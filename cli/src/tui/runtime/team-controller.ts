@@ -21,6 +21,7 @@ import { ensureCliDb } from "../../db/bootstrap"
 import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
 import { resolveAppSettings } from "./goal-controller"
+import { sleepWithAbort } from "../../agent/runtime/retry"
 import {
   fetchDesktopTeamRunStatus,
   listDesktopTeams,
@@ -130,10 +131,8 @@ export interface TeamRunDeps {
   listDesktop?: typeof listDesktopTeams
   startRun?: typeof startDesktopTeamRun
   fetchStatus?: typeof fetchDesktopTeamRunStatus
-  sleep?: (ms: number) => Promise<void>
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
-
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 /**
  * `/team run [teamId]` — run a DESKTOP AgentTeam from the CLI. Without an id,
@@ -146,11 +145,17 @@ export async function teamRun(teamId: string, deps: TeamRunDeps): Promise<void> 
   const listDesktop = deps.listDesktop ?? listDesktopTeams
   const startRun = deps.startRun ?? startDesktopTeamRun
   const fetchStatus = deps.fetchStatus ?? fetchDesktopTeamRunStatus
-  const sleep = deps.sleep ?? defaultSleep
+  const sleep = deps.sleep ?? sleepWithAbort
+
+  if (deps.signal?.aborted) {
+    deps.dispatch({ type: "NOTICE", message: "Team run cancelled before dispatch." })
+    return
+  }
 
   const id = teamId.trim()
   if (!id) {
     const teams = await listDesktop()
+    if (deps.signal?.aborted) return
     if (teams === null) {
       deps.dispatch({ type: "NOTICE", message: DESKTOP_UNREACHABLE_MESSAGE })
       return
@@ -195,16 +200,25 @@ export async function teamRun(teamId: string, deps: TeamRunDeps): Promise<void> 
 
   let sinceTs = 0
   let lastStatus = ""
+  const stoppedWatching = (): boolean => {
+    if (!deps.signal?.aborted) return false
+    deps.dispatch({
+      type: "NOTICE",
+      message: "Stopped watching — the team run continues on the desktop.",
+    })
+    return true
+  }
   for (let tick = 0; tick < MAX_POLL_TICKS; tick++) {
-    if (deps.signal?.aborted) {
-      deps.dispatch({
-        type: "NOTICE",
-        message: "Stopped watching — the team run continues on the desktop.",
-      })
-      return
+    if (stoppedWatching()) return
+    try {
+      await sleep(POLL_INTERVAL_MS, deps.signal)
+    } catch (error) {
+      if (stoppedWatching()) return
+      throw error
     }
-    await sleep(POLL_INTERVAL_MS)
+    if (stoppedWatching()) return
     const status = await fetchStatus(id, sinceTs)
+    if (stoppedWatching()) return
     if (!status) continue // transient bridge hiccup — keep watching
     for (const event of status.events ?? []) {
       sinceTs = Math.max(sinceTs, event.ts)

@@ -21,10 +21,29 @@ export type PreparedLines =
 export function prepareDocumentLines(
   body: string,
   format: DocumentFormat,
-  lang?: string
+  lang?: string,
+  panelTitle?: string
 ): PreparedLines {
   if (format === "markdown") {
-    return { kind: "markdown", lines: tokenizeMarkdown(body) }
+    const lines = tokenizeMarkdown(body)
+    // The panel already labels the document. Only elide its matching opening
+    // heading, never a later section, distinct title, or link with its own target.
+    // Work on parsed spans so emphasis, inline code, and Setext headings compare
+    // by visible text; the original body remains intact for copy/export.
+    const first = lines.findIndex((line) => line.kind !== "blank")
+    const heading = lines[first]
+    const normalize = (text: string) => text.trim().replace(/\s+/g, " ")
+    if (
+      panelTitle &&
+      heading?.kind === "heading" &&
+      !heading.spans.some((span) => span.link) &&
+      normalize(heading.spans.map((span) => span.text).join("")) === normalize(panelTitle)
+    ) {
+      let start = first + 1
+      while (lines[start]?.kind === "blank") start++
+      return { kind: "markdown", lines: lines.slice(start) }
+    }
+    return { kind: "markdown", lines }
   }
   const rendered = lang ? highlightCode(body, lang) : body
   // Drop a single trailing newline so the viewer doesn't show a blank tail row.
@@ -59,4 +78,36 @@ export function positionLabel(scroll: number, viewport: number, total: number): 
   const start = clampScroll(scroll, total, win)
   const end = Math.min(total, start + win)
   return `${start + 1}–${end} / ${total}`
+}
+
+/** Keep the visible text anchored across revisions; use the nearest matching row
+ * when repeated text occurs, and clamp when the old anchor was removed. Width
+ * changes preserve the character offset when the rendered text is unchanged. */
+export function relocateDocumentScroll(
+  previous: readonly string[],
+  next: readonly string[],
+  scroll: number,
+  viewport: number
+): number {
+  const oldStart = clampScroll(scroll, previous.length, 1)
+  if (oldStart === 0) return 0
+  if (previous.join("") === next.join("")) {
+    let offset = previous.slice(0, oldStart).join("").length
+    let row = 0
+    while (row < next.length - 1 && offset >= next[row].length) {
+      offset -= next[row].length
+      row++
+    }
+    return clampScroll(row, next.length, viewport)
+  }
+  const anchor = previous[oldStart]
+  let target = -1
+  if (anchor?.trim()) {
+    next.forEach((line, i) => {
+      if (line === anchor && (target < 0 || Math.abs(i - oldStart) < Math.abs(target - oldStart))) {
+        target = i
+      }
+    })
+  }
+  return clampScroll(target < 0 ? oldStart : target, next.length, viewport)
 }

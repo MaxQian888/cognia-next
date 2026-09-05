@@ -5,6 +5,7 @@
  * the scrollback layout prints. Both read the shared `format/*` helpers, so the
  * two surfaces cannot drift on what a tool call says.
  */
+import { stringWidth, truncateToWidth } from "../markdown/width"
 import { tokenizeCached } from "../markdown/render-cache"
 import {
   cellRefText,
@@ -15,15 +16,18 @@ import {
   TABLE_RULE_MID,
   TABLE_RULE_TOP,
   tableLayout,
+  stackTable,
   tableRule,
 } from "../markdown/table-layout"
 import type { DiffLine, MdLine, MdSpan } from "../markdown/types"
 import { diffFilePath, formatEditDiff } from "../markdown/diff"
 import { highlightLine, langFromPath, paletteCodeTheme } from "../markdown/highlight"
 import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
+import { elideImageData } from "../format/result-images"
 import {
   isDiffTool,
   resultPreview,
+  toolResultPreviewText,
   summarizeToolCall,
   toolGlyph,
   toolHeaderLabel,
@@ -51,6 +55,7 @@ import type { Cell, ToolCell } from "../state/types"
 import {
   buildTerminalBlock,
   sanitizeTerminalText,
+  wrapTerminalSpans,
   type TerminalBlock,
   type TerminalSpan,
   type TerminalStyle,
@@ -92,10 +97,12 @@ function spanStyle(span: MdSpan): {
 
 /** Inline spans of a markdown line, styled: links accented, code tinted. */
 function inlineSpans(spans: MdSpan[]): TerminalSpan[] {
-  return spans.flatMap((span) => {
+  return spans.flatMap((span, index) => {
     const { style, extra } = spanStyle(span)
     const own = seg(span.text, style, extra)
-    return span.link && span.link !== span.text ? [own, seg(` (${span.link})`, "muted")] : [own]
+    return span.link && span.link !== span.text && spans[index + 1]?.link !== span.link
+      ? [own, seg(` (${span.link})`, "muted")]
+      : [own]
   })
 }
 
@@ -116,6 +123,9 @@ function tableSpans(
   line: Extract<MdLine, { kind: "table" }>,
   maxWidth: number | undefined
 ): TerminalSpan[] {
+  const stacked = stackTable(line, maxWidth)
+  if (stacked)
+    return stacked.flatMap((spans, i) => [...(i > 0 ? [BREAK] : []), ...inlineSpans(spans)])
   const footnotes = collectTableFootnotes(line, false)
   const { widths, capped } = tableLayout(line, (spans) => cellRefText(spans, footnotes), maxWidth)
   const cols = line.header.length
@@ -162,7 +172,7 @@ function tableCellSpans(spans: MdSpan[], footnotes: string[], header: boolean): 
 const HEADING_STYLE: Record<number, TerminalStyle> = { 1: "accent", 2: "warning", 3: "success" }
 
 /** One markdown line as styled spans, without a trailing row break. */
-function markdownLineSpans(
+export function markdownLineSpans(
   line: MdLine,
   highlight: boolean,
   palette: ThemePalette | undefined,
@@ -182,29 +192,69 @@ function markdownLineSpans(
       return inlineSpans(line.spans)
     case "code":
       return [
-        ...(line.first ? [seg(`╭─ ${line.lang || "code"}`, "muted"), BREAK] : []),
-        seg("│ ", "muted"),
-        ...(highlight && line.lang
-          ? ansiToSpans(
-              highlightLine(line.text, line.lang, palette ? paletteCodeTheme(palette) : undefined),
-              "code"
-            )
-          : [seg(line.text, "code")]),
-        ...(line.last ? [BREAK, seg("╰─", "muted")] : []),
+        ...(line.first
+          ? [seg(truncateToWidth(`╭─ ${line.lang || "code"}`, maxWidth ?? 80), "muted"), BREAK]
+          : []),
+        ...prefixMarkdownSpans(
+          highlight && line.lang
+            ? ansiToSpans(
+                highlightLine(
+                  line.text,
+                  line.lang,
+                  palette ? paletteCodeTheme(palette) : undefined
+                ),
+                "code"
+              )
+            : [seg(line.text, "code")],
+          "│ ",
+          maxWidth,
+          "  "
+        ),
+        ...(line.last ? [BREAK, seg(truncateToWidth("╰─", maxWidth ?? 80), "muted")] : []),
       ]
+    case "indent":
+      return prefixMarkdownSpans(
+        markdownLineSpans(
+          line.child,
+          highlight,
+          palette,
+          maxWidth === undefined ? undefined : Math.max(1, maxWidth - line.columns)
+        ),
+        " ".repeat(line.columns),
+        maxWidth
+      )
     case "blockquote":
-      return [
-        seg("│ ".repeat(Math.max(1, line.depth ?? 1)), "muted"),
-        ...inlineSpans(line.spans).map((span) =>
+      if (line.child)
+        return prefixMarkdownSpans(
+          markdownLineSpans(
+            line.child,
+            highlight,
+            palette,
+            maxWidth === undefined ? undefined : Math.max(1, maxWidth - (line.depth ?? 1) * 2)
+          ),
+          "│ ".repeat(Math.max(1, line.depth ?? 1)),
+          maxWidth
+        )
+      return prefixMarkdownSpans(
+        inlineSpans(line.spans).map((span) =>
           span.style === "plain" ? { ...span, style: "muted" as TerminalStyle } : span
         ),
-      ]
+        "│ ".repeat(Math.max(1, line.depth ?? 1)),
+        maxWidth
+      )
     case "listitem": {
       const marker = line.checked === undefined ? line.marker : line.checked ? "☑" : "☐"
-      return [seg(`${"  ".repeat(line.depth + 1)}${marker} `, "accent"), ...inlineSpans(line.spans)]
+      return prefixMarkdownSpans(
+        inlineSpans(line.spans),
+        `${"  ".repeat(line.depth + 1)}${marker} `,
+        maxWidth,
+        " ".repeat((line.depth + 1) * 2 + stringWidth(marker) + 1)
+      ).map((span, index) =>
+        index === 0 ? { ...span, style: line.checked ? "success" : "accent" } : span
+      )
     }
     case "rule":
-      return [seg("────────────────────────", "muted")]
+      return [seg("─".repeat(maxWidth ?? 24), "muted")]
     case "blank":
       return []
     case "table":
@@ -212,8 +262,31 @@ function markdownLineSpans(
   }
 }
 
-/** A whole markdown document as styled spans, one row break between lines. */
-function markdownSpans(
+/** Prefix every physical row of a nested block, including code/table frames. */
+function prefixMarkdownSpans(
+  spans: TerminalSpan[],
+  prefix: string,
+  maxWidth?: number,
+  continuation = prefix
+): TerminalSpan[] {
+  const cap = maxWidth === undefined ? Infinity : Math.max(0, maxWidth - 1)
+  const first = truncateToWidth(stringWidth(prefix) > cap ? prefix.trimStart() : prefix, cap)
+  const next = continuation === prefix ? first : " ".repeat(stringWidth(first))
+  const bodyWidth =
+    maxWidth === undefined
+      ? Infinity
+      : Math.max(1, maxWidth - Math.max(stringWidth(first), stringWidth(next)))
+  const rows = wrapTerminalSpans(spans, bodyWidth)
+  return rows.flatMap((row, index) => [
+    ...(index > 0 ? [BREAK] : []),
+    seg(index === 0 ? first : next, "muted"),
+    ...row.spans,
+  ])
+}
+
+/** A whole markdown document as styled spans, one row break between lines.
+ * Pass to wrapTerminalSpans or buildTerminalBlock for physical viewport rows. */
+export function markdownSpans(
   raw: string,
   highlight = false,
   palette: ThemePalette | undefined = undefined,
@@ -225,9 +298,9 @@ function markdownSpans(
   return lines.flatMap((spans, index) => (index === 0 ? spans : [BREAK, ...spans]))
 }
 
-function safeResult(result: unknown): string {
+function safeResult(result: unknown, preview: boolean): string {
   try {
-    return resultToText(result)
+    return preview ? toolResultPreviewText(elideImageData(result)) : resultToText(result)
   } catch {
     return "[unavailable tool result]"
   }
@@ -279,14 +352,26 @@ export interface CellRenderOptions {
 function resultBodySpans(
   cell: ToolCell,
   prefs: ResolvedRenderConfig,
-  palette: ThemePalette | undefined
+  palette: ThemePalette | undefined,
+  maxWidth: number
 ): TerminalSpan[] {
-  const text = safeResult(cell.result)
+  const preview = prefs !== VERBATIM_RENDER_PREFS
+  const text = sanitizeTerminalText(safeResult(cell.result, preview))
   if (!text) return []
   const totalLines = text.split("\n").length
   const tooBig = totalLines > prefs.pagerThresholdLines
   const maxLines = tooBig ? Math.min(prefs.toolResultMaxLines, 20) : prefs.toolResultMaxLines
-  const rendered = renderResultLines(text, {
+  const rawLines = text.split("\n")
+  const visibleLines = rawLines.slice(0, maxLines > 0 ? maxLines : rawLines.length)
+  const bodyWidth = Math.max(
+    1,
+    maxWidth - RULE.length - (prefs.fileLineNumbers ? String(totalLines).length + 3 : 0)
+  )
+  const fittedLines = preview
+    ? visibleLines.map((line) => truncateToWidth(line, bodyWidth))
+    : visibleLines
+  const clipped = fittedLines.some((line, index) => line !== visibleLines[index])
+  const rendered = renderResultLines(fittedLines.join("\n"), {
     ...(toolResultLang(cell.toolName, cell.input)
       ? { lang: toolResultLang(cell.toolName, cell.input) }
       : {}),
@@ -298,14 +383,16 @@ function resultBodySpans(
   const out: TerminalSpan[] = []
   rendered.lines.forEach((line, index) => {
     if (index > 0) out.push(BREAK)
-    out.push(seg(RULE, "muted"), ...ansiToSpans(line, "muted"))
+    out.push(seg(RULE, "muted"), ...ansiToSpans(line, "plain"))
   })
+  const hiddenLines = totalLines - rendered.lines.length
+  if (clipped) out.push(BREAK, seg(`${RULE}/expand · long lines shortened`, "warning"))
   const note = tooBig
-    ? `${totalLines} lines total, open the full output with /expand`
-    : rendered.hiddenLines > 0
-      ? `+${rendered.hiddenLines} more line${rendered.hiddenLines === 1 ? "" : "s"} hidden, /expand`
+    ? `${totalLines} lines total`
+    : hiddenLines > 0
+      ? `+${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden`
       : ""
-  if (note) out.push(BREAK, seg(`${RULE}\u2026 ${note}`, "warning"))
+  if (note) out.push(BREAK, seg(`${RULE}/expand · \u2026 ${note}`, "warning"))
   return out
 }
 
@@ -452,7 +539,7 @@ function toolHeaderSpans(cell: ToolCell, expanded: boolean, hasBody: boolean): T
   out.push(seg(`${toolGlyph(cell.toolName)} `, "muted"))
   out.push(seg(cell.displayTitle ?? toolHeaderLabel(cell.toolName), "plain", { bold: true }))
   const summary = summarizeToolCall(cell.toolName, cell.input)
-  if (summary) out.push(seg(` ${summary}`, "muted"))
+  if (summary) out.push(seg(` ${summary}`, "plain"))
   if (cell.status === "cancelled") out.push(seg(" · stopped", "muted"))
   pushChip(out, describeToolResult(cell))
   return out
@@ -480,7 +567,7 @@ function detailSpans(cell: ToolCell): TerminalSpan[] {
   // answer (a shell command, an MCP call) instead.
   if (isContextTool(cell.toolName)) return []
   const preview = resultPreview(cell.result)
-  return preview ? [BREAK, seg(`  ↳ ${preview}`, "muted")] : []
+  return preview ? [BREAK, seg(`  ↳ ${preview}`, "plain")] : []
 }
 
 /** A tool cell: header row, then the diff or the result body when expanded, or
@@ -489,7 +576,8 @@ function toolSpans(
   cell: ToolCell,
   verbose: boolean,
   prefs: ResolvedRenderConfig,
-  palette: ThemePalette | undefined
+  palette: ThemePalette | undefined,
+  maxWidth: number
 ): TerminalSpan[] {
   const expanded = verbose || !cell.collapsed
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
@@ -508,7 +596,7 @@ function toolSpans(
   }
   if (!hasUsefulResult) return out
   if (expanded) {
-    out.push(BREAK, ...resultBodySpans(cell, prefs, palette))
+    out.push(BREAK, ...resultBodySpans(cell, prefs, palette, maxWidth))
     return out
   }
   out.push(...detailSpans(cell))
@@ -521,7 +609,8 @@ function subagentSpans(
   cell: ToolCell,
   verbose: boolean,
   prefs: ResolvedRenderConfig,
-  palette: ThemePalette | undefined
+  palette: ThemePalette | undefined,
+  maxWidth: number
 ): TerminalSpan[] {
   const expanded = verbose || !cell.collapsed
   const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
@@ -540,7 +629,7 @@ function subagentSpans(
   if (task) out.push(BREAK, seg(`  ${task}`, "muted"))
   if (!hasUsefulResult) return out
   if (expanded) {
-    out.push(BREAK, ...resultBodySpans(cell, prefs, palette))
+    out.push(BREAK, ...resultBodySpans(cell, prefs, palette, maxWidth))
     return out
   }
   out.push(...detailSpans(cell))
@@ -581,8 +670,8 @@ function cellSpans(
     case "tool":
       return {
         spans: isSubagentTool(cell.toolName)
-          ? subagentSpans(cell, verbose, prefs, palette)
-          : toolSpans(cell, verbose, prefs, palette),
+          ? subagentSpans(cell, verbose, prefs, palette, maxWidth)
+          : toolSpans(cell, verbose, prefs, palette, maxWidth),
       }
     case "todo":
       return {

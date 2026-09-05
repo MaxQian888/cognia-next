@@ -27,7 +27,8 @@ export type MdLine =
   | { kind: "code"; lang?: string; text: string; first?: boolean; last?: boolean; width?: number }
   // A blockquote line. `depth` is the nesting level (1 = outermost) so the
   // renderer can cascade the `│ ` gutter for `> >` quotes.
-  | { kind: "blockquote"; spans: MdSpan[]; depth?: number }
+  | { kind: "blockquote"; spans: MdSpan[]; depth?: number; child?: MdLine }
+  | { kind: "indent"; columns: number; child: MdLine }
   | {
       kind: "listitem"
       depth: number

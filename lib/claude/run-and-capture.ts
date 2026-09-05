@@ -37,6 +37,7 @@ import type {
   SendContent,
   SendOptions,
 } from "@cognia/agent-config-types"
+import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 import { extractUsage, type UsageInfo } from "./adapter"
 import { runChatMiddlewareChain } from "@/lib/claude/chat-middleware/runner"
@@ -63,23 +64,42 @@ import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
  */
 export async function subscribeCaptureFromEnvelopes(
   sessionId: string,
-  onEvent: (event: CaptureStreamEvent) => void
+  onEvent: (event: CaptureStreamEvent) => void,
+  options?: {
+    turnId?: string
+    onCanonicalEvent?: (event: CanonicalAgentEvent) => void
+    onTerminal?: () => void
+  }
 ): Promise<(() => void) | null> {
-  const [{ isAgentExecutionFlagEnabled }, { captureEventFromCanonical }, ipc] = await Promise.all([
+  const [
+    { isAgentExecutionFlagEnabled },
+    { captureEventFromCanonical, createEnvelopeOrderTracker },
+    ipc,
+  ] = await Promise.all([
     import("@/lib/ai/agent/execution/feature-flags"),
     import("@/lib/ai/agent/execution/event-envelope"),
     import("./ipc"),
   ])
   if (
+    !options?.onCanonicalEvent &&
     !isAgentExecutionFlagEnabled("genericAgentHostCommands") &&
     !isAgentExecutionFlagEnabled("claudeSdkParityV1")
   ) {
     return null
   }
+  const order = createEnvelopeOrderTracker()
   return ipc.subscribeAgentEvents((envelope) => {
     if (envelope.sessionId !== sessionId) return
-    const event = captureEventFromCanonical(envelope.event)
-    if (event) onEvent(event)
+    if (options?.turnId && envelope.turnId !== options.turnId) return
+    if (order.observe(envelope).kind === "duplicate") return
+    if (options?.onCanonicalEvent) {
+      options.onCanonicalEvent(envelope.event)
+    } else {
+      const event = captureEventFromCanonical(envelope.event)
+      if (event) onEvent(event)
+    }
+    if (envelope.event.kind === "lifecycle" && envelope.event.phase === "ended")
+      options?.onTerminal?.()
   })
 }
 
@@ -130,6 +150,8 @@ export interface RunAndCaptureResult {
    * on the text channel / when no event arrived.
    */
   sdkSessionId?: string
+  /** Provider-neutral durable conversation at the turn boundary. */
+  conversationSnapshot?: unknown[]
   /** Parsed SDK structured output when a JSON-schema output format was requested. */
   structuredOutput?: unknown
 }
@@ -474,6 +496,9 @@ export interface RunAndCaptureOptions {
    * throwing callback is swallowed. Default `undefined` → no events emitted.
    */
   onEvent?: (event: CaptureStreamEvent) => void
+  /** Lossless canonical stream. Takes precedence over onEvent for canonical
+   * delivery; onEvent remains the legacy transport fallback. */
+  onCanonicalEvent?: (event: CanonicalAgentEvent) => void
   /** Persist the SDK resume identity as soon as its stream event arrives. */
   onSdkSessionId?: (sdkSessionId: string) => void | Promise<void>
   /**
@@ -654,6 +679,9 @@ async function captureAssistantReplyCore(
     let unlisten: (() => void) | null = null
     let envelopeUnlisten: (() => void) | null = null
     let preferEnvelopeEvents = false
+    let canonicalTerminalSeen = false
+    let pendingTerminal: ClaudeEvent | null = null
+    let terminalDrainHandle: ReturnType<typeof setTimeout> | null = null
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
     let idleHandle: ReturnType<typeof setTimeout> | null = null
     let interruptDrainHandle: ReturnType<typeof setTimeout> | null = null
@@ -741,6 +769,9 @@ async function captureAssistantReplyCore(
         } catch {
           outcome = { decision: "deny", message: "permission responder failed" }
         }
+        // A delayed UI response belongs to this turn only. Cancellation may
+        // still be draining usage, so check the signal as well as settlement.
+        if (settled || abortRequested || signal?.aborted) return
         try {
           await approveTool(
             sessionId,
@@ -782,6 +813,7 @@ async function captureAssistantReplyCore(
             updatedToolOutput = undefined
           }
         }
+        if (settled || abortRequested || signal?.aborted) return
         try {
           await toolResultDecision(
             sessionId,
@@ -813,6 +845,9 @@ async function captureAssistantReplyCore(
         /* idempotent unlisten — swallow secondary errors */
       }
       envelopeUnlisten = null
+      if (terminalDrainHandle !== null) clearTimeout(terminalDrainHandle)
+      terminalDrainHandle = null
+      pendingTerminal = null
       if (timeoutHandle != null) {
         clearTimeout(timeoutHandle)
         timeoutHandle = null
@@ -1010,6 +1045,21 @@ async function captureAssistantReplyCore(
       }
 
       if (evt.type === "session_ended") {
+        // The sidecar writes the raw frame first, then its canonical tail.
+        // Keep the listener alive until that tail arrives; a legacy/missing
+        // tail has a bounded drain so it cannot strand a completed turn.
+        if (preferEnvelopeEvents && !canonicalTerminalSeen) {
+          pendingTerminal = evt
+          if (terminalDrainHandle === null)
+            terminalDrainHandle = setTimeout(() => {
+              terminalDrainHandle = null
+              canonicalTerminalSeen = true
+              const terminal = pendingTerminal
+              pendingTerminal = null
+              if (terminal && !settled) onEvent(terminal)
+            }, 250)
+          return
+        }
         if (abortRequested) {
           // Some transports attach usage only to the terminal envelope instead
           // of streaming a preceding result event. Surface that final snapshot
@@ -1081,6 +1131,9 @@ async function captureAssistantReplyCore(
           ...(usage ? { usage } : {}),
           ...(resultSubtype ? { resultSubtype } : {}),
           ...(capturedSdkSessionId ? { sdkSessionId: capturedSdkSessionId } : {}),
+          ...(Array.isArray(evt.conversationSnapshot)
+            ? { conversationSnapshot: evt.conversationSnapshot }
+            : {}),
           ...(hasStructuredOutput ? { structuredOutput } : {}),
         })
         return
@@ -1356,8 +1409,32 @@ async function captureAssistantReplyCore(
         }
         unlisten = un
         try {
-          envelopeUnlisten = await subscribeCaptureFromEnvelopes(sessionId, (event) =>
-            emitEvent(event, "envelope")
+          envelopeUnlisten = await subscribeCaptureFromEnvelopes(
+            sessionId,
+            (event) => {
+              if (!settled) emitEvent(event, "envelope")
+            },
+            {
+              turnId,
+              onTerminal: () => {
+                canonicalTerminalSeen = true
+                const terminal = pendingTerminal
+                pendingTerminal = null
+                if (terminal && !settled) onEvent(terminal)
+              },
+              ...(cap?.onCanonicalEvent
+                ? {
+                    onCanonicalEvent: (event: CanonicalAgentEvent) => {
+                      if (settled) return
+                      try {
+                        cap.onCanonicalEvent?.(event)
+                      } catch {
+                        /* observer is best-effort */
+                      }
+                    },
+                  }
+                : {}),
+            }
           )
           preferEnvelopeEvents = envelopeUnlisten !== null
         } catch {
@@ -1370,7 +1447,15 @@ async function captureAssistantReplyCore(
         // The signal may abort while the async envelope subscription above is
         // resolving. Cleanup has already detached the raw listener in that case;
         // never send a prompt after cancellation won that race.
-        if (settled) return
+        if (settled) {
+          try {
+            envelopeUnlisten?.()
+          } catch {
+            /* best-effort detach */
+          }
+          envelopeUnlisten = null
+          return
+        }
         // Now fire the actual send. If it throws synchronously the
         // catch below cleans up; if it rejects async we still clean up
         // via the same path.

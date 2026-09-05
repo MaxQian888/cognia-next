@@ -35,8 +35,10 @@ function defaultSubscribe(workflowId: string, next: (runs: WorkflowRunRow[]) => 
 export function startRunsWatch(deps: RunsWatchDeps): { stop: () => void } {
   const subscribe = deps.subscribe ?? defaultSubscribe
   let unsub: (() => void) | null = null
+  let stopped = false
   try {
     unsub = subscribe(deps.workflowId, (runs) => {
+      if (stopped) return
       try {
         deps.onRuns(runs)
       } catch {
@@ -48,10 +50,14 @@ export function startRunsWatch(deps: RunsWatchDeps): { stop: () => void } {
   }
   return {
     stop() {
+      if (stopped) return
+      stopped = true
       try {
         unsub?.()
       } catch {
         // ignore unsubscribe errors
+      } finally {
+        unsub = null
       }
     },
   }

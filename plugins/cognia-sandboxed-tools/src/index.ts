@@ -417,7 +417,7 @@ async function sandboxWriteFile(
       command: {
         // `$1` is the target path; `cat > "$1"` writes stdin verbatim. The
         // path is a separate argv element so it is never shell-interpreted.
-        argv: ["bash", "-lc", 'cat > "$1"', "sandbox_write", path],
+        argv: ["bash", "-c", 'cat > "$1"', "sandbox_write", path],
         cwd: parentDir(path),
         env: env ?? {},
         stdin: content,

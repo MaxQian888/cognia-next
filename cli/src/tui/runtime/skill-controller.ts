@@ -31,6 +31,8 @@ import { openDocument } from "./shared"
 import type { TuiAction } from "../state/types"
 
 export interface SkillDeps {
+  /** Suppress late results and new work after the runtime request is cancelled. */
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   home: string
   /** Project working directory — its `.cognia/skills/` (and, when external
@@ -89,14 +91,18 @@ function scanOptionsOf(deps: SkillDeps): SkillScanOptions {
  * Code / Codex / OpenCode / configured skills, not just built-ins. */
 async function ensureSkillsReady(deps: SkillDeps): Promise<void> {
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const seed =
     deps.seedDisk ?? (() => seedDiskSkills(scanOptionsOf(deps), upsertSkillByCanonicalId))
   await seed()
 }
 
 export async function skillList(deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await ensureSkillsReady(deps)
+  if (deps.signal?.aborted) return
   const skills = await (deps.list ?? listSkills)()
+  if (deps.signal?.aborted) return
   if (skills.length === 0) {
     deps.dispatch({
       type: "NOTICE",
@@ -134,8 +140,11 @@ export async function skillList(deps: SkillDeps): Promise<void> {
  * warnings) and an enabled badge. Space toggles, Enter opens the detail pager.
  */
 export async function skillPanel(deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await ensureSkillsReady(deps)
+  if (deps.signal?.aborted) return
   const skills = await (deps.list ?? listSkills)()
+  if (deps.signal?.aborted) return
   if (skills.length === 0) {
     deps.dispatch({
       type: "NOTICE",
@@ -157,6 +166,7 @@ export async function skillPanel(deps: SkillDeps): Promise<void> {
  * fills in by editing the skill on disk or via the desktop app.
  */
 export async function skillCreate(args: string, deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const flags = parseSkillFlags(args)
   const name = flags.name?.trim()
   if (!name) {
@@ -167,6 +177,7 @@ export async function skillCreate(args: string, deps: SkillDeps): Promise<void> 
     return
   }
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const make =
     deps.create ??
     ((draft: { name: string; description?: string; content: string }) => createSkill(draft))
@@ -189,8 +200,11 @@ export async function skillCreate(args: string, deps: SkillDeps): Promise<void> 
  * list, and removing another tool's files is out of scope.
  */
 export async function skillDelete(id: string, deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const skill = await (deps.get ?? getSkill)(id)
+  if (deps.signal?.aborted) return
   if (!skill) {
     deps.dispatch({ type: "NOTICE", message: `Skill ${id} not found.` })
     return
@@ -264,8 +278,11 @@ export function buildSkillDocument(skill: Skill, enabled: boolean): string {
 }
 
 export async function skillShow(id: string, deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await ensureSkillsReady(deps)
+  if (deps.signal?.aborted) return
   const skill = await (deps.get ?? getSkill)(id)
+  if (deps.signal?.aborted) return
   if (!skill) {
     deps.dispatch({ type: "NOTICE", message: `Skill ${id} not found.` })
     return
@@ -284,8 +301,11 @@ export async function skillShow(id: string, deps: SkillDeps): Promise<void> {
  * skills bundle files; everything else reports that there are none.
  */
 export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await ensureSkillsReady(deps)
+  if (deps.signal?.aborted) return
   const skill = await (deps.get ?? getSkill)(id)
+  if (deps.signal?.aborted) return
   if (!skill) {
     deps.dispatch({ type: "NOTICE", message: `Skill ${id} not found.` })
     return
@@ -300,6 +320,7 @@ export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
   const find =
     deps.findDisk ?? ((cid: string) => findDiskSkillByCanonicalId(scanOptionsOf(deps), cid))
   const discovered = await find(skill.canonicalId)
+  if (deps.signal?.aborted) return
   if (!discovered?.dir) {
     deps.dispatch({
       type: "NOTICE",
@@ -308,6 +329,7 @@ export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
     return
   }
   const files = await (deps.listFiles ?? listSkillBundledFiles)(discovered.dir)
+  if (deps.signal?.aborted) return
   if (files.length === 0) {
     deps.dispatch({ type: "NOTICE", message: `Skill "${skill.name}" bundles no files.` })
     return
@@ -325,21 +347,36 @@ export async function skillFiles(id: string, deps: SkillDeps): Promise<void> {
 }
 
 export async function skillToggle(id: string, deps: SkillDeps): Promise<void> {
-  await dbOf(deps)()
-  const enabled = enabledOf(deps)
-  const turnOn = !enabled.has(id)
-  ;(deps.setSkillEnabled ?? ((i, on) => setEnabled(deps.home, i, on)))(id, turnOn)
-  deps.dispatch({
-    type: "NOTICE",
-    message: `Skill "${id}" ${turnOn ? "enabled" : "disabled"} for this session.`,
-  })
+  if (deps.signal?.aborted) return
+  await skillSetEnabled(id, !enabledOf(deps).has(id.trim()), deps)
 }
 
-export function skillSetEnabled(id: string, enabled: boolean, deps: SkillDeps): void {
-  ;(deps.setSkillEnabled ?? ((i, on) => setEnabled(deps.home, i, on)))(id, enabled)
+export async function skillSetEnabled(
+  id: string,
+  enabled: boolean,
+  deps: SkillDeps
+): Promise<void> {
+  if (deps.signal?.aborted) return
+  const key = id.trim()
+  if (!key) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /skill enable|disable|toggle <id>" })
+    return
+  }
+  if (enabled) {
+    await ensureSkillsReady(deps)
+    if (deps.signal?.aborted) return
+    const skill = await (deps.get ?? getSkill)(key)
+    if (deps.signal?.aborted) return
+    if (!skill) {
+      deps.dispatch({ type: "NOTICE", message: `Skill ${key} not found.` })
+      return
+    }
+  }
+  // Disabling also clears stale ids whose skill was removed from disk.
+  ;(deps.setSkillEnabled ?? ((i, on) => setEnabled(deps.home, i, on)))(key, enabled)
   deps.dispatch({
     type: "NOTICE",
-    message: `Skill "${id}" ${enabled ? "enabled" : "disabled"} for this session.`,
+    message: `Skill "${key}" ${enabled ? "enabled" : "disabled"} for this session.`,
   })
 }
 
@@ -350,8 +387,11 @@ export function skillSetEnabled(id: string, enabled: boolean, deps: SkillDeps): 
  * the `skill` feature, so the next turn reflects the new set.
  */
 export async function skillBulkSetEnabled(enabled: boolean, deps: SkillDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   await ensureSkillsReady(deps)
+  if (deps.signal?.aborted) return
   const skills = await (deps.list ?? listSkills)()
+  if (deps.signal?.aborted) return
   const ids = skills.map((s) => s.id)
   if (ids.length === 0) {
     deps.dispatch({ type: "NOTICE", message: "No skills to update." })

@@ -22,6 +22,7 @@ import {
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { detectHostProfile } from "@/lib/platform/capabilities"
+import { isCliHost } from "@/lib/platform/detect"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import {
@@ -374,6 +375,14 @@ function buildWorkflowSnapshotBlock(
 }
 
 export interface BuildOptionsContext {
+  /** Host-owned OS launcher for built-in coding processes (CLI). */
+  builtinProcessSandbox?: SendOptions["builtinProcessSandbox"]
+  /** Host filesystem and managed installation policy for agent LSP. */
+  lspHost?: {
+    readProjectFile: typeof readProjectLspFile
+    installDir: string
+    autoInstall: boolean
+  }
   session?: ChatSession | null
   /**
    * Which agent this turn belongs to, for lifecycle-hook scoping
@@ -1044,6 +1053,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // hand to `runAndCaptureAssistantReply`. Without a default, `agents: "chat"`
   // would match nothing — an unidentified turn never matches a narrowed hook.
   const opts: SendOptions = { agentKind: ctx.agentKind ?? "chat" }
+  if (isCliHost()) opts.backgroundProcessHost = "sidecar"
   if (ctx.turnId) opts.turnId = ctx.turnId
 
   // --- Resolve the active character -----------------------------------------
@@ -2110,7 +2120,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // prompt (ADR-0139), the artifact tool manifest, and the consent tier below.
   // The routing prompt advertising a chart artifact while the tool that makes
   // one is absent is the exact mismatch this file used to ship.
-  const artifactsChannelAvailable = !session?.platformBinding?.adapterId
+  const artifactsChannelAvailable = !session?.platformBinding?.adapterId && !isCliHost()
   const artifactAuthoringEnabled =
     artifactsChannelAvailable && appSettings?.artifacts?.agentAuthoring !== false
 
@@ -2541,14 +2551,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       const servers = await resolveLspServers({
         rootDir: opts.cwd,
         userServers: appSettings?.lsp?.servers,
-        readProjectFile: readProjectLspFile,
+        readProjectFile: ctx.lspHost?.readProjectFile ?? readProjectLspFile,
       })
       // Managed install root for the npm-first install ladder. Resolved here
       // because the sidecar has no Tauri path API; absent on web/mobile.
-      let installDir: string | undefined
+      let installDir: string | undefined = ctx.lspHost?.installDir
       try {
         const { isTauri } = await import("@/lib/tauri")
-        if (isTauri()) {
+        if (!installDir && isTauri()) {
           const { appDataDir, join } = await import("@tauri-apps/api/path")
           installDir = await join(await appDataDir(), "lsp")
         }
@@ -2558,7 +2568,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.lsp = {
         enabled: true,
         servers,
-        autoInstall: appSettings?.lsp?.autoInstall !== false,
+        autoInstall: (ctx.lspHost?.autoInstall ?? true) && appSettings?.lsp?.autoInstall !== false,
         installDir,
       }
     }
@@ -3347,6 +3357,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     delete opts.sandboxRuntimeRef
   }
   if (sandboxEnabled) {
+    if (ctx.builtinProcessSandbox && sandboxBinding.shellTier === "os") {
+      opts.builtinProcessSandbox = ctx.builtinProcessSandbox
+    }
     const disallowed = new Set(opts.disallowedTools ?? [])
     // SDK builtins AND the sidecar coreFiles mutators — either would bypass
     // the sandbox (bare names = ai-sdk path, namespaced = Anthropic hatch).
@@ -3371,6 +3384,18 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       "mcp__cognia-tools__start_process",
       "mcp__cognia-tools__shell_execute_advanced",
     ]) {
+      if (
+        opts.builtinProcessSandbox &&
+        [
+          "bash",
+          "start_process",
+          "shell_execute_advanced",
+          "mcp__cognia-tools__bash",
+          "mcp__cognia-tools__start_process",
+          "mcp__cognia-tools__shell_execute_advanced",
+        ].includes(t)
+      )
+        continue
       disallowed.add(t)
     }
     opts.disallowedTools = [...disallowed]
@@ -3379,12 +3404,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         (t) => t.name !== "text_editor" && t.name !== "str_replace_based_edit_tool"
       )
     }
-    const sandboxHint =
-      "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
-      "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
-      "(from cognia-sandboxed-tools) instead of the SDK builtins; they accept the " +
-      "same shape plus an explicit writable/readable scope. The unsandboxed Bash / " +
-      "Edit / Write are not available in this session."
+    const sandboxHint = opts.builtinProcessSandbox
+      ? "Shell, background processes and persistent terminals run through the workspace OS sandbox. Use built-in bash, start_process and terminal_repl tools for coding commands. Use sandbox_edit / sandbox_write for file edits. Network follows the configured sandbox policy."
+      : "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
+        "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
+        "(from cognia-sandboxed-tools) instead of the SDK builtins; they accept the " +
+        "same shape plus an explicit writable/readable scope. The unsandboxed Bash / " +
+        "Edit / Write are not available in this session."
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
   }
@@ -3399,7 +3425,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // stacking both would double-confine. Rootless sessions (no active project)
   // carry no policy and behave exactly as before.
   const confinementEnabled =
-    !sandboxEnabled &&
+    (!sandboxEnabled || Boolean(opts.builtinProcessSandbox)) &&
     Boolean(ctx.activeProject) &&
     (session?.workspaceConfinementEnabled ??
       character?.workspaceConfinementEnabled ??

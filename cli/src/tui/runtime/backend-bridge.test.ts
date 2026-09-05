@@ -121,10 +121,10 @@ describe("buildCodexOptions", () => {
     ).toEqual({ defaultReasoningEffort: "high", extraSkillRoots: ["/skills"] })
   })
 
-  it("forwards nothing on a preset that does not read the Codex channel", () => {
+  it.each(["claude-code", "codex", "codex-acp"])("forwards no native options to %s", (presetId) => {
     // ACP has no metadata slot for either, so claiming support would be a lie.
     expect(
-      buildCodexOptions({ ...config, thinkingLevel: "high", skillDirs: ["/s"] }, "claude-code")
+      buildCodexOptions({ ...config, thinkingLevel: "high", skillDirs: ["/s"] }, presetId)
     ).toBeUndefined()
   })
 
@@ -133,10 +133,10 @@ describe("buildCodexOptions", () => {
   })
 
   it("carries just one half when only one is configured", () => {
-    expect(buildCodexOptions({ ...config, thinkingLevel: "low" }, "codex")).toEqual({
+    expect(buildCodexOptions({ ...config, thinkingLevel: "low" }, "codex-app-server")).toEqual({
       defaultReasoningEffort: "low",
     })
-    expect(buildCodexOptions({ ...config, skillDirs: ["/s"] }, "codex")).toEqual({
+    expect(buildCodexOptions({ ...config, skillDirs: ["/s"] }, "codex-app-server")).toEqual({
       extraSkillRoots: ["/s"],
     })
   })

@@ -24,6 +24,26 @@ function evt(type: WorkflowRunEventRow["type"], stepId: string, ts: number): Wor
 }
 
 describe("startRunWatch", () => {
+  it("fences late and reentrant events and unsubscribes only once after stop", () => {
+    let emit: (events: WorkflowRunEventRow[]) => void = () => {}
+    const onState = jest.fn()
+    const unsub = jest.fn(() => emit([evt("step_started", "a", 1)]))
+    const watch = startRunWatch({
+      runId: "r1",
+      initial: init,
+      onState,
+      subscribe: (_id, next) => {
+        emit = next
+        return unsub
+      },
+    })
+    watch.stop()
+    watch.stop()
+    emit([evt("step_completed", "a", 2)])
+    expect(onState).not.toHaveBeenCalled()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
   it("folds each emit and calls onState with the derived state", () => {
     let emit: (e: WorkflowRunEventRow[]) => void = () => {}
     const states: number[] = []

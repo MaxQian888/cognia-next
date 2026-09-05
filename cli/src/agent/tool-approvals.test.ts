@@ -68,8 +68,8 @@ describe("tool-approvals", () => {
     addToolApproval(HOME, "mcp__cognia-tools__bash", fsx, { cwd: "/proj/a" })
     expect(readToolApprovals(HOME, fsx, "/proj/a").has("mcp__cognia-tools__bash")).toBe(true)
     expect(readToolApprovals(HOME, fsx, "/proj/b").has("mcp__cognia-tools__bash")).toBe(false)
-    // An unscoped read (no cwd) sees it (back-compat with session-runner).
-    expect(readToolApprovals(HOME, fsx).has("mcp__cognia-tools__bash")).toBe(true)
+    // A scoped grant requires a matching workspace; absence is not authority.
+    expect(readToolApprovals(HOME, fsx).has("mcp__cognia-tools__bash")).toBe(false)
   })
 
   it("removes a single tool, leaving the others", () => {
@@ -116,4 +116,14 @@ describe("tool-approvals", () => {
     const { fsx } = memFs()
     expect(clearToolApprovals(HOME, fsx)).toBe(0)
   })
+})
+
+it("preserves independent grants for the same command in two workspaces", () => {
+  const { fsx } = memFs()
+  addToolApproval(HOME, "bash(pnpm test)", fsx, { cwd: "/project/a" })
+  addToolApproval(HOME, "bash(pnpm test)", fsx, { cwd: "/project/b" })
+  expect(readToolApprovalEntries(HOME, fsx)).toHaveLength(2)
+  expect(readToolApprovals(HOME, fsx, "/project/a").has("bash(pnpm test)")).toBe(true)
+  expect(readToolApprovals(HOME, fsx, "/project/b").has("bash(pnpm test)")).toBe(true)
+  expect(readToolApprovals(HOME, fsx, "/project/c").has("bash(pnpm test)")).toBe(false)
 })

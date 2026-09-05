@@ -1168,6 +1168,8 @@ export type CredentialsFile = z.infer<typeof credentialsFileSchema>
  * optional because the agent has sensible fallbacks for each.
  */
 export interface ResolvedConfig {
+  /** Resolved CLI data root; runtime metadata, never read from project config. */
+  cliHome?: string
   provider: string
   /** Runtime hosted by interactive chat. `builtin` keeps the Cognia sidecar;
    * any other value resolves through the external-agent preset registry. */
@@ -1178,6 +1180,8 @@ export interface ResolvedConfig {
   protocol?: ResolverProtocol
   systemPrompt?: string
   permissionMode: (typeof PERMISSION_MODES)[number]
+  /** True when a file, flag, or live user selection supplies the mode. */
+  permissionModeExplicit?: boolean
   allowedTools?: string[]
   builtinTools: BuiltinToolsConfig
   providers: Record<string, ProviderConfig>
@@ -1196,7 +1200,7 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
-  /** OS-level sandboxing for the model's shell and file tools. Off by default. */
+  /** OS-level sandboxing for the model's shell and file tools. Enabled by default. */
   sandbox?: CliSandboxConfig
   /** Fully layered search policy and provider credentials. */
   search?: CliSearchConfig
@@ -1336,8 +1340,18 @@ export const DEFAULT_PROVIDER = "anthropic"
 export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   provider: DEFAULT_PROVIDER,
   agentBackend: "builtin",
-  permissionMode: "default",
-  builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+  permissionMode: "acceptEdits",
+  permissionModeExplicit: false,
+  sandbox: { enabled: true, tier: "os", policy: { network: "off" } },
+  builtinTools: {
+    ...DEFAULT_BUILTIN_TOOLS,
+    process: true,
+    shellAdvanced: true,
+    terminalRepl: true,
+    lsp: true,
+    codeGraph: true,
+    astGrep: true,
+  },
   providers: {},
   streamIdleTimeoutMs: 60_000,
   aiSdkMaxSteps: 256,

@@ -204,3 +204,22 @@ describe("Transcript", () => {
     expect(mockStaticRenders.at(-1)).toBe(2)
   })
 })
+
+it("shows context targets and restores an individually expanded call", () => {
+  const cells: Cell[] = ["a.ts", "b.ts"].map((path, i) => ({
+    id: String(i),
+    kind: "tool",
+    callKey: String(i),
+    toolName: "read",
+    input: { path },
+    status: "done",
+    collapsed: true,
+    result: "file body",
+  }))
+  const { container, rerender } = render(<Transcript cells={cells} mode="live" columns={40} />)
+  expect(container.textContent).toContain("Read: a.ts")
+  expect(container.textContent).toContain("Read: b.ts")
+  rerender(<Transcript cells={cells.map((cell) => ({ ...cell, collapsed: false }))} mode="live" />)
+  expect(container.textContent).not.toContain("⚙")
+  expect(container.textContent).toContain("file body")
+})

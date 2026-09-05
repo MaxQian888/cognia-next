@@ -23,6 +23,11 @@ import { createPermissionGate } from "./permission-gate"
 import {
   __clearAllCliBackgroundRunsForTesting,
   __disposeCliBackgroundJournalForTesting,
+  __waitForCliBackgroundJournalForTesting,
+  cancelCliBackgroundRun,
+  listCliBackgroundRuns,
+  getCliBackgroundRecord,
+  collectCliBackgroundResult,
 } from "./subagent-background-tasks"
 import {
   __clearLiveSubagentsForTesting,
@@ -122,6 +127,60 @@ describe("register / clear / get context", () => {
 })
 
 describe("handleCliDispatchAgent", () => {
+  it("preserves background failure status in both the registry and journal", async () => {
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        mintRunId: () => "failed-bg",
+        run: async () => {
+          throw new Error("boom")
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "check", background: true }))
+    await __waitForCliBackgroundJournalForTesting()
+    expect(listCliBackgroundRuns("s1")).toEqual([
+      expect.objectContaining({ runId: "failed-bg", status: "error" }),
+    ])
+    expect(
+      await getCliBackgroundRecord("failed-bg", { home: testHome, owner: "s1" })
+    ).toMatchObject({ status: "error", error: expect.stringContaining("boom") })
+  })
+
+  it("cancels only the requested sibling and fences late output after abort", async () => {
+    let nextId = 0
+    const runs: Parameters<NonNullable<CliSubagentDispatchContext["run"]>>[3][] = []
+    const finishes: Array<(value: { text: string }) => void> = []
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        mintRunId: () => `bg-${++nextId}`,
+        run: async (_def, _prompt, _session, deps) => {
+          runs.push(deps)
+          return new Promise((resolve) => finishes.push(resolve))
+        },
+      })
+    )
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "a", background: true }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "b", background: true }))
+    expect(cancelCliBackgroundRun("bg-1", "other-session")).toBe(false)
+    expect(cancelCliBackgroundRun("bg-1", "s1")).toBe(true)
+    expect(cancelCliBackgroundRun("bg-1", "s1")).toBe(false)
+    expect(runs[0].signal?.aborted).toBe(true)
+    expect(runs[1].signal?.aborted).toBe(false)
+    runs[0].onEvent?.({ type: "text-delta", delta: "late secret" })
+    finishes[0]({ text: "late success" })
+    finishes[1]({ text: "sibling result" })
+    await collectCliBackgroundResult("bg-1", { home: testHome, owner: "s1" })
+    await __waitForCliBackgroundJournalForTesting()
+    expect(getLiveSubagent("bg-1", "s1")).toMatchObject({ status: "interrupted", text: "" })
+    expect(await getCliBackgroundRecord("bg-1", { home: testHome, owner: "s1" })).toMatchObject({
+      status: "interrupted",
+    })
+    expect(listCliBackgroundRuns("s1")).toEqual([
+      expect.objectContaining({ runId: "bg-2", status: "done" }),
+    ])
+  })
   it("errors when no context is registered for the session", async () => {
     const resp = await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go" }))
     expect(resp.error).toContain("no active subagent context")

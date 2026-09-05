@@ -5,7 +5,7 @@
 
 #[cfg(target_os = "macos")]
 use std::path::Path;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
@@ -64,19 +64,22 @@ where
         .ok_or_else(|| format!("missing value for {flag}"))
 }
 
-#[cfg(target_os = "linux")]
-fn find_on_path(binary: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|value| {
-        std::env::split_paths(&value)
-            .map(|dir| dir.join(binary))
-            .find(|candidate| candidate.is_file())
-    })
+// PATH belongs to the command being launched and can contain workspace shims.
+// Choosing the sandbox executable from it would execute those shims before
+// confinement. Only OS-managed absolute locations may provide bubblewrap.
+#[cfg(any(target_os = "linux", test))]
+fn find_trusted_bwrap(is_file: impl Fn(&std::path::Path) -> bool) -> Option<PathBuf> {
+    ["/usr/bin/bwrap", "/bin/bwrap"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|candidate| is_file(candidate))
 }
 
 #[cfg(target_os = "linux")]
 fn render_launch(args: &Args) -> Result<Vec<String>, String> {
-    let bwrap = find_on_path("bwrap").ok_or_else(|| {
-        "bubblewrap (bwrap) is required for strict external-agent hosting".to_string()
+    let bwrap = find_trusted_bwrap(|candidate| candidate.is_file()).ok_or_else(|| {
+        "bubblewrap is required at /usr/bin/bwrap or /bin/bwrap for strict sandbox hosting"
+            .to_string()
     })?;
     let empty = std::env::temp_dir().join("cognia-sandbox-empty");
     std::fs::create_dir_all(&empty)
@@ -142,6 +145,21 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bubblewrap_selection_never_searches_workspace_or_path() {
+        let mut visited = std::cell::RefCell::new(Vec::new());
+        let selected = find_trusted_bwrap(|candidate| {
+            visited.borrow_mut().push(candidate.to_path_buf());
+            candidate == std::path::Path::new("/bin/bwrap")
+        });
+        assert_eq!(selected, Some(PathBuf::from("/bin/bwrap")));
+        assert_eq!(
+            *visited.get_mut(),
+            vec![PathBuf::from("/usr/bin/bwrap"), PathBuf::from("/bin/bwrap")]
+        );
+        assert_eq!(find_trusted_bwrap(|_| false), None);
+    }
 
     #[test]
     fn parses_scope_and_preserves_target_argv() {

@@ -4,6 +4,15 @@
 jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
+jest.mock("@/lib/ai/agent/external/presets", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/external/presets")
+  return {
+    ...actual,
+    resolvePreferredCodexExecutablePresetId: jest.fn(
+      actual.resolvePreferredCodexExecutablePresetId
+    ),
+  }
+})
 
 import type {
   AcpConfigOption,
@@ -20,6 +29,7 @@ import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
 import type { TranscriptFs } from "./transcript"
 import { RunAndCaptureError } from "@/lib/claude/run-and-capture"
+import * as externalPresets from "@/lib/ai/agent/external/presets"
 
 import {
   acpPermissionRequestToCli,
@@ -267,6 +277,119 @@ describe("createExternalAgentSession", () => {
     await session.close()
   })
 
+  it.each(["onEnvelope", "onAction", "onEvent"] as const)(
+    "delivers hosted tool events to %s consumers",
+    async (channel) => {
+      const { manager } = fakeManager()
+      let host: Parameters<
+        NonNullable<import("./external-agent-session").ExternalAgentSessionParams["startToolHost"]>
+      >[0]
+      const execute = (manager.execute as jest.Mock).getMockImplementation()!
+      ;(manager.execute as jest.Mock).mockImplementation(async (...args) => {
+        host.onToolCall?.({ name: "read", input: { path: "a.ts" }, callKey: "host-1" })
+        host.onToolResult?.({ name: "read", callKey: "host-1", ok: true, summary: "content" })
+        return execute(...args)
+      })
+      const receive = jest.fn()
+      const session = createExternalAgentSession({
+        config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+        manager,
+        transcriptFs: memoryTranscript().fs,
+        startToolHost: async (params) => {
+          host = params
+          return {
+            endpoint: "http://127.0.0.1:1234",
+            token: "token",
+            isClosed: () => false,
+            connections: () => 0,
+            cancelInFlight: jest.fn(),
+            close: async () => undefined,
+          } as never
+        },
+        buildToolHostServers: () => [],
+      })
+      try {
+        await session.send("read", {
+          gate: async () => ({ decision: "allow" }),
+          [channel]: receive,
+        })
+        const events = receive.mock.calls.map(([value]) =>
+          channel === "onEnvelope" ? value.event.kind : value.type
+        )
+        expect(events).toEqual(
+          expect.arrayContaining(
+            channel === "onAction" ? ["TOOL_CALL", "TOOL_RESULT"] : ["tool-call", "tool-result"]
+          )
+        )
+        await expect(
+          host!.gate?.({
+            type: "permission_request",
+            sessionId: "done",
+            requestId: "late",
+            toolUseID: "late",
+            toolName: "bash",
+            input: {},
+          })
+        ).resolves.toMatchObject({ decision: "deny", message: "No active turn" })
+        receive.mockClear()
+        host!.onToolCall?.({ name: "bash", input: {}, callKey: "late" })
+        expect(receive).not.toHaveBeenCalled()
+      } finally {
+        await session.close()
+      }
+    }
+  )
+
+  it("preserves native diff refinements and diagnostics in envelope order", async () => {
+    const { manager } = fakeManager()
+    ;(manager.execute as jest.Mock).mockImplementation(async (_id, _prompt, options) => {
+      for (const event of [
+        {
+          type: "tool_call_update",
+          toolCallId: "edit-1",
+          content: [{ type: "diff", path: "a.ts", oldText: "one", newText: "two" }],
+        },
+        { type: "error", error: "retrying", recoverable: true },
+        { type: "hook_fire", event: "Stop", outcome: "context", warnings: [] },
+        { type: "error", error: "failed", recoverable: false },
+      ])
+        options.onEvent({ ...event, timestamp: new Date() })
+      return {
+        success: false,
+        error: "failed",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+      }
+    })
+    const receive = jest.fn()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    try {
+      await expect(
+        session.send("edit", { gate: async () => ({ decision: "deny" }), onEnvelope: receive })
+      ).rejects.toThrow("failed")
+      expect(receive.mock.calls.map(([value]) => value.event)).toEqual([
+        expect.objectContaining({
+          kind: "tool-call",
+          toolCallId: "edit-1",
+          toolName: "Edit",
+          input: { file_path: "a.ts", old_string: "one", new_string: "two" },
+        }),
+        expect.objectContaining({ kind: "warning", message: "retrying" }),
+        expect.objectContaining({ kind: "informational", content: "Stop context" }),
+        expect.objectContaining({ kind: "failure", message: "failed" }),
+      ])
+    } finally {
+      await session.close()
+    }
+  })
+
   it("maps CLI credential-file providers onto each external CLI's native env contract", () => {
     const config = {
       ...DEFAULT_RESOLVED_CONFIG,
@@ -412,7 +535,7 @@ describe("createExternalAgentSession", () => {
       1,
       "cli-external-cli-session",
       "first",
-      expect.objectContaining({ workingDirectory: "/work", permissionMode: "default" })
+      expect.objectContaining({ workingDirectory: "/work", permissionMode: "acceptEdits" })
     )
     expect(manager.execute).toHaveBeenNthCalledWith(
       1,
@@ -451,7 +574,6 @@ describe("createExternalAgentSession", () => {
       transcriptFs: memoryTranscript().fs,
     })
     const gate = jest.fn(async () => ({ decision: "allow_always" as const }))
-    await session.send("go", { gate })
     const request: AcpPermissionRequest = {
       id: "p",
       toolCallId: "t",
@@ -460,15 +582,75 @@ describe("createExternalAgentSession", () => {
       options: [{ optionId: "always", name: "Always", kind: "allow_always" }],
     }
 
-    await expect(getExecuteOptions()?.onPermissionRequest?.(request)).resolves.toMatchObject({
-      requestId: "p",
-      granted: true,
-      rememberChoice: true,
-      optionId: "always",
+    const execute = (manager.execute as jest.Mock).getMockImplementation()!
+    ;(manager.execute as jest.Mock).mockImplementation(async (...args) => {
+      const result = await execute(...args)
+      await expect(getExecuteOptions()?.onPermissionRequest?.(request)).resolves.toMatchObject({
+        requestId: "p",
+        granted: true,
+        rememberChoice: true,
+        optionId: "always",
+      })
+      return result
     })
+    await session.send("go", { gate })
     expect(gate).toHaveBeenCalledWith(
       expect.objectContaining({ toolName: "edit", input: { path: "a.ts" } })
     )
+    gate.mockClear()
+    await expect(getExecuteOptions()?.onPermissionRequest?.(request)).resolves.toMatchObject({
+      granted: false,
+      reason: "No active turn",
+    })
+    expect(gate).not.toHaveBeenCalled()
+  })
+
+  it("rejects an approval that resolves after cancellation and ignores late events", async () => {
+    const { manager } = fakeManager()
+    const controller = new AbortController()
+    const onAction = jest.fn()
+    ;(manager.execute as jest.Mock).mockImplementation(async (_id, _prompt, options) => {
+      const response = await options.onPermissionRequest({
+        id: "cancelled-request",
+        toolInfo: { id: "bash", name: "bash" },
+        options: [{ optionId: "once", name: "Allow once", kind: "allow_once" }],
+      })
+      expect(response.granted).toBe(false)
+      options.onEvent({
+        type: "message_delta",
+        timestamp: new Date(),
+        delta: { type: "text", text: "late" },
+      })
+      return {
+        success: false,
+        error: "Cancelled",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+      }
+    })
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/work", agentBackend: "claude-code" },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    try {
+      await expect(
+        session.send("go", {
+          signal: controller.signal,
+          onAction,
+          gate: async () => {
+            controller.abort()
+            return { decision: "allow" }
+          },
+        })
+      ).rejects.toThrow("Cancelled")
+      expect(onAction).not.toHaveBeenCalled()
+    } finally {
+      await session.close()
+    }
   })
 
   it("falls back to CaptureStreamEvent output for the readline chat", async () => {
@@ -554,6 +736,12 @@ describe("createExternalAgentSession", () => {
         "acp-session-1",
         "gpt-5.6-sol"
       )
+      await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ model: "gpt-5.6-sol" })
+      )
     })
 
     it("uses ACP model config options for listing and live switching", async () => {
@@ -589,6 +777,12 @@ describe("createExternalAgentSession", () => {
         "claude-opus-4-1"
       )
       expect(manager.setSessionModel).not.toHaveBeenCalled()
+      await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ model: "claude-opus-4-1" })
+      )
     })
 
     it("creates and retains the real ACP session when models are opened before the first turn", async () => {
@@ -680,6 +874,12 @@ describe("createExternalAgentSession", () => {
       await session.send("go", { gate: async () => ({ decision: "allow" }) })
       // A rejected model must not take the turn — or the TUI — down.
       await expect(session.setModel?.("nope")).resolves.toBe(false)
+      await session.send("continue", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.execute).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        expect.not.objectContaining({ model: "nope" })
+      )
     })
   })
 
@@ -725,18 +925,21 @@ describe("external-agent adaptation edge cases", () => {
     })
   })
 
-  it("maps the codex credential through the openai slot when no codex slot exists", () => {
-    expect(
-      externalAgentCredentialEnv(
-        {
-          ...DEFAULT_RESOLVED_CONFIG,
-          cwd: "/work",
-          providers: { openai: { apiKey: "sk-o", authToken: "tok" } },
-        },
-        "codex"
-      )
-    ).toEqual({ CODEX_ACCESS_TOKEN: "tok", OPENAI_API_KEY: "sk-o", CODEX_API_KEY: "sk-o" })
-  })
+  it.each(["codex", "codex-acp", "codex-app-server"])(
+    "maps %s credentials through the openai fallback",
+    (presetId) => {
+      expect(
+        externalAgentCredentialEnv(
+          {
+            ...DEFAULT_RESOLVED_CONFIG,
+            cwd: "/work",
+            providers: { openai: { apiKey: "sk-o", authToken: "tok" } },
+          },
+          presetId
+        )
+      ).toEqual({ CODEX_ACCESS_TOKEN: "tok", OPENAI_API_KEY: "sk-o", CODEX_API_KEY: "sk-o" })
+    }
+  )
 
   it("forwards an Anthropic base URL and yields nothing for an unmapped preset", () => {
     const config = {
@@ -1405,6 +1608,42 @@ describe("external-agent turn bounds", () => {
     )
   })
 
+  it("forwards options and the saved model of the resolved native Codex engine", async () => {
+    const preferred = jest
+      .spyOn(externalPresets, "resolvePreferredCodexExecutablePresetId")
+      .mockResolvedValue("codex-app-server")
+    const { manager, getExecuteOptions } = fakeManager()
+    const session = createExternalAgentSession({
+      disableToolHost: true,
+      config: {
+        ...baseConfig,
+        agentBackend: "codex",
+        thinkingLevel: "high",
+        skillDirs: ["/work/skills"],
+        externalSkills: true,
+        agentBackends: {
+          codex: { model: "fallback" },
+          "codex-app-server": { model: "native-model" },
+        },
+      },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+    })
+    try {
+      await session.send("go", { gate: async () => ({ decision: "allow" }) })
+      expect(manager.addAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protocol: "codex-app-server",
+          codexOptions: { defaultReasoningEffort: "high", extraSkillRoots: ["/work/skills"] },
+        })
+      )
+      expect(getExecuteOptions()?.model).toBe("native-model")
+    } finally {
+      await session.close()
+      preferred.mockRestore()
+    }
+  })
+
   it("builds its own manager when none is injected", () => {
     expect(() =>
       createExternalAgentSession({
@@ -1434,5 +1673,65 @@ describe("external-agent turn bounds", () => {
 
     expect(result.text).toBe("done")
     expect(manager.cancel).not.toHaveBeenCalled()
+  })
+
+  it("pauses the watchdog for broker approvals as well as native approvals", async () => {
+    let brokerGate: import("./permission-gate").PermissionResponder | undefined
+    const { manager } = fakeManager()
+    ;(manager.execute as jest.Mock).mockImplementation(async (_id, _prompt, options) => {
+      options.onEvent({
+        type: "message_delta",
+        sessionId: "external-1",
+        timestamp: new Date(),
+        delta: { type: "text", text: "Waiting for the tool" },
+      })
+      await brokerGate!({
+        type: "permission_request",
+        sessionId: "external-1",
+        requestId: "broker-1",
+        toolUseID: "tool-1",
+        toolName: "bash",
+        input: { command: "echo approved" },
+      })
+      return {
+        success: true,
+        sessionId: "external-1",
+        finalResponse: "done",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+      }
+    })
+    const session = createExternalAgentSession({
+      config: { ...baseConfig, streamIdleTimeoutMs: 30 },
+      manager,
+      transcriptFs: memoryTranscript().fs,
+      startToolHost: async ({ gate }) => {
+        brokerGate = gate
+        return {
+          endpoint: "http://127.0.0.1:1234",
+          token: "token",
+          isClosed: () => false,
+          connections: () => 0,
+          cancelInFlight: jest.fn(),
+          close: async () => undefined,
+        } as never
+      },
+      buildToolHostServers: () => [],
+    })
+    try {
+      await expect(
+        session.send("go", {
+          gate: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 150))
+            return { decision: "allow" }
+          },
+        })
+      ).resolves.toMatchObject({ text: "done" })
+      expect(manager.cancel).not.toHaveBeenCalled()
+    } finally {
+      await session.close()
+    }
   })
 })

@@ -51,7 +51,7 @@ describe("buildAgentsRunDispatch", () => {
     expect(loadMcpServers).toHaveBeenCalledWith(["/work", "/home/.cognia"])
     expect(applyDisabled).toHaveBeenCalled()
     expect(readDisabled).toHaveBeenCalledWith("/home/.cognia")
-    expect(readToolApprovals).toHaveBeenCalledWith("/home/.cognia")
+    expect(readToolApprovals).toHaveBeenCalledWith("/home/.cognia", undefined, "/work")
     expect(readDisabledTools).toHaveBeenCalledWith("/home/.cognia")
 
     const [passedDef, prompt, parentId, deps] = mockRun.mock.calls[0]

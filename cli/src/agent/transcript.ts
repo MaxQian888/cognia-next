@@ -78,7 +78,23 @@ export function readTranscript(
     const trimmed = line.trim()
     if (!trimmed) continue
     try {
-      out.push(JSON.parse(trimmed) as TranscriptEntry)
+      const entry: unknown = JSON.parse(trimmed)
+      // A partially migrated/corrupt file can contain valid JSON of the wrong
+      // shape. Validate at the disk boundary before resume/list/export consume it.
+      if (
+        entry === null ||
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        !("ts" in entry) ||
+        typeof entry.ts !== "number" ||
+        !Number.isFinite(entry.ts) ||
+        !("role" in entry) ||
+        !["user", "assistant", "system"].includes(entry.role as string) ||
+        !("content" in entry) ||
+        typeof entry.content !== "string"
+      )
+        continue
+      out.push(entry as TranscriptEntry)
     } catch {
       // Skip a corrupt line rather than failing the whole read.
     }

@@ -139,9 +139,9 @@
     {
       "name": "setPermissionMode",
       "kind": "sdk",
-      "exposure": "dedicated-command",
+      "exposure": "control",
       "capability": "permissions.set-mode",
-      "command": "claude_set_mode"
+      "args": ["mode"]
     },
     {
       "name": "steer",

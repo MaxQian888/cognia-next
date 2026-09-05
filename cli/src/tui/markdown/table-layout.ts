@@ -13,6 +13,7 @@
  * {@link stringWidth}, never in code units.
  */
 import { stringWidth, truncateToWidth } from "./width"
+import { isSafeHyperlink } from "./hyperlink"
 import type { MdLine, MdSpan, TableAlign } from "./types"
 
 /** The box-drawing pieces of a framed table, in one place so the rules and the
@@ -99,11 +100,16 @@ export function collectTableFootnotes(
   line: Extract<MdLine, { kind: "table" }>,
   hyperlinks: boolean
 ): string[] {
-  if (hyperlinks) return []
   const urls: string[] = []
   const scan = (spans: MdSpan[]) => {
     for (const s of spans) {
-      if (s.link && s.link !== s.text && !urls.includes(s.link)) urls.push(s.link)
+      if (
+        s.link &&
+        (!hyperlinks || !isSafeHyperlink(s.link)) &&
+        s.link !== s.text &&
+        !urls.includes(s.link)
+      )
+        urls.push(s.link)
     }
   }
   for (const cell of line.header) scan(cell)
@@ -178,4 +184,26 @@ export function fitCell(
   const shown = truncated ? truncateToWidth(text, width) : text
   const { left, right } = padCell(stringWidth(shown), width, align)
   return { text: shown, left, right, truncated }
+}
+
+/** Stack header/value pairs when even three columns of text per cell cannot fit.
+ * Both surfaces keep all content in this mode and let their normal text wrapping work. */
+export function stackTable(
+  line: Extract<MdLine, { kind: "table" }>,
+  maxWidth?: number
+): MdSpan[][] | undefined {
+  if (
+    maxWidth === undefined ||
+    maxWidth >= tableFrameOverhead(line.header.length) + line.header.length * 3
+  )
+    return undefined
+  if (line.rows.length === 0) return line.header
+  return line.rows.flatMap((row, index) => [
+    ...(index > 0 ? [[]] : []),
+    ...line.header.map((header, column) => [
+      ...header.map((span) => ({ ...span, bold: true })),
+      { text: ": " },
+      ...(row[column] ?? []),
+    ]),
+  ])
 }

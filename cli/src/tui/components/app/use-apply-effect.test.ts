@@ -15,6 +15,17 @@ import { runRuntimeRequest } from "../../runtime"
 import { CliDbSnapshotError } from "../../../db/bootstrap"
 
 jest.mock("../../runtime", () => ({ runRuntimeRequest: jest.fn(() => Promise.resolve()) }))
+jest.mock("../../runtime/lifecycle-firer", () => ({
+  createCliLifecycleFirer: () => async () => null,
+}))
+
+let testHome: string
+beforeEach(() => {
+  testHome = fs.mkdtempSync(nodePath.join(os.tmpdir(), "effect-controls-"))
+})
+afterEach(() => {
+  fs.rmSync(testHome, { recursive: true, force: true })
+})
 
 const runRuntimeRequestMock = jest.mocked(runRuntimeRequest)
 
@@ -24,6 +35,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
   const agent = {
     send: jest.fn(),
+    abort: jest.fn(),
     compact: jest.fn(),
     clear: jest.fn(),
     listCheckpoints: jest.fn(() => []),
@@ -37,8 +49,8 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
     agent,
     dispatch: jest.fn(),
     state: createInitialState(config, "s1", true, []),
-    home: "/home",
-    osHome: "/oshome",
+    home: testHome,
+    osHome: testHome,
     mintId: () => "new-id",
     clearScreen: jest.fn(),
     scrollReset: jest.fn(),
@@ -82,6 +94,31 @@ function buildDeps(over: Partial<ApplyEffectDeps> = {}): ApplyEffectDeps {
 const run = (deps: ApplyEffectDeps) => renderHook(() => useApplyEffect(deps)).result.current
 
 describe("useApplyEffect", () => {
+  it("does not send refinement if the backend cannot enter read-only plan mode", async () => {
+    const deps = buildDeps()
+    jest.mocked(deps.agent.switchMode).mockRejectedValueOnce(new Error("mode unavailable"))
+    run(deps)({ kind: "planRefine", feedback: "Revise the plan" })
+    await flush()
+    expect(deps.agent.send).not.toHaveBeenCalled()
+    expect(deps.persist).not.toHaveBeenCalled()
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: "Plan refinement failed: mode unavailable",
+    })
+  })
+  it("refines the reviewed plan with the user's explicit instructions after entering plan mode", async () => {
+    const deps = buildDeps()
+    deps.state.lastPlan = { raw: "# Revised Plan\n1. Keep the API", seq: 2 }
+    run(deps)({ kind: "planRefine", feedback: "Add a migration rollback step" })
+    await flush()
+    expect(deps.agent.switchMode).toHaveBeenCalledWith("plan")
+    expect(deps.agent.send).toHaveBeenCalledWith(
+      expect.stringContaining("# Revised Plan\n1. Keep the API")
+    )
+    expect(deps.agent.send).toHaveBeenCalledWith(
+      expect.stringContaining("Add a migration rollback step")
+    )
+  })
   beforeEach(() => runRuntimeRequestMock.mockResolvedValue())
 
   it("dispatches a NOTICE for the notice effect", () => {
@@ -326,7 +363,7 @@ describe("useApplyEffect", () => {
   it("persists the status bar patch", () => {
     const deps = buildDeps()
     run(deps)({ kind: "statusBar", patch: { theme: "ascii" } as never })
-    expect(deps.persistStatusBar).toHaveBeenCalledWith("/home", { theme: "ascii" })
+    expect(deps.persistStatusBar).toHaveBeenCalledWith(deps.home, { theme: "ascii" })
   })
 
   it("starts a goal run and arms the abort controller", () => {
@@ -585,5 +622,214 @@ describe("useApplyEffect", () => {
       run(deps)({ kind: "permissionMode", mode: "bypassPermissions" })
       expect(notices(deps).join("\n")).not.toMatch(/can't enforce/)
     })
+  })
+})
+
+describe("foreground goal/loop controls", () => {
+  const loop = {
+    kind: "loop" as const,
+    mode: "interval" as const,
+    prompt: "check",
+    maxIterations: 3,
+  }
+  const goalControl = (action: string) => ({
+    kind: "runtime" as const,
+    runtime: { feature: "goal" as const, action },
+  })
+  function controls() {
+    let current: AbortController | null = null
+    const deps = buildDeps({
+      getRuntimeAbort: () => current,
+      setRuntimeAbort: jest.fn((value) => {
+        current = value
+      }),
+    })
+    return { deps, apply: run(deps) }
+  }
+
+  it("resumes a persisted goal through the streaming runner, not the status-only router", async () => {
+    const { deps, apply } = controls()
+    apply(goalControl("resume"))
+    expect(deps.startGoalRun).toHaveBeenCalledWith("", expect.objectContaining({ resume: true }))
+    expect(runRuntimeRequestMock).not.toHaveBeenCalled()
+    await flush()
+  })
+
+  it("waits for a paused loop to settle, preserves continuation and rejects duplicate resume", async () => {
+    const { deps, apply } = controls()
+    let finish!: () => void
+    jest.mocked(deps.startLoopRun).mockImplementationOnce((input) => {
+      input.continuation!.completed = 2
+      return new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    })
+    apply(loop)
+    const signal = jest.mocked(deps.startLoopRun).mock.calls[0][0].signal
+    apply({ kind: "loopControl", action: "pause" })
+    expect(signal.aborted).toBe(true)
+    expect(deps.agent.abort).toHaveBeenCalledTimes(1)
+    apply({ kind: "loopControl", action: "resume" })
+    apply({ kind: "loopControl", action: "resume" })
+    expect(deps.startLoopRun).toHaveBeenCalledTimes(1)
+    finish()
+    await flush()
+    expect(deps.startLoopRun).toHaveBeenCalledTimes(2)
+    expect(deps.startLoopRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: "resume",
+        continuation: { completed: 2 },
+        maxIterations: 3,
+      })
+    )
+  })
+
+  it("stops a paused loop without another turn and clears the continuation", async () => {
+    const { deps, apply } = controls()
+    jest.mocked(deps.startLoopRun).mockImplementationOnce(
+      (input) =>
+        new Promise((resolve) => {
+          input.continuation!.loopId = "l1"
+          input.signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+    )
+    apply(loop)
+    apply({ kind: "loopControl", action: "pause" })
+    await flush()
+    apply({ kind: "loopControl", action: "stop" })
+    await flush()
+    expect(deps.startLoopRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        action: "stop",
+        continuation: { loopId: "l1" },
+      })
+    )
+    apply({ kind: "loopControl", action: "resume" })
+    expect(deps.startLoopRun).toHaveBeenCalledTimes(2)
+    expect(deps.dispatch).toHaveBeenCalledWith({
+      type: "NOTICE",
+      message: "No paused loop run in this session.",
+    })
+  })
+
+  it("allows retrying a failed persisted stop instead of leaving a dead stopping state", async () => {
+    const { deps, apply } = controls()
+    jest.mocked(deps.startLoopRun).mockImplementationOnce(
+      (input) =>
+        new Promise((resolve) => {
+          input.signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+    )
+    apply(loop)
+    apply({ kind: "loopControl", action: "pause" })
+    await flush()
+    jest.mocked(deps.startLoopRun).mockRejectedValueOnce(new Error("db busy"))
+    apply({ kind: "loopControl", action: "stop" })
+    await flush()
+    apply({ kind: "loopControl", action: "stop" })
+    await flush()
+    expect(deps.startLoopRun).toHaveBeenCalledTimes(3)
+    expect(deps.dispatch).toHaveBeenCalledWith({ type: "NOTICE", message: "Loop stopped." })
+  })
+
+  it("persists stop after a loop has exited with an error", async () => {
+    const { deps, apply } = controls()
+    jest.mocked(deps.startLoopRun).mockImplementationOnce(async (input) => {
+      input.continuation!.loopId = "failed-loop"
+      input.dispatch({ type: "ACTIVITY_END", status: "error", summary: "Turn failed" })
+    })
+    apply(loop)
+    await flush()
+    apply({ kind: "loopControl", action: "stop" })
+    await flush()
+    expect(deps.startLoopRun).toHaveBeenCalledTimes(2)
+    expect(deps.startLoopRun).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "stop", continuation: { loopId: "failed-loop" } })
+    )
+    expect(deps.agent.send).not.toHaveBeenCalled()
+  })
+
+  it("persists stop after a goal runner rejects", async () => {
+    const { deps, apply } = controls()
+    jest.mocked(deps.startGoalRun).mockRejectedValueOnce(new Error("Turn failed"))
+    apply({ kind: "goalRun", objective: "ship" })
+    await flush()
+    apply(goalControl("stop"))
+    await flush()
+    expect(runRuntimeRequestMock).toHaveBeenCalledWith(
+      { feature: "goal", action: "stop" },
+      expect.anything()
+    )
+    expect(deps.startGoalRun).toHaveBeenCalledTimes(1)
+    expect(deps.agent.send).not.toHaveBeenCalled()
+  })
+
+  it("stop supersedes a queued resume before the old goal settles", async () => {
+    const { deps, apply } = controls()
+    let finish!: () => void
+    jest.mocked(deps.startGoalRun).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    apply({ kind: "goalRun", objective: "ship" })
+    apply(goalControl("pause"))
+    apply(goalControl("resume"))
+    apply(goalControl("stop"))
+    finish()
+    await flush()
+    expect(deps.startGoalRun).toHaveBeenCalledTimes(1)
+    expect(runRuntimeRequestMock).toHaveBeenCalledWith(
+      { feature: "goal", action: "stop" },
+      expect.anything()
+    )
+  })
+
+  it("keeps the loop cancellation owner while a status request runs", async () => {
+    const { deps, apply } = controls()
+    let finish!: () => void
+    jest.mocked(deps.startLoopRun).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    apply(loop)
+    const owner = deps.getRuntimeAbort()
+    apply(goalControl("status"))
+    await flush()
+    expect(deps.getRuntimeAbort()).toBe(owner)
+    apply({ kind: "loopControl", action: "stop" })
+    expect(owner!.signal.aborted).toBe(true)
+    finish()
+    await flush()
+    expect(deps.getRuntimeAbort()).toBeNull()
+  })
+
+  it.each(["pause", "resume", "stop"] as const)(
+    "reports %s with no loop without running anything",
+    (action) => {
+      const { deps, apply } = controls()
+      apply({ kind: "loopControl", action })
+      expect(deps.startLoopRun).not.toHaveBeenCalled()
+      expect(deps.agent.abort).not.toHaveBeenCalled()
+      expect(deps.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining("No ") })
+      )
+    }
+  )
+
+  it("rejects a second foreground start and cleans up a rejected runner", async () => {
+    const { deps, apply } = controls()
+    jest.mocked(deps.startGoalRun).mockRejectedValueOnce(new Error("boom"))
+    apply({ kind: "goalRun", objective: "ship" })
+    apply(loop)
+    expect(deps.startLoopRun).not.toHaveBeenCalled()
+    await flush()
+    expect(deps.getRuntimeAbort()).toBeNull()
+    expect(deps.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: "Run failed: boom" })
+    )
   })
 })

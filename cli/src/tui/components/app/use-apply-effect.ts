@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import fs from "node:fs"
 import nodePath from "node:path"
 import type { Dispatch } from "react"
@@ -26,7 +26,7 @@ import { PLAN_REFINE_PROMPT } from "../../runtime/plan"
 import type { McpProbeCache } from "../../runtime/mcp-cache"
 import { clipboardFailureMessage, type CopyResult } from "../../clipboard"
 import type { runGoalStreaming } from "../../runtime/goal-run"
-import type { runLoopStreaming } from "../../runtime/loop-run"
+import type { runLoopStreaming, LoopContinuation } from "../../runtime/loop-run"
 import type { runFixStreaming } from "../../runtime/fix-run"
 import type { CommandEffect } from "../../commands/types"
 import type { TuiState, TuiAction } from "../../state/types"
@@ -143,6 +143,17 @@ export interface ApplyEffectDeps {
   sessionOnlyPermissionMode?: ResolvedConfig["permissionMode"]
 }
 
+type DrivenEffect = Extract<CommandEffect, { kind: "goalRun" | "loop" }>
+interface DrivenJob {
+  effect: DrivenEffect
+  sessionId: string
+  controller: AbortController
+  pending: Promise<void>
+  settled: boolean
+  disposition: "running" | "paused" | "resuming" | "stopped"
+  continuation: LoopContinuation
+}
+
 /**
  * Interpret a pure {@link CommandEffect} produced by the dispatcher. The only
  * place the slash commands' side effects happen — keeps every handler
@@ -197,8 +208,189 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     mcpProbeCache,
     sessionOnlyPermissionMode,
   } = deps
+  const drivenJob = useRef<DrivenJob | null>(null)
+  useEffect(
+    () => () => {
+      const job = drivenJob.current
+      if (job?.sessionId === state.sessionId) {
+        job.controller.abort("pause")
+        drivenJob.current = null
+      }
+    },
+    [state.sessionId]
+  )
   return useCallback(
     (effect: CommandEffect) => {
+      const notice = (message: string) => dispatch({ type: "NOTICE", message })
+      const launchDriven = (
+        next: DrivenEffect,
+        resume = false,
+        continuation: LoopContinuation = {}
+      ) => {
+        const current = drivenJob.current
+        if (current || (getRuntimeAbort() && !getRuntimeAbort()!.signal.aborted)) {
+          notice("A foreground run already exists; pause, resume, or stop it first.")
+          return
+        }
+        const controller = new AbortController()
+        const job: DrivenJob = {
+          effect: next,
+          sessionId: state.sessionId,
+          controller,
+          pending: Promise.resolve(),
+          settled: false,
+          disposition: "running",
+          continuation,
+        }
+        drivenJob.current = job
+        setRuntimeAbort(controller)
+        const onAbort = () => {
+          if (drivenJob.current === job) agent.abort()
+        }
+        controller.signal.addEventListener("abort", onAbort, { once: true })
+        const emit: Dispatch<TuiAction> = (action) => {
+          if (drivenJob.current === job) {
+            if (
+              action.type === "ACTIVITY_END" &&
+              action.status === "error" &&
+              job.disposition === "running"
+            ) {
+              job.disposition = "paused"
+            }
+            dispatch(action)
+          }
+        }
+        const common = {
+          send: agent.send,
+          dispatch: emit,
+          sessionId: state.sessionId,
+          config: state.config,
+          signal: controller.signal,
+          takeSteer,
+        }
+        job.pending = (async () => {
+          if (next.kind === "goalRun") {
+            await startGoalRun(next.objective, {
+              ...common,
+              resume,
+              firer: createCliLifecycleFirer({ home, osHome }),
+            })
+          } else {
+            await startLoopRun({
+              ...next,
+              ...common,
+              continuation,
+              ...(resume ? { action: "resume" as const } : {}),
+            })
+          }
+        })()
+          .catch((error: unknown) => {
+            emit({
+              type: "ACTIVITY_END",
+              status: "error",
+              summary: `Run failed: ${error instanceof Error ? error.message : String(error)}`,
+            })
+          })
+          .finally(() => {
+            job.settled = true
+            controller.signal.removeEventListener("abort", onAbort)
+            if (getRuntimeAbort() === controller) setRuntimeAbort(null)
+            if (drivenJob.current === job && job.disposition === "running") {
+              if (controller.signal.aborted) job.disposition = "paused"
+              else drivenJob.current = null
+            }
+            persistDb()
+          })
+      }
+      const controlDriven = async (
+        kind: "goalRun" | "loop",
+        action: "pause" | "resume" | "stop"
+      ) => {
+        const job = drivenJob.current
+        if (!job || job.sessionId !== state.sessionId || job.effect.kind !== kind) {
+          if (kind === "goalRun" && action === "resume" && !job) {
+            launchDriven({ kind: "goalRun", objective: "" }, true)
+          } else {
+            notice(
+              `No ${action === "resume" ? "paused" : "active"} ${kind === "loop" ? "loop" : "goal"} run in this session.`
+            )
+          }
+          return
+        }
+        if (action === "resume") {
+          if (
+            job.disposition !== "paused" &&
+            !(job.disposition === "running" && job.controller.signal.aborted)
+          ) {
+            notice("Run is not paused.")
+            return
+          }
+          job.disposition = "resuming"
+          await job.pending
+          if (drivenJob.current !== job || job.disposition !== "resuming") return
+          const other = getRuntimeAbort()
+          if (other && other !== job.controller && !other.signal.aborted) {
+            job.disposition = "paused"
+            notice("Another foreground action is running; finish it before resuming.")
+            return
+          }
+          drivenJob.current = null
+          launchDriven(job.effect, true, job.continuation)
+          return
+        }
+        if (action === "pause" && job.disposition !== "running") {
+          notice("Run is already paused or changing state.")
+          return
+        }
+        if (job.disposition === "stopped") {
+          notice("Run is already stopping.")
+          return
+        }
+        job.disposition = action === "pause" ? "paused" : "stopped"
+        const needsPersistedStop =
+          action === "stop" && (job.controller.signal.aborted || job.settled)
+        job.controller.abort(action)
+        await job.pending
+        if (drivenJob.current !== job) return
+        try {
+          if (needsPersistedStop) {
+            if (job.effect.kind === "loop") {
+              await startLoopRun({
+                ...job.effect,
+                continuation: job.continuation,
+                action: "stop",
+                send: agent.send,
+                dispatch,
+                sessionId: state.sessionId,
+                config: state.config,
+                signal: new AbortController().signal,
+              })
+            } else {
+              await runRuntimeRequest(
+                { feature: "goal", action: "stop" },
+                {
+                  dispatch,
+                  sessionId: state.sessionId,
+                  config: state.config,
+                  signal: new AbortController().signal,
+                  home,
+                  osHome,
+                  roots: [state.config.cwd, home],
+                  version: VERSION,
+                }
+              )
+            }
+          }
+        } catch (error) {
+          if (drivenJob.current === job) job.disposition = "paused"
+          throw error
+        }
+        if (drivenJob.current !== job) return
+        if (action === "stop" && drivenJob.current === job) drivenJob.current = null
+        notice(`${kind === "loop" ? "Loop" : "Goal"} ${action === "pause" ? "paused" : "stopped"}.`)
+        persistDb()
+      }
+
       // Recolour the committed scrollback after a display-only change (theme).
       // In scrollback mode the transcript + banner live inside Ink's `<Static>`,
       // which freezes already-emitted rows and never re-renders them in place —
@@ -866,48 +1058,15 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           }
           break
         }
-        case "goalRun": {
-          // Start a self-driving goal that streams every turn into the transcript
-          // (reuses lib/goal: createGoal + judge + handleTurnComplete). Esc aborts
-          // the controller, ending the run. `btw` steers it via `takeSteer`.
-          const controller = new AbortController()
-          setRuntimeAbort(controller)
-          void startGoalRun(effect.objective, {
-            send: agent.send,
-            dispatch,
-            sessionId: state.sessionId,
-            config: state.config,
-            signal: controller.signal,
-            takeSteer,
-            firer: createCliLifecycleFirer({ home, osHome }),
-          }).finally(() => {
-            if (getRuntimeAbort() === controller) setRuntimeAbort(null)
-            persistDb()
-          })
+        case "goalRun":
+        case "loop":
+          launchDriven(effect)
           break
-        }
-        case "loop": {
-          // Run a self-paced or interval loop, streaming each turn (reuses
-          // lib/loop). Esc aborts the controller; `btw` steers via `takeSteer`.
-          const controller = new AbortController()
-          setRuntimeAbort(controller)
-          void startLoopRun({
-            send: agent.send,
-            dispatch,
-            sessionId: state.sessionId,
-            config: state.config,
-            signal: controller.signal,
-            mode: effect.mode,
-            prompt: effect.prompt,
-            ...(effect.intervalMs !== undefined ? { intervalMs: effect.intervalMs } : {}),
-            ...(effect.maxIterations !== undefined ? { maxIterations: effect.maxIterations } : {}),
-            takeSteer,
-          }).finally(() => {
-            if (getRuntimeAbort() === controller) setRuntimeAbort(null)
-            persistDb()
-          })
+        case "loopControl":
+          void controlDriven("loop", effect.action).catch((error: unknown) =>
+            notice(`Loop control failed: ${String(error)}`)
+          )
           break
-        }
         case "fixRun": {
           // Bounded test-fix loop: run the tests, feed failures to the agent, and
           // re-run until green or the round cap (reuses runDrivenTurns). Esc aborts
@@ -930,8 +1089,20 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           break
         }
         case "runtime": {
+          if (effect.runtime.feature === "goal") {
+            const action = effect.runtime.action
+            if (
+              action === "resume" ||
+              ((action === "pause" || action === "stop") && drivenJob.current)
+            ) {
+              void controlDriven("goalRun", action).catch((error: unknown) =>
+                notice(`Goal control failed: ${String(error)}`)
+              )
+              break
+            }
+          }
           const controller = new AbortController()
-          setRuntimeAbort(controller)
+          if (!getRuntimeAbort() || getRuntimeAbort()!.signal.aborted) setRuntimeAbort(controller)
           const roots = [state.config.cwd, home]
           void runRuntimeRequest(effect.runtime, {
             dispatch,
@@ -999,10 +1170,23 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
           // the OpenCode "keep iterating" loop. Mirrors the plan-approval switch:
           // switchMode mutates the live session in place, so the plan above is
           // still in context for the refine turn.
-          persist("permissionMode", "plan")
           void (async () => {
-            await agent.switchMode("plan")
-            await agent.send(PLAN_REFINE_PROMPT)
+            try {
+              await agent.switchMode("plan")
+              persist("permissionMode", "plan")
+              await agent.send(
+                [
+                  PLAN_REFINE_PROMPT,
+                  ...(state.lastPlan ? ["", "Current reviewed plan:", state.lastPlan.raw] : []),
+                  ...(effect.feedback ? ["", "Requested revisions:", effect.feedback] : []),
+                ].join("\n")
+              )
+            } catch (error) {
+              dispatch({
+                type: "NOTICE",
+                message: `Plan refinement failed: ${error instanceof Error ? error.message : String(error)}`,
+              })
+            }
           })()
           break
         case "exit":
@@ -1012,6 +1196,7 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
     },
     [
       agent,
+      state.lastPlan,
       clearScreen,
       copyClipboard,
       doExit,

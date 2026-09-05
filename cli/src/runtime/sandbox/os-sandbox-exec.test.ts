@@ -175,7 +175,10 @@ describe("createNodeOsSandboxExecutor", () => {
     expect(calls[0]).toEqual({ binary: "/bin/helper", args: ["--exec"] })
     // Never argv: the payload carries the caller's environment, and argv is
     // readable by any process on the machine.
-    expect(JSON.parse(last().stdinChunks.join(""))).toEqual(payload())
+    expect(JSON.parse(last().stdinChunks.join(""))).toEqual({
+      ...payload(),
+      command: { ...payload().command, env: process.env.PATH ? { PATH: process.env.PATH } : {} },
+    })
     expect(last().stdinEnded).toBe(true)
   })
 

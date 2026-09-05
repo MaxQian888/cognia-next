@@ -250,6 +250,15 @@ describe("web-mode rejection", () => {
 })
 
 describe("Claude session commands", () => {
+  it("passes durable restored messages through the outbound PII gate", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    const initialConversation = [{ role: "user", content: "saved" }]
+    await sendPrompt("restored", "next", { initialConversation })
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith(
+      expect.objectContaining({ initialConversation })
+    )
+  })
+
   it("gates the complete provider-visible prompt before any send", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", {

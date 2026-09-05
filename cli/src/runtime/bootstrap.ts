@@ -11,9 +11,13 @@ import { spawn as nodeSpawn } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
 import { Readable } from "node:stream"
+import { StringDecoder } from "node:string_decoder"
+import { stripVTControlCharacters } from "node:util"
 import { fileURLToPath } from "node:url"
 
 import { setTransport } from "@/lib/tauri"
+import { redactCredentialText } from "@/lib/security/redact-credentials"
+import { DEFAULT_REDACTION_KEYS } from "@/packages/logging/src/redaction-patterns"
 
 import { StdioTransport, type SidecarHandle } from "./stdio-transport"
 
@@ -24,6 +28,7 @@ export interface SpawnedChild {
     on?(event: "error", cb: (err: Error) => void): unknown
   } | null
   stdout: NodeJS.ReadableStream | null
+  stderr?: NodeJS.ReadableStream | null
   on(event: "exit", cb: (code: number | null) => void): unknown
   on(event: "error", cb: (err: Error) => void): unknown
   kill(signal?: NodeJS.Signals): void
@@ -36,6 +41,7 @@ interface BunSubprocessLike {
     end?(): unknown
   }
   stdout: ReadableStream<Uint8Array>
+  stderr?: ReadableStream<Uint8Array>
   exited: Promise<number>
   kill(signal?: NodeJS.Signals): void
   unref?(): void
@@ -48,7 +54,7 @@ type BunSpawn = (
     env: Record<string, string | undefined>
     stdin: "pipe"
     stdout: "pipe"
-    stderr: "inherit"
+    stderr: "pipe"
   }
 ) => BunSubprocessLike
 
@@ -191,7 +197,7 @@ const realSpawn: SpawnFn = (script, options) => {
         env,
         stdin: "pipe",
         stdout: "pipe",
-        stderr: "inherit",
+        stderr: "pipe",
       })
     )
   }
@@ -208,6 +214,7 @@ export function adaptBunSubprocess(child: BunSubprocessLike): SpawnedChild {
   const errorHandlers: Array<(error: Error) => void> = []
   const stdinErrorHandlers: Array<(error: Error) => void> = []
   const stdout = Readable.fromWeb(child.stdout)
+  const stderr = child.stderr ? Readable.fromWeb(child.stderr) : undefined
   void child.exited
     .then((code) => {
       for (const handler of exitHandlers) handler(code)
@@ -233,6 +240,7 @@ export function adaptBunSubprocess(child: BunSubprocessLike): SpawnedChild {
       },
     },
     stdout,
+    stderr,
     on(event, handler) {
       if (event === "exit") {
         exitHandlers.push(handler as (code: number | null) => void)
@@ -248,6 +256,7 @@ export function adaptBunSubprocess(child: BunSubprocessLike): SpawnedChild {
         // The child may already have closed its end of the pipe.
       }
       stdout.destroy()
+      stderr?.destroy()
       child.kill(signal)
       child.unref?.()
     },
@@ -296,6 +305,96 @@ function toHandle(child: SpawnedChild): SidecarHandle {
   }
 }
 
+/** Bounded startup-only capture. Keep draining after readiness so a verbose
+ * child cannot block on its stderr pipe. Oversized lines are discarded whole:
+ * truncating before redaction could expose the suffix of a credential.
+ */
+function startupDiagnostics(stderr: SpawnedChild["stderr"], env: NodeJS.ProcessEnv) {
+  const maxLine = 2_048
+  const maxTail = 8_192
+  const decoder = new StringDecoder("utf8")
+  const secrets = Object.entries(env)
+    .filter(
+      ([key, value]) =>
+        value &&
+        (DEFAULT_REDACTION_KEYS.some((hint) => key.toLowerCase().includes(hint)) ||
+          /(?:^|_)key(?:_|$)|credential/i.test(key))
+    )
+    .flatMap(([, value]) => value!.split(/\r?\n/).filter(Boolean))
+    .sort((a, b) => b.length - a.length)
+  const sanitize = (text: string): string => {
+    let safe = stripVTControlCharacters(text)
+    for (const secret of secrets) safe = safe.replaceAll(secret, "[REDACTED]")
+    return redactCredentialText(safe)
+  }
+  let collecting = true
+  let pending = ""
+  let oversized = false
+  let tail = ""
+  let ended = !stderr
+  let onEnd: (() => void) | undefined
+  const commitLine = () => {
+    const line = oversized ? "[oversized stderr line omitted]" : sanitize(pending)
+    tail += line.slice(0, maxLine) + "\n"
+    while (tail.length > maxTail) tail = tail.slice(tail.indexOf("\n") + 1)
+    pending = ""
+    oversized = false
+  }
+  const consume = (text: string) => {
+    let start = 0
+    while (start < text.length) {
+      const newline = text.indexOf("\n", start)
+      const end = newline < 0 ? text.length : newline
+      if (!oversized) {
+        if (pending.length + end - start > maxLine) {
+          pending = ""
+          oversized = true
+        } else pending += text.slice(start, end)
+      }
+      if (newline < 0) break
+      commitLine()
+      start = newline + 1
+    }
+  }
+  const finish = () => {
+    ended = true
+    onEnd?.()
+  }
+  stderr?.on("data", (chunk: Buffer | string) => {
+    if (collecting) consume(typeof chunk === "string" ? chunk : decoder.write(chunk))
+  })
+  stderr?.on("end", finish)
+  stderr?.on("close", finish)
+  // A closed/broken diagnostic pipe must not become an unhandled stream error.
+  stderr?.on("error", finish)
+  return {
+    discard() {
+      collecting = false
+      pending = ""
+      tail = ""
+      secrets.length = 0
+    },
+    async failure(error: unknown): Promise<Error> {
+      // Child 'exit' can precede the final pipe data. Give it a bounded drain
+      // window; inherited descriptors or an unclosed pipe cannot hold us here.
+      if (!ended)
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 50)
+          onEnd = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+        })
+      consume(decoder.end())
+      if (pending || oversized) commitLine()
+      const reason = sanitize(error instanceof Error ? error.message : String(error))
+      const detail = tail.trim()
+      // Do not attach the original error as cause: it may contain raw secrets.
+      return new Error(detail ? `${reason}\nSidecar startup stderr:\n${detail}` : reason)
+    },
+  }
+}
+
 /** Spawn the sidecar, install the StdioTransport, and await readiness. */
 export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<SidecarBootstrap> {
   const env = opts.env ?? process.env
@@ -306,19 +405,23 @@ export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<Sid
   const spawn = opts.spawn ?? realSpawn
 
   const child = spawn(script, { cwd, env })
+  const diagnostics = startupDiagnostics(child.stderr, env)
   const transport = new StdioTransport(toHandle(child))
   setTransport(transport)
 
   try {
     await transport.whenReady(opts.readyTimeoutMs)
   } catch (err) {
+    const failure = await diagnostics.failure(err)
+    diagnostics.discard()
     try {
       child.kill()
     } catch {
       // ignore — already dead
     }
-    throw err
+    throw failure
   }
+  diagnostics.discard()
 
   let stopped = false
   return {

@@ -163,6 +163,7 @@ export type CommandEffect =
   /** Start a self-driving goal loop (`/goal <objective>`), streaming each turn
    * into the transcript. status/pause/resume/stop/list stay `runtime` requests. */
   | { kind: "goalRun"; objective: string }
+  | { kind: "loopControl"; action: "pause" | "resume" | "stop" }
   /** Run `/loop`: `self_paced` lets the model decide when to stop + how long to
    * wait between iterations (reuses `lib/loop`); `interval` re-sends on a fixed
    * cadence. `maxIterations` caps either mode; both stream each turn. */
@@ -177,7 +178,7 @@ export type CommandEffect =
    * agent, re-run, up to `maxRounds` rounds or until green. Streams each fix turn. */
   | { kind: "fixRun"; testCommand: string; maxRounds: number }
   /** Re-enter plan mode and ask the agent to revise the last plan (`/plan refine`). */
-  | { kind: "planRefine" }
+  | { kind: "planRefine"; feedback?: string }
   /** Manage `/add-dir` extra working roots (App validates + persists + applies). */
   | { kind: "addDir"; op: "add" | "remove" | "list"; arg: string }
   /** Switch the session working directory (`/cd <dir>`). The App resolves `dir`

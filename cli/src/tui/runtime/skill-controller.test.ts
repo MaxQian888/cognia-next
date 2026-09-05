@@ -257,6 +257,7 @@ describe("skillToggle", () => {
       ...base,
       dispatch,
       getEnabled: () => new Set(),
+      get: async () => skill("s1"),
       setSkillEnabled: (id, on) => {
         captured = { id, on }
       },
@@ -267,9 +268,9 @@ describe("skillToggle", () => {
 })
 
 describe("skillSetEnabled", () => {
-  it("passes the explicit enabled flag through", () => {
+  it("passes the explicit enabled flag through", async () => {
     let captured: { id: string; on: boolean } | null = null
-    skillSetEnabled("s1", false, {
+    await skillSetEnabled("s1", false, {
       ...base,
       dispatch: () => {},
       setSkillEnabled: (id, on) => {
@@ -278,6 +279,19 @@ describe("skillSetEnabled", () => {
     })
     expect(captured).toEqual({ id: "s1", on: false })
   })
+})
+
+it("does not report an unknown skill as enabled for the next turn", async () => {
+  const { dispatch, actions } = recorder()
+  const setSkillEnabled = jest.fn()
+  await skillSetEnabled("missing", true, {
+    ...base,
+    dispatch,
+    get: async () => undefined,
+    setSkillEnabled,
+  })
+  expect(setSkillEnabled).not.toHaveBeenCalled()
+  expect(actions[0]).toMatchObject({ message: expect.stringContaining("not found") })
 })
 
 describe("skillPanel", () => {
@@ -404,4 +418,44 @@ describe("parseSkillFlags", () => {
       description: "a b c",
     })
   })
+})
+
+it("enables a discovered skill in persisted state and reflects it when reopened", async () => {
+  const enabled = new Set<string>()
+  const { dispatch, actions } = recorder()
+  const deps = {
+    ...base,
+    dispatch,
+    get: async () => skill("s1"),
+    list: async () => [skill("s1")],
+    getEnabled: () => enabled,
+    setSkillEnabled: (id: string, on: boolean) => {
+      if (on) enabled.add(id)
+      else enabled.delete(id)
+    },
+  }
+  await skillSetEnabled(" s1 ", true, deps)
+  await skillList(deps)
+  expect(enabled.has("s1")).toBe(true)
+  expect(actions.at(-1)).toMatchObject({ overlay: { items: [{ id: "s1", hint: "on" }] } })
+  await skillToggle("s1", deps)
+  expect(enabled.size).toBe(0)
+})
+
+it("does not enable a skill if cancelled while resolving its id", async () => {
+  const controller = new AbortController()
+  const { dispatch, actions } = recorder()
+  const setSkillEnabled = jest.fn()
+  await skillSetEnabled("s1", true, {
+    ...base,
+    dispatch,
+    signal: controller.signal,
+    setSkillEnabled,
+    get: async () => {
+      controller.abort()
+      return skill("s1")
+    },
+  })
+  expect(setSkillEnabled).not.toHaveBeenCalled()
+  expect(actions).toEqual([])
 })

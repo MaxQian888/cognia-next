@@ -23,6 +23,7 @@ import {
   hasCliBackgroundRun,
   listCliBackgroundRuns,
   startCliBackgroundRun,
+  cancelCliBackgroundRun,
 } from "./subagent-background-tasks"
 
 function deferred<T>(): {
@@ -91,6 +92,53 @@ afterEach(async () => {
 })
 
 describe("CLI background subagent tasks", () => {
+  it("projects structured faults and interruptions without turning them into successes", async () => {
+    const home = makeHome()
+    startCliBackgroundRun(
+      "failed",
+      meta(home),
+      Promise.resolve({ text: "failed output", error: "failed output" })
+    )
+    startCliBackgroundRun(
+      "cancelled",
+      meta(home),
+      Promise.resolve({ text: "cancelled output", interrupted: true })
+    )
+    await collectCliBackgroundResult("failed", { home, owner: "ses_1" })
+    await collectCliBackgroundResult("cancelled", { home, owner: "ses_1" })
+    await __waitForCliBackgroundJournalForTesting()
+    expect(await getDb().backgroundTasks.get("failed")).toMatchObject({ status: "error" })
+    expect(await getDb().backgroundTasks.get("cancelled")).toMatchObject({ status: "interrupted" })
+    expect(await collectCliBackgroundResult("cancelled", { home, owner: "ses_1" })).toBe(
+      "cancelled output"
+    )
+  })
+
+  it("requires an owner and cancels only once while a run is pending", async () => {
+    const home = makeHome()
+    const cancel = jest.fn()
+    const run = deferred<string>()
+    startCliBackgroundRun("r1", meta(home), run.promise, { cancel })
+    expect(cancelCliBackgroundRun("r1")).toBe(false)
+    expect(cancelCliBackgroundRun("r1", "foreign")).toBe(false)
+    expect(cancelCliBackgroundRun("r1", "ses_1")).toBe(true)
+    expect(cancelCliBackgroundRun("r1", "ses_1")).toBe(false)
+    expect(cancel).toHaveBeenCalledTimes(1)
+    run.resolve("done")
+    await collectCliBackgroundResult("r1", { home })
+    expect(cancelCliBackgroundRun("r1", "ses_1")).toBe(false)
+  })
+
+  it("rejects duplicate live ids before overwriting ownership", async () => {
+    const home = makeHome()
+    const run = deferred<string>()
+    startCliBackgroundRun("r1", meta(home), run.promise)
+    expect(() =>
+      startCliBackgroundRun("r1", meta(home, { sessionId: "foreign" }), Promise.resolve("other"))
+    ).toThrow("already exists")
+    run.resolve("owned")
+    expect(await collectCliBackgroundResult("r1", { home, owner: "ses_1" })).toBe("owned")
+  })
   it("parks a live string run, journals it, and collects the live value", async () => {
     const home = makeHome()
     const run = deferred<string>()
@@ -159,7 +207,7 @@ describe("CLI background subagent tasks", () => {
     __clearAllCliBackgroundRunsForTesting()
 
     await expect(collectCliBackgroundResult("stale", { home })).resolves.toBe(
-      'Background run "stale" was interrupted before it finished.'
+      "Background task interrupted because its host process stopped."
     )
     await expect(countInterruptedCliBackgroundRuns({ home })).resolves.toBe(1)
     await expect(getDb().backgroundTasks.get("stale")).resolves.toMatchObject({

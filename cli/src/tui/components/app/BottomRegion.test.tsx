@@ -1,6 +1,8 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
+import { hasSpinnerFrame } from "../Spinner"
+
 import { BottomRegion, type BottomRegionProps } from "./BottomRegion"
 import { ThemeProvider } from "../../theme/context"
 import { RenderPrefsProvider } from "../../render/context"
@@ -167,4 +169,83 @@ describe("BottomRegion", () => {
     expect(petSlot).toHaveAttribute("data-width", "100%")
     expect(petSlot).toHaveAttribute("data-justify-content", "flex-end")
   })
+})
+
+it("replaces the working status with a static approval wait while the permission overlay is open", () => {
+  const state = baseState({
+    turnStatus: "streaming",
+    overlay: {
+      kind: "permission",
+      req: {
+        toolName: "bash",
+        input: { command: "touch approved.txt" },
+        requestId: "r",
+        sessionId: "s",
+      } as never,
+      choices: [],
+      index: 0,
+    },
+  })
+  const { container, rerender } = wrap(
+    <BottomRegion {...baseProps({ state, overlayOpen: true })} />
+  )
+  expect(container.textContent).toContain("Waiting for approval")
+  expect(container.textContent).not.toContain("Percolating")
+  expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+  expect(state.turnStatus).toBe("streaming")
+  rerender(
+    <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+      <BottomRegion {...baseProps({ state: { ...state, overlay: { kind: "none" } } })} />
+    </ThemeProvider>
+  )
+  expect(container.textContent).not.toContain("Waiting for approval")
+  expect(hasSpinnerFrame(container.textContent ?? "")).toBe(true)
+})
+
+describe("permission waiting with constrained layouts and background work", () => {
+  it.each([
+    { columns: 32, rows: 10, enabled: false, background: "running" as const },
+    { columns: 48, rows: 24, enabled: true, background: "running" as const },
+    { columns: 140, rows: 40, enabled: false, background: "done" as const },
+    { columns: 140, rows: 40, enabled: true, background: "running" as const },
+  ])(
+    "prioritizes approval at $columns columns, then restores $background background activity",
+    ({ columns, rows, enabled, background }) => {
+      const state = baseState({
+        turnStatus: "idle",
+        activity: { kind: "loop", label: "background check", status: background },
+        config: { ...config, mascot: { style: "robot", enabled } },
+        overlay: { kind: "permission", req: { toolName: "bash" } as never, choices: [], index: 0 },
+      })
+      const props = baseProps({
+        state,
+        columns,
+        overlayOpen: true,
+        layout: terminalLayout(columns, rows),
+        footerBackgroundSubagents: 2,
+      })
+      const { container, rerender } = wrap(<BottomRegion {...props} />)
+      expect(container.textContent).toContain("Waiting for approval")
+      expect(container.textContent).not.toContain("background check")
+      expect(container.textContent).not.toContain("2 bg")
+      expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+      expect(container.querySelector('[data-testid="mascot-right-slot"]')).toBeNull()
+      rerender(
+        <ThemeProvider palette={BUILTIN_THEMES.ansi}>
+          <BottomRegion
+            {...props}
+            state={{ ...state, overlay: { kind: "none" } }}
+            overlayOpen={false}
+          />
+        </ThemeProvider>
+      )
+      expect(container.textContent).not.toContain("Waiting for approval")
+      expect(container.textContent).toContain("2 bg")
+      if (background === "running") expect(container.textContent).toContain("background check")
+      if (columns === 32)
+        expect(container.querySelector('[data-testid="mascot-right-slot"]')).toBeNull()
+      else if (enabled) expect(container.textContent).toContain("◉")
+      else expect(container.textContent).not.toContain("◉")
+    }
+  )
 })

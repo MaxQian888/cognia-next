@@ -7,6 +7,8 @@
 import nodeFs from "node:fs"
 import path from "node:path"
 
+import { denormalizeMcpEntry } from "@/lib/claude/agents/shared"
+
 import type { McpServer, McpTransport } from "@cognia/agent-config-types"
 
 import { loadMcpServers } from "../../mcp/load-mcp-config"
@@ -41,6 +43,8 @@ import { buildPromptsDocument, buildResourcesDocument, buildToolsDocument } from
 import type { TuiAction } from "../state/types"
 
 export interface McpDeps {
+  /** Suppress late results and new work after the runtime request is cancelled. */
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   roots: string[]
   home: string
@@ -109,18 +113,27 @@ export function probeAuthProvider(home: string, server: McpServer): unknown {
 }
 
 /** Default rich probe — status + (optionally) resources/prompts in one connect. */
-function defaultProbeServer(home: string) {
+function defaultProbeServer(home: string, signal?: AbortSignal) {
   return (server: McpServer, opts: { statusOnly?: boolean } = {}) =>
     probeMcpServer(server, {
+      signal,
       skipResources: opts.statusOnly,
       skipPrompts: opts.statusOnly,
       authProvider: (s) => probeAuthProvider(home, s),
     })
 }
 
+function defaultProbeTools(deps: McpDeps) {
+  return (server: McpServer) =>
+    probeMcpTools(server, {
+      signal: deps.signal,
+      authProvider: probeAuthProvider(deps.home, server),
+    })
+}
+
 function defaultAuthenticate(deps: McpDeps) {
   return (server: McpServer, onAuthUrl: (url: string) => void) =>
-    authenticateMcpServer(server, { home: deps.home, onAuthUrl })
+    authenticateMcpServer(server, { home: deps.home, onAuthUrl, signal: deps.signal })
 }
 
 /** Parse a `--flag value …` arg string into a flat record (values may span
@@ -154,6 +167,7 @@ export function parseFlags(args: string): Record<string, string> {
  * servers show `disabled` without a probe.
  */
 export async function mcpPanel(deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const servers = loadServers(deps)
   if (servers.length === 0) {
     deps.dispatch({
@@ -199,7 +213,7 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
     },
   })
   if (toProbe.length === 0) return
-  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home, deps.signal)
   const now = deps.now ?? Date.now
   let remaining = toProbe.length
   await Promise.all(
@@ -222,6 +236,7 @@ export async function mcpPanel(deps: McpDeps): Promise<void> {
           })
         )
         .then((result) => {
+          if (deps.signal?.aborted) return
           cache?.set(s.name, toCacheEntry(result, now()))
           remaining -= 1
           deps.dispatch({
@@ -270,13 +285,14 @@ export function mcpLogsPanel(deps: McpDeps): void {
  * child process is spawned just for an auth check that can never apply.
  */
 export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const cache = deps.probeCache
   const enabled = loadServers(deps).filter((s) => s.enabled)
   // With a cache, warm EVERY enabled server (stdio included). Without one, keep
   // the old behaviour: only remote servers matter for the auth notice.
   const targets = cache ? enabled : enabled.filter((s) => s.transport !== "stdio")
   if (targets.length === 0) return
-  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home, deps.signal)
   const now = deps.now ?? Date.now
   await Promise.all(
     targets.map((s) =>
@@ -298,6 +314,7 @@ export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
           })
         )
         .then((result) => {
+          if (deps.signal?.aborted) return
           cache?.set(s.name, toCacheEntry(result, now()))
           if (result.status === "needs_auth" && s.transport !== "stdio") {
             deps.dispatch({
@@ -324,13 +341,14 @@ export async function mcpAuthStartupNotices(deps: McpDeps): Promise<void> {
 /** Re-probe a single server (the panel's `r` reconnect action). Patches its row
  * to `pending` first, then the fresh status — the rest of the board is untouched. */
 export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const server = loadServers(deps).find((s) => s.name === name)
   if (!server) {
     deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch: { status: "failed" } })
     return
   }
   deps.dispatch({ type: "MCP_STATUS_PATCH", name, patch: { status: "pending" } })
-  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home, deps.signal)
   const now = deps.now ?? Date.now
   const result = await probe(server, { statusOnly: true }).then(
     (r) => ({
@@ -348,6 +366,7 @@ export async function mcpReconnect(name: string, deps: McpDeps): Promise<void> {
       prompts: [],
     })
   )
+  if (deps.signal?.aborted) return
   // A reconnect is the one action that always re-probes — refresh the cache so
   // the panel reflects the fresh status and a later re-open stays instant.
   deps.probeCache?.set(name, toCacheEntry(result, now()))
@@ -368,6 +387,7 @@ export async function mcpToggleServerInPanel(
   name: string,
   deps: McpDeps
 ): Promise<"enabled" | "disabled" | null> {
+  if (deps.signal?.aborted) return null
   const server = loadServers(deps).find((s) => s.name === name)
   if (!server) return null
   const disable = server.enabled
@@ -390,6 +410,7 @@ export async function mcpToggleServerInPanel(
  * `disabledTools` overlay, and opens the `mcpTools` overlay.
  */
 export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const server = loadServers(deps).find((s) => s.name === name)
   if (!server) {
     deps.dispatch({ type: "NOTICE", message: `MCP server "${name}" not found.` })
@@ -400,16 +421,18 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
   // probe still lists tools) — reuse them so drilling in doesn't re-connect.
   const cached = cache?.get(name)
   let tools: McpToolInfo[]
-  if (cached && cached.status === "connected" && cached.tools.length > 0) {
+  if (cached && cached.status === "connected") {
     tools = cached.tools
   } else {
     try {
-      tools = await (deps.probe ?? probeMcpTools)(server)
+      tools = await (deps.probe ?? defaultProbeTools(deps))(server)
     } catch (err) {
+      if (deps.signal?.aborted) return
       const reason = err instanceof Error ? err.message : String(err)
       deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${name}": ${reason}` })
       return
     }
+    if (deps.signal?.aborted) return
     // Fold the freshly-listed tools into the cache so a later open is instant.
     // A successful tool probe means the server is reachable, so record it as
     // `connected` and drop any stale error — otherwise a recovered server that
@@ -427,6 +450,7 @@ export async function openMcpToolsPanel(name: string, deps: McpDeps): Promise<vo
       })
     }
   }
+  if (deps.signal?.aborted) return
   if (tools.length === 0) {
     deps.dispatch({ type: "NOTICE", message: `"${name}" advertises no tools.` })
     return
@@ -458,6 +482,7 @@ export function mcpToggleTool(server: string, tool: string, enabled: boolean, de
 }
 
 export async function mcpList(deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const servers = loadServers(deps)
   if (servers.length === 0) {
     deps.dispatch({
@@ -471,7 +496,7 @@ export async function mcpList(deps: McpDeps): Promise<void> {
     type: "NOTICE",
     message: `Probing ${servers.length} MCP server${servers.length === 1 ? "" : "s"}…`,
   })
-  const probe = deps.probeServer ?? defaultProbeServer(deps.home)
+  const probe = deps.probeServer ?? defaultProbeServer(deps.home, deps.signal)
   const statuses = await Promise.all(
     servers.map((s) =>
       probe(s, { statusOnly: true }).then(
@@ -480,6 +505,7 @@ export async function mcpList(deps: McpDeps): Promise<void> {
       )
     )
   )
+  if (deps.signal?.aborted) return
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
@@ -553,6 +579,7 @@ async function probeAndRender(
   kind: "resources" | "prompts",
   deps: McpDeps
 ): Promise<void> {
+  if (deps.signal?.aborted) return
   const key = name.trim()
   if (!key) {
     deps.dispatch({ type: "NOTICE", message: `Usage: /mcp ${kind} <name>` })
@@ -566,12 +593,14 @@ async function probeAndRender(
   deps.dispatch({ type: "NOTICE", message: `Connecting to "${key}" to list ${kind}…` })
   let result: McpProbeResult
   try {
-    result = await (deps.probeServer ?? defaultProbeServer(deps.home))(server)
+    result = await (deps.probeServer ?? defaultProbeServer(deps.home, deps.signal))(server)
   } catch (err) {
+    if (deps.signal?.aborted) return
     const reason = err instanceof Error ? err.message : String(err)
     deps.dispatch({ type: "NOTICE", message: `Could not connect to "${key}": ${reason}` })
     return
   }
+  if (deps.signal?.aborted) return
   if (result.status === "needs_auth") {
     deps.dispatch({
       type: "NOTICE",
@@ -616,6 +645,7 @@ export function mcpPrompts(name: string, deps: McpDeps): Promise<void> {
 
 /** `/mcp auth <name>` — run the OAuth authorization-code flow for a remote server. */
 export async function mcpAuth(name: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const key = name.trim()
   if (!key) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /mcp auth <name>" })
@@ -635,12 +665,23 @@ export async function mcpAuth(name: string, deps: McpDeps): Promise<void> {
   }
   deps.dispatch({ type: "NOTICE", message: `Authorizing "${key}" — opening your browser…` })
   const onAuthUrl = (url: string) =>
+    !deps.signal?.aborted &&
     deps.dispatch({
       type: "NOTICE",
       message: `If the browser didn't open, visit:\n${url}`,
     })
-  const result = await (deps.authenticate ?? defaultAuthenticate(deps))(server, onAuthUrl)
-  deps.dispatch({ type: "NOTICE", message: result.message })
+  try {
+    const result = await (deps.authenticate ?? defaultAuthenticate(deps))(server, onAuthUrl)
+    if (result.ok) deps.probeCache?.clear(key)
+    if (deps.signal?.aborted) return
+    deps.dispatch({ type: "NOTICE", message: result.message })
+  } catch (err) {
+    if (deps.signal?.aborted) return
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Authorization failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
+  }
 }
 
 /** `/mcp logout <name>` — delete a server's stored OAuth credentials. */
@@ -651,6 +692,7 @@ export function mcpLogout(name: string, deps: McpDeps): void {
     return
   }
   const removed = (deps.logout ?? ((n) => clearAuthEntry(deps.home, n)))(key)
+  deps.probeCache?.clear(key)
   deps.dispatch({
     type: "NOTICE",
     message: removed
@@ -661,6 +703,7 @@ export function mcpLogout(name: string, deps: McpDeps): void {
 
 /** `/mcp tools <name>` — connect to the server and list its advertised tools. */
 export async function mcpTools(name: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const key = name.trim()
   if (!key) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /mcp tools <name>" })
@@ -674,12 +717,14 @@ export async function mcpTools(name: string, deps: McpDeps): Promise<void> {
   deps.dispatch({ type: "NOTICE", message: `Connecting to "${key}" to list tools…` })
   let tools: McpToolInfo[]
   try {
-    tools = await (deps.probe ?? probeMcpTools)(server)
+    tools = await (deps.probe ?? defaultProbeTools(deps))(server)
   } catch (err) {
+    if (deps.signal?.aborted) return
     const reason = err instanceof Error ? err.message : String(err)
     deps.dispatch({ type: "NOTICE", message: `Could not list tools for "${key}": ${reason}` })
     return
   }
+  if (deps.signal?.aborted) return
   if (tools.length === 0) {
     deps.dispatch({ type: "NOTICE", message: `"${key}" advertises no tools.` })
     return
@@ -730,7 +775,9 @@ function defaultAddServer(home: string) {
       doc = {}
     }
     doc.mcpServers = doc.mcpServers ?? {}
-    doc.mcpServers[name] = transport === "stdio" ? config : { ...config }
+    doc.mcpServers[name] = denormalizeMcpEntry(transport, config, {
+      typeKey: transport === "stdio" ? null : "type",
+    })
     nodeFs.mkdirSync(path.dirname(file), { recursive: true })
     nodeFs.writeFileSync(file, JSON.stringify(doc, null, 2), "utf8")
   }
@@ -761,6 +808,7 @@ function defaultRemoveServer(home: string) {
  * aren't user-owned, so they're refused with a pointer to where they live.
  */
 export async function mcpRemove(name: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const key = name.trim()
   if (!key) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /mcp remove <name>" })
@@ -785,7 +833,9 @@ function loadCatalog(deps: McpDeps): Promise<CatalogPreset[]> {
 
 /** `/mcp presets` — browse the built-in + plugin-contributed preset gallery. */
 export async function mcpPresets(deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const catalog = await loadCatalog(deps)
+  if (deps.signal?.aborted) return
   const lines: string[] = [
     `${catalog.length} preset${catalog.length === 1 ? "" : "s"} available.`,
     "",
@@ -819,6 +869,7 @@ export async function mcpPresets(deps: McpDeps): Promise<void> {
 
 async function mcpAddFromPreset(flags: Record<string, string>, deps: McpDeps): Promise<void> {
   const catalog = await loadCatalog(deps)
+  if (deps.signal?.aborted) return
   const found = findCatalogPreset(catalog, flags.preset.trim())
   if (!found) {
     deps.dispatch({
@@ -851,6 +902,7 @@ async function mcpAddFromPreset(flags: Record<string, string>, deps: McpDeps): P
 }
 
 export async function mcpAdd(args: string, deps: McpDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const flags = parseFlags(args)
   if (flags.preset) return mcpAddFromPreset(flags, deps)
   const name = flags.name?.trim()
@@ -863,6 +915,13 @@ export async function mcpAdd(args: string, deps: McpDeps): Promise<void> {
     return
   }
   const transport = (flags.transport?.trim() || "stdio") as McpTransport
+  if (!["stdio", "sse", "http"].includes(transport)) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: "Unsupported MCP transport. Use stdio, sse, or http.",
+    })
+    return
+  }
   if (transport === "stdio" && !flags.command) {
     deps.dispatch({ type: "NOTICE", message: "stdio transport needs --command." })
     return

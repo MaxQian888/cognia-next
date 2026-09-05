@@ -405,10 +405,16 @@ async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> 
 /**
  * Bootstrap the in-tree plugin runtime once (cached). Never throws — returns a
  * result describing success + tool count, or the failure reason. Safe to call on
- * every session; only the first call does the work.
+ * every session; successful initialization is reused, failures can be retried.
  */
 export function ensurePluginRuntime(deps: PluginRuntimeDeps = {}): Promise<PluginRuntimeResult> {
-  if (!cached) cached = bootstrap(deps)
+  if (!cached) {
+    const pending = bootstrap(deps).then((result) => {
+      if (!result.ok && cached === pending) cached = null
+      return result
+    })
+    cached = pending
+  }
   return cached
 }
 

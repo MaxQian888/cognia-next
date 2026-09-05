@@ -34,6 +34,8 @@ import {
 } from "@/lib/settings/builtin-tools"
 
 import type { ResolvedCliSessionContext } from "../session-context"
+import { commandIsAutoApprovable, shellCommandOf } from "../command-approval"
+import { resolvePermissionDetailed, resolveBashPermission } from "@/lib/claude/permissions/ruleset"
 
 /** Bare names of the built-ins that never require approval (read-only). */
 export const READ_ONLY_BUILTIN_TOOLS: ReadonlySet<string> = new Set(
@@ -79,6 +81,7 @@ export { BUILTIN_SERVER_NAME }
  * the parity invariant the external path is held to.
  */
 export function visibleBuiltinTools(options: SendOptions): string[] {
+  if (options.toolSurface === "none") return []
   const enabled = (options.builtinTools ?? {}) as Record<string, unknown>
   const allowed = options.allowedTools?.length ? new Set(options.allowedTools) : null
   const disallowed = new Set(options.disallowedTools ?? [])
@@ -102,6 +105,7 @@ export function visibleBuiltinTools(options: SendOptions): string[] {
 
 /** Bare names of the host/plugin tools this session may advertise. */
 export function visibleHostTools(options: SendOptions): string[] {
+  if (options.toolSurface === "none") return []
   const disallowed = new Set(options.disallowedTools ?? [])
   const allowed = options.allowedTools?.length ? new Set(options.allowedTools) : null
   const planMode = options.permissionMode === "plan"
@@ -338,21 +342,53 @@ export function confinementRoots(session: ResolvedCliSessionContext): string[] {
  * `suppressApprovalForTools` is where the session's read-only auto-approval and
  * the user's persisted "Allow always" rules land, so honouring it is what stops
  * a Cognia-projected call from prompting twice for something already trusted.
+ *
+ * `input` is what lets a shell call be judged by its command rather than by the
+ * name `bash`. Without it every `ls` an external agent asked us to run raised a
+ * prompt, because the tool that runs `ls` is the same tool that runs `rm -rf`.
+ * Optional so a caller with no payload keeps the old, stricter answer.
  */
-export function needsApproval(options: SendOptions, namespacedName: string): boolean {
+export function isExplicitlyDenied(options: SendOptions, name: string, input: unknown): boolean {
+  const rules = options.permissionRuleset
+  if (!rules) return false
+  const command = shellCommandOf(name, input)
+  if (command && resolveBashPermission(command, [rules]).verdict === "deny") return true
+  const args = input && typeof input === "object" ? (input as Record<string, unknown>) : {}
+  const targets = [
+    command ?? "",
+    ...Object.values(args).filter((value): value is string => typeof value === "string"),
+  ]
+  return targets.some((target) => {
+    const result = resolvePermissionDetailed(name, target, [rules])
+    return result.layer > 0 && result.verdict === "deny"
+  })
+}
+
+export function needsApproval(
+  options: SendOptions,
+  namespacedName: string,
+  input?: unknown
+): boolean {
   const suppressed = new Set(options.suppressApprovalForTools ?? [])
   if (suppressed.has(namespacedName)) return false
   if (options.permissionMode === "bypassPermissions") return false
-  if (options.permissionMode === "acceptEdits" && ACCEPT_EDITS_TOOLS.has(namespacedName)) {
+  if (
+    options.permissionMode === "acceptEdits" &&
+    (ACCEPT_EDITS_TOOLS.has(namespacedName) ||
+      ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].some(
+        (name) => namespacedHostTool(name) === namespacedName
+      ))
+  ) {
     return false
   }
+  if (input !== undefined && commandIsAutoApprovable(namespacedName, input)) return false
   return true
 }
 
 /**
  * Built-ins auto-approved in `acceptEdits` — the write/edit family a user who
  * "accepted edits" implicitly trusts. Mirrors the ai-sdk bridge's set;
- * deliberately excludes exec/process/git-mutation and rename/move ops.
+ * excludes exec/process/git-mutation; confinement checks still govern relocation.
  */
 const ACCEPT_EDITS_TOOLS: ReadonlySet<string> = new Set(
   [
@@ -363,5 +399,9 @@ const ACCEPT_EDITS_TOOLS: ReadonlySet<string> = new Set(
     "NotebookEdit",
     "file_append",
     "file_binary_write",
+    "directory_create",
+    "file_copy",
+    "file_move",
+    "file_rename",
   ].map(namespaced)
 )

@@ -15,12 +15,30 @@ import {
   removeToolApproval,
   type ToolApprovalEntry,
 } from "../../agent/tool-approvals"
+import { describeApprovalKey } from "../../agent/command-approval"
 import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
 
-/** Strip the gate's `mcp__cognia-tools__` namespace for a readable list. */
+/** Strip the gate's namespace for a readable list, keeping a command scope. */
 function bare(name: string): string {
-  return name.replace(/^mcp__cognia-tools__/, "")
+  return describeApprovalKey(name)
+}
+
+/**
+ * Turn what {@link bare} printed back into the key the store holds.
+ *
+ * Only the TOOL half is namespaced. Namespacing the whole string would produce
+ * `mcp__cognia-tools__bash(pnpm build)` from the tool name alone and
+ * `mcp__cognia-tools__bash(pnpm build)` never from what `/permissions list`
+ * actually printed, so `/permissions remove` could not undo what the list
+ * showed.
+ */
+function restoreApprovalKey(input: string): string {
+  const open = input.indexOf("(")
+  const tool = open >= 0 ? input.slice(0, open) : input
+  const scope = open >= 0 ? input.slice(open) : ""
+  const full = tool.startsWith("mcp__") ? tool : `mcp__cognia-tools__${tool}`
+  return `${full}${scope}`
 }
 
 /** A human suffix describing an approval's scope / expiry, e.g. " (in /proj, expired)". */
@@ -44,6 +62,10 @@ export function buildPermissionsReport(
   const lines = [
     `Permission mode: ${mode}`,
     `Auto-approved (read-only) tools: ${autoApprovedCount}`,
+    // The other half of the answer, and the half people were missing: shell
+    // calls are judged one command at a time, so `ls` never reaches a prompt
+    // and `rm -rf` always does.
+    "Shell commands: judged per command, so read-only ones run without asking.",
   ]
   if (entries.length === 0) {
     lines.push("Always-allowed: none — risky tools still prompt.")
@@ -95,7 +117,7 @@ export function permissionsRemove(deps: PermissionsDeps, toolName: string): void
     deps.dispatch({ type: "NOTICE", message: "Usage: /permissions remove <tool>" })
     return
   }
-  const namespaced = trimmed.startsWith("mcp__") ? trimmed : `mcp__cognia-tools__${trimmed}`
+  const namespaced = restoreApprovalKey(trimmed)
   const removed = (deps.removeApproval ?? removeToolApproval)(deps.home, namespaced)
   deps.dispatch({
     type: "NOTICE",

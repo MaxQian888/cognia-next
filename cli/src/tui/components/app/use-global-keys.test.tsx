@@ -331,7 +331,9 @@ describe("useGlobalKeys", () => {
   // Shift+Tab no longer persists/switches inline: it runs `/mode <next>` so the
   // persist + notice + danger-tier acknowledgement have ONE implementation.
   it("cycles the permission mode on Shift+Tab through the command path", () => {
-    const deps = buildDeps()
+    const deps = buildDeps({
+      state: createInitialState({ ...config, permissionMode: "default" }, "s1", true, []),
+    })
     render(<Harness deps={deps} />)
     act(() => __fireInput("", { tab: true, shift: true }))
     expect(deps.runCommandLine).toHaveBeenCalledWith("/mode acceptEdits")

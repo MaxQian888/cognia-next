@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { buildCogniaParityReport, parityHealthLine } from "./cognia-parity-report"
+import {
+  buildCogniaParityReport,
+  parityHealthLine,
+  builtinReadinessLines,
+} from "./cognia-parity-report"
 import type { ToolHostSnapshot } from "../../agent/tool-host/status"
 import {
   __resetToolHostStatusForTesting,
@@ -24,6 +28,30 @@ const snapshot = (overrides: Partial<ToolHostSnapshot> = {}): ToolHostSnapshot =
 afterEach(() => __resetToolHostStatusForTesting())
 
 describe("buildCogniaParityReport", () => {
+  it("retains builtin readiness and explains failures in both reports", () => {
+    const report = buildCogniaParityReport("builtin", () =>
+      snapshot({
+        backend: "builtin",
+        running: false,
+        builtin: {
+          phase: "failed",
+          reason: "relay unavailable",
+          runtime: "ai-sdk",
+          capabilities: [],
+          skills: false,
+          categories: { lsp: { state: "failed", reason: "Install the language server" } },
+        },
+      })
+    )!
+    expect(parityHealthLine(report)).toContain("relay unavailable")
+    expect(builtinReadinessLines(report)).toEqual([
+      "Runtime: ai-sdk · failed — relay unavailable",
+      "lsp: failed — Install the language server",
+    ])
+    expect(builtinReadinessLines(buildCogniaParityReport("external", () => snapshot())!)).toEqual(
+      []
+    )
+  })
   it("is absent until the session publishes something", () => {
     expect(buildCogniaParityReport("s1")).toBeUndefined()
   })

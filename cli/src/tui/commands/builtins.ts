@@ -5,7 +5,7 @@
  */
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 
-import { resolveActiveModel } from "../../config/active-model"
+import { backendIdentity } from "../runtime/backend-identity"
 import type { ResolvedConfig } from "../../config/schema"
 
 /** Human-readable label for each built-in tool category. */
@@ -178,11 +178,15 @@ export function buildToolsCatalogDocument(builtin: BuiltinToolsConfig): string {
  * One-line summary of the active config for `/about`: provider, model, auth
  * mode, and permission mode.
  */
-export function aboutLine(config: ResolvedConfig, version: string): string {
-  const provider = config.provider
-  const model = resolveActiveModel(config) ?? "default"
-  const auth = authMode(config)
-  return `cognia-agent v${version} · ${provider} · ${model} · ${auth} · ${config.permissionMode} mode`
+export function aboutLine(config: ResolvedConfig, version: string, presetId?: string): string {
+  const identity = backendIdentity(config, presetId)
+  return [
+    `cognia-agent v${version}`,
+    identity.provider,
+    ...(identity.model ? [identity.model] : identity.external ? [] : ["default"]),
+    ...(!identity.external ? [authMode(config)] : []),
+    `${config.permissionMode} mode`,
+  ].join(" · ")
 }
 
 /** Which credential the active provider will authenticate with. */

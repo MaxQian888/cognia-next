@@ -3,7 +3,7 @@
  */
 import type { McpServer } from "@cognia/agent-config-types"
 
-import type { OpenedMcp } from "./mcp-client"
+import type { OpenedMcp, OpenMcpOptions } from "./mcp-client"
 import { isUnauthorized, makeStderrTail, probeMcpServer } from "./probe-mcp-server"
 
 const srv = (over: Partial<McpServer> = {}): McpServer =>
@@ -334,4 +334,158 @@ describe("probeMcpServer", () => {
     expect(authProvider).toHaveBeenCalled()
     expect(seenAuth).toEqual({ tag: "p" })
   })
+})
+
+describe("bounded discovery", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it.each(["listTools", "listResources", "listPrompts"] as const)(
+    "bounds a hung %s and closes once",
+    async (method) => {
+      const close = jest.fn(async () => {})
+      const open = jest.fn(async (server: McpServer, options: OpenMcpOptions) => ({
+        ...(await fakeOpen({ [method]: () => new Promise(() => {}) })(server, options)),
+        close,
+      }))
+      let result: Awaited<ReturnType<typeof probeMcpServer>> | undefined
+      void probeMcpServer(srv(), { open, timeoutMs: 10 }).then((value) => {
+        result = value
+      })
+      await jest.advanceTimersByTimeAsync(11)
+      expect(result).toMatchObject({ status: "failed", error: "MCP probe timed out after 10ms" })
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(open.mock.calls[0][1].signal.aborted).toBe(true)
+      expect(close).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("bounds teardown even when close never resolves", async () => {
+    const close = jest.fn(() => new Promise<void>(() => {}))
+    let result: Awaited<ReturnType<typeof probeMcpServer>> | undefined
+    void probeMcpServer(srv(), {
+      timeoutMs: 10,
+      open: async (server, options) => ({ ...(await fakeOpen({})(server, options)), close }),
+    }).then((value) => {
+      result = value
+    })
+    await jest.advanceTimersByTimeAsync(11)
+    expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("timed out") })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it("cancels retry backoff without starting another attempt", async () => {
+    const controller = new AbortController()
+    const open = jest.fn(async () => {
+      throw new Error("cold start")
+    })
+    let result: Awaited<ReturnType<typeof probeMcpServer>> | undefined
+    void probeMcpServer(srv(), { open, signal: controller.signal, retryDelayMs: 1000 }).then(
+      (value) => {
+        result = value
+      }
+    )
+    await jest.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(result).toMatchObject({ status: "failed", error: "MCP probe cancelled" })
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
+  it("cancels discovery immediately and does not start later lists", async () => {
+    const controller = new AbortController()
+    const listResources = jest.fn(async () => ({ resources: [] }))
+    const close = jest.fn(async () => {})
+    let resolveTools!: (value: { tools: [] }) => void
+    let result: Awaited<ReturnType<typeof probeMcpServer>> | undefined
+    void probeMcpServer(srv(), {
+      signal: controller.signal,
+      open: async (server, options) => ({
+        ...(await fakeOpen({
+          listTools: () =>
+            new Promise((resolve) => {
+              resolveTools = resolve
+            }),
+          listResources,
+        })(server, options)),
+        close,
+      }),
+    }).then((value) => {
+      result = value
+    })
+    await jest.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await jest.advanceTimersByTimeAsync(0)
+    expect(result).toMatchObject({ status: "failed", error: expect.stringContaining("cancelled") })
+    resolveTools({ tools: [] })
+    await jest.advanceTimersByTimeAsync(0)
+    expect(listResources).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(jest.getTimerCount()).toBe(0)
+  })
+})
+
+it("does no setup for an already cancelled caller", async () => {
+  const open = jest.fn(fakeOpen({}))
+  const authProvider = jest.fn()
+  expect(
+    await probeMcpServer(srv(), { open, authProvider, signal: AbortSignal.abort() })
+  ).toMatchObject({ status: "failed" })
+  expect(open).not.toHaveBeenCalled()
+  expect(authProvider).not.toHaveBeenCalled()
+})
+
+it.each(["listTools", "listResources", "listPrompts"] as const)(
+  "reports authorization errors from %s without retrying",
+  async (method) => {
+    const open = jest.fn(
+      fakeOpen({
+        [method]: async () => {
+          throw new Error("HTTP 401")
+        },
+      })
+    )
+    expect(await probeMcpServer(srv(), { open, retryDelayMs: 0 })).toMatchObject({
+      status: "needs_auth",
+      error: "HTTP 401",
+    })
+    expect(open).toHaveBeenCalledTimes(1)
+  }
+)
+
+it("reports a non-capability discovery failure", async () => {
+  expect(
+    await probeMcpServer(srv(), {
+      attempts: 1,
+      open: fakeOpen({
+        listResources: async () => {
+          throw new Error("connection lost")
+        },
+      }),
+    })
+  ).toMatchObject({ status: "failed", error: "connection lost" })
+})
+
+it("treats JSON-RPC -32601 as an absent capability", async () => {
+  const res = await probeMcpServer(srv(), {
+    open: fakeOpen({
+      listTools: async () => {
+        throw { code: -32601 }
+      },
+    }),
+  })
+  expect(res).toMatchObject({ status: "connected", tools: [] })
+})
+
+it("reports a throwing auth provider without leaking a rejection", async () => {
+  expect(
+    await probeMcpServer(srv(), {
+      attempts: 1,
+      authProvider: () => {
+        throw new Error("credential store unavailable")
+      },
+      open: fakeOpen({}),
+    })
+  ).toMatchObject({ status: "failed", error: "credential store unavailable" })
 })

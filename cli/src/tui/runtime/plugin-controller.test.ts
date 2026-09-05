@@ -173,6 +173,20 @@ describe("pluginSetEnabled", () => {
     expect((actions[0] as { message: string }).message).toContain("enabled")
   })
 
+  it("does not persist a toggle rejected by the live manager", async () => {
+    const { dispatch } = recorder()
+    const setEnabled = jest.fn()
+    await pluginSetEnabled("a", true, {
+      ...base,
+      dispatch,
+      setEnabled,
+      setLive: async () => {
+        throw new Error("activation refused")
+      },
+    })
+    expect(setEnabled).not.toHaveBeenCalled()
+  })
+
   it("surfaces a live-manager failure as a notice", async () => {
     const { dispatch, actions } = recorder()
     await pluginSetEnabled("a", false, {
@@ -815,7 +829,7 @@ describe("pluginUpdate (check-all)", () => {
     expect((actions[0] as { message: string }).message).toContain("up to date")
   })
 
-  it("ignores a source that fails to resolve", async () => {
+  it("reports a source that fails to resolve", async () => {
     const { dispatch, actions } = recorder()
     await pluginUpdate("", {
       ...base,
@@ -827,7 +841,7 @@ describe("pluginUpdate (check-all)", () => {
         throw new Error("404")
       },
     })
-    expect((actions[0] as { message: string }).message).toContain("up to date")
+    expect((actions[0] as { message: string }).message).toContain("No plugins could be checked.")
   })
 
   it("notices when nothing is GitHub-installed", async () => {
@@ -896,5 +910,112 @@ describe("plugin trust", () => {
     const { dispatch, actions } = recorder()
     pluginTrustRemove("", { ...base, dispatch })
     expect((actions[0] as { message: string }).message).toContain("Usage")
+  })
+})
+
+it("reports persistence failure separately after the live toggle succeeded", async () => {
+  const { dispatch, actions } = recorder()
+  const setLive = jest.fn(async () => {})
+  await pluginSetEnabled(" a ", false, {
+    ...base,
+    dispatch,
+    setLive,
+    setEnabled: () => {
+      throw new Error("disk full")
+    },
+  })
+  expect(setLive).toHaveBeenCalledWith("a", false)
+  expect(actions[0]).toMatchObject({
+    message: expect.stringMatching(/disabled now.*saving.*disk full/),
+  })
+})
+
+it("does not install or show consent when a preview completes after cancellation", async () => {
+  const controller = new AbortController()
+  const { dispatch, actions } = recorder()
+  const install = jest.fn()
+  await pluginInstall("owner/repo", {
+    ...base,
+    dispatch,
+    signal: controller.signal,
+    install,
+    preview: async () => {
+      controller.abort()
+      return { manifest: { id: "x" } as never }
+    },
+  })
+  expect(install).not.toHaveBeenCalled()
+  expect(actions).toEqual([])
+})
+
+it("rejects an empty plugin toggle before touching the live manager", async () => {
+  const { dispatch, actions } = recorder()
+  const setLive = jest.fn()
+  await pluginSetEnabled("  ", true, { ...base, dispatch, setLive })
+  expect(setLive).not.toHaveBeenCalled()
+  expect(actions[0]).toMatchObject({ message: expect.stringContaining("Usage:") })
+})
+
+describe("plugin update check failures", () => {
+  const origins = {
+    a: { repoRef: "owner/a", version: "1.0.0", fingerprint: "", installedAt: 1 },
+    b: { repoRef: "owner/b", version: "1.0.0", fingerprint: "", installedAt: 1 },
+  }
+
+  it("reports all failed lookups instead of claiming plugins are current", async () => {
+    const { dispatch, actions } = recorder()
+    await pluginUpdate("", {
+      ...base,
+      dispatch,
+      getOrigins: () => origins,
+      preview: async () => {
+        throw new Error("offline")
+      },
+    })
+    const message = (actions[0] as { message: string }).message
+    expect(message).toContain("a (offline)")
+    expect(message).toContain("b (offline)")
+    expect(message).toContain("incomplete")
+    expect(message).not.toContain("up to date")
+  })
+
+  it.each(["1.0.0", "2.0.0"])(
+    "reports partial failures alongside successful version %s",
+    async (version) => {
+      const { dispatch, actions } = recorder()
+      await pluginUpdate("", {
+        ...base,
+        dispatch,
+        getOrigins: () => origins,
+        preview: async (ref) => {
+          if (ref === "owner/b") throw "unavailable"
+          return { manifest: manifest({ version }) }
+        },
+      })
+      const message = (actions[0] as { message: string }).message
+      expect(message).toContain("b (unavailable)")
+      expect(message).toContain("incomplete")
+      expect(message).not.toContain("All installed plugins")
+      if (version === "2.0.0") expect(message).toContain("a (v1.0.0 → v2.0.0)")
+    }
+  )
+
+  it.each([false, true])("stops after cancellation during a lookup (reject=%s)", async (reject) => {
+    const { dispatch, actions } = recorder()
+    const controller = new AbortController()
+    const preview = jest.fn(async () => {
+      controller.abort()
+      if (reject) throw new Error("cancelled")
+      return { manifest: manifest({ version: "2.0.0" }) }
+    })
+    await pluginUpdate("", {
+      ...base,
+      dispatch,
+      getOrigins: () => origins,
+      preview,
+      signal: controller.signal,
+    })
+    expect(preview).toHaveBeenCalledTimes(1)
+    expect(actions).toEqual([])
   })
 })

@@ -119,25 +119,29 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           queued (and expiring) while one is open, but never let it push a
           Doctor/MCP/document panel upward or occupy its lower-left corner. */}
       {!overlayOpen ? <Toasts toasts={state.toasts} /> : null}
-      <BottomStatus
-        turnStatus={state.turnStatus}
-        activity={state.activity}
-        tools={state.inflight.tools}
-        steerQueue={state.steerQueue}
-        since={streamStartedAt}
-        lastActivityAt={lastActivityAt}
-        subagentRunning={footerSubagentRunning}
-        backgroundSubagents={footerBackgroundSubagents}
-        interruptedBackgroundSubagents={interruptedBackgroundSubagents}
-        copilot={footerCopilot}
-        verbose={state.verbose}
-        backtrackArmed={backtrackArmed}
-        columns={columns}
-        chipRowRef={subagentChipRef}
-        sessionId={state.sessionId}
-        agentTreeRef={agentTreeRef}
-        suppressAgentTree={overlayOpen}
-      />
+      {state.overlay.kind === "permission" ? (
+        <Text color={warningColor}>Waiting for approval</Text>
+      ) : (
+        <BottomStatus
+          turnStatus={state.turnStatus}
+          activity={state.activity}
+          tools={state.inflight.tools}
+          steerQueue={state.steerQueue}
+          since={streamStartedAt}
+          lastActivityAt={lastActivityAt}
+          subagentRunning={footerSubagentRunning}
+          backgroundSubagents={footerBackgroundSubagents}
+          interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+          copilot={footerCopilot}
+          verbose={state.verbose}
+          backtrackArmed={backtrackArmed}
+          columns={columns}
+          chipRowRef={subagentChipRef}
+          sessionId={state.sessionId}
+          agentTreeRef={agentTreeRef}
+          suppressAgentTree={overlayOpen}
+        />
+      )}
       {cursor.state.find && (
         <FindBar
           query={cursor.state.find.query}

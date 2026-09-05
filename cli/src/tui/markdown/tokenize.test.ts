@@ -177,10 +177,10 @@ describe("tokenizeMarkdown", () => {
     expect(lines.map((l) => l.kind)).toEqual(["heading", "paragraph"])
   })
 
-  it("turns a hard line break into a space span", () => {
+  it("preserves an explicit hard line break", () => {
     const lines = tokenizeMarkdown("a  \nb")
     const spans = spansOf(lines[0])
-    expect(spans.some((s) => s.text === " ")).toBe(true)
+    expect(spans.some((s) => s.text === "\n")).toBe(true)
   })
 
   it("decodes common HTML entities in prose so the terminal shows real characters", () => {
@@ -336,7 +336,7 @@ describe("blocksToLines (defensive)", () => {
 
   it("handles a blockquote whose inner line has no spans", () => {
     const lines = blocksToLines([{ type: "blockquote", tokens: [{ type: "hr" }] }] as BlockTokens)
-    expect(lines[0]).toEqual({ kind: "blockquote", depth: 1, spans: [] })
+    expect(lines[0]).toEqual({ kind: "blockquote", depth: 1, spans: [], child: { kind: "rule" } })
   })
 
   it("handles a list with no items and a non-numeric start", () => {
@@ -369,4 +369,61 @@ describe("blocksToLines (defensive)", () => {
     const lines = blocksToLines([{ type: "table" }] as BlockTokens)
     expect(lines[0]).toEqual({ kind: "table", header: [], rows: [], align: [] })
   })
+})
+
+describe("rich block preservation", () => {
+  it("keeps continuation paragraphs, quoted tasks, and fenced diffs inside lists", () => {
+    const lines = tokenizeMarkdown(
+      "- first\n\n  continuation\n\n  > - [x] quoted task\n\n  ~~~diff file.patch\n  -old\n  +new\n  ~~~"
+    )
+    expect(lines[0]).toMatchObject({ kind: "listitem" })
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        kind: "indent",
+        child: expect.objectContaining({ kind: "paragraph", spans: [{ text: "continuation" }] }),
+      })
+    )
+    expect(JSON.stringify(lines)).toContain('"checked":true')
+    expect(JSON.stringify(lines)).toContain('"lang":"diff"')
+    expect(JSON.stringify(lines)).toContain("+new")
+  })
+
+  it("keeps nested link emphasis and image descriptions with targets", () => {
+    const spans = spansOf(
+      tokenizeMarkdown(
+        "[**bold** and \u0060code\u0060](https://x.test) ![diagram](./map.png) ![](empty.png)"
+      )[0]
+    )
+    expect(spans).toContainEqual(
+      expect.objectContaining({ text: "bold", bold: true, link: "https://x.test" })
+    )
+    expect(spans).toContainEqual(
+      expect.objectContaining({ text: "code", code: true, link: "https://x.test" })
+    )
+    expect(spans).toContainEqual(
+      expect.objectContaining({ text: "[image: diagram]", link: "./map.png" })
+    )
+    expect(spans).toContainEqual(expect.objectContaining({ text: "[image]", link: "empty.png" }))
+  })
+
+  it("never reintroduces controls through entities or throws on invalid scalars", () => {
+    const src = "&#27;[2J &#x9b;31m &#1114112; &#xD800; [safe](https://x.test/&#7;)"
+    const rendered = JSON.stringify(tokenizeMarkdown(src))
+    expect(rendered).not.toMatch(/\\u001b|\\u0007|\u009b/)
+    expect(rendered).toContain("�")
+  })
+
+  it("accepts every streaming prefix of nested content without losing the final blocks", () => {
+    const src =
+      "> - [x] done\n>\n> \u0060\u0060\u0060diff\n> -old\n> +new\n> \u0060\u0060\u0060\n\n[**docs**](https://x.test)"
+    for (let i = 0; i <= src.length; i++)
+      expect(() => tokenizeMarkdown(src.slice(0, i))).not.toThrow()
+    expect(JSON.stringify(tokenizeMarkdown(src))).toContain("+new")
+  })
+})
+
+it("renders loose task checkboxes once and preserves continuation text", () => {
+  const lines = tokenizeMarkdown("- [x] task\n\n  continuation")
+  expect(lines[0]).toMatchObject({ kind: "listitem", checked: true, spans: [{ text: "task" }] })
+  expect(JSON.stringify(lines)).not.toContain("[x]")
 })

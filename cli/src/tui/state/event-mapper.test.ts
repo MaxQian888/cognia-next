@@ -1,6 +1,8 @@
 /**
  * @jest-environment node
  */
+import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/pi-rpc-events"
+import { externalAgentEventToCanonicalFallback } from "../../runtime/external/external-event-mapper"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
 import {
@@ -192,6 +194,36 @@ describe("canonicalEnvelopeToActions", () => {
     event,
   })
 
+  it.each<PiEvent>([
+    { type: "extension_ui_request", id: "w", method: "setWidget", widgetLines: ["bg status"] },
+    { type: "extension_ui_request", id: "s", method: "setStatus", statusText: "working" },
+    { type: "turn_end" },
+    { type: "agent_end" },
+  ])("retains Pi $type audit envelopes without rendering a diagnostic placeholder", (frame) => {
+    const [mapped] = mapPiEvent(frame, { sessionId: "s1" })
+    const diagnostic = externalAgentEventToCanonicalFallback(mapped)
+    const persisted = envelope(diagnostic)
+    expect(diagnostic).toMatchObject({
+      kind: "diagnostic",
+      runtime: "pi-rpc",
+      payload: { piDiagnostic: frame },
+    })
+    expect(canonicalEnvelopeToActions(persisted)).toEqual([])
+    expect(persisted.event).toBe(diagnostic)
+    expect(classifyCanonicalEvent(diagnostic.kind)).toBe("audit")
+  })
+
+  it("does not suppress other diagnostics or actionable Pi errors", () => {
+    expect(
+      canonicalEnvelopeToActions(envelope({ kind: "diagnostic", runtime: "other", payload: {} }))
+    ).toEqual([expect.objectContaining({ type: "CANONICAL_EVENT_NOTICE", title: "diagnostic" })])
+    expect(
+      canonicalEnvelopeToActions(
+        envelope({ kind: "failure", code: "pi-rpc", message: "extension failed", retryable: true })
+      )
+    ).toEqual([expect.objectContaining({ type: "CANONICAL_EVENT_NOTICE", level: "error" })])
+  })
+
   it("classifies every known canonical event explicitly", () => {
     expect(Object.keys(CANONICAL_TUI_CLASSIFICATION).sort()).toEqual(
       [...CANONICAL_AGENT_EVENT_KINDS].sort()
@@ -234,6 +266,25 @@ describe("canonicalEnvelopeToActions", () => {
       },
     ])
   })
+
+  it.each(["builtin", "claude-agent-sdk", "ai-sdk"])(
+    "leaves %s permission UI to the live gate",
+    (runtime) => {
+      const request = envelope({
+        kind: "permission-request",
+        requestId: "p1",
+        toolName: "bash",
+        input: {},
+      })
+      expect(
+        canonicalEnvelopeToActions({ ...request, runtime }, { permissionHandledByGate: true })
+      ).toEqual([])
+      const resolved = envelope({ kind: "permission-resolved", requestId: "p1", behavior: "allow" })
+      expect(
+        canonicalEnvelopeToActions({ ...resolved, runtime }, { permissionHandledByGate: true })
+      ).toEqual([])
+    }
+  )
 
   it("maps canonical permission events into the existing approval overlay", () => {
     const [request] = canonicalEnvelopeToActions(

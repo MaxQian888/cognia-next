@@ -1,3 +1,6 @@
+import { loadMcpServers } from "../../mcp/load-mcp-config"
+import * as toolProbe from "../../mcp/probe-mcp-tools"
+jest.mock("../../mcp/probe-mcp-tools", () => ({ probeMcpTools: jest.fn() }))
 /**
  * @jest-environment node
  */
@@ -66,6 +69,21 @@ describe("parseFlags", () => {
 })
 
 describe("mcpList", () => {
+  it("does not reopen the list when cancellation occurs during discovery", async () => {
+    const controller = new AbortController()
+    const { dispatch, actions } = recorder()
+    await mcpList({
+      ...base,
+      dispatch,
+      signal: controller.signal,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        controller.abort()
+        return ok()
+      },
+    })
+    expect(actions.some((action) => action.type === "OVERLAY_OPEN")).toBe(false)
+  })
   it("probes each server and shows its live status in the overlay", async () => {
     const { dispatch, actions } = recorder()
     await mcpList({
@@ -109,6 +127,60 @@ describe("mcpList", () => {
     const { dispatch, actions } = recorder()
     await mcpList({ ...base, dispatch, load: () => [] })
     expect((actions[0] as { message: string }).message).toContain("No MCP servers")
+  })
+})
+
+describe("MCP tool discovery lifecycle", () => {
+  it.each([mcpTools, openMcpToolsPanel])(
+    "suppresses canceled tool-probe errors: %p",
+    async (open) => {
+      const controller = new AbortController()
+      const { dispatch, actions } = recorder()
+      await open("fs", {
+        ...base,
+        dispatch,
+        signal: controller.signal,
+        load: () => [server("fs")],
+        probe: async () => {
+          controller.abort()
+          throw new Error("closed")
+        },
+      })
+      expect(
+        actions.some((action) => action.type === "NOTICE" && action.message.includes("closed"))
+      ).toBe(false)
+      expect(actions.some((action) => action.type === "OVERLAY_OPEN")).toBe(false)
+    }
+  )
+
+  it("forwards stored OAuth credentials and cancellation to the default tool probe", async () => {
+    const home = nodeFs.mkdtempSync(path.join(os.tmpdir(), "mcp-tool-auth-"))
+    const probe = jest.mocked(toolProbe.probeMcpTools).mockResolvedValueOnce([])
+    try {
+      patchAuthEntry(home, "remote", {
+        tokens: { access_token: "fixture-token", token_type: "Bearer" },
+      })
+      const signal = new AbortController().signal
+      await mcpTools("remote", {
+        home,
+        roots: [home],
+        signal,
+        dispatch: jest.fn(),
+        load: () => [
+          { ...server("remote"), transport: "http", config: { url: "https://offline.invalid" } },
+        ],
+      })
+      expect(probe).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          signal,
+          authProvider: expect.objectContaining({ tokens: expect.any(Function) }),
+        })
+      )
+    } finally {
+      probe.mockReset()
+      nodeFs.rmSync(home, { recursive: true, force: true })
+    }
   })
 })
 
@@ -719,6 +791,29 @@ describe("real defaults (no injection)", () => {
     expect(doc.mcpServers.fs).toEqual({ command: "npx" })
   })
 
+  it("preserves SSE transport when the next turn reloads the saved config", async () => {
+    const { dispatch } = recorder()
+    await mcpAdd("--name events --transport sse --url https://offline.invalid/events", {
+      dispatch,
+      roots: [home],
+      home,
+    })
+    expect(loadMcpServers([home])[0]).toMatchObject({ name: "events", transport: "sse" })
+  })
+
+  it("rejects an unsupported transport without persisting it", async () => {
+    const { dispatch, actions } = recorder()
+    const addServer = jest.fn()
+    await mcpAdd("--name bad --transport ftp --url https://offline.invalid", {
+      dispatch,
+      roots: [home],
+      home,
+      addServer,
+    })
+    expect(addServer).not.toHaveBeenCalled()
+    expect(actions[0]).toMatchObject({ message: expect.stringContaining("transport") })
+  })
+
   it("mcpShow reads real auth state for a remote server (default hasTokens)", () => {
     const { dispatch, actions } = recorder()
     const remote = {
@@ -750,7 +845,7 @@ describe("real defaults (no injection)", () => {
     const { dispatch } = recorder()
     await mcpAdd("--preset deepwiki --name dw", { dispatch, roots: [home], home })
     const doc = JSON.parse(nodeFs.readFileSync(path.join(home, "mcp.json"), "utf8"))
-    expect(doc.mcpServers.dw).toEqual({ url: "https://mcp.deepwiki.com/mcp" })
+    expect(doc.mcpServers.dw).toEqual({ type: "http", url: "https://mcp.deepwiki.com/mcp" })
   })
 
   describe("probeAuthProvider", () => {
@@ -1239,5 +1334,104 @@ describe("mcpRemove", () => {
       load: () => [],
     })
     expect(probeCache.has("fs")).toBe(false)
+  })
+})
+
+it("discards a cancelled panel probe instead of repopulating its cache", async () => {
+  const controller = new AbortController()
+  const { dispatch, actions } = recorder()
+  const probeCache = createMcpProbeCache()
+  await mcpPanel({
+    ...base,
+    dispatch,
+    signal: controller.signal,
+    probeCache,
+    load: () => [server("fs")],
+    probeServer: async () => {
+      controller.abort()
+      return ok()
+    },
+  })
+  expect(actions.filter((a) => a.type === "MCP_STATUS_PATCH")).toEqual([])
+  expect(probeCache.get("fs")).toBeUndefined()
+})
+
+it("reuses an empty connected tool cache without another probe", async () => {
+  const { dispatch, actions } = recorder()
+  const probeCache = createMcpProbeCache()
+  probeCache.set("fs", toCacheEntry(ok(), 0))
+  const probe = jest.fn()
+  await openMcpToolsPanel("fs", {
+    ...base,
+    dispatch,
+    probeCache,
+    probe,
+    load: () => [server("fs")],
+  })
+  expect(probe).not.toHaveBeenCalled()
+  expect(actions[0]).toMatchObject({ message: expect.stringContaining("no tools") })
+})
+
+it("invalidates stale auth status after authorization and logout", async () => {
+  const { dispatch } = recorder()
+  const probeCache = createMcpProbeCache()
+  const remote = { ...server("r"), transport: "http" as const }
+  probeCache.set("r", toCacheEntry(ok({ status: "needs_auth" }), 0))
+  const deps = { ...base, dispatch, probeCache, load: () => [remote] }
+  await mcpAuth("r", {
+    ...deps,
+    authenticate: async () => ({ ok: true, status: "authorized", message: "signed in" }),
+  })
+  expect(probeCache.get("r")).toBeUndefined()
+  probeCache.set("r", toCacheEntry(ok(), 1))
+  mcpLogout("r", { ...deps, logout: () => true })
+  expect(probeCache.get("r")).toBeUndefined()
+})
+
+it("surfaces an injected authorization failure as a notice", async () => {
+  const { dispatch, actions } = recorder()
+  await mcpAuth("r", {
+    ...base,
+    dispatch,
+    load: () => [{ ...server("r"), transport: "http" }],
+    authenticate: async () => {
+      throw new Error("offline refusal")
+    },
+  })
+  expect(actions.at(-1)).toMatchObject({
+    message: expect.stringContaining("Authorization failed: offline refusal"),
+  })
+})
+
+describe.each([mcpResources, mcpPrompts])("cancelled MCP catalog reads", (read) => {
+  it("does not load config or probe when already cancelled", async () => {
+    const { dispatch, actions } = recorder()
+    const load = jest.fn(() => [server("fs")])
+    const probeServer = jest.fn(async () => ok())
+    await read("fs", { ...base, dispatch, load, probeServer, signal: AbortSignal.abort() })
+    expect(load).not.toHaveBeenCalled()
+    expect(probeServer).not.toHaveBeenCalled()
+    expect(actions).toEqual([])
+  })
+
+  it.each([false, true])("suppresses late completion (reject=%s)", async (reject) => {
+    const { dispatch, actions } = recorder()
+    const controller = new AbortController()
+    await read("fs", {
+      ...base,
+      dispatch,
+      signal: controller.signal,
+      load: () => [server("fs")],
+      probeServer: async () => {
+        controller.abort()
+        if (reject) throw new Error("cancelled probe")
+        return ok()
+      },
+    })
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toMatchObject({
+      type: "NOTICE",
+      message: expect.stringContaining("Connecting"),
+    })
   })
 })

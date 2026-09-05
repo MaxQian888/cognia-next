@@ -27,13 +27,30 @@ export function buildCogniaParityReport(
     hostToolCount: snapshot.hostToolCount,
     userMcpCount: snapshot.userMcpCount,
     connections: snapshot.connections,
+    ...(snapshot.builtin ? { builtin: snapshot.builtin } : {}),
     restartRequired: fieldsByLayer("session"),
   }
 }
 
 /** One-line health summary for a compact surface. */
 export function parityHealthLine(report: CogniaParityReport): string {
+  if (report.builtin && report.builtin.phase !== "ready") {
+    return `Cognia tools: ${report.builtin.phase} — ${report.builtin.reason ?? "Waiting for the tool host"}`
+  }
   if (!report.attachable) return "Cognia tools: unavailable (this agent cannot host the bridge)"
   if (!report.running) return "Cognia tools: bridge not started"
   return `Cognia tools: ${report.builtinToolCount} built-in · ${report.hostToolCount} host · ${report.userMcpCount} user MCP`
+}
+
+/** Shared text for both diagnostic surfaces, including lazy service failures. */
+export function builtinReadinessLines(report: CogniaParityReport): string[] {
+  if (!report.builtin) return []
+  const { phase, reason, runtime, categories } = report.builtin
+  return [
+    `Runtime: ${runtime ?? "unresolved"} · ${phase}${reason ? ` — ${reason}` : ""}`,
+    ...Object.entries(categories).map(
+      ([name, readiness]) =>
+        `${name}: ${readiness.state}${readiness.reason ? ` — ${readiness.reason}` : ""}`
+    ),
+  ]
 }

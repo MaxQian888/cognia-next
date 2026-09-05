@@ -61,6 +61,8 @@ function harness(over: Partial<LoopRunDeps>): {
     ensureDb: async () => {},
     ensureSession: async () => {},
     appSettings: null,
+    pauseLoop: async () => {},
+    stopLoop: async () => {},
     delay: async (ms) => {
       delays.push(ms)
     },
@@ -203,5 +205,113 @@ describe("runLoopStreaming — interval", () => {
       status: "done",
       summary: "Loop reached its 7-day expiry.",
     })
+  })
+})
+
+describe("loop continuation controls", () => {
+  it.each(["pause", "stop"])("persists %s without processing a cancelled turn", async (action) => {
+    const controller = new AbortController()
+    const pauseLoop = jest.fn(async () => {})
+    const stopLoop = jest.fn(async () => {})
+    const handleTurn = jest.fn()
+    const loop = fakeLoop()
+    const { deps } = harness({
+      signal: controller.signal,
+      createLoop: async () => loop,
+      getLoop: async () => loop,
+      pauseLoop,
+      stopLoop,
+      handleTurn,
+      send: async () => {
+        controller.abort(action)
+        return null
+      },
+    })
+    await runLoopStreaming(deps)
+    expect(handleTurn).not.toHaveBeenCalled()
+    expect(action === "pause" ? pauseLoop : stopLoop).toHaveBeenCalledWith(loop.id)
+  })
+
+  it("resumes the same self-paced loop without resetting its identity", async () => {
+    const loop = fakeLoop()
+    const createLoop = jest.fn()
+    const resumeLoop = jest.fn(async () => loop)
+    const { deps, sent } = harness({
+      action: "resume",
+      continuation: { loopId: loop.id },
+      createLoop,
+      getLoop: async () => ({ ...loop, status: "paused" }),
+      resumeLoop,
+      handleTurn: (async () => ({
+        kind: "exit",
+        resultingStatus: "completed",
+        reason: "done",
+      })) as never,
+    })
+    await runLoopStreaming(deps)
+    expect(createLoop).not.toHaveBeenCalled()
+    expect(resumeLoop).toHaveBeenCalledWith(loop.id)
+    expect(sent).toHaveLength(1)
+  })
+
+  it("does not replace a missing loop on resume", async () => {
+    const createLoop = jest.fn()
+    const { deps, sent, actions } = harness({
+      action: "resume",
+      continuation: { loopId: "missing" },
+      createLoop,
+      getLoop: async () => undefined,
+    })
+    await runLoopStreaming(deps)
+    expect(createLoop).not.toHaveBeenCalled()
+    expect(sent).toEqual([])
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("No paused loop") })
+  })
+
+  it("stops a paused loop without sending or creating", async () => {
+    const stopLoop = jest.fn(async () => {})
+    const { deps, sent } = harness({ action: "stop", continuation: { loopId: "l1" }, stopLoop })
+    await runLoopStreaming(deps)
+    expect(stopLoop).toHaveBeenCalledWith("l1")
+    expect(sent).toEqual([])
+  })
+
+  it("retains interval count and expiry across pause/resume", async () => {
+    const continuation = {}
+    const controller = new AbortController()
+    const first = harness({
+      mode: "interval",
+      maxIterations: 3,
+      continuation,
+      now: () => 100,
+      signal: controller.signal,
+      delay: async () => controller.abort("pause"),
+    })
+    await runLoopStreaming(first.deps)
+    expect(first.sent).toHaveLength(1)
+    expect(continuation).toMatchObject({ completed: 1, expiresAt: 100 + LOOP_EXPIRY_MS })
+    const resumed = harness({
+      mode: "interval",
+      action: "resume",
+      maxIterations: 3,
+      continuation,
+      now: () => 200,
+    })
+    await runLoopStreaming(resumed.deps)
+    expect(resumed.sent).toHaveLength(2)
+    const exhausted = harness({ ...resumed.deps, send: jest.fn(), action: "resume" })
+    await runLoopStreaming(exhausted.deps)
+    expect(exhausted.deps.send).not.toHaveBeenCalled()
+  })
+
+  it("does not send after a paused interval loop expires", async () => {
+    const { deps, sent } = harness({
+      mode: "interval",
+      action: "resume",
+      continuation: { completed: 1, expiresAt: 100 },
+      now: () => 101,
+    })
+    await runLoopStreaming(deps)
+    expect(sent).toEqual([])
   })
 })

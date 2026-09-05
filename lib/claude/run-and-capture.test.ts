@@ -165,6 +165,15 @@ describe("runAndCaptureAssistantReply", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", { turnId: "turn-frozen" })
   })
 
+  it("retains the provider conversation snapshot from the terminal frame", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "next", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    const conversationSnapshot = [{ role: "user", content: "original" }]
+    fire(assistantEvent("continued"))
+    fire({ ...sessionEnded(), conversationSnapshot } as ClaudeEvent)
+    await expect(promise).resolves.toEqual(expect.objectContaining({ conversationSnapshot }))
+  })
+
   it("surfaces the SDK session id immediately as well as on the final result", async () => {
     const onSdkSessionId = jest.fn()
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -360,6 +369,41 @@ describe("runAndCaptureAssistantReply", () => {
     )
     expect(error?.httpStatus).toBeUndefined()
     expect(error?.retryAfterMs).toBeUndefined()
+  })
+
+  it("drains canonical terminal events emitted after the raw session-ended frame", async () => {
+    let canonicalSubscriber!: (envelope: unknown) => void
+    const unlistenCanonical = jest.fn()
+    subscribeAgentEventsMock.mockImplementation(async (callback) => {
+      canonicalSubscriber = callback
+      return unlistenCanonical
+    })
+    const canonical = jest.fn()
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "terminal-order" },
+      {
+        onCanonicalEvent: canonical,
+        timeoutMs: 1000,
+      }
+    )
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    expect(unlistenCanonical).not.toHaveBeenCalled()
+    canonicalSubscriber({
+      sessionId: SESSION,
+      turnId: "terminal-order",
+      attemptId: "a1",
+      sequence: 0,
+      event: { kind: "lifecycle", phase: "ended" },
+    })
+    await expect(promise).resolves.toMatchObject({ text: "done" })
+    expect(canonical).toHaveBeenCalledWith({ kind: "lifecycle", phase: "ended" })
+    expect(unlistenCanonical).toHaveBeenCalledTimes(1)
+    subscribeAgentEventsMock.mockReset()
   })
 
   it("rejects with no_assistant_text when nothing was captured", async () => {
@@ -1606,6 +1650,26 @@ describe("runAndCaptureAssistantReply", () => {
     })
   })
 
+  it("never applies an approval that resolves after cancellation", async () => {
+    const controller = new AbortController()
+    let approve!: (decision: { decision: "allow" }) => void
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      signal: controller.signal,
+      onPermissionRequest: () =>
+        new Promise((resolve) => {
+          approve = resolve
+        }),
+    })
+    await Promise.resolve()
+    fire(permissionRequest("stale-request", "bash", { command: "build" }))
+    controller.abort()
+    const rejected = expect(promise).rejects.toMatchObject({ code: "aborted" })
+    approve({ decision: "allow" })
+    await Promise.resolve()
+    await rejected
+    expect(approveToolMock).not.toHaveBeenCalled()
+  })
+
   it("swallows an approveTool rejection without breaking capture", async () => {
     approveToolMock.mockRejectedValueOnce(new Error("approve failed"))
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -1852,6 +1916,38 @@ describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
     subscriber?.({ sessionId: "other", event: { kind: "text-delta", delta: "nope" } })
     subscriber?.({ sessionId: "s1", event: { kind: "lifecycle", phase: "ended" } })
     expect(events).toEqual([{ type: "text-delta", delta: "hi" }])
+  })
+
+  it("forwards canonical-only events once and excludes stale turns", async () => {
+    let subscriber: ((e: unknown) => void) | undefined
+    subscribeAgentEventsMock.mockImplementation(async (cb: (e: unknown) => void) => {
+      subscriber = cb
+      return jest.fn()
+    })
+    const { subscribeCaptureFromEnvelopes } = await import("./run-and-capture")
+    const legacy = jest.fn()
+    const canonical = jest.fn()
+    await subscribeCaptureFromEnvelopes("s1", legacy, { turnId: "t1", onCanonicalEvent: canonical })
+    const frame = {
+      sessionId: "s1",
+      turnId: "t1",
+      attemptId: "a1",
+      sequence: 0,
+      event: { kind: "lifecycle", phase: "started" },
+    }
+    subscriber?.(frame)
+    subscriber?.(frame)
+    subscriber?.({ ...frame, turnId: "old", sequence: 1 })
+    subscriber?.({
+      ...frame,
+      sequence: 1,
+      event: { kind: "tool-summary", summary: "Read files", toolCallIds: ["c1"] },
+    })
+    expect(canonical.mock.calls.map(([event]) => event)).toEqual([
+      frame.event,
+      { kind: "tool-summary", summary: "Read files", toolCallIds: ["c1"] },
+    ])
+    expect(legacy).not.toHaveBeenCalled()
   })
 
   it("also enables the canonical stream for Claude SDK parity rollout", async () => {

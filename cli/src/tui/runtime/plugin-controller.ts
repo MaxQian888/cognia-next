@@ -41,6 +41,8 @@ import type { TuiAction } from "../state/types"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 
 export interface PluginDeps {
+  /** Suppress late results and new work after the runtime request is cancelled. */
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   roots: string[]
   home: string
@@ -169,7 +171,9 @@ async function realHost(): Promise<
 // ── list / show / tools ─────────────────────────────────────────────────────────
 
 export async function pluginList(deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const plugins = await loadPlugins(deps)
+  if (deps.signal?.aborted) return
   if (plugins.length === 0) {
     deps.dispatch({
       type: "NOTICE",
@@ -224,7 +228,9 @@ export function buildPluginDocument(plugin: PluginInfo, enabled: boolean): strin
 }
 
 export async function pluginShow(id: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const plugins = await loadPlugins(deps)
+  if (deps.signal?.aborted) return
   const plugin = plugins.find((p) => p.id === id)
   if (!plugin) {
     deps.dispatch({ type: "NOTICE", message: `Plugin ${id} not found.` })
@@ -240,7 +246,9 @@ export async function pluginShow(id: string, deps: PluginDeps): Promise<void> {
 
 /** `/plugin tools <id>` — show each declared tool's description + schema. */
 export async function pluginTools(id: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const plugins = await loadPlugins(deps)
+  if (deps.signal?.aborted) return
   const plugin = plugins.find((p) => p.id === id)
   if (!plugin) {
     deps.dispatch({ type: "NOTICE", message: `Plugin ${id} not found.` })
@@ -275,7 +283,12 @@ export async function pluginSetEnabled(
   enabled: boolean,
   deps: PluginDeps
 ): Promise<void> {
-  ;(deps.setEnabled ?? ((i, d) => setPluginDisabled(deps.home, i, d)))(id, !enabled)
+  if (deps.signal?.aborted) return
+  id = id.trim()
+  if (!id) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /plugin enable|disable <id>" })
+    return
+  }
   try {
     const setLive =
       deps.setLive ??
@@ -293,6 +306,15 @@ export async function pluginSetEnabled(
     })
     return
   }
+  try {
+    ;(deps.setEnabled ?? ((i, d) => setPluginDisabled(deps.home, i, d)))(id, !enabled)
+  } catch (err) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: `Plugin "${id}" is ${enabled ? "enabled" : "disabled"} now, but saving that setting failed: ${err instanceof Error ? err.message : String(err)}`,
+    })
+    return
+  }
   deps.dispatch({
     type: "NOTICE",
     message: `Plugin "${id}" ${enabled ? "enabled" : "disabled"}.`,
@@ -302,6 +324,7 @@ export async function pluginSetEnabled(
 // ── reload ──────────────────────────────────────────────────────────────────────
 
 export async function pluginReload(id: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   if (!id) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /plugin reload <id>" })
     return
@@ -414,6 +437,7 @@ export function parseInstallArg(arg: string): { ref: string; confirmed: boolean 
 }
 
 export async function pluginInstall(arg: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const { ref, confirmed } = parseInstallArg(arg)
   if (!ref) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /plugin install <owner/repo[@ref][/subdir]>" })
@@ -433,6 +457,7 @@ export async function pluginInstall(arg: string, deps: PluginDeps): Promise<void
         })
       const isInstalled = deps.isInstalled ?? (() => false)
       const { manifest } = await preview(ref)
+      if (deps.signal?.aborted) return
       const owner = ownerOfRef(ref)
       deps.dispatch({
         type: "OVERLAY_OPEN",
@@ -586,6 +611,7 @@ export function buildPreviewDocument(
  * path skips its own consent).
  */
 export async function pluginPreview(ref: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const trimmed = ref.trim()
   if (!trimmed) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /plugin preview <owner/repo[@ref][/subdir]>" })
@@ -600,6 +626,7 @@ export async function pluginPreview(ref: string, deps: PluginDeps): Promise<void
         return fetchGithubPluginPreview(parseGithubPluginRef(r))
       })
     const { manifest, readme } = await preview(trimmed)
+    if (deps.signal?.aborted) return
     const owner = ownerOfRef(trimmed)
     deps.dispatch({
       type: "OVERLAY_OPEN",
@@ -627,6 +654,7 @@ export async function pluginPreview(ref: string, deps: PluginDeps): Promise<void
 // ── update (re-fetch + hot-reload, or check-all) ────────────────────────────────
 
 export async function pluginUpdate(arg: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const id = arg.trim()
   if (!id) return pluginUpdateCheckAll(deps)
 
@@ -697,28 +725,39 @@ async function pluginUpdateCheckAll(deps: PluginDeps): Promise<void> {
       return fetchGithubPluginPreview(parseGithubPluginRef(r))
     })
   const available: string[] = []
+  const failures: string[] = []
   for (const id of ids) {
     try {
       const { manifest } = await preview(origins[id].repoRef)
+      if (deps.signal?.aborted) return
       const latest = manifest.version ?? "0.0.0"
       if (latest !== origins[id].version)
         available.push(`${id} (v${origins[id].version} → v${latest})`)
-    } catch {
-      // A source that won't resolve is reported as part of "up to date" silence;
-      // the per-plugin `/plugin update <id>` surfaces the real fetch error.
+    } catch (err) {
+      if (deps.signal?.aborted) return
+      failures.push(`${id} (${err instanceof Error ? err.message : String(err)})`)
     }
   }
+  const result = available.length
+    ? `Updates available: ${available.join(", ")}. Run /plugin update <id>.`
+    : failures.length === ids.length
+      ? "No plugins could be checked."
+      : failures.length > 0
+        ? "No updates found among successfully checked plugins."
+        : "All installed plugins are up to date."
   deps.dispatch({
     type: "NOTICE",
-    message: available.length
-      ? `Updates available: ${available.join(", ")}. Run /plugin update <id>.`
-      : "All installed plugins are up to date.",
+    message:
+      failures.length > 0
+        ? `${result} Could not check: ${failures.join(", ")}. Update check is incomplete.`
+        : result,
   })
 }
 
 // ── uninstall ─────────────────────────────────────────────────────────────────
 
 export async function pluginUninstall(id: string, deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   if (!id) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /plugin uninstall <id>" })
     return
@@ -810,6 +849,7 @@ export function pluginTrustRemove(owner: string, deps: PluginDeps): void {
 // ── marketplace browse ──────────────────────────────────────────────────────────
 
 export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const sources = (deps.getSources ?? (() => readSources(deps.home)))()
   if (sources.length === 0) {
     deps.dispatch({
@@ -850,6 +890,7 @@ export async function pluginMarketplace(deps: PluginDeps): Promise<void> {
   }
   try {
     result = await browse(sources)
+    if (deps.signal?.aborted) return
   } catch (err) {
     deps.dispatch({
       type: "NOTICE",

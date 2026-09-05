@@ -11,6 +11,7 @@ import { contextGauge } from "../../format/status-bar"
 import { useTheme } from "../../theme/context"
 import { formatTokens } from "../../format/usage"
 import type { StatusReport } from "../../state/types"
+import { builtinReadinessLines } from "../../runtime/cognia-parity-report"
 
 const ok = (b: boolean): string => (b ? "✓" : "✗")
 
@@ -85,6 +86,12 @@ export function StatusPanel({ report, onClose }: { report: StatusReport; onClose
           <Text color={row.color}>{row.value}</Text>
         </Text>
       ))}
+      {report.cogniaParity &&
+        builtinReadinessLines(report.cogniaParity).map((line) => (
+          <Text key={line} color={theme.muted}>
+            {line}
+          </Text>
+        ))}
       <Text color={theme.muted} dimColor>
         esc to close
       </Text>

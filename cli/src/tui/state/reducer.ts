@@ -249,25 +249,94 @@ function commitInflight(
   return { cells: next, seq: nextSeq, inflight: { text: "", thinking: "", tools: inflight.tools } }
 }
 
+/** Seal the current text segment and commit only the prefix before a running tool.
+ * Later cells stay live in arrival order; a faster concurrent result cannot
+ * leapfrog a running card in the append-only transcript.
+ */
+function advanceTranscript(state: TuiState): TuiState {
+  const sealed = commitInflight([], state.inflight, state.seq)
+  const live: Cell[] = [...state.inflight.tools, ...sealed.cells, ...state.pendingCells]
+  const blocked = live.findIndex((cell) => cell.kind === "tool" && cell.status === "running")
+  const boundary = blocked < 0 ? live.length : blocked
+  const remaining = live.slice(boundary)
+  let toolCount = 0
+  while (remaining[toolCount]?.kind === "tool") toolCount++
+  return {
+    ...state,
+    cells: [...state.cells, ...live.slice(0, boundary)],
+    seq: sealed.seq,
+    inflight: { text: "", thinking: "", tools: remaining.slice(0, toolCount) as ToolCell[] },
+    pendingCells: remaining.slice(toolCount),
+  }
+}
+
+function appendPendingDelta(
+  state: TuiState,
+  kind: "assistant" | "thinking",
+  delta: string
+): TuiState {
+  const pendingCells = [...state.pendingCells]
+  const last = pendingCells.at(-1)
+  if (kind === "assistant" && last?.kind === "assistant") {
+    pendingCells[pendingCells.length - 1] = { ...last, raw: last.raw + delta }
+  } else if (kind === "thinking" && last?.kind === "thinking") {
+    pendingCells[pendingCells.length - 1] = { ...last, text: last.text + delta }
+  } else {
+    pendingCells.push(
+      kind === "assistant"
+        ? { id: makeId(state.seq), kind, raw: delta }
+        : { id: makeId(state.seq), kind, text: delta, collapsed: true }
+    )
+    return { ...state, pendingCells, seq: state.seq + 1 }
+  }
+  return { ...state, pendingCells }
+}
+
+/** True while the live region still has something painted under `cells`. */
+function liveRegionBusy(state: TuiState): boolean {
+  return (
+    state.inflight.text.length > 0 ||
+    state.inflight.thinking.length > 0 ||
+    state.inflight.tools.length > 0 ||
+    state.pendingCells.length > 0
+  )
+}
+
 /**
- * Commit a proposed plan to a {@link PlanCell} and derive the `lastPlan` record
- * the App watches to open the approval overlay. Shared by both triggers:
- *   • the `ExitPlanMode` tool signal (`keepText: true` — the inflight narration
- *     before the tool call is committed as a normal assistant cell, the plan
- *     body comes from the tool input);
- *   • the `looksLikePlan` fallback in TURN_COMMIT (`keepText: false` — the
- *     inflight text *is* the plan, so it becomes the PlanCell, not an assistant
- *     cell).
- * Pending reasoning is always flushed first. `prevRaw` (the superseded plan)
- * drives the revision diff badge on a refine.
+ * Append a transcript cell that describes the moment it arrived.
+ *
+ * Straight into `cells` when nothing is live, because there is nothing for it
+ * to jump over. Into {@link TuiState.pendingCells} otherwise, so it paints
+ * under the tool cards and the reply already on screen instead of over them,
+ * and joins `cells` once that content commits.
+ */
+function appendTranscriptCell(state: TuiState, make: (id: string) => Cell): TuiState {
+  const cell = make(makeId(state.seq))
+  return liveRegionBusy(state)
+    ? { ...state, pendingCells: [...state.pendingCells, cell], seq: state.seq + 1 }
+    : { ...state, cells: [...state.cells, cell], seq: state.seq + 1 }
+}
+
+/**
+ * Move queued cells onto the end of a freshly committed cell list.
+ *
+ * Called at the boundaries that empty the live region, and always last, because
+ * last is where the live frame has been painting them. Returns a fresh array
+ * the callers go on to push their own closing cell onto.
+ */
+function drained(cells: Cell[], pending: Cell[]): Cell[] {
+  return pending.length > 0 ? [...cells, ...pending] : [...cells]
+}
+
+/** Commit the turn's final plan text after its tools and reasoning.
+ * Explicit plan signals use COMMIT_PLAN so they can stay behind live tools.
  */
 function commitPlan(
   cells: Cell[],
   inflight: Inflight,
   seq: number,
   raw: string,
-  prevRaw: string | undefined,
-  opts: { keepText: boolean }
+  prevRaw: string | undefined
 ): {
   cells: Cell[]
   seq: number
@@ -278,9 +347,6 @@ function commitPlan(
   const next = [...cells]
   if (inflight.thinking.length > 0) {
     next.push({ id: makeId(nextSeq++), kind: "thinking", text: inflight.thinking, collapsed: true })
-  }
-  if (opts.keepText && inflight.text.length > 0) {
-    next.push({ id: makeId(nextSeq++), kind: "assistant", raw: inflight.text })
   }
   const planSeq = nextSeq
   next.push({ id: makeId(nextSeq++), kind: "plan", raw })
@@ -363,91 +429,72 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     // ── Streaming ─────────────────────────────────────────────────────────────
     case "INFLIGHT_TEXT": {
-      // First answer text after reasoning flushes the reasoning cell.
-      if (state.inflight.thinking.length > 0) {
-        const committed = commitInflight(
-          state.cells,
-          { text: "", thinking: state.inflight.thinking, tools: state.inflight.tools },
-          state.seq
-        )
-        return {
-          ...state,
-          cells: committed.cells,
-          seq: committed.seq,
-          inflight: {
-            text: state.inflight.text + action.delta,
-            thinking: "",
-            tools: state.inflight.tools,
-          },
-        }
+      if (!action.delta) return state
+      if (state.pendingCells.length > 0 || state.inflight.thinking.length > 0) {
+        state = advanceTranscript(state)
       }
+      if (state.pendingCells.length > 0) return appendPendingDelta(state, "assistant", action.delta)
       return { ...state, inflight: { ...state.inflight, text: state.inflight.text + action.delta } }
     }
-    case "INFLIGHT_THINKING":
+    case "INFLIGHT_THINKING": {
+      if (!action.delta) return state
+      if (state.pendingCells.length > 0 || state.inflight.text.length > 0) {
+        state = advanceTranscript(state)
+      }
+      if (state.pendingCells.length > 0) return appendPendingDelta(state, "thinking", action.delta)
       return {
         ...state,
         inflight: { ...state.inflight, thinking: state.inflight.thinking + action.delta },
       }
+    }
     case "COMMENTARY_DELTA": {
-      const existing = state.cells.findIndex(
-        (cell) => cell.kind === "commentary" && cell.messageId === action.messageId
-      )
-      if (existing >= 0) {
-        const cells = [...state.cells]
+      for (const key of ["cells", "pendingCells"] as const) {
+        const existing = state[key].findIndex(
+          (cell) => cell.kind === "commentary" && cell.messageId === action.messageId
+        )
+        if (existing < 0) continue
+        const cells = [...state[key]]
         const cell = cells[existing]
         if (cell.kind !== "commentary") return state
-        cells[existing] = {
-          ...cell,
-          text: cell.text + action.delta,
-          done: action.done,
-        }
-        return { ...state, cells }
+        cells[existing] = { ...cell, text: cell.text + action.delta, done: action.done }
+        return { ...state, [key]: cells }
       }
-      return {
-        ...state,
-        cells: [
-          ...state.cells,
-          {
-            id: makeId(state.seq),
-            kind: "commentary",
-            messageId: action.messageId,
-            text: action.delta,
-            done: action.done,
-          },
-        ],
-        seq: state.seq + 1,
-      }
+      return appendTranscriptCell(state, (id) => ({
+        id,
+        kind: "commentary",
+        messageId: action.messageId,
+        text: action.delta,
+        done: action.done,
+      }))
     }
     case "CONTENT_PART_UPSERT": {
-      const existing = state.cells.findIndex(
-        (cell) => cell.kind === "content-part" && cell.partId === action.partId
-      )
-      if (existing >= 0) {
-        const cells = [...state.cells]
+      for (const key of ["cells", "pendingCells"] as const) {
+        const existing = state[key].findIndex(
+          (cell) => cell.kind === "content-part" && cell.partId === action.partId
+        )
+        if (existing < 0) continue
+        const cells = [...state[key]]
         const cell = cells[existing]
         if (cell.kind !== "content-part") return state
         cells[existing] = { ...cell, part: action.part }
-        return { ...state, cells }
+        return { ...state, [key]: cells }
       }
-      return {
-        ...state,
-        cells: [
-          ...state.cells,
-          {
-            id: makeId(state.seq),
-            kind: "content-part",
-            partId: action.partId,
-            part: action.part,
-          },
-        ],
-        seq: state.seq + 1,
-      }
+      return appendTranscriptCell(state, (id) => ({
+        id,
+        kind: "content-part",
+        partId: action.partId,
+        part: action.part,
+      }))
     }
     case "CONTENT_PART_REMOVE": {
-      const cells = state.cells.filter(
-        (cell) => cell.kind !== "content-part" || cell.partId !== action.partId
-      )
-      return cells.length === state.cells.length ? state : { ...state, cells }
+      const keep = (cell: Cell): boolean =>
+        cell.kind !== "content-part" || cell.partId !== action.partId
+      const cells = state.cells.filter(keep)
+      const pendingCells = state.pendingCells.filter(keep)
+      return cells.length === state.cells.length &&
+        pendingCells.length === state.pendingCells.length
+        ? state
+        : { ...state, cells, pendingCells }
     }
     case "CANONICAL_EVENT_NOTICE": {
       if (action.ephemeral) {
@@ -461,27 +508,20 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         }
       }
       if (
-        state.cells.some(
+        [...state.cells, ...state.pendingCells].some(
           (cell) => cell.kind === "canonical-event" && cell.eventId === action.eventId
         )
       ) {
         return state
       }
-      return {
-        ...state,
-        cells: [
-          ...state.cells,
-          {
-            id: makeId(state.seq),
-            kind: "canonical-event",
-            eventId: action.eventId,
-            level: action.level,
-            title: action.title,
-            summary: action.summary,
-          },
-        ],
-        seq: state.seq + 1,
-      }
+      return appendTranscriptCell(state, (id) => ({
+        id,
+        kind: "canonical-event",
+        eventId: action.eventId,
+        level: action.level,
+        title: action.title,
+        summary: action.summary,
+      }))
     }
     case "COMMIT_PLAN": {
       // Programmatic plan capture from the `/plan explore` pipeline: the Plan
@@ -491,15 +531,12 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // the pipeline can be kicked from any mode.
       const raw = action.raw.trim()
       if (!raw) return state
-      const p = commitPlan(state.cells, state.inflight, state.seq, raw, state.lastPlan?.raw, {
-        keepText: true,
-      })
+      state = advanceTranscript(state)
+      const planSeq = state.seq
+      const placed = appendTranscriptCell(state, (id) => ({ id, kind: "plan", raw }))
       return {
-        ...state,
-        cells: p.cells,
-        seq: p.seq,
-        inflight: p.inflight,
-        lastPlan: p.lastPlan,
+        ...placed,
+        lastPlan: { raw, seq: planSeq, ...(state.lastPlan ? { prevRaw: state.lastPlan.raw } : {}) },
         planCapturedThisTurn: true,
       }
     }
@@ -515,17 +552,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         if (state.planCapturedThisTurn) return state
         const body = planBodyFromExitInput(action.input)
         if (body) {
-          const p = commitPlan(state.cells, state.inflight, state.seq, body, state.lastPlan?.raw, {
-            keepText: true,
-          })
-          return {
-            ...state,
-            cells: p.cells,
-            seq: p.seq,
-            inflight: p.inflight,
-            lastPlan: p.lastPlan,
-            planCapturedThisTurn: true,
-          }
+          return reduceInner(state, { type: "COMMIT_PLAN", raw: body })
         }
         // Malformed input (no usable plan body): fall through to render it as a
         // normal tool cell rather than swallowing the call.
@@ -558,6 +585,14 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         tools[inflightDuplicate] = next
         return { ...state, inflight: { ...state.inflight, tools } }
       }
+      const pendingDuplicate = state.pendingCells.findIndex(
+        (cell) => cell.kind === "tool" && cell.callKey === action.callKey
+      )
+      if (pendingDuplicate >= 0) {
+        const pendingCells = [...state.pendingCells]
+        pendingCells[pendingDuplicate] = refine(pendingCells[pendingDuplicate] as ToolCell)
+        return { ...state, pendingCells }
+      }
       const committedDuplicate = state.cells.findIndex(
         (cell) => cell.kind === "tool" && cell.callKey === action.callKey
       )
@@ -575,55 +610,23 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         cells[committedDuplicate] = next
         return { ...state, cells }
       }
-      // ── flush completed tools → cells (in original order) ─────────────────
-      // Tools that already resolved stay in inflight.tools so they re-render live
-      // (⏳→✓). They are only moved to `<Static>` cells at the NEXT commit
-      // boundary — a follow-on TOOL_CALL or TURN_COMMIT — so the transcript order
-      // is: text-before-tool → tool(done) → text-after-tool → next-tool.
+      state = advanceTranscript(state)
       let seq = state.seq
       const cells = [...state.cells]
-      const remainingTools: ToolCell[] = []
-      for (const t of state.inflight.tools) {
-        if (t.status !== "running") {
-          cells.push(t)
-        } else {
-          remainingTools.push(t)
-        }
-      }
-      // ── commit pending inflight text/thinking ────────────────────────────
-      if (state.inflight.thinking.length > 0) {
-        cells.push({
-          id: makeId(seq++),
-          kind: "thinking",
-          text: state.inflight.thinking,
-          collapsed: true,
-        })
-      }
-      if (state.inflight.text.length > 0) {
-        cells.push({ id: makeId(seq++), kind: "assistant", raw: state.inflight.text })
-      }
+      const remainingTools = [...state.inflight.tools]
       // ── todo tool still merges into a single cell (not a per-call cell) ─
       const toolStats = bumpToolStat(state.toolStats, action.toolName, "calls")
       if (isTodoTool(action.toolName)) {
         const todos = parseTodos(action.input)
-        const existingIdx = cells.findIndex((c) => c.kind === "todo")
-        if (existingIdx >= 0) {
-          const updated = [...cells]
+        for (const key of ["cells", "pendingCells"] as const) {
+          const existingIdx = state[key].findIndex((cell) => cell.kind === "todo")
+          if (existingIdx < 0) continue
+          const updated = [...state[key]]
           updated[existingIdx] = { ...(updated[existingIdx] as TodoCell), todos }
-          return {
-            ...state,
-            cells: updated,
-            seq,
-            inflight: { text: "", thinking: "", tools: remainingTools },
-            toolStats,
-          }
+          return { ...state, [key]: updated, toolStats }
         }
-        cells.push({ id: makeId(seq++), kind: "todo", todos })
         return {
-          ...state,
-          cells,
-          seq,
-          inflight: { text: "", thinking: "", tools: remainingTools },
+          ...appendTranscriptCell(state, (id) => ({ id, kind: "todo", todos })),
           toolStats,
         }
       }
@@ -638,6 +641,9 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         status: "running",
         // Tools collapse by default (Claude-Code look); a user pref can flip it.
         collapsed: state.config.render?.collapseToolsByDefault !== false,
+      }
+      if (state.pendingCells.length > 0) {
+        return { ...state, seq, pendingCells: [...state.pendingCells, tool], toolStats }
       }
       remainingTools.push(tool)
       return {
@@ -661,6 +667,14 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
         tools[inflightIdx] = patch(tools[inflightIdx])
         return { ...state, inflight: { ...state.inflight, tools } }
       }
+      const pendingIdx = state.pendingCells.findIndex(
+        (cell) => cell.kind === "tool" && cell.callKey === action.callKey
+      )
+      if (pendingIdx >= 0) {
+        const pendingCells = [...state.pendingCells]
+        pendingCells[pendingIdx] = patch(pendingCells[pendingIdx] as ToolCell)
+        return { ...state, pendingCells }
+      }
       const cellIdx = state.cells.findIndex(
         (c) => c.kind === "tool" && c.callKey === action.callKey
       )
@@ -672,100 +686,53 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // The update outran its `TOOL_CALL` (or the call was never announced):
       // materialize the card rather than dropping the content. Idempotent —
       // every later update for this key now finds it above.
-      const created: ToolCell = {
-        id: makeId(state.seq),
-        kind: "tool",
+      return reduceInner(state, {
+        type: "TOOL_CALL",
         callKey: action.callKey,
         toolName: action.toolName ?? "external",
-        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
         input: action.input ?? {},
-        status: "running",
-        collapsed: state.config.render?.collapseToolsByDefault !== false,
-      }
-      return {
-        ...state,
-        seq: state.seq + 1,
-        inflight: { ...state.inflight, tools: [...state.inflight.tools, created] },
-      }
+        ...(action.displayTitle ? { displayTitle: action.displayTitle } : {}),
+      })
     }
     case "TOOL_RESULT": {
-      // Pair the result with its running tool cell, most-specific match first:
-      //   1. exact callKey (set when the result correlated to its tool_use),
-      //   2. oldest running cell of the same tool name,
-      //   3. the sole running cell — but ONLY when exactly one is in flight, so a
-      //      nameless/keyless result can't be mis-attached to the wrong card when
-      //      several different tools run concurrently.
-      // Search inflight.tools first — tool cells now live there during the turn
-      // so status transitions (⏳→✓) re-render in the live frame. Fall back to
-      // cells for edge cases (e.g. a stale result arriving after the turn ended).
-      const runningOf = (tools: ToolCell[], pred: (c: ToolCell) => boolean): number =>
-        tools.findIndex((c) => c.status === "running" && pred(c))
-      const soleRunning = (tools: ToolCell[]): number => {
-        const running = tools.filter((c) => c.status === "running")
-        return running.length === 1 ? tools.indexOf(running[0]) : -1
-      }
-      let idx = action.callKey
-        ? runningOf(state.inflight.tools, (c) => c.callKey === action.callKey)
-        : -1
-      if (idx < 0 && action.toolName)
-        idx = runningOf(state.inflight.tools, (c) => c.toolName === action.toolName)
-      // The sole-running fallback is ONLY for a nameless, keyless result — a
-      // result that DID carry a key/name but matched nothing (a late/duplicate
-      // result, or its tool already moved to cells) must NOT be force-attached to
-      // an unrelated tool that happens to be the lone one in flight.
-      if (idx < 0 && !action.callKey && !action.toolName) idx = soleRunning(state.inflight.tools)
-      if (idx >= 0) {
-        // Found in inflight — update in place so the live frame re-renders it
-        // (⏳→✓/✗). Do NOT move it to cells yet; it stays in inflight.tools until
-        // the next commit boundary (TOOL_CALL / TURN_COMMIT), preserving the
-        // natural text→result ordering.
-        const updated = [...state.inflight.tools]
-        const matched = updated[idx] as ToolCell
-        updated[idx] = {
-          ...matched,
-          status: action.isError ? "error" : "done",
-          result: action.result,
-          isError: action.isError,
-        }
-        const toolStats = action.isError
-          ? bumpToolStat(state.toolStats, matched.toolName, "errors")
-          : state.toolStats
-        return { ...state, inflight: { ...state.inflight, tools: updated }, toolStats }
-      }
-      // Fallback: search cells for running tools (stale result after turn end,
-      // or a pre-existing cell from a restored session).
-      const cellIdx = action.callKey
-        ? state.cells.findIndex(
-            (c) => c.kind === "tool" && c.status === "running" && c.callKey === action.callKey
-          )
-        : -1
-      let fallbackIdx = cellIdx
-      if (fallbackIdx < 0 && action.toolName)
-        fallbackIdx = state.cells.findIndex(
-          (c) => c.kind === "tool" && c.status === "running" && c.toolName === action.toolName
-        )
-      if (fallbackIdx < 0 && !action.callKey && !action.toolName) {
-        // Same single-candidate guard as inflight, and likewise only for a
-        // nameless, keyless result: pair it to a lone running cell, never guess
-        // among several and never override an unmatched keyed/named result.
-        const running = state.cells.filter((c) => c.kind === "tool" && c.status === "running")
-        if (running.length === 1) fallbackIdx = state.cells.indexOf(running[0])
-      }
-      if (fallbackIdx < 0) return state
-      const updated = [...state.cells]
-      const matched = updated[fallbackIdx] as ToolCell
-      updated[fallbackIdx] = {
-        ...matched,
+      // Search the entire live sequence before restored cells. Correlation must
+      // not depend on which side of a notice a tool happens to occupy.
+      const locations = [
+        ...state.inflight.tools.map((tool, index) => ({ tool, index, region: "tools" as const })),
+        ...state.pendingCells.flatMap((cell, index) =>
+          cell.kind === "tool" ? [{ tool: cell, index, region: "pendingCells" as const }] : []
+        ),
+        ...state.cells.flatMap((cell, index) =>
+          cell.kind === "tool" ? [{ tool: cell, index, region: "cells" as const }] : []
+        ),
+      ]
+      const running = locations.filter(({ tool }) => tool.status === "running")
+      let match = action.callKey
+        ? running.find(({ tool }) => tool.callKey === action.callKey)
+        : undefined
+      if (!match && action.toolName)
+        match = running.find(({ tool }) => tool.toolName === action.toolName)
+      // ADR0053: never guess among concurrent tools for a nameless/keyless result.
+      if (!match && !action.callKey && !action.toolName && running.length === 1) match = running[0]
+      if (!match) return state
+      const { tool, index, region } = match
+      const updated: ToolCell = {
+        ...tool,
         status: action.isError ? "error" : "done",
         result: action.result,
         isError: action.isError,
       }
-      // Tally the error against the cell we actually matched — the action's
-      // toolName may be empty when the result couldn't be correlated.
       const toolStats = action.isError
-        ? bumpToolStat(state.toolStats, matched.toolName, "errors")
+        ? bumpToolStat(state.toolStats, tool.toolName, "errors")
         : state.toolStats
-      return { ...state, cells: updated, toolStats }
+      if (region === "tools") {
+        const tools = [...state.inflight.tools]
+        tools[index] = updated
+        return { ...state, inflight: { ...state.inflight, tools }, toolStats }
+      }
+      const cells = [...state[region]]
+      cells[index] = updated
+      return { ...state, [region]: cells, toolStats }
     }
 
     // ── Usage (per-turn, streamed from the SDK result message) ──────────────────
@@ -843,13 +810,17 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
 
     // ── Turn lifecycle ──────────────────────────────────────────────────────────
     case "TURN_START": {
+      // A queue can survive a turn that never reached a commit boundary. Flush
+      // it ahead of the new prompt rather than losing it or letting it drift
+      // into the next turn's output.
       const cells = [
-        ...state.cells,
+        ...drained(state.cells, state.pendingCells),
         { id: makeId(state.seq), kind: "user", text: action.prompt } as Cell,
       ]
       return {
         ...state,
         cells,
+        pendingCells: [],
         seq: state.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         // A new turn's reveal must start from zero rather than inherit the
@@ -895,15 +866,17 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
           state.inflight,
           state.seq,
           state.inflight.text,
-          state.lastPlan?.raw,
-          { keepText: false }
+          state.lastPlan?.raw
         )
         committed = { cells: p.cells, seq: p.seq, inflight: p.inflight }
         lastPlan = p.lastPlan
       } else {
         committed = commitInflight(baseCells, state.inflight, state.seq)
       }
-      const finalCells = committed.cells
+      // Queued notices land last, which is exactly where the live frame has
+      // been painting them: the committed transcript reads the same as the
+      // screen it replaces.
+      const finalCells = drained(committed.cells, state.pendingCells)
       // The native Anthropic path streams usage via SET_USAGE; only fall back to
       // the resolved result's usage when no stream event landed (ai-sdk path),
       // so a turn's tokens/cost are never counted twice.
@@ -912,6 +885,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         cells: finalCells,
+        pendingCells: [],
         seq: committed.seq,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
@@ -951,7 +925,18 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       )
       const baseCells = terminalTools.length > 0 ? [...state.cells, ...terminalTools] : state.cells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
-      const finalCells = committed.cells
+      const finalCells = drained(
+        committed.cells,
+        state.pendingCells.map((cell) =>
+          cell.kind === "tool"
+            ? settleRunningTools(
+                [cell],
+                "error",
+                `Turn ended before this tool completed: ${action.message}`
+              )[0]
+            : cell
+        )
+      )
       finalCells.push({
         id: makeId(committed.seq),
         kind: "error",
@@ -962,6 +947,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         cells: finalCells,
+        pendingCells: [],
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
@@ -979,12 +965,24 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       // The key handler adds an immediate interruption boundary so a blocked
       // permission/tool call acknowledges the keypress synchronously. Move that
       // boundary behind the settled tools/partial reply instead of duplicating it.
+      // It is queued rather than committed while the turn is still live, so the
+      // queue is where to look for it first.
+      const queued = state.pendingCells
+      const isInterruption = (cell: Cell): boolean =>
+        cell.kind === "notice" && cell.tone === "interrupted"
       const lastCell = state.cells.at(-1)
-      const pendingInterruption = lastCell?.kind === "notice" && lastCell.tone === "interrupted"
-      const priorCells = pendingInterruption ? state.cells.slice(0, -1) : state.cells
+      const priorCells =
+        lastCell && isInterruption(lastCell) ? state.cells.slice(0, -1) : state.cells
+      const carried = queued
+        .filter((cell) => !isInterruption(cell))
+        .map((cell) =>
+          cell.kind === "tool"
+            ? settleRunningTools([cell], "cancelled", "Cancelled by user.")[0]
+            : cell
+        )
       const baseCells = terminalTools.length > 0 ? [...priorCells, ...terminalTools] : priorCells
       const committed = commitInflight(baseCells, state.inflight, state.seq)
-      const finalCells = committed.cells
+      const finalCells = drained(committed.cells, carried)
       finalCells.push({
         id: makeId(committed.seq),
         kind: "notice",
@@ -994,6 +992,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         cells: finalCells,
+        pendingCells: [],
         seq: committed.seq + 1,
         inflight: { text: "", thinking: "", tools: [] },
         turnStatus: "idle",
@@ -1223,31 +1222,26 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "EDIT_CLEAR":
       return state.editTarget ? { ...state, editTarget: undefined } : state
     case "NOTICE": {
-      const cells = [
-        ...state.cells,
-        {
-          id: makeId(state.seq),
-          kind: "notice" as const,
-          message: action.message,
-          ...(action.tone ? { tone: action.tone } : {}),
-        },
-      ]
+      const placed = appendTranscriptCell(state, (id) => ({
+        id,
+        kind: "notice" as const,
+        message: action.message,
+        ...(action.tone ? { tone: action.tone } : {}),
+      }))
       // When flagged, also surface a transient toast so the message isn't lost in
       // scrollback (uses a second seq tick for a stable, unique toast id).
       if (action.toast) {
-        const toastId = makeId(state.seq + 1)
         return {
-          ...state,
-          cells,
-          seq: state.seq + 2,
-          toasts: pushToast(state.toasts, {
-            id: toastId,
+          ...placed,
+          seq: placed.seq + 1,
+          toasts: pushToast(placed.toasts, {
+            id: makeId(placed.seq),
             severity: action.severity ?? "info",
             message: action.message,
           }),
         }
       }
-      return { ...state, cells, seq: state.seq + 1 }
+      return placed
     }
     case "TOAST_PUSH":
       return {
@@ -1266,20 +1260,18 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
       return { ...state, sidecarDown: action.down }
     case "COMPACT_BOUNDARY":
       // Render the boundary inline as a notice cell (reuses the notice renderer).
+      return appendTranscriptCell(state, (id) => ({
+        id,
+        kind: "notice",
+        message: formatCompactBoundary(action.trigger, action.preTokens, action.postTokens),
+      }))
+    case "LOAD_CELLS":
       return {
         ...state,
-        cells: [
-          ...state.cells,
-          {
-            id: makeId(state.seq),
-            kind: "notice",
-            message: formatCompactBoundary(action.trigger, action.preTokens, action.postTokens),
-          },
-        ],
-        seq: state.seq + 1,
+        cells: action.cells,
+        pendingCells: [],
+        inflight: { text: "", thinking: "", tools: [] },
       }
-    case "LOAD_CELLS":
-      return { ...state, cells: action.cells, inflight: { text: "", thinking: "", tools: [] } }
     case "SET_INIT_DRAFT":
       return { ...state, initDraft: { target: action.target, content: action.content } }
     case "CLEAR_INIT_DRAFT":
@@ -1368,7 +1360,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
     case "SET_MODE":
       return {
         ...state,
-        config: { ...state.config, permissionMode: action.mode },
+        config: { ...state.config, permissionMode: action.mode, permissionModeExplicit: true },
         overlay: { kind: "none" },
       }
     case "BYPASS_ACK":

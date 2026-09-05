@@ -98,6 +98,38 @@ describe("DoctorPanel", () => {
     expect(container.textContent ?? "").not.toContain("Sandbox")
   })
 
+  it("renders built-in lazy service status from the session snapshot", () => {
+    const { container } = render(
+      <DoctorPanel
+        report={{
+          ...report,
+          agentBackend: "builtin",
+          cogniaParity: {
+            backend: "builtin",
+            contextVersion: "v1",
+            attachable: true,
+            running: true,
+            builtinToolCount: 3,
+            hostToolCount: 1,
+            userMcpCount: 0,
+            connections: 1,
+            restartRequired: [],
+            builtin: {
+              phase: "ready",
+              runtime: "ai-sdk",
+              capabilities: [],
+              skills: false,
+              categories: { lsp: { state: "initializing", reason: "Initialized on first use" } },
+            },
+          },
+        }}
+        onClose={() => {}}
+        onViewReport={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("lsp: initializing — Initialized on first use")
+  })
+
   it("flags an invalid model", () => {
     const { container } = render(
       <DoctorPanel

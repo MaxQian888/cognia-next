@@ -79,6 +79,29 @@ function makeAssembler(
 }
 
 describe("createCliContextAssembler — session context", () => {
+  it("rejects failed plugin startup before resolving tools and allows a clean retry", async () => {
+    let attempts = 0
+    const resolveOptions = jest.fn(async () => ({ model: "claude-x" }) as SendOptions)
+    const assembler = makeAssembler(
+      {
+        resolveOptions,
+        loadPluginRuntime: async () =>
+          ++attempts === 1
+            ? { ok: false, toolCount: 0, error: "Cannot find package lib0" }
+            : { ok: true, toolCount: 4 },
+      },
+      cfg({ pluginTools: true })
+    )
+    await expect(assembler.resolveSession()).rejects.toMatchObject({
+      code: "plugin_runtime_unavailable",
+      retryable: true,
+      message: expect.stringContaining("Cannot find package lib0"),
+    })
+    expect(resolveOptions).not.toHaveBeenCalled()
+    expect(assembler.peek()).toBeNull()
+    await expect(assembler.resolveSession()).resolves.toBeDefined()
+    expect(resolveOptions).toHaveBeenCalledTimes(1)
+  })
   it("resolves once and caches; invalidate forces a re-resolve", async () => {
     let calls = 0
     const assembler = makeAssembler({

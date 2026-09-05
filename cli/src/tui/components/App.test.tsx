@@ -34,6 +34,7 @@ jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
 // marked@18 is ESM-only; this suite exercises App orchestration rather than
 // markdown tokenization, which has its own focused tests.
 jest.mock("../render/cell-terminal-block", () => ({
+  markdownSpans: jest.requireActual("../render/cell-terminal-block").markdownSpans,
   cellToTerminalBlock: (cell: { id?: string; text?: string; raw?: string; result?: string }) => {
     const plainText = cell.text ?? cell.raw ?? cell.result ?? ""
     return {
@@ -72,6 +73,20 @@ jest.mock("../../handoff/host-state-client", () => ({
 }))
 
 import { App } from "./App"
+import { skillSetEnabled } from "../runtime/skill-controller"
+
+jest.mock("../runtime/skill-controller", () => ({
+  ...jest.requireActual("../runtime/skill-controller"),
+  skillSetEnabled: jest.fn(jest.requireActual("../runtime/skill-controller").skillSetEnabled),
+}))
+import { externalCapabilities } from "../runtime/backend-capabilities"
+
+jest.mock("../runtime/backend-controller", () => ({
+  ...jest.requireActual("../runtime/backend-controller"),
+  disconnectBackend: jest.fn(async () => undefined),
+}))
+
+import { hasSpinnerFrame } from "./Spinner"
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CreateSession } from "../hooks/useAgentSession"
@@ -148,6 +163,19 @@ function submit() {
 }
 
 describe("App", () => {
+  let isolatedHome: string
+  let previousHome: string | undefined
+  beforeAll(() => {
+    previousHome = process.env.COGNIA_HOME
+    isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-app-test-"))
+    process.env.COGNIA_HOME = isolatedHome
+  })
+  afterAll(() => {
+    if (previousHome === undefined) delete process.env.COGNIA_HOME
+    else process.env.COGNIA_HOME = previousHome
+    fs.rmSync(isolatedHome, { recursive: true, force: true })
+  })
+
   beforeEach(() => __resetInk())
 
   it("persists a submitted line to the durable history store", async () => {
@@ -175,6 +203,50 @@ describe("App", () => {
     })
     await waitFor(() => expect(container.textContent).toContain("hello there"))
     expect(container.textContent).toContain("hi")
+  })
+
+  it("refreshes command availability from the built-in runtime readiness callback", async () => {
+    const fake = fakeSession("ready for follow-up")
+    let publish: Parameters<CreateSession>[0]["onToolHostStatus"]
+    const create: CreateSession = (params) => {
+      publish = params.onToolHostStatus
+      return fake.create(params)
+    }
+    const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("ready for follow-up"))
+    const snapshot = {
+      backend: "builtin",
+      contextVersion: "ctx",
+      attachable: true,
+      running: true,
+      builtinToolCount: 1,
+      hostToolCount: 1,
+      subagentDispatch: false,
+      userMcpCount: 0,
+      connections: 1,
+      builtin: {
+        phase: "ready" as const,
+        runtime: "ai-sdk",
+        capabilities: [],
+        skills: false,
+        categories: {},
+      },
+    }
+    act(() => publish?.(snapshot))
+    type("/think")
+    submit()
+    expect(container.textContent).toContain("Thinking level is unavailable")
+    act(() =>
+      publish?.({ ...snapshot, builtin: { ...snapshot.builtin, capabilities: ["thinking"] } })
+    )
+    type("/think")
+    submit()
+    expect(container.textContent).toContain("Reasoning effort")
   })
 
   it("routes attached sends through the HostState outbox instead of the standalone session", async () => {
@@ -466,6 +538,48 @@ describe("App", () => {
     expect(prompts[0]).toBe("explain")
   })
 
+  it("waits for asynchronous skill enablement before sending a mention prompt", async () => {
+    let complete!: () => void
+    const enable = (skillSetEnabled as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve
+        })
+    )
+    const fake = fakeSession("enabled")
+    try {
+      render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={fake.create}
+          mentionProviders={{
+            files: () => [],
+            skills: async () => [
+              { kind: "skill", id: "skill_cite", label: "Cite", insert: "@skill:skill_cite" },
+            ],
+            agents: async () => [],
+          }}
+        />
+      )
+      type("@skill:skill_cite explain")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(enable).toHaveBeenCalledWith("skill_cite", true, expect.any(Object))
+      expect(fake.prompts).toEqual([])
+      await act(async () => {
+        complete()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(fake.prompts).toEqual(["explain"]))
+    } finally {
+      enable.mockClear()
+    }
+  })
+
   it("resolves a @agent mention: dispatches it and folds the result into the prompt", async () => {
     const { create, prompts } = fakeSession("done")
     const mentionProviders = {
@@ -583,7 +697,10 @@ describe("App", () => {
         await opts.gate({
           toolName: "mcp__cognia-tools__bash",
           displayName: "mcp__cognia-tools__bash",
-          input: { command: "ls" },
+          // A command that genuinely needs a decision. `ls` never reaches the
+          // prompt any more, because the command decides now, not the name of
+          // the tool that runs it.
+          input: { command: "chmod +x deploy.sh" },
           requestId: "r1",
           sessionId: "s",
         } as never)
@@ -613,8 +730,15 @@ describe("App", () => {
       __fireInput("", { return: true })
       await Promise.resolve()
     })
+    // The grant that gets written is the COMMAND, not the tool. "Allow always"
+    // on one build used to hand over every future `rm -rf` in the same click.
     await waitFor(() =>
-      expect(persistToolApproval).toHaveBeenCalledWith("/home/u/.cognia", "mcp__cognia-tools__bash")
+      expect(persistToolApproval).toHaveBeenCalledWith(
+        "/home/u/.cognia",
+        "mcp__cognia-tools__bash(chmod +x deploy.sh)",
+        undefined,
+        { cwd: "/work" }
+      )
     )
     expect(invalidate).toHaveBeenCalled()
   })
@@ -908,6 +1032,198 @@ describe("App", () => {
     expect(container.textContent).not.toContain("Switch model")
   })
 
+  it.each(["dismiss", "replace", "reject"])(
+    "ignores a stale external model catalog after %s",
+    async (action) => {
+      let resolveModels!: (models: Array<{ id: string }>) => void
+      let rejectModels!: (error: Error) => void
+      const listExternalModels = jest.fn(
+        () =>
+          new Promise<Array<{ id: string }>>((resolve, reject) => {
+            resolveModels = resolve
+            rejectModels = reject
+          })
+      )
+      const { container } = render(
+        <App
+          config={{ ...config, agentBackend: "codex" }}
+          sessionId="s1"
+          connectBackendFn={async () => ({
+            ok: true,
+            connection: {
+              backend: "codex",
+              presetId: "codex-app-server",
+              agentId: "fake-agent",
+              command: "codex",
+              capabilities: externalCapabilities({
+                backend: "codex",
+                presetId: "codex-app-server",
+              }),
+            },
+          })}
+          listExternalModels={listExternalModels}
+        />
+      )
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      type("/model")
+      submit()
+      expect(listExternalModels).toHaveBeenCalledTimes(1)
+      if (action === "dismiss") act(() => __fireInput("", { escape: true }))
+      else {
+        type("/help")
+        submit()
+      }
+      await act(async () => {
+        if (action === "reject") rejectModels(new Error("offline failure"))
+        else resolveModels([{ id: "stale-only-model" }])
+      })
+      expect(container.textContent).not.toContain("Switch model")
+      expect(container.textContent).not.toContain("stale-only-model")
+      expect(container.textContent).not.toContain("did not report any models")
+    }
+  )
+
+  it("does not refresh a replacement model overlay with an old provider catalog", async () => {
+    const syncs: Array<() => void> = []
+    const initOpenRouterCatalog = jest.fn(() => new Promise<void>((resolve) => syncs.push(resolve)))
+    const { container } = render(
+      <App
+        config={{
+          ...config,
+          provider: "openrouter",
+          model: "router-old",
+          providers: {
+            openrouter: { apiKey: "fake", model: "router-old" },
+            openai: { apiKey: "fake", model: "gpt-4o" },
+          },
+        }}
+        sessionId="s1"
+        createSession={fakeSession().create}
+        initOpenRouterCatalog={initOpenRouterCatalog}
+        persistConfig={() => true}
+        persistProviderModel={() => true}
+        persistCredential={() => true}
+      />
+    )
+    type("/model")
+    submit()
+    expect(container.textContent).toContain("Switch model")
+    act(() => __fireInput("", { escape: true }))
+    type("/provider")
+    submit()
+    type("openai")
+    submit()
+    // The provider picker opens credential management even for a saved key.
+    submit()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    type("/model")
+    submit()
+    expect(container.textContent).toContain("Switch model")
+    await act(async () => {
+      syncs.forEach((resolve) => resolve())
+    })
+    expect(container.textContent).not.toContain("router-old")
+    expect(container.textContent).toContain("gpt-4o")
+  })
+
+  it.each(["unreadable", "missing"])(
+    "preserves the current session when a listed transcript becomes %s",
+    async (failure) => {
+      const fake = fakeSession("current answer")
+      let unavailable = false
+      const fsx = {
+        ...transcriptFs,
+        read: (file: string) => {
+          if (unavailable) {
+            if (failure === "missing") return null
+            throw new Error("read denied")
+          }
+          return transcriptFs.read(file)
+        },
+      }
+      const { container } = render(
+        <App
+          config={config}
+          sessionId="s1"
+          createSession={fake.create}
+          home="/home"
+          readdir={() => ["ses1.jsonl"]}
+          transcriptFs={fsx}
+        />
+      )
+      type("hello")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      type("/sessions")
+      submit()
+      expect(container.textContent).toContain("Resume session")
+      unavailable = true
+      await act(async () => {
+        __fireInput("", { return: true })
+        await Promise.resolve()
+      })
+      expect(container.textContent).toContain("Could not resume session")
+      expect(fake.closed).not.toHaveBeenCalled()
+      expect(container.textContent).toContain("current answer")
+    }
+  )
+
+  it("reports asynchronous resume creation failures", async () => {
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={() => {
+          throw new Error("resume factory failed")
+        }}
+        home="/home"
+        readdir={() => ["ses1.jsonl"]}
+        transcriptFs={transcriptFs}
+      />
+    )
+    type("/sessions")
+    submit()
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(container.textContent).toContain("Could not resume session: resume factory failed")
+    )
+  })
+
+  it("forwards the App clipboard writer to the transcript document", async () => {
+    const copyClipboard = jest.fn(async () => ({ ok: true as const }))
+    const { container } = render(
+      <App
+        config={config}
+        sessionId="s1"
+        createSession={fakeSession("whole transcript answer").create}
+        copyClipboard={copyClipboard}
+      />
+    )
+    type("hello")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    type("/transcript")
+    submit()
+    await act(async () => {
+      __fireInput("y")
+      await Promise.resolve()
+    })
+    expect(copyClipboard).toHaveBeenCalledWith(expect.stringContaining("whole transcript answer"))
+    expect(container.textContent).toContain("Copied the complete document")
+  })
+
   it("opens the mode switcher on /mode", () => {
     const { create } = fakeSession()
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
@@ -959,8 +1275,8 @@ describe("App", () => {
     const { create } = fakeSession()
     const { container } = render(<App config={config} sessionId="s1" createSession={create} />)
     act(() => __fireInput("", { tab: true, shift: true }))
-    // default → acceptEdits (first step of the PERMISSION_MODES cycle).
-    expect(container.textContent).toContain("Permission mode: acceptEdits")
+    // The CLI defaults to acceptEdits, whose next mode is read-only Plan.
+    expect(container.textContent).toContain("Permission mode: plan")
   })
 
   it("opens the session picker on /resume", async () => {
@@ -2226,6 +2542,38 @@ describe("App", () => {
   describe("plan mode", () => {
     const planConfig: ResolvedConfig = { ...config, permissionMode: "plan" }
 
+    it.each(["", null])(
+      "keeps an empty or unreadable edited plan unapproved (%s)",
+      async (edited) => {
+        const persistPlan = jest.fn(() => "/p.md")
+        const { create, prompts } = fakeSession("# Plan\n1. implement feature\n2. verify behavior")
+        const { container } = render(
+          <App
+            config={planConfig}
+            sessionId="s1"
+            createSession={create}
+            home="/home/.cognia"
+            persistPlan={persistPlan}
+            openInEditorFn={async () => true}
+            loadPlanFile={() => edited}
+          />
+        )
+        type("plan it")
+        await act(async () => {
+          submit()
+          await Promise.resolve()
+        })
+        await waitFor(() => expect(persistPlan).toHaveBeenCalled())
+        await act(async () => {
+          __fireInput("g", { ctrl: true })
+          await Promise.resolve()
+        })
+        await waitFor(() => expect(container.textContent).toContain("empty or unreadable"))
+        expect(prompts).toHaveLength(1)
+        expect(container.textContent).toContain("Review plan")
+      }
+    )
+
     it("captures a plan-mode plan, persists it, and opens the approval prompt", async () => {
       const persistPlan = jest.fn(() => "/home/.cognia/plans/s1-plan-2.md")
       const { create } = fakeSession("# Plan\n- step one\n- step two")
@@ -2245,7 +2593,7 @@ describe("App", () => {
       })
       await waitFor(() => expect(persistPlan).toHaveBeenCalled())
       expect(container.textContent).toContain("Plan ready for review") // the plan cell header
-      expect(container.textContent).toContain("Ready to code?") // the approval overlay
+      expect(container.textContent).toContain("Review plan") // the approval overlay
       expect(container.textContent).toContain("/home/.cognia/plans/s1-plan-2.md")
       // The latest plan stays visible as a footer chip (open it with /plan).
       expect(container.textContent).toContain("📋")
@@ -2269,15 +2617,69 @@ describe("App", () => {
         await Promise.resolve()
       })
       await waitFor(() => expect(persistPlan).toHaveBeenCalled())
-      // Enter at index 0 = approve.
+      // Review first, then select the execution action.
       await act(async () => {
         __fireInput("", { return: true })
         await Promise.resolve()
       })
-      const { PLAN_APPROVED_PROMPT } = jest.requireActual("../runtime/plan") as {
-        PLAN_APPROVED_PROMPT: string
-      }
-      await waitFor(() => expect(prompts).toContain(PLAN_APPROVED_PROMPT))
+      await act(async () => {
+        __fireInput("", { return: true })
+        await Promise.resolve()
+      })
+      await waitFor(() =>
+        expect(
+          prompts.some(
+            (p) => p.includes("Use this reviewed version") && p.includes("## Approach\n1. a\n2. b")
+          )
+        ).toBe(true)
+      )
+    })
+
+    it("waits for edited plan review and executes the revised content in the current session", async () => {
+      const original = "# Plan\n1. add feature\n2. verify behavior"
+      const revised = "# Revised Plan\n1. preserve compatibility\n2. verify new behavior"
+      const persistPlan = jest.fn(() => "/p.md")
+      const openInEditorFn = jest.fn(async () => true)
+      const { create, prompts } = fakeSession(original)
+      const { container } = render(
+        <App
+          config={planConfig}
+          sessionId="s1"
+          createSession={create}
+          home="/home/.cognia"
+          persistPlan={persistPlan}
+          openInEditorFn={openInEditorFn}
+          loadPlanFile={() => revised}
+        />
+      )
+      type("plan it")
+      await act(async () => {
+        submit()
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(persistPlan).toHaveBeenCalledTimes(1))
+      await act(async () => {
+        __fireInput("g", { ctrl: true })
+        await Promise.resolve()
+      })
+      await waitFor(() => expect(persistPlan).toHaveBeenCalledTimes(2))
+      expect(openInEditorFn).toHaveBeenCalledWith("/p.md", expect.objectContaining({ wait: true }))
+      expect(__suspendTerminal).toHaveBeenCalled()
+      expect(container.textContent).toContain("Revised Plan")
+      expect(prompts).toHaveLength(1)
+      await act(async () => {
+        __fireInput("", { return: true })
+        await Promise.resolve()
+      })
+      await act(async () => {
+        __fireInput("", { return: true })
+        await Promise.resolve()
+      })
+      await waitFor(() =>
+        expect(
+          prompts.some((p) => p.includes("Use this reviewed version") && p.includes(revised))
+        ).toBe(true)
+      )
     })
 
     it("does not prompt for a short clarifying reply in plan mode", async () => {
@@ -2508,4 +2910,58 @@ describe("App", () => {
       expect(container.textContent).toContain("No image in clipboard")
     })
   })
+})
+
+it("shows approval waiting before a Bash side effect and resumes only after Enter", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-approval-view-"))
+  const target = path.join(dir, "approved.txt")
+  __resetInk()
+  const input = { command: `touch ${target} && chmod +x ${target}` }
+  const create: CreateSession = () => ({
+    sessionId: "approval-view",
+    async send(_prompt, opts) {
+      opts.onEvent?.({ type: "tool-call", toolName: "bash", input })
+      const decision = await opts.gate({
+        toolName: "bash",
+        displayName: "Bash",
+        input,
+        requestId: "approval-view",
+        sessionId: "s",
+      } as never)
+      if (decision.decision === "allow") fs.writeFileSync(target, "approved")
+      opts.onEvent?.({ type: "tool-result", toolName: "bash", input, result: "created" })
+      opts.onEvent?.({ type: "text-delta", delta: "approval completed" })
+      return result("approval completed")
+    },
+    close: jest.fn(),
+  })
+  try {
+    const { container, unmount } = render(
+      <App
+        config={{ ...config, permissionMode: "default" }}
+        sessionId="s1"
+        createSession={create}
+        home={dir}
+      />
+    )
+    type("create the file")
+    await act(async () => {
+      submit()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(container.textContent).toContain("Waiting for approval"))
+    expect(container.textContent).toContain("Bash")
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+    expect(fs.existsSync(target)).toBe(false)
+    await act(async () => {
+      __fireInput("", { return: true })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fs.existsSync(target)).toBe(true))
+    await waitFor(() => expect(container.textContent).toContain("approval completed"))
+    expect(container.textContent).not.toContain("Waiting for approval")
+    unmount()
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

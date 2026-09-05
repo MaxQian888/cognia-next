@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { runCliSubagent } from "./subagent-runner"
+import { runCliSubagent, type RunCliSubagentDeps } from "./subagent-runner"
 import type { BuildOptionsContext } from "@/lib/claude/build-options"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
@@ -51,6 +51,101 @@ function captureResult(overrides: Partial<RunAndCaptureResult> = {}): RunAndCapt
 }
 
 describe("runCliSubagent", () => {
+  function setupDeps(): RunCliSubagentDeps {
+    return {
+      config: cfg(),
+      home: "/unused",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      resolveOptions: jest.fn(async () => ({})),
+      resolveHooks: () => undefined,
+      capture: jest.fn(async () => captureResult()),
+      closeSession: jest.fn(async () => undefined),
+      mintId: () => "cancel-test",
+    }
+  }
+
+  it("does not resolve options or start a child for a pre-canceled dispatch", async () => {
+    const deps = setupDeps()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      runCliSubagent(def(), "go", "parent", { ...deps, signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(deps.resolveOptions).not.toHaveBeenCalled()
+    expect(deps.capture).not.toHaveBeenCalled()
+  })
+
+  it("uses the assigned child working directory without mutating the parent config", async () => {
+    const deps = setupDeps()
+    deps.cwd = "/work/child"
+    await runCliSubagent(def(), "go", "parent", deps)
+    expect(deps.resolveOptions).toHaveBeenCalledWith(
+      expect.objectContaining({ session: expect.objectContaining({ workingDir: "/work/child" }) })
+    )
+    expect(deps.config.cwd).toBe("/work")
+  })
+
+  it("does not start or register a child canceled while options resolve", async () => {
+    const deps = setupDeps()
+    const controller = new AbortController()
+    const register = jest.fn()
+    deps.resolveOptions = async () => {
+      controller.abort()
+      return {}
+    }
+    await expect(
+      runCliSubagent(def(), "go", "parent", {
+        ...deps,
+        signal: controller.signal,
+        nesting: { manifest: null, register, unregister: jest.fn() },
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(register).not.toHaveBeenCalled()
+    expect(deps.capture).not.toHaveBeenCalled()
+  })
+
+  it("cleans up partial nested registration when registration throws", async () => {
+    const deps = setupDeps()
+    const unregister = jest.fn()
+    await expect(
+      runCliSubagent(def(), "go", "parent", {
+        ...deps,
+        nesting: {
+          manifest: null,
+          register: () => {
+            throw new Error("registration failed")
+          },
+          unregister,
+        },
+      })
+    ).rejects.toThrow("registration failed")
+    expect(unregister).toHaveBeenCalledWith("parent::sub-cancel-test")
+    expect(deps.closeSession).toHaveBeenCalledWith("parent::sub-cancel-test")
+    expect(deps.capture).not.toHaveBeenCalled()
+  })
+
+  it("does not forward an approval that arrives after the child was canceled", async () => {
+    const deps = setupDeps()
+    const controller = new AbortController()
+    deps.signal = controller.signal
+    deps.gate = async () => {
+      controller.abort()
+      return { decision: "allow" }
+    }
+    deps.capture = async (_id, _prompt, _options, captureOptions) => {
+      await captureOptions!.onPermissionRequest!({ toolName: "write", input: {} } as never)
+      return captureResult()
+    }
+    await expect(runCliSubagent(def(), "go", "parent", deps)).rejects.toMatchObject({
+      name: "AbortError",
+    })
+    expect(deps.closeSession).toHaveBeenCalled()
+  })
+
   it("runs the subagent over a fresh child session and maps the result", async () => {
     let ctxSeen: BuildOptionsContext | null = null
     const capture = jest.fn().mockResolvedValue(
@@ -99,13 +194,26 @@ describe("runCliSubagent", () => {
     expect(ctxSeen!.character?.allowedTools).toEqual(["Read"])
 
     // Auto-approve + disabled overlay applied to the child's send options.
-    expect((sendOptions as SendOptions).suppressApprovalForTools).toContain(
+    expect((sendOptions as SendOptions).suppressApprovalForTools).not.toContain(
       "mcp__cognia-tools__bash"
     )
     expect((sendOptions as SendOptions).disallowedTools).toContain("mcp__s__x")
 
     // The parent turn's gate answers the subagent's tool approvals.
-    expect((capOpts as { onPermissionRequest: unknown }).onPermissionRequest).toBe(gate)
+    const permission = (
+      capOpts as {
+        onPermissionRequest: (req: {
+          toolName: string
+          input: object
+        }) => Promise<{ decision: string }>
+      }
+    ).onPermissionRequest
+    expect(await permission({ toolName: "mcp__cognia-tools__bash", input: {} })).toEqual({
+      decision: "allow",
+    })
+    expect(await permission({ toolName: "unapproved", input: {} })).toEqual(
+      await gate({ toolName: "unapproved", input: {} } as never)
+    )
 
     // Child session retired afterwards.
     expect(closeSession).toHaveBeenCalledWith("parent::sub-abcd")

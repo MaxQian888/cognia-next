@@ -1,7 +1,14 @@
 /**
  * @jest-environment node
  */
-import { interpretLine, chatCommand, launchCommandFromFlags, selectSessionFactory } from "./chat"
+import {
+  createLineReader,
+  interpretLine,
+  chatCommand,
+  launchCommandFromFlags,
+  selectSessionFactory,
+} from "./chat"
+import { PassThrough, Writable } from "node:stream"
 import { parseArgv } from "./args"
 import type { OutputSink } from "./output"
 import type { AgentSession } from "../agent/session-runner"
@@ -310,5 +317,62 @@ describe("selectSessionFactory", () => {
     expect(selectSessionFactory({ ...cfg(), agentBackend: "codex" }, builtin, external)).toBe(
       external
     )
+  })
+})
+
+describe("createLineReader", () => {
+  const sink = () =>
+    new Writable({
+      write(_chunk, _enc, done) {
+        done()
+      },
+    })
+
+  it("hands back every line of a pipe that arrives in one chunk", async () => {
+    const input = new PassThrough()
+    const reader = createLineReader(input, sink())
+    // A piped script lands as ONE readable chunk. Reading it a line at a time
+    // through `question` dropped everything after the first, so a file of
+    // commands ran only its opening line.
+    input.end("/help\n/clear\n/exit\n")
+    expect(await reader.read("› ")).toBe("/help")
+    expect(await reader.read("› ")).toBe("/clear")
+    expect(await reader.read("› ")).toBe("/exit")
+    reader.close()
+  })
+
+  it("answers null once the queue is drained and the input has ended", async () => {
+    const input = new PassThrough()
+    const reader = createLineReader(input, sink())
+    input.end("only one\n")
+    expect(await reader.read("› ")).toBe("only one")
+    expect(await reader.read("› ")).toBeNull()
+    reader.close()
+  })
+
+  it("waits for a line that has not been typed yet", async () => {
+    const input = new PassThrough()
+    const reader = createLineReader(input, sink())
+    const pending = reader.read("› ")
+    input.write("typed later\n")
+    expect(await pending).toBe("typed later")
+    reader.close()
+  })
+
+  it("writes the prompt for each read", async () => {
+    const prompts: string[] = []
+    const output = new Writable({
+      write(chunk, _enc, done) {
+        prompts.push(String(chunk))
+        done()
+      },
+    })
+    const input = new PassThrough()
+    const reader = createLineReader(input, output)
+    input.end("a\nb\n")
+    await reader.read("› ")
+    await reader.read("› ")
+    expect(prompts.filter((p) => p === "› ")).toHaveLength(2)
+    reader.close()
   })
 })

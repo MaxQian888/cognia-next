@@ -25,6 +25,7 @@ function sessionContext(overrides: Partial<SendOptions> = {}): ResolvedCliSessio
     agents: [],
     subagentToolEnabled: false,
     activeSkillIds: [],
+    contextualSkills: [],
     databaseError: null,
     contextVersion: "ctx1",
     sendOptions: {
@@ -639,4 +640,101 @@ describe("toolHostEndpoint — path length", () => {
     const long = "session-".repeat(20)
     expect(toolHostEndpoint(long, 1, socketDir)).not.toBe(toolHostEndpoint(long, 2, socketDir))
   })
+})
+
+it("rejects a late approval after cancellation", async () => {
+  let approve!: (decision: { decision: "allow" }) => void
+  let requested!: () => void
+  const waiting = new Promise<void>((resolve) => {
+    requested = resolve
+  })
+  const broker = await start({
+    gate: () => {
+      requested()
+      return new Promise((resolve) => {
+        approve = resolve
+      })
+    },
+  })
+  const { c } = await connected(broker)
+  const pending = c.call("authorize", { name: "write", args: { path: "/work/file" } })
+  await waiting
+  broker.cancelInFlight("interrupted")
+  expect(await pending).toEqual({ allow: false, reason: "interrupted" })
+  approve({ decision: "allow" })
+  c.end()
+})
+
+it("explicit denies cannot be bypassed by a suppressed tool", async () => {
+  const broker = await start({
+    session: sessionContext({
+      permissionMode: "bypassPermissions",
+      suppressApprovalForTools: [namespaced("write")],
+      permissionRuleset: { [namespaced("write")]: "deny" },
+    }),
+  })
+  const { c } = await connected(broker)
+  expect(await c.call("authorize", { name: "write", args: { path: "/work/file" } })).toEqual({
+    allow: false,
+    reason: "denied by permission ruleset",
+  })
+  c.end()
+})
+
+it.each([{ writableRoots: [] }, { writableRoots: ["/work/output"] }])(
+  "keeps declared workspace reads available with writable roots $writableRoots",
+  async ({ writableRoots }) => {
+    const gate = jest.fn(allowGate)
+    const broker = await start({
+      gate,
+      session: sessionContext({
+        builtinProcessSandbox: {
+          launcher: "/launcher",
+          writableRoots,
+          readableRoots: ["/work"],
+          network: false,
+        },
+      }),
+    })
+    const { c } = await connected(broker)
+    expect(
+      await c.call("authorize", { name: "read", args: { file_path: "/work/source.ts" } })
+    ).toEqual({ allow: true })
+    expect(
+      await c.call("authorize", { name: "write", args: { path: "/work/source.ts" } })
+    ).toMatchObject({ allow: false, reason: expect.stringContaining("writableRoots") })
+    expect(
+      await c.call("authorize", { name: "read", args: { file_path: "/outside/source.ts" } })
+    ).toMatchObject({ allow: false, reason: expect.stringContaining("readableRoots") })
+    expect(
+      await c.call("authorize", { name: "read", args: { file_path: "/work/.ssh/id_rsa" } })
+    ).toMatchObject({ allow: false, reason: expect.stringContaining("credential") })
+    expect(gate).not.toHaveBeenCalled()
+    c.end()
+  }
+)
+
+it("refuses an immutable sandbox scope violation before requesting approval", async () => {
+  const gate = jest.fn(allowGate)
+  const broker = await start({
+    gate,
+    session: sessionContext({
+      confinement: { enabled: false, roots: [] },
+      builtinProcessSandbox: {
+        launcher: "/launcher",
+        writableRoots: ["/work/subdir"],
+        readableRoots: [],
+        network: false,
+      },
+    }),
+  })
+  const { c } = await connected(broker)
+  const result = (await c.call("authorize", { name: "write", args: { path: "/work/file" } })) as {
+    allow: boolean
+    reason: string
+  }
+  expect(result.allow).toBe(false)
+  expect(result.reason).toContain("sandbox.policy.writableRoots")
+  expect(gate).not.toHaveBeenCalled()
+  c.end()
 })

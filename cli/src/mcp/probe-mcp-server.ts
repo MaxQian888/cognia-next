@@ -43,7 +43,9 @@ export interface ProbeServerDeps {
   open?: (server: McpServer, opts: OpenMcpOptions) => Promise<OpenedMcp>
   /** Build an OAuth provider (loads stored tokens) for a remote server. */
   authProvider?: (server: McpServer) => unknown
-  /** Per-attempt probe timeout in ms (default 12s). */
+  /** Caller cancellation covers setup, discovery, and retry backoff. */
+  signal?: AbortSignal
+  /** Per-attempt deadline for setup, all discovery pages, and close (default 12s). */
   timeoutMs?: number
   /** Total connect attempts (default 2) — a cold stdio server (npx still
    * installing) or a waking remote endpoint routinely fails its FIRST connect;
@@ -101,11 +103,20 @@ export function isUnauthorized(err: unknown): boolean {
 }
 
 /** A server may not implement resources/prompts; treat that as "none". */
-async function listSoft<T>(fn: () => Promise<T[]>): Promise<T[]> {
+async function listSoft<T>(
+  fn: () => Promise<T[]>,
+  isAuthError: (err: unknown) => boolean
+): Promise<T[]> {
   try {
     return await fn()
-  } catch {
-    return []
+  } catch (err) {
+    // Only a missing optional method is an empty capability list. In particular,
+    // expired credentials during discovery must still produce needs_auth.
+    if (isAuthError(err)) throw err
+    const code = (err as { code?: unknown } | null)?.code
+    const message = err instanceof Error ? err.message : String(err)
+    if (code === -32601 || /\bmethod not found\b/i.test(message)) return []
+    throw err
   }
 }
 
@@ -120,26 +131,41 @@ export async function probeMcpServer(
   const empty = { tools: [], resources: [], prompts: [] }
   if (!server.enabled) return { status: "disabled", ...empty }
 
+  const cancelled = (): McpProbeResult => ({
+    status: "failed",
+    ...empty,
+    error: "MCP probe cancelled",
+  })
+  if (deps.signal?.aborted) return cancelled()
   const open = deps.open ?? openMcpClient
   const isAuthError = deps.isAuthError ?? isUnauthorized
   const timeoutMs = deps.timeoutMs ?? 12_000
   const maxAttempts = Math.max(1, deps.attempts ?? 2)
   const retryDelayMs = deps.retryDelayMs ?? 300
-  const authProvider = deps.authProvider?.(server)
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-  /** One connect attempt with its own timeout + abort. */
-  const connectOnce = async (): Promise<
-    { ok: true; opened: OpenedMcp } | { ok: false; error: string; timedOut: boolean; auth: boolean }
-  > => {
+  const attemptOnce = async (): Promise<{ result: McpProbeResult; retry: boolean }> => {
     const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let timedOut = false
-    // Capture the stdio child's stderr so a failure can report the real reason
-    // instead of a bare "timed out" / EOF. Piped (not inherited) by the transport,
-    // so it never smears the TUI frame.
     const stderr = makeStderrTail()
-    const timeout = new Promise<never>((_, reject) => {
+    let opened: OpenedMcp | undefined
+    let closing: Promise<void> | undefined
+    const close = (): Promise<void> => {
+      if (opened && !closing) {
+        const handle = opened
+        closing = Promise.resolve()
+          .then(() => handle.close())
+          .catch(() => undefined)
+      }
+      return closing ?? Promise.resolve()
+    }
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort = () => {}
+    const stopped = new Promise<never>((_, reject) => {
+      onAbort = () => {
+        reject(new Error("MCP probe cancelled"))
+        controller.abort()
+      }
+      deps.signal?.addEventListener("abort", onAbort, { once: true })
       timer = setTimeout(() => {
         timedOut = true
         reject(new Error(`MCP probe timed out after ${timeoutMs}ms`))
@@ -147,78 +173,98 @@ export async function probeMcpServer(
       }, timeoutMs)
     })
     try {
-      const opening = open(server, {
-        signal: controller.signal,
-        authProvider,
-        onStderr: stderr.push,
-      })
-      // Some transports cannot cancel their handshake immediately. If one wins
-      // the race only after our timeout aborted the attempt, close that late
-      // connection instead of leaking its child/session into the next retry.
-      void opening.then(
-        (late) => {
-          if (controller.signal.aborted) void late.close().catch(() => undefined)
-        },
-        () => undefined
-      )
-      const opened = await Promise.race([opening, timeout])
-      return { ok: true, opened }
+      const discover = async (): Promise<McpProbeResult> => {
+        opened = await open(server, {
+          signal: controller.signal,
+          authProvider: deps.authProvider?.(server),
+          onStderr: stderr.push,
+        })
+        // A transport may finish setup after our deadline/cancellation. Own
+        // and close that late handle without starting any discovery requests.
+        if (controller.signal.aborted) {
+          void close()
+          controller.signal.throwIfAborted()
+        }
+        // Cursorless SDK list methods aggregate all pages, with the shared
+        // transport's listMaxPages cap. Keep them under this attempt's deadline.
+        const tools = await listSoft(
+          async () =>
+            ((await opened!.client.listTools()).tools ?? []).map((t) => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            })),
+          isAuthError
+        )
+        controller.signal.throwIfAborted()
+        const resources = deps.skipResources
+          ? []
+          : await listSoft(
+              async () =>
+                ((await opened!.client.listResources()).resources ?? []).map((r) => ({
+                  uri: r.uri,
+                  name: r.name,
+                  description: r.description,
+                  mimeType: r.mimeType,
+                })),
+              isAuthError
+            )
+        controller.signal.throwIfAborted()
+        const prompts = deps.skipPrompts
+          ? []
+          : await listSoft(
+              async () =>
+                ((await opened!.client.listPrompts()).prompts ?? []).map((p) => ({
+                  name: p.name,
+                  description: p.description,
+                  arguments: p.arguments,
+                })),
+              isAuthError
+            )
+        controller.signal.throwIfAborted()
+        await close()
+        return { status: "connected", tools, resources, prompts }
+      }
+      return { result: await Promise.race([discover(), stopped]), retry: false }
     } catch (err) {
+      const aborted = deps.signal?.aborted === true
+      const auth = !timedOut && !aborted && isAuthError(err)
       const reason = err instanceof Error ? err.message : String(err)
       const tail = stderr.value()
-      const error = tail ? `${reason}\n${tail}` : reason
-      return { ok: false, error, timedOut, auth: !timedOut && isAuthError(err) }
+      return {
+        result: {
+          status: auth ? "needs_auth" : "failed",
+          ...empty,
+          error: tail ? `${reason}\n${tail}` : reason,
+        },
+        retry: !timedOut && !aborted && !auth,
+      }
     } finally {
-      if (timer) clearTimeout(timer)
+      clearTimeout(timer)
+      deps.signal?.removeEventListener("abort", onAbort)
+      controller.abort()
+      // Cleanup is initiated exactly once, but an uncooperative close must not
+      // hold the caller past its deadline. A late open is handled above.
+      void close()
     }
   }
 
-  let opened: OpenedMcp | undefined
-  for (let attempt = 0; attempt < maxAttempts && !opened; attempt++) {
-    if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs)
-    const result = await connectOnce()
-    if (result.ok) {
-      opened = result.opened
-      break
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (deps.signal?.aborted) return cancelled()
+    if (attempt > 0 && retryDelayMs > 0) {
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer)
+          deps.signal?.removeEventListener("abort", done)
+          resolve()
+        }
+        const timer = setTimeout(done, retryDelayMs)
+        deps.signal?.addEventListener("abort", done, { once: true })
+      })
+      if (deps.signal?.aborted) return cancelled()
     }
-    // Auth failures can't be fixed by retrying; a timeout already burned the
-    // full per-attempt budget — report both immediately.
-    if (result.auth) return { status: "needs_auth", ...empty, error: result.error }
-    if (result.timedOut || attempt === maxAttempts - 1) {
-      return { status: "failed", ...empty, error: result.error }
-    }
+    const { result, retry } = await attemptOnce()
+    if (!retry || attempt === maxAttempts - 1) return result
   }
-  if (!opened) return { status: "failed", ...empty, error: "unreachable" }
-
-  try {
-    const tools = await listSoft(async () =>
-      ((await opened.client.listTools()).tools ?? []).map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema,
-      }))
-    )
-    const resources = deps.skipResources
-      ? []
-      : await listSoft(async () =>
-          ((await opened.client.listResources()).resources ?? []).map((r) => ({
-            uri: r.uri,
-            name: r.name,
-            description: r.description,
-            mimeType: r.mimeType,
-          }))
-        )
-    const prompts = deps.skipPrompts
-      ? []
-      : await listSoft(async () =>
-          ((await opened.client.listPrompts()).prompts ?? []).map((p) => ({
-            name: p.name,
-            description: p.description,
-            arguments: p.arguments,
-          }))
-        )
-    return { status: "connected", tools, resources, prompts }
-  } finally {
-    await opened.close().catch(() => undefined)
-  }
+  return { status: "failed", ...empty, error: "unreachable" }
 }

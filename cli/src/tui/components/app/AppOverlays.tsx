@@ -19,10 +19,10 @@ import { McpToolsPanel } from "../McpToolsPanel"
 import { McpLogPanel } from "../McpLogPanel"
 import { LogPanel } from "../LogPanel"
 import { logInjectionActions, mergeLogSources, nextLogPasteSeq } from "../../runtime/log-model"
-import { copyToClipboard } from "../../clipboard"
+import { copyToClipboard, type CopyResult } from "../../clipboard"
 import { SkillPanel } from "../SkillPanel"
 import { EffortSlider } from "../EffortSlider"
-import { isBuiltinBackend } from "../../runtime/backend-capabilities"
+import { isBuiltinBackend, supportsFeature } from "../../runtime/backend-capabilities"
 import { requiresReconnect } from "../../runtime/context-lifecycle"
 import { PermissionOverlay } from "../overlays/PermissionOverlay"
 import { Help } from "../overlays/Help"
@@ -77,7 +77,10 @@ import {
   setManyEnabled as setManySkillsEnabled,
 } from "../../../skill/skill-state"
 import { getLiveSubagent, listLiveSubagents } from "../../../agent/subagent-live-output"
-import { listCliBackgroundRuns } from "../../../agent/subagent-background-tasks"
+import {
+  cancelCliBackgroundRun,
+  listCliBackgroundRuns,
+} from "../../../agent/subagent-background-tasks"
 import { refreshAgentPanelRows } from "../../runtime/agents-panel-model"
 import { buildConvDetail } from "../../runtime/agent-stats-model"
 import { formatToolResultBody } from "../../commands/expand-command"
@@ -125,6 +128,7 @@ export interface AppOverlaysProps {
   mcpPanelDeps: () => McpDeps
   /** Clears both committed and coalescer-pending unified logs. */
   clearLogs: () => void
+  copyClipboard?: (text: string) => Promise<CopyResult>
 }
 
 export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
@@ -154,6 +158,10 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     mcpPanelDeps,
     clearLogs,
   } = props
+  const effortSupported =
+    state.backendCapabilities && !state.backendCapabilities.builtin
+      ? supportsFeature(state.backendCapabilities, "thinking")
+      : modelSupportsEffort(state.config.provider, activeModel)
   const theme = useTheme()
   const itemRows = Math.max(1, contentRows(viewportRows, OVERLAY_CHROME_ROWS))
   const openReturnedSettings = (
@@ -329,7 +337,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           off={state.overlay.off}
           index={state.overlay.index}
           width={columns}
-          supported={modelSupportsEffort(state.config.provider, activeModel)}
+          supported={effortSupported}
           modelLabel={activeModel}
           onConfirm={({ off, index }) => {
             // Resolve the picked level: off → "off", else the slider tier.
@@ -358,7 +366,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             }
             // Warn (but still save) when the active model won't honour effort —
             // the preference re-applies once a reasoning-capable model is active.
-            if (lvl !== "off" && !modelSupportsEffort(state.config.provider, activeModel)) {
+            if (lvl !== "off" && !effortSupported) {
               dispatch({
                 type: "NOTICE",
                 message: `Saved. Note: ${activeModel ?? "the current model"} doesn't support thinking levels — it applies when you switch to a reasoning model (Opus 4.5+, Sonnet 4.6, o-series, …).`,
@@ -928,7 +936,25 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             }
           }}
           onStop={(row) => {
-            if (row.runtimeTaskId) void agent.stopTask(row.runtimeTaskId)
+            if (row.runtimeTaskId) {
+              void agent.stopTask(row.runtimeTaskId).then(
+                (stopped) => {
+                  if (!stopped)
+                    dispatch({ type: "NOTICE", message: "No active agent task to stop." })
+                },
+                (error: unknown) => {
+                  dispatch({ type: "NOTICE", message: `Could not stop agent: ${String(error)}` })
+                }
+              )
+            } else if (row.runId) {
+              const canceled = cancelCliBackgroundRun(row.runId, state.sessionId)
+              dispatch({
+                type: "NOTICE",
+                message: canceled
+                  ? `Stopping background agent "${row.name}".`
+                  : `No running background agent "${row.name}" in this session.`,
+              })
+            }
           }}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
         />
@@ -1143,13 +1169,21 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
       )}
       {state.overlay.kind === "document" && (
         <DocumentViewer
+          columns={columns}
           title={state.overlay.title}
           body={state.overlay.body}
           format={state.overlay.format}
           lang={state.overlay.lang}
           viewportRows={viewportRows}
           onCopy={(text) => {
-            void copyToClipboard(text).then((result) =>
+            const copy =
+              props.copyClipboard ??
+              ((value: string) =>
+                copyToClipboard(value, {
+                  osc52: state.config.clipboard?.osc52,
+                  osc52MaxBytes: state.config.clipboard?.osc52MaxBytes,
+                }))
+            void copy(text).then((result) =>
               dispatch({
                 type: "NOTICE",
                 message: result.ok
@@ -1196,6 +1230,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           raw={state.overlay.raw}
           prevPlan={state.overlay.prevPlan}
           viewportRows={viewportRows}
+          columns={columns}
           onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
           onSelect={onPlanDecision}
           onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}

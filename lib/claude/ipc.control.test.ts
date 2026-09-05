@@ -10,6 +10,7 @@ import {
   reconnectSessionMcpServer,
   sessionControl,
   setSessionModel,
+  setSessionMode,
 } from "./ipc"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -106,7 +107,7 @@ describe("sessionControl round-trip", () => {
 
   it("forwards positional params for mutating methods", async () => {
     const callSpy = jest.spyOn(transport, "call").mockResolvedValue(undefined)
-    void reconnectSessionMcpServer("s4", "github")
+    const pending = reconnectSessionMcpServer("s4", "github")
     await flush()
     expect(callSpy).toHaveBeenCalledWith(
       "claude_session_control",
@@ -114,6 +115,15 @@ describe("sessionControl round-trip", () => {
       // signature so one manifest `args` list describes both ends.
       expect.objectContaining({ method: "reconnectMcpServer", params: { serverName: "github" } })
     )
+    const { requestId } = callSpy.mock.calls[0][1] as { requestId: string }
+    captured!({
+      type: "control_response",
+      sessionId: "s4",
+      requestId,
+      method: "reconnectMcpServer",
+      ok: true,
+    })
+    await pending
   })
 
   it("forwards a caller-owned command id on the correlated request", async () => {
@@ -169,4 +179,42 @@ describe("sessionControl round-trip", () => {
       jest.useRealTimers()
     }
   })
+})
+
+it("permission mode waits for matching acknowledgement and rejects runtime refusal", async () => {
+  const callSpy = jest.spyOn(transport, "call").mockResolvedValue(undefined)
+  let settled = false
+  const pending = setSessionMode("mode-session", "plan").then(() => {
+    settled = true
+  })
+  await flush()
+  expect(settled).toBe(false)
+  const { requestId } = callSpy.mock.calls[0][1] as { requestId: string }
+  expect(callSpy).toHaveBeenCalledWith(
+    "claude_session_control",
+    expect.objectContaining({ method: "setPermissionMode", params: { mode: "plan" } })
+  )
+  captured!({
+    type: "control_response",
+    sessionId: "mode-session",
+    requestId,
+    method: "setPermissionMode",
+    ok: true,
+    result: { mode: "plan" },
+  })
+  await pending
+  expect(settled).toBe(true)
+  callSpy.mockClear()
+  const rejected = setSessionMode("mode-session", "acceptEdits")
+  await flush()
+  const next = callSpy.mock.calls[0][1] as { requestId: string }
+  captured!({
+    type: "control_response",
+    sessionId: "mode-session",
+    requestId: next.requestId,
+    method: "setPermissionMode",
+    ok: false,
+    error: "SDK refused",
+  })
+  await expect(rejected).rejects.toThrow("SDK refused")
 })

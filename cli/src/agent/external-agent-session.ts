@@ -49,7 +49,7 @@ import { resolveHome } from "../config/load"
 import { piMetadataForPreset, resolveBackendModel } from "../config/active-model"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
-import { toAcpMcpServers } from "../tui/runtime/backend-bridge"
+import { buildCodexOptions, toAcpMcpServers } from "../tui/runtime/backend-bridge"
 import type { ResolvedConfig } from "../config/schema"
 import {
   externalAgentEventToActions,
@@ -310,6 +310,7 @@ export interface ExternalAgentSessionParams {
     session: ResolvedCliSessionContext
     attempt: number
     gate?: PermissionResponder
+    awaitApprovals?: () => Promise<void>
     execHostTool: (name: string, args: unknown) => Promise<{ result?: unknown; error?: string }>
     onToolCall?: (event: { name: string; input: unknown; callKey: string }) => void
     onToolResult?: (event: { callKey: string; name: string; ok: boolean; summary?: string }) => void
@@ -393,7 +394,7 @@ export function externalAgentCredentialEnv(
   config: ResolvedConfig,
   presetId: string
 ): Record<string, string> {
-  if (presetId === "codex" || presetId === "codex-app-server") {
+  if (presetId === "codex" || presetId === "codex-acp" || presetId === "codex-app-server") {
     const credential = config.providers.codex ?? config.providers.openai
     return {
       ...(credential?.authToken ? { CODEX_ACCESS_TOKEN: credential.authToken } : {}),
@@ -529,7 +530,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   let turnSequence = 0
 
   const now = params.now ?? Date.now
-  const requestedModel = resolveBackendModel(params.config, params.connection?.presetId)
+  let requestedModel = resolveBackendModel(params.config, params.connection?.presetId)
   const sessionId = params.sessionId ?? mintSessionId(now())
   const agentId = params.connection?.agentId ?? `cli-external-${sessionId}`
   // Bind this session's provider/search config so plugin `ctx.ai.*` and
@@ -548,7 +549,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const resolveMcpServers =
     params.resolveMcpServers ??
     (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
-  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const resolveApprovedTools =
+    params.resolveApprovedTools ?? (() => readToolApprovals(home, undefined, params.config.cwd))
   const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const startToolHost = params.startToolHost ?? startToolHostBroker
   const buildToolHostServers =
@@ -600,6 +602,8 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   // was minted for.
   let broker: ToolHostBroker | null = null
   let activeTurnOptions: SendTurnOptions | undefined
+  let emitTurnAction: ((action: TuiAction) => void) | undefined
+  let activeWatchdog: ReturnType<typeof createIdleWatchdog> | undefined
   let activeToolScope: { turnId: string; attemptId: string } | undefined
   let brokerAttempt = 0
   let skillsAnnounced = false
@@ -618,10 +622,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   const ensureAgent = async (): Promise<void> => {
     if (initialized) return
     const presetId = backend === "codex" ? await resolvePreferredCodexExecutablePresetId() : backend
+    requestedModel = resolveBackendModel(params.config, presetId)
     const config = createAgentFromPreset(presetId, {
       id: agentId,
       enabled: true,
       defaultPermissionMode: permissionMode,
+      codexOptions: buildCodexOptions(params.config, presetId),
       // Bounds `manager.connect` only — every `execute` passes its own budget.
       timeout: resolveConnectTimeoutMs(params.config),
     })
@@ -715,23 +721,35 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       broker = await startToolHost({
         session,
         attempt: brokerAttempt,
-        gate: async (request) =>
-          activeTurnOptions
-            ? activeTurnOptions.gate(request)
-            : { decision: "deny", message: "No active turn" },
+        gate: async (request) => {
+          const turnOptions = activeTurnOptions
+          const watchdog = activeWatchdog
+          if (!turnOptions || turnOptions.signal?.aborted) {
+            return { decision: "deny", message: "No active turn" }
+          }
+          watchdog?.pause()
+          try {
+            const decision = await turnOptions.gate(request)
+            return activeTurnOptions === turnOptions && !turnOptions.signal?.aborted
+              ? decision
+              : { decision: "deny", message: "The turn was interrupted" }
+          } finally {
+            watchdog?.resume()
+          }
+        },
         // Read per call, not captured: the barrier belongs to whichever turn is
         // live, and the broker outlives any one of them.
         awaitApprovals: async () => activeTurnOptions?.awaitApprovals?.(),
         execHostTool,
         onToolCall: (event) =>
-          activeTurnOptions?.onAction?.({
+          emitTurnAction?.({
             type: "TOOL_CALL",
             callKey: event.callKey,
             toolName: event.name,
             input: (event.input ?? {}) as Record<string, unknown>,
           }),
         onToolResult: (event) =>
-          activeTurnOptions?.onAction?.({
+          emitTurnAction?.({
             type: "TOOL_RESULT",
             callKey: event.callKey,
             toolName: event.name,
@@ -882,10 +900,20 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         )
       }
       activeTurnOptions = opts
+      emitTurnAction = (action) => {
+        if (activeTurnOptions !== opts || opts.signal?.aborted) return
+        if (envelopeEmitter) envelopeEmitter.emit(actionToCanonicalEvent(action))
+        else if (opts.onAction) opts.onAction(action)
+        else {
+          const capture = actionToCaptureEvent(action)
+          if (capture) opts.onEvent?.(capture)
+        }
+      }
       const cogniaServers = await ensureToolHost(session).catch((error) => {
         releaseSkillScope()
         activeToolScope = undefined
         activeTurnOptions = undefined
+        emitTurnAction = undefined
         throw error
       })
 
@@ -912,6 +940,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       // first streamed event and pauses while a permission prompt is on screen,
       // so neither a slow cold start nor a long approval can trip it.
       const watchdog = createIdleWatchdog({ timeoutMs: resolveIdleTimeoutMs(params.config) })
+      activeWatchdog = watchdog
       // The event stream carries the external session id before the result does;
       // capturing it here lets a mid-turn cancel target the right session on the
       // very first turn (when `externalSessionId` is still unset).
@@ -966,6 +995,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           timeout:
             opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : EXTERNAL_TURN_WALL_CLOCK_MS,
           onPermissionRequest: async (request) => {
+            if (activeTurnOptions !== opts || opts.signal?.aborted) {
+              return captureDecisionToAcp(request, { decision: "deny", message: "No active turn" })
+            }
             // A Cognia-projected tool is gated by the broker, which shows the
             // real prompt and owns the persisted rules. Acknowledging the
             // agent's generic ask here is what keeps ONE Cognia call from
@@ -977,7 +1009,12 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             watchdog.pause()
             try {
               const decision = await opts.gate(acpPermissionRequestToCli(request, sessionId))
-              return captureDecisionToAcp(request, decision)
+              return captureDecisionToAcp(
+                request,
+                activeTurnOptions === opts && !opts.signal?.aborted
+                  ? decision
+                  : { decision: "deny", message: "The turn was interrupted" }
+              )
             } finally {
               watchdog.resume()
             }
@@ -1004,6 +1041,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
             }
           },
           onEvent: (event) => {
+            if (activeTurnOptions !== opts || opts.signal?.aborted) return
             watchdog.bump()
             if (event.sessionId) observedSessionId = event.sessionId
             const actions = externalAgentEventToActions(event)
@@ -1073,8 +1111,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
         releaseSkillScope()
         activeToolScope = undefined
         watchdog.stop()
+        activeWatchdog = undefined
         clearDispatch()
         activeTurnOptions = undefined
+        emitTurnAction = undefined
       }
 
       if (result.sessionId && result.sessionId !== externalSessionId) {
@@ -1214,6 +1254,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       if (modelOption && manager.setConfigOption) {
         try {
           await manager.setConfigOption(agentId, externalSessionId, modelOption.id, model)
+          requestedModel = model
           return true
         } catch {
           // A model rejected by the active ACP agent must not fall through to a
@@ -1224,6 +1265,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
 
       try {
         await manager.setSessionModel(agentId, externalSessionId, model)
+        requestedModel = model
         return true
       } catch {
         return false

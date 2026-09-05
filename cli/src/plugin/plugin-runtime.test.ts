@@ -294,6 +294,23 @@ describe("ensurePluginRuntime", () => {
     })
     expect(result).toEqual({ ok: false, toolCount: 0, error: "guard boom" })
   })
+  it("retries a failed bootstrap instead of caching unavailable tools permanently", async () => {
+    let runs = 0
+    const deps = {
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {
+        if (++runs === 1) throw new Error("temporary failure")
+      },
+      initManager: async () => {},
+      applyDisabled: () => {},
+      registerDisk: () => {},
+      manifestCount: () => 4,
+    }
+    await expect(ensurePluginRuntime(deps)).resolves.toMatchObject({ ok: false })
+    await expect(ensurePluginRuntime(deps)).resolves.toEqual({ ok: true, toolCount: 4 })
+    expect(runs).toBe(2)
+  })
 
   it("enables the canonical Python runtime only for the supervised headless brain", async () => {
     jest.resetModules()

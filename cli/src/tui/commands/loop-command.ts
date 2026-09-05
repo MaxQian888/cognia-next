@@ -78,6 +78,10 @@ export function parseLoopArgs(args: string): ParsedLoop | null {
 }
 
 function handle(ctx: CommandContext): CommandEffect {
+  const control = ctx.args.trim()
+  if (control === "pause" || control === "resume" || control === "stop") {
+    return { kind: "loopControl", action: control }
+  }
   const parsed = parseLoopArgs(ctx.args)
   if (!parsed) {
     return { kind: "notice", message: "Usage: /loop [interval] <prompt> [--n <count>]" }
@@ -97,4 +101,12 @@ export const loopCommand: CommandDescriptor = {
   category: "cognia",
   argumentHint: "[interval] <prompt> [--n <count>]",
   handler: handle,
+  subcommands: (["pause", "resume", "stop"] as const).map((action) => ({
+    name: action,
+    description: `${action} the foreground loop`,
+    handler: (ctx) =>
+      ctx.args.trim()
+        ? { kind: "notice", message: `Usage: /loop ${action}` }
+        : { kind: "loopControl", action },
+  })),
 }

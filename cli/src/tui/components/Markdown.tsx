@@ -14,8 +14,8 @@ import {
   tokenizeCached,
   tokenizeTransient,
 } from "../markdown/render-cache"
-import { truncateToWidth } from "../markdown/width"
-import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
+import { stringWidth, truncateToWidth } from "../markdown/width"
+import { isSafeHyperlink, osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
 import type { MdLine, MdSpan } from "../markdown/types"
 import {
@@ -27,6 +27,7 @@ import {
   TABLE_RULE_MID,
   TABLE_RULE_TOP,
   tableLayout,
+  stackTable,
   tableRule,
   type TableRuleEnds,
 } from "../markdown/table-layout"
@@ -50,14 +51,14 @@ export function codeFrameWidth(
   contentWidth: number | undefined,
   maxWidth: number = CODE_FRAME_MAX
 ): number {
-  const cap = Math.min(CODE_FRAME_MAX, maxWidth)
-  return Math.max(CODE_FRAME_MIN, Math.min(cap, (contentWidth ?? 0) + 2))
+  const cap = Math.max(1, Math.min(CODE_FRAME_MAX, Math.floor(maxWidth)))
+  return Math.min(cap, Math.max(CODE_FRAME_MIN, (contentWidth ?? 0) + 2))
 }
 
-function Span({ span }: { span: MdSpan }) {
+function Span({ span, showTarget = true }: { span: MdSpan; showTarget?: boolean }) {
   const theme = useTheme()
   const hyperlinks = React.useContext(HyperlinkContext)
-  if (span.code) {
+  if (span.code && !span.link) {
     // Inline code is a distinct foreground colour. No background by default
     // (cleaner, more consistent across terminals); a theme may set `inlineCodeBg`
     // to opt into a subtle block.
@@ -72,14 +73,14 @@ function Span({ span }: { span: MdSpan }) {
     // clickable and the noisy `(url)` suffix is dropped. Otherwise fall back to
     // the underlined label + dimmed URL (suppressed for a bare `<url>` autolink
     // whose text already equals its href).
-    if (hyperlinks) {
+    if (hyperlinks && isSafeHyperlink(span.link)) {
       return (
         <Text color={theme.link} underline bold={span.bold} italic={span.italic}>
           {osc8Link(span.link, span.text)}
         </Text>
       )
     }
-    const showUrl = Boolean(span.link) && span.link !== span.text
+    const showUrl = showTarget && span.link !== span.text
     return (
       <Text>
         <Text color={theme.link} underline bold={span.bold} italic={span.italic}>
@@ -103,7 +104,9 @@ function Span({ span }: { span: MdSpan }) {
 }
 
 function spansText(spans: MdSpan[]): React.ReactNode {
-  return spans.map((s, i) => <Span key={i} span={s} />)
+  return spans.map((s, i) => (
+    <Span key={i} span={s} showTarget={!s.link || spans[i + 1]?.link !== s.link} />
+  ))
 }
 
 // `truncateToWidth` now lives in ../markdown/width (next to `stringWidth`) so the
@@ -146,6 +149,15 @@ function Table({
 }) {
   const theme = useTheme()
   const hyperlinks = React.useContext(HyperlinkContext)
+  const stacked = stackTable(line, maxWidth)
+  if (stacked)
+    return (
+      <Box flexDirection="column">
+        {stacked.map((spans, i) => (
+          <Text key={i}>{spansText(spans)}</Text>
+        ))}
+      </Box>
+    )
   const footnotes = collectTableFootnotes(line, hyperlinks)
   const cols = line.header.length
   const { widths, capped } = tableLayout(line, (spans) => cellRefText(spans, footnotes), maxWidth)
@@ -264,27 +276,33 @@ export function MarkdownLine({
       // drawn on the block's boundary lines (flagged by the tokenizer).
       const label = line.lang || "code"
       const frame = codeFrameWidth(line.width, maxWidth)
-      const head = `╭─ ${label} `
-      const top = head + "─".repeat(Math.max(3, frame - head.length))
+      const head = truncateToWidth(`╭─ ${label} `, frame)
+      const top = head + "─".repeat(Math.max(0, frame - stringWidth(head)))
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" width={maxWidth}>
           {line.first ? (
             <Text color={theme.muted} dimColor>
               {top}
             </Text>
           ) : null}
-          {/* Gutter + body in a flex row so a body line too wide for the frame
-              wraps under the code (hanging indent) instead of resetting to
-              column 0. Highlighting is cached so a stable block is O(1) per
-              flush during streaming. */}
-          <Box>
-            <Text color={theme.muted} dimColor>
-              {"│ "}
-            </Text>
-            <Box flexGrow={1}>
-              <Text>{highlightCached(line.text, line.lang, codeHi.theme, codeHi.key)}</Text>
+          {maxWidth !== undefined && maxWidth < 3 ? (
+            <Text>{highlightCached(line.text, line.lang, codeHi.theme, codeHi.key)}</Text>
+          ) : (
+            <Box>
+              <Box width={2} flexShrink={0}>
+                <Text color={theme.muted} dimColor>
+                  {"│ "}
+                </Text>
+              </Box>
+              <Box
+                flexGrow={1}
+                minWidth={0}
+                width={maxWidth === undefined ? undefined : maxWidth - 2}
+              >
+                <Text>{highlightCached(line.text, line.lang, codeHi.theme, codeHi.key)}</Text>
+              </Box>
             </Box>
-          </Box>
+          )}
           {line.last ? (
             <Text color={theme.muted} dimColor>
               {"╰" + "─".repeat(frame - 1)}
@@ -293,6 +311,17 @@ export function MarkdownLine({
         </Box>
       )
     }
+    case "indent":
+      return (
+        <Box paddingLeft={line.columns}>
+          <Box flexGrow={1} minWidth={0} flexDirection="column">
+            <MarkdownLine
+              line={line.child}
+              maxWidth={maxWidth === undefined ? undefined : Math.max(1, maxWidth - line.columns)}
+            />
+          </Box>
+        </Box>
+      )
     case "blockquote": {
       // Cascade the gutter for nested quotes (`> >` → `│ │ `) and lay the body
       // out in its own flex column so wrapped lines hang under the text, not
@@ -304,40 +333,53 @@ export function MarkdownLine({
           <Text color={theme.blockquote} dimColor>
             {"│ ".repeat(depth)}
           </Text>
-          <Box flexGrow={1}>
-            <Text color={theme.blockquote} italic>
-              {spansText(line.spans)}
-            </Text>
+          <Box flexGrow={1} minWidth={0}>
+            {line.child ? (
+              <MarkdownLine
+                line={line.child}
+                maxWidth={maxWidth === undefined ? undefined : Math.max(1, maxWidth - depth * 2)}
+              />
+            ) : (
+              <Text color={theme.blockquote} italic>
+                {spansText(line.spans)}
+              </Text>
+            )}
           </Box>
         </Box>
       )
     }
     case "listitem": {
-      // Indent via a padded Box (not literal spaces) so a wrapped item hangs
-      // under its text instead of resetting to column 0. The marker/checkbox
-      // sits in a fixed leading column; the body flexes and wraps beside it.
-      const pad = (line.depth + 1) * 2
-      // GFM task-list items render a checkbox in place of the bullet/number; the
-      // done state is dimmed + struck through for a Claude-Code-style checklist.
-      if (line.checked !== undefined) {
+      const marker = line.checked === undefined ? line.marker : line.checked ? "☑" : "☐"
+      const markerWidth = stringWidth(marker) + 1
+      const pad =
+        maxWidth === undefined
+          ? (line.depth + 1) * 2
+          : Math.min((line.depth + 1) * 2, Math.max(0, maxWidth - markerWidth - 1))
+      const body = (
+        <Text dimColor={line.checked} strikethrough={line.checked}>
+          {spansText(line.spans)}
+        </Text>
+      )
+      if (maxWidth !== undefined && maxWidth <= markerWidth) {
         return (
-          <Box paddingLeft={pad}>
-            <Text color={line.checked ? theme.success : undefined}>
-              {line.checked ? "☑" : "☐"}{" "}
+          <Box width={maxWidth}>
+            <Text>
+              {marker} {body}
             </Text>
-            <Box flexGrow={1}>
-              <Text dimColor={line.checked} strikethrough={line.checked}>
-                {spansText(line.spans)}
-              </Text>
-            </Box>
           </Box>
         )
       }
       return (
-        <Box paddingLeft={pad}>
-          <Text>{line.marker} </Text>
-          <Box flexGrow={1}>
-            <Text>{spansText(line.spans)}</Text>
+        <Box paddingLeft={pad} width={maxWidth}>
+          <Box width={markerWidth} flexShrink={0}>
+            <Text color={line.checked ? theme.success : undefined}>{marker} </Text>
+          </Box>
+          <Box
+            flexGrow={1}
+            minWidth={0}
+            width={maxWidth === undefined ? undefined : maxWidth - pad - markerWidth}
+          >
+            {body}
           </Box>
         </Box>
       )
@@ -375,7 +417,7 @@ export function Markdown({
     [safeRaw, streaming]
   )
   // Root-owned reactive columns keep fenced-code rules from wrapping on resize.
-  const maxWidth = columns > 0 ? columns - 2 : undefined
+  const maxWidth = columns > 0 ? Math.max(1, columns - 2) : undefined
   // Detected once here (env is stable for the session) and shared via context.
   const hyperlinks = React.useMemo(() => supportsHyperlinks(), [])
   return (

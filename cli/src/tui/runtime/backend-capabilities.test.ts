@@ -3,26 +3,52 @@
  */
 import {
   canHostCogniaTools,
-  BACKEND_FEATURES,
   blockedFeatures,
   builtinCapabilities,
   effectivePermissionMode,
   externalCapabilities,
   featureBlockedReason,
   supportsFeature,
+  supportsModelListing,
   unsupportedFeatureMessage,
   usesCodexOptions,
 } from "./backend-capabilities"
 
 describe("builtinCapabilities", () => {
-  it("supports every feature, since the sidecar is what they were built against", () => {
+  it("offers local configuration but does not claim live controls before startup", () => {
     const caps = builtinCapabilities()
     expect(caps.builtin).toBe(true)
-    for (const feature of BACKEND_FEATURES) {
-      expect(supportsFeature(caps, feature)).toBe(true)
-      expect(featureBlockedReason(caps, feature)).toBeUndefined()
-    }
-    expect(blockedFeatures(caps)).toEqual([])
+    expect(supportsFeature(caps, "modelPicker")).toBe(true)
+    expect(supportsFeature(caps, "mcp")).toBe(true)
+    expect(supportsFeature(caps, "compact")).toBe(false)
+    expect(supportsFeature(caps, "thinking")).toBe(true)
+    expect(featureBlockedReason(caps, "compact")).toMatch(/started/)
+  })
+
+  it("projects the resolved runtime instead of assuming every provider supports every control", () => {
+    const caps = builtinCapabilities({
+      backend: "builtin",
+      contextVersion: "ctx",
+      attachable: true,
+      running: true,
+      builtinToolCount: 10,
+      hostToolCount: 2,
+      subagentDispatch: true,
+      userMcpCount: 0,
+      connections: 1,
+      builtin: {
+        phase: "ready",
+        runtime: "ai-sdk",
+        capabilities: ["compaction", "session.resume"],
+        skills: true,
+        categories: {},
+      },
+    })
+    expect(supportsFeature(caps, "compact")).toBe(true)
+    expect(supportsFeature(caps, "resume")).toBe(true)
+    expect(supportsFeature(caps, "rateLimits")).toBe(false)
+    expect(supportsFeature(caps, "thinking")).toBe(false)
+    expect(featureBlockedReason(caps, "thinking")).toMatch(/runtime/)
   })
 })
 
@@ -124,10 +150,11 @@ describe("externalCapabilities", () => {
     ).toMatch(/did not advertise/)
   })
 
-  it("recognises both Codex preset spellings as the metadata channel", () => {
+  it("restricts the native metadata channel to the resolved app-server preset", () => {
     // One definition, shared with the bridge that does the forwarding, so the
     // advertised capability cannot drift from what is actually sent.
-    expect(usesCodexOptions("codex")).toBe(true)
+    expect(usesCodexOptions("codex")).toBe(false)
+    expect(usesCodexOptions("codex-acp")).toBe(false)
     expect(usesCodexOptions("codex-app-server")).toBe(true)
     expect(usesCodexOptions("claude-code")).toBe(false)
     expect(usesCodexOptions(undefined)).toBe(false)
@@ -243,9 +270,10 @@ describe("effectivePermissionMode", () => {
     )
   })
 
-  it("normalizes Cognia-only `auto` to `default` (it has no ACP rung)", () => {
-    expect(effectivePermissionMode(builtinCapabilities(), "auto")).toBe("default")
-    expect(effectivePermissionMode(undefined, "auto")).toBe("default")
+  it("preserves built-in auto and only normalizes it for external protocols", () => {
+    expect(effectivePermissionMode(builtinCapabilities(), "auto")).toBe("auto")
+    expect(effectivePermissionMode(undefined, "auto")).toBe("auto")
+    expect(effectivePermissionMode(caps("acp"), "auto")).toBe("default")
   })
 
   it("passes through while still connecting (no capabilities, no protocol)", () => {
@@ -272,4 +300,24 @@ describe("effectivePermissionMode", () => {
   it("drops `dontAsk` on a backend with no pre-approval registry", () => {
     expect(effectivePermissionMode(caps("codex-app-server"), "dontAsk")).toBe("plan")
   })
+})
+
+it("projects explicit Codex ACP capabilities without native-only controls", () => {
+  const explicit = externalCapabilities({ backend: "codex-acp", presetId: "codex-acp" })
+  const legacy = externalCapabilities({ backend: "codex", presetId: "codex" })
+  expect(explicit.features).toEqual(legacy.features)
+  expect(supportsFeature(explicit, "mcp")).toBe(true)
+  expect(supportsFeature(explicit, "modelPicker")).toBe(true)
+  expect(supportsFeature(explicit, "thinking")).toBe(false)
+  expect(supportsFeature(explicit, "resume")).toBe(false)
+  expect(
+    supportsFeature(
+      externalCapabilities({ backend: "codex-acp", negotiated: { multiTurn: true } }),
+      "resume"
+    )
+  ).toBe(true)
+  expect(supportsModelListing("codex-acp")).toBe(false)
+  expect(supportsModelListing("codex")).toBe(false)
+  expect(supportsModelListing("codex-app-server")).toBe(true)
+  expect(supportsModelListing(undefined)).toBe(false)
 })

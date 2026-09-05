@@ -33,11 +33,13 @@ import {
 } from "../../config/schema"
 import { DEFAULT_LAYOUT } from "../layout-mode"
 import {
+  effectivePermissionMode,
   supportsFeature,
   unsupportedFeatureMessage,
   type BackendCapabilities,
   type BackendFeature,
 } from "./backend-capabilities"
+import { backendIdentity } from "./backend-identity"
 import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { BUILTIN_HOOKS } from "@/lib/claude/hooks/builtin-hooks"
@@ -230,6 +232,8 @@ export function settingsSections(
   config: ResolvedConfig,
   capabilities?: BackendCapabilities
 ): SettingsSectionView[] {
+  const identity = backendIdentity(config, capabilities?.presetId)
+  const permissionMode = effectivePermissionMode(capabilities, config.permissionMode)
   const mascotEnabled = config.mascot?.enabled !== false
   const statusTheme = config.statusBar?.theme ?? "default"
   /** The reason a feature is unreachable here, or undefined when it is fine. */
@@ -244,10 +248,12 @@ export function settingsSections(
     rows: [
       {
         id: "provider",
-        label: "Provider",
+        label: identity.external ? "Built-in provider" : "Provider",
         value: config.provider,
         control: { type: "delegate", command: "/provider" },
-        description: "Which AI provider serves this session (opens the provider picker).",
+        description: identity.external
+          ? "Saved provider for the built-in backend; changing it leaves the active external agent unchanged."
+          : "Which AI provider serves this session (opens the provider picker).",
       },
       {
         id: "credential",
@@ -258,12 +264,14 @@ export function settingsSections(
             ? "token configured"
             : "not configured",
         control: { type: "credential" },
-        description: "Set or replace the active provider's API key or subscription token.",
+        description: identity.external
+          ? "Set or replace the saved built-in provider's API key or subscription token."
+          : "Set or replace the active provider's API key or subscription token.",
       },
       {
         id: "model",
         label: "Model",
-        value: config.model ?? "default",
+        value: identity.model ?? (identity.external ? "agent default" : "default"),
         control: { type: "delegate", command: "/model" },
         description: "The model id used for your turns (opens the model picker).",
         ...(() => {
@@ -274,7 +282,10 @@ export function settingsSections(
       {
         id: "mode",
         label: "Permission mode",
-        value: config.permissionMode,
+        value:
+          permissionMode === config.permissionMode
+            ? permissionMode
+            : `${permissionMode} (requested ${config.permissionMode})`,
         control: { type: "delegate", command: "/mode" },
         description: "How tool calls are approved (default / acceptEdits / plan / bypass / …).",
       },

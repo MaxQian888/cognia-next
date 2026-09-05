@@ -19,6 +19,12 @@
  * Populating both means whichever path the router picks is correctly credentialed.
  */
 
+import nodeFs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
+import { resolveHome } from "./load"
+
 import type { ProviderSettingsEntry } from "@/lib/ai/provider-consumption"
 import {
   getBuiltInProviderDefaultBaseURL,
@@ -35,6 +41,8 @@ import type {
   SessionKind,
 } from "@cognia/agent-config-types"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
+
+import { resolveBuiltinProcessSandbox } from "../runtime/sandbox/builtin-process-sandbox"
 
 import { resolveActiveModel } from "./active-model"
 import { effectivePermissionMode } from "./agent-mode"
@@ -251,7 +259,11 @@ export function buildCliSession(
   // user hasn't explicitly chosen one — otherwise selecting the built-in `plan`
   // mode would never make the agent read-only. An explicit `/mode` choice still
   // wins (see `effectivePermissionMode`).
-  const permissionMode = effectivePermissionMode(config.permissionMode, agentMode ?? undefined)
+  const permissionMode = effectivePermissionMode(
+    config.permissionMode,
+    agentMode ?? undefined,
+    config.permissionModeExplicit
+  )
   return {
     id: sessionId,
     title: "cli",
@@ -364,6 +376,15 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
 
   return {
     session,
+    builtinProcessSandbox: resolveBuiltinProcessSandbox(config),
+    lspHost: {
+      readProjectFile: (rootDir) =>
+        readProjectLspFile(rootDir, (filePath) => nodeFs.readFile(filePath, "utf8")),
+      installDir: path.join(config.cliHome ?? resolveHome(process.env, os.homedir()), "lsp"),
+      // Managed installs spawn package managers outside the per-tool network gate.
+      // Permit them only when the session explicitly grants unrestricted network.
+      autoInstall: config.sandbox?.policy?.network === "on",
+    },
     character,
     appSettings,
     agentMode: params.agentMode ?? null,

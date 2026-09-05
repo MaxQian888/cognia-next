@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Stop the CLI transcript reordering itself. Two things moved on screen while a turn ran. Status notices were appended straight to the committed transcript, which is painted above the live region, so a line about the turn in progress surfaced above the tool cards and the reply that were already visible: a notice about the third tool call read as if it had happened before the first one printed its output. Those now wait under the live region, where they arrived, and join the transcript when it commits. And the live frame painted reasoning above tool cards while the reducer committed them the other way round, so every finished card jumped over the reasoning at the moment the turn ended, which is the most disorienting time for anything to move. The two orders are now one order, and the rule holds in both directions: the committed transcript reads exactly like the last live frame it replaced. Both are pinned by tests that assert against a reconstructed terminal screen rather than against the state behind it, because the whole defect was that the state was right and the screen was not.

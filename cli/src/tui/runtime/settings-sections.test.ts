@@ -36,6 +36,48 @@ function findRow(
 }
 
 describe("settingsSections — backend capability gating", () => {
+  it("shows the resolved backend model rather than the legacy built-in pin", () => {
+    const config = cfg({
+      agentBackend: "codex",
+      model: "stale-claude",
+      agentBackends: {
+        codex: { model: "legacy-codex" },
+        "codex-app-server": { model: "selected-native" },
+      },
+    })
+    const rows = settingsSections(
+      config,
+      externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
+    )[0].rows
+    expect(rows.find((row) => row.id === "model")?.value).toBe("selected-native")
+    expect(rows.find((row) => row.id === "provider")?.label).toBe("Built-in provider")
+    expect(rows.find((row) => row.id === "credential")?.description).toMatch(/built-in provider/i)
+  })
+
+  it("leaves an unselected external model to the agent, including explicit ACP", () => {
+    expect(
+      findRow(cfg({ agentBackend: "codex-acp", model: "stale-claude" }), "model", "model")?.value
+    ).toBe("agent default")
+  })
+
+  it("shows built-in per-provider model memory ahead of a legacy pin", () => {
+    expect(
+      findRow(
+        cfg({ model: "stale", providers: { anthropic: { model: "selected-claude" } } }),
+        "model",
+        "model"
+      )?.value
+    ).toBe("selected-claude")
+  })
+
+  it("shows the effective permission mode and the requested preference when clamped", () => {
+    const rows = settingsSections(
+      cfg({ agentBackend: "codex-acp", permissionMode: "auto" }),
+      externalCapabilities({ backend: "codex-acp", protocol: "acp" })
+    )[0].rows
+    expect(rows.find((row) => row.id === "mode")?.value).toBe("default (requested auto)")
+  })
+
   const rowsFor = (caps?: Parameters<typeof settingsSections>[1]) =>
     Object.fromEntries(
       settingsSections(cfg({ agentBackend: "codex" }), caps)

@@ -32,7 +32,7 @@ jest.mock("@/stores/plugin-runtime", () => ({
       plugins: {
         demo: {
           manifest: { id: "demo", name: "Demo", version: "1.0.0", type: "frontend", tools: [] },
-          path: "/tmp/cognia-test/.cognia/plugins/demo",
+          path: path.join(base.home, "plugins", "demo"),
           status: "enabled",
         },
       },
@@ -63,7 +63,7 @@ jest.mock("@/lib/plugin/package/github-marketplace", () => ({
 jest.mock("../../plugin/install", () => ({
   installFromGithubRef: async () => ({
     id: "demo",
-    dir: "/tmp/cognia-test/.cognia/plugins/demo",
+    dir: path.join(base.home, "plugins", "demo"),
     manifest: { id: "demo", name: "Demo", version: "1.0.0", type: "frontend" },
   }),
 }))
@@ -90,10 +90,20 @@ function recorder() {
   return { dispatch: (a: TuiAction) => actions.push(a), actions }
 }
 
-const base = { roots: ["/w"], home: "/tmp/cognia-test", getDisabled: () => new Set<string>() }
+const base = {
+  roots: ["/w"],
+  home: "",
+  getDisabled: () => new Set<string>(),
+  recordOrigin: jest.fn(),
+  removeOrigin: jest.fn(),
+}
 
 beforeEach(() => {
   managerCalls.length = 0
+  base.home = nodeFs.mkdtempSync(path.join(os.tmpdir(), "cognia-plugin-defaults-"))
+})
+afterEach(() => {
+  nodeFs.rmSync(base.home, { recursive: true, force: true })
 })
 
 describe("controller default seams", () => {

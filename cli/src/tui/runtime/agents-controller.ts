@@ -18,6 +18,7 @@ import { buildSubagentModelRows } from "./subagent-models-model"
 import type { ResolvedConfig } from "../../config/schema"
 import {
   listCliBackgroundRuns,
+  cancelCliBackgroundRun,
   type CliBackgroundRunInfo,
 } from "../../agent/subagent-background-tasks"
 import { listLiveSubagents, type SubagentLiveEntry } from "../../agent/subagent-live-output"
@@ -64,7 +65,19 @@ async function loadAgents(deps: AgentsDeps): Promise<AgentSummary[]> {
 }
 
 export async function agentsList(deps: AgentsDeps): Promise<void> {
-  const agents = await loadAgents(deps)
+  if (deps.signal?.aborted) return
+  let agents: AgentSummary[]
+  try {
+    agents = await loadAgents(deps)
+  } catch (error) {
+    if (!deps.signal?.aborted)
+      deps.dispatch({
+        type: "NOTICE",
+        message: `Subagent discovery failed: ${errorMessage(error)}`,
+      })
+    return
+  }
+  if (deps.signal?.aborted) return
   if (agents.length === 0) {
     deps.dispatch({
       type: "NOTICE",
@@ -80,6 +93,7 @@ export async function agentsList(deps: AgentsDeps): Promise<void> {
 }
 
 export interface AgentsPanelDeps {
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   /** In-turn sub-agent dispatches still running (from `state.inflight.tools`). */
   inflight: InflightSubagentRow[]
@@ -102,10 +116,12 @@ export interface AgentsPanelDeps {
  * the "nothing running" affordance (mirrors `/mcp`).
  */
 export async function agentsPanel(deps: AgentsPanelDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const owner = deps.sessionId
   const live = (deps.liveSubagents ?? (() => listLiveSubagents(owner)))()
   const backgroundRuns = (deps.liveRuns ?? (() => listCliBackgroundRuns(owner)))()
   const allRecords = await (deps.journal ?? (() => listBackgroundTaskRecords({ host: "cli" })))()
+  if (deps.signal?.aborted) return
   const journalRecords =
     owner === undefined ? allRecords : allRecords.filter((r) => r.sessionId === owner)
   const rows = buildAgentPanelRows({
@@ -118,6 +134,7 @@ export async function agentsPanel(deps: AgentsPanelDeps): Promise<void> {
 }
 
 export interface AgentsModelsPanelDeps {
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   cwd: string
   /** Discovery roots (project + home). Defaults to `[cwd]`. */
@@ -136,14 +153,17 @@ export interface AgentsModelsPanelDeps {
  * when only the built-in `general-purpose` agent exists.
  */
 export async function agentsModelsPanel(deps: AgentsModelsPanelDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const base = deps.list
     ? await deps.list()
     : withBuiltinAgents(await discoverDispatchableAgents(deps.roots ?? [deps.cwd]))
+  if (deps.signal?.aborted) return
   const rows = buildSubagentModelRows(base, deps.config)
   deps.dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "subagentModels", rows, index: 0 } })
 }
 
 export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const trimmed = arg.trim()
   const space = trimmed.indexOf(" ")
   const id = space === -1 ? trimmed : trimmed.slice(0, space)
@@ -152,7 +172,18 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
     deps.dispatch({ type: "NOTICE", message: "Usage: /agents run <id> <prompt>" })
     return
   }
-  const agents = await loadAgents(deps)
+  let agents: AgentSummary[]
+  try {
+    agents = await loadAgents(deps)
+  } catch (error) {
+    if (!deps.signal?.aborted)
+      deps.dispatch({
+        type: "NOTICE",
+        message: `Subagent discovery failed: ${errorMessage(error)}`,
+      })
+    return
+  }
+  if (deps.signal?.aborted) return
   const match = agents.find((a) => a.id === id)
   if (!match) {
     deps.dispatch({
@@ -165,6 +196,14 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
   const run = deps.dispatchAgent ?? ((def, p, opts) => dispatchSubagent(def, p, opts))
   try {
     const result = await run(match.def, prompt, { cwd: deps.cwd, abortSignal: deps.signal })
+    if (deps.signal?.aborted) {
+      deps.dispatch({
+        type: "ACTIVITY_END",
+        status: "done",
+        summary: `Subagent "${id}" interrupted.`,
+      })
+      return
+    }
     // A nesting guard can refuse a dispatch (depth/cycle) by returning a result
     // with `rejection` set rather than throwing — surface it as an error end.
     if (result.rejection) {
@@ -187,10 +226,41 @@ export async function agentsDispatch(arg: string, deps: AgentsDeps): Promise<voi
       summary: `Subagent "${id}"${suffix}:\n${result.text}`,
     })
   } catch (err) {
+    if (deps.signal?.aborted) {
+      deps.dispatch({
+        type: "ACTIVITY_END",
+        status: "done",
+        summary: `Subagent "${id}" interrupted.`,
+      })
+      return
+    }
     deps.dispatch({
       type: "ACTIVITY_END",
       status: "error",
       summary: `Subagent "${id}" failed: ${errorMessage(err)}`,
     })
   }
+}
+
+/** Owner-scoped stop used by the existing agents command/panel surface. */
+export function agentsStop(
+  arg: string,
+  deps: {
+    dispatch: (action: TuiAction) => void
+    sessionId: string
+    cancel?: typeof cancelCliBackgroundRun
+  }
+): void {
+  const id = arg.trim()
+  if (!id || /\s/.test(id)) {
+    deps.dispatch({ type: "NOTICE", message: "Usage: /agents stop <runId>" })
+    return
+  }
+  const stopped = (deps.cancel ?? cancelCliBackgroundRun)(id, deps.sessionId)
+  deps.dispatch({
+    type: "NOTICE",
+    message: stopped
+      ? `Cancellation requested for background run ${id}.`
+      : `No cancellable background run "${id}" in this session.`,
+  })
 }

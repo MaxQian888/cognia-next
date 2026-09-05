@@ -82,7 +82,7 @@ describe("Footer", () => {
     const { container } = render(<Footer config={cfg} turnStatus="idle" columns={200} />)
     const text = container.textContent ?? ""
     expect(text).toContain("claude-x")
-    expect(text).toContain("default") // permission mode
+    expect(text).toContain(`${cfg.permissionMode} · claude-x`)
     // cost/cwd segments are not in the custom list
     expect(text).not.toContain("/work")
   })

@@ -3,6 +3,7 @@
  */
 import { toBuildContext } from "./to-build-context"
 import { resolveConfig } from "./load"
+import { resolveAgentMode } from "./agent-mode"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
@@ -570,14 +571,14 @@ describe("toBuildContext — opt-in auto routing", () => {
 })
 
 describe("toBuildContext — sandbox settings", () => {
-  it("leaves every sandbox field absent when the config says nothing", () => {
+  it("uses the default OS sandbox for a fresh CLI configuration", () => {
     // Absent must resolve to off through the shared ladder, not to a CLI
     // default that diverges from the desktop's.
     const appSettings = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
       .appSettings as unknown as Record<string, unknown>
-    expect("sandboxDefaultEnabled" in appSettings).toBe(false)
-    expect("sandboxTier" in appSettings).toBe(false)
-    expect("sandboxPolicy" in appSettings).toBe(false)
+    expect(appSettings.sandboxDefaultEnabled).toBe(true)
+    expect(appSettings.sandboxTier).toBe("os")
+    expect(appSettings.sandboxPolicy).toEqual({ network: "off" })
   })
 
   it("feeds enabled / tier / policy onto the rung resolveSendOptions reads", () => {
@@ -623,4 +624,67 @@ describe("toBuildContext — sandbox settings", () => {
     expect(appSettings.sandboxPolicy).toEqual({ network: "off" })
     expect("sandboxDefaultEnabled" in appSettings).toBe(false)
   })
+})
+
+describe("CLI LSP host", () => {
+  it("uses the CLI managed root and keeps installation behind network policy", () => {
+    const previous = process.env.COGNIA_HOME
+    process.env.COGNIA_HOME = "/custom-cli-home"
+    try {
+      const make = (network: "off" | "allowlist" | "on") =>
+        toBuildContext({
+          sessionId: "lsp",
+          config: cfg({ sandbox: { enabled: true, policy: { network } } }),
+        }).lspHost
+      expect(make("off")).toMatchObject({ installDir: "/custom-cli-home/lsp", autoInstall: false })
+      expect(make("allowlist")?.autoInstall).toBe(false)
+      expect(make("on")?.autoInstall).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.COGNIA_HOME
+      else process.env.COGNIA_HOME = previous
+    }
+  })
+
+  it("reads project configuration in a real Node host", async () => {
+    const fs = await import("node:fs/promises")
+    const os = await import("node:os")
+    const path = await import("node:path")
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cognia-lsp-test-"))
+    try {
+      await fs.mkdir(path.join(dir, ".cognia"))
+      await fs.writeFile(
+        path.join(dir, ".cognia/lsp.json"),
+        JSON.stringify({ servers: [{ id: "typescript", enabled: false }] })
+      )
+      const ctx = toBuildContext({ sessionId: "lsp", config: cfg({ cwd: dir }) })
+      expect(await ctx.lspHost?.readProjectFile(dir)).toEqual({
+        servers: [{ id: "typescript", enabled: false }],
+      })
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+it("projects Plan as read-only with the default CLI editing policy", () => {
+  const ctx = toBuildContext({
+    sessionId: "plan",
+    config: cfg(),
+    agentMode: resolveAgentMode("plan", []),
+  })
+  expect(ctx.session?.permissionMode).toBe("plan")
+})
+
+it("forwards the OS process sandbox contract and preserves explicit disable", () => {
+  const ctx = toBuildContext({ sessionId: "sandbox", config: cfg() })
+  expect(ctx.builtinProcessSandbox).toMatchObject({
+    writableRoots: ["/work"],
+    readableRoots: ["/work"],
+    network: false,
+  })
+  expect(typeof ctx.builtinProcessSandbox?.launcher).toBe("string")
+  expect(
+    toBuildContext({ sessionId: "sandbox", config: cfg({ sandbox: { enabled: false } }) })
+      .builtinProcessSandbox
+  ).toBeUndefined()
 })

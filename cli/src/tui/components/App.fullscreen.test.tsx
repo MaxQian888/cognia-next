@@ -137,7 +137,7 @@ describe("App — fullscreen layout", () => {
     // The enriched fixed header renders the context segment (0% with no usage),
     // which the scrollback banner never shows.
     expect(text).toContain("0% ctx")
-    expect(text).toContain("default")
+    expect(text).toContain(`${config.permissionMode} · 0% ctx`)
   })
 
   it("still streams an answer in fullscreen mode", async () => {

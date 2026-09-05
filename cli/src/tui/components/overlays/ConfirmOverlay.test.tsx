@@ -33,6 +33,48 @@ describe("ConfirmOverlay", () => {
     expect(text).toContain("Esc cancel")
   })
 
+  it("shares duplicate-heading suppression and preserves a different heading", () => {
+    const props = {
+      body: "# Review changes\n\n- Keep source intact",
+      format: "markdown" as const,
+      onConfirm: jest.fn(),
+      onCancel: jest.fn(),
+    }
+    const { container, rerender } = render(<ConfirmOverlay {...props} title="Review changes" />)
+    expect(container.textContent!.match(/Review changes/g)).toHaveLength(1)
+    expect(container.textContent).toContain("Keep source intact")
+    rerender(<ConfirmOverlay {...props} title="Confirm overwrite?" />)
+    expect(container.textContent).toContain("Confirm overwrite?")
+    expect(container.textContent).toContain("Review changes")
+    expect(props.onConfirm).not.toHaveBeenCalled()
+  })
+
+  it("keeps every navigation route available after heading suppression", () => {
+    const { container } = render(
+      <ConfirmOverlay
+        title="Tools"
+        body={"# Tools\n\n" + Array.from({ length: 30 }, (_, i) => `- tool_${i}`).join("\n")}
+        format="markdown"
+        viewportRows={10}
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    )
+    fire("[<65;1;1M")
+    expect(container.textContent).toContain("2–5 / 30")
+    fire("[<64;1;1M")
+    fire("[<0;1;1M")
+    fire(" ")
+    fire("b")
+    fire("", { pageDown: true })
+    fire("", { pageUp: true })
+    fire("G")
+    fire("g")
+    fire("", { upArrow: true })
+    expect(container.textContent).toContain("1–4 / 30")
+    fire("x")
+  })
+
   it("confirms on Enter", () => {
     const onConfirm = jest.fn()
     const onCancel = jest.fn()

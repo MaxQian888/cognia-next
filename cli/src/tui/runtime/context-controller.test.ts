@@ -88,3 +88,19 @@ describe("runContextReport", () => {
     expect(msg).not.toContain("Live context (SDK)")
   })
 })
+
+it("does not publish a late context report after cancellation", async () => {
+  const controller = new AbortController()
+  const { dispatch, actions } = collect()
+  await runContextReport({
+    dispatch,
+    config,
+    sessionId: "s1",
+    signal: controller.signal,
+    fetchSdkContext: async () => {
+      controller.abort()
+      throw new Error("cancelled")
+    },
+  })
+  expect(actions).toEqual([])
+})

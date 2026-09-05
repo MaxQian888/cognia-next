@@ -245,6 +245,19 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
   // fold every one of them fell through to the generic key scan — so a wrapped
   // `bash` showed no command and a wrapped `grep` no pattern.
   const name = bareToolName(toolName).toLowerCase()
+  if (name === "terminal_repl_spawn") {
+    const argv = Array.isArray(input.args)
+      ? input.args.filter((arg) => typeof arg === "string")
+      : []
+    return (
+      firstString({ command: [input.shell, ...argv].filter(Boolean).join(" ") }, ["command"]) ?? ""
+    )
+  }
+  if (["terminal_repl_write", "terminal_repl_read", "terminal_repl_kill"].includes(name)) {
+    return [firstString(input, ["sessionId"]), firstString(input, ["data", "signal"])]
+      .filter(Boolean)
+      .join("  ")
+  }
   if (name === "bash" || name === "shell") {
     return firstString(input, ["command", "cmd"]) ?? ""
   }
@@ -254,9 +267,11 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
     return [pattern, path].filter(Boolean).join("  ")
   }
   if (name === "glob") {
-    return firstString(input, ["pattern", "glob"]) ?? ""
+    return [firstString(input, ["pattern", "glob"]), firstString(input, ["path", "cwd"], 40)]
+      .filter(Boolean)
+      .join("  ")
   }
-  if (name === "read") {
+  if (name === "read" || name === "cat" || name === "view") {
     const path = firstString(input, ["file_path", "filePath", "path"])
     if (!path) return ""
     const range = readRange(input)
@@ -273,7 +288,73 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
     const files = (patch.match(/^\+\+\+ /gm) ?? []).length
     return files > 0 ? `${files} file${files === 1 ? "" : "s"}` : ""
   }
-  return firstString(input, ["file_path", "filePath", "path", "url", "query", "command"]) ?? ""
+  return (
+    firstString(input, [
+      "file_path",
+      "filePath",
+      "path",
+      "cwd",
+      "url",
+      "query",
+      "command",
+      "action",
+      "description",
+    ]) ?? ""
+  )
+}
+
+/** Inline object output is a labeled outline, not escaped JSON. Traversal is
+ * bounded independently of the view's line cap; the full payload stays in the
+ * existing pager/export path. Text content blocks retain their natural lines. */
+export function toolResultPreviewText(result: unknown): string {
+  if (result == null) return ""
+  if (typeof result === "string") return result
+  const ancestors = new Set<object>()
+  function* outline(value: unknown, depth: number): Generator<string> {
+    if (value === null || typeof value !== "object") {
+      yield* String(value).split("\n")
+      return
+    }
+    if (depth >= 5 || ancestors.has(value)) {
+      yield "… nested details — /expand"
+      return
+    }
+    ancestors.add(value)
+    if (Array.isArray(value)) {
+      if (value.length === 0) yield "(empty)"
+      for (const item of value) yield* outline(item, depth + 1)
+    } else {
+      const object = value as Record<string, unknown>
+      if (object.type === "text" && typeof object.text === "string") {
+        yield* object.text.split("\n")
+      } else {
+        const keys = Object.keys(object)
+        if (keys.length === 0) yield "(empty)"
+        for (const key of keys) {
+          const item = object[key]
+          const label = humanizeToolName(key)
+          if (item !== null && typeof item === "object") {
+            yield `${label}:`
+            for (const line of outline(item, depth + 1)) yield `  ${line}`
+          } else {
+            const lines = String(item).split("\n")
+            yield `${label}: ${lines[0]}`
+            for (const line of lines.slice(1)) yield `  ${line}`
+          }
+        }
+      }
+    }
+    ancestors.delete(value)
+  }
+  const lines: string[] = []
+  for (const line of outline(result, 0)) {
+    if (lines.length === 120) {
+      lines.push("… structured preview — /expand")
+      break
+    }
+    lines.push(line)
+  }
+  return lines.join("\n")
 }
 
 /**
@@ -356,15 +437,7 @@ export function summarizeResult(result: unknown): ResultSize {
  */
 export function resultPreview(result: unknown, max = 60): string {
   if (result == null) return ""
-  let text: string
-  if (typeof result === "string") text = result
-  else {
-    try {
-      text = JSON.stringify(result)
-    } catch {
-      text = String(result)
-    }
-  }
+  const text = toolResultPreviewText(result)
   const line =
     text
       .split("\n")

@@ -1,51 +1,24 @@
-/**
- * The plan-approval prompt shown after a plan-mode turn proposes a plan. The
- * full plan markdown is rendered INSIDE this overlay as a scrollable region (so
- * the user can read/scroll it while the approve menu is up — Claude Code parity)
- * and the transcript's `PlanCell` is only a compact reference. Mirrors OpenCode's
- * `plan_exit` confirmation: approve (switch to a build mode and implement) or keep
- * planning to refine.
- *
- * Key arbitration: the `SelectList` owns ↑/↓ (move selection) only; the plan body
- * owns everything used to read it — the wheel plus the keys the list ignores
- * (PgUp/PgDn, Space/b, g/G) — handled by this overlay's modal-body route, so
- * scrolling works even while a choice is highlighted (the bug this fixes). The
- * wheel scrolls the plan (not the menu) because the plan is the tall content the
- * user is reading; the short choice list is arrow-driven. Scroll state lives
- * here; the decisions are delegated to the parent so the App stays a thin
- * interpreter.
- */
+/** Content-first plan review. The parent still owns decisions and editing. */
 import React from "react"
-import { Box, Text } from "ink"
-import { useModalBodyInput } from "../../input/input-router"
-
-import { SelectList } from "../SelectList"
-import { MarkdownLine } from "../Markdown"
-import { parseMouseEvent } from "../../input/mouse"
+import { Box, Text, type DOMElement } from "ink"
+import { useModalInput } from "../../input/input-router"
+import { usePanelClick } from "../../input/use-panel-click"
 import { useTheme } from "../../theme/context"
+import { markdownSpans } from "../../render/cell-terminal-block"
 import {
-  clampScroll,
-  lineCount,
-  maxScroll,
-  positionLabel,
-  prepareDocumentLines,
-} from "../document-view"
+  sanitizeTerminalText,
+  terminalStringWidth,
+  wrapTerminalSpans,
+  type TerminalStyle,
+} from "../../render/terminal-block"
+import { truncateToWidth } from "../../markdown/width"
+import { clampScroll, maxScroll, positionLabel, relocateDocumentScroll } from "../document-view"
 import {
   PLAN_APPROVAL_CHOICES,
   planDiffStat,
   planStats,
-  planTitle,
   type PlanDecision,
 } from "../../runtime/plan"
-import { contentRows } from "../../layout/terminal-layout"
-
-/** Rows reserved for the header block, the choice list, and footer chrome — the
- * plan body gets whatever height is left. Generous so the 5-row list + header
- * always fit; the body clamps to a `MIN_BODY_ROWS` floor on short terminals. */
-const CHROME_ROWS = 16
-/** Lines the plan body scrolls per wheel notch — a small step so the wheel feels
- * like a nudge, while PgUp/PgDn still jump a full viewport. */
-const WHEEL_STEP = 3
 
 export function PlanApprovalOverlay({
   index,
@@ -55,118 +28,193 @@ export function PlanApprovalOverlay({
   onMove,
   onSelect,
   onCancel,
-  viewportRows,
+  viewportRows = 24,
+  columns = 80,
 }: {
   index: number
-  /** Where the plan was persisted, shown so the user knows `/plan` can re-open it. */
   savedTo?: string
-  /** The proposed plan markdown — rendered as the scrollable body + revision badge. */
   raw?: string
-  /** The plan this one supersedes, when this is a revision; drives a `+A −R` badge. */
   prevPlan?: string
   onMove: (delta: number) => void
   onSelect: (decision: PlanDecision) => void
   onCancel: () => void
-  /** Test seam: plan-body viewport height in rows (defaults to terminal height). */
+  /** Available overlay rows, including its compact controls. */
   viewportRows?: number
+  /** Root-owned terminal columns, updated on resize. */
+  columns?: number
 }) {
   const theme = useTheme()
-  const [scroll, setScroll] = React.useState(0)
-
-  // When this plan revises an earlier one, show how many lines changed.
-  const revision = prevPlan != null && raw != null ? planDiffStat(prevPlan, raw) : null
-  const stats = raw != null ? planStats(raw) : null
-  const title = raw != null ? planTitle(raw) : null
-
-  const prepared = React.useMemo(
-    () => (raw != null ? prepareDocumentLines(raw, "markdown") : null),
-    [raw]
+  const boxRef = React.useRef<DOMElement | null>(null)
+  const height = Math.max(1, Math.floor(viewportRows))
+  // Leave the final terminal column unused to avoid deferred terminal wrapping.
+  const width = Math.max(1, Math.floor(columns) - 1)
+  const headerRows = height >= 4 ? 1 : 0
+  const detailRows = height >= 12 && (savedTo || prevPlan != null) ? 1 : 0
+  const footerRows = height >= 3 ? 2 : height >= 2 ? 1 : 0
+  const viewport = Math.max(1, height - headerRows - detailRows - footerRows)
+  const lines = React.useMemo(
+    () =>
+      raw?.trim()
+        ? wrapTerminalSpans(markdownSpans(raw, true, theme, width), width)
+        : wrapTerminalSpans(
+            [
+              {
+                text: "No plan content available. Ctrl+G edit · Esc keep planning",
+                style: "muted",
+              },
+            ],
+            width
+          ),
+    [raw, theme, width]
   )
-  const total = prepared ? lineCount(prepared) : 0
-  const totalViewport = viewportRows ?? 24
-  const viewport = contentRows(totalViewport, CHROME_ROWS)
-  const choiceRows = Math.max(
-    1,
-    Math.min(PLAN_APPROVAL_CHOICES.length, contentRows(totalViewport, 6))
-  )
-  const showDetails = totalViewport >= CHROME_ROWS
-
-  const move = React.useCallback(
-    (delta: number) => setScroll((s) => clampScroll(s + delta, total, viewport)),
-    [total, viewport]
-  )
-
-  // Ctrl+G opens the plan in $EDITOR (Claude Code parity); the wheel and the
-  // remaining keys scroll the plan body. ↑/↓, Enter and Esc are left to the
-  // SelectList below so the highlight and the body scroll never fight over a key.
-  useModalBodyInput((input, key) => {
-    if (key.ctrl && (input === "g" || input === "G")) {
-      onSelect("edit-then-approve")
-      return
+  const plain = React.useMemo(() => lines.map((line) => line.plain), [lines])
+  const [reading, setReading] = React.useState({ plain, raw, scroll: 0, actions: false })
+  // Adjust before painting: an inserted section must not flash a stale viewport
+  // or leave approval armed for a different revision.
+  if (reading.plain !== plain || reading.raw !== raw) {
+    setReading({
+      plain,
+      raw,
+      scroll: relocateDocumentScroll(reading.plain, plain, reading.scroll, viewport),
+      actions: reading.raw === raw && reading.actions,
+    })
+  }
+  const start = clampScroll(reading.scroll, lines.length, viewport)
+  const move = (delta: number) =>
+    setReading((state) => ({
+      ...state,
+      scroll: clampScroll(start + delta, lines.length, viewport),
+    }))
+  const choiceIndex = Math.max(0, Math.min(index, PLAN_APPROVAL_CHOICES.length - 1))
+  const choice = PLAN_APPROVAL_CHOICES[choiceIndex]
+  const select = () => {
+    if (!reading.actions) return setReading((state) => ({ ...state, actions: true }))
+    // Missing content cannot authorize implementation; editing/refining remain available.
+    if (raw?.trim() || !choice.id.startsWith("approve-")) onSelect(choice.id)
+  }
+  const handleMouse = usePanelClick({
+    boxRef,
+    headerRows: height - 1,
+    borderRows: 0,
+    hasAboveMore: false,
+    visibleCount: footerRows > 0 ? 1 : 0,
+    onPick: select,
+    onWheel: (dir) => move(dir === "up" ? -3 : 3),
+  })
+  useModalInput((input, key) => {
+    if (key.ctrl && input.toLowerCase() === "g") return onSelect("edit-then-approve")
+    if (key.escape) return onCancel()
+    if (handleMouse(input)) return
+    if (key.tab) return setReading((state) => ({ ...state, actions: !state.actions }))
+    if (key.return) return select()
+    if (key.upArrow || key.downArrow) {
+      const delta = key.upArrow ? -1 : 1
+      return reading.actions ? onMove(delta) : move(delta)
     }
-    if (total === 0) return
-    const mouse = parseMouseEvent(input)
-    if (mouse?.kind === "wheel") return move(mouse.dir === "up" ? -WHEEL_STEP : WHEEL_STEP)
     if (key.pageUp || input === "b") return move(-viewport)
     if (key.pageDown || input === " ") return move(viewport)
-    if (input === "g") return setScroll(0)
-    if (input === "G") return setScroll(maxScroll(total, viewport))
+    if (input === "g") return move(-start)
+    if (input === "G") return move(maxScroll(lines.length, viewport) - start)
   })
-
-  const start = clampScroll(scroll, total, viewport)
-  const end = Math.min(total, start + viewport)
-
+  const revision = prevPlan != null && raw != null ? planDiffStat(prevPlan, raw) : null
+  const stats = planStats(raw ?? "")
+  const progress = `${positionLabel(start, viewport, lines.length)} · ${Math.round((Math.min(lines.length, start + viewport) / lines.length) * 100)}%`
+  const colors: Record<TerminalStyle, string | undefined> = {
+    plain: undefined,
+    muted: theme.muted,
+    accent: theme.accent,
+    success: theme.success,
+    warning: theme.warning,
+    danger: theme.danger,
+    code: theme.secondary,
+  }
+  const compact = (text: string) => truncateToWidth(sanitizeTerminalText(text), width)
+  const metadata = `${stats.steps > 0 ? `${stats.steps} step${stats.steps === 1 ? "" : "s"} · ` : ""}${stats.lines} line${stats.lines === 1 ? "" : "s"}`
+  const headerGap = Math.max(
+    1,
+    width - terminalStringWidth("Review plan") - terminalStringWidth(metadata)
+  )
+  const navigation = "PgUp/PgDn · g/G"
+  const progressRule = Math.max(
+    0,
+    width - terminalStringWidth(progress) - terminalStringWidth(navigation) - 2
+  )
+  const actionLabel = `${choiceIndex + 1}/${PLAN_APPROVAL_CHOICES.length} ${choice.label}`
+  const primaryKey = reading.actions ? "Enter select" : "Enter actions"
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingX={1}>
-        <Text color={theme.accent} bold>
-          Ready to code?
+    <Box ref={boxRef} flexDirection="column" width={width} height={height} overflow="hidden">
+      {headerRows > 0 ? (
+        <Text wrap="truncate-end">
+          <Text bold>{compact("Review plan")}</Text>
+          {width >= 40 ? (
+            <Text color={theme.muted}>
+              {" ".repeat(headerGap)}
+              {metadata}
+            </Text>
+          ) : null}
         </Text>
-      </Box>
-      <SelectList
-        items={PLAN_APPROVAL_CHOICES}
-        index={index}
-        maxRows={choiceRows}
-        onMove={onMove}
-        onSelect={(i) => onSelect(PLAN_APPROVAL_CHOICES[i].id)}
-        onCancel={onCancel}
-        disableWheel
-        footerHint="↑/↓ select · wheel/PgUp/PgDn scroll plan · Enter approve · Ctrl+G edit · Esc keep planning"
-      />
-      {showDetails ? (
-        <Box flexDirection="column" paddingX={1}>
-          {title ? <Text color={theme.accent}>{title}</Text> : null}
-          {stats ? (
-            <Text color={theme.muted} dimColor>
-              {stats.steps > 0 ? `${stats.steps} step${stats.steps === 1 ? "" : "s"}` : "plan"} ·{" "}
-              {stats.lines} lines
-            </Text>
-          ) : null}
-          {revision ? (
-            <Text color={theme.warning}>
-              Revised plan · +{revision.added} −{revision.removed} lines vs the previous version
-            </Text>
-          ) : null}
-          {savedTo ? (
-            <Text color={theme.muted} dimColor>
-              Saved to {savedTo} — reopen anytime with /plan
-            </Text>
-          ) : null}
-        </Box>
       ) : null}
-      {prepared && total > 0 && viewport > 0 ? (
-        <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
-          {prepared.kind === "markdown"
-            ? prepared.lines
-                .slice(start, end)
-                .map((line, i) => <MarkdownLine key={start + i} line={line} />)
-            : prepared.lines
-                .slice(start, end)
-                .map((line, i) => <Text key={start + i}>{line.length > 0 ? line : " "}</Text>)}
-          <Text color={theme.muted} dimColor>
-            {`${positionLabel(start, viewport, total)} · PgUp/PgDn·Space scroll · g/G top/bottom`}
+      {detailRows > 0 ? (
+        <Text color={theme.muted} wrap="truncate-end">
+          {compact(
+            revision
+              ? `Revised plan · +${revision.added} −${revision.removed} lines`
+              : `Saved to ${savedTo} · /plan`
+          )}
+        </Text>
+      ) : null}
+      <Box flexDirection="column" height={viewport} flexShrink={0}>
+        {lines.slice(start, start + viewport).map((line, i) => (
+          <Text key={start + i} wrap="truncate-end">
+            {line.plain.length === 0
+              ? " "
+              : line.spans.map((span, j) => (
+                  <Text
+                    key={j}
+                    color={span.color ?? colors[span.style]}
+                    bold={span.bold}
+                    italic={span.italic}
+                    underline={span.underline}
+                    dimColor={span.style === "muted" && !span.color}
+                  >
+                    {span.text}
+                  </Text>
+                ))}
           </Text>
-        </Box>
+        ))}
+      </Box>
+      {footerRows >= 2 ? (
+        <Text color={theme.muted} wrap="truncate-end">
+          {reading.actions ? (
+            compact(
+              width >= 60
+                ? (choice.hint ?? "Choose how to continue")
+                : "Enter select · ↑/↓ choose · Tab review"
+            )
+          ) : (
+            <>
+              {compact(progress)}
+              {progressRule > 0 ? (
+                <Text color={theme.borderSubtle}>{` ${"─".repeat(progressRule)} `}</Text>
+              ) : null}
+              {progressRule > 0 ? navigation : null}
+            </>
+          )}
+        </Text>
+      ) : null}
+      {footerRows > 0 ? (
+        <Text wrap="truncate-end">
+          <Text color={theme.accent} bold>
+            {compact(reading.actions ? actionLabel : primaryKey)}
+          </Text>
+          <Text color={theme.muted}>
+            {compact(
+              reading.actions
+                ? " · Enter select · ↑/↓ choose · Tab review · Ctrl+G edit · Esc keep"
+                : " · ↑/↓ scroll · Ctrl+G edit · Esc keep planning"
+            )}
+          </Text>
+        </Text>
       ) : null}
     </Box>
   )

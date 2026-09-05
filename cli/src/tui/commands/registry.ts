@@ -301,7 +301,10 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
     aliases: ["version"],
     description: "show version and provider info",
     category: "system",
-    handler: (ctx) => ({ kind: "notice", message: aboutLine(ctx.config, ctx.version) }),
+    handler: (ctx) => ({
+      kind: "notice",
+      message: aboutLine(ctx.config, ctx.version, ctx.state.backendCapabilities?.presetId),
+    }),
   },
   {
     name: "handoff",
@@ -412,7 +415,8 @@ const registry = new Map<string, CommandDescriptor>()
 const aliasIndex = new Map<string, string>()
 
 function indexAlias(desc: CommandDescriptor): void {
-  for (const alias of desc.aliases ?? []) aliasIndex.set(alias.toLowerCase(), desc.name)
+  for (const alias of desc.aliases ?? [])
+    aliasIndex.set(alias.toLowerCase(), desc.name.toLowerCase())
 }
 
 /** Register one command. Throws on a name/alias collision so mistakes surface. */

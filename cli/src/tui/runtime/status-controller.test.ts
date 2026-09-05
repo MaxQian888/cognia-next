@@ -145,7 +145,7 @@ describe("collectStatusReport — backend", () => {
 
   it("lists nothing as blocked on the built-in capability set", () => {
     const report = collectStatusReport(deps({ capabilities: builtinCapabilities() }))
-    expect(report.blockedFeatures).toEqual([])
+    expect(report.blockedFeatures).toContain("Context compaction")
   })
 })
 

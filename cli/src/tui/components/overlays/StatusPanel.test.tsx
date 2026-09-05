@@ -57,6 +57,37 @@ describe("StatusPanel", () => {
     expect(container.textContent).toContain("—")
   })
 
+  it("shows the live built-in dependency failure and recovery instruction", () => {
+    const { container } = render(
+      <StatusPanel
+        report={{
+          ...report,
+          cogniaParity: {
+            backend: "builtin",
+            contextVersion: "v1",
+            attachable: true,
+            running: true,
+            builtinToolCount: 3,
+            hostToolCount: 1,
+            userMcpCount: 0,
+            connections: 1,
+            restartRequired: [],
+            builtin: {
+              phase: "ready",
+              runtime: "ai-sdk",
+              capabilities: [],
+              skills: false,
+              categories: { sandbox: { state: "failed", reason: "Reinstall the launcher" } },
+            },
+          },
+        }}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("Runtime: ai-sdk · ready")
+    expect(container.textContent).toContain("sandbox: failed — Reinstall the launcher")
+  })
+
   it("counts the Cognia tools an external agent can actually call", () => {
     const { container } = render(
       <StatusPanel

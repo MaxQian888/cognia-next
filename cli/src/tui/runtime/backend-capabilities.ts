@@ -45,6 +45,7 @@ import { getPresetConfig } from "@/lib/ai/agent/external/presets"
 // dependency-free modules. Duplicating the table here would be the drift the
 // single-source comment on `PROTOCOL_PERMISSION_MODE_SUPPORT` warns about.
 import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import type { ToolHostSnapshot } from "../../agent/tool-host/status"
 
 /**
  * Is this backend id the built-in sidecar?
@@ -141,10 +142,9 @@ export interface BackendCapabilities {
 export function effectivePermissionMode(
   capabilities: BackendCapabilities | undefined,
   requested: AcpPermissionMode | "auto"
-): AcpPermissionMode {
+): AcpPermissionMode | "auto" {
+  if (!capabilities || capabilities.builtin || !capabilities.protocol) return requested
   const normalized: AcpPermissionMode = requested === "auto" ? "default" : requested
-  // No capabilities yet (still connecting) or the built-in agent: nothing clamps.
-  if (!capabilities || capabilities.builtin || !capabilities.protocol) return normalized
   return adaptPermissionMode(normalized, capabilities.protocol).mode
 }
 
@@ -208,14 +208,11 @@ function fromProfile(
 }
 
 /**
- * Presets whose adapter reads the Codex metadata channel (`codexOptions`).
- *
- * That channel is the ONLY route reasoning effort and extra skill roots have, so
- * it decides both what the bridge forwards and what this module may advertise —
- * hence one definition rather than a capability table that could drift from the
- * code doing the forwarding.
+ * Presets whose adapter consumes the Codex metadata channel (`codexOptions`).
+ * ACP uses a different session configuration protocol and currently drops this
+ * channel, even when the agent behind it is Codex.
  */
-const CODEX_PRESETS = new Set(["codex", "codex-app-server"])
+const CODEX_PRESETS = new Set(["codex-app-server"])
 
 export function usesCodexOptions(presetId: string | undefined): boolean {
   return !!presetId && CODEX_PRESETS.has(presetId)
@@ -224,10 +221,9 @@ export function usesCodexOptions(presetId: string | undefined): boolean {
 /**
  * Presets that can enumerate their own models without a session (`model/list`).
  *
- * Narrower than {@link usesCodexOptions} on purpose: only the NATIVE app-server
- * speaks that method. The `codex` preset is the `@zed-industries/codex-acp`
- * shim, and ACP has no model-list call. ACP model selection is negotiated per
- * session via `configOptions`, so ACP is handled separately below.
+ * Only the native app-server speaks that method. The `codex` and `codex-acp`
+ * presets use the ACP shim, where model selection is negotiated per session
+ * via `configOptions` instead.
  */
 const MODEL_LISTING_PRESETS = new Set(["codex-app-server"])
 
@@ -235,15 +231,35 @@ export function supportsModelListing(presetId: string | undefined): boolean {
   return !!presetId && MODEL_LISTING_PRESETS.has(presetId)
 }
 
-/** Everything the built-in sidecar supports — i.e. everything. */
-export function builtinCapabilities(): BackendCapabilities {
+/** Local configuration remains usable before startup; live controls require runtime evidence. */
+export function builtinCapabilities(snapshot?: ToolHostSnapshot): BackendCapabilities {
+  const host = snapshot?.builtin
+  const unavailable = (reason: string): FeatureSupport => ({ supported: false, reason })
+  const feature = (id: string): FeatureSupport => {
+    if (!host || host.phase !== "ready") {
+      return unavailable(host?.reason ?? "The built-in runtime has not started")
+    }
+    return host.capabilities.some((capability) => capability === id)
+      ? SUPPORTED
+      : unavailable(`The resolved ${host.runtime ?? "built-in"} runtime does not support ${id}`)
+  }
   return {
     backend: "builtin",
     builtin: true,
-    features: Object.fromEntries(BACKEND_FEATURES.map((f) => [f, SUPPORTED])) as Record<
-      BackendFeature,
-      FeatureSupport
-    >,
+    features: {
+      // These open local configuration; they do not assert that any configured tool is running.
+      mcp: SUPPORTED,
+      skills: SUPPORTED,
+      plugins: SUPPORTED,
+      modelPicker: SUPPORTED,
+      subagentModels: SUPPORTED,
+      thinking: host?.phase === "ready" ? feature("thinking") : SUPPORTED,
+      compact: feature("compaction"),
+      resume: feature("session.resume"),
+      hooks: feature("hooks.lifecycle"),
+      mcpLogs: feature("mcp.logs"),
+      rateLimits: feature("rate-limit-reporting"),
+    },
   }
 }
 

@@ -28,11 +28,12 @@ import { StartupGate } from "./StartupGate"
 import { BackendConnect } from "./BackendConnect"
 import { BackendFailure, type BackendFailureAction } from "./BackendFailure"
 import { BackendInstall } from "./BackendInstall"
-import type { BackendInstallOption } from "../state/types"
+import type { BackendInstallOption, TuiAction } from "../state/types"
 import { createAgentSession, type AgentSession } from "../../agent/session-runner"
 import {
   externalCapabilities,
   isBuiltinBackend,
+  builtinCapabilities,
   supportsFeature,
   unsupportedFeatureMessage,
 } from "../runtime/backend-capabilities"
@@ -62,7 +63,7 @@ import {
   planFileName,
   planTitle,
   planDecisionMode,
-  PLAN_APPROVED_PROMPT,
+  planApprovedPrompt,
   PLAN_EXECUTE_PROMPT,
   type PlanDecision,
 } from "../runtime/plan"
@@ -124,6 +125,7 @@ import { useLogIngest } from "../hooks/use-log-ingest"
 import { useTerminalSize } from "../hooks/useTerminalSize"
 import { terminalLayout } from "../layout/terminal-layout"
 import { addToolApproval, readToolApprovals } from "../../agent/tool-approvals"
+import { approvalKey } from "../../agent/command-approval"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import { mintSessionId } from "../../agent/run"
 import { readTranscript, type TranscriptFs } from "../../agent/transcript"
@@ -346,7 +348,7 @@ export interface AppProps {
   runInteractiveShell?: (command: string, opts: RunInteractiveShellOpts) => Promise<ShellResult>
   /** Persist an "Allow always" tool choice; defaults to the real
    * `tool-approvals.json` writer. Injected as a no-op by tests. */
-  persistToolApproval?: (home: string, toolName: string) => void
+  persistToolApproval?: typeof addToolApproval
   /**
    * Whether `config.cwd` is already trusted. `false` opens the app in the
    * startup phase (welcome banner + "do you trust this folder?" gate). Defaults
@@ -464,12 +466,7 @@ export function App({
   osHome = os.homedir(),
   readdir,
   transcriptFs,
-  copyClipboard = (text: string) =>
-    copyToClipboard(text, {
-      osc52: config.clipboard?.osc52,
-      osc52MaxBytes: config.clipboard?.osc52MaxBytes,
-      env: process.env,
-    }),
+  copyClipboard: injectedCopyClipboard,
   persistConfig,
   persistProviderModel,
   persistBackendModel,
@@ -527,8 +524,41 @@ export function App({
   titleEnv,
 }: AppProps) {
   const { exit, suspendTerminal } = useApp()
-  const [state, dispatch] = useReducer(tuiReducer, undefined, () =>
+  const externalModelRequestRef = useRef(0)
+  const [state, reducerDispatch] = useReducer(tuiReducer, undefined, () =>
     createInitialState(config, sessionId, trusted, initialHistory)
+  )
+  // Async catalogs belong to one overlay opening, including close/reopen in
+  // the same React batch. Query and selection changes keep that ownership.
+  const dispatch = useCallback((action: TuiAction) => {
+    if (
+      action.type === "OVERLAY_OPEN" ||
+      action.type === "OVERLAY_CLOSE" ||
+      action.type === "RESET"
+    ) {
+      externalModelRequestRef.current += 1
+    }
+    reducerDispatch(action)
+  }, [])
+  const modelContextRef = useRef({ config: state.config, sessionId: state.sessionId })
+  useEffect(() => {
+    modelContextRef.current = { config: state.config, sessionId: state.sessionId }
+  }, [state.config, state.sessionId])
+  useEffect(
+    () => () => {
+      externalModelRequestRef.current += 1
+    },
+    []
+  )
+  const copyClipboard = useCallback(
+    (text: string) =>
+      injectedCopyClipboard
+        ? injectedCopyClipboard(text)
+        : copyToClipboard(text, {
+            osc52: state.config.clipboard?.osc52,
+            osc52MaxBytes: state.config.clipboard?.osc52MaxBytes,
+          }),
+    [injectedCopyClipboard, state.config.clipboard]
   )
   // One owner for the external backend's connect attempt, process, and
   // teardown. A ref (not state) because it is read when a session is lazily
@@ -537,7 +567,6 @@ export function App({
   // which is what the old local `cancelled` flag could not do.
   const connectionRef = useRef<BackendConnection | null>(null)
   const lifecycleRef = useRef<BackendLifecycle<BackendConnection> | null>(null)
-  const externalModelRequestRef = useRef(0)
   // The install option resolved for the current failure (a ref so the failure
   // page's "install" handler reads the latest without recreating the callback).
   const installOptionRef = useRef<BackendInstallOption | null>(null)
@@ -555,7 +584,14 @@ export function App({
   const activeCreateSession = useCallback<CreateSession>(
     (params) => {
       if (isBuiltinBackend(activeBackend)) {
-        return (createSession ?? createAgentSession)(params)
+        return (createSession ?? createAgentSession)({
+          ...params,
+          onToolHostStatus: (snapshot) =>
+            dispatch({
+              type: "BACKEND_CAPABILITIES_UPDATE",
+              capabilities: builtinCapabilities(snapshot),
+            }),
+        })
       }
       if (!createExternalSession) {
         // Refuse rather than quietly answering on the built-in agent — the whole
@@ -594,7 +630,7 @@ export function App({
           : {}),
       })
     },
-    [activeBackend, createSession, createExternalSession]
+    [activeBackend, createExternalSession, createSession, dispatch]
   )
   // Mounted ONCE for the app's lifetime (never per turn): the external-agent
   // emitter has the default 10-listener cap, and a MaxListenersExceededWarning
@@ -687,7 +723,7 @@ export function App({
         throw error
       }
     },
-    [home]
+    [dispatch, home]
   )
   const detachHost = useCallback(async () => {
     attachedHostAbortRef.current?.abort()
@@ -760,7 +796,7 @@ export function App({
           severity: "warn",
         })
       )
-  }, [attachHost, home])
+  }, [attachHost, dispatch, home])
   const submitAttachedIntent = useCallback(
     async (intent: AllowedHostStateIntent) => {
       const connection = attachedHostConnectionRef.current
@@ -909,7 +945,7 @@ export function App({
         message: `Skill "${id}" ${enabled ? "enabled" : "disabled"} for this session.`,
       })
     },
-    [home, agent]
+    [agent, dispatch, home]
   )
   // Whether the composer popup currently owns input — read by the wheel handler
   // so the transcript doesn't scroll while the popup is being wheel-scrolled.
@@ -1237,7 +1273,7 @@ export function App({
     return () => {
       cancelled = true
     }
-  }, [resolveMeta, activeProvider, activeModel])
+  }, [resolveMeta, activeProvider, activeModel, dispatch])
 
   // Prime + background-refresh the OpenRouter live-models catalog whenever
   // OpenRouter is the active provider, so the `/model` picker reflects the synced
@@ -1266,12 +1302,18 @@ export function App({
   // updates". No-op for every other provider (their lists are static/synchronous).
   const syncAndRefreshModelOverlay = useCallback(() => {
     if (state.config.provider !== "openrouter") return
-    void initOpenRouterCatalog({ apiKey: openRouterApiKey }).then(() => {
-      dispatch({
-        type: "OVERLAY_REFRESH_MODEL_OPTIONS",
-        options: collectModelOptions(state.config),
+    const requestId = externalModelRequestRef.current
+    const context = modelContextRef.current
+    void initOpenRouterCatalog({ apiKey: openRouterApiKey })
+      .then(() => {
+        if (externalModelRequestRef.current !== requestId || modelContextRef.current !== context)
+          return
+        dispatch({
+          type: "OVERLAY_REFRESH_MODEL_OPTIONS",
+          options: collectModelOptions(context.config),
+        })
       })
-    })
+      .catch(() => {})
   }, [state.config, dispatch, initOpenRouterCatalog, openRouterApiKey])
 
   // Open the `/model` switcher instantly with whatever models are cached, then
@@ -1298,9 +1340,11 @@ export function App({
         ? `${caps.backend} did not expose model options for the active ACP session. Send a message first, then retry.`
         : `${caps.backend} did not report any models.`
       const requestId = ++externalModelRequestRef.current
+      const context = modelContextRef.current
       const isCurrentRequest = () => {
         return (
           externalModelRequestRef.current === requestId &&
+          modelContextRef.current === context &&
           connectionRef.current?.agentId === agentId
         )
       }
@@ -1380,7 +1424,7 @@ export function App({
         ...(plan.prevRaw ? { prevPlan: plan.prevRaw } : {}),
       },
     })
-  }, [state.lastPlan, state.sessionId, home, persistPlan])
+  }, [state.lastPlan, state.sessionId, home, persistPlan, dispatch])
 
   // Bridge `state.copilot` (driven by the COPILOT_* actions the runtime
   // controller dispatches) to the agent session: entering routes `send` to a
@@ -1453,7 +1497,7 @@ export function App({
         // backend has already stopped or refuses to acknowledge shutdown.
       }
     })()
-  }, [agent, exit, getRuntimeAbort, onExit])
+  }, [agent, dispatch, exit, getRuntimeAbort, onExit])
 
   // Startup trust gate: "Yes, proceed" trusts the current cwd and enters chat.
   const trustCwd = useCallback(() => {
@@ -1463,7 +1507,7 @@ export function App({
       // A read-only home shouldn't block the session — just don't remember it.
     }
     dispatch({ type: "STARTUP_TRUST" })
-  }, [home, trustFolderFn, state.config.cwd])
+  }, [dispatch, trustFolderFn, home, state.config.cwd])
 
   // Folder picker confirmed a directory (or `/cd <dir>`): switch cwd, trust it,
   // and enter chat. `agent.changeCwd` dispatches SET_CWD and recreates the
@@ -1480,7 +1524,7 @@ export function App({
       void agent.changeCwd(dir)
       dispatch({ type: "STARTUP_TRUST" })
     },
-    [agent, home, trustFolderFn]
+    [agent, dispatch, home, trustFolderFn]
   )
 
   // Bring the external backend up while the composer is still closed. Runs on
@@ -1567,7 +1611,7 @@ export function App({
     // The config is read through `liveConfigRef`, deliberately keeping it out of
     // the deps: the effect must fire once per ENTRY into the connecting phase,
     // not on every unrelated config change while a connect is in flight.
-  }, [state.phase, connectBackendFn, resolveInstallOptionFn, sessionId])
+  }, [state.phase, connectBackendFn, resolveInstallOptionFn, sessionId, dispatch])
 
   // Esc during the connect: reclaim whatever the in-flight connect may have
   // registered under the stable id (the connect writes `connectionRef` only on
@@ -1587,7 +1631,7 @@ export function App({
       type: "BACKEND_CONNECT_FAIL",
       failure: { kind: "handshake", stage: "launch", message: "Connection cancelled." },
     })
-  }, [sessionId])
+  }, [dispatch, sessionId])
 
   // Reclaim the external agent process on unmount. The controller — not the
   // session — owns the process it started, so exiting without this orphans the
@@ -1690,60 +1734,94 @@ export function App({
   //   - edit-then-approve: open the saved plan in $EDITOR and KEEP the overlay
   //     open so the user can revise, then approve.
   //   - keep: close and stay in plan mode.
+  const planDecisionBusy = useRef(false)
   const onPlanDecision = useCallback(
     (decision: PlanDecision) => {
       const planOverlay = state.overlay.kind === "plan" ? state.overlay : null
-
-      // Edit-first: launch the editor on the saved plan, leave the overlay up.
-      if (decision === "edit-then-approve") {
-        const file = planOverlay?.savedTo
-        if (!file) {
-          dispatch({ type: "NOTICE", message: "No saved plan file to edit yet." })
-          return
-        }
-        const { editor } = detectEditor(process.env, { config: state.config.editor })
-        void openInEditorFn(file, { editor }).then((ok) =>
+      if (!planOverlay || planDecisionBusy.current) return
+      if (decision === "keep") {
+        dispatch({ type: "OVERLAY_CLOSE" })
+        return
+      }
+      planDecisionBusy.current = true
+      void (async () => {
+        try {
+          if (decision === "edit-then-approve") {
+            const file =
+              planOverlay.savedTo ??
+              persistPlan(
+                home,
+                planFileName(state.sessionId, state.lastPlan?.seq ?? state.seq),
+                planOverlay.raw
+              )
+            if (!file) throw new Error("Could not save the plan for editing.")
+            const { editor } = detectEditor(process.env, { config: state.config.editor })
+            let ok = false
+            await suspendTerminal(async () => {
+              ok = await openInEditorFn(file, { editor, wait: true })
+            })
+            if (!ok)
+              throw new Error(
+                "The editor did not finish successfully. The plan has not been approved."
+              )
+            const revised = loadPlanFile(file)
+            if (revised == null || !revised.trim())
+              throw new Error(
+                "The edited plan is empty or unreadable. Restore its content and edit again."
+              )
+            if (revised !== planOverlay.raw) dispatch({ type: "COMMIT_PLAN", raw: revised })
+            else
+              dispatch({
+                type: "NOTICE",
+                message: "Plan unchanged. Review it, then choose how to proceed.",
+              })
+            return
+          }
+          // An external editor may have changed the file since it was displayed.
+          // Reopen that revision for review instead of silently approving unseen text.
+          const saved = planOverlay.savedTo ? loadPlanFile(planOverlay.savedTo) : null
+          if (saved != null && saved !== planOverlay.raw) {
+            if (!saved.trim())
+              throw new Error("The saved plan is empty. Restore its content before approving.")
+            dispatch({ type: "COMMIT_PLAN", raw: saved })
+            return
+          }
+          const raw = planOverlay.raw
+          if (!raw.trim()) throw new Error("There is no plan content to approve.")
+          const fresh = decision === "approve-new-session"
+          const mode = fresh ? "acceptEdits" : planDecisionMode(decision)
+          if (!mode) return
+          dispatch({ type: "OVERLAY_CLOSE" })
+          if (fresh) await agent.clear(mintId())
+          await agent.switchMode(mode)
+          persist("permissionMode", mode)
+          await agent.send(fresh ? PLAN_EXECUTE_PROMPT(raw) : planApprovedPrompt(raw))
+        } catch (err) {
           dispatch({
             type: "NOTICE",
-            message: ok
-              ? `Editing ${file} in ${editor.displayName} — save it, then pick an approve option to run the edited plan.`
-              : `Couldn't launch an editor — edit ${file} manually, then approve.`,
+            message: `Plan action failed: ${err instanceof Error ? err.message : String(err)}`,
           })
-        )
-        return
-      }
-
-      dispatch({ type: "OVERLAY_CLOSE" })
-      if (decision === "keep") return
-
-      // Fresh-session execution: clean context, auto-edits, embed the (reloaded)
-      // plan so the new session has the full brief.
-      if (decision === "approve-new-session") {
-        const reloaded = planOverlay?.savedTo ? loadPlanFile(planOverlay.savedTo) : null
-        const raw = reloaded ?? planOverlay?.raw ?? ""
-        persist("permissionMode", "acceptEdits")
-        void (async () => {
-          await agent.clear(mintId())
-          await agent.switchMode("acceptEdits")
-          await agent.send(raw ? PLAN_EXECUTE_PROMPT(raw) : PLAN_APPROVED_PROMPT)
-        })()
-        return
-      }
-
-      const mode = planDecisionMode(decision)
-      if (mode) {
-        persist("permissionMode", mode)
-        // switchMode now mutates the LIVE session in place (no respawn), so the
-        // proposed plan above is still in context when we tell the agent to
-        // implement it. Await the mode switch before sending so the build-mode
-        // gate is active for the implementation turn.
-        void (async () => {
-          await agent.switchMode(mode)
-          await agent.send(PLAN_APPROVED_PROMPT)
-        })()
-      }
+        } finally {
+          planDecisionBusy.current = false
+        }
+      })()
     },
-    [agent, persist, state.overlay, state.config.editor, openInEditorFn, loadPlanFile, mintId]
+    [
+      state.overlay,
+      state.sessionId,
+      state.lastPlan,
+      state.seq,
+      state.config.editor,
+      dispatch,
+      loadPlanFile,
+      agent,
+      mintId,
+      persist,
+      persistPlan,
+      home,
+      suspendTerminal,
+      openInEditorFn,
+    ]
   )
 
   const openSessions = useCallback(() => {
@@ -1754,14 +1832,26 @@ export function App({
       return
     }
     dispatch({ type: "OVERLAY_OPEN", overlay: { kind: "sessions", items, index: 0 } })
-  }, [home, readdir, transcriptFs])
+  }, [dispatch, home, readdir, transcriptFs])
 
   const doResume = useCallback(
     (id: string) => {
-      const cells = transcriptToCells(readTranscript(home, id, transcriptFs))
-      void agent.resume(id, cells)
+      void (async () => {
+        try {
+          const entries = readTranscript(home, id, transcriptFs)
+          if (entries.length === 0)
+            throw new Error("Session transcript is missing or has no readable messages.")
+          const cells = transcriptToCells(entries)
+          await agent.resume(id, cells)
+        } catch (error) {
+          dispatch({
+            type: "NOTICE",
+            message: `Could not resume session: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      })()
     },
-    [agent, home, transcriptFs]
+    [agent, home, transcriptFs, dispatch]
   )
 
   // Resume the most-recently-active session directly (the `/resume` command),
@@ -1774,7 +1864,7 @@ export function App({
       return
     }
     doResume(items[0].sessionId)
-  }, [doResume, home, readdir, transcriptFs])
+  }, [dispatch, doResume, home, readdir, transcriptFs])
 
   // Resume a specific session by id (`/resume <id>` / `--resume <id>`). Validated
   // against the session store so a typo'd id yields a notice, not an empty session.
@@ -1789,7 +1879,7 @@ export function App({
       }
       doResume(match.sessionId)
     },
-    [doResume, home, readdir, transcriptFs]
+    [dispatch, doResume, home, readdir, transcriptFs]
   )
 
   // Interpret a pure CommandEffect produced by the dispatcher — see useApplyEffect.
@@ -1941,14 +2031,14 @@ export function App({
       })
       if (action === "doctor") runCommandLine("/doctor")
     },
-    [doExit, runCommandLine, runInstallFn]
+    [dispatch, doExit, runCommandLine, runInstallFn]
   )
 
   const cancelBackendInstall = useCallback(() => {
     installAbortRef.current?.abort()
     installAbortRef.current = null
     dispatch({ type: "BACKEND_INSTALL_CANCEL" })
-  }, [])
+  }, [dispatch])
 
   // Launch-flag command (`--continue` / `--resume [id]`): run exactly once, and
   // only after the startup trust gate has cleared — resuming a session while
@@ -1978,7 +2068,7 @@ export function App({
       type: "OVERLAY_OPEN",
       overlay: startupBypassConfirmOverlay(state.config.permissionMode),
     })
-  }, [state.phase, state.bypassAcknowledged, state.config.permissionMode])
+  }, [state.phase, state.bypassAcknowledged, state.config.permissionMode, dispatch])
 
   // Resolve `@skill:` / `@agent:` mentions in a submitted line before it is sent:
   // enable + persist mentioned skills, synchronously dispatch mentioned agents and
@@ -1994,7 +2084,7 @@ export function App({
             persistSkillEnabled(id)
             return
           }
-          skillSetEnabled(id, true, {
+          return skillSetEnabled(id, true, {
             dispatch,
             home,
             cwd: state.config.cwd,
@@ -2036,13 +2126,14 @@ export function App({
         knownAgentIds: async () => new Set((await mentionProviders.agents("")).map((c) => c.id)),
       }),
     [
-      mentionProviders,
+      persistSkillEnabled,
+      dispatch,
       home,
-      osHome,
       state.config.cwd,
       state.config.externalSkills,
       state.config.skillDirs,
-      persistSkillEnabled,
+      osHome,
+      mentionProviders,
     ]
   )
 
@@ -2073,7 +2164,7 @@ export function App({
       await agent.send(text)
       copilotCheckProposal(workflowId, { dispatch })
     },
-    [agent]
+    [agent, dispatch]
   )
 
   const handleSubmit = useCallback(
@@ -2145,18 +2236,19 @@ export function App({
       runCommandLine(text)
     },
     [
-      busy,
-      runBash,
-      runCommandLine,
-      sendThenDrainSteer,
-      sendCopilot,
-      hasForegroundRun,
-      sendInputToForeground,
-      state.copilot?.workflowId,
+      scrollReset,
       state.editTarget,
       state.cells,
+      state.copilot?.workflowId,
+      hasForegroundRun,
+      sendInputToForeground,
+      runCommandLine,
+      dispatch,
       agent,
-      scrollReset,
+      sendThenDrainSteer,
+      runBash,
+      busy,
+      sendCopilot,
     ]
   )
 
@@ -2171,7 +2263,7 @@ export function App({
     dispatch({ type: "OVERLAY_CLOSE" })
     const sub = form.subcommand ? ` ${form.subcommand}` : ""
     runCommandLine(`/${form.commandName}${sub} ${result.args}`.trim())
-  }, [state.overlay, runCommandLine])
+  }, [state.overlay.kind, state.overlay.form, dispatch, runCommandLine])
 
   // Apply an inline settings-panel edit (enum cycle / boolean toggle): persist
   // via the matching mutate helper, live-merge the config, then RE-OPEN the panel
@@ -2304,7 +2396,16 @@ export function App({
         dispatch({ type: "REPAINT" })
       }
     },
-    [state.config, state.overlay, state.backendCapabilities, home, agent, clearScreen, fullscreen]
+    [
+      state.config,
+      state.overlay,
+      state.backendCapabilities,
+      dispatch,
+      agent,
+      fullscreen,
+      home,
+      clearScreen,
+    ]
   )
 
   // Enter on a delegate/form settings row: delegate rows run the existing slash
@@ -2390,7 +2491,15 @@ export function App({
         },
       })
     },
-    [state.config, state.overlay, runCommandLine, applyEffect]
+    [
+      state.overlay.kind,
+      state.overlay.section,
+      state.overlay.index,
+      state.config,
+      applyEffect,
+      runCommandLine,
+      dispatch,
+    ]
   )
 
   // `/agents models` panel edit: persist one subagent's provider/model override
@@ -2422,7 +2531,7 @@ export function App({
         },
       })
     },
-    [state.overlay, state.config, home, agent]
+    [state.overlay, state.config, dispatch, agent, home]
   )
 
   // Reverse-history-search handlers. The pure `searchHistory` matcher scans the
@@ -2445,7 +2554,7 @@ export function App({
         },
       })
     },
-    [state.input.history.entries]
+    [dispatch, state.input.history.entries]
   )
 
   // Ctrl+V: read an image off the OS clipboard and append it as an `@<path>`
@@ -2462,7 +2571,7 @@ export function App({
     const sep = bufferText(buffer).length > 0 ? " " : ""
     dispatch({ type: "INPUT_SET", buffer: insertText(buffer, `${sep}@${result.path}`) })
     dispatch({ type: "NOTICE", message: "📎 image from clipboard" })
-  }, [readClipboardImage, state.input.buffer])
+  }, [dispatch, readClipboardImage, state.input.buffer])
 
   const abortRuntime = useCallback(() => {
     if (runtimeAbort.current) {
@@ -2481,9 +2590,13 @@ export function App({
         decision.decision === "allow_always" &&
         state.overlay.kind === "permission"
       ) {
-        const toolName = state.overlay.req.toolName
+        // What gets remembered is the CALL, not the tool. "Allow always" on a
+        // shell tool used to grant every future `bash`, so agreeing to one
+        // `pnpm build` silently bought `git push --force` and `rm -rf` for the
+        // rest of time.
+        const toolName = approvalKey(state.overlay.req.toolName, state.overlay.req.input)
         try {
-          persistToolApproval(home, toolName)
+          persistToolApproval(home, toolName, undefined, { cwd: state.config.cwd })
         } catch {
           // best-effort — a read-only home shouldn't break the turn.
         }
@@ -2495,7 +2608,7 @@ export function App({
       }
       agent.resolvePermission(decision)
     },
-    [agent, home, persistToolApproval, state.overlay]
+    [agent, home, persistToolApproval, state.overlay, state.config.cwd]
   )
 
   // Global key handler: Ctrl+C ladder, find-in-viewport, backtrack-to-edit,
@@ -2531,7 +2644,10 @@ export function App({
     pasteClipboardImage,
     scrollReset,
     disarmBacktrack,
-    armBacktrack,
+    armBacktrack: () => {
+      externalModelRequestRef.current += 1
+      armBacktrack()
+    },
     cursor,
     scroll,
     clearScreen,
@@ -2715,6 +2831,7 @@ export function App({
       askUser={askUser}
       mcpPanelDeps={mcpPanelDeps}
       clearLogs={clearLogs}
+      copyClipboard={copyClipboard}
     />
   )
 

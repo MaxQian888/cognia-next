@@ -13,6 +13,25 @@ jest.mock("@/lib/db/workflows", () => ({
 const run = (id: string): WorkflowRunRow => ({ id, workflowId: "w1" }) as WorkflowRunRow
 
 describe("startRunsWatch", () => {
+  it("fences late and reentrant rows and unsubscribes only once after stop", () => {
+    let emit: (rows: WorkflowRunRow[]) => void = () => {}
+    const onRuns = jest.fn()
+    const unsub = jest.fn(() => emit([run("a")]))
+    const watch = startRunsWatch({
+      workflowId: "w1",
+      onRuns,
+      subscribe: (_id, next) => {
+        emit = next
+        return unsub
+      },
+    })
+    watch.stop()
+    watch.stop()
+    emit([run("b")])
+    expect(onRuns).not.toHaveBeenCalled()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
   it("forwards each emitted run list to onRuns", () => {
     let emit: (r: WorkflowRunRow[]) => void = () => {}
     const seen: number[] = []

@@ -13,7 +13,7 @@ import { Box, Static, Text, measureElement, type DOMElement } from "ink"
 import { CellView } from "./CellView"
 import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
-import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
+import { groupContextRuns, contextGroupLines } from "../format/context-group"
 import type { Cell, ToolCell } from "../state/types"
 import type { ResolvedRenderConfig } from "../../config/schema"
 import { cellToTerminalBlock } from "../render/cell-terminal-block"
@@ -41,14 +41,17 @@ function MeasuredCell({
   )
 }
 
-/** A folded run of completed context-gathering tools, shown as one dim summary
- * line ("⚙ 3 reads, 2 searches") so a burst doesn't bury the actual work. */
-function ContextGroupView({ tools }: { tools: ToolCell[] }) {
+/** A compact completed run with readable actions and bounded target previews. */
+function ContextGroupView({ tools, columns }: { tools: ToolCell[]; columns: number }) {
   const theme = useTheme()
   return (
-    <Text color={theme.muted} dimColor>
-      ⚙ {summarizeContextGroup(tools)}
-    </Text>
+    <Box flexDirection="column">
+      {contextGroupLines(tools, columns).map((line, index) => (
+        <Text key={index} color={index === 0 ? theme.statusDone : theme.text}>
+          {line}
+        </Text>
+      ))}
+    </Box>
   )
 }
 
@@ -174,7 +177,7 @@ function TranscriptImpl({
         {runs.map((run) =>
           run.kind === "group" ? (
             <Box key={run.tools[0].id} marginBottom={1}>
-              <ContextGroupView tools={run.tools} />
+              <ContextGroupView tools={run.tools} columns={columns} />
             </Box>
           ) : (
             renderCell(run.cell)

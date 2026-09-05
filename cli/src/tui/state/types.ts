@@ -407,6 +407,7 @@ export interface StatusReport {
  * version is live.
  */
 export interface CogniaParityReport {
+  builtin?: import("../../agent/tool-host/status").BuiltinHostReadiness
   backend: string
   contextVersion: string
   /** The protocol can carry Cognia's MCP bridge. */
@@ -904,6 +905,12 @@ export interface TuiState {
   bypassAcknowledged: boolean
   cells: Cell[]
   inflight: Inflight
+  /**
+   * Ordered live suffix after `inflight`: notices, content, and later text/tool
+   * segments blocked by an earlier running tool. Commit only a completed prefix
+   * so concurrent results and new deltas cannot move ahead of earlier output.
+   */
+  pendingCells: Cell[]
   overlay: Overlay
   input: InputState
   /** The latest turn's usage — drives the context-window gauge. */

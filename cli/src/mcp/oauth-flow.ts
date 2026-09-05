@@ -13,6 +13,7 @@
  * opener, callback server, connection, RNG) is injectable so the orchestration
  * is unit-tested without sockets or a real browser.
  */
+import { randomBytes } from "node:crypto"
 import type { McpServer } from "@cognia/agent-config-types"
 
 import { createMcpConnection, type McpClientLike, type OpenedMcp } from "./mcp-client"
@@ -35,11 +36,16 @@ export interface AuthFlowDeps {
   scope?: string
   /** How long to wait for the browser redirect (default 3 min). */
   timeoutMs?: number
+  signal?: AbortSignal
   fs?: McpAuthFs
   createConnection?: (
     server: McpServer,
     opts: { authProvider?: unknown }
-  ) => Promise<{ client: McpClientLike; transport: OpenedMcp["transport"] }>
+  ) => Promise<{
+    client: McpClientLike
+    transport: OpenedMcp["transport"]
+    closeEgressGuard?: () => Promise<void>
+  }>
   startCallbackServer?: typeof startCallbackServer
   openBrowser?: (url: string) => Promise<boolean>
   /** Surface the authorization URL to the TUI (manual-paste fallback). */
@@ -50,10 +56,7 @@ export interface AuthFlowDeps {
 }
 
 function randomToken(): string {
-  // 16 hex chars of weak-but-sufficient CSRF state (the redirect is loopback).
-  let s = ""
-  for (let i = 0; i < 16; i++) s += Math.floor(Math.random() * 16).toString(16)
-  return s
+  return randomBytes(32).toString("hex")
 }
 
 /**
@@ -64,6 +67,12 @@ export async function authenticateMcpServer(
   server: McpServer,
   deps: AuthFlowDeps
 ): Promise<AuthFlowResult> {
+  const cancelled = (): AuthFlowResult => ({
+    ok: false,
+    status: "denied",
+    message: "OAuth authorization cancelled.",
+  })
+  if (deps.signal?.aborted) return cancelled()
   if (server.transport === "stdio") {
     return {
       ok: false,
@@ -77,43 +86,89 @@ export async function authenticateMcpServer(
   const open = deps.openBrowser ?? openBrowser
   const isAuthError = deps.isAuthError ?? isUnauthorized
   const timeoutMs = deps.timeoutMs ?? 180_000
-  const state = (deps.randomState ?? randomToken)()
-
-  let callback: CallbackServer
-  try {
-    callback = await startServer()
-  } catch (err) {
-    return {
-      ok: false,
-      status: "error",
-      message: `Could not start OAuth callback server: ${msg(err)}`,
+  let callback: CallbackServer | undefined
+  let connection: Awaited<ReturnType<NonNullable<AuthFlowDeps["createConnection"]>>> | undefined
+  let finished = false
+  const assertActive = () => {
+    if (deps.signal?.aborted || finished) throw new Error("OAuth authorization cancelled.")
+  }
+  const closeConnection = async (conn: NonNullable<typeof connection>) => {
+    await Promise.allSettled([
+      Promise.resolve().then(() => conn.client.close()),
+      Promise.resolve().then(() => conn.closeEgressGuard?.()),
+    ])
+  }
+  const cleanup = () => {
+    const cb = callback
+    callback = undefined
+    try {
+      cb?.close()
+    } catch {
+      /* Continue releasing the connection. */
+    }
+    const conn = connection
+    connection = undefined
+    return conn ? closeConnection(conn) : Promise.resolve()
+  }
+  const onAbort = () => {
+    void cleanup()
+  }
+  deps.signal?.addEventListener("abort", onAbort, { once: true })
+  async function wait<T>(operation: () => Promise<T>): Promise<T> {
+    assertActive()
+    let onCancel: () => void = () => {}
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onCancel = () => reject(new Error("OAuth authorization cancelled."))
+      deps.signal?.addEventListener("abort", onCancel, { once: true })
+    })
+    try {
+      const result = await Promise.race([operation(), aborted])
+      assertActive()
+      return result
+    } finally {
+      deps.signal?.removeEventListener("abort", onCancel)
     }
   }
-
-  let client: McpClientLike | undefined
+  let failurePrefix = "Could not start OAuth callback server"
   try {
+    const state = (deps.randomState ?? randomToken)()
+    const cb = await wait(() =>
+      startServer().then((opened) => {
+        if (deps.signal?.aborted || finished) opened.close()
+        else callback = opened
+        return opened
+      })
+    )
+    failurePrefix = "Connection failed"
     const provider = createMcpOAuthProvider({
       home: deps.home,
       serverName: server.name,
-      redirectUrl: callback.redirectUrl,
+      redirectUrl: cb.redirectUrl,
       scope: deps.scope,
       state,
       fs: deps.fs,
       onRedirect: async (url) => {
+        assertActive()
         deps.onAuthUrl?.(url.href)
-        await open(url.href)
+        await wait(() => open(url.href))
       },
     })
 
-    const conn = await createConnection(server, { authProvider: provider })
-    client = conn.client
+    const conn = await wait(() =>
+      createConnection(server, { authProvider: provider }).then((opened) => {
+        if (deps.signal?.aborted || finished) void closeConnection(opened)
+        else connection = opened
+        return opened
+      })
+    )
     const { transport } = conn
 
     try {
-      await client.connect(transport)
+      await wait(() => conn.client.connect(transport))
       // A stored refresh token still works — no browser round-trip needed.
       return { ok: true, status: "authorized", message: `"${server.name}" is already authorized.` }
     } catch (err) {
+      assertActive()
       if (!isAuthError(err)) {
         return { ok: false, status: "error", message: `Connection failed: ${msg(err)}` }
       }
@@ -122,12 +177,13 @@ export async function authenticateMcpServer(
 
     let result
     try {
-      result = await callback.waitForCode(timeoutMs)
+      result = await wait(() => cb.waitForCode(timeoutMs))
     } catch (err) {
+      assertActive()
       return { ok: false, status: "denied", message: msg(err) }
     }
 
-    if (result.state && result.state !== state) {
+    if (result.state !== state) {
       return {
         ok: false,
         status: "error",
@@ -142,16 +198,21 @@ export async function authenticateMcpServer(
       return { ok: false, status: "error", message: "Transport does not support OAuth completion." }
     }
     try {
-      await transport.finishAuth(result.code)
-      await client.connect(transport)
+      await wait(() => transport.finishAuth!(result.code!))
+      await wait(() => conn.client.connect(transport))
     } catch (err) {
+      assertActive()
       return { ok: false, status: "error", message: `Token exchange failed: ${msg(err)}` }
     }
 
     return { ok: true, status: "authorized", message: `"${server.name}" authorized.` }
+  } catch (err) {
+    if (deps.signal?.aborted) return cancelled()
+    return { ok: false, status: "error", message: `${failurePrefix}: ${msg(err)}` }
   } finally {
-    await client?.close().catch(() => undefined)
-    callback.close()
+    finished = true
+    deps.signal?.removeEventListener("abort", onAbort)
+    await cleanup()
   }
 }
 

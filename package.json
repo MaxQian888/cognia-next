@@ -208,6 +208,7 @@
     "e2e:serve:test": "node --test scripts/e2e/serve-out.test.mjs",
     "cli:test": "jest cli/",
     "cli:test:conversation": "jest cli/src/tui/pty/",
+    "cli:test:conversation:real": "node scripts/test/cli-conversation-real.mjs",
     "conformance:prepare": "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server --features workspace-runtime-exec",
     "// 12 ─── Gates — lint / audit / check (see scripts/gates/check-all.mjs) ───": "",
     "check:all": "node scripts/gates/check-all.mjs",

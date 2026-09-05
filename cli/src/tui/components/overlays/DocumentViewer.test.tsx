@@ -1,4 +1,7 @@
 import React from "react"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { join } from "node:path"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
@@ -12,7 +15,57 @@ function fire(input: string, key: Record<string, boolean> = {}): void {
 }
 
 describe("DocumentViewer", () => {
+  it("bounds long inspect blocks to real terminal rows and columns", () => {
+    const dir = mkdtempSync(join(process.cwd(), "node_modules/.inspect-layout-"))
+    const outfile = join(dir, "viewer.mjs")
+    try {
+      const result = execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+        import {build} from 'esbuild'; import {renderToString} from 'ink';
+        import React from 'react'; import assert from 'node:assert/strict';
+        await build({stdin:{contents:"export {DocumentViewer} from './cli/src/tui/components/overlays/DocumentViewer';",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',packages:'external',outfile:${JSON.stringify(outfile)},logLevel:'silent'});
+        const {DocumentViewer}=await import(${JSON.stringify(outfile)});
+        const body='## Invocation\\n\\n### Command\\n\\n~~~bash\\n'+'head -n 80; cat file; '.repeat(25)+'\\n~~~\\n\\n### Output\\n\\n~~~text\\n'+Array.from({length:100},(_,i)=>'row '+i).join('\\n')+'\\n~~~';
+        for(const columns of [20,40,80,160]) {
+          const out=renderToString(React.createElement(DocumentViewer,{title:'bash output',body,format:'markdown',columns,viewportRows:16,onClose:()=>{}}),{columns});
+          const lines=out.split('\\n');
+          assert.ok(lines.length<=16, columns+': '+lines.length+' rows');
+          assert.ok(lines.every(line=>line.length<=columns),out);
+          assert.ok(out.includes('1–'),out);
+        }
+        console.log('4 inspect layouts passed');
+      `,
+        ],
+        { encoding: "utf8", timeout: 30000 }
+      )
+      expect(result).toContain("4 inspect layouts passed")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
   beforeEach(() => __resetInk())
+
+  it("scrolls through wrapped code rows to the actual document end", () => {
+    const { container } = render(
+      <DocumentViewer
+        title="Inspect"
+        format="markdown"
+        body={"~~~bash\n" + "echo abc; ".repeat(40) + "\n~~~\n\nEND OF OUTPUT"}
+        columns={24}
+        viewportRows={12}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).not.toContain("END OF OUTPUT")
+    fire("G")
+    expect(container.textContent).toContain("END OF OUTPUT")
+    fire("g")
+    expect(container.textContent).not.toContain("END OF OUTPUT")
+  })
 
   it("renders the title and a viewport window of text lines", () => {
     const { container } = render(
@@ -143,6 +196,76 @@ describe("DocumentViewer", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("Heading")
     expect(text).toContain("bold")
+  })
+
+  it("shows a repeated document title once and copies the unmodified source", () => {
+    const body = "# Built-in tools\n\n- Read files\n- Edit files"
+    const onCopy = jest.fn()
+    const { container } = render(
+      <DocumentViewer
+        title="Built-in tools"
+        body={body}
+        format="markdown"
+        onClose={() => {}}
+        onCopy={onCopy}
+      />
+    )
+    expect(container.textContent!.match(/Built-in tools/g)).toHaveLength(1)
+    expect(container.textContent).toContain("Read files")
+    fire("y")
+    expect(onCopy).toHaveBeenCalledWith(body)
+  })
+
+  it("recomputes heading visibility when only the panel title changes", () => {
+    const props = {
+      body: "# Built-in tools\n\nRead files",
+      format: "markdown" as const,
+      onClose: () => {},
+    }
+    const { container, rerender } = render(<DocumentViewer {...props} title="Built-in tools" />)
+    expect(container.textContent!.match(/Built-in tools/g)).toHaveLength(1)
+    rerender(<DocumentViewer {...props} title="Tool reference" />)
+    expect(container.textContent).toContain("Tool reference")
+    expect(container.textContent).toContain("Built-in tools")
+  })
+
+  it("searches and pages the remaining document after removing the repeated heading", () => {
+    const body = "# Tools\n\n" + Array.from({ length: 30 }, (_, i) => `- tool_${i}`).join("\n")
+    const { container } = render(
+      <DocumentViewer
+        title="Tools"
+        body={body}
+        format="markdown"
+        viewportRows={10}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent).toContain("1–4 / 30")
+    fire("/")
+    fire("tool_29")
+    fire("", { return: true })
+    expect(container.textContent).toContain("tool_29")
+    expect(container.textContent).toContain("27–30 / 30")
+    fire("n")
+    fire("N")
+    expect(container.textContent).toContain("1/1 matches")
+    fire("/")
+    fire("absent")
+    fire("", { return: true })
+    expect(container.textContent).toContain("0/0 matches")
+    fire("n")
+    fire("/")
+    fire("a")
+    fire("", { backspace: true })
+    fire("", { return: true })
+    expect(container.textContent).not.toContain("matches")
+    fire("/")
+    fire("", { escape: true })
+    fire("u", { ctrl: true })
+    fire("d", { ctrl: true })
+    fire("", { pageUp: true })
+    fire("[<0;1;1M")
+    fire("x")
   })
 
   it("closes on Escape, q, and Enter", () => {

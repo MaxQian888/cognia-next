@@ -5,6 +5,7 @@ import {
   formatGoalProgress,
   goalList,
   goalPause,
+  goalResume,
   goalStart,
   goalStatus,
   goalStop,
@@ -117,15 +118,15 @@ describe("formatGoalProgress", () => {
 describe("goalStatus", () => {
   it("notices the active goal's status with progress", async () => {
     const { dispatch, actions } = recorder()
-    await goalStatus({ ...baseDeps(), dispatch, getActive: async () => goal() })
+    await goalStatus({ ...baseDeps(), dispatch, getOpen: async () => goal() })
     const message = (actions[0] as { message: string }).message
     expect(message).toContain("active")
     expect(message).toContain("3/20 turns")
   })
   it("notices when there's no active goal", async () => {
     const { dispatch, actions } = recorder()
-    await goalStatus({ ...baseDeps(), dispatch, getActive: async () => undefined })
-    expect((actions[0] as { message: string }).message).toContain("No active goal")
+    await goalStatus({ ...baseDeps(), dispatch, getOpen: async () => undefined })
+    expect((actions[0] as { message: string }).message).toContain("No active or paused goal")
   })
   // Regression: `/goal status|list|pause|…` read the db directly, so they must
   // open the CLI-local db (which installs the `window` shim `getDb()` requires)
@@ -138,16 +139,49 @@ describe("goalStatus", () => {
       ensureDb: async () => {
         order.push("ensureDb")
       },
-      getActive: async () => {
-        order.push("getActive")
+      getOpen: async () => {
+        order.push("getOpen")
         return undefined
       },
     })
-    expect(order).toEqual(["ensureDb", "getActive"])
+    expect(order).toEqual(["ensureDb", "getOpen"])
   })
 })
 
 describe("goalPause / goalStop", () => {
+  it("resolves paused goals for resume and stop across a full control cycle", async () => {
+    const { dispatch, actions } = recorder()
+    let row = goal()
+    const control = {
+      pauseGoal: jest.fn(async () => {
+        row = { ...row, status: "paused" }
+      }),
+      resumeGoal: jest.fn(async () => {
+        row = { ...row, status: "active" }
+      }),
+      stopGoal: jest.fn(async () => {
+        row = { ...row, status: "stopped" }
+      }),
+    }
+    const deps = {
+      ...baseDeps(),
+      dispatch,
+      control,
+      getActive: async () => (row.status === "active" ? row : undefined),
+      getOpen: async () => (row.status === "active" || row.status === "paused" ? row : undefined),
+    }
+    await goalPause(deps)
+    expect(row.status).toBe("paused")
+    await goalResume(deps)
+    expect(row.status).toBe("active")
+    await goalPause(deps)
+    await goalStop(deps)
+    expect(row.status).toBe("stopped")
+    expect(control.resumeGoal).toHaveBeenCalledWith("g1")
+    expect(control.stopGoal).toHaveBeenCalledWith("g1")
+    expect(actions.at(-1)).toMatchObject({ message: "Goal stopped." })
+  })
+
   it("pauses the active goal via the runtime control", async () => {
     const { dispatch, actions } = recorder()
     let paused = ""
@@ -169,8 +203,8 @@ describe("goalPause / goalStop", () => {
 
   it("notices when there's nothing to stop", async () => {
     const { dispatch, actions } = recorder()
-    await goalStop({ ...baseDeps(), dispatch, getActive: async () => undefined })
-    expect((actions[0] as { message: string }).message).toContain("No active goal")
+    await goalStop({ ...baseDeps(), dispatch, getOpen: async () => undefined })
+    expect((actions[0] as { message: string }).message).toContain("No active or paused goal")
   })
 })
 

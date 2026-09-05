@@ -169,19 +169,16 @@ export function resolveAgentMode(
 }
 
 /**
- * The permission mode the CLI session should run with, given the configured
- * permission mode and the active agent mode.
- *
- * An explicitly-chosen permission mode (anything other than the baseline
- * `"default"`, set via `/mode`, `--permission-mode`, or config) always wins —
- * the user's direct choice is authoritative. Otherwise a mode that declares its
- * own permission ruleset (e.g. the built-in `plan` mode) applies it, so picking
- * "Plan" actually makes the agent read-only without a second `/mode` step.
+ * Plan is a read-only constraint. Other modes inherit explicit user policy;
+ * defaulted CLI autonomy yields to the selected mode's policy. The optional
+ * provenance flag preserves compatibility for callers with manually built config.
  */
 export function effectivePermissionMode(
   configPermissionMode: PermissionMode,
-  mode: AgentModeConfig | undefined
+  mode: AgentModeConfig | undefined,
+  explicitlyConfigured = configPermissionMode !== "default"
 ): PermissionMode {
-  if (configPermissionMode !== "default") return configPermissionMode
+  if (mode?.permissionMode === "plan") return "plan"
+  if (explicitlyConfigured) return configPermissionMode
   return mode?.permissionMode ?? configPermissionMode
 }

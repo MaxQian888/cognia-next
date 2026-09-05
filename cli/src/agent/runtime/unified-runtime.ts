@@ -238,6 +238,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
 
   // ---- 1. Backend selection. Before anything is spawned or locked. --------
   const selection = (params.selectBackendFn ?? selectBackend)({
+    provider: params.config.provider,
     ...(params.config.agentBackend ? { requested: params.config.agentBackend } : {}),
     ...(params.requires ? { requires: params.requires } : {}),
     ...(params.prefers ? { prefers: params.prefers } : {}),
@@ -353,7 +354,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           turnId,
           attemptId,
           hostRef: HEADLESS_HOST_REF,
-          runtime: backend.kind === "builtin" ? "claude-agent-sdk" : backend.id,
+          runtime: backend.runtimeAdapter ?? backend.id,
         },
         ...(params.onEnvelope ? { onEnvelope: params.onEnvelope } : {}),
         sideEffects,
@@ -400,6 +401,13 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           gate: params.gate,
           signal: cancellation.signal,
           ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
+          onEnvelope: (envelope) => {
+            cancellation.noteActivity()
+            // The outer attempt owns its lifecycle and input identity. All other
+            // events must survive without narrowing through CaptureStreamEvent.
+            if (envelope.event.kind === "lifecycle" || envelope.event.kind === "user-input") return
+            emitter.emit(envelope.event)
+          },
           onEvent: (event: CaptureStreamEvent) => {
             // Any byte of progress resets the idle deadline.
             cancellation.noteActivity()

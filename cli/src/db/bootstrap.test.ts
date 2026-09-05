@@ -6,6 +6,7 @@ import os from "node:os"
 import path from "node:path"
 
 import Dexie from "dexie"
+import { getRecentErrorLogs } from "@/packages/logging/src/recent-errors"
 
 import {
   __resetCliDbForTesting,
@@ -230,6 +231,81 @@ describe("ensureCliDb", () => {
     expect(h.writes).toHaveLength(0)
     await h.scheduled[h.scheduled.length - 1]()
     expect(h.writes).toHaveLength(1)
+  })
+
+  it("reports scheduled ENOSPC without rejecting and retries every dirty table", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-full-"))
+    const goals = new FakeTable("goals", [{ id: "pending-goal" }])
+    const sessions = new FakeTable("sessions", [{ id: "pending-session" }])
+    const scheduled: (() => void | Promise<void>)[] = []
+    const full = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" })
+    let mkdir: jest.SpyInstance | undefined
+    try {
+      const handle = await ensureCliDb({
+        home,
+        getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [goals, sessions] }),
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: (fn) => {
+          scheduled.push(fn)
+          return () => {}
+        },
+      })
+      mkdir = jest.spyOn(fs, "mkdirSync").mockImplementationOnce(() => {
+        throw full
+      })
+      handle.scheduleFlush()
+      await expect(Promise.resolve(scheduled[0]())).resolves.toBeUndefined()
+      expect(getRecentErrorLogs()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            module: "cli.db",
+            message: expect.stringContaining("flush failed"),
+          }),
+        ])
+      )
+      expect(scheduled).toHaveLength(1) // No uncontrolled retry timer on a full disk.
+      mkdir.mockRestore()
+      sessions.rows = [{ id: "latest-session" }]
+      handle.scheduleTableFlush("CogniaDB", "sessions")
+      await handle.flush()
+      const tableDir = path.join(home, "db.json.tables")
+      expect(
+        JSON.parse(fs.readFileSync(path.join(tableDir, "CogniaDB--goals.json"), "utf8"))
+      ).toEqual([{ id: "pending-goal" }])
+      expect(
+        JSON.parse(fs.readFileSync(path.join(tableDir, "CogniaDB--sessions.json"), "utf8"))
+      ).toEqual([{ id: "latest-session" }])
+      await handle.dispose()
+    } finally {
+      mkdir?.mockRestore()
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps explicit flush and dispose ENOSPC rejection retryable without losing the cached handle", async () => {
+    let full = true
+    const saved: string[] = []
+    const error = Object.assign(new Error("ENOSPC: disk full"), { code: "ENOSPC" })
+    const { opts, goals } = makeOpts({
+      writeSnapshot: (_file, data) => {
+        if (full) throw error
+        saved.push(data)
+      },
+    })
+    const handle = await ensureCliDb(opts)
+    goals.rows = [{ id: "unsaved" }]
+    await expect(handle.flush()).rejects.toBe(error)
+    await expect(handle.dispose()).rejects.toBe(error)
+    expect(await ensureCliDb(opts)).toBe(handle)
+    full = false
+    await handle.dispose()
+    expect(saved).toHaveLength(1)
+    expect(JSON.parse(saved[0]).dbs.CogniaDB.tables.goals).toEqual([{ id: "unsaved" }])
+    await handle.dispose()
+    expect(saved).toHaveLength(1)
+    expect(await ensureCliDb(opts)).not.toBe(handle)
   })
 
   it("flush() serialises every table to the snapshot path", async () => {

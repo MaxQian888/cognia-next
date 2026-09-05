@@ -25,6 +25,7 @@ import {
 } from "../../agent/session-runner"
 import { runManualCompact } from "../../agent/manual-compact"
 import { readToolApprovals } from "../../agent/tool-approvals"
+import { approvalKey, commandIsAutoApprovable } from "../../agent/command-approval"
 import { resolveHome } from "../../config/load"
 import { writeTranscript, type TranscriptEntry } from "../../agent/transcript"
 import { SIDECAR_EVENT } from "../../runtime/protocol"
@@ -39,7 +40,10 @@ import { resumeContinuityNotice } from "../../agent/external-session-link"
 import { supportsFeature, type BackendCapabilities } from "../runtime/backend-capabilities"
 import { classifyError } from "../format/error-classify"
 import { parseRateLimitHeaders, rateLimitWarning } from "../format/rate-limits"
-import { DEFAULT_PERMISSION_CHOICES } from "../components/overlays/PermissionOverlay"
+import {
+  DEFAULT_PERMISSION_CHOICES,
+  initialChoiceIndex,
+} from "../components/overlays/PermissionOverlay"
 import type { CapturePermissionDecision, RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 import { resolveCliLoggingConfig } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
@@ -52,6 +56,7 @@ export type CreateSession = (params: {
   sessionId?: string
   sessionKind?: import("@cognia/agent-config-types").SessionKind
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
+  onToolHostStatus?: (snapshot: import("../../agent/tool-host/status").ToolHostSnapshot) => void
 }) => AgentSession
 
 /** What a `/rewind` restores: the conversation, the files touched since the
@@ -248,10 +253,8 @@ export function useAgentSession({
   const nativeCheckpointSeqRef = useRef(0)
   const checkpointCellCountRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
-  // The live "Allow always" set consulted by the gate's silent auto-approver.
-  // Seeded from the persisted store and grown in place when the user picks
-  // "Allow always", so an already-trusted tool stops re-prompting THIS session
-  // (the persisted store is only re-read on a session respawn).
+  // Session-only grants (for example when persistence fails). Persisted rules
+  // are reread at each request so external revocations take effect live.
   const approvedToolsRef = useRef<Set<string>>(new Set())
   const cwd = config.cwd
   const seedApproved = useCallback(
@@ -260,13 +263,13 @@ export function useAgentSession({
       readToolApprovals(resolveHome(process.env, os.homedir()), undefined, cwd),
     [resolveApprovedTools, cwd]
   )
+  const seedApprovedRef = useRef(seedApproved)
   useEffect(() => {
-    try {
-      approvedToolsRef.current = new Set(seedApproved())
-    } catch {
-      approvedToolsRef.current = new Set()
-    }
+    seedApprovedRef.current = seedApproved
   }, [seedApproved])
+  useEffect(() => {
+    approvedToolsRef.current = new Set()
+  }, [cwd])
   // Live API rate-limit headers: the sidecar's fetch-interceptor emits a
   // `usage_headers` message for every Anthropic response. Fold the
   // `anthropic-ratelimit-*` bag into a snapshot so the /limits panel + footer
@@ -407,12 +410,19 @@ export function useAgentSession({
           hookRunner.onPermissionRequest(req.toolName, req.input)
           dispatch({
             type: "OVERLAY_OPEN",
-            overlay: { kind: "permission", req, choices: DEFAULT_PERMISSION_CHOICES, index: 0 },
+            overlay: {
+              kind: "permission",
+              req,
+              choices: DEFAULT_PERMISSION_CHOICES,
+              // A catastrophic command opens on Deny, so the dangerous answer
+              // is never the one a reflex Enter lands on.
+              index: initialChoiceIndex(req.toolName, req.input, DEFAULT_PERMISSION_CHOICES),
+            },
           })
         },
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
         (req) => hookRunner.preToolUse(req.toolName, req.input),
-        // Silent auto-approve, from two sources. The tools the user chose
+        // Silent auto-approve, from three sources. The tools the user chose
         // "Allow always" for, and the mode whose entire definition is "no
         // prompts": under `bypassPermissions` an approval overlay is not a
         // safeguard, it is the thing the user just turned off. An agent that
@@ -420,13 +430,32 @@ export function useAgentSession({
         // recreated, and answering those asks HERE is what makes the switch
         // take effect on the turn that is already running.
         //
+        // The third is the command itself. `bash` is one tool rated by its
+        // worst possible use, so `ls` reached this prompt wearing the same
+        // "high risk" badge as `rm -rf`. The classifier reads the actual
+        // command line, and a read-only one runs without interrupting anybody.
+        //
         // Runs after the PreToolUse pre-check, so a hook deny still wins over
         // bypass. Both refs are read only when the model requests a tool
         // mid-turn, never during render.
         // eslint-disable-next-line react-hooks/refs
-        (req) =>
-          configRef.current.permissionMode === "bypassPermissions" ||
-          approvedToolsRef.current.has(req.toolName)
+        (req) => {
+          let persisted = new Set<string>()
+          try {
+            persisted = new Set(seedApprovedRef.current())
+          } catch {
+            /* failed reads grant nothing */
+          }
+          for (const key of persisted) approvedToolsRef.current.delete(key)
+          return (
+            configRef.current.permissionMode === "bypassPermissions" ||
+            persisted.has(req.toolName) ||
+            persisted.has(approvalKey(req.toolName, req.input)) ||
+            approvedToolsRef.current.has(req.toolName) ||
+            approvedToolsRef.current.has(approvalKey(req.toolName, req.input)) ||
+            commandIsAutoApprovable(req.toolName, req.input)
+          )
+        }
       ),
     [dispatch, hookRunner]
   )
@@ -703,9 +732,17 @@ export function useAgentSession({
     [gate, hookRunner]
   )
 
-  const rememberApproval = useCallback((toolName: string) => {
-    approvedToolsRef.current.add(toolName)
-  }, [])
+  const rememberApproval = useCallback(
+    (toolName: string) => {
+      try {
+        if (new Set(seedApproved()).has(toolName)) return
+      } catch {
+        /* preserve an explicit session grant if persistence is unavailable */
+      }
+      approvedToolsRef.current.add(toolName)
+    },
+    [seedApproved]
+  )
 
   const clear = useCallback(
     async (newSessionId: string) => {
@@ -787,33 +824,33 @@ export function useAgentSession({
 
   const switchMode = useCallback(
     async (mode: PermissionMode) => {
-      dispatch({ type: "SET_MODE", mode })
-      // Unlike model/thinking (folded deep into resolved SendOptions), the
-      // permission mode can be mutated on a LIVE session in place — the sidecar
-      // calls `Query.setPermissionMode` (Anthropic) / re-reads the mutated
-      // `sendOptions` (ai-sdk). So we do NOT drop the session: the in-process
-      // conversation is preserved across a Shift+Tab / plan-approval switch
-      // (the old respawn lost it, contextless-implementing an "approved" plan).
-      // Before a session is live there is nothing to mutate — SET_MODE folds
-      // into the first `startSession`'s options.
       const session = sessionRef.current
-      if (!session?.isLive?.()) return
-      const handle = executionHandleRef.current
-      if (handle) {
-        await handle.setPermissionMode(mode)
+      if (!session?.isLive?.()) {
+        dispatch({ type: "SET_MODE", mode })
         return
       }
-      if (!session.setPermissionMode) return
-      // Not every agent can be switched while it runs. Pi seals its native-tool
-      // policy into the process at spawn, so the honest answer there is "the
-      // agent restarts on your next message" — the session arranges that
-      // itself. Saying nothing is what made a switch to `bypassPermissions`
-      // look broken: the banner changed, and the next tool asked anyway.
-      const appliedLive = await session.setPermissionMode(mode)
-      if (appliedLive === false) {
+      try {
+        const handle = executionHandleRef.current
+        if (session.setPermissionMode) {
+          // The session also retains the acknowledged mode for later turns.
+          const appliedLive = await session.setPermissionMode(mode)
+          if (appliedLive === false) {
+            dispatch({
+              type: "NOTICE",
+              message: `${mode} takes effect on your next message — this agent cannot change its permission mode while it is running, so its context restarts.`,
+            })
+          }
+        } else if (handle) {
+          await handle.setPermissionMode(mode)
+        } else {
+          throw new Error("The runtime cannot change permission mode")
+        }
+        // Never present a rejected or merely-written control frame as effective.
+        dispatch({ type: "SET_MODE", mode })
+      } catch (error) {
         dispatch({
           type: "NOTICE",
-          message: `${mode} takes effect on your next message — this agent cannot change its permission mode while it is running, so its context restarts.`,
+          message: `Permission mode unchanged: ${error instanceof Error ? error.message : String(error)}`,
         })
       }
     },

@@ -7,6 +7,7 @@ import { rt } from "./runtime-handler"
 import { loopCommand } from "./loop-command"
 import { planTitle } from "../runtime/plan"
 import { formatPresetSnippets } from "../format/limits"
+import { isBuiltinBackend } from "../runtime/backend-capabilities"
 import type { CommandDescriptor } from "./types"
 
 /** `/plan` (bare) — re-show this session's most recent plan from memory, or
@@ -36,7 +37,7 @@ const planRefineHandler: CommandDescriptor["handler"] = (ctx) => {
       message: "No plan to refine yet — propose one in plan mode (Shift+Tab) first.",
     }
   }
-  return { kind: "planRefine" }
+  return { kind: "planRefine", ...(ctx.args.trim() ? { feedback: ctx.args.trim() } : {}) }
 }
 
 /** A copilot in-mode verb (apply/discard/save/exit) — routes the active draft's
@@ -210,6 +211,7 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
       {
         name: "refine",
         description: "re-enter plan mode to revise the last plan",
+        argumentHint: "[revision instructions]",
         handler: planRefineHandler,
       },
     ],
@@ -252,7 +254,10 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     name: "models",
     description: "list this provider's models (catalog + live inventory) and switch",
     category: "system",
-    handler: rt("provider", "models"),
+    handler: (ctx) =>
+      isBuiltinBackend(ctx.config.agentBackend)
+        ? rt("provider", "models")(ctx)
+        : { kind: "modelPicker" },
   },
   {
     name: "balance",

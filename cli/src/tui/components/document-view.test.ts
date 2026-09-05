@@ -1,4 +1,5 @@
 import {
+  relocateDocumentScroll,
   clampScroll,
   lineCount,
   maxScroll,
@@ -13,6 +14,50 @@ describe("prepareDocumentLines", () => {
     if (prepared.kind === "markdown") {
       expect(prepared.lines[0]).toMatchObject({ kind: "heading", level: 1 })
     }
+  })
+
+  it.each([
+    "# Built-in tools\n\nRead and edit files.",
+    "\n\n# **Built-in** tools\n\nRead and edit files.",
+    "Built-in tools\n===\n\nRead and edit files.",
+    "## Built-in   tools\n\nRead and edit files.",
+  ])("omits a duplicate leading title and its blank spacing", (body) => {
+    const prepared = prepareDocumentLines(body, "markdown", undefined, "Built-in tools")
+    expect(prepared).toMatchObject({ kind: "markdown", lines: [{ kind: "paragraph" }] })
+    expect(lineCount(prepared)).toBe(1)
+  })
+
+  it.each([
+    "# Different heading\n\nBody",
+    "Intro\n\n# Built-in tools",
+    "Built-in tools\n\nBody",
+    "# [Built-in tools](https://example.com)\n\nBody",
+  ])("preserves distinct headings, prose, and linked information", (body) => {
+    expect(prepareDocumentLines(body, "markdown", undefined, "Built-in tools")).toEqual(
+      prepareDocumentLines(body, "markdown")
+    )
+  })
+
+  it("removes only the first matching heading, retaining later sections", () => {
+    const prepared = prepareDocumentLines(
+      "# Title\n\n## Title\n\nBody",
+      "markdown",
+      undefined,
+      "Title"
+    )
+    expect(prepared).toMatchObject({
+      kind: "markdown",
+      lines: [{ kind: "heading", level: 2 }, { kind: "paragraph" }],
+    })
+  })
+
+  it("handles an empty body and a title-only document", () => {
+    expect(lineCount(prepareDocumentLines("", "markdown", undefined, "Title"))).toBe(0)
+    expect(lineCount(prepareDocumentLines("# Title\n", "markdown", undefined, "Title"))).toBe(0)
+    expect(prepareDocumentLines("# Title", "text", undefined, "Title")).toEqual({
+      kind: "text",
+      lines: ["# Title"],
+    })
   })
 
   it("splits text bodies into raw lines", () => {
@@ -73,5 +118,26 @@ describe("positionLabel", () => {
 
   it("clamps an over-scrolled offset before labelling", () => {
     expect(positionLabel(999, 20, 100)).toBe("81–100 / 100")
+  })
+})
+
+describe("relocateDocumentScroll", () => {
+  it("keeps the top at the top", () => {
+    expect(relocateDocumentScroll(["a"], ["new", "a"], 0, 1)).toBe(0)
+  })
+  it("anchors inserted and removed rows to visible text", () => {
+    expect(relocateDocumentScroll(["a", "b", "c"], ["new", "a", "b", "c"], 1, 1)).toBe(2)
+    expect(relocateDocumentScroll(["a", "b", "c"], ["b", "c"], 1, 1)).toBe(0)
+  })
+  it("chooses the nearest occurrence of repeated rows", () => {
+    expect(relocateDocumentScroll(["a", "b", "b", "c"], ["b", "x", "b", "c"], 2, 1)).toBe(2)
+  })
+  it("clamps when the anchor disappears or is blank", () => {
+    expect(relocateDocumentScroll(["a", "b", "c"], ["x"], 2, 1)).toBe(0)
+    expect(relocateDocumentScroll(["a", "", "c"], ["x", "y", "z"], 1, 1)).toBe(1)
+  })
+  it("preserves text offset after wrapping and skips empty rows", () => {
+    expect(relocateDocumentScroll(["ab", "cd", "ef", "gh"], ["abcd", "efgh"], 2, 1)).toBe(1)
+    expect(relocateDocumentScroll(["ab", "cd"], ["", "a", "b", "c", "d"], 1, 1)).toBe(3)
   })
 })

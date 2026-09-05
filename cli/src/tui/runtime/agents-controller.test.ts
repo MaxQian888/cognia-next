@@ -17,7 +17,13 @@ jest.mock("../../agent/builtin-agents", () => ({
   withBuiltinAgents: (agents: unknown[]) => agents,
 }))
 
-import { agentsDispatch, agentsList, agentsModelsPanel, agentsPanel } from "./agents-controller"
+import {
+  agentsDispatch,
+  agentsList,
+  agentsModelsPanel,
+  agentsPanel,
+  agentsStop,
+} from "./agents-controller"
 import type { AgentSummary } from "../../agent/discover-agents"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CliBackgroundRunInfo } from "../../agent/subagent-background-tasks"
@@ -301,5 +307,121 @@ describe("agentsDispatch", () => {
       },
     })
     expect(actions.at(-1)).toMatchObject({ type: "ACTIVITY_END", status: "error" })
+  })
+})
+
+describe("agents cancellation boundaries", () => {
+  it("does not discover or dispatch with an already aborted signal", async () => {
+    const { dispatch, actions } = recorder()
+    const list = jest.fn()
+    const dispatchAgent = jest.fn()
+    await agentsDispatch("reviewer work", {
+      dispatch,
+      cwd: "/w",
+      signal: AbortSignal.abort(),
+      list,
+      dispatchAgent,
+    })
+    expect(list).not.toHaveBeenCalled()
+    expect(dispatchAgent).not.toHaveBeenCalled()
+    expect(actions).toEqual([])
+  })
+
+  it("does not dispatch after cancellation during discovery", async () => {
+    const { dispatch, actions } = recorder()
+    const controller = new AbortController()
+    const dispatchAgent = jest.fn()
+    await agentsDispatch("reviewer work", {
+      dispatch,
+      cwd: "/w",
+      signal: controller.signal,
+      list: async () => {
+        controller.abort()
+        return [agent("reviewer")]
+      },
+      dispatchAgent,
+    })
+    expect(dispatchAgent).not.toHaveBeenCalled()
+    expect(actions).toEqual([])
+  })
+
+  it("reports discovery failures without an unhandled rejection or a started activity", async () => {
+    const { dispatch, actions } = recorder()
+    await agentsDispatch("reviewer work", {
+      dispatch,
+      cwd: "/w",
+      list: async () => {
+        throw new Error("discovery failed")
+      },
+    })
+    expect(actions).toEqual([
+      { type: "NOTICE", message: "Subagent discovery failed: discovery failed" },
+    ])
+  })
+
+  it("suppresses late models and agents overlays after cancellation", async () => {
+    const { dispatch, actions } = recorder()
+    const models = new AbortController()
+    await agentsModelsPanel({
+      dispatch,
+      cwd: "/w",
+      config: {} as ResolvedConfig,
+      signal: models.signal,
+      list: async () => {
+        models.abort()
+        return [agent("reviewer")]
+      },
+    })
+    const panel = new AbortController()
+    await agentsPanel({
+      dispatch,
+      inflight: [],
+      signal: panel.signal,
+      liveSubagents: () => [],
+      liveRuns: () => [],
+      journal: async () => {
+        panel.abort()
+        return []
+      },
+    })
+    expect(actions).toEqual([])
+  })
+
+  it("does not report a late successful result as done after abort", async () => {
+    const { dispatch, actions } = recorder()
+    const controller = new AbortController()
+    await agentsDispatch("reviewer work", {
+      dispatch,
+      cwd: "/w",
+      signal: controller.signal,
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => {
+        controller.abort()
+        return { text: "late success" }
+      },
+    })
+    expect(actions.at(-1)).toMatchObject({
+      type: "ACTIVITY_END",
+      status: "done",
+      summary: 'Subagent "reviewer" interrupted.',
+    })
+    expect(JSON.stringify(actions)).not.toContain("late success")
+  })
+
+  it("validates stop ids and passes the owning session to cancellation", () => {
+    const { dispatch, actions } = recorder()
+    const cancel = jest.fn(() => true)
+    agentsStop(" ", { dispatch, sessionId: "s1", cancel })
+    expect(cancel).not.toHaveBeenCalled()
+    agentsStop(" bg-1 ", { dispatch, sessionId: "s1", cancel })
+    expect(cancel).toHaveBeenCalledWith("bg-1", "s1")
+    expect(actions.at(-1)).toMatchObject({
+      message: "Cancellation requested for background run bg-1.",
+    })
+    cancel.mockReturnValueOnce(false)
+    agentsStop("unknown", { dispatch, sessionId: "s1", cancel })
+    expect(actions.at(-1)).toMatchObject({
+      message: expect.stringContaining("No cancellable background run"),
+    })
   })
 })

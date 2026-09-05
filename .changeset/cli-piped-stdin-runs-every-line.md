@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Run every line of a script piped into `cognia-agent chat`, not just the first. The non-TTY REPL read input through `readline.question`, which listens for exactly one line and then stops listening while the interface keeps flowing. Against a terminal that is invisible, because the next line has not been typed yet. Against a pipe the whole file arrives in one chunk, so everything after the first line was emitted while nothing was listening and thrown away: the session ran the opening command, printed a prompt for the second, and exited having ignored the rest. A listener that stays attached and buffers is the fix, and it gives end-of-input one meaning instead of two, so a pipe whose last command shares a chunk with its EOF still runs that command. The non-TTY path is now covered against the shipped binary rather than only in-process against injected dependencies, which is what let this survive: it also pins that a piped run never emits alternate-screen, hidden-cursor or mouse-reporting escapes into whatever is consuming its output.

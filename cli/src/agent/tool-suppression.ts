@@ -55,22 +55,18 @@ export const CLI_AUTO_APPROVED_TOOLS: readonly string[] = [
   "ExitPlanMode",
 ]
 
-/**
- * Merge the CLI's auto-approve set into the resolved options' approval
- * suppressions, preserving anything the resolver already set. `extraApproved`
- * carries the user's persisted "Allow always" choices so a tool approved-always
- * once never prompts again — including risky tools (bash/write) the user
- * explicitly trusted.
- */
+/** Merge static CLI defaults; mutable persisted grants belong to the live gate. */
 export function withCliAutoApprovedTools(
   options: SendOptions,
-  extraApproved: Iterable<string> = []
+  _extraApproved: Iterable<string> = []
 ): SendOptions {
   const existing = Array.isArray(options.suppressApprovalForTools)
     ? options.suppressApprovalForTools
     : []
-  const merged = [...new Set([...existing, ...CLI_AUTO_APPROVED_TOOLS, ...extraApproved])]
-  return { ...options, suppressApprovalForTools: merged }
+  return {
+    ...options,
+    suppressApprovalForTools: [...new Set([...existing, ...CLI_AUTO_APPROVED_TOOLS])],
+  }
 }
 
 /**

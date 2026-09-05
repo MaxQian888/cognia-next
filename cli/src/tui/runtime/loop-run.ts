@@ -31,6 +31,13 @@ import { runDrivenTurns, type DrivenAdvance } from "./driven-turns"
 import { truncate } from "./shared"
 import type { TuiAction } from "../state/types"
 
+/** Foreground continuation retained by the effect owner across pause/resume. */
+export interface LoopContinuation {
+  loopId?: string
+  completed?: number
+  expiresAt?: number
+}
+
 export interface LoopRunDeps {
   send: (prompt: string) => Promise<RunAndCaptureResult | null>
   dispatch: (action: TuiAction) => void
@@ -42,6 +49,11 @@ export interface LoopRunDeps {
   intervalMs?: number
   maxIterations?: number
   takeSteer?: () => string | null
+  continuation?: LoopContinuation
+  action?: "resume" | "stop"
+  resumeLoop?: (id: string) => Promise<Loop | null>
+  pauseLoop?: (id: string) => Promise<unknown>
+  stopLoop?: (id: string) => Promise<unknown>
   // ── injectable seams ──
   ensureDb?: () => Promise<unknown>
   ensureSession?: (sessionId: string, config: ResolvedConfig) => Promise<unknown>
@@ -62,8 +74,18 @@ export interface LoopRunDeps {
 export async function runLoopStreaming(deps: LoopRunDeps): Promise<void> {
   const ensureDb = deps.ensureDb ?? (() => ensureCliDb())
   const ensureSession = deps.ensureSession ?? ensureSessionRow
+  if (deps.signal.aborted) return
   await ensureDb()
+  if (deps.signal.aborted) return
+  if (deps.action === "stop") {
+    if (deps.continuation?.loopId) {
+      await (deps.stopLoop ?? ((id) => getLoopRuntime().stopLoop(id)))(deps.continuation.loopId)
+    }
+    deps.dispatch({ type: "NOTICE", message: "Loop stopped." })
+    return
+  }
   await ensureSession(deps.sessionId, deps.config)
+  if (deps.signal.aborted) return
 
   const label = truncate(deps.prompt)
   const common = {
@@ -101,15 +123,33 @@ async function runSelfPacedLoop(deps: LoopRunDeps, common: Common): Promise<void
 
   let loop: Loop
   try {
-    loop = await createLoop({
-      sessionId: deps.sessionId,
-      rawPrompt: deps.prompt,
-      mode: "self_paced",
-      ...(deps.maxIterations !== undefined
-        ? { config: { maxIterations: deps.maxIterations } }
-        : {}),
-      appSettings,
-    })
+    if (deps.continuation?.loopId) {
+      const paused = await readLoop(deps.continuation.loopId)
+      if (!paused || paused.status !== "paused") {
+        deps.dispatch({ type: "NOTICE", message: "No paused loop to resume; its state changed." })
+        return
+      }
+      if (deps.signal.aborted) return
+      const resumed = await (deps.resumeLoop ?? ((id) => getLoopRuntime().resumeLoop(id)))(
+        paused.id
+      )
+      if (!resumed || resumed.status !== "active") {
+        deps.dispatch({ type: "NOTICE", message: "Loop could not be resumed; its state changed." })
+        return
+      }
+      loop = resumed
+    } else {
+      loop = await createLoop({
+        sessionId: deps.sessionId,
+        rawPrompt: deps.prompt,
+        mode: "self_paced",
+        ...(deps.maxIterations !== undefined
+          ? { config: { maxIterations: deps.maxIterations } }
+          : {}),
+        appSettings,
+      })
+    }
+    if (deps.continuation) deps.continuation.loopId = loop.id
   } catch (err) {
     deps.dispatch({
       type: "ACTIVITY_END",
@@ -138,7 +178,7 @@ async function runSelfPacedLoop(deps: LoopRunDeps, common: Common): Promise<void
       lastResponse,
       tokensDelta,
       signal: deps.signal,
-      capturedGenerationId: current.generationId,
+      capturedGenerationId: loop.generationId,
     })
     switch (outcome.kind) {
       case "continue":
@@ -164,23 +204,47 @@ async function runSelfPacedLoop(deps: LoopRunDeps, common: Common): Promise<void
     }
   }
 
-  await runDrivenTurns({
-    ...common,
-    firstPrompt: renderLoopIterationMessage(loop),
-    advance,
-    ...(deps.maxIterations !== undefined ? { max: deps.maxIterations } : {}),
-  })
+  try {
+    await runDrivenTurns({
+      ...common,
+      firstPrompt: renderLoopIterationMessage(loop),
+      advance,
+      ...(deps.maxIterations !== undefined ? { max: deps.maxIterations } : {}),
+    })
+  } finally {
+    {
+      const current = await readLoop(loop.id)
+      if (current?.generationId === loop.generationId && current.status === "active") {
+        const control =
+          deps.signal.reason === "stop"
+            ? (deps.stopLoop ?? ((id: string) => getLoopRuntime().stopLoop(id)))
+            : (deps.pauseLoop ?? ((id: string) => getLoopRuntime().pauseLoop(id)))
+        await control(loop.id)
+      }
+    }
+  }
 }
 
 async function runIntervalLoop(deps: LoopRunDeps, common: Common): Promise<void> {
   const now = deps.now ?? Date.now
   const intervalMs = deps.intervalMs ?? MIN_INTERVAL_MS
   const cap = deps.maxIterations ?? DEFAULT_LOOP_CONFIG.maxIterations
-  const expiresAt = now() + LOOP_EXPIRY_MS
-  let completed = 0
+  const continuation = deps.continuation ?? {}
+  const startedAt = now()
+  const expiresAt = continuation.expiresAt ?? startedAt + LOOP_EXPIRY_MS
+  continuation.expiresAt = expiresAt
+  let completed = continuation.completed ?? 0
+  if (completed >= cap || startedAt >= expiresAt) {
+    deps.dispatch({
+      type: "NOTICE",
+      message: "Loop already reached its iteration cap or 7-day expiry.",
+    })
+    return
+  }
 
   const advance = async (): Promise<DrivenAdvance> => {
     completed += 1
+    continuation.completed = completed
     if (completed >= cap) {
       return {
         kind: "stop",
@@ -204,6 +268,6 @@ async function runIntervalLoop(deps: LoopRunDeps, common: Common): Promise<void>
     firstPrompt: deps.prompt,
     advance,
     max: cap,
-    hardCap: cap + 1,
+    hardCap: cap - completed + 1,
   })
 }

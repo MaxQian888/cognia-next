@@ -22,8 +22,13 @@ export interface ParsedCommand {
 export function parseCommandLine(line: string): ParsedCommand | null {
   const trimmed = line.trim()
   if (!trimmed.startsWith("/")) return null
-  const [word, ...rest] = trimmed.slice(1).split(/\s+/)
-  return { name: word.toLowerCase(), rest: rest.join(" ") }
+  const command = trimmed.slice(1)
+  const separator = command.search(/\s/)
+  if (separator < 0) return { name: command.toLowerCase(), rest: "" }
+  return {
+    name: command.slice(0, separator).toLowerCase(),
+    rest: command.slice(separator).trimStart(),
+  }
 }
 
 /** Find a subcommand by name (case-insensitive). */

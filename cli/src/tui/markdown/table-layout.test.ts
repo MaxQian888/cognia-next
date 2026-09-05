@@ -1,3 +1,4 @@
+import { stackTable } from "./table-layout"
 /** @jest-environment node */
 import {
   cellRefText,
@@ -133,5 +134,26 @@ describe("collectTableFootnotes / cellRefText", () => {
     const footnotes = collectTableFootnotes(line, false)
     expect(cellRefText(line.rows[0][0], footnotes)).toBe("Home[1]")
     expect(cellRefText(line.rows[1][0], footnotes)).toBe("http://y.test")
+  })
+})
+
+describe("stackTable", () => {
+  const table: Extract<MdLine, { kind: "table" }> = {
+    kind: "table",
+    header: [[{ text: "A" }], [{ text: "B" }]],
+    rows: [[[{ text: "alpha" }], [{ text: "beta" }]], [{ text: "second" }].map((text) => [text])],
+    align: [],
+  }
+  it("preserves every value below the minimum framed width", () => {
+    expect(stackTable(table, 10)?.map((spans) => spans.map((s) => s.text).join(""))).toEqual([
+      "A: alpha",
+      "B: beta",
+      "",
+      "A: second",
+      "B: ",
+    ])
+    expect(stackTable(table, 80)).toBeUndefined()
+    expect(stackTable(table)).toBeUndefined()
+    expect(stackTable({ ...table, rows: [] }, 1)).toEqual(table.header)
   })
 })

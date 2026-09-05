@@ -119,9 +119,17 @@ launches the selected process through a strict native sandbox:
 
 ```bash
 cognia-agent chat --backend codex
+cognia-agent chat --backend codex-app-server  # native Codex, explicitly
+cognia-agent chat --backend codex-acp         # ACP adapter, explicitly
 cognia-agent chat --backend claude-code
 cognia-agent config set agentBackend codex   # persist the default
 ```
+
+`codex` prefers the installed native app-server and otherwise selects the ACP
+adapter. The explicit engine names keep that choice stable. The ACP route launches
+`@zed-industries/codex-acp` through `npx`, which may download the adapter on first
+use. Native reasoning and extra skill roots are forwarded only to the native
+engine. ACP model and mode controls use the options advertised by that adapter.
 
 macOS uses Seatbelt and Linux requires bubblewrap; unsupported platforms or a
 missing launcher fail closed, with no unsandboxed fallback. Cognia credentials,

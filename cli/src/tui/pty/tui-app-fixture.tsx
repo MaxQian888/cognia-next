@@ -3,6 +3,7 @@ import React from "react"
 import { render, useWindowSize } from "ink"
 
 import { TuiInputProvider } from "../input/input-router"
+import { appendHistory, loadHistory } from "../input/history-store"
 import { applyMouseMode, enterAltScreen, exitAltScreen, resetMouse } from "../screen"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../../config/schema"
 import type { CreateSession } from "../hooks/useAgentSession"
@@ -60,6 +61,9 @@ const marker = (text: string) => {
   else process.stdout.write(`${text}\n`)
 }
 
+/** Where history and approvals live. The driver gives every run its own. */
+const home = process.env.COGNIA_HOME ?? "/tmp/cognia-tui-fixture"
+
 const record = emptyScenarioRecord()
 const scripted = scenarioCreateSession(scenario, record)
 
@@ -115,8 +119,19 @@ const instance = render(
       trusted
       altScreenPreEntered
       layoutCapability={{ stdoutIsTTY: true, stdinIsTTY: true, term: process.env.TERM }}
-      home={process.env.COGNIA_HOME ?? "/tmp/cognia-tui-fixture"}
-      persistHistory={() => {}}
+      home={home}
+      // Real command history, against the driver's isolated home. A no-op here
+      // meant nothing crossed a restart, so the whole class of "what survives
+      // quitting" was untestable through the terminal.
+      initialHistory={loadHistory(home)}
+      persistHistory={(entry) => {
+        try {
+          appendHistory(home, entry)
+        } catch {
+          // A read-only home is the driver's problem to report, not a reason
+          // to fail the turn.
+        }
+      }}
       persistDb={() => {}}
       resolveMeta={async (_provider, model) => ({
         modelId: model ?? "fixture-model",

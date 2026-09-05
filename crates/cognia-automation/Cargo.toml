@@ -56,8 +56,9 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["r
 # is implemented with ScreenCaptureKit in `native/macos/screen_capture.m`.
 xcap = "0.9.8"
 
-[dev-dependencies]
 tempfile = "3"
+
+[dev-dependencies]
 
 [target."cfg(target_os = \"windows\")".dependencies]
 # UI Automation — pins windows = 0.62.2 (matched below to avoid a duplicate tree).

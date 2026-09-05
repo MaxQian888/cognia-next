@@ -107,6 +107,7 @@ export async function sendPrompt(
   if (
     !hasNoLeakingPiiDeep({
       prompt,
+      ...(options?.initialConversation ? { initialConversation: options.initialConversation } : {}),
       systemPrompt: options?.systemPrompt,
       appendSystemPrompt: options?.appendSystemPrompt,
       ...(options?.agents ? { agents: options.agents } : {}),
@@ -214,7 +215,14 @@ export async function setSessionMode(
   mode: NonNullable<SendOptions["permissionMode"]>,
   options?: { commandId?: string }
 ): Promise<void> {
-  await transport.call("claude_set_mode", { sessionId, mode, commandId: options?.commandId })
+  const result = await sessionControl<{ mode: NonNullable<SendOptions["permissionMode"]> }>(
+    sessionId,
+    "setPermissionMode",
+    { mode },
+    options
+  )
+  if (result?.mode !== mode)
+    throw new Error("Runtime did not acknowledge the requested permission mode")
 }
 
 // ---- Live session introspection & control (SDK Query control methods) ----

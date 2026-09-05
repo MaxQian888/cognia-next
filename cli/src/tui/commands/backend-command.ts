@@ -25,6 +25,7 @@ export const BUILTIN_BACKEND_ID = "builtin"
 const HINTS: Record<string, string> = {
   builtin: "Cognia's own agent (full feature set)",
   codex: "host the Codex CLI",
+  "codex-acp": "host Codex explicitly over ACP",
   "codex-app-server": "host Codex over its app-server protocol",
   "claude-code": "host Claude Code over ACP",
 }
@@ -37,7 +38,7 @@ const HINTS: Record<string, string> = {
  * the eagerly-loaded command registry. Any preset NOT here relies on the
  * agent's own prior `login`, which the hint says out loud.
  */
-const CREDENTIAL_INJECTED = new Set(["codex", "codex-app-server", "claude-code"])
+const CREDENTIAL_INJECTED = new Set(["codex", "codex-acp", "codex-app-server", "claude-code"])
 
 /** The picker hint for a backend, marking the one currently in use, and warning
  * when the backend needs its own login. Every row gets some text — a blank hint

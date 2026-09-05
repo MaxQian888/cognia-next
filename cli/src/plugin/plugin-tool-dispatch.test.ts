@@ -41,6 +41,52 @@ describe("subscribePluginToolDispatch", () => {
     ])
   })
 
+  it("ignores other sessions instead of answering their tool calls twice", async () => {
+    let callback!: (request: PluginToolExecRequest) => void
+    const handle = jest.fn(async () => ({
+      type: "plugin_tool_response" as const,
+      sessionId: "s1",
+      toolUseId: "t1",
+    }))
+    const send = jest.fn(async () => {})
+    await subscribePluginToolDispatch({
+      sessionId: "s1",
+      subscribe: async (cb) => {
+        callback = cb
+        return () => {}
+      },
+      handle,
+      send,
+    })
+    callback({ ...req, sessionId: "other" })
+    await Promise.resolve()
+    expect(handle).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it("settles throwing tool executors with an error response", async () => {
+    let callback!: (request: PluginToolExecRequest) => void
+    const send = jest.fn(async () => {})
+    await subscribePluginToolDispatch({
+      subscribe: async (cb) => {
+        callback = cb
+        return () => {}
+      },
+      handle: () => {
+        throw new Error("executor crashed")
+      },
+      send,
+    })
+    callback(req)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(send).toHaveBeenCalledWith({
+      type: "plugin_tool_response",
+      sessionId: "s1",
+      toolUseId: "t1",
+      error: "Plugin tool executor failed",
+    })
+  })
+
   it("returns the unsubscribe fn from the transport", async () => {
     const unsub = jest.fn()
     const ret = await subscribePluginToolDispatch({

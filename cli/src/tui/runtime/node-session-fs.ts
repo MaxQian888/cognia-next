@@ -14,7 +14,32 @@ import { promises as fsp } from "node:fs"
 import { vendorRootsFromEnv, type VendorRoots } from "@/lib/agent-roots"
 import type { SessionFs } from "@/lib/session-import"
 
-export function nodeSessionFs(): SessionFs {
+/** Bound bytes before UTF-8 decoding and JSON expansion in the vendor adapters. */
+export const MAX_SESSION_FILE_BYTES = 16 * 1024 * 1024
+
+export class SessionReadLimitError extends Error {
+  constructor(readonly reason: "file" | "budget") {
+    super(
+      reason === "file"
+        ? "Session file exceeds the 16 MiB read limit"
+        : "Session analysis byte budget exhausted"
+    )
+    this.name = "SessionReadLimitError"
+  }
+}
+
+export function nodeSessionFs(
+  options: {
+    /** Optional aggregate input budget for callers retaining parsed conversations. */
+    maxTotalBytes?: number
+    onLimit?: (reason: "file" | "budget") => void
+  } = {}
+): SessionFs {
+  let remaining = options.maxTotalBytes ?? Infinity
+  function rejectLimit(reason: "file" | "budget"): never {
+    options.onLimit?.(reason)
+    throw new SessionReadLimitError(reason)
+  }
   return {
     async exists(path) {
       try {
@@ -33,7 +58,46 @@ export function nodeSessionFs(): SessionFs {
       return { size: s.size, isFile: s.isFile() }
     },
     async readTextFile(path) {
-      return fsp.readFile(path, "utf8")
+      const handle = await fsp.open(path, "r")
+      try {
+        const info = await handle.stat()
+        if (!info.isFile()) throw new Error("Session path is not a regular file")
+        if (info.size > MAX_SESSION_FILE_BYTES) rejectLimit("file")
+        if (info.size > remaining) rejectLimit("budget")
+        // Reserve before awaiting any reads so concurrent readers share one budget.
+        let reserved = info.size
+        remaining -= reserved
+        let used = 0
+        const chunks: Buffer[] = []
+        try {
+          while (true) {
+            // Read the reservation first. Growth is charged by actual bytes read,
+            // with at most one bounded chunk in flight per descriptor. The
+            // extra byte distinguishes EOF from growth at an exhausted limit.
+            const available = reserved - used
+            const chunk = Buffer.allocUnsafe(
+              available > 0
+                ? Math.min(64 * 1024, available)
+                : Math.min(64 * 1024, MAX_SESSION_FILE_BYTES - used + 1, remaining + 1)
+            )
+            const { bytesRead } = await handle.read(chunk, 0, chunk.length, null)
+            if (bytesRead === 0) break
+            used += bytesRead
+            // An appending transcript can outgrow the descriptor's initial stat.
+            if (used > MAX_SESSION_FILE_BYTES) rejectLimit("file")
+            const growth = Math.max(0, used - reserved)
+            if (growth > remaining) rejectLimit("budget")
+            remaining -= growth
+            reserved += growth
+            chunks.push(chunk.subarray(0, bytesRead))
+          }
+          return Buffer.concat(chunks, used).toString("utf8")
+        } finally {
+          remaining += reserved - Math.min(used, reserved)
+        }
+      } finally {
+        await handle.close()
+      }
     },
   }
 }

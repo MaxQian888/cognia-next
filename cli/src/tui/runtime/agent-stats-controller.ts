@@ -44,9 +44,24 @@ export interface AgentStatsDeps {
 }
 
 const DEFAULT_MAX = 500
+const MAX_PHASE_INPUT_BYTES = 64 * 1024 * 1024
 
 export async function runAgentStats(deps: AgentStatsDeps): Promise<void> {
-  const fs = deps.fs ?? nodeSessionFs()
+  if (deps.signal?.aborted) return
+  let oversized = false
+  let discoveryBudgetExhausted = false
+  let analysisBudgetExhausted = false
+  const discoveryLimitNote =
+    "Discovery reads exceeding the remaining 64 MiB discovery input budget were skipped; statistics are incomplete."
+  const fs =
+    deps.fs ??
+    nodeSessionFs({
+      maxTotalBytes: MAX_PHASE_INPUT_BYTES,
+      onLimit: (reason) => {
+        if (reason === "file") oversized = true
+        else discoveryBudgetExhausted = true
+      },
+    })
   // The desktop OpenCode reader is a Tauri command; give the CLI a Node one.
   ;(deps.installOpencodeReader ?? (() => setOpencodeReader(nodeOpencodeReader)))()
 
@@ -68,8 +83,13 @@ export async function runAgentStats(deps: AgentStatsDeps): Promise<void> {
   if (summaries.length === 0) {
     deps.dispatch({
       type: "NOTICE",
-      message:
-        "No external agent sessions found (looked in ~/.claude, ~/.codex, and OpenCode's store).",
+      message: discoveryBudgetExhausted
+        ? discoveryLimitNote +
+          " No readable session summaries remain." +
+          (oversized ? " Files over 16 MiB were also skipped." : "")
+        : oversized
+          ? "Session scan incomplete: files over 16 MiB were skipped to bound memory; no readable sessions found."
+          : "No external agent sessions found (looked in ~/.claude, ~/.codex, and OpenCode's store).",
     })
     return
   }
@@ -89,11 +109,32 @@ export async function runAgentStats(deps: AgentStatsDeps): Promise<void> {
 
   let convs: ImportedConversation[] = []
   try {
-    convs = await (deps.parse ?? parseSessions)(refs, input)
+    // Analysis retains parsed conversations for drill-down. Give it a fresh
+    // aggregate input budget independent of bytes read during discovery.
+    convs = await (deps.parse ?? parseSessions)(refs, {
+      ...input,
+      fs:
+        deps.fs ??
+        nodeSessionFs({
+          maxTotalBytes: MAX_PHASE_INPUT_BYTES,
+          onLimit: (reason) => {
+            if (reason === "file") oversized = true
+            else analysisBudgetExhausted = true
+          },
+        }),
+    })
   } catch {
     convs = []
   }
   if (deps.signal?.aborted) return
+
+  if (oversized)
+    notes.push("Files over 16 MiB were skipped to bound memory; statistics are incomplete.")
+  if (discoveryBudgetExhausted) notes.push(discoveryLimitNote)
+  if (analysisBudgetExhausted)
+    notes.push(
+      "Analysis reads exceeding the remaining 64 MiB analysis input budget were skipped; statistics are incomplete."
+    )
 
   const items: ConvWithUsage[] = convs.map((conv) => ({
     source: sourceOfSessionId(conv.session.id),

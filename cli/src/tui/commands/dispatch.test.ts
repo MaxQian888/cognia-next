@@ -28,6 +28,16 @@ describe("parseCommandLine", () => {
   it("returns null for a non-slash line", () => {
     expect(parseCommandLine("hello")).toBeNull()
   })
+  it("preserves whitespace inside path, quoted, and multiline arguments", () => {
+    expect(parseCommandLine("/cwd /work/my  project")).toEqual({
+      name: "cwd",
+      rest: "/work/my  project",
+    })
+    expect(parseCommandLine('/memory add "two  spaces"\nnext\tcolumn')).toEqual({
+      name: "memory",
+      rest: 'add "two  spaces"\nnext\tcolumn',
+    })
+  })
 })
 
 describe("resolveSubcommand", () => {
@@ -46,6 +56,20 @@ describe("resolveSubcommand", () => {
 })
 
 describe("dispatchCommand", () => {
+  it("passes a subcommand's argument content through unchanged", () => {
+    registerCommand({
+      name: "memo",
+      description: "",
+      category: "custom",
+      subcommands: [
+        { name: "add", description: "", handler: (c) => ({ kind: "notice", message: c.args }) },
+      ],
+    })
+    expect(dispatchCommand('/memo add "two  spaces"\nnext\tcolumn', ctx(""))).toEqual({
+      kind: "notice",
+      message: '"two  spaces"\nnext\tcolumn',
+    })
+  })
   it("reports an unknown command", () => {
     expect(dispatchCommand("/bogus extra", ctx("extra"))).toEqual({
       kind: "notice",

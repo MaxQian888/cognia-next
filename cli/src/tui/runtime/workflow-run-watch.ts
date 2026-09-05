@@ -44,8 +44,10 @@ function defaultSubscribe(
 export function startRunWatch(deps: RunWatchDeps): { stop: () => void } {
   const subscribe = deps.subscribe ?? defaultSubscribe
   let unsub: (() => void) | null = null
+  let stopped = false
   try {
     unsub = subscribe(deps.runId, (events) => {
+      if (stopped) return
       try {
         deps.onState(foldRunEvents(deps.initial, events), events)
       } catch {
@@ -57,10 +59,14 @@ export function startRunWatch(deps: RunWatchDeps): { stop: () => void } {
   }
   return {
     stop() {
+      if (stopped) return
+      stopped = true
       try {
         unsub?.()
       } catch {
         // ignore unsubscribe errors
+      } finally {
+        unsub = null
       }
     },
   }

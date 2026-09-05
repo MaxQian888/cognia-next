@@ -31,6 +31,7 @@ describe("backendChoices", () => {
     const choices = backendChoices()
     expect(choices[0]).toBe(BUILTIN_BACKEND_ID)
     expect(choices).toContain("claude-code")
+    expect(choices).toContain("codex-acp")
   })
 
   it("omits a preset that spawns no process", () => {
@@ -65,6 +66,7 @@ describe("/backend", () => {
 
   it("switches to a known backend", () => {
     expect(run("codex")).toEqual({ kind: "backend", backend: "codex" })
+    expect(run("codex-acp")).toEqual({ kind: "backend", backend: "codex-acp" })
     expect(run("  CLAUDE-CODE  ")).toEqual({ kind: "backend", backend: "claude-code" })
   })
 
@@ -84,6 +86,7 @@ describe("/backend", () => {
     expect(backendHint("opencode", "codex")).toBe("external agent — log in with its own CLI first")
     // Codex/Claude-Code get their credentials injected, so no login note.
     expect(backendHint("codex", "codex")).toBe("current — host the Codex CLI")
+    expect(backendHint("codex-acp", "codex-acp")).toBe("current — host Codex explicitly over ACP")
     expect(backendHint("opencode", "opencode")).toBe(
       "current — external agent — log in with its own CLI first"
     )

@@ -182,8 +182,8 @@ describe("listAgentModes", () => {
 
 describe("effectivePermissionMode", () => {
   const planMode = resolveAgentMode("plan", [])
-  it("an explicit non-default permission mode always wins", () => {
-    expect(effectivePermissionMode("acceptEdits", planMode)).toBe("acceptEdits")
+  it("Plan constrains even an explicitly selected editing permission", () => {
+    expect(effectivePermissionMode("acceptEdits", planMode)).toBe("plan")
   })
   it("a mode's permission applies when the config is the baseline default", () => {
     expect(effectivePermissionMode("default", planMode)).toBe("plan")
@@ -193,4 +193,10 @@ describe("effectivePermissionMode", () => {
     const build = resolveAgentMode("general", [])
     expect(effectivePermissionMode("default", build)).toBe("default") // general has none
   })
+})
+
+it("lets Plan constrain defaulted editing autonomy", () => {
+  const plan = resolveAgentMode("plan", [])
+  expect(effectivePermissionMode("acceptEdits", plan, false)).toBe("plan")
+  expect(effectivePermissionMode("default", plan, true)).toBe("plan")
 })

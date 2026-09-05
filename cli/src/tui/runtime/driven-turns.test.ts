@@ -14,6 +14,29 @@ const reply = (text: string, input = 0, output = 0): RunAndCaptureResult => ({
 })
 
 describe("runDrivenTurns", () => {
+  it.each(["null", "reply", "throw"])("fences a cancelled send returning %s", async (result) => {
+    const controller = new AbortController()
+    const dispatch = jest.fn()
+    const advance = jest.fn()
+    await runDrivenTurns({
+      firstPrompt: "work",
+      kind: "goal",
+      label: "work",
+      signal: controller.signal,
+      dispatch,
+      advance,
+      send: async () => {
+        controller.abort("pause")
+        if (result === "throw") throw new Error("cancelled")
+        return result === "null" ? null : reply("late")
+      },
+    })
+    expect(advance).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "done", summary: expect.stringContaining("paused") })
+    )
+  })
+
   it("pumps firstPrompt + continuations until advance stops", async () => {
     const actions: TuiAction[] = []
     const sent: string[] = []

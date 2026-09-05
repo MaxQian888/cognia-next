@@ -226,7 +226,8 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     })
   const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
-  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const resolveApprovedTools =
+    params.resolveApprovedTools ?? (() => readToolApprovals(home, undefined, config.cwd))
   const devPluginsEnabled = config.devPlugins === true
   // Sandbox mode implies the plugin runtime, the same way `devPlugins` does.
   // The four `sandbox_*` tools ARE plugin tools, and sandbox mode denies the
@@ -267,8 +268,19 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
   async function build(): Promise<ResolvedCliSessionContext> {
     // Hydrate the in-tree plugin runtime BEFORE resolving options so
     // `buildPluginToolsManifest` (inside `resolveSendOptions`) sees the plugins.
-    // Graceful: a failure leaves the manifest empty, chat unaffected.
-    if (pluginToolsEnabled) await loadPluginRuntime()
+    // A missing runtime would silently remove the sandbox's write tools.
+    if (pluginToolsEnabled) {
+      const result = await loadPluginRuntime()
+      if (result && typeof result === "object" && "ok" in result && result.ok === false) {
+        const reason = "error" in result ? String(result.error) : "Unknown startup failure"
+        throw Object.assign(
+          new Error(
+            `Plugin tool runtime failed to start: ${reason}. Repair the installation and retry the turn.`
+          ),
+          { code: "plugin_runtime_unavailable", retryable: true }
+        )
+      }
+    }
     let ephemeralSkillIds = resolveSkillIds()
     let databaseError: CliDbSnapshotError | null = null
     let databaseReady = false

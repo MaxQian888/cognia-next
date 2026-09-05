@@ -20,6 +20,33 @@ import {
 } from "./plan"
 
 describe("looksLikePlan", () => {
+  it("keeps a project analysis with headings and technical lists as a normal answer", () => {
+    expect(
+      looksLikePlan("The plan mode enforces read-only tools. It does not edit your project.")
+    ).toBe(false)
+    expect(
+      looksLikePlan("# Plan mode\nThis section describes the existing permission system.")
+    ).toBe(false)
+    expect(
+      looksLikePlan(
+        "# Cognia 项目分析\n## 技术栈\n- Next.js 和 React\n- Rust 核心\n## 总结\n这是一个以工程治理换规模的项目。"
+      )
+    ).toBe(false)
+    expect(
+      looksLikePlan(
+        "# Architecture\n1. Next.js frontend\n2. Rust backend\n\n" +
+          "Existing architecture. ".repeat(30)
+      )
+    ).toBe(false)
+  })
+
+  it("recognizes explicit Chinese plans and action sequences but not fenced examples", () => {
+    expect(looksLikePlan("# 实施计划\n1. 修改渲染组件\n2. 添加回归测试")).toBe(true)
+    expect(looksLikePlan("1. 修复渲染组件中的布局\n2. 验证窄屏下的交互行为")).toBe(true)
+    expect(looksLikePlan("代码示例：\n```markdown\n# Plan\n1. implement\n2. verify\n```")).toBe(
+      false
+    )
+  })
   it("rejects a short clarifying question", () => {
     expect(looksLikePlan("Which file should I start with?")).toBe(false)
   })
@@ -43,7 +70,7 @@ describe("looksLikePlan", () => {
   })
 
   it("accepts a long prose body even without structure", () => {
-    expect(looksLikePlan("x".padEnd(300, "y"))).toBe(true)
+    expect(looksLikePlan("x".padEnd(300, "y"))).toBe(false)
   })
 })
 

@@ -198,6 +198,8 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     model: layer.model ?? acc.model,
     systemPrompt: layer.systemPrompt ?? acc.systemPrompt,
     permissionMode: layer.permissionMode ?? acc.permissionMode,
+    permissionModeExplicit:
+      layer.permissionMode !== undefined || acc.permissionModeExplicit === true,
     allowedTools: layer.allowedTools ?? acc.allowedTools,
     builtinTools: layer.builtinTools
       ? { ...acc.builtinTools, ...stripUndefined(layer.builtinTools) }
@@ -467,7 +469,7 @@ export function resolveConfig(input: ResolveConfigInput): ResolvedConfig {
   // A flag/config cwd may be relative — resolve it against the process cwd so
   // the agent always hands the sidecar an absolute working directory.
   acc.cwd = path.isAbsolute(acc.cwd) ? acc.cwd : path.resolve(cwd, acc.cwd)
-  return acc
+  return { ...acc, cliHome: home }
 }
 
 /** Real-fs reader: returns file text or `null` when missing. */

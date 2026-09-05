@@ -27,6 +27,11 @@ const options = (o: Partial<SendOptions> = {}): SendOptions =>
   }) as SendOptions
 
 describe("visibleBuiltinTools", () => {
+  it("withholds native and relay tools for a sealed empty surface", () => {
+    const sealed = options({ toolSurface: "none", pluginTools: [{ name: "ask_user" }] } as never)
+    expect(visibleBuiltinTools(sealed)).toEqual([])
+    expect(visibleHostTools(sealed)).toEqual([])
+  })
   it("exposes only the enabled categories", () => {
     const gitOnly = visibleBuiltinTools(options({ builtinTools: { git: true } } as never))
     expect(gitOnly).toContain("git_status")

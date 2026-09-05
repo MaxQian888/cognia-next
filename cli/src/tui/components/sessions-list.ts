@@ -6,7 +6,12 @@
  */
 import path from "node:path"
 
-import { readTranscript, SESSIONS_DIR, type TranscriptFs } from "../../agent/transcript"
+import {
+  readTranscript,
+  SESSIONS_DIR,
+  type TranscriptFs,
+  type TranscriptEntry,
+} from "../../agent/transcript"
 import type { SessionSummary } from "../state/types"
 
 export type ReadDir = (dir: string) => string[]
@@ -33,7 +38,13 @@ export function listSessions(home: string, deps: SessionsListDeps): SessionSumma
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue
     const sessionId = file.slice(0, -".jsonl".length)
-    const entries = readTranscript(home, sessionId, deps.transcriptFs)
+    let entries: TranscriptEntry[]
+    try {
+      entries = readTranscript(home, sessionId, deps.transcriptFs)
+    } catch {
+      // A disappearing/unreadable transcript must not hide every other session.
+      continue
+    }
     if (entries.length === 0) continue
     const firstUser = entries.find((e) => e.role === "user")
     const turns = entries.filter((e) => e.role === "user").length

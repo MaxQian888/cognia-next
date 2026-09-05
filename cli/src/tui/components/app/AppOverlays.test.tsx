@@ -2,6 +2,18 @@ import React from "react"
 import { act, render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
+import { externalCapabilities } from "../../runtime/backend-capabilities"
+import { copyToClipboard } from "../../clipboard"
+import { cancelCliBackgroundRun } from "../../../agent/subagent-background-tasks"
+jest.mock("../../../agent/subagent-background-tasks", () => ({
+  ...jest.requireActual("../../../agent/subagent-background-tasks"),
+  cancelCliBackgroundRun: jest.fn(() => true),
+}))
+jest.mock("../../clipboard", () => ({
+  ...jest.requireActual("../../clipboard"),
+  copyToClipboard: jest.fn(async () => ({ ok: true })),
+}))
+
 import { AppOverlays, type AppOverlaysProps } from "./AppOverlays"
 import { ThemeProvider } from "../../theme/context"
 import { RenderPrefsProvider } from "../../render/context"
@@ -69,6 +81,61 @@ const wrap = (el: React.ReactElement) =>
   )
 
 describe("AppOverlays", () => {
+  it("stops a background agent in the owning session from the agents panel", () => {
+    const props = propsFor({
+      kind: "agents",
+      rows: [
+        {
+          id: "bg:run-1",
+          kind: "background",
+          name: "reviewer",
+          task: "review",
+          status: "running",
+          runId: "run-1",
+        },
+      ],
+    })
+    wrap(<AppOverlays {...props} />)
+    act(() => __fireInput("s", {}))
+    expect(cancelCliBackgroundRun).toHaveBeenCalledWith("run-1", "s1")
+  })
+
+  it.each([false, new Error("transport closed")])(
+    "reports an unavailable native stop: %s",
+    async (outcome) => {
+      const stopTask = jest.fn(async () => {
+        if (outcome instanceof Error) throw outcome
+        return outcome
+      })
+      const props = propsFor(
+        {
+          kind: "agents",
+          rows: [
+            {
+              id: "native-1",
+              kind: "inflight",
+              name: "reviewer",
+              task: "review",
+              status: "running",
+              runtimeTaskId: "task-1",
+            },
+          ],
+        },
+        { agent: { ...agent, stopTask } }
+      )
+      wrap(<AppOverlays {...props} />)
+      await act(async () => __fireInput("s", {}))
+      expect(stopTask).toHaveBeenCalledWith("task-1")
+      expect(props.dispatch).toHaveBeenCalledWith({
+        type: "NOTICE",
+        message:
+          outcome instanceof Error
+            ? "Could not stop agent: Error: transport closed"
+            : "No active agent task to stop.",
+      })
+    }
+  )
+
   it("renders nothing when no overlay is open", () => {
     const { container } = wrap(<AppOverlays {...propsFor({ kind: "none" })} />)
     expect((container.textContent ?? "").trim()).toBe("")
@@ -127,6 +194,84 @@ describe("AppOverlays", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("beta")
     expect(text).not.toContain("alpha")
+  })
+
+  it.each([true, false])(
+    "uses live external thinking capability (%s) instead of the builtin provider",
+    (supported) => {
+      const overlay = { kind: "effortSlider", off: false, index: 0 } as const
+      const caps = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
+      caps.features.thinking = { supported }
+      const props = propsFor(overlay, {
+        state: {
+          ...createInitialState({ ...config, agentBackend: "codex" }, "s1", true, []),
+          overlay,
+          backendCapabilities: caps,
+        },
+        activeModel: "native-model",
+      })
+      const { container } = wrap(<AppOverlays {...props} />)
+      expect(container.textContent?.includes("doesn't support")).toBe(!supported)
+      act(() => __fireInput("", { return: true }))
+      expect(props.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "BACKEND_CONNECT_RETRY" })
+      )
+      const notices = (props.dispatch as jest.Mock).mock.calls.filter(
+        ([action]) => action.type === "NOTICE"
+      )
+      expect(notices.some(([action]) => action.message.includes("doesn't support thinking"))).toBe(
+        !supported
+      )
+    }
+  )
+
+  it("copies documents with the configured clipboard strategy", async () => {
+    const overlay = {
+      kind: "document",
+      title: "Transcript",
+      body: "complete body",
+      format: "text",
+    } as const
+    const props = propsFor(overlay, {
+      state: {
+        ...createInitialState(
+          { ...config, clipboard: { osc52: "always", osc52MaxBytes: 42 } },
+          "s1",
+          true,
+          []
+        ),
+        overlay,
+      },
+    })
+    wrap(<AppOverlays {...props} />)
+    await act(async () => {
+      __fireInput("y")
+      await Promise.resolve()
+    })
+    expect(copyToClipboard).toHaveBeenCalledWith("complete body", {
+      osc52: "always",
+      osc52MaxBytes: 42,
+    })
+  })
+
+  it("uses the injected writer for document copying", async () => {
+    const copyClipboard = jest.fn(async () => ({ ok: true as const }))
+    const props = propsFor(
+      { kind: "document", title: "Transcript", body: "injected body", format: "text" },
+      { copyClipboard }
+    )
+    wrap(<AppOverlays {...props} />)
+    await act(async () => {
+      __fireInput("y")
+      await Promise.resolve()
+    })
+    expect(copyClipboard).toHaveBeenCalledWith("injected body")
+    expect(props.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "NOTICE",
+        message: "Copied the complete document to the clipboard.",
+      })
+    )
   })
 
   it("renders the provider picker and filters it by the typeahead query", () => {

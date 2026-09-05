@@ -45,6 +45,14 @@ export type ScenarioStep =
     }
   /** Report token usage mid-turn. */
   | { kind: "usage"; inputTokens: number; outputTokens: number }
+  /**
+   * Announce a context compaction mid-turn.
+   *
+   * The scenario's way of producing a transcript notice while a turn is still
+   * open, which is the case that used to paint a status line above the tool
+   * cards it arrived after.
+   */
+  | { kind: "notice"; trigger?: "manual" | "auto"; preTokens?: number; postTokens?: number }
   /** Pause, so a test can act while the turn is still open. */
   | { kind: "delay"; ms: number }
   /**
@@ -184,6 +192,14 @@ export function scenarioCreateSession(
             options.onEvent?.({
               type: "usage",
               usage: { inputTokens: step.inputTokens, outputTokens: step.outputTokens },
+            })
+            break
+          case "notice":
+            options.onEvent?.({
+              type: "compact",
+              trigger: step.trigger ?? "auto",
+              preTokens: step.preTokens ?? 40_000,
+              postTokens: step.postTokens ?? 12_000,
             })
             break
           case "hold":

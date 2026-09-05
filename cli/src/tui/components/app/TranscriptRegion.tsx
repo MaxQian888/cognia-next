@@ -132,6 +132,8 @@ export function TranscriptRegion({
           )}
           <Inflight
             inflight={state.inflight}
+            pending={state.pendingCells}
+            awaitingApproval={state.overlay.kind === "permission"}
             verbose={state.verbose}
             epoch={state.streamEpoch}
             columns={columns}
@@ -164,6 +166,8 @@ export function TranscriptRegion({
       />
       <Inflight
         inflight={state.inflight}
+        pending={state.pendingCells}
+        awaitingApproval={state.overlay.kind === "permission"}
         verbose={state.verbose}
         epoch={state.streamEpoch}
         columns={columns}

@@ -163,19 +163,93 @@ describe("teamRun", () => {
     expect(actions).toHaveLength(1)
   })
 
-  it("stops watching (run continues) when the signal aborts", async () => {
+  it("does not start a desktop run when already cancelled", async () => {
     const { dispatch, actions } = recorder()
     const ac = new AbortController()
     ac.abort()
+    const startRun = jest.fn(async () => ({ ok: true as const }))
     await teamRun("t1", {
       dispatch,
       signal: ac.signal,
-      startRun: async () => ({ ok: true }),
+      startRun,
       fetchStatus: async () => ({ run: { runId: "r1", status: "running", startedAt: 1 } }),
       sleep: noSleep,
     })
     const messages = actions.map((a) => (a as { message?: string }).message ?? "")
-    expect(messages.some((m) => m.includes("continues on the desktop"))).toBe(true)
+    expect(startRun).not.toHaveBeenCalled()
+    expect(messages).toEqual([expect.stringContaining("cancelled before dispatch")])
+  })
+
+  it("does not open a late desktop picker after cancellation", async () => {
+    const { dispatch, actions } = recorder()
+    const ac = new AbortController()
+    await teamRun("", {
+      dispatch,
+      signal: ac.signal,
+      listDesktop: async () => {
+        ac.abort()
+        return [{ id: "t1", name: "Alpha", status: "idle", objective: "obj", teammateCount: 1 }]
+      },
+    })
+    expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(false)
+  })
+
+  it("does not fetch after cancellation during the poll delay", async () => {
+    const { dispatch, actions } = recorder()
+    const ac = new AbortController()
+    const fetchStatus = jest.fn()
+    await teamRun("t1", {
+      dispatch,
+      signal: ac.signal,
+      startRun: async () => ({ ok: true }),
+      sleep: async () => ac.abort(),
+      fetchStatus,
+    })
+    expect(fetchStatus).not.toHaveBeenCalled()
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("Stopped watching") })
+  })
+
+  it("does not publish late events or completion after cancellation during a fetch", async () => {
+    const { dispatch, actions } = recorder()
+    const ac = new AbortController()
+    await teamRun("t1", {
+      dispatch,
+      signal: ac.signal,
+      startRun: async () => ({ ok: true }),
+      sleep: noSleep,
+      fetchStatus: async () => {
+        ac.abort()
+        return {
+          run: { runId: "r1", status: "succeeded", startedAt: 1 },
+          events: [{ ts: 5, type: "run_log", message: "late event" }],
+        }
+      },
+    })
+    expect(actions).toHaveLength(2)
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("Stopped watching") })
+  })
+
+  it("clears the default poll timer immediately when cancelled", async () => {
+    jest.useFakeTimers()
+    try {
+      const { dispatch } = recorder()
+      const ac = new AbortController()
+      const fetchStatus = jest.fn()
+      const pending = teamRun("t1", {
+        dispatch,
+        signal: ac.signal,
+        startRun: async () => ({ ok: true }),
+        fetchStatus,
+      })
+      await Promise.resolve()
+      expect(jest.getTimerCount()).toBe(1)
+      ac.abort()
+      expect(jest.getTimerCount()).toBe(0)
+      await pending
+      expect(fetchStatus).not.toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })
 

@@ -14,8 +14,9 @@ import { useRenderPrefs } from "../render/context"
 import { useElapsedSeconds } from "../render/use-elapsed-seconds"
 import { sanitizeCell } from "../render/sanitize-cell"
 import { diffFilePath, formatEditDiff } from "../markdown/diff"
+import { truncateToWidth } from "../markdown/width"
 import { langFromPath } from "../markdown/highlight"
-import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
+import { renderResultLines, toolResultLang } from "../format/result-render"
 import {
   extractResultImages,
   elideImageData,
@@ -26,6 +27,7 @@ import { buildImageEscape, detectGraphics } from "../format/terminal-graphics"
 import {
   isDiffTool,
   resultPreview,
+  toolResultPreviewText,
   summarizeToolCall,
   toolFileLine,
   toolFilePath,
@@ -228,7 +230,7 @@ function CardBody({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ToolView({ cell }: { cell: ToolCell }) {
+function ToolView({ cell, columns }: { cell: ToolCell; columns: number }) {
   const theme = useTheme()
   const STATUS_COLOR: Record<ToolCell["status"], string> = {
     running: theme.statusRunning,
@@ -277,7 +279,7 @@ function ToolView({ cell }: { cell: ToolCell }) {
       : ""
   return (
     <Box flexDirection="column">
-      <Box>
+      <Text>
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <Disclosure shown={collapsible} collapsed={cell.collapsed} />
         <ToolBadge toolName={cell.toolName} />
@@ -285,7 +287,7 @@ function ToolView({ cell }: { cell: ToolCell }) {
         {/* Label from the protocol when there is one, canonical name otherwise.
             `cell.toolName` still drives every formatter above. */}
         <Text bold>{cell.displayTitle ?? toolHeaderLabel(cell.toolName)}</Text>
-        {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
+        {summary ? <Text color={theme.text}> {summaryDisplay}</Text> : null}
         {cell.status === "cancelled" ? <Text color={theme.muted}> · stopped</Text> : null}
         <ElapsedHint status={cell.status} />
         {chip ? <ResultChip descriptor={chip} /> : null}
@@ -295,12 +297,10 @@ function ToolView({ cell }: { cell: ToolCell }) {
             · {missingDetails}
           </Text>
         ) : null}
-      </Box>
+      </Text>
       {cell.collapsed && detail?.text ? (
         <Box paddingLeft={2}>
-          <Text color={detail.tone === "error" ? theme.danger : theme.muted} dimColor>
-            ↳ {detail.text}
-          </Text>
+          <Text color={detail.tone === "error" ? theme.danger : theme.text}>↳ {detail.text}</Text>
         </Box>
       ) : null}
       {diff.length > 0 ? (
@@ -310,7 +310,11 @@ function ToolView({ cell }: { cell: ToolCell }) {
       ) : null}
       {!cell.collapsed && diff.length === 0 && hasUsefulResult ? (
         <CardBody>
-          <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
+          <ToolResult
+            columns={columns}
+            result={cell.result}
+            lang={toolResultLang(cell.toolName, cell.input)}
+          />
         </CardBody>
       ) : null}
     </Box>
@@ -322,13 +326,21 @@ function ToolView({ cell }: { cell: ToolCell }) {
  * textual body with image base64 elided, so an image result no longer floods
  * the transcript with a base64 wall.
  */
-function ToolResult({ result, lang }: { result: unknown; lang?: string }) {
+function ToolResult({
+  result,
+  lang,
+  columns,
+}: {
+  result: unknown
+  lang?: string
+  columns: number
+}) {
   const images = extractResultImages(result)
-  if (images.length === 0) return <ResultBody result={result} lang={lang} />
+  if (images.length === 0) return <ResultBody columns={columns} result={result} lang={lang} />
   return (
     <Box flexDirection="column">
       <ToolImages images={images} />
-      <ResultBody result={elideImageData(result)} lang={lang} />
+      <ResultBody columns={columns} result={elideImageData(result)} lang={lang} />
     </Box>
   )
 }
@@ -368,10 +380,18 @@ function ToolImages({ images }: { images: ExtractedImage[] }) {
  * result (over `pagerThresholdLines`) collapses to a short preview plus a
  * "open in pager" hint instead of flooding the transcript.
  */
-function ResultBody({ result, lang }: { result: unknown; lang?: string }) {
+function ResultBody({
+  result,
+  lang,
+  columns,
+}: {
+  result: unknown
+  lang?: string
+  columns: number
+}) {
   const theme = useTheme()
   const prefs = useRenderPrefs()
-  const text = resultToText(result)
+  const text = toolResultPreviewText(result)
   if (!text) return null
 
   const totalLines = text.split("\n").length
@@ -379,7 +399,15 @@ function ResultBody({ result, lang }: { result: unknown; lang?: string }) {
   const tooBig = totalLines > prefs.pagerThresholdLines
   const maxLines = tooBig ? Math.min(prefs.toolResultMaxLines, 20) : prefs.toolResultMaxLines
 
-  const rendered = renderResultLines(text, {
+  const bodyWidth = Math.max(
+    1,
+    columns - 4 - (prefs.fileLineNumbers ? String(totalLines).length + 3 : 0)
+  )
+  const rawLines = text.split("\n")
+  const visibleLines = rawLines.slice(0, maxLines > 0 ? maxLines : rawLines.length)
+  const fittedLines = visibleLines.map((line) => truncateToWidth(line, bodyWidth))
+  const clipped = fittedLines.some((line, index) => line !== visibleLines[index])
+  const rendered = renderResultLines(fittedLines.join("\n"), {
     lang,
     highlight: prefs.syntaxHighlightInline,
     lineNumbers: prefs.fileLineNumbers,
@@ -387,24 +415,26 @@ function ResultBody({ result, lang }: { result: unknown; lang?: string }) {
     maxLines,
   })
 
+  const hiddenLines = totalLines - rendered.lines.length
   return (
     <Box flexDirection="column">
       {rendered.lines.map((line, i) =>
         colored ? (
           <Text key={i}>{line}</Text>
         ) : (
-          <Text key={i} color={theme.muted}>
+          <Text key={i} color={theme.text}>
             {line}
           </Text>
         )
       )}
+      {clipped ? <Text color={theme.warning}>/expand · long lines shortened</Text> : null}
       {tooBig ? (
         <Text color={theme.warning} dimColor>
           {`… ${totalLines} lines total — open full output: /expand`}
         </Text>
-      ) : rendered.hiddenLines > 0 ? (
+      ) : hiddenLines > 0 ? (
         <Text color={theme.warning} dimColor>
-          {`… +${rendered.hiddenLines} more line${rendered.hiddenLines === 1 ? "" : "s"} hidden — /expand`}
+          {`… +${hiddenLines} more line${hiddenLines === 1 ? "" : "s"} hidden — /expand`}
         </Text>
       ) : null}
     </Box>
@@ -425,7 +455,7 @@ const SUBAGENT_STATUS_LABEL: Record<ToolCell["status"], string> = {
  * rides the normal {@link ToolCell} pipeline; this view just frames it like a
  * delegated agent instead of an opaque tool card.
  */
-function SubagentView({ cell }: { cell: ToolCell }) {
+function SubagentView({ cell, columns }: { cell: ToolCell; columns: number }) {
   const theme = useTheme()
   const STATUS_COLOR: Record<ToolCell["status"], string> = {
     running: theme.statusRunning,
@@ -447,7 +477,7 @@ function SubagentView({ cell }: { cell: ToolCell }) {
         : null
   return (
     <Box flexDirection="column">
-      <Box>
+      <Text>
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
         <Disclosure shown={hasUsefulResult} collapsed={cell.collapsed} />
         <Text color={theme.accent} bold>
@@ -460,7 +490,7 @@ function SubagentView({ cell }: { cell: ToolCell }) {
         </Text>
         <ElapsedHint status={cell.status} />
         {chip ? <ResultChip descriptor={chip} /> : null}
-      </Box>
+      </Text>
       {task ? (
         <Box paddingLeft={2}>
           <Text color={theme.muted}>{task}</Text>
@@ -468,14 +498,12 @@ function SubagentView({ cell }: { cell: ToolCell }) {
       ) : null}
       {cell.collapsed && detail?.text ? (
         <Box paddingLeft={2}>
-          <Text color={detail.tone === "error" ? theme.danger : theme.muted} dimColor>
-            ↳ {detail.text}
-          </Text>
+          <Text color={detail.tone === "error" ? theme.danger : theme.text}>↳ {detail.text}</Text>
         </Box>
       ) : null}
       {!cell.collapsed && hasUsefulResult ? (
         <CardBody>
-          <ToolResult result={cell.result} />
+          <ToolResult columns={columns} result={cell.result} />
         </CardBody>
       ) : null}
     </Box>
@@ -718,7 +746,11 @@ export function CellView({ cell, columns = 80 }: { cell: Cell; columns?: number 
     case "thinking":
       return <ThinkingView cell={cell} columns={columns} />
     case "tool":
-      return isSubagentTool(cell.toolName) ? <SubagentView cell={cell} /> : <ToolView cell={cell} />
+      return isSubagentTool(cell.toolName) ? (
+        <SubagentView cell={cell} columns={columns} />
+      ) : (
+        <ToolView cell={cell} columns={columns} />
+      )
     case "todo":
       return <TodoView cell={cell} />
     case "plan":

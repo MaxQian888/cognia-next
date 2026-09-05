@@ -46,6 +46,7 @@ import {
 } from "./skill-load-tool"
 import {
   startCliBackgroundRun,
+  hasCliBackgroundRun,
   collectCliBackgroundResult,
   getCliBackgroundRecord,
 } from "./subagent-background-tasks"
@@ -241,7 +242,7 @@ export async function handleCliDispatchAgent(
    * subagent id) — NOT for a neutral interrupt or a non-success finish reason —
    * so the dispatching tool call can render red ✗ rather than a green ✓ when a
    * subagent actually failed. */
-  type DispatchOutcome = { text: string; ok: boolean }
+  type DispatchOutcome = { text: string; ok: boolean; interrupted?: boolean }
 
   /** The body of one dispatch — never throws (errors collapse onto a line).
    * `liveId` ties the run to its TUI live-output entry: background runs pass their
@@ -250,8 +251,10 @@ export async function handleCliDispatchAgent(
   const executeOne = async (
     d: NormalizedDispatch,
     label: string,
-    liveId?: string
+    liveId?: string,
+    signal = ctx.signal
   ): Promise<DispatchOutcome> => {
+    if (signal?.aborted) return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
     const refused = refuseByPolicy(d, label)
     if (refused) return refused
     const match = ctx.agents.find((a) => a.id === d.subagentId)
@@ -285,6 +288,7 @@ export async function handleCliDispatchAgent(
             register: (childSessionId: string) =>
               registerCliSubagentContext(childSessionId, {
                 ...ctx,
+                signal,
                 gate: ctx.resolveSubagentGate?.(d.subagentId) ?? ctx.gate,
                 depth: childDepth,
                 maxDepth,
@@ -295,6 +299,7 @@ export async function handleCliDispatchAgent(
             unregister: clearCliSubagentContext,
           }
         : undefined
+    let settled = false
     try {
       const r = await run(match.def, d.prompt, req.sessionId, {
         config: ctx.config,
@@ -307,13 +312,19 @@ export async function handleCliDispatchAgent(
                 ctx.resolveSubagentOptions!(d.subagentId, buildContext),
             }
           : {}),
-        ...(ctx.signal ? { signal: ctx.signal } : {}),
+        ...(signal ? { signal } : {}),
         mcpServers: ctx.mcpServers,
         approvedTools: ctx.approvedTools,
         disabledMcpTools: ctx.disabledMcpTools,
-        onEvent: (event) => applyLiveSubagentEvent(live, event),
+        onEvent: (event) => {
+          if (!settled && !signal?.aborted) applyLiveSubagentEvent(live, event)
+        },
         ...(nesting ? { nesting } : {}),
       })
+      if (signal?.aborted) {
+        settleLiveSubagent(live, "interrupted")
+        return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
+      }
       settleLiveSubagent(live, "done")
       return { text: `[${label}]${metaSuffix(r)}\n${r.text}`, ok: true }
     } catch (err) {
@@ -321,12 +332,14 @@ export async function handleCliDispatchAgent(
       // interruption (not a fault) so the model gets an accurate signal instead
       // of a raw abort-error string. An interrupt is neutral (`ok: true`) — it's
       // a user action, not a subagent failure.
-      if (ctx.signal?.aborted) {
+      if (signal?.aborted) {
         settleLiveSubagent(live, "interrupted")
-        return { text: `[${label}] interrupted.`, ok: true }
+        return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
       }
       settleLiveSubagent(live, "error")
       return { text: `[${label}] failed: ${errorMessage(err)}`, ok: false }
+    } finally {
+      settled = true
     }
   }
 
@@ -345,7 +358,13 @@ export async function handleCliDispatchAgent(
         ok: false,
       }
     }
+    if (ctx.signal?.aborted) return { text: `[${label}] interrupted.`, ok: true, interrupted: true }
     const runId = mintRunId()
+    if (hasCliBackgroundRun(runId))
+      return { text: `[${label}] Background run id already exists: ${runId}.`, ok: false }
+    const controller = new AbortController()
+    const onParentAbort = () => controller.abort(ctx.signal?.reason)
+    ctx.signal?.addEventListener("abort", onParentAbort, { once: true })
     startCliBackgroundRun(
       runId,
       {
@@ -363,7 +382,14 @@ export async function handleCliDispatchAgent(
       },
       // Share the background `runId` as the live-output id so the panel never
       // shows the run twice (once live, once from the journal record).
-      executeOne(d, d.subagentId, runId).then((o) => o.text)
+      executeOne(d, d.subagentId, runId, controller.signal)
+        .then((outcome) => ({
+          text: outcome.text,
+          ...(!outcome.ok ? { error: outcome.text } : {}),
+          ...(outcome.interrupted ? { interrupted: true } : {}),
+        }))
+        .finally(() => ctx.signal?.removeEventListener("abort", onParentAbort)),
+      { cancel: () => controller.abort("Cancelled by user.") }
     )
     return {
       text: `[${d.subagentId}] started in background (runId: ${runId}). Collect later with dispatch_agent({collect:"${runId}"}).`,

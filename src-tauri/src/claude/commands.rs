@@ -799,6 +799,7 @@ pub fn is_allowed_control_method(method: &str) -> bool {
             | "setMcpPermissionModeOverride"
             | "setMcpServers"
             | "setModel"
+            | "setPermissionMode"
             | "steer"
             | "stopTask"
             | "supportedAgents"
@@ -1620,6 +1621,7 @@ mod tests {
             "setMcpPermissionModeOverride",
             "setMcpServers",
             "setModel",
+            "setPermissionMode",
             "steer",
             "stopTask",
             "supportedAgents",
@@ -1635,7 +1637,6 @@ mod tests {
             // frame a second, unaudited way to end a session.
             "close",
             "interrupt",
-            "setPermissionMode",
             // Declared `not-exposed` in protocol/agent-control-methods.json.
             "streamInput",
             "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",
@@ -1713,6 +1714,7 @@ mod tests {
             // Control methods travel on the `control` frame; letting them in
             // here would be a second, unaudited route to a live query.
             "setModel",
+            "setPermissionMode",
             "steer",
             "interrupt",
             // Not SDK session functions at all.

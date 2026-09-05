@@ -29,6 +29,17 @@ function emitter(overrides: Partial<Parameters<typeof createEnvelopeEmitter>[0]>
 }
 
 describe("canonicalFromCapture", () => {
+  it("preserves tool summaries when diagnostics are disabled", () => {
+    const event = {
+      type: "tool-summary",
+      summary: "Read the project",
+      toolCallIds: ["call-1"],
+    } as const
+    expect(emitter().fromCapture({ ...event, toolCallIds: [...event.toolCallIds] })?.event).toEqual(
+      { kind: "tool-summary", summary: event.summary, toolCallIds: ["call-1"] }
+    )
+  })
+
   it("maps a retry to the canonical kind, not to a suppressed diagnostic", () => {
     // The `default` branch turns unknown capture events into `diagnostic`,
     // which `fromCapture` drops unless `includeDiagnostics` is on — so a

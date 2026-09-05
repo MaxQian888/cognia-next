@@ -18,6 +18,7 @@ import { lexer } from "marked"
 
 import type { MdLine, MdSpan, TableAlign } from "./types"
 import { stringWidth } from "./width"
+import { sanitizeTerminalText } from "../render/terminal-block"
 
 type InlineToken = {
   type?: string
@@ -83,8 +84,13 @@ export function decodeHtmlEntities(text: string): string {
   return text.replace(
     /&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*));/g,
     (_, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
-      if (dec) return String.fromCodePoint(parseInt(dec, 10))
-      if (hex) return String.fromCodePoint(parseInt(hex, 16))
+      if (dec || hex) {
+        const value = dec ? parseInt(dec, 10) : parseInt(hex!, 16)
+        if (value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) return "�"
+        // Entity decoding must never manufacture terminal controls after input sanitization.
+        if (value < 32 || (value >= 127 && value <= 159)) return ""
+        return String.fromCodePoint(value)
+      }
       return NAMED_ENTITIES[name ?? ""] ?? `&${name};`
     }
   )
@@ -157,15 +163,24 @@ export function inlineToSpans(tokens: InlineToken[] | undefined, style: SpanStyl
         // which is the only reason this branch used to decode.)
         spans.push({ text: t.text ?? "", code: true })
         break
-      case "link":
+      case "link": {
+        const label = t.tokens
+          ? inlineToSpans(t.tokens, style)
+          : [{ text: decodeHtmlEntities(t.text ?? t.href ?? ""), ...styleFlags(style) }]
+        spans.push(...label.map((span) => ({ ...span, link: decodeHtmlEntities(t.href ?? "") })))
+        break
+      }
+      case "image":
         spans.push({
-          text: decodeHtmlEntities(t.text ?? t.href ?? ""),
-          link: t.href,
+          text: t.text ? `[image: ${decodeHtmlEntities(t.text)}]` : "[image]",
+          link: decodeHtmlEntities(t.href ?? ""),
           ...styleFlags(style),
         })
         break
+      case "checkbox":
+        break
       case "br":
-        spans.push({ text: " " })
+        spans.push({ text: "\n" })
         break
       default:
         spans.push({ text: decodeHtmlEntities(t.text ?? t.raw ?? ""), ...styleFlags(style) })
@@ -207,7 +222,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
         // Verbatim, for the same reason as `codespan` above — a fenced block
         // containing `&amp;` must render those six characters, not `&`.
         const lines = (token.text ?? "").split("\n")
-        const lang = token.lang || undefined
+        const lang = token.lang?.trim().split(/\s+/)[0] || undefined
         // Widest body line (display columns) so the renderer can size the frame
         // to the code instead of a fixed width.
         const width = lines.reduce((m, l) => Math.max(m, stringWidth(l)), 0)
@@ -236,7 +251,8 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
             out.push({
               kind: "blockquote",
               depth: 1,
-              spans: "spans" in line ? line.spans : plainSpans("text" in line ? line.text : ""),
+              spans: "spans" in line ? line.spans : [],
+              ...(line.kind === "paragraph" ? {} : { child: line }),
             })
           }
         }
@@ -257,6 +273,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
           // recurse one level deeper.
           let placedOwnLine = false
           for (const block of itemBlocks) {
+            if (block.type === "checkbox") continue
             if (!placedOwnLine && (block.type === "text" || block.type === "paragraph")) {
               out.push({
                 kind: "listitem",
@@ -267,8 +284,30 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
                 spans: block.tokens ? inlineToSpans(block.tokens) : plainSpans(block.text ?? ""),
               })
               placedOwnLine = true
-            } else if (block.type === "list") {
-              blockToLines([block], depth + 1, out)
+            } else {
+              if (!placedOwnLine) {
+                out.push({
+                  kind: "listitem",
+                  depth,
+                  ordered,
+                  marker,
+                  ...(checked !== undefined ? { checked } : {}),
+                  spans: [],
+                })
+                placedOwnLine = true
+              }
+              if (block.type === "list") {
+                blockToLines([block], depth + 1, out)
+              } else {
+                const children = blocksToLines([block], depth)
+                for (const child of children) {
+                  out.push({
+                    kind: "indent",
+                    columns: (depth + 1) * 2 + stringWidth(marker) + 1,
+                    child,
+                  })
+                }
+              }
             }
           }
           if (!placedOwnLine) {
@@ -305,6 +344,7 @@ function blockToLines(tokens: BlockToken[], depth: number, out: MdLine[]): void 
 }
 
 export function tokenizeMarkdown(src: string): MdLine[] {
+  src = sanitizeTerminalText(src).replace(/[\u001b\u0080-\u009f]/g, "")
   if (!src) return []
   let tokens: BlockToken[]
   try {

@@ -12,6 +12,9 @@
  */
 import { bareToolName } from "../markdown/diff"
 import type { Cell, ToolCell } from "../state/types"
+import { summarizeToolCall, toolHeaderLabel } from "./tools"
+import { truncateToWidth } from "../markdown/width"
+import { sanitizeTerminalText } from "../render/terminal-block"
 
 /** Context-gathering tools whose bursts are worth folding. */
 const CONTEXT_TOOLS = new Set(["read", "cat", "view", "grep", "search", "glob", "ls", "list"])
@@ -40,6 +43,7 @@ export function groupContextRuns(cells: Cell[], verbose: boolean): ContextRun[] 
       cell.kind === "tool" &&
       isContextTool(cell.toolName) &&
       cell.status === "done" &&
+      cell.collapsed &&
       !cell.isError
     if (groupable) {
       run.push(cell as ToolCell)
@@ -54,7 +58,7 @@ export function groupContextRuns(cells: Cell[], verbose: boolean): ContextRun[] 
 
 /** Coarse category for the group summary. */
 function category(toolName: string): "read" | "search" | "glob" | "list" {
-  const n = toolName.toLowerCase()
+  const n = bareToolName(toolName).toLowerCase()
   if (n === "read" || n === "cat" || n === "view") return "read"
   if (n === "grep" || n === "search") return "search"
   if (n === "glob") return "glob"
@@ -81,4 +85,20 @@ export function summarizeContextGroup(tools: ToolCell[]): string {
     if (n) parts.push(`${n} ${n === 1 ? singular : plural}`)
   }
   return parts.join(", ")
+}
+
+/** Keep grouping compact, but show what actually ran. Only inspect three inputs,
+ * never result payloads; verbose/find still expose every original cell. */
+export function contextGroupLines(tools: ToolCell[], columns = 80): string[] {
+  const fit = (text: string) =>
+    truncateToWidth(sanitizeTerminalText(text).replace(/[\r\n\t]+/g, " "), Math.max(1, columns))
+  const lines = [fit(`⚙ ${summarizeContextGroup(tools)} · done`)]
+  for (const tool of tools.slice(0, 3)) {
+    const summary = summarizeToolCall(tool.toolName, tool.input)
+    lines.push(
+      fit(`  ${toolHeaderLabel(tool.toolName)}: ${summary || "completed · no target supplied"}`)
+    )
+  }
+  if (tools.length > 3) lines.push(fit(`  +${tools.length - 3} more · ctrl+o to expand`))
+  return lines
 }

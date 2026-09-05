@@ -49,6 +49,7 @@ export function createInitialState(
     bypassAcknowledged: false,
     cells: [],
     inflight: { text: "", thinking: "", tools: [] },
+    pendingCells: [],
     overlay: { kind: "none" },
     input: { ...input, history: { ...input.history, entries: history } },
     sessionTotals: emptySessionTotals(),

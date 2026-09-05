@@ -9,6 +9,7 @@
  */
 import { nodePtyAvailable } from "./node-pty-harness"
 import { runConversation } from "./conversation-driver"
+import { RENDER_DEFAULTS } from "../../config/schema"
 
 const maybe = nodePtyAvailable() ? describe : describe.skip
 
@@ -117,11 +118,103 @@ maybe("conversation: tools and approvals", () => {
           rows.findIndex((row) => row.includes("scan repo")),
           rows.findIndex((row) => row.includes("Here is what I found")) + 1
         )
-        // The three reads are one summary row, not three cards.
+        // The three reads share a compact summary and retain their targets.
         expect(body.filter((row) => row.includes("⚙")).length).toBe(1)
-        expect(body.join("\n")).not.toContain("package.json")
+        for (const target of ["package.json", "README.md", "tsconfig.json"]) {
+          expect(body.join("\n")).toContain(target)
+        }
         // The whole turn, question to answer, in a handful of rows.
-        expect(body.filter((row) => row.trim() !== "").length).toBeLessThanOrEqual(6)
+        expect(body.filter((row) => row.trim() !== "").length).toBeLessThanOrEqual(9)
+      }
+    )
+  })
+
+  it("shows grouped paths while held and expands structured results through real fullscreen scroll", async () => {
+    await runConversation(
+      {
+        geometry: { columns: 60, rows: 24 },
+        scenario: {
+          config: {
+            render: {
+              ...RENDER_DEFAULTS,
+              toolResultMaxLines: 12,
+              fileLineNumbers: false,
+              syntaxHighlightInline: false,
+            },
+          },
+          turns: [
+            {
+              steps: [
+                {
+                  kind: "tool-call",
+                  id: "read-a",
+                  toolName: "read",
+                  input: { path: "src/config.ts" },
+                },
+                { kind: "tool-result", id: "read-a", toolName: "read", result: "config source" },
+                {
+                  kind: "tool-call",
+                  id: "read-b",
+                  toolName: "read",
+                  input: { path: "src/tools.ts" },
+                },
+                { kind: "tool-result", id: "read-b", toolName: "read", result: "tool source" },
+                {
+                  kind: "tool-call",
+                  id: "read-c",
+                  toolName: "read",
+                  input: { path: "src/results.ts" },
+                },
+                {
+                  kind: "tool-result",
+                  id: "read-c",
+                  toolName: "read",
+                  result: {
+                    exit_code: 0,
+                    stdout:
+                      "preview start\n" +
+                      Array.from({ length: 30 }, (_, i) => `result row ${i + 1}`).join("\n"),
+                  },
+                },
+                { kind: "hold" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send("inspect grouped reads")
+        // Earlier reads are committed; the last read remains in Inflight until stop.
+        await session.waitForText("⚙ 2 reads · done")
+        expect(session.modes().altScreen).toBe(true)
+        for (const path of ["src/config.ts", "src/tools.ts", "src/results.ts"])
+          expect(session.flat()).toContain(path)
+        expect(session.flat()).not.toContain("Exit code:")
+        // End the held turn so this assertion now exercises committed cells in
+        // VirtualizedTranscript, not only the live Inflight region.
+        await session.press("escape")
+        await session.waitForTurnEnd(1)
+        await session.waitForText("Turn stopped")
+        await session.waitForText("⚙ 3 reads · done")
+        for (const path of ["src/config.ts", "src/tools.ts", "src/results.ts"])
+          expect(session.flat()).toContain(path)
+        await session.press("ctrlO")
+        await session.waitForText("Detail mode on")
+        await session.waitForText("/expand")
+        const tail = session.screen()
+        for (let page = 0; page < 4 && !session.flat().includes("Exit code: 0"); page++) {
+          const before = session.screen()
+          await session.press("pageUp")
+          await session.waitFor((screen) => screen !== before, {
+            describe: "expanded tool output to scroll",
+          })
+        }
+        await session.waitForText("Exit code: 0")
+        expect(session.flat()).toContain("Stdout: preview start")
+        expect(session.flat()).not.toContain('"exit_code"')
+        expect(session.screen()).not.toBe(tail)
+        await session.press("pageDown")
+        await session.waitForText("/expand")
       }
     )
   })
@@ -133,7 +226,11 @@ maybe("conversation: tools and approvals", () => {
           turns: [
             {
               steps: [
-                { kind: "ask-permission", toolName: "bash", input: { command: "echo hello" } },
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "chmod +x deploy.sh" },
+                },
                 { kind: "text", delta: "ran it" },
               ],
             },
@@ -141,16 +238,71 @@ maybe("conversation: tools and approvals", () => {
         },
       },
       async (session) => {
-        await session.send("echo hi")
+        await session.send("make it executable")
         await session.waitForText("Allow bash?")
         // What is being approved has to be on screen ABOVE the answers. A bare
         // tool name reads as a UI that lost the command.
-        expect(session.flat()).toContain("echo hello")
+        expect(session.flat()).toContain("chmod +x deploy.sh")
         await session.press("enter")
         await session.waitForText("ran it")
       }
     )
     expect(result.record.decisions).toEqual([{ toolName: "bash", decision: { decision: "allow" } }])
+  })
+
+  it("runs a read-only command without asking anybody", async () => {
+    const result = await runConversation(
+      {
+        scenario: {
+          turns: [
+            {
+              steps: [
+                { kind: "ask-permission", toolName: "bash", input: { command: "ls -la packages" } },
+                { kind: "text", delta: "three packages" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send("what is in packages")
+        await session.waitForText("three packages")
+        // `bash` is rated `high` in the tool catalogue because `bash` can do
+        // anything, so this used to open the same prompt as `rm -rf /`.
+        expect(session.flat()).not.toContain("Allow bash?")
+      }
+    )
+    expect(result.record.decisions).toEqual([{ toolName: "bash", decision: { decision: "allow" } }])
+  })
+
+  it("says which part of a command is the risky part", async () => {
+    await runConversation(
+      {
+        scenario: {
+          turns: [
+            {
+              steps: [
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "git push origin dev" },
+                },
+                { kind: "text", delta: "pushed" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send("push it")
+        await session.waitForText("Allow bash?")
+        const flat = session.flat()
+        expect(flat).toContain("git push mutates remote/history")
+        expect(flat).toContain("[medium risk]")
+        await session.press("enter")
+        await session.waitForText("pushed")
+      }
+    )
   })
 
   it("denies with a message the agent can act on", async () => {
@@ -170,13 +322,11 @@ maybe("conversation: tools and approvals", () => {
       async (session) => {
         await session.send("wipe")
         await session.waitForText("Allow bash?")
-        // Down twice: Allow once, Allow always, Deny. Each move is confirmed by
-        // where the marker landed before the next key, so two arrow keys can
-        // never arrive in one read and be parsed as a single sequence.
-        await session.press("down")
-        await session.waitForText("❯ Allow always")
-        await session.press("down")
+        // A command the classifier calls catastrophic opens ON Deny, so the
+        // answer a reflex Enter gives is the safe one. Nothing is pressed to
+        // get there.
         await session.waitForText("❯ Deny")
+        expect(session.flat()).toContain("[high risk]")
         await session.press("enter")
         await session.waitForText("understood")
       }
@@ -192,13 +342,21 @@ maybe("conversation: tools and approvals", () => {
           turns: [
             {
               steps: [
-                { kind: "ask-permission", toolName: "bash", input: { command: "echo one" } },
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "chmod +x deploy.sh" },
+                },
                 { kind: "text", delta: "first done" },
               ],
             },
             {
               steps: [
-                { kind: "ask-permission", toolName: "bash", input: { command: "echo two" } },
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "chmod +x deploy.sh" },
+                },
                 { kind: "text", delta: "second done" },
               ],
             },
@@ -206,14 +364,14 @@ maybe("conversation: tools and approvals", () => {
         },
       },
       async (session) => {
-        await session.send("echo one")
+        await session.send("make it executable")
         await session.waitForText("Allow bash?")
         await session.press("down")
         await session.waitForText("❯ Allow always")
         await session.press("enter")
         await session.waitForText("first done")
 
-        await session.send("echo two")
+        await session.send("do it again")
         await session.waitForTurnEnd(2)
         await session.waitForText("second done")
         // The second call must not have raised a prompt at all.
@@ -226,6 +384,53 @@ maybe("conversation: tools and approvals", () => {
     ])
   })
 
+  // What a user agreed to was a command. Remembering the TOOL instead meant one
+  // click on a build turned every future `git push --force` into a silent one.
+  it("does not let allow always on one command cover a different one", async () => {
+    await runConversation(
+      {
+        scenario: {
+          turns: [
+            {
+              steps: [
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "chmod +x deploy.sh" },
+                },
+                { kind: "text", delta: "marked" },
+              ],
+            },
+            {
+              steps: [
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "git push --force origin dev" },
+                },
+                { kind: "text", delta: "pushed" },
+              ],
+            },
+          ],
+        },
+      },
+      async (session) => {
+        await session.send("make it executable")
+        await session.waitForText("Allow bash?")
+        await session.press("down")
+        await session.waitForText("❯ Allow always")
+        await session.press("enter")
+        await session.waitForText("marked")
+
+        await session.send("now force push")
+        // Still asked, and the prompt names what makes this one different.
+        await session.waitForText("git push mutates remote/history")
+        await session.press("enter")
+        await session.waitForText("pushed")
+      }
+    )
+  })
+
   // What a user sees when this is wrong: an approval on screen, and the agent's
   // other tools running behind it. Whatever they are about to answer, the work
   // has already happened.
@@ -236,7 +441,7 @@ maybe("conversation: tools and approvals", () => {
           turns: [
             {
               steps: [
-                { kind: "ask-permission", toolName: "bash", input: { command: "echo one" } },
+                { kind: "ask-permission", toolName: "bash", input: { command: "pnpm publish" } },
                 { kind: "text", delta: "the tool ran" },
               ],
             },
@@ -244,7 +449,7 @@ maybe("conversation: tools and approvals", () => {
         },
       },
       async (session) => {
-        await session.send("echo one")
+        await session.send("publish it")
         await session.waitForText("Allow bash?")
         // Nothing past the approval has reached the screen.
         expect(session.flat()).not.toContain("the tool ran")
@@ -262,7 +467,11 @@ maybe("conversation: tools and approvals", () => {
           turns: [
             {
               steps: [
-                { kind: "ask-permission", toolName: "bash", input: { command: "sleep 30" } },
+                {
+                  kind: "ask-permission",
+                  toolName: "bash",
+                  input: { command: "docker compose up -d" },
+                },
                 { kind: "text", delta: "should never run" },
               ],
             },
@@ -270,7 +479,7 @@ maybe("conversation: tools and approvals", () => {
         },
       },
       async (session) => {
-        await session.send("sleep")
+        await session.send("bring it up")
         await session.waitForText("Allow bash?")
         await session.press("escape")
         await session.waitForTurnEnd(1)

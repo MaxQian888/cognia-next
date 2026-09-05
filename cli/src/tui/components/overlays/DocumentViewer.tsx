@@ -11,16 +11,12 @@ import React from "react"
 import { Box, Text } from "ink"
 import { useModalInput } from "../../input/input-router"
 
-import { MarkdownLine } from "../Markdown"
+import { markdownLineSpans } from "../../render/cell-terminal-block"
+import { ansiToSpans } from "../../render/ansi-spans"
+import { wrapTerminalSpans, type TerminalStyle } from "../../render/terminal-block"
 import { parseMouseEvent } from "../../input/mouse"
 import { useTheme } from "../../theme/context"
-import {
-  clampScroll,
-  lineCount,
-  maxScroll,
-  positionLabel,
-  prepareDocumentLines,
-} from "../document-view"
+import { clampScroll, maxScroll, positionLabel, prepareDocumentLines } from "../document-view"
 import type { DocumentFormat } from "../../state/types"
 import { contentRows } from "../../layout/terminal-layout"
 
@@ -34,6 +30,7 @@ export interface DocumentViewerProps {
   onCopy?: (body: string) => void
   /** Test seam: viewport height in rows (defaults to the terminal height). */
   viewportRows?: number
+  columns?: number
 }
 
 /** Rows reserved for the border, title, and footer chrome. */
@@ -50,6 +47,7 @@ export function DocumentViewer({
   onClose,
   onCopy,
   viewportRows,
+  columns = 80,
 }: DocumentViewerProps) {
   const theme = useTheme()
   const [scroll, setScroll] = React.useState(0)
@@ -57,10 +55,21 @@ export function DocumentViewer({
   const [search, setSearch] = React.useState({ query: "", matches: [] as number[], index: 0 })
 
   const prepared = React.useMemo(
-    () => prepareDocumentLines(body, format, lang),
-    [body, format, lang]
+    () => prepareDocumentLines(body, format, lang, title),
+    [body, format, lang, title]
   )
-  const total = lineCount(prepared)
+  const width = Math.max(5, Math.floor(columns) - 1)
+  const bodyWidth = Math.max(1, width - 4)
+  const lines = React.useMemo(() => {
+    const spans = prepared.lines.flatMap((line, index) => [
+      ...(index > 0 ? [{ text: "\n", style: "plain" as const }] : []),
+      ...(typeof line === "string"
+        ? ansiToSpans(line, "plain")
+        : markdownLineSpans(line, true, theme, bodyWidth)),
+    ])
+    return wrapTerminalSpans(spans, bodyWidth)
+  }, [prepared, theme, bodyWidth])
+  const total = lines.length
   const viewport = Math.max(1, contentRows(viewportRows ?? 24, CHROME_ROWS))
 
   const move = React.useCallback(
@@ -68,24 +77,7 @@ export function DocumentViewer({
     [total, viewport]
   )
 
-  const searchableLines = React.useMemo(
-    () =>
-      prepared.kind === "text"
-        ? prepared.lines
-        : prepared.lines.map((line) => {
-            if ("spans" in line) return line.spans.map((span) => span.text).join("")
-            if (line.kind === "code") return line.text
-            if (line.kind === "table") {
-              return [line.header, ...line.rows]
-                .flatMap((row) => row)
-                .flatMap((spans) => spans)
-                .map((span) => span.text)
-                .join(" ")
-            }
-            return ""
-          }),
-    [prepared]
-  )
+  const searchableLines = React.useMemo(() => lines.map((line) => line.plain), [lines])
 
   const commitSearch = React.useCallback(
     (query: string) => {
@@ -145,22 +137,49 @@ export function DocumentViewer({
 
   const start = clampScroll(scroll, total, viewport)
   const end = Math.min(total, start + viewport)
+  const colors: Record<TerminalStyle, string | undefined> = {
+    plain: undefined,
+    muted: theme.muted,
+    accent: theme.accent,
+    success: theme.success,
+    warning: theme.warning,
+    danger: theme.danger,
+    code: theme.secondary,
+  }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
-      <Text bold color={theme.accent}>
+    <Box
+      flexDirection="column"
+      width={width}
+      height={viewportRows ?? 24}
+      overflow="hidden"
+      borderStyle="round"
+      borderColor={theme.border}
+      paddingX={1}
+    >
+      <Text bold color={theme.accent} wrap="truncate-end">
         {title}
       </Text>
-      <Box flexDirection="column">
-        {prepared.kind === "markdown"
-          ? prepared.lines
-              .slice(start, end)
-              .map((line, i) => <MarkdownLine key={start + i} line={line} />)
-          : prepared.lines
-              .slice(start, end)
-              .map((line, i) => <Text key={start + i}>{line.length > 0 ? line : " "}</Text>)}
+      <Box flexDirection="column" height={viewport} flexShrink={0}>
+        {lines.slice(start, end).map((line, i) => (
+          <Text key={start + i} wrap="truncate-end">
+            {line.plain
+              ? line.spans.map((span, j) => (
+                  <Text
+                    key={j}
+                    color={span.color ?? colors[span.style]}
+                    bold={span.bold}
+                    italic={span.italic}
+                    underline={span.underline}
+                  >
+                    {span.text}
+                  </Text>
+                ))
+              : " "}
+          </Text>
+        ))}
       </Box>
-      <Text color={theme.muted} dimColor>
+      <Text color={theme.muted} dimColor wrap="truncate-end">
         {searchDraft !== null
           ? `/${searchDraft}█ · enter search · esc cancel`
           : `${positionLabel(start, viewport, total)}${search.query ? ` · ${search.matches.length === 0 ? "0" : search.index + 1}/${search.matches.length} matches` : ""} · ↑/↓ scroll · PgUp/PgDn page · g/G top/bottom · / search · n/N next/prev${onCopy ? " · y copy all" : ""} · q/esc close`}

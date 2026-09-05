@@ -100,6 +100,20 @@ describe("AgentsPanel", () => {
     expect(onStop).toHaveBeenCalledWith(native)
   })
 
+  it("stops a selected running background subagent with s", () => {
+    const background = {
+      id: "bg:run-1",
+      kind: "background" as const,
+      name: "reviewer",
+      task: "review",
+      status: "running" as const,
+      runId: "run-1",
+    }
+    const { onStop } = wrap({ rows: [background] })
+    key("s")
+    expect(onStop).toHaveBeenCalledWith(background)
+  })
+
   it("clamps navigation at the list bounds", () => {
     const { onView } = wrap()
     key("", { upArrow: true }) // already at top → stays on row 0

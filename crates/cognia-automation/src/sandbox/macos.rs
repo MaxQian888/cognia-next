@@ -78,7 +78,24 @@ impl SandboxedExec for MacOsSandboxBackend {
             .env
             .get("COGNIA_SANDBOX_PROXY_PORT")
             .and_then(|s| s.parse::<u16>().ok());
-        let profile = render_profile(&policy, proxy_port)?;
+        // Each invocation gets its own scratch area. Global temp write grants
+        // let a workspace under /tmp modify its siblings outside the policy.
+        let scratch = tempfile::Builder::new()
+            .prefix("cognia-sandbox-")
+            .tempdir()
+            .map_err(|error| SandboxError::BackendFailed {
+                reason: format!("cannot create sandbox scratch directory: {error}"),
+            })?;
+        let scratch_path =
+            std::fs::canonicalize(scratch.path()).map_err(|error| SandboxError::BackendFailed {
+                reason: format!("cannot resolve sandbox scratch directory: {error}"),
+            })?;
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            command
+                .env
+                .insert(key.into(), scratch_path.to_string_lossy().into_owned());
+        }
+        let profile = render_profile_with_scratch(&policy, proxy_port, &scratch_path)?;
 
         // Argv: sandbox-exec -p '<profile>' -- <target argv>
         let mut cmd = Command::new(SANDBOX_EXEC);
@@ -326,11 +343,6 @@ fn push_base_policy(out: &mut String) {
     // POSIX shared memory + semaphores for OpenMP / threaded runtimes.
     out.push_str("(allow ipc-posix-shm*)\n");
     out.push_str("(allow ipc-posix-sem)\n");
-    // The system temp dir ($TMPDIR resolves under /private/var/folders) must
-    // be writable for compilers, package managers, and `mktemp` users.
-    out.push_str("(allow file-read* file-write* (subpath \"/private/var/folders\"))\n");
-    out.push_str("(allow file-read* file-write* (subpath \"/private/tmp\"))\n");
-    out.push_str("(allow file-read* file-write* (subpath \"/private/var/tmp\"))\n");
 }
 
 /// Render the `SandboxPolicy` to an SBPL profile string. Pure function so
@@ -386,6 +398,16 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
     push_baseline_secret_read_denies(&mut out);
 
     Ok(out)
+}
+
+fn render_profile_with_scratch(
+    policy: &SandboxPolicy,
+    proxy_port: Option<u16>,
+    scratch: &Path,
+) -> Result<String, SandboxError> {
+    let mut profile = render_profile(policy, proxy_port)?;
+    push_writable(&mut profile, &[scratch.to_path_buf()]);
+    Ok(profile)
 }
 
 /// Deny reads of every credential store the profile knows about, anchored at
@@ -523,6 +545,48 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn scratch_works_without_granting_workspace_sibling_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let outside = root.path().join("outside.txt");
+        let result = MacOsSandboxBackend::new().run(
+            SandboxCommand {
+                argv: vec!["/bin/sh".into(), "-c".into(),
+                    "printf scratch > \"$TMPDIR/scratch\" || exit 6; if printf escape > \"$1\"; then exit 7; fi; test -f \"$TMPDIR/scratch\"".into(),
+                    "sandbox-test".into(), outside.to_string_lossy().into_owned()],
+                cwd: workspace.clone(),
+                env: Default::default(),
+                stdin: None,
+                timeout: Duration::from_secs(10),
+            },
+            SandboxPolicy::Bash { writable: vec![workspace], readable: vec![], network: NetworkPolicy::Off, max_cpu_seconds: 0, max_memory_mb: 0 },
+        ).await.unwrap();
+        assert_eq!(result.exit_code, 0, "{}", result.stderr);
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn temporary_writes_are_scoped_to_one_invocation() {
+        let policy = SandboxPolicy::Bash {
+            writable: vec![std::path::PathBuf::from("/workspace")],
+            readable: vec![],
+            network: NetworkPolicy::Off,
+            max_cpu_seconds: 0,
+            max_memory_mb: 0,
+        };
+        let profile =
+            render_profile_with_scratch(&policy, None, Path::new("/private/tmp/cognia-one"))
+                .unwrap();
+        assert!(profile.contains("(subpath \"/private/tmp/cognia-one\")"));
+        for root in ["/private/tmp", "/private/var/tmp", "/private/var/folders"] {
+            assert!(!profile.contains(&format!(
+                "(allow file-read* file-write* (subpath \"{root}\"))"
+            )));
+        }
+    }
+
     #[test]
     fn render_bash_profile_includes_writable_and_readable() {
         let policy = SandboxPolicy::Bash {
@@ -597,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn base_policy_grants_tty_tmpdir_and_shm_for_real_programs() {
+    fn base_policy_grants_tty_and_shm_without_shared_temp_writes() {
         let p = render_profile(
             &SandboxPolicy::Bash {
                 writable: vec![PathBuf::from("/workspace")],
@@ -611,7 +675,7 @@ mod tests {
         .unwrap();
         assert!(p.contains("(allow pseudo-tty)"));
         assert!(p.contains("(literal \"/dev/ptmx\")"));
-        assert!(p.contains("(subpath \"/private/var/folders\")"));
+        assert!(!p.contains("(subpath \"/private/var/folders\")"));
         assert!(p.contains("(allow ipc-posix-shm*)"));
         assert!(p.contains("(allow user-preference-read)"));
         assert!(p.contains("(allow file-write-data (literal \"/dev/null\"))"));

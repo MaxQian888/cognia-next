@@ -3,8 +3,10 @@
  */
 import { COGNIA_COMMANDS } from "./cognia-commands"
 import type { CommandContext } from "./types"
+import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 
-const ctx = (args: string): CommandContext => ({ args }) as CommandContext
+const ctx = (args: string): CommandContext =>
+  ({ args, config: DEFAULT_RESOLVED_CONFIG }) as CommandContext
 
 function cmd(name: string) {
   const c = COGNIA_COMMANDS.find((d) => d.name === name)
@@ -13,6 +15,14 @@ function cmd(name: string) {
 }
 
 describe("COGNIA_COMMANDS", () => {
+  it.each(["codex-app-server", "codex-acp", "pi-rpc"])(
+    "routes /models through the active %s picker",
+    (agentBackend) => {
+      expect(
+        cmd("models").handler!({ ...ctx(""), config: { ...DEFAULT_RESOLVED_CONFIG, agentBackend } })
+      ).toEqual({ kind: "modelPicker" })
+    }
+  )
   it("registers the runtime commands", () => {
     expect(COGNIA_COMMANDS.map((c) => c.name).sort()).toEqual([
       "agents",
@@ -201,5 +211,15 @@ describe("COGNIA_COMMANDS", () => {
     const effect = refine.handler({ args: "", state: {} } as unknown as CommandContext)
     expect(effect.kind).toBe("notice")
     expect((effect as { message: string }).message).toContain("No plan to refine")
+  })
+
+  it("passes explicit plan revision instructions through the command", () => {
+    const refine = cmd("plan").subcommands!.find((s) => s.name === "refine")!
+    expect(
+      refine.handler({
+        args: "  keep the existing API  ",
+        state: { lastPlan: { raw: "# Plan", seq: 1 } },
+      } as unknown as CommandContext)
+    ).toEqual({ kind: "planRefine", feedback: "keep the existing API" })
   })
 })

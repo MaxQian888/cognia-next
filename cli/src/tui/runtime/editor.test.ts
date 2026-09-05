@@ -162,6 +162,50 @@ describe("commandExists", () => {
 })
 
 describe("openInEditor", () => {
+  it("waits for a terminal editor to exit with inherited input before returning", async () => {
+    const child = new EventEmitter()
+    const spawn = jest.fn(() => child)
+    let settled = false
+    const result = openInEditor("/plan.md", {
+      editor: describeEditor("nvim"),
+      spawn: spawn as never,
+      wait: true,
+    }).then((ok) => {
+      settled = true
+      return ok
+    })
+    child.emit("spawn")
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(spawn).toHaveBeenCalledWith(
+      "nvim",
+      ["/plan.md"],
+      expect.objectContaining({ stdio: "inherit" })
+    )
+    child.emit("exit", 0)
+    await expect(result).resolves.toBe(true)
+  })
+
+  it.each(["code", "subl", "idea"])(
+    "uses %s's wait flag and reports an unsuccessful edit",
+    async (command) => {
+      const child = new EventEmitter()
+      const spawn = jest.fn(() => child)
+      const result = openInEditor("/plan.md", {
+        editor: describeEditor(command),
+        spawn: spawn as never,
+        wait: true,
+      })
+      expect(spawn).toHaveBeenCalledWith(
+        command,
+        expect.arrayContaining(["--wait"]),
+        expect.anything()
+      )
+      child.emit("exit", 1)
+      await expect(result).resolves.toBe(false)
+    }
+  )
+
   function fakeChild() {
     return new EventEmitter() as EventEmitter & { stdin?: unknown }
   }

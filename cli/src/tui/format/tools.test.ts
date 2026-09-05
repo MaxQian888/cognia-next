@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import {
+  toolResultPreviewText,
   diffStat,
   isDiffTool,
   isTodoTool,
@@ -118,6 +119,21 @@ describe("toolFileLine", () => {
 })
 
 describe("summarizeToolCall", () => {
+  it("shows terminal program, input, and target session in permission summaries", () => {
+    expect(summarizeToolCall("terminal_repl_spawn", { shell: "node", args: ["-i"] })).toBe(
+      "node -i"
+    )
+    expect(
+      summarizeToolCall("mcp__cognia-tools__terminal_repl_write", {
+        sessionId: "pty-1",
+        data: "run()",
+      })
+    ).toBe("pty-1  run()")
+    expect(summarizeToolCall("terminal_repl_kill", { sessionId: "pty-1", signal: "SIGTERM" })).toBe(
+      "pty-1  SIGTERM"
+    )
+    expect(summarizeToolCall("terminal_repl_read", { sessionId: "pty-1" })).toBe("pty-1")
+  })
   it("summarizes bash by command", () => {
     expect(summarizeToolCall("bash", { command: "ls -la" })).toBe("ls -la")
   })
@@ -353,11 +369,39 @@ describe("resultPreview", () => {
   })
 
   it("stringifies object results", () => {
-    expect(resultPreview({ error: "nope" })).toBe('{"error":"nope"}')
+    expect(resultPreview({ error: "nope" })).toBe("Error: nope")
   })
 
   it("returns '' for null or all-blank results", () => {
     expect(resultPreview(null)).toBe("")
     expect(resultPreview("   \n  ")).toBe("")
   })
+})
+
+it("formats structured results as labeled, bounded outlines", () => {
+  expect(
+    toolResultPreviewText({ exit_code: 0, stdout: "first\nsecond", files: ["a.ts", "b.ts"] })
+  ).toBe("Exit code: 0\nStdout: first\n  second\nFiles:\n  a.ts\n  b.ts")
+  expect(toolResultPreviewText({ content: [{ type: "text", text: "line one\nline two" }] })).toBe(
+    "Content:\n  line one\n  line two"
+  )
+  expect(toolResultPreviewText(null)).toBe("")
+  expect(toolResultPreviewText("raw\nsource")).toBe("raw\nsource")
+  expect(toolResultPreviewText([null, true, 4, [], {}])).toBe("null\ntrue\n4\n(empty)\n(empty)")
+  const cycle: Record<string, unknown> = { status: "ok" }
+  cycle.self = cycle
+  expect(toolResultPreviewText(cycle)).toContain("nested details — /expand")
+  expect(toolResultPreviewText({ a: { b: { c: { d: { e: { f: 1 } } } } } })).toContain(
+    "nested details"
+  )
+  const wide = toolResultPreviewText(Array.from({ length: 1000 }, (_, i) => `file-${i}`))
+  expect(wide.split("\n")).toHaveLength(121)
+  expect(wide).toContain("structured preview — /expand")
+})
+
+it("includes alias read ranges, glob roots and generic actions", () => {
+  expect(summarizeToolCall("cat", { path: "a.ts", offset: 2, limit: 3 })).toBe("a.ts :2-5")
+  expect(summarizeToolCall("glob", { pattern: "*.ts", path: "src" })).toBe("*.ts  src")
+  expect(summarizeToolCall("list", { cwd: "src" })).toBe("src")
+  expect(summarizeToolCall("custom", { action: "restart" })).toBe("restart")
 })

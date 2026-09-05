@@ -26,6 +26,31 @@ const okResult = (overrides?: Partial<RunAndCaptureResult>): RunAndCaptureResult
 })
 
 describe("createGateController", () => {
+  it("settles pending pre-checks on cancel and ignores their late approval", async () => {
+    let finishCheck!: (value: undefined) => void
+    const requests = jest.fn()
+    const gate = createGateController(
+      requests,
+      () =>
+        new Promise((resolve) => {
+          finishCheck = resolve
+        })
+    )
+    const result = gate.responder({
+      type: "permission_request",
+      sessionId: "s",
+      requestId: "late",
+      toolUseID: "late-tool",
+      toolName: "Bash",
+      input: { command: "pwd" },
+    })
+    expect(gate.denyAll("cancelled")).toBe(1)
+    await expect(result).resolves.toMatchObject({ decision: "deny", message: "cancelled" })
+    finishCheck(undefined)
+    await Promise.resolve()
+    expect(requests).not.toHaveBeenCalled()
+    expect(gate.isPending()).toBe(false)
+  })
   it("resolves the responder promise when the UI supplies a decision", async () => {
     const requests: string[] = []
     const gate = createGateController((req) => requests.push(req.toolName))

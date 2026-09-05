@@ -256,6 +256,8 @@ export const AGENT_PERMISSION_MODES: readonly AgentPermissionMode[] = [
 ]
 
 export interface SendOptions {
+  /** Standalone hosts use the existing session-owned process supervisor. */
+  backgroundProcessHost?: "sidecar" | "host"
   /**
    * Host-only task workspace envelope. The Rust/Companion host consumes it
    * before spawning the agent and never forwards it to a model provider.
@@ -515,6 +517,8 @@ export interface SendOptions {
    * set, so leave `includePartialMessages` off when budgeting thinking.
    */
   maxThinkingTokens?: number
+  /** Validated provider-neutral history restored by a CLI session restart. */
+  initialConversation?: unknown[]
   /** Resume an existing SDK session by id. Mutually exclusive with `forkFromSessionId`. */
   resumeSessionId?: string
   /** Fork a new branch from an existing SDK session id. */
@@ -556,6 +560,15 @@ export interface SendOptions {
    * the SDK. See {@link BuiltinToolsConfig}.
    */
   builtinTools?: BuiltinToolsConfig
+  /** Host-resolved sandbox for native coding processes. An unavailable launcher
+   * fails closed; absence preserves the desktop's existing execution path. */
+  builtinProcessSandbox?: {
+    unavailableReason?: string
+    launcher: string
+    writableRoots: string[]
+    readableRoots: string[]
+    network: boolean
+  }
 
   /**
    * Resolved LSP server list + master toggle for the agent runtime LSP.
@@ -1159,6 +1172,8 @@ export interface LogEvent {
 
 export interface SessionEndedEvent {
   type: "session_ended"
+  /** Complete AI SDK conversation at the completed turn boundary. */
+  conversationSnapshot?: unknown[]
   sessionId: string
   result?: SDKResultMessage
   error?: string
@@ -1328,6 +1343,7 @@ export type SessionControlMethod =
   | "setMcpPermissionModeOverride"
   | "setMcpServers"
   | "setModel"
+  | "setPermissionMode"
   | "steer"
   | "stopTask"
   | "supportedAgents"
@@ -1365,6 +1381,7 @@ export const SESSION_CONTROL_CAPABILITIES: Record<SessionControlMethod, AgentCap
   setMcpPermissionModeOverride: "mcp.dynamic",
   setMcpServers: "mcp.dynamic",
   setModel: "set-model",
+  setPermissionMode: "permissions.set-mode",
   steer: "steer",
   stopTask: "tasks.background",
   supportedAgents: "subagents.manage",

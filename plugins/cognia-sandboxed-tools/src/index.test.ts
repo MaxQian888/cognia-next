@@ -102,7 +102,7 @@ describe("sandbox_write", () => {
     await tools.get("sandbox_write")!.execute({ path: "/repo/out.txt", content: "hello" }, CTX)
     expect(calls).toHaveLength(1)
     const cmd = (calls[0].args as { command: { argv: string[]; stdin: unknown } }).command
-    expect(cmd.argv).toEqual(["bash", "-lc", 'cat > "$1"', "sandbox_write", "/repo/out.txt"])
+    expect(cmd.argv).toEqual(["bash", "-c", 'cat > "$1"', "sandbox_write", "/repo/out.txt"])
     // stdin is converted from the UTF-8 string to a JSON byte array for Rust.
     expect(cmd.stdin).toEqual(Array.from(new TextEncoder().encode("hello")))
     const req = (calls[0].args as { request: { targetFiles: string[] } }).request

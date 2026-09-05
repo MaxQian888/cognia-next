@@ -2,6 +2,8 @@ import React from "react"
 import { render } from "@testing-library/react"
 
 import { CellView } from "./CellView"
+import { RenderPrefsProvider } from "../render/context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import { hasSpinnerFrame } from "./Spinner"
 import type { Cell } from "../state/types"
 
@@ -494,7 +496,7 @@ describe("CellView", () => {
     expect(text).not.toContain("/inspect")
   })
 
-  it("serializes object tool results when expanded", () => {
+  it("labels object tool results when expanded", () => {
     const text = renderCell({
       id: "1",
       kind: "tool",
@@ -505,7 +507,7 @@ describe("CellView", () => {
       result: { ok: true },
       collapsed: false,
     })
-    expect(text).toContain("ok")
+    expect(text).toContain("Ok: true")
   })
 
   it("renders a sub-agent dispatch as a framed agent unit, not a plain tool card", () => {
@@ -749,4 +751,90 @@ describe("CellView", () => {
     // inside the approval overlay instead.
     expect(text).not.toContain("step one")
   })
+})
+
+it("renders structured output as readable labels with a bounded narrow preview", () => {
+  const { container } = render(
+    <CellView
+      columns={24}
+      cell={{
+        id: "structured",
+        kind: "tool",
+        callKey: "structured",
+        toolName: "bash",
+        input: { command: "pnpm test" },
+        status: "done",
+        collapsed: false,
+        result: { exit_code: 0, stdout: "passed\n" + "x".repeat(400) },
+      }}
+    />
+  )
+  expect(container.textContent).toContain("Exit code: 0")
+  expect(container.textContent).toContain("Stdout: passed")
+  expect(container.textContent).not.toContain('"exit_code"')
+  expect(container.textContent).not.toContain("x".repeat(30))
+  expect(container.textContent).toContain("/expand · long lines shortened")
+})
+
+it("keeps the action and command in one wrapping header flow", () => {
+  const { container } = render(
+    <CellView
+      columns={24}
+      cell={{
+        id: "header",
+        kind: "tool",
+        callKey: "header",
+        toolName: "bash",
+        input: { command: "pnpm test --filter cli" },
+        status: "done",
+        collapsed: true,
+      }}
+    />
+  )
+  const header = container.querySelector('[data-ink="box"] > [data-ink="text"]')
+  expect(header?.textContent).toContain("Bash pnpm test --filter cli")
+})
+
+it("honors unnumbered uncapped plain previews without truncating short results", () => {
+  const { container } = render(
+    <RenderPrefsProvider
+      prefs={{
+        ...RENDER_DEFAULTS,
+        fileLineNumbers: false,
+        toolResultMaxLines: 0,
+        syntaxHighlightInline: false,
+      }}
+    >
+      <CellView
+        cell={{
+          id: "plain",
+          kind: "tool",
+          callKey: "plain",
+          toolName: "read",
+          input: { path: "a.ts" },
+          status: "done",
+          collapsed: false,
+          result: "first\nsecond",
+        }}
+      />
+    </RenderPrefsProvider>
+  )
+  expect(container.textContent).toContain("firstsecond")
+  expect(container.textContent).not.toContain("1 │")
+  expect(container.textContent).not.toContain("/expand")
+})
+
+it("does not render an empty result body", () => {
+  const text = renderCell({
+    id: "empty",
+    kind: "tool",
+    callKey: "empty",
+    toolName: "read",
+    input: { path: "empty.ts" },
+    status: "done",
+    collapsed: false,
+    result: "",
+  })
+  expect(text).toContain("empty.ts")
+  expect(text).not.toContain("/expand")
 })

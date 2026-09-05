@@ -24,6 +24,9 @@ export interface McpToolInfo {
 }
 
 export interface ProbeMcpDeps {
+  signal?: AbortSignal
+  /** Stored OAuth credentials for authenticated remote tool discovery. */
+  authProvider?: unknown
   /** Override the live connection (tests). */
   connect?: (server: McpServer, signal: AbortSignal) => Promise<McpToolInfo[]>
   /** Probe timeout in ms (default 15s). */
@@ -31,9 +34,14 @@ export interface ProbeMcpDeps {
 }
 
 /** Open the shared SDK client, list tools, and always close the transport. */
-async function liveConnect(server: McpServer, signal: AbortSignal): Promise<McpToolInfo[]> {
-  const opened = await openMcpClient(server, { signal })
+async function liveConnect(
+  server: McpServer,
+  signal: AbortSignal,
+  authProvider?: unknown
+): Promise<McpToolInfo[]> {
+  const opened = await openMcpClient(server, { signal, authProvider })
   try {
+    signal.throwIfAborted()
     const res = await opened.client.listTools()
     return (res.tools ?? []).map((t) => ({
       name: t.name,
@@ -53,10 +61,20 @@ export async function probeMcpTools(
   server: McpServer,
   deps: ProbeMcpDeps = {}
 ): Promise<McpToolInfo[]> {
-  const connect = deps.connect ?? liveConnect
+  deps.signal?.throwIfAborted()
+  const connect =
+    deps.connect ?? ((server, signal) => liveConnect(server, signal, deps.authProvider))
   const timeoutMs = deps.timeoutMs ?? 15_000
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
+  const canceled = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      reject(deps.signal?.reason ?? new Error("MCP probe canceled"))
+      controller.abort(deps.signal?.reason)
+    }
+    deps.signal?.addEventListener("abort", onAbort, { once: true })
+  })
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       // Reject (winning the race with the timeout message) BEFORE aborting —
@@ -67,8 +85,9 @@ export async function probeMcpTools(
     }, timeoutMs)
   })
   try {
-    return await Promise.race([connect(server, controller.signal), timeout])
+    return await Promise.race([connect(server, controller.signal), timeout, canceled])
   } finally {
     if (timer) clearTimeout(timer)
+    if (onAbort) deps.signal?.removeEventListener("abort", onAbort)
   }
 }

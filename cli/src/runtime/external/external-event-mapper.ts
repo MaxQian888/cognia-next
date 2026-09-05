@@ -1,3 +1,4 @@
+import { isPiDiagnosticProgressEvent } from "@/lib/ai/agent/external/pi-rpc-events"
 import type {
   AcpPlanEntry,
   AcpToolCallDiffContent,
@@ -165,10 +166,18 @@ export function externalAgentEventToCanonicalFallback(
         elapsedMs: 0,
       }
     case "tool_use_end":
+      // Progress on a call, not news. This used to print one transcript row per
+      // tool call saying that the model had finished streaming that call's
+      // ARGUMENTS, which is bookkeeping the tool card already implies: a turn
+      // with fourteen tool calls ended with fourteen lines of
+      // "External tool input completed: call_09be7183…" stacked under it,
+      // pushing the answer off the screen and telling the reader nothing.
       return {
-        kind: "informational",
-        content: `External tool input completed: ${event.toolUseId}`,
-        level: "info",
+        kind: "tool-progress",
+        toolCallId: event.toolUseId,
+        toolName: "external",
+        elapsedMs: 0,
+        heartbeat: true,
       }
     case "permission_request":
       return {
@@ -205,11 +214,10 @@ export function externalAgentEventToCanonicalFallback(
         })),
       }
     case "config_options_update":
-      return {
-        kind: "informational",
-        content: `${event.configOptions.length} external configuration options available`,
-        level: "info",
-      }
+      // Setup metadata, and repeatable. "12 external configuration options
+      // available" is not something a reader does anything about, and the
+      // options themselves live in the panels that can actually show them.
+      return { kind: "diagnostic", runtime: "external-agent", payload: event }
     case "mode_update":
       return { kind: "informational", content: `External mode: ${event.modeId}`, level: "notice" }
     case "usage_update":
@@ -223,13 +231,12 @@ export function externalAgentEventToCanonicalFallback(
         },
       }
     case "session_info_update":
-      return {
-        kind: "informational",
-        content: event.title
-          ? `Session title: ${event.title}`
-          : "External session metadata updated",
-        level: "info",
-      }
+      // A title is worth a line. The same event with no title said only
+      // "External session metadata updated", which is a row that reports its
+      // own existence, and agents emit it repeatedly.
+      return event.title
+        ? { kind: "informational", content: `Session title: ${event.title}`, level: "info" }
+        : { kind: "diagnostic", runtime: "external-agent", payload: event }
     case "tool_call_update":
       // A status tick on a call that is already on screen. The reducer branch
       // turns one of these into a diff when it carries one and into nothing
@@ -245,6 +252,9 @@ export function externalAgentEventToCanonicalFallback(
         heartbeat: true,
       }
     case "progress":
+      if (isPiDiagnosticProgressEvent(event)) {
+        return { kind: "diagnostic", runtime: "pi-rpc", payload: event }
+      }
       return {
         kind: "activity",
         phase: "requesting",

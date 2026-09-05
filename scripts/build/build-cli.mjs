@@ -1,3 +1,4 @@
+import { stageAstGrep } from "./lib/stage-ast-grep.mjs"
 // Bundle the standalone agent CLI into a single Node ESM file.
 //
 // The CLI lives inside the main TS graph (so it reuses lib/claude/* directly),
@@ -32,6 +33,8 @@ const esbuild = await loadEsbuild()
 // The plugin list and the option set are shared with the PTY fixture bundle
 // (scripts/build/esbuild-shared.mjs), so both go through one definition.
 await esbuild.build(cliEsbuildOptions({ root, entry, outdir, entryNames: "cognia-agent" }))
+
+stageAstGrep({ outDir: outdir })
 
 if (jsOnly) {
   console.log(`build-cli: wrote ${path.relative(root, outdir)}/cognia-agent.mjs (JavaScript only)`)

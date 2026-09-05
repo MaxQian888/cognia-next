@@ -127,7 +127,9 @@ export function AgentsPanel({
         return
       }
       if (input.toLowerCase() === "s") {
-        if (current?.status === "running" && current.runtimeTaskId) onStop?.(current)
+        if (current?.status === "running" && (current.runtimeTaskId || current.runId)) {
+          onStop?.(current)
+        }
         return
       }
     },

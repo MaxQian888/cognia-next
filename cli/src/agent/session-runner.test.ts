@@ -5,6 +5,10 @@ jest.mock("./configured-plugin-tool-handle", () => ({
   makeConfiguredCliPluginToolHandle: jest.fn(() => jest.fn(async () => ({ result: "ok" }))),
 }))
 
+jest.mock("../plugin/plugin-tool-dispatch", () => ({
+  subscribePluginToolDispatch: jest.fn(async () => () => undefined),
+}))
+
 import {
   createAgentSession,
   withCliAutoApprovedTools,
@@ -14,7 +18,7 @@ import {
 } from "./session-runner"
 import type { SendOptions } from "@cognia/agent-config-types"
 import { createPermissionGate } from "./permission-gate"
-import { readTranscript, type TranscriptFs } from "./transcript"
+import { appendTranscript, readTranscript, type TranscriptFs } from "./transcript"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { SidecarBootstrap } from "../runtime/bootstrap"
@@ -24,6 +28,7 @@ import { getCliSubagentContext } from "./subagent-dispatch"
 import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import type { AgentSummary } from "./discover-agents"
 import { CliDbSnapshotError } from "../db/bootstrap"
+import { readToolHostStatus } from "./tool-host/status"
 
 const subagent = (id: string): AgentSummary => ({
   id,
@@ -108,12 +113,12 @@ describe("withCliAutoApprovedTools", () => {
     )
   })
 
-  it("merges the user's persisted 'Allow always' tools (incl. risky ones)", () => {
+  it("keeps persisted grants out of cached runtime options", () => {
     const out = withCliAutoApprovedTools({} as SendOptions, ["mcp__cognia-tools__bash"])
-    // The read-only set is still there...
+    // Static read-only defaults remain cached.
     expect(out.suppressApprovalForTools).toContain("mcp__cognia-tools__ls")
-    // ...plus the explicitly-trusted risky tool the user always-allowed.
-    expect(out.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
+    // Mutable persisted grants are checked at each request.
+    expect(out.suppressApprovalForTools).not.toContain("mcp__cognia-tools__bash")
   })
 })
 
@@ -167,12 +172,88 @@ describe("createAgentSession", () => {
     await session.send("search", { gate: createPermissionGate({ yes: true }) })
 
     expect(makeConfiguredCliPluginToolHandle).toHaveBeenCalledWith(config)
+    expect(readToolHostStatus("s_search_config")?.builtin?.phase).toBe("ready")
+    await session.close()
+    expect(readToolHostStatus("s_search_config")).toBeUndefined()
+  })
+
+  it("cancels host tools waiting behind approvals without executing their bodies", async () => {
+    const { subscribePluginToolDispatch } = await import("../plugin/plugin-tool-dispatch")
+    const { makeConfiguredCliPluginToolHandle } = await import("./configured-plugin-tool-handle")
+    const controller = new AbortController()
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+      resolveOptions: async () => ({ provider: "anthropic", model: "m" }) as never,
+      capture: (async (_id: string, _content: unknown, options: SendOptions) => {
+        const handle = jest.mocked(subscribePluginToolDispatch).mock.calls.at(-1)?.[0]?.handle
+        const pending = handle!({
+          type: "plugin_tool_exec",
+          sessionId: session.sessionId,
+          turnId: options.turnId,
+          toolUseId: "tool1",
+          name: "web_fetch",
+          args: {},
+        })
+        controller.abort()
+        await expect(pending).resolves.toMatchObject({
+          error: expect.stringContaining("cancelled"),
+        })
+        return result("cancelled")
+      }) as never,
+    })
+    await session.send("hi", {
+      gate: createPermissionGate({ yes: true }),
+      signal: controller.signal,
+      awaitApprovals: () => new Promise(() => {}),
+    })
+    const execute = jest.mocked(makeConfiguredCliPluginToolHandle).mock.results.at(-1)?.value
+    expect(execute).not.toHaveBeenCalled()
+    await session.close()
+  })
+
+  it("shuts down failed relay startup and retries before dispatching a prompt", async () => {
+    const shutdown = jest.fn().mockResolvedValue(undefined)
+    const bootstrap = jest.fn().mockResolvedValue({ transport: {}, shutdown })
+    const subscribePluginTools = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("relay disconnected"))
+      .mockResolvedValue(() => undefined)
+    const capture = jest.fn(async () => result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      bootstrap,
+      subscribePluginTools,
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await expect(
+      session.send("first", { gate: createPermissionGate({ yes: true }) })
+    ).rejects.toMatchObject({ code: "plugin_relay_unavailable" })
+    expect(shutdown).toHaveBeenCalledTimes(1)
+    expect(session.isLive?.()).toBe(false)
+    expect(capture).not.toHaveBeenCalled()
+    await session.send("retry", { gate: createPermissionGate({ yes: true }) })
+    expect(bootstrap).toHaveBeenCalledTimes(2)
+    expect(subscribePluginTools).toHaveBeenCalledTimes(2)
+    expect(capture).toHaveBeenCalledTimes(1)
     await session.close()
   })
 
   it("prefers canonical envelopes and never double-applies the legacy callback", async () => {
     const capture = jest.fn(async (_sessionId, _content, _options, cap) => {
-      cap?.onEvent?.({ type: "text-delta", delta: "hello" })
+      cap?.onCanonicalEvent?.({ kind: "lifecycle", phase: "started" })
+      cap?.onCanonicalEvent?.({
+        kind: "tool-progress",
+        toolCallId: "c1",
+        toolName: "Read",
+        elapsedMs: 2000,
+      })
+      cap?.onCanonicalEvent?.({ kind: "text-delta", delta: "hello" })
       return result("hello")
     })
     const session = createAgentSession({
@@ -196,7 +277,11 @@ describe("createAgentSession", () => {
       onEvent: legacy,
     })
 
-    expect(envelopes.map((item) => item.event)).toEqual([{ kind: "text-delta", delta: "hello" }])
+    expect(envelopes.map((item) => item.event)).toEqual([
+      { kind: "lifecycle", phase: "started" },
+      { kind: "tool-progress", toolCallId: "c1", toolName: "Read", elapsedMs: 2000 },
+      { kind: "text-delta", delta: "hello" },
+    ])
     expect(legacy).not.toHaveBeenCalled()
   })
 
@@ -483,7 +568,8 @@ describe("createAgentSession", () => {
     expect(got2).toHaveLength(0)
   })
 
-  it("threads the persisted always-allow store into the resolved options", async () => {
+  it("rechecks persisted grants on the same live session after revocation", async () => {
+    const grants = new Set(["mcp__cognia-tools__bash"])
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(),
@@ -494,13 +580,24 @@ describe("createAgentSession", () => {
         .fn()
         .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
       resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
-      resolveApprovedTools: () => new Set(["mcp__cognia-tools__bash"]),
+      resolveApprovedTools: () => grants,
       capture,
       transcriptFs: memFs().fsx,
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
-    expect(sendOptions.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
+    expect(sendOptions.suppressApprovalForTools).not.toContain("mcp__cognia-tools__bash")
+    const request = {
+      requestId: "request",
+      toolName: "mcp__cognia-tools__bash",
+      input: { command: "custom-program --dangerous" },
+    }
+    expect(await capture.mock.calls[0][3].onPermissionRequest(request)).toEqual({
+      decision: "allow",
+    })
+    grants.clear()
+    await session.send("follow up", { gate: createPermissionGate({ yes: false }) })
+    expect((await capture.mock.calls[1][3].onPermissionRequest(request)).decision).toBe("deny")
   })
 
   it("threads the resolved agent mode into the build context (and folds its permission)", async () => {
@@ -864,7 +961,7 @@ describe("createAgentSession", () => {
     expect(onActiveSkills).toHaveBeenCalledTimes(2)
   })
 
-  it("does not load the plugin runtime when pluginTools is off, but subscribes the executor for web tools", async () => {
+  it("loads the sandbox tool runtime even with pluginTools off and subscribes the relay", async () => {
     const loadPluginRuntime = jest.fn()
     const subscribePluginTools = jest.fn().mockResolvedValue(() => {})
     const session = createAgentSession({
@@ -881,9 +978,9 @@ describe("createAgentSession", () => {
       subscribePluginTools,
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
-    // The plugin RUNTIME stays unloaded (web tools bypass the plugin registry)…
-    expect(loadPluginRuntime).not.toHaveBeenCalled()
-    // …but the executor IS subscribed so web_search / web_fetch round-trip.
+    // CLI sandbox tools need the host runtime even when user plugins are off.
+    expect(loadPluginRuntime).toHaveBeenCalledTimes(1)
+    // The executor also keeps web_search / web_fetch connected.
     expect(subscribePluginTools).toHaveBeenCalledTimes(1)
   })
 
@@ -1380,4 +1477,178 @@ describe("createAgentSession — liveness and defaults", () => {
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     await expect(session.close()).resolves.toBeUndefined()
   })
+})
+
+describe("durable runtime history", () => {
+  it.each(["anthropic", "deepseek"])(
+    "restores %s history on a fresh CLI process",
+    async (provider) => {
+      const { fsx } = memFs()
+      const conversationSnapshot = [
+        { role: "user", content: "ORIGINAL_REQUEST" },
+        {
+          role: "assistant",
+          content: [
+            { type: "tool-call", toolCallId: "c1", toolName: "read", input: { path: "a.ts" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "c1",
+              toolName: "read",
+              output: { type: "text", value: "original file" },
+            },
+          ],
+        },
+        { role: "assistant", content: "fixed" },
+      ]
+      const capture = jest.fn(async () => ({
+        ...result("fixed"),
+        sdkSessionId: provider === "anthropic" ? "sdk-original" : undefined,
+        conversationSnapshot: provider === "anthropic" ? undefined : conversationSnapshot,
+      }))
+      const options = { provider, model: "m" }
+      const params = {
+        config: cfg({ provider }),
+        home: HOME,
+        sessionId: "restore",
+        transcriptFs: fsx,
+        bootstrap: async () => ({ transport: {}, shutdown: async () => {} }) as never,
+        resolveOptions: async () => ({ ...options }) as never,
+        capture: capture as never,
+      }
+      const first = createAgentSession(params)
+      await first.send("ORIGINAL_REQUEST", { gate: createPermissionGate({ yes: true }) })
+      await first.close()
+      const nextCapture = jest.fn(async () => result("continued"))
+      const next = createAgentSession({ ...params, capture: nextCapture as never })
+      await next.send("FOLLOWUP_REQUEST", { gate: createPermissionGate({ yes: true }) })
+      const sent = (nextCapture.mock.calls as unknown[][])[0][2] as SendOptions
+      if (provider === "anthropic") expect(sent.resumeSessionId).toBe("sdk-original")
+      else expect(sent.initialConversation).toEqual(conversationSnapshot)
+      await next.close()
+    }
+  )
+})
+
+describe("incompatible durable history", () => {
+  it.each([
+    ["legacy", undefined],
+    [
+      "null content part",
+      {
+        version: 1,
+        runtime: "ai-sdk",
+        provider: "deepseek",
+        messages: [{ role: "assistant", content: [null] }],
+      },
+    ],
+    [
+      "primitive content part",
+      {
+        version: 1,
+        runtime: "ai-sdk",
+        provider: "deepseek",
+        messages: [{ role: "assistant", content: ["not a part"] }],
+      },
+    ],
+    [
+      "runtime changed",
+      { version: 1, runtime: "claude-agent-sdk", provider: "anthropic", sdkSessionId: "native" },
+    ],
+    [
+      "orphan result",
+      {
+        version: 1,
+        runtime: "ai-sdk",
+        provider: "deepseek",
+        messages: [
+          { role: "tool", content: [{ type: "tool-result", toolCallId: "orphan", output: "x" }] },
+        ],
+      },
+    ],
+    [
+      "unfinished call",
+      {
+        version: 1,
+        runtime: "ai-sdk",
+        provider: "deepseek",
+        messages: [
+          { role: "assistant", content: [{ type: "tool-call", toolCallId: "unfinished" }] },
+        ],
+      },
+    ],
+  ])("rejects %s before booting or sending", async (_name, runtimeHistory) => {
+    const { fsx } = memFs()
+    appendTranscript(
+      HOME,
+      "bad-restore",
+      { role: "assistant", content: "old", meta: { runtimeHistory } },
+      fsx
+    )
+    const bootstrap = jest.fn()
+    const capture = jest.fn()
+    const session = createAgentSession({
+      config: cfg({ provider: "deepseek" }),
+      home: HOME,
+      sessionId: "bad-restore",
+      transcriptFs: fsx,
+      resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+      bootstrap,
+      capture,
+    })
+    await expect(
+      session.send("next", { gate: createPermissionGate({ yes: true }) })
+    ).rejects.toThrow(/Cannot resume this conversation.*Start a new session/)
+    expect(bootstrap).not.toHaveBeenCalled()
+    expect(capture).not.toHaveBeenCalled()
+    await session.close()
+  })
+})
+
+it("rejects an incomplete AI SDK transcript tail instead of dropping the failed user turn", async () => {
+  const { fsx } = memFs()
+  appendTranscript(
+    HOME,
+    "incomplete",
+    {
+      role: "assistant",
+      content: "previous",
+      meta: {
+        runtimeHistory: {
+          version: 1,
+          runtime: "ai-sdk",
+          provider: "deepseek",
+          messages: [
+            { role: "user", content: "old" },
+            { role: "assistant", content: "previous" },
+          ],
+        },
+      },
+    },
+    fsx
+  )
+  appendTranscript(
+    HOME,
+    "incomplete",
+    { role: "user", content: "failed request must not disappear" },
+    fsx
+  )
+  const capture = jest.fn()
+  const session = createAgentSession({
+    config: cfg({ provider: "deepseek" }),
+    home: HOME,
+    sessionId: "incomplete",
+    transcriptFs: fsx,
+    resolveOptions: async () => ({ provider: "deepseek", model: "m" }) as never,
+    capture,
+  })
+  await expect(session.send("next", { gate: createPermissionGate({ yes: true }) })).rejects.toThrow(
+    /last turn did not save a completed provider snapshot/
+  )
+  expect(capture).not.toHaveBeenCalled()
+  await session.close()
 })

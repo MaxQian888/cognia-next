@@ -43,7 +43,7 @@ describe("memoryList", () => {
     expect(msg(actions[0]!)).toContain("Hybrid recall is available via openai")
   })
 
-  it("falls back to a truthful keyword notice when the probe fails", async () => {
+  it("does not invent a recall mode when the probe fails", async () => {
     const { dispatch, actions } = recorder()
     await memoryList({
       dispatch,
@@ -53,7 +53,7 @@ describe("memoryList", () => {
         throw new Error("probe failed")
       },
     })
-    expect(msg(actions[0]!)).toContain("keyword-only")
+    expect(msg(actions[0]!)).toContain("Could not determine recall mode")
   })
 
   it("notices when no memories are stored", async () => {
@@ -161,4 +161,20 @@ describe("memoryDelete", () => {
     await memoryDelete("  ", { dispatch, ensureDb: async () => {} })
     expect(msg(actions[0]!)).toContain("Usage: /memory delete")
   })
+})
+
+it("does not write memory after cancellation during database initialization", async () => {
+  const controller = new AbortController()
+  const { dispatch, actions } = recorder()
+  const add = jest.fn()
+  await memoryAdd("fact", {
+    dispatch,
+    signal: controller.signal,
+    ensureDb: async () => {
+      controller.abort()
+    },
+    add,
+  })
+  expect(add).not.toHaveBeenCalled()
+  expect(actions).toEqual([])
 })

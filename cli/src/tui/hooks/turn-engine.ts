@@ -69,7 +69,7 @@ export interface GateController {
    */
   whenSettled(): Promise<void>
   /**
-   * Discard every pending resolver without resolving it. Used after a session
+   * Deny every pending resolver. Used after a session
    * error (timeout / sidecar crash) to prevent a stale resolver from being
    * popped by the next turn's permission UI — a stale "allow" on an old
    * request would corrupt the gate queue and hang the new turn.
@@ -79,10 +79,7 @@ export interface GateController {
    * Answer every queued request with a denial and empty the queue. Returns how
    * many were answered.
    *
-   * What an interrupt has to do. `reset()` drops the resolvers on the floor,
-   * which is right after the turn is already dead, but pressing Esc while an
-   * approval is on screen happens BEFORE anything has ended: the agent is
-   * sitting on a question, and dropping it leaves that question unanswered.
+   * What an interrupt has to do, including requests still running a pre-check.
    * A denial is the honest answer to "stop" — the user did not approve
    * anything — and it is what actually unblocks the agent so the cancel can
    * land.
@@ -132,9 +129,10 @@ export function createGateController(
   }> = []
   /** Woken every time the queue drains, for {@link GateController.whenSettled}. */
   const settledWaiters: Array<() => void> = []
+  const preChecks = new Set<(decision: CapturePermissionDecision) => void>()
 
   const notifySettled = () => {
-    if (queue.length > 0) return
+    if (queue.length > 0 || preChecks.size > 0) return
     const waiters = settledWaiters.splice(0, settledWaiters.length)
     for (const wake of waiters) wake()
   }
@@ -174,18 +172,31 @@ export function createGateController(
       // Run the PreToolUse hooks first; a deny short-circuits the overlay. A
       // throwing/rejecting pre-check must never block a legitimate tool, so it
       // falls through to the normal approval UI.
-      void preCheck(req)
+      preChecks.add(resolve)
+      let check: ReturnType<GatePreCheck>
+      try {
+        check = preCheck(req)
+      } catch {
+        preChecks.delete(resolve)
+        proceed()
+        return
+      }
+      void check
         .then((decision) => {
+          if (!preChecks.delete(resolve)) return
           if (decision?.deny) {
             resolve({
               decision: "deny",
               message: decision.reason ?? "Blocked by a PreToolUse hook.",
             })
+            notifySettled()
             return
           }
           proceed()
         })
-        .catch(() => proceed())
+        .catch(() => {
+          if (preChecks.delete(resolve)) proceed()
+        })
     })
 
   return {
@@ -201,21 +212,30 @@ export function createGateController(
       return queue[0]?.req
     },
     isPending() {
-      return queue.length > 0
+      return queue.length > 0 || preChecks.size > 0
     },
     whenSettled() {
-      if (queue.length === 0) return Promise.resolve()
+      if (queue.length === 0 && preChecks.size === 0) return Promise.resolve()
       return new Promise<void>((wake) => settledWaiters.push(wake))
     },
     reset() {
-      queue.length = 0
+      const pending = queue.splice(0, queue.length)
+      const checking = [...preChecks]
+      preChecks.clear()
+      for (const entry of pending)
+        entry.resolve({ decision: "deny", message: "permission request reset" })
+      for (const settle of checking)
+        settle({ decision: "deny", message: "permission request reset" })
       notifySettled()
     },
     denyAll(message) {
       const pending = queue.splice(0, queue.length)
+      const checking = [...preChecks]
+      preChecks.clear()
       for (const entry of pending) entry.resolve({ decision: "deny", message })
+      for (const settle of checking) settle({ decision: "deny", message })
       notifySettled()
-      return pending.length
+      return pending.length + checking.length
     },
   }
 }
@@ -295,7 +315,11 @@ export async function runTurn(
         }
         opts.onCanonicalEnvelope?.(envelope)
         applyCanonicalTaskEnvelope(envelope)
-        const actions = canonicalEnvelopeToActions(envelope)
+        const actions = canonicalEnvelopeToActions(envelope, {
+          permissionHandledByGate: ["builtin", "claude-agent-sdk", "ai-sdk"].includes(
+            envelope.runtime
+          ),
+        })
         for (const action of actions) {
           if (
             action.type === "CANONICAL_EVENT_NOTICE" &&

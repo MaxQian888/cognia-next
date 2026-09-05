@@ -47,7 +47,10 @@ export function ConfirmOverlay({
   const theme = useTheme()
   const [scroll, setScroll] = React.useState(0)
 
-  const prepared = React.useMemo(() => prepareDocumentLines(body, format), [body, format])
+  const prepared = React.useMemo(
+    () => prepareDocumentLines(body, format, undefined, title),
+    [body, format, title]
+  )
   const total = lineCount(prepared)
   const viewport = Math.max(1, contentRows(viewportRows ?? 24, CHROME_ROWS))
 

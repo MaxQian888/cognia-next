@@ -11,7 +11,7 @@
  */
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { Goal } from "@/types/goal"
-import { getActiveGoalForSession, listGoalsBySession } from "@/lib/db/goals"
+import { getActiveGoalForSession, getOpenGoalForSession, listGoalsBySession } from "@/lib/db/goals"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import {
   runGoalLoopHeadless,
@@ -56,6 +56,7 @@ export interface GoalDeps {
     signal: AbortSignal
   }) => Promise<RunGoalLoopResult>
   getActive?: (sessionId: string) => Promise<Goal | undefined>
+  getOpen?: (sessionId: string) => Promise<Goal | undefined>
   listGoals?: (sessionId: string) => Promise<Goal[]>
   control?: GoalControl
 }
@@ -150,9 +151,9 @@ export function formatGoalProgress(goal: Goal): string {
 
 export async function goalStatus(deps: GoalDeps): Promise<void> {
   await dbOf(deps)()
-  const active = await (deps.getActive ?? getActiveGoalForSession)(deps.sessionId)
+  const active = await (deps.getOpen ?? getOpenGoalForSession)(deps.sessionId)
   if (!active) {
-    deps.dispatch({ type: "NOTICE", message: "No active goal in this session." })
+    deps.dispatch({ type: "NOTICE", message: "No active or paused goal in this session." })
     return
   }
   deps.dispatch({
@@ -167,14 +168,21 @@ async function controlActive(
   run: (control: GoalControl, id: string) => Promise<unknown>
 ): Promise<void> {
   await dbOf(deps)()
-  const active = await (deps.getActive ?? getActiveGoalForSession)(deps.sessionId)
+  const read =
+    verb === "pause"
+      ? (deps.getActive ?? getActiveGoalForSession)
+      : (deps.getOpen ?? getOpenGoalForSession)
+  const active = await read(deps.sessionId)
   if (!active) {
-    deps.dispatch({ type: "NOTICE", message: "No active goal to " + verb + "." })
+    deps.dispatch({
+      type: "NOTICE",
+      message: `No ${verb === "pause" ? "active" : "active or paused"} goal to ${verb}.`,
+    })
     return
   }
   const control = deps.control ?? getGoalRuntime()
   await run(control, active.id)
-  deps.dispatch({ type: "NOTICE", message: `Goal ${verb}d.` })
+  deps.dispatch({ type: "NOTICE", message: `Goal ${verb === "stop" ? "stopped" : `${verb}d`}.` })
 }
 
 export function goalPause(deps: GoalDeps): Promise<void> {

@@ -9,13 +9,13 @@ import {
 import type { SendOptions } from "@cognia/agent-config-types"
 
 describe("withCliAutoApprovedTools", () => {
-  it("merges the full auto-approve set, preserving existing suppressions + extras", () => {
+  it("merges the full auto-approve set, preserving configured suppressions but never caching mutable grants", () => {
     const out = withCliAutoApprovedTools(
       { suppressApprovalForTools: ["pre-existing"] } as unknown as SendOptions,
       ["mcp__cognia-tools__bash"]
     )
     expect(out.suppressApprovalForTools).toContain("pre-existing")
-    expect(out.suppressApprovalForTools).toContain("mcp__cognia-tools__bash")
+    expect(out.suppressApprovalForTools).not.toContain("mcp__cognia-tools__bash")
     for (const t of CLI_AUTO_APPROVED_TOOLS) {
       expect(out.suppressApprovalForTools).toContain(t)
     }

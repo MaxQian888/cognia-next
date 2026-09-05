@@ -95,21 +95,27 @@ export async function runDrivenTurns(deps: DrivenTurnsDeps): Promise<void> {
   // Run-scoped token total — surfaced as the activity-pill note so a long run
   // shows live consumption ("how much has this goal/loop burned so far").
   let totalTokens = 0
+  const endAborted = () =>
+    dispatch({
+      type: "ACTIVITY_END",
+      status: "done",
+      summary: `${cap(deps.kind)} ${signal.reason === "pause" ? "paused" : "stopped"} after ${turns} turn${turns === 1 ? "" : "s"}.`,
+    })
 
   try {
     while (turns < hardCap) {
       if (signal.aborted) {
-        dispatch({
-          type: "ACTIVITY_END",
-          status: "done",
-          summary: `${cap(deps.kind)} stopped after ${turns} turn${turns === 1 ? "" : "s"}.`,
-        })
+        endAborted()
         return
       }
 
       turns += 1
       dispatch({ type: "ACTIVITY_PROGRESS", turns })
       const result = await send(nextPrompt)
+      if (signal.aborted) {
+        endAborted()
+        return
+      }
       if (result === null) {
         dispatch({
           type: "ACTIVITY_END",
@@ -122,6 +128,10 @@ export async function runDrivenTurns(deps: DrivenTurnsDeps): Promise<void> {
       const tokensDelta = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0)
       totalTokens += tokensDelta
       const decision = await advance({ text: result.text, tokensDelta })
+      if (signal.aborted) {
+        endAborted()
+        return
+      }
 
       if (decision.kind === "stop") {
         dispatch({ type: "ACTIVITY_END", status: decision.status, summary: decision.summary })
@@ -155,6 +165,10 @@ export async function runDrivenTurns(deps: DrivenTurnsDeps): Promise<void> {
       summary: `${cap(deps.kind)} hit the ${hardCap}-turn safety cap.`,
     })
   } catch (err) {
+    if (signal.aborted) {
+      endAborted()
+      return
+    }
     dispatch({
       type: "ACTIVITY_END",
       status: "error",

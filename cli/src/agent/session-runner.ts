@@ -43,8 +43,9 @@ import type { UnlistenFn } from "@tauri-apps/api/event"
 import { mintSessionId } from "./run"
 import { type PermissionResponder } from "./permission-gate"
 import { fetchTwinContext as defaultFetchTwinContext } from "../twin/context-client"
+import { approvalKey } from "./command-approval"
 import { readToolApprovals } from "./tool-approvals"
-import { appendTranscript, type TranscriptFs } from "./transcript"
+import { appendTranscript, readTranscript, type TranscriptFs } from "./transcript"
 import {
   CLI_AUTO_APPROVED_TOOLS,
   withCliAutoApprovedTools,
@@ -66,9 +67,28 @@ import {
   twinContextBlock,
   type AttachmentSummary,
   type CliContextAssembler,
+  type ResolvedCliSessionContext,
 } from "./session-context"
 import { registerTurnSubagentContext } from "./turn-dispatch"
 import { createEnvelopeEmitter } from "./runtime/turn-events"
+import {
+  clearToolHostStatus,
+  publishBuiltinToolHostStatus,
+  observeBuiltinToolResult,
+  type ToolHostSnapshot,
+} from "./tool-host/status"
+
+export class AgentSessionStartupError extends Error {
+  readonly code = "plugin_relay_unavailable"
+  readonly retryable = true
+
+  constructor(cause: unknown) {
+    super("Plugin tool relay failed to start. Retry the turn to reconnect the tool host.", {
+      cause,
+    })
+    this.name = "AgentSessionStartupError"
+  }
+}
 
 export type { AttachmentSummary }
 
@@ -161,6 +181,7 @@ export interface AgentSessionParams {
   now?: () => number
   /** Receives the exact execution spec resolved for this live session. */
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
+  onToolHostStatus?: (snapshot: ToolHostSnapshot) => void
 }
 
 /** A model option exposed by the external agent that is currently hosting a session. */
@@ -252,6 +273,67 @@ export interface AgentSession {
  * the sidecar transport mapping — spawning it, keeping the plugin-tool executor
  * subscribed, and streaming the turn through `runAndCaptureAssistantReply`.
  */
+/** Reject lossy restoration before dispatching a new provider turn. */
+function restoreRuntimeHistory(options: SendOptions, entries: ReturnType<typeof readTranscript>) {
+  if (entries.length === 0) return
+  function fail(reason: string): never {
+    throw new Error(
+      `Cannot resume this conversation: ${reason}. Start a new session or resume with the original runtime/provider.`
+    )
+  }
+  const latest = [...entries].reverse().find((entry) => entry.role === "assistant")
+  const saved = latest?.meta?.runtimeHistory as
+    | {
+        version?: number
+        provider?: string
+        runtime?: string
+        sdkSessionId?: string
+        messages?: unknown[]
+      }
+    | undefined
+  const runtime =
+    options.execution?.runtimeAdapter ??
+    (options.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk")
+  if (!saved || saved.version !== 1)
+    fail("the saved transcript has no compatible durable runtime history")
+  if (saved.runtime !== runtime || saved.provider !== options.provider)
+    fail("the saved runtime/provider differs from this session")
+  if (runtime === "claude-agent-sdk") {
+    if (typeof saved.sdkSessionId !== "string" || !saved.sdkSessionId)
+      fail("the native SDK session id is missing")
+    options.resumeSessionId = saved.sdkSessionId
+    return
+  }
+  if ([...entries].reverse().find((entry) => entry.role !== "system")?.role !== "assistant")
+    fail("the last turn did not save a completed provider snapshot")
+  if (!Array.isArray(saved.messages) || saved.messages.length === 0)
+    fail("the provider message snapshot is missing")
+  const calls = new Set<string>()
+  for (const raw of saved.messages) {
+    if (!raw || typeof raw !== "object") fail("a saved message is malformed")
+    const message = raw as { role?: string; content?: unknown }
+    if (
+      !["system", "user", "assistant", "tool"].includes(message.role ?? "") ||
+      !(typeof message.content === "string" || Array.isArray(message.content))
+    )
+      fail("a saved message has an incompatible format")
+    if (!Array.isArray(message.content)) continue
+    for (const part of message.content) {
+      if (!part || typeof part !== "object" || typeof part.type !== "string")
+        fail("a saved message content part is malformed")
+      if (part.type === "tool-call") {
+        if (typeof part.toolCallId !== "string" || calls.has(part.toolCallId))
+          fail("a saved tool call has a missing or duplicate id")
+        calls.add(part.toolCallId)
+      } else if (part?.type === "tool-result") {
+        if (!calls.delete(part.toolCallId)) fail("a saved tool result has no matching call")
+      }
+    }
+  }
+  if (calls.size) fail("the saved turn has unresolved tool calls")
+  options.initialConversation = saved.messages
+}
+
 export function createAgentSession(params: AgentSessionParams): AgentSession {
   const now = params.now ?? Date.now
   const sessionId = params.sessionId ?? mintSessionId(now())
@@ -259,17 +341,55 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   const capture = params.capture ?? defaultCapture
   const bootstrap =
     params.bootstrap ?? ((cwd: string) => bootstrapSidecar({ cwd, env: process.env }))
-  const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
+  const resolveApprovedTools =
+    params.resolveApprovedTools ?? (() => readToolApprovals(home, undefined, params.config.cwd))
   const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))
   const resolveMcpServers =
     params.resolveMcpServers ??
     (() => applyDisabled(loadMcpServers([params.config.cwd, home]), readDisabled(home)))
+  let activeInvocation: {
+    turnId: string
+    controller: AbortController
+    awaitApprovals?: () => Promise<void>
+  } | null = null
   const subscribePluginTools =
     params.subscribePluginTools ??
-    (() =>
-      subscribePluginToolDispatch({
-        handle: makeConfiguredCliPluginToolHandle(params.config),
-      }))
+    (() => {
+      const execute = makeConfiguredCliPluginToolHandle(params.config)
+      return subscribePluginToolDispatch({
+        sessionId,
+        handle: async (request) => {
+          const active = activeInvocation
+          const rejected = () => ({
+            type: "plugin_tool_response" as const,
+            sessionId: request.sessionId,
+            toolUseId: request.toolUseId,
+            error: "Tool invocation cancelled or belongs to an inactive turn",
+          })
+          if (
+            !active ||
+            active.controller.signal.aborted ||
+            (request.turnId && request.turnId !== active.turnId)
+          )
+            return rejected()
+          let removeAbort = () => {}
+          const cancelled = new Promise<void>((resolve) => {
+            const onAbort = () => resolve()
+            active.controller.signal.addEventListener("abort", onAbort, { once: true })
+            removeAbort = () => active.controller.signal.removeEventListener("abort", onAbort)
+          })
+          try {
+            await Promise.race([active.awaitApprovals?.(), cancelled])
+          } catch {
+            return rejected()
+          } finally {
+            removeAbort()
+          }
+          if (activeInvocation !== active || active.controller.signal.aborted) return rejected()
+          return execute({ ...request, abortSignal: active.controller.signal })
+        },
+      })
+    })
   const setSessionMode = params.setSessionMode ?? defaultSetSessionMode
 
   const assembler: CliContextAssembler = createCliContextAssembler({
@@ -315,11 +435,30 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
   let sendOptionsOverrideMode: PermissionModeValue | null = null
   let turnSequence = 0
 
+  function publishStatus(
+    session: ResolvedCliSessionContext,
+    phase: "initializing" | "ready" | "failed",
+    reason?: string
+  ) {
+    const snapshot = publishBuiltinToolHostStatus(session, phase, reason)
+    params.onToolHostStatus?.(snapshot)
+  }
+
   async function ensureReady() {
     if (closed) throw new Error("agent session is closed")
     const session = await assembler.resolveSession()
     if (!boot) {
-      boot = await bootstrap(params.config.cwd)
+      restoreRuntimeHistory(
+        session.sendOptions,
+        readTranscript(home, sessionId, params.transcriptFs)
+      )
+      publishStatus(session, "initializing")
+      try {
+        boot = await bootstrap(params.config.cwd)
+      } catch (error) {
+        publishStatus(session, "failed", error instanceof Error ? error.message : String(error))
+        throw error
+      }
       // The transport is now live — subscribe the plugin-tool executor so the
       // model's plugin tool calls round-trip back here for execution. This MUST
       // be unconditional: `resolveSendOptions` always appends the `ask_user`
@@ -328,12 +467,26 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // forever. Web tools, plugin tools, and `dispatch_agent` ride the same
       // wire, so a single subscription serves them too.
       if (!pluginUnsub) {
-        pluginUnsub = await subscribePluginTools().catch(() => null)
+        try {
+          pluginUnsub = await subscribePluginTools()
+        } catch (cause) {
+          const failedBoot = boot
+          boot = null
+          try {
+            await failedBoot.shutdown()
+          } catch {
+            /* preserve the startup failure */
+          }
+          const error = new AgentSessionStartupError(cause)
+          publishStatus(session, "failed", error.message)
+          throw error
+        }
       }
     }
     // A `/mode` switch applied to the LIVE sidecar session must survive a later
     // local read of the cached options.
     if (sendOptionsOverrideMode) session.sendOptions.permissionMode = sendOptionsOverrideMode
+    publishStatus(session, "ready")
     if (params.outputSchema) {
       session.sendOptions.claudeAgentSdk = {
         ...session.sendOptions.claudeAgentSdk,
@@ -359,7 +512,11 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       if (sendOptions.execution) {
         sendOptions.execution = {
           ...sendOptions.execution,
-          identity: { sessionId, ...turnIdentity },
+          identity: {
+            ...sendOptions.execution.identity,
+            runId: turnIdentity.runId,
+            attemptId: turnIdentity.attemptId,
+          },
         }
       }
       // Non-Anthropic (ai-sdk) channel agentic step budget. The sidecar's
@@ -447,10 +604,24 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
               hostRef: "desktop-sidecar",
               runtime: sendOptions.execution?.runtimeAdapter ?? "builtin",
             },
-            onEnvelope: opts.onEnvelope,
+            onEnvelope: (envelope) => {
+              const status = observeBuiltinToolResult(sessionId, envelope.event)
+              if (status) params.onToolHostStatus?.(status)
+              opts.onEnvelope?.(envelope)
+            },
             now: () => new Date(now()),
           })
         : undefined
+      const controller = new AbortController()
+      const onAbort = () => controller.abort()
+      if (opts.signal?.aborted) controller.abort()
+      else opts.signal?.addEventListener("abort", onAbort, { once: true })
+      const invocation = {
+        turnId: turnIdentity.turnId,
+        controller,
+        awaitApprovals: opts.awaitApprovals,
+      }
+      activeInvocation = invocation
       try {
         result = await capture(sessionId, turnContent, sendOptions, {
           signal: opts.signal,
@@ -458,7 +629,25 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
           // Idle (read) watchdog: interrupt a turn whose provider stream stalls
           // mid-flight.
           idleTimeoutMs: params.config.streamIdleTimeoutMs,
-          onPermissionRequest: opts.gate,
+          onPermissionRequest: async (request) => {
+            const approved = resolveApprovedTools()
+            if (
+              approved.has(request.toolName) ||
+              approved.has(approvalKey(request.toolName, request.input))
+            ) {
+              return { decision: "allow" }
+            }
+            return opts.gate(request)
+          },
+          ...(envelopeEmitter
+            ? {
+                onCanonicalEvent: (
+                  event: import("@cognia/agent-config-types/agent-execution").CanonicalAgentEvent
+                ) => {
+                  if (event.kind !== "diagnostic") envelopeEmitter.emit(event)
+                },
+              }
+            : {}),
           onEvent: envelopeEmitter
             ? (event) => {
                 envelopeEmitter.fromCapture(event)
@@ -466,6 +655,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
             : opts.onEvent,
         })
       } finally {
+        controller.abort()
+        opts.signal?.removeEventListener("abort", onAbort)
+        if (activeInvocation === invocation) activeInvocation = null
         releaseCliSkillLoadContext(sessionId)
         clearDispatch()
         // Defensive: `registerTurnSubagentContext` is a no-op when the tool was
@@ -490,6 +682,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
           })
         }
       }
+      if (result.sdkSessionId) sendOptions.resumeSessionId = result.sdkSessionId
       appendTranscript(
         home,
         sessionId,
@@ -500,6 +693,17 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
             model: sendOptions.model,
             provider: sendOptions.provider,
             ...(result.usage ? { usage: result.usage } : {}),
+            runtimeHistory: {
+              version: 1,
+              runtime:
+                sendOptions.execution?.runtimeAdapter ??
+                (sendOptions.provider === "anthropic" ? "claude-agent-sdk" : "ai-sdk"),
+              provider: sendOptions.provider,
+              ...(result.sdkSessionId || sendOptions.resumeSessionId
+                ? { sdkSessionId: result.sdkSessionId ?? sendOptions.resumeSessionId }
+                : {}),
+              ...(result.conversationSnapshot ? { messages: result.conversationSnapshot } : {}),
+            },
           },
         },
         params.transcriptFs,
@@ -525,7 +729,10 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // live mode.
       sendOptionsOverrideMode = mode
       const cached = assembler.peek()
-      if (cached) cached.sendOptions.permissionMode = mode
+      if (cached) {
+        cached.sendOptions.permissionMode = mode
+        params.onToolHostStatus?.(publishBuiltinToolHostStatus(cached, "ready"))
+      }
       // The sidecar takes it live, every time: this path is the reason the
       // contract can promise "in force now" at all.
       return true
@@ -536,6 +743,9 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     async close() {
       if (closed) return
       closed = true
+      activeInvocation?.controller.abort()
+      activeInvocation = null
+      clearToolHostStatus(sessionId)
       // Drop any lingering dispatch context (defensive — `send` clears it per
       // turn, but a close mid-turn must not leave a stale entry behind).
       clearCliSubagentContext(sessionId)

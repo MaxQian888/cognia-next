@@ -1,6 +1,9 @@
 import path from "node:path"
 
-import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentEventEnvelope,
+  CanonicalAgentEvent,
+} from "@cognia/agent-config-types/agent-execution"
 import type { RunAndCaptureResult } from "@/lib/claude/run-and-capture"
 
 import type { ResolvedConfig } from "../../config/schema"
@@ -32,6 +35,7 @@ function fakeSession(
         text: string
         events?: Parameters<NonNullable<SendTurnOptions["onEvent"]>>[0][]
         usage?: Record<string, number>
+        canonical?: CanonicalAgentEvent[]
       }
     | { kind: "throw"; error: unknown }
   >
@@ -47,6 +51,20 @@ function fakeSession(
       index += 1
       if (!step || step.kind === "throw") throw step?.error ?? new Error("no script")
       for (const event of step.events ?? []) opts.onEvent?.(event)
+      for (const event of step.canonical ?? [])
+        opts.onEnvelope?.({
+          schemaVersion: 1,
+          eventId: "inner",
+          sequence: 0,
+          sessionId: "fake",
+          runId: "inner",
+          turnId: "inner",
+          attemptId: "inner",
+          hostRef: "cli",
+          runtime: "builtin",
+          timestamp: new Date(0).toISOString(),
+          event,
+        })
       return {
         text: step.text,
         ...(step.usage ? { usage: step.usage } : {}),
@@ -212,6 +230,31 @@ describe("successful turn", () => {
     expect(result.runId).toMatch(/^run_/)
     expect(result.turnId).toBe(`${result.runId}:t0`)
     expect(result.attemptId).toBe(`${result.turnId}:a0`)
+  })
+
+  it("preserves canonical tool progress and summaries without duplicating turn lifecycle", async () => {
+    const seen: AgentEventEnvelope[] = []
+    await runUnifiedTurn(
+      params(createMemoryFs(), {
+        onEnvelope: (event) => seen.push(event),
+        createSession: fakeSession([
+          {
+            kind: "reply",
+            text: "done",
+            canonical: [
+              { kind: "lifecycle", phase: "started" },
+              { kind: "tool-progress", toolCallId: "c1", toolName: "bash", elapsedMs: 10 },
+              { kind: "tool-summary", summary: "Tests passed", toolCallIds: ["c1"] },
+              { kind: "lifecycle", phase: "ended" },
+            ],
+          },
+        ]).factory,
+      })
+    )
+    expect(seen.filter((item) => item.event.kind === "tool-progress")).toHaveLength(1)
+    expect(seen.filter((item) => item.event.kind === "tool-summary")).toHaveLength(1)
+    expect(seen.filter((item) => item.event.kind === "lifecycle")).toHaveLength(2)
+    expect(seen.every((item) => item.runId !== "inner")).toBe(true)
   })
 
   it("preserves recovered run and turn identities at the supplied attempt", async () => {

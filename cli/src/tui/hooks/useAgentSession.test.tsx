@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { sessionRestartNotice, useAgentSession, type CreateSession } from "./useAgentSession"
 import type { SendTurnOptions } from "../../agent/session-runner"
@@ -400,17 +400,43 @@ describe("useAgentSession", () => {
           requestId: "req-1",
           toolUseID: "tool-1",
           toolName: "Bash",
-          input: { command: "ls" },
+          input: { command: "rm -rf build" },
         })
         return result()
       },
     })
     await act(async () => {
-      await h.api().send("run ls")
+      await h.api().send("clean up")
     })
-    expect(hooks.onPermissionRequest).toHaveBeenCalledWith("Bash", { command: "ls" })
+    expect(hooks.onPermissionRequest).toHaveBeenCalledWith("Bash", { command: "rm -rf build" })
     act(() => h.api().resolvePermission({ decision: "deny", message: "nope" }))
     expect(hooks.onPermissionDenied).toHaveBeenCalledWith("Bash", "nope")
+  })
+
+  it("runs a read-only shell command without asking anybody", async () => {
+    const hooks = spyHookRunner()
+    let decision: unknown
+    const h = harness({
+      hooks,
+      sendImpl: async (_p, o) => {
+        decision = await o.gate({
+          type: "permission_request",
+          sessionId: "s",
+          requestId: "req-1",
+          toolUseID: "tool-1",
+          toolName: "Bash",
+          input: { command: "ls -la packages" },
+        })
+        return result()
+      },
+    })
+    await act(async () => {
+      await h.api().send("what is in packages")
+    })
+    // `bash` is one tool rated by its worst possible use, so this used to open
+    // the same "[high risk]" prompt as `rm -rf /`.
+    expect(decision).toEqual({ decision: "allow" })
+    expect(hooks.onPermissionRequest).not.toHaveBeenCalled()
   })
 
   it("raises a rate-limit toast when a meter crosses crit, de-duped per level", () => {
@@ -547,6 +573,39 @@ describe("useAgentSession", () => {
     expect(h.close).not.toHaveBeenCalled()
   })
 
+  it("commits a live mode only after acknowledgement and preserves it after refusal", async () => {
+    const h = harness({ isLive: true })
+    await act(async () => {
+      await h.api().send("hi")
+    })
+    let acknowledge!: () => void
+    h.setPermissionMode.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve
+        })
+    )
+    let switching!: Promise<void>
+    await act(async () => {
+      switching = h.api().switchMode("plan")
+    })
+    expect(h.actions).not.toContainEqual({ type: "SET_MODE", mode: "plan" })
+    await act(async () => {
+      acknowledge()
+      await switching
+    })
+    expect(h.actions).toContainEqual({ type: "SET_MODE", mode: "plan" })
+    h.setPermissionMode.mockRejectedValueOnce(new Error("SDK refused"))
+    await act(async () => {
+      await h.api().switchMode("acceptEdits")
+    })
+    expect(h.actions).not.toContainEqual({ type: "SET_MODE", mode: "acceptEdits" })
+    expect(h.actions).toContainEqual({
+      type: "NOTICE",
+      message: "Permission mode unchanged: SDK refused",
+    })
+  })
+
   it("switchMode before a session is live only dispatches (no control message, no drop)", async () => {
     const h = harness({ isLive: false })
     await act(async () => {
@@ -663,6 +722,61 @@ describe("useAgentSession", () => {
     })
     expect(decision).toEqual({ decision: "allow" })
     expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(false)
+  })
+
+  it("rechecks persisted grants after revocation in the same live session", async () => {
+    const grants = new Set(["Edit"])
+    const actions: TuiAction[] = []
+    const dispatch = (a: TuiAction) => actions.push(a)
+    let decision: CapturePermissionDecision | undefined
+    const send = jest.fn(
+      async (_p: string, opts: { gate: (r: unknown) => Promise<CapturePermissionDecision> }) => {
+        decision = await opts.gate({ toolName: "Edit", input: {} })
+        return result()
+      }
+    )
+    const create = jest.fn(() => ({
+      sessionId: "s",
+      send,
+      close: jest.fn(async () => {}),
+      isLive: () => false,
+    })) as unknown as CreateSession
+    const capture = {
+      beginTurn: jest.fn(),
+      onToolCall: jest.fn(),
+      list: jest.fn(() => []),
+      store: { restore: jest.fn() },
+    }
+    const { result: hook } = renderHook(() =>
+      useAgentSession({
+        config,
+        dispatch,
+        createSession: create,
+        subscribeSidecar: () => () => undefined,
+        requestCompact: jest.fn(async () => undefined),
+        createCheckpoints: () => capture as never,
+        resolveApprovedTools: () => grants,
+      })
+    )
+    act(() => {
+      hook.current.rememberApproval("Edit")
+    })
+    await act(async () => {
+      await hook.current.send("hi")
+    })
+    expect(decision).toEqual({ decision: "allow" })
+    expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(false)
+    grants.clear()
+    let pending: Promise<RunAndCaptureResult | null>
+    act(() => {
+      pending = hook.current.send("after revoke")
+    })
+    await waitFor(() => expect(actions.some((a) => a.type === "OVERLAY_OPEN")).toBe(true))
+    await act(async () => {
+      hook.current.denyPendingPermissions("revoked")
+      await pending!
+    })
+    expect(decision?.decision).toBe("deny")
   })
 
   it("compact notices when there is no live session yet", async () => {

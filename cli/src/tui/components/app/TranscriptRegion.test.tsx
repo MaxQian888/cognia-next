@@ -1,10 +1,13 @@
 import React from "react"
 import { render } from "@testing-library/react"
 
+import { hasSpinnerFrame } from "../Spinner"
+
 import { TranscriptRegion } from "./TranscriptRegion"
 import { ThemeProvider } from "../../theme/context"
 import { RenderPrefsProvider } from "../../render/context"
 import { BUILTIN_THEMES } from "../../theme/builtins"
+import { terminalLayout } from "../../layout/terminal-layout"
 import { resolveRenderConfig } from "../../../config/schema"
 import { createInitialState } from "../../state/initial"
 import { DEFAULT_RESOLVED_CONFIG } from "../../../config/schema"
@@ -176,4 +179,158 @@ describe("TranscriptRegion", () => {
       expect(container.textContent ?? "").not.toContain("% ctx")
     })
   })
+})
+
+it.each([false, true])(
+  "derives approval waiting from the overlay in fullscreen=%s",
+  (fullscreen) => {
+    const state = makeState()
+    state.inflight.tools = [
+      {
+        id: "t",
+        kind: "tool",
+        callKey: "t",
+        toolName: "bash",
+        input: { command: "touch approved.txt" },
+        status: "running",
+        collapsed: true,
+      },
+    ]
+    state.overlay = {
+      kind: "permission",
+      req: { toolName: "bash" } as never,
+      choices: [],
+      index: 0,
+    }
+    const { container } = wrap(
+      <TranscriptRegion
+        state={state}
+        fullscreen={fullscreen}
+        banner={null}
+        identity={builtinIdentity}
+        activeModel="claude-x"
+        scroll={scroll()}
+        scrollContentRef={{ current: null }}
+        cursor={cursor()}
+        mutedColor="gray"
+      />
+    )
+    expect(container.textContent).toContain("Waiting for approval")
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+  }
+)
+
+describe("permission waiting across transcript layouts", () => {
+  function waitingState(): TuiState {
+    const state = makeState()
+    state.turnStatus = "streaming"
+    state.inflight.tools = [
+      {
+        id: "write",
+        kind: "tool",
+        callKey: "write",
+        toolName: "bash",
+        input: { command: "touch approved.txt" },
+        status: "running",
+        collapsed: true,
+      },
+    ]
+    state.overlay = {
+      kind: "permission",
+      req: { toolName: "bash" } as never,
+      choices: [],
+      index: 0,
+    }
+    return state
+  }
+
+  it.each([32, 48, 140])(
+    "keeps approval waiting readable at %i columns with the appropriate banner budget",
+    (columns) => {
+      const state = waitingState()
+      const { container } = wrap(
+        <TranscriptRegion
+          state={state}
+          fullscreen
+          banner={null}
+          identity={builtinIdentity}
+          activeModel="claude-x"
+          columns={columns}
+          layout={terminalLayout(columns, 24)}
+          scroll={scroll()}
+          scrollContentRef={{ current: null }}
+          cursor={cursor()}
+          mutedColor="gray"
+        />
+      )
+      expect(container.textContent).toContain("Waiting for approval")
+      expect(container.textContent).toContain("Bash")
+      expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+      if (columns === 32) expect(container.textContent).not.toContain("Cognia Agent")
+      else expect(container.textContent).toContain(columns === 48 ? "✻ Cognia ·" : "Cognia Agent")
+    }
+  )
+
+  it("preserves attached external identity and reported context while a newly arrived approval is below the viewport", () => {
+    const state = waitingState()
+    state.config = { ...state.config, agentBackend: "codex" }
+    state.modelMeta = { modelId: "remote-model", contextWindow: 100_000, runtime: true }
+    state.usage = { contextTokens: 25_000 }
+    const { container } = wrap(
+      <TranscriptRegion
+        state={state}
+        fullscreen
+        banner={null}
+        identity={{ provider: "codex (attached)", model: "remote-model", external: true }}
+        activeModel="claude-x"
+        columns={140}
+        scroll={scroll({ atBottom: false, hidden: { above: 0, below: 1 }, newRowsBelow: 2 })}
+        scrollContentRef={{ current: null }}
+        cursor={cursor()}
+        mutedColor="gray"
+      />
+    )
+    expect(container.textContent).toContain("codex (attached)")
+    expect(container.textContent).toContain("remote-model")
+    expect(container.textContent).toContain("25% ctx")
+    expect(container.textContent).not.toContain("claude-x")
+    expect(container.textContent).toContain("1 more line below · 2 new")
+    expect(container.textContent).toContain("Waiting for approval")
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+  })
+
+  it.each(["measuring", "fullscreen-backtrack", "scrollback-backtrack"] as const)(
+    "keeps the earlier prompt visible during %s without presenting the pending command as executing",
+    (mode) => {
+      const state = waitingState()
+      const activeCursor = cursor()
+      if (mode === "measuring") {
+        activeCursor.measuring = true
+        activeCursor.state.focusedCellId = "c1"
+      } else {
+        state.backtrack = { index: 0 }
+      }
+      state.config = {
+        ...state.config,
+        render: { ...state.config.render, terminalResizeReplayMaxRows: 20 },
+      }
+      const { container } = wrap(
+        <TranscriptRegion
+          state={state}
+          fullscreen={mode !== "scrollback-backtrack"}
+          banner={null}
+          identity={builtinIdentity}
+          activeModel="claude-x"
+          scroll={scroll()}
+          scrollContentRef={{ current: null }}
+          cursor={activeCursor}
+          mutedColor="gray"
+        />
+      )
+      expect(container.textContent).toContain("hello world")
+      expect(container.textContent).toContain("Waiting for approval")
+      expect(container.textContent).toContain("touch approved.txt")
+      expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
+    }
+  )
 })

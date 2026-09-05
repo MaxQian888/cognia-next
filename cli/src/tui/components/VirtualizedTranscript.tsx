@@ -7,7 +7,7 @@ import type { VirtualBlockMetric } from "../state/virtual-block-index"
 import { cellToTerminalBlock, TerminalBlockCache } from "../render/cell-terminal-block"
 import { buildTerminalBlock } from "../render/terminal-block"
 import type { TerminalBlock, TerminalStyle } from "../render/terminal-block"
-import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
+import { groupContextRuns, contextGroupLines } from "../format/context-group"
 import { needsBlankAfter } from "../render/transcript-spacing"
 import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
@@ -26,7 +26,7 @@ function revisionOf(cell: Cell): string {
 function BlockView({ block }: { block: TerminalBlock }) {
   const theme = useTheme()
   const colors: Record<TerminalStyle, string | undefined> = {
-    plain: undefined,
+    plain: theme.text,
     muted: theme.muted,
     accent: theme.accent,
     success: theme.success,
@@ -88,36 +88,34 @@ function VirtualizedTranscriptBody({
   // cursor model aligned (especially visible on paragraph-leading capitals).
   const safeWidth = Math.max(1, Math.floor(width) - 1)
   const blocks = React.useMemo(
-    // Fold settled context-gathering bursts (read / grep / glob / ls) into one
-    // summary row, the same collapse the scrollback renderer applies. It used to
-    // live only in the legacy `Transcript` live path, so the renderer that
-    // actually paints the fullscreen viewport showed every read in full.
+    // Fold settled context bursts into the same bounded action/target preview
+    // as the live region. The resulting block owns its actual rendered height.
     () => {
       const runs = groupContextRuns(cells, verbose)
-      // A folded context burst is one summary row, so it packs like any other
-      // row. `leadCell` is what the spacing rule sees for a run.
+      // `leadCell` is what the spacing rule sees for a run.
       const leadCell = (run: (typeof runs)[number]) =>
         run.kind === "group" ? run.tools[0] : run.cell
       return runs.map((run, index) => {
         const blank = needsBlankAfter(leadCell(run), runs[index + 1] && leadCell(runs[index + 1]))
         if (run.kind === "group") {
+          const lines = contextGroupLines(run.tools, safeWidth)
           return blockCache.get(
             {
               id: `context:${run.tools[0].id}`,
               width: safeWidth,
               theme: JSON.stringify(theme),
               preferences: `compact:${blank}`,
-              revision: run.tools.map((tool) => tool.id).join(","),
+              // Inputs can be enriched under the same call ids. Key only the
+              // bounded displayed content, without serializing result bodies.
+              revision: JSON.stringify(lines),
             },
             () =>
               buildTerminalBlock({
                 id: `context:${run.tools[0].id}`,
-                spans: [
-                  {
-                    text: `⚙ ${summarizeContextGroup(run.tools)}${blank ? "\n" : ""}`,
-                    style: "muted",
-                  },
-                ],
+                spans: lines.map((line, index) => ({
+                  text: `${line}${index < lines.length - 1 || blank ? "\n" : ""}`,
+                  style: index === 0 ? "success" : "plain",
+                })),
                 width: safeWidth,
               })
           )

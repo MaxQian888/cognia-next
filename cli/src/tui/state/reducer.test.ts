@@ -2982,3 +2982,266 @@ describe("BACKEND_INSTALL_START — install ownership", () => {
     expect(next.backendInstall?.ownership).toBeUndefined()
   })
 })
+
+describe("tuiReducer — transcript ordering regressions", () => {
+  it("keeps reasoning after its tool when answer text starts", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "TOOL_RESULT", callKey: "a", toolName: "read", result: "ok" },
+      { type: "INFLIGHT_THINKING", delta: "reason" },
+      { type: "INFLIGHT_TEXT", delta: "answer" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "thinking", "assistant"])
+  })
+
+  it("does not move a completed concurrent tool ahead of an earlier running tool", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "TOOL_CALL", callKey: "b", toolName: "read", input: {} },
+      { type: "TOOL_RESULT", callKey: "b", toolName: "read", result: "B" },
+      { type: "TOOL_CALL", callKey: "c", toolName: "read", input: {} }
+    )
+    expect(s.cells).toEqual([])
+    expect(s.inflight.tools.map((tool) => tool.callKey)).toEqual(["a", "b", "c"])
+  })
+
+  it("drains a queued notice before the next tool starts", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "NOTICE", message: "between tools" },
+      { type: "TOOL_RESULT", callKey: "a", toolName: "read", result: "A" },
+      { type: "TOOL_CALL", callKey: "b", toolName: "read", input: {} },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "notice", "tool"])
+    expect(s.pendingCells).toEqual([])
+  })
+
+  it("keeps a queued notice before subsequent answer text", () => {
+    const s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "before" },
+      { type: "NOTICE", message: "between" },
+      { type: "INFLIGHT_TEXT", delta: "after" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["assistant", "notice", "assistant"])
+    expect(s.cells[0]).toMatchObject({ raw: "before" })
+    expect(s.cells[2]).toMatchObject({ raw: "after" })
+  })
+
+  it("deduplicates canonical notices while they are queued", () => {
+    const notice: TuiAction = {
+      type: "CANONICAL_EVENT_NOTICE",
+      eventId: "event-1",
+      level: "info",
+      title: "Title",
+      summary: "Summary",
+    }
+    const s = reduce(base(), { type: "INFLIGHT_TEXT", delta: "answer" }, notice, notice)
+    expect(s.pendingCells).toHaveLength(1)
+  })
+})
+
+describe("tuiReducer — live ordering boundaries", () => {
+  const interleaved = (): TuiState =>
+    reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "NOTICE", message: "between" },
+      { type: "TOOL_CALL", callKey: "b", toolName: "read", input: {} },
+      { type: "INFLIGHT_TEXT", delta: "answer" }
+    )
+
+  it.each(["TURN_ERROR", "TURN_ABORTED"] as const)("%s settles queued tools in place", (type) => {
+    const s = reduce(interleaved(), type === "TURN_ERROR" ? { type, message: "failed" } : { type })
+    expect(s.cells.map((cell) => cell.kind)).toEqual([
+      "tool",
+      "notice",
+      "tool",
+      "assistant",
+      type === "TURN_ERROR" ? "error" : "notice",
+    ])
+    expect(s.cells.filter((cell) => cell.kind === "tool").map((cell) => cell.status)).toEqual(
+      type === "TURN_ERROR" ? ["error", "error"] : ["cancelled", "cancelled"]
+    )
+  })
+
+  it("correlates queued tool results and duplicate starts without adding boundaries", () => {
+    const s = reduce(
+      interleaved(),
+      { type: "TOOL_CALL", callKey: "b", toolName: "read", input: { path: "b" } },
+      { type: "TOOL_RESULT", callKey: "b", toolName: "read", result: "B" },
+      { type: "TOOL_RESULT", callKey: "a", toolName: "read", result: "A" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "notice", "tool", "assistant"])
+    expect(s.cells[0]).toMatchObject({ callKey: "a", result: "A" })
+    expect(s.cells[2]).toMatchObject({ callKey: "b", result: "B", input: { path: "b" } })
+    expect(new Set(s.cells.map((cell) => cell.id)).size).toBe(s.cells.length)
+  })
+
+  it("keeps commentary and content parts after live output, including repeated updates", () => {
+    const s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "before" },
+      {
+        type: "COMMENTARY_DELTA",
+        eventId: "commentary-1",
+        messageId: "m",
+        delta: "one",
+        done: false,
+      },
+      {
+        type: "CONTENT_PART_UPSERT",
+        partId: "p",
+        part: { type: "custom", customType: "test", summary: "old" },
+      },
+      {
+        type: "COMMENTARY_DELTA",
+        eventId: "commentary-2",
+        messageId: "m",
+        delta: "two",
+        done: true,
+      },
+      {
+        type: "CONTENT_PART_UPSERT",
+        partId: "p",
+        part: { type: "custom", customType: "test", summary: "new" },
+      },
+      { type: "INFLIGHT_TEXT", delta: "after" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual([
+      "assistant",
+      "commentary",
+      "content-part",
+      "assistant",
+    ])
+    expect(s.cells[1]).toMatchObject({ text: "onetwo", done: true })
+    expect(s.cells[2]).toMatchObject({ part: { summary: "new" } })
+  })
+})
+
+describe("tuiReducer — queued tool correlation", () => {
+  it("does not guess a keyless result across the live prefix and queued tools", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "NOTICE", message: "between" },
+      { type: "TOOL_CALL", callKey: "b", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", toolName: "", result: "ambiguous" }
+    )
+    expect(s.inflight.tools[0].status).toBe("running")
+    expect(s.pendingCells.at(-1)).toMatchObject({ callKey: "b", status: "running" })
+  })
+
+  it("pairs a keyless result with the sole running queued tool", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "NOTICE", message: "between" },
+      { type: "TOOL_CALL", callKey: "b", toolName: "bash", input: {} },
+      { type: "TOOL_RESULT", callKey: "a", toolName: "read", result: "A" },
+      { type: "TOOL_RESULT", toolName: "", result: "B" }
+    )
+    expect(s.pendingCells.at(-1)).toMatchObject({ callKey: "b", status: "done", result: "B" })
+  })
+})
+
+describe("tuiReducer — plan ordering boundaries", () => {
+  it.each(["todo", "plan"] as const)("keeps a %s after an earlier running tool", (kind) => {
+    const action: TuiAction =
+      kind === "todo"
+        ? { type: "TOOL_CALL", callKey: "todo", toolName: "TodoWrite", input: { todos: [] } }
+        : { type: "COMMIT_PLAN", raw: "Proposed plan" }
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      action,
+      { type: "TOOL_RESULT", callKey: "a", toolName: "read", result: "A" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", kind])
+  })
+})
+
+describe("tuiReducer — queued segment updates", () => {
+  it("accumulates reasoning and text behind a notice without merging across their boundary", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "NOTICE", message: "between" },
+      { type: "INFLIGHT_THINKING", delta: "think" },
+      { type: "INFLIGHT_THINKING", delta: " more" },
+      { type: "INFLIGHT_TEXT", delta: "answer" },
+      { type: "INFLIGHT_TEXT", delta: " more" },
+      { type: "TURN_ABORTED" }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual([
+      "tool",
+      "notice",
+      "thinking",
+      "assistant",
+      "notice",
+    ])
+    expect(s.cells[2]).toMatchObject({ text: "think more" })
+    expect(s.cells[3]).toMatchObject({ raw: "answer more" })
+  })
+
+  it("removes a queued content part without disturbing its surrounding text", () => {
+    const s = reduce(
+      base(),
+      { type: "INFLIGHT_TEXT", delta: "before" },
+      {
+        type: "CONTENT_PART_UPSERT",
+        partId: "p",
+        part: { type: "custom", customType: "test", summary: "part" },
+      },
+      { type: "CONTENT_PART_REMOVE", partId: "p" },
+      { type: "INFLIGHT_TEXT", delta: "after" },
+      { type: "TURN_COMMIT", result: result() }
+    )
+    expect(s.cells).toHaveLength(1)
+    expect(s.cells[0]).toMatchObject({ raw: "beforeafter" })
+  })
+
+  it("retains the position of a queued diff update that arrived before its tool start", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "INFLIGHT_TEXT", delta: "before edit" },
+      { type: "TOOL_UPDATE", callKey: "b", toolName: "Edit", input: { file_path: "b" } },
+      { type: "TOOL_UPDATE", callKey: "b", input: { new_string: "new" }, displayTitle: "Edit b" },
+      { type: "TOOL_RESULT", callKey: "b", toolName: "Edit", result: "failed", isError: true },
+      { type: "TURN_ABORTED" }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "assistant", "tool", "notice"])
+    expect(s.cells[2]).toMatchObject({
+      status: "error",
+      displayTitle: "Edit b",
+      input: { file_path: "b", new_string: "new" },
+    })
+  })
+
+  it("updates a queued todo in place", () => {
+    const s = reduce(
+      base(),
+      { type: "TOOL_CALL", callKey: "a", toolName: "read", input: {} },
+      { type: "TOOL_CALL", callKey: "todo", toolName: "TodoWrite", input: { todos: [] } },
+      {
+        type: "TOOL_CALL",
+        callKey: "todo",
+        toolName: "TodoWrite",
+        input: { todos: [{ content: "done", status: "completed" }] },
+      },
+      { type: "TURN_ABORTED" }
+    )
+    expect(s.cells.map((cell) => cell.kind)).toEqual(["tool", "todo", "notice"])
+    expect(s.cells[1]).toMatchObject({ todos: [{ content: "done", status: "completed" }] })
+  })
+})

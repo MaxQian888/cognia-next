@@ -257,18 +257,28 @@ export function openInEditor(
     editor: EditorDescriptor
     spawn?: Spawn
     platform?: NodeJS.Platform
+    /** Keep the terminal suspended until the editing session closes. */
+    wait?: boolean
   }
 ): Promise<boolean> {
   const platform = opts.platform ?? process.platform
   const spawn = opts.spawn ?? nodeSpawn
   const argv = opts.editor.openArgs(file, opts.line, opts.col)
+  if (
+    opts.wait &&
+    ["vscode", "sublime", "jetbrains"].includes(opts.editor.family) &&
+    !argv.includes("--wait")
+  ) {
+    argv.unshift("--wait")
+  }
   const cmd = platform === "win32" ? "cmd" : opts.editor.command
   const args = platform === "win32" ? ["/c", opts.editor.command, ...argv] : argv
   return new Promise<boolean>((resolve) => {
     try {
-      const child = spawn(cmd, args, { stdio: "ignore", detached: false })
+      const child = spawn(cmd, args, { stdio: opts.wait ? "inherit" : "ignore", detached: false })
       child.on("error", () => resolve(false))
-      child.on("spawn", () => resolve(true))
+      if (opts.wait) child.on("exit", (code: number | null) => resolve(code === 0))
+      else child.on("spawn", () => resolve(true))
     } catch {
       resolve(false)
     }

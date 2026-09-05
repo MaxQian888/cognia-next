@@ -70,7 +70,7 @@ export function buildAgentsRunDispatch(ctx: AgentsRunDispatchCtx) {
       gate,
       ...(signal ? { signal } : {}),
       mcpServers,
-      approvedTools: readToolApprovals(home),
+      approvedTools: readToolApprovals(home, undefined, opts.cwd ?? config.cwd),
       disabledMcpTools: readDisabledTools(home),
     })
     const totalTokens = (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0)

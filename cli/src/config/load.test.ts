@@ -49,11 +49,12 @@ describe("resolveConfig defaults", () => {
   it("resolves to defaults with no files/env/flags", () => {
     const cfg = run({})
     expect(cfg.provider).toBe("anthropic")
-    expect(cfg.permissionMode).toBe("default")
+    expect(cfg.permissionMode).toBe("acceptEdits")
     expect(cfg.builtinTools.coreFiles).toBe(true)
-    expect(cfg.builtinTools.process).toBe(false)
+    expect(cfg.builtinTools.process).toBe(true)
     expect(cfg.providers).toEqual({})
     expect(cfg.cwd).toBe(CWD)
+    expect(cfg.cliHome).toBe(HOME)
     expect(cfg.model).toBeUndefined()
     expect(cfg.streamIdleTimeoutMs).toBe(60_000)
     expect(cfg.agentBackend).toBe("builtin")
@@ -406,7 +407,7 @@ describe("builtinTools merge", () => {
     expect(cfg.builtinTools.process).toBe(true)
     expect(cfg.builtinTools.lsp).toBe(true)
     expect(cfg.builtinTools.coreFiles).toBe(true) // untouched default
-    expect(cfg.builtinTools.shellAdvanced).toBe(false) // untouched default
+    expect(cfg.builtinTools.shellAdvanced).toBe(true) // untouched default
   })
 })
 
@@ -640,7 +641,33 @@ describe("sandbox settings survive the loader", () => {
     expect(cfg.sandbox?.enabled).toBe(false)
   })
 
-  it("stays absent when nothing configures it", () => {
-    expect(run({}).sandbox).toBeUndefined()
+  it("enables the OS sandbox when nothing configures it", () => {
+    expect(run({}).sandbox).toEqual({ enabled: true, tier: "os", policy: { network: "off" } })
+  })
+})
+
+describe("CLI coding policy defaults", () => {
+  it("retains explicit conservative permissions and category disables", () => {
+    const config = run(
+      {},
+      {
+        flags: {
+          permissionMode: "default",
+          builtinTools: { lsp: false, process: false },
+          sandbox: { enabled: false },
+        },
+      }
+    )
+    expect(config.permissionModeExplicit).toBe(true)
+    expect(config.permissionMode).toBe("default")
+    expect(config.builtinTools).toMatchObject({
+      lsp: false,
+      process: false,
+      codeGraph: true,
+      astGrep: true,
+      terminalRepl: true,
+    })
+    expect(config.sandbox?.enabled).toBe(false)
+    expect(run({}).permissionModeExplicit).toBe(false)
   })
 })

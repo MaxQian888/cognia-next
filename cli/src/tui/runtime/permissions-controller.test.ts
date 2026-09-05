@@ -86,6 +86,43 @@ describe("permissionsRemove", () => {
   })
 })
 
+describe("permissionsRemove — command-scoped grants", () => {
+  it("undoes exactly the line /permissions list printed", () => {
+    const removed: string[] = []
+    const dispatch = jest.fn()
+    permissionsRemove(
+      {
+        dispatch,
+        config: { permissionMode: "default" } as never,
+        home: "/home/u/.cognia",
+        removeApproval: (_home, tool) => {
+          removed.push(tool)
+          return true
+        },
+      },
+      "bash(pnpm build)"
+    )
+    expect(removed).toEqual(["mcp__cognia-tools__bash(pnpm build)"])
+  })
+
+  it("still takes a plain tool name", () => {
+    const removed: string[] = []
+    permissionsRemove(
+      {
+        dispatch: jest.fn(),
+        config: { permissionMode: "default" } as never,
+        home: "/home/u/.cognia",
+        removeApproval: (_home, tool) => {
+          removed.push(tool)
+          return true
+        },
+      },
+      "write"
+    )
+    expect(removed).toEqual(["mcp__cognia-tools__write"])
+  })
+})
+
 describe("permissionsClear", () => {
   it("clears and reports the count", () => {
     const actions: TuiAction[] = []

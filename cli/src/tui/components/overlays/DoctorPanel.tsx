@@ -15,6 +15,7 @@ import { windowList } from "../list-window"
 // than "NaN undefined". Both agree on every defined byte count.
 import { formatBytes } from "../../../util/disk"
 import type { CrashReportItem, DoctorReport } from "../../state/types"
+import { builtinReadinessLines } from "../../runtime/cognia-parity-report"
 
 const STATUS = {
   pass: "✓",
@@ -222,6 +223,11 @@ export function DoctorPanel({
           backends have anything to say here; the built-in agent IS Cognia. */}
       {report.cogniaParity && (
         <Box flexDirection="column" marginTop={1}>
+          {builtinReadinessLines(report.cogniaParity).map((line) => (
+            <Text key={line} color={theme.muted}>
+              {line}
+            </Text>
+          ))}
           <Text bold color={theme.muted}>
             Cognia parity
           </Text>

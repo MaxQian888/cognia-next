@@ -42,9 +42,13 @@ import {
 } from "./protocol"
 import {
   checkConfinement,
+  extractPathArguments,
+  isInsideRoots,
+  isExplicitlyDenied,
   confinementRoots,
   namespacedHostTool,
   needsApproval,
+  READ_ONLY_BUILTIN_TOOLS,
   visibleBuiltinTools,
   visibleHostTools,
 } from "./policy"
@@ -198,6 +202,10 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
   const sockets = new Set<net.Socket>()
   let closed = false
   let cancelledReason: string | null = null
+  let settleCancellation!: (reason: string) => void
+  const cancellation = new Promise<string>((resolve) => {
+    settleCancellation = resolve
+  })
   let callSeq = 0
 
   /** Decide one call. Never throws — a fault reads as a denial, not a crash. */
@@ -210,7 +218,7 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     // Nothing starts while the user is answering a question. Awaited BEFORE
     // this call's own approval is raised, so a call never waits on itself, and
     // re-checked afterwards because the answer may have ended the session.
-    await params.awaitApprovals?.()
+    await Promise.race([params.awaitApprovals?.(), cancellation])
     if (closed) return { allow: false, reason: "the Cognia session has ended" }
     if (cancelledReason) return { allow: false, reason: cancelledReason }
     const visible = server === COGNIA_TOOLS_SERVER ? visibleBuiltins : visibleHost
@@ -219,11 +227,29 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     if (!visible.has(p.name)) {
       return { allow: false, reason: `"${p.name}" is not available in this session` }
     }
+    const fixedScope = session.sendOptions.builtinProcessSandbox
+    const readOnly = server === COGNIA_TOOLS_SERVER && READ_ONLY_BUILTIN_TOOLS.has(p.name)
+    const scopeRoots = fixedScope
+      ? readOnly
+        ? [...fixedScope.writableRoots, ...fixedScope.readableRoots]
+        : fixedScope.writableRoots
+      : []
+    if (
+      fixedScope &&
+      extractPathArguments(p.args, session.cwd).some((target) => !isInsideRoots(scopeRoots, target))
+    ) {
+      return {
+        allow: false,
+        reason: `The tool target is outside sandbox.policy.${readOnly ? "readableRoots and writableRoots" : "writableRoots"}. Add the required directory to sandbox.policy.${readOnly ? "readableRoots" : "writableRoots"} and retry; approval cannot widen this fixed scope.`,
+      }
+    }
     const confined = checkConfinement(roots, session.cwd, p.args)
     // `checkConfinement` always explains a denial, so the reason is never absent.
     if (!confined.allowed) return { allow: false, reason: String(confined.reason) }
     const full = namespacedFor(server, p.name)
-    if (!needsApproval(session.sendOptions, full)) return { allow: true }
+    if (isExplicitlyDenied(session.sendOptions, full, p.args))
+      return { allow: false, reason: "denied by permission ruleset" }
+    if (!needsApproval(session.sendOptions, full, p.args)) return { allow: true }
     if (!params.gate) {
       return { allow: false, reason: `"${p.name}" needs approval and none is available` }
     }
@@ -238,10 +264,15 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     }
     let decision: CapturePermissionDecision
     try {
-      decision = await params.gate(request)
+      decision = await Promise.race([
+        params.gate(request),
+        cancellation.then((message): CapturePermissionDecision => ({ decision: "deny", message })),
+      ])
     } catch {
       return { allow: false, reason: `"${p.name}" was denied` }
     }
+    if (closed || cancelledReason)
+      return { allow: false, reason: cancelledReason ?? "the Cognia session has ended" }
     if (decision.decision === "deny") {
       return { allow: false, reason: decision.message ?? `"${p.name}" was denied` }
     }
@@ -401,11 +432,13 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     isClosed: () => closed,
     cancelInFlight(reason: string) {
       cancelledReason = reason
+      settleCancellation(reason)
     },
     async close() {
       if (closed) return
       closed = true
       cancelledReason = "the Cognia session has ended"
+      settleCancellation(cancelledReason)
       for (const socket of sockets) socket.destroy()
       sockets.clear()
       await new Promise<void>((resolve) => server.close(() => resolve()))

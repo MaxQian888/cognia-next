@@ -90,7 +90,11 @@ export function readToolApprovalEntries(
 function isLive(entry: ToolApprovalEntry, now: number, cwd?: string): boolean {
   if (typeof entry.expiresAt === "number" && now >= entry.expiresAt) return false
   // A cwd-scoped entry only applies in its directory; unscoped entries are global.
-  if (entry.cwd !== undefined && cwd !== undefined && entry.cwd !== cwd) return false
+  if (
+    entry.cwd !== undefined &&
+    (cwd === undefined || path.resolve(entry.cwd) !== path.resolve(cwd))
+  )
+    return false
   return true
 }
 
@@ -126,7 +130,9 @@ export function addToolApproval(
   fs: ToolApprovalsFs = defaultFs,
   opts: { cwd?: string; ttlMs?: number } = {}
 ): Set<string> {
-  const entries = readToolApprovalEntries(home, fs).filter((e) => e.tool !== toolName)
+  const entries = readToolApprovalEntries(home, fs).filter(
+    (e) => e.tool !== toolName || e.cwd !== opts.cwd
+  )
   entries.push({
     tool: toolName,
     ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),

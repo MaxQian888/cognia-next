@@ -115,6 +115,22 @@ const run = (req: RuntimeRequest, h: ReturnType<typeof harness>) =>
 
 describe("runRuntimeRequest", () => {
   it.each([
+    ["mcp", "tools", "mcpTools"],
+    ["skill", "show", "skillShow"],
+    ["plugin", "show", "pluginShow"],
+    ["memory", "add", "memoryAdd"],
+    ["context", "show", "runContextReport"],
+    ["agents", "panel", "agentsPanel"],
+    ["agents", "models", "agentsModelsPanel"],
+  ] as const)("forwards cancellation to %s %s", async (feature, action, method) => {
+    const { deps, impl } = harness()
+    const invoke = jest.fn(async (..._args: unknown[]) => undefined)
+    await runRuntimeRequest({ feature, action, arg: "test" }, deps, { ...impl, [method]: invoke })
+    expect(invoke).toHaveBeenCalled()
+    const args = invoke.mock.calls[0] as unknown[]
+    expect(args.at(-1)).toEqual(expect.objectContaining({ signal: deps.signal }))
+  })
+  it.each([
     [{ feature: "workflow", action: "list" }, "workflowList"],
     [{ feature: "workflow", action: "run", arg: "w1" }, "workflowRun"],
     [{ feature: "workflow", action: "inspect", arg: "w1" }, "workflowInspect"],

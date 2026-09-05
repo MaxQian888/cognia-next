@@ -78,6 +78,8 @@ export function canonicalFromCapture(event: CaptureStreamEvent): CanonicalAgentE
         ...(event.messageId ? { messageId: event.messageId } : {}),
         ...(typeof event.done === "boolean" ? { done: event.done } : {}),
       }
+    case "tool-summary":
+      return { kind: "tool-summary", summary: event.summary, toolCallIds: event.toolCallIds }
     case "tool-call":
       return {
         kind: "tool-call",

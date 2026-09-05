@@ -1,3 +1,5 @@
+import { stageAstGrep } from "./lib/stage-ast-grep.mjs"
+import { createWebcloneBundlePlugin } from "./lib/webclone-bundle-plugin.mjs"
 // Build self-contained, per-platform native binaries of the `cognia-agent` CLI.
 //
 // This is an ADDITIVE pipeline alongside `build-cli.mjs` (which produces the
@@ -40,6 +42,7 @@ import {
   writeCheckedMcpSidecarOutput,
 } from "./lib/mcp-host-bridge.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { stageClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import {
   BUILTIN_PLUGIN_ASSET_DIR,
   stageBuiltinPluginAssets,
@@ -295,6 +298,7 @@ await esbuild.build({
   format: "esm",
   target: "node26",
   external: SIDECAR_EXTERNALS,
+  plugins: [createWebcloneBundlePlugin({ root })],
   banner: { js: CREATE_REQUIRE_BANNER },
   loader: ASSET_LOADERS,
   logLevel: "info",
@@ -309,6 +313,7 @@ await esbuild.build({
   format: "esm",
   target: "node26",
   external: SIDECAR_EXTERNALS,
+  plugins: [createWebcloneBundlePlugin({ root })],
   banner: { js: CREATE_REQUIRE_BANNER },
   loader: ASSET_LOADERS,
   logLevel: "info",
@@ -391,6 +396,7 @@ console.log(
 // layouts copy them next to cli.mjs. Their catalog URLs are root-relative, so
 // the Node reader resolves them against the layout directory; without the tree
 // all five refuse to enable on a CLI or brain host.
+stageAstGrep({ outDir: binDir })
 const stagedBuiltinPlugins = stageBuiltinPluginAssets({ root, outDir: binDir })
 console.log(
   `build-cli-binary: staged ${stagedBuiltinPlugins.pluginIds.length} built-in plugin chunk(s) → ${path.relative(root, stagedBuiltinPlugins.dir)}`
@@ -430,8 +436,8 @@ for (const dep of VSCODE_HOST_RUNTIME_DEPS) {
 console.log(`build-cli-binary: copied VS Code extension host → ${path.relative(root, vscodeHostOutDir)}`)
 
 // 3. Copy a pruned node_modules — just the externals (+ their nested deps).
-// Under pnpm's isolated layout each package nests its own deps, so a
-// dereferenced recursive copy of each external yields a correct closure.
+// pnpm's optional SDK runtime is a sibling package, so stage it explicitly
+// after copying the external modules below.
 if (!fs.existsSync(sidecarNodeModules)) {
   console.error(
     `build-cli-binary: ${path.relative(root, sidecarNodeModules)} is missing — run \`pnpm sidecar:install\` first.`
@@ -452,6 +458,7 @@ for (const dep of SIDECAR_COPIED_RUNTIME_DEPS) {
   fs.cpSync(src, path.join(destNodeModules, dep), { recursive: true, dereference: true })
 }
 console.log(`build-cli-binary: copied sidecar externals → ${path.relative(root, destNodeModules)}`)
+stageClaudeRuntime({ root, nodeModulesDir: destNodeModules })
 
 // 3c. Layout-only exit: assemble the plain-Node dist (no pkg binary). The
 // consumer runs `node <layout>/cli.mjs …`; cli.mjs resolves react/ink from the
@@ -545,6 +552,14 @@ for (const t of TARGETS) {
       dereference: true,
     })
     fs.cpSync(sidecarOutDir, path.join(distDir, "sidecar"), { recursive: true, dereference: true })
+    const [, targetOs, targetArch] = t.pkg.split("-")
+    stageClaudeRuntime({
+      root,
+      nodeModulesDir: path.join(distDir, "sidecar/node_modules"),
+      platform: { win: "win32", macos: "darwin", linux: "linux" }[targetOs],
+      arch: targetArch,
+    })
+    stageAstGrep({ outDir: distDir, platform: t.pkg.includes("win") ? "win32" : t.pkg.includes("macos") ? "darwin" : "linux", arch: t.pkg.endsWith("arm64") ? "arm64" : "x64" })
     fs.cpSync(stagedBuiltinPlugins.dir, path.join(distDir, BUILTIN_PLUGIN_ASSET_DIR), {
       recursive: true,
       dereference: true,

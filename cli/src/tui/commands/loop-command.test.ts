@@ -92,6 +92,9 @@ describe("parseLoopArgs", () => {
 })
 
 describe("/loop handler", () => {
+  it.each(["pause", "resume", "stop"])("routes %s as a control, never a model prompt", (action) => {
+    expect(run(action)).toEqual({ kind: "loopControl", action })
+  })
   it("emits a self-paced loop effect", () => {
     expect(run("ship it --n 2")).toEqual({
       kind: "loop",

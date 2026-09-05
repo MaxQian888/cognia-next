@@ -15,6 +15,8 @@ import { langFromPath } from "../../markdown/highlight"
 import { listBuiltinTools, type BuiltinToolRiskLevel } from "@/lib/settings/builtin-tools"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { PermissionChoice, PermissionRequestEvent } from "../../state/types"
+import { classifyToolCommand } from "../../../agent/command-approval"
+import type { CommandVerdict } from "@/lib/claude/permissions/command-safety"
 import { contentRows } from "../../layout/terminal-layout"
 
 export function choiceToDecision(
@@ -34,7 +36,7 @@ export function prettyToolName(name: string): string {
   return parts.length >= 3 && parts[0] === "mcp" ? parts.slice(2).join("__") : name
 }
 
-const RISK_BY_BARE_NAME: Map<string, BuiltinToolRiskLevel> = new Map(
+const RISK_BY_NAME: Map<string, BuiltinToolRiskLevel> = new Map(
   listBuiltinTools().map((t) => [t.name, t.riskLevel])
 )
 
@@ -44,10 +46,55 @@ const RISK_TOKEN = {
   high: "riskHigh",
 } as const satisfies Record<BuiltinToolRiskLevel, string>
 
-/** The shared risk model's level for a (possibly namespaced) tool, or undefined
- * for tools outside the built-in catalogue (custom MCP servers). */
-export function riskLevelFor(toolName: string): BuiltinToolRiskLevel | undefined {
-  return RISK_BY_BARE_NAME.get(prettyToolName(toolName))
+/** Verdict of the command classifier, as a risk level. */
+const RISK_BY_VERDICT = {
+  allow: "low",
+  ask: "medium",
+  deny: "high",
+} as const satisfies Record<CommandVerdict, BuiltinToolRiskLevel>
+
+/**
+ * The risk level to badge this request with.
+ *
+ * A shell call is rated by its command, not by the fact that it is a shell
+ * call. `bash` sits in the catalogue at `high` because `bash` can do anything,
+ * which is true and useless: it put the same red badge on `ls` and on
+ * `rm -rf /`, and a badge that never varies is one the reader stops seeing.
+ * Everything else keeps the catalogue's level, and a tool outside the
+ * catalogue (a custom MCP server) still has none.
+ */
+export function riskLevelFor(toolName: string, input?: unknown): BuiltinToolRiskLevel | undefined {
+  const classification = input === undefined ? null : classifyToolCommand(toolName, input)
+  if (classification) return RISK_BY_VERDICT[classification.verdict]
+  return RISK_BY_NAME.get(prettyToolName(toolName))
+}
+
+/**
+ * Where the selection starts.
+ *
+ * On Deny for a command the classifier calls catastrophic, so the dangerous
+ * answer is never one blind Enter away. Everything else opens on "Allow once",
+ * which is the answer the user wants almost every time they are asked.
+ */
+export function initialChoiceIndex(
+  toolName: string,
+  input: unknown,
+  choices: readonly PermissionChoice[]
+): number {
+  if (classifyToolCommand(toolName, input)?.verdict !== "deny") return 0
+  const deny = choices.findIndex((c) => c.value === "deny")
+  return deny >= 0 ? deny : 0
+}
+
+/**
+ * The one line that says why this is being asked, when the answer is not
+ * already obvious from the command itself. Only the classifier can produce it,
+ * so a non-shell tool has none.
+ */
+export function permissionReason(toolName: string, input: unknown): string | undefined {
+  const classification = classifyToolCommand(toolName, input)
+  if (!classification || classification.verdict === "allow") return undefined
+  return classification.reason
 }
 
 /**
@@ -86,7 +133,8 @@ export function PermissionOverlay({
   const summary = summarizeToolCall(req.toolName, input)
   const detail = permissionDetail(req, summary)
   const name = prettyToolName(req.displayName ?? req.toolName)
-  const risk = riskLevelFor(req.toolName)
+  const risk = riskLevelFor(req.toolName, input)
+  const reason = permissionReason(req.toolName, input)
   // For an edit/write request, preview the proposed change inline (capped) so the
   // user approves a concrete diff, not just a tool name + path.
   const bareName = prettyToolName(req.toolName)
@@ -98,7 +146,8 @@ export function PermissionOverlay({
     Math.min(choices.length, contentRows(maxRows, (showFrame ? 2 : 0) + 4))
   )
   // The detail line is always rendered now, so it always costs a row.
-  const metadataRows = 1 + (req.description && req.description !== detail ? 1 : 0)
+  const metadataRows =
+    1 + (req.description && req.description !== detail ? 1 : 0) + (reason ? 1 : 0)
   const fixedRows = (showFrame ? 2 : 0) + 4 + metadataRows + choiceRows + (diff.length > 0 ? 1 : 0)
   const diffRows = Math.min(12, contentRows(maxRows, fixedRows))
   return (
@@ -129,6 +178,14 @@ export function PermissionOverlay({
       {req.description && req.description !== detail ? (
         <Text color={theme.muted} wrap="truncate-end">
           {req.description}
+        </Text>
+      ) : null}
+      {/* Why this one is being asked about. Without it the prompt states a fact
+          the user can already read (the command) and withholds the only thing
+          it knows that they do not: which part of it is the risky part. */}
+      {reason ? (
+        <Text color={risk ? theme[RISK_TOKEN[risk]] : theme.muted} wrap="truncate-end">
+          {reason}
         </Text>
       ) : null}
       {diff.length > 0 && diffRows > 0 ? (

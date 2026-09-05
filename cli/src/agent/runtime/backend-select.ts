@@ -35,7 +35,12 @@
  * reachable from the API and has no CLI flag behind it.
  */
 
-import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentCapabilityId,
+  AgentRuntimeAdapterId,
+} from "@cognia/agent-config-types/agent-execution"
+import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
+import { RUNTIME_CAPABILITIES } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"
 import {
   isCapabilityUsable,
@@ -60,6 +65,7 @@ export interface SelectedBackend {
   displayName: string
   /** Capabilities effective for this backend, after clamping. */
   capabilities: AgentCapabilityId[]
+  runtimeAdapter?: AgentRuntimeAdapterId
 }
 
 /**
@@ -95,6 +101,8 @@ export type BackendSelection =
   { ok: true; backend: SelectedBackend } | { ok: false; error: AgentStructuredError }
 
 export interface BackendSelectOptions {
+  /** Provider determines the built-in rail; it must not inherit native Claude claims. */
+  provider?: string
   /** Requested backend id. Absent / "builtin" selects the sidecar. */
   requested?: string
   /** Hard requirements. A missing one fails with `unsupported_capability`. */
@@ -176,11 +184,15 @@ export function selectBackend(
 
   let candidate: SelectedBackend
   if (!requested || requested === BUILTIN_BACKEND) {
+    const runtimeAdapter = runtimeFromLegacy({ provider: options.provider })
     candidate = {
       id: BUILTIN_BACKEND,
       kind: "builtin",
       displayName: "Cognia built-in sidecar",
-      capabilities: [...BUILTIN_CAPABILITIES],
+      runtimeAdapter,
+      capabilities: BUILTIN_CAPABILITIES.filter((capability) =>
+        RUNTIME_CAPABILITIES[runtimeAdapter].includes(capability)
+      ),
     }
   } else {
     const preset = lookupPreset(requested)

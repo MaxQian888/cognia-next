@@ -23,6 +23,63 @@ import { boolFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
 /**
+ * Read the REPL's input one line at a time, without dropping the rest.
+ *
+ * `readline.question` listens for exactly one line and then stops listening,
+ * but the interface keeps flowing. Against a terminal that is invisible,
+ * because the next line does not exist yet. Against a PIPE every remaining
+ * line arrives in the same chunk, so everything after the first was emitted
+ * while nothing was listening and silently discarded: piping a script into
+ * `cognia-agent chat` ran its first command, printed a prompt for the second,
+ * and exited having ignored the rest of the file.
+ *
+ * A listener that stays attached and buffers is the fix. It also gives EOF a
+ * single meaning: the queue is drained first, then reads resolve null.
+ */
+export interface LineReader {
+  read(prompt: string): Promise<string | null>
+  close(): void
+}
+
+export function createLineReader(
+  input: NodeJS.ReadableStream = stdin,
+  output: NodeJS.WritableStream = stdout
+): LineReader {
+  const rl = readline.createInterface({ input, output })
+  const pending: string[] = []
+  let waiting: ((line: string | null) => void) | null = null
+  let ended = false
+  rl.on("line", (line) => {
+    const resolve = waiting
+    waiting = null
+    if (resolve) resolve(line)
+    else pending.push(line)
+  })
+  rl.on("close", () => {
+    ended = true
+    const resolve = waiting
+    waiting = null
+    // EOF only answers a read that has nothing queued, so a pipe that ends in
+    // the same chunk as its last command still runs that command.
+    if (resolve) resolve(null)
+  })
+  return {
+    async read(prompt) {
+      output.write(prompt)
+      const queued = pending.shift()
+      if (queued !== undefined) return queued
+      if (ended) return null
+      return new Promise<string | null>((resolve) => {
+        waiting = resolve
+      })
+    },
+    close() {
+      rl.close()
+    },
+  }
+}
+
+/**
  * Map the session launch flags to the slash command the TUI runs on mount:
  * `--continue` / `-c` → `/continue` (most recent session), `--resume <id>` →
  * `/resume <id>`, bare `--resume` → `/resume` (session picker). Mirrors
@@ -151,17 +208,8 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
   }
 
   // Default IO (real terminal). Tests inject readLine + confirm instead.
-  let rl: readline.Interface | undefined
-  const readLine =
-    deps.readLine ??
-    (async (promptStr: string) => {
-      rl ??= readline.createInterface({ input: stdin, output: stdout })
-      try {
-        return await rl.question(promptStr)
-      } catch {
-        return null // Ctrl-D / closed
-      }
-    })
+  const reader = deps.readLine ? undefined : createLineReader()
+  const readLine = deps.readLine ?? ((promptStr: string) => reader?.read(promptStr) ?? null)
   const confirm =
     deps.confirm ??
     (async (question: string) => {
@@ -220,6 +268,6 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
     return 0
   } finally {
     await session.close()
-    rl?.close()
+    reader?.close()
   }
 }

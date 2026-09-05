@@ -15,6 +15,7 @@ import path from "node:path"
 import fs from "node:fs"
 
 import { getDb, whenSeeded } from "@/lib/db/schema"
+import { createLogger } from "@/packages/logging/src/core"
 // Canonical home moved to lib/headless (ADR-0059 T-A1) so the headless brain
 // shares the exact shim; re-exported for the existing CLI import sites.
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
@@ -31,6 +32,8 @@ import {
 } from "./snapshot"
 
 export { installFakeIndexedDb }
+
+const log = createLogger("cli.db")
 
 export interface EnsureCliDbOptions {
   /** Config home (`~/.cognia`). */
@@ -525,14 +528,20 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
     if (cancelTimer) cancelTimer()
     cancelTimer = schedule(async () => {
       cancelTimer = null
-      await flush()
+      try {
+        await flush()
+      } catch (error) {
+        log.error("Background database flush failed; pending changes remain in memory.", error, {
+          file,
+        })
+      }
     }, debounceMs)
   }
 
   async function dispose(): Promise<void> {
     if (disposed) return
-    disposed = true
     await flush()
+    disposed = true
   }
 
   return { ready, scheduleFlush, scheduleTableFlush, flush, dispose }

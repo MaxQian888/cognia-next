@@ -17,6 +17,8 @@ import type { ResolvedConfig } from "../../config/schema"
 import type { TuiAction } from "../state/types"
 
 export interface ContextReportDeps {
+  /** Suppress late results and new work after the runtime request is cancelled. */
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   config: ResolvedConfig
   sessionId: string
@@ -30,6 +32,7 @@ export interface ContextReportDeps {
 }
 
 export async function runContextReport(deps: ContextReportDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const base = buildContextReport(deps.usage, deps.config, deps.contextWindow, deps.presetId)
 
   let sdk: SdkContextUsage | null = null
@@ -44,6 +47,7 @@ export async function runContextReport(deps: ContextReportDeps): Promise<void> {
     }
   }
 
+  if (deps.signal?.aborted) return
   const message = sdk ? `${base}\n${formatSdkContextBreakdown(sdk)}` : base
   deps.dispatch({ type: "NOTICE", message })
 }

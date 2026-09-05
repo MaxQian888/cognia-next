@@ -13,6 +13,11 @@ import type { SelectItem } from "../state/types"
 export const PLAN_APPROVED_PROMPT =
   "The plan above is approved. Proceed with the implementation now, making the changes directly."
 
+/** Always carry the reviewed revision, including edits absent from model history. */
+export function planApprovedPrompt(raw: string): string {
+  return `${PLAN_APPROVED_PROMPT}\n\nUse this reviewed version of the plan; it supersedes earlier drafts:\n\n${raw}`
+}
+
 /** The synthetic user turn injected by `/plan refine` — re-enters plan mode and
  * asks the agent to revise its latest plan without making changes yet. */
 export const PLAN_REFINE_PROMPT =
@@ -157,7 +162,7 @@ export function planBodyFromExitInput(input: unknown): string | null {
 export function looksLikeQuestion(raw: string): boolean {
   const text = raw.trim()
   if (!text) return false
-  if (text.endsWith("?")) return true
+  if (/[?？]$/.test(text)) return true
   return /\b(which|should i|do you want|would you like|could you|can you|what (?:would|should|do)|let me know|a few questions|before i (?:start|begin|proceed)|to confirm|need(?:s)? clarif|please clarify)\b/i.test(
     text
   )
@@ -165,20 +170,36 @@ export function looksLikeQuestion(raw: string): boolean {
 
 /**
  * Whether a plan-mode reply reads like a proposed plan (worth surfacing the
- * approval prompt + saving) rather than a short clarifying question. Heuristic,
- * since — unlike OpenCode's explicit `plan_exit` tool — our agent has no
- * structured signal: a markdown heading, two or more list/numbered steps, or a
- * substantial body all count as a plan; a one-line question does not.
+ * approval prompt + saving). This fallback supplements explicit exit-plan tool
+ * signals. Reports and explanations remain ordinary answers regardless of length.
  */
 export function looksLikePlan(raw: string): boolean {
-  const text = raw.trim()
+  const text = raw
+    .replace(/^\s*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^\s*\1\s*$|$(?![\s\S]))/gm, "")
+    .trim()
   if (text.length < 20) return false
-  // Structural signals mark a plan regardless of length; a long prose body does
-  // too. A short, unstructured reply is treated as a clarifying question.
-  if (/^#{1,6}\s/m.test(text)) return true
-  const listItems = (text.match(/^\s*(?:[-*+]|\d+[.)])\s+/gm) ?? []).length
-  if (listItems >= 2) return true
-  return text.length >= 280
+  // Analysis reports also contain headings, lists and long prose. Require an
+  // explicit plan heading or multiple proposed actions; length alone says nothing.
+  const headings = text.match(/^#{1,6}\s+[^\n]+/gm) ?? []
+  if (
+    headings.some((heading) =>
+      /\b(?:plan(?!\s+mode)|approach|implementation steps)\b|实施计划|执行计划|实现方案|实施方案|行动计划/i.test(
+        heading
+      )
+    ) ||
+    /^(?:implementation plan|proposed plan|plan|approach|实施计划|执行计划|实现方案|实施方案|行动计划)\s*[:：]?\s*$/im.test(
+      text
+    )
+  )
+    return true
+  const actions = text
+    .split("\n")
+    .filter((line) =>
+      /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(?:(?:explore|research|inspect|implement|add|update|modify|fix|refactor|remove|create|write|test|verify|validate|run|document|migrate|replace)\b|(?:修改|修复|添加|新增|实现|验证|测试|重构|移除|创建|编写|运行|检查|迁移|替换))/.test(
+        line.trim().toLowerCase()
+      )
+    )
+  return actions.length >= 2
 }
 
 /**

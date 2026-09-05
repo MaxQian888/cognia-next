@@ -1,10 +1,12 @@
 import React from "react"
 import { render, waitFor } from "@testing-library/react"
 
-import { VirtualizedTranscript } from "./VirtualizedTranscript"
+import { terminalBlockCacheStats, VirtualizedTranscript } from "./VirtualizedTranscript"
 import { RenderPrefsProvider } from "../render/context"
 import { RENDER_DEFAULTS } from "../../config/schema"
-import type { Cell } from "../state/types"
+import { contextGroupLines } from "../format/context-group"
+import { stringWidth } from "../markdown/width"
+import type { Cell, ToolCell } from "../state/types"
 
 describe("VirtualizedTranscript", () => {
   it("renders only the visible window plus overscan", () => {
@@ -36,7 +38,15 @@ describe("VirtualizedTranscript", () => {
   it("packs adjacent one-line cells and keeps a paragraph separated", () => {
     const cells: Cell[] = [
       { id: "u", kind: "user", text: "do the thing" },
-      { id: "t1", kind: "tool", callKey: "k1", toolName: "read", input: {}, status: "done" },
+      {
+        id: "t1",
+        kind: "tool",
+        callKey: "k1",
+        toolName: "read",
+        input: {},
+        status: "done",
+        collapsed: true,
+      },
       { id: "n1", kind: "notice", message: "first notice" },
       { id: "n2", kind: "notice", message: "second notice" },
       { id: "a", kind: "assistant", raw: "the answer" },
@@ -94,7 +104,8 @@ describe("VirtualizedTranscript", () => {
     )
     const text = container.textContent ?? ""
     expect(text).toContain("⚙ 2 reads, 1 search")
-    expect(text).not.toContain("/a.ts")
+    expect(text).toContain("Read: /a.ts")
+    expect(text).toContain("Read: /b.ts")
     expect(container.querySelectorAll('[data-testid="terminal-block"]').length).toBe(1)
   })
 
@@ -194,5 +205,121 @@ describe("VirtualizedTranscript", () => {
     )
     await waitFor(() => expect(onMetrics).toHaveBeenCalled())
     expect(onMetrics.mock.calls.at(-1)?.[0]).toEqual([{ id: "a", rows: 3 }])
+  })
+})
+
+const groupedTool = (id: string, toolName = "read"): ToolCell => ({
+  id,
+  kind: "tool",
+  callKey: id,
+  toolName,
+  input: { path: `src/${id}.ts` },
+  status: "done",
+  result: "contents",
+  collapsed: true,
+})
+
+describe("fullscreen context preview metrics", () => {
+  it.each([20, 32, 80])("matches bounded rendered group rows at %s columns", (width) => {
+    const tools = Array.from({ length: 20 }, (_, i) => groupedTool(`metrics-${width}-${i}`))
+    const onMetrics = jest.fn()
+    const { container } = render(
+      <VirtualizedTranscript
+        cells={tools}
+        width={width}
+        top={0}
+        viewportRows={40}
+        verbose={false}
+        onMetrics={onMetrics}
+      />
+    )
+    const block = container.querySelector('[data-testid="terminal-block"]')!
+    const expected = contextGroupLines(tools, width - 1)
+    expect([...block.children].slice(0, -1).map((row) => row.textContent)).toEqual(expected)
+    expect(onMetrics.mock.calls.at(-1)?.[0]).toEqual([
+      { id: `context:${tools[0].id}`, rows: expected.length + 1 },
+    ])
+    expect([...block.children].every((row) => stringWidth(row.textContent ?? "") < width)).toBe(
+      true
+    )
+    expect(block.children[1].querySelector("span")?.getAttribute("data-color")).not.toBe("gray")
+  })
+
+  it("refreshes enriched targets and reuses identical displayed groups", () => {
+    const cells = [groupedTool("cache-a"), groupedTool("cache-b")]
+    const { container, rerender } = render(
+      <VirtualizedTranscript cells={cells} width={80} top={0} viewportRows={40} verbose={false} />
+    )
+    const before = terminalBlockCacheStats()
+    rerender(
+      <VirtualizedTranscript
+        cells={[...cells]}
+        width={80}
+        top={0}
+        viewportRows={40}
+        verbose={false}
+      />
+    )
+    expect(terminalBlockCacheStats().hits).toBe(before.hits + 1)
+    expect(terminalBlockCacheStats().size).toBe(before.size)
+    const enriched = [{ ...cells[0], input: { path: "src/enriched.ts" } }, cells[1]]
+    rerender(
+      <VirtualizedTranscript
+        cells={enriched}
+        width={80}
+        top={0}
+        viewportRows={40}
+        verbose={false}
+      />
+    )
+    expect(container.textContent).toContain("src/enriched.ts")
+    expect(container.textContent).not.toContain("src/cache-a.ts")
+  })
+
+  it("keeps expanded and failed calls separate while measuring the surrounding group", () => {
+    const calls = [
+      groupedTool("nav-a"),
+      groupedTool("nav-b"),
+      { ...groupedTool("nav-expanded"), collapsed: false },
+      { ...groupedTool("nav-error"), status: "error" as const, isError: true, result: "denied" },
+    ]
+    const onMetrics = jest.fn()
+    const { container } = render(
+      <VirtualizedTranscript
+        cells={calls}
+        width={80}
+        top={0}
+        viewportRows={40}
+        verbose={false}
+        onMetrics={onMetrics}
+      />
+    )
+    const blocks = [...container.querySelectorAll('[data-testid="terminal-block"]')]
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0].textContent).toContain("⚙ 2 reads")
+    expect(blocks[1].textContent).toContain("contents")
+    expect(blocks[2].textContent).toContain("denied")
+    expect(onMetrics.mock.calls.at(-1)?.[0].map((metric: { rows: number }) => metric.rows)).toEqual(
+      blocks.map((block) => block.children.length)
+    )
+  })
+
+  it("renders bounded structured results through the actual fullscreen component", () => {
+    const cell = {
+      ...groupedTool("outline"),
+      toolName: "bash",
+      input: { command: "pnpm test" },
+      collapsed: false,
+      result: { exit_code: 0, stdout: "passed\n" + "界".repeat(100) },
+    }
+    const { container } = render(
+      <VirtualizedTranscript cells={[cell]} width={32} top={0} viewportRows={40} verbose={false} />
+    )
+    expect(container.textContent).toContain("Exit code: 0")
+    expect(container.textContent).toContain("Stdout: passed")
+    expect(container.textContent).not.toContain('"exit_code"')
+    expect(container.textContent).toContain("/expand")
+    const rows = [...container.querySelector('[data-testid="terminal-block"]')!.children]
+    expect(rows.every((row) => stringWidth(row.textContent ?? "") <= 31)).toBe(true)
   })
 })

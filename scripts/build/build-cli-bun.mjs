@@ -1,3 +1,5 @@
+import { stageAstGrep } from "./lib/stage-ast-grep.mjs"
+import { createWebcloneBundlePlugin } from "./lib/webclone-bundle-plugin.mjs"
 // Build the standalone Cognia CLI release executable with Bun 1.4.
 
 import fs from "node:fs"
@@ -21,6 +23,7 @@ import {
 } from "./cli-bun-contract.mjs"
 import { signCliArtifacts } from "./sign-cli-bun.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
+import { resolveClaudeRuntime } from "./lib/stage-claude-runtime.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
@@ -59,29 +62,9 @@ function replaceExactly(source, search, replacement, label) {
   return source.replace(search, () => replacement)
 }
 
-function findPnpmPackageDir(packageName) {
-  const store = path.join(root, "sidecar/node_modules/.pnpm")
-  const encoded = packageName.replace("/", "+")
-  const entryName = fs
-    .readdirSync(store)
-    .filter((name) => name.startsWith(`${encoded}@`))
-    .sort()
-    .at(-1)
-  if (!entryName) {
-    throw new Error(
-      `build-cli-bun: ${packageName} is not installed for ${target.name}; run pnpm install on the target runner`
-    )
-  }
-  const [scope, name] = packageName.split("/")
-  return path.join(store, entryName, "node_modules", scope, name)
-}
-
 const claudeBinary = variants.includes("full")
-  ? path.join(findPnpmPackageDir(target.claudePackage), target.claudeBinary)
+  ? resolveClaudeRuntime({ root, packageName: target.claudePackage }).binary
   : undefined
-if (claudeBinary && !fs.statSync(claudeBinary, { throwIfNoEntry: false })?.isFile()) {
-  throw new Error(`build-cli-bun: missing Claude executable ${claudeBinary}`)
-}
 
 const executableSuffix = target.name === "win32-x64" ? ".exe" : ""
 // One table for what gets built and what gets staged. `target/release` on this
@@ -238,31 +221,6 @@ const embeddedMulticallRolesPlugin = {
 const dynamicRequireCompatPlugin = {
   name: "dynamic-require-compat",
   setup(build) {
-    build.onResolve({ filter: /^css-tree$/ }, () => ({
-      path: path.join(root, "sidecar/webclone/node_modules/css-tree/dist/csstree.esm.js"),
-    }))
-    build.onResolve({ filter: /^@babel\/traverse$/ }, () => ({
-      path: path.join(root, "sidecar/webclone/node_modules/@babel/traverse/lib/index.js"),
-    }))
-    build.onLoad(
-      { filter: /[\\/]sidecar[\\/]webclone[\\/]dist[\\/]transform[\\/]js-analyzer\.js$/ },
-      async (args) => {
-        let source = await Bun.file(args.path).text()
-        source = replaceExactly(
-          source,
-          'import { createRequire } from "node:module";\n',
-          "",
-          "webclone createRequire import"
-        )
-        source = replaceExactly(
-          source,
-          'const require = createRequire(import.meta.url);\nconst traverse = require("@babel/traverse").default;',
-          'import traverseModule from "@babel/traverse";\nconst traverse = traverseModule.default;',
-          "webclone Babel traversal binding"
-        )
-        return { contents: source, loader: "js" }
-      }
-    )
     build.onLoad(
       { filter: /[\\/]sidecar[\\/]builtin-tools[\\/]code[\\/]store-sqlite\.mjs$/ },
       async (args) => {
@@ -374,6 +332,7 @@ const result = await Bun.build({
   plugins: [
     createCliExternalAgentAliasPlugin(root),
     embeddedMulticallRolesPlugin,
+    createWebcloneBundlePlugin({ root }),
     dynamicRequireCompatPlugin,
     createTsconfigPathsPlugin(),
     bundleAgentProtocolDependenciesPlugin,
@@ -469,6 +428,7 @@ for (const variant of variants) {
   // The generated built-in plugin chunks. Their catalog URLs are
   // root-relative, so the Node reader resolves them against this layout
   // directory; without the tree all five refuse to enable on this host.
+  stageAstGrep({ outDir: layoutRoot, platform: target.name.split("-")[0], arch: target.name.split("-")[1] })
   stageBuiltinPluginAssets({ root, outDir: layoutRoot })
   copyRequired(
     path.join(root, "sidecar/node_modules/web-tree-sitter/tree-sitter.wasm"),

@@ -29,6 +29,11 @@ export type CliBackgroundTaskMeta = BackgroundTaskStartMeta & {
   home?: string
 }
 
+export type CliBackgroundResult = string | { text: string; error?: string; interrupted?: boolean }
+
+// The shared registry exposes done/error settlements. Preserve CLI interruption
+// semantics in its journal adapter and public list without changing that core.
+const interruptedRuns = new Set<string>()
 const runHomes = new Map<string, string | undefined>()
 // The session that owns each live run — the cross-session isolation key. A run
 // may only be collected / listed / counted by the session that started it, so a
@@ -47,25 +52,43 @@ const journal: BackgroundTaskJournalWriter = {
     return enqueueJournalWrite(record.runId, async () => dexieJournal.recordStart(record))
   },
   recordSettle(runId, patch) {
-    return enqueueJournalWrite(runId, async () => dexieJournal.recordSettle(runId, patch))
+    const settled = interruptedRuns.has(runId)
+      ? { ...patch, status: "interrupted" as const }
+      : patch
+    return enqueueJournalWrite(runId, async () => dexieJournal.recordSettle(runId, settled))
   },
 }
 
-const registry = new BackgroundTaskRegistry<string>({
+const registry = new BackgroundTaskRegistry<CliBackgroundResult>({
   journal,
-  projectForJournal: (value) => ({ text: value }),
+  projectForJournal: (value) =>
+    typeof value === "string"
+      ? { text: value }
+      : {
+          text: value.text,
+          ...(value.error || value.interrupted ? { error: value.error ?? value.text } : {}),
+        },
 })
 
 export function startCliBackgroundRun(
   runId: string,
   meta: CliBackgroundTaskMeta,
-  promise: Promise<string>,
+  promise: Promise<CliBackgroundResult>,
   controls?: BackgroundTaskControls
 ): void {
+  if (registry.has(runId)) throw new Error(`Background run "${runId}" already exists.`)
   const { home, ...journalMeta } = meta
   runHomes.set(runId, home)
   runOwners.set(runId, journalMeta.sessionId)
-  registry.start(runId, journalMeta, promise, controls)
+  registry.start(
+    runId,
+    journalMeta,
+    promise.then((value) => {
+      if (typeof value !== "string" && value.interrupted) interruptedRuns.add(runId)
+      return value
+    }),
+    controls
+  )
 }
 
 export function hasCliBackgroundRun(runId: string): boolean {
@@ -96,7 +119,8 @@ export async function collectCliBackgroundResult(
       markCliCollected(runId)
       runHomes.delete(runId)
       runOwners.delete(runId)
-      return live
+      interruptedRuns.delete(runId)
+      return typeof live === "string" ? live : live.text
     }
   } catch (err) {
     markCliCollected(runId)
@@ -118,7 +142,7 @@ export async function collectCliBackgroundResult(
   }
   if (record.status === "interrupted") {
     markCliCollected(runId, options.home)
-    return backgroundTaskInterruptedMessage(runId)
+    return record.resultText ?? record.error ?? backgroundTaskInterruptedMessage(runId)
   }
   return undefined
 }
@@ -149,10 +173,18 @@ export function listCliBackgroundRuns(owner?: string): CliBackgroundRunInfo[] {
     .map((entry) => ({
       runId: entry.runId,
       subagentId: entry.subagentId,
-      status: entry.status,
+      status: interruptedRuns.has(entry.runId) ? "interrupted" : entry.status,
       startedAt: entry.startedAt,
       sessionId: entry.sessionId,
     }))
+}
+
+/** Cancel only a live run owned by this chat; never fall back to another owner. */
+export function cancelCliBackgroundRun(runId: string, owner?: string): boolean {
+  if (!owner || runOwners.get(runId) !== owner) return false
+  const entry = registry.list().find((run) => run.runId === runId)
+  if (!entry || entry.cancelled) return false
+  return registry.cancel(runId)
 }
 
 export function countRunningCliBackgroundRuns(owner?: string): number {
@@ -178,6 +210,7 @@ export function __clearAllCliBackgroundRunsForTesting(): void {
   runHomes.clear()
   runOwners.clear()
   interruptedHomes.clear()
+  interruptedRuns.clear()
   journalQueue = Promise.resolve()
 }
 

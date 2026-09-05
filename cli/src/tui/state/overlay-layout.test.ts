@@ -29,6 +29,12 @@ describe("overlayTakesScreen", () => {
     expect(overlayTakesScreen({ kind: "settings" } as unknown as Overlay)).toBe(true)
   })
 
+  it("gives plan review the measured screen region because it contains its own document", () => {
+    const plan = { kind: "plan", index: 0 } as Overlay
+    expect(overlayTakesScreen(plan)).toBe(true)
+    expect(overlayIsInline(plan)).toBe(false)
+  })
+
   it("treats a closed overlay as neither", () => {
     expect(overlayTakesScreen({ kind: "none" })).toBe(false)
     expect(overlayIsInline({ kind: "none" })).toBe(false)

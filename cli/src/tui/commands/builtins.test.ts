@@ -79,10 +79,24 @@ describe("authMode", () => {
 })
 
 describe("aboutLine", () => {
+  it("reports the resolved external engine without another provider's model or auth", () => {
+    const cfg: ResolvedConfig = {
+      ...base,
+      agentBackend: "codex",
+      providers: { anthropic: { apiKey: "k", model: "claude-x" } },
+      agentBackends: { "codex-app-server": { model: "native-model" } },
+    }
+    const line = aboutLine(cfg, "9.9.9", "codex-app-server")
+    expect(line).toContain("codex (codex-app-server)")
+    expect(line).toContain("native-model")
+    expect(line).not.toMatch(/anthropic|claude-x|api key/)
+    expect(aboutLine({ ...cfg, agentBackends: {} }, "9.9.9")).not.toMatch(/claude-x|api key/)
+  })
   it("summarizes version, provider, model, auth and mode", () => {
     const cfg: ResolvedConfig = {
       ...base,
       providers: { anthropic: { apiKey: "k", model: "claude-x" } },
+      permissionMode: "default",
     }
     const line = aboutLine(cfg, "9.9.9")
     expect(line).toContain("v9.9.9")

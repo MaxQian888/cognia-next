@@ -239,6 +239,28 @@ describe("connectBackend", () => {
     if (!result.ok) expect(result.failure.message).toBe("string fault")
   })
 
+  it("reclaims a connected backend when reading its negotiated capabilities fails", async () => {
+    const active = new Set<string>()
+    const host = fakeHost({
+      addAgent: jest.fn(async (agent) => {
+        active.add(agent.id)
+      }),
+      removeAgent: jest.fn(async (id) => {
+        active.delete(id)
+      }),
+      getAgentCapabilities: jest.fn(() => {
+        throw new Error("connection lost")
+      }),
+    })
+    const result = await connectBackend(deps({ host }))
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { stage: "launch", message: "connection lost" },
+    })
+    expect(active.size).toBe(0)
+    expect(host.connect).toHaveBeenCalledTimes(1)
+  })
+
   it("reports a preset that cannot be built into an agent", async () => {
     const result = await connectBackend(deps({ buildAgent: (() => undefined) as never }))
     expect(result.ok).toBe(false)

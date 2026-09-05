@@ -41,6 +41,7 @@ import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
 import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
 import { type PermissionResponder } from "./permission-gate"
+import { approvalKey } from "./command-approval"
 import { withCliAutoApprovedTools, withCliDisabledMcpTools } from "./tool-suppression"
 
 /**
@@ -178,6 +179,7 @@ export async function runCliSubagent(
   parentSessionId: string,
   deps: RunCliSubagentDeps
 ): Promise<CliSubagentResult> {
+  deps.signal?.throwIfAborted()
   const resolveOptions = deps.resolveOptions ?? defaultResolveSendOptions
   const capture = deps.capture ?? defaultCapture
   const closeSession = deps.closeSession ?? defaultCloseSession
@@ -185,7 +187,7 @@ export async function runCliSubagent(
   const mintId = deps.mintId ?? defaultMintId
 
   const childSessionId = `${parentSessionId}::sub-${mintId()}`
-  const childConfig = buildChildConfig(deps.config, def)
+  const childConfig = { ...buildChildConfig(deps.config, def), cwd: deps.cwd }
 
   const ctx = toBuildContext({
     sessionId: childSessionId,
@@ -194,6 +196,7 @@ export async function runCliSubagent(
     now: now(),
   })
   let sendOptions = await resolveOptions(ctx)
+  deps.signal?.throwIfAborted()
   // Bound the subagent: an explicit `maxTurns` from its definition wins as the
   // ai-sdk step budget; otherwise it inherits the parent's configured cap.
   if (typeof def.maxTurns === "number" && def.maxTurns > 0) {
@@ -230,11 +233,13 @@ export async function runCliSubagent(
     if (deps.nesting.manifest) {
       sendOptions.pluginTools = [...(sendOptions.pluginTools ?? []), deps.nesting.manifest]
     }
-    deps.nesting.register(childSessionId)
   }
 
   let result: RunAndCaptureResult
   try {
+    deps.signal?.throwIfAborted()
+    deps.nesting?.register(childSessionId)
+    deps.signal?.throwIfAborted()
     result = await capture(childSessionId, prompt, sendOptions, {
       ...(deps.signal ? { signal: deps.signal } : {}),
       // No hard wall-clock: a dispatched subagent is autonomous and may
@@ -252,7 +257,17 @@ export async function runCliSubagent(
       // 60000ms"). Falls back to the interactive idle, then a 5-minute default.
       idleTimeoutMs:
         childConfig.subagentStreamIdleTimeoutMs ?? childConfig.streamIdleTimeoutMs ?? 300_000,
-      onPermissionRequest: deps.gate,
+      onPermissionRequest: async (request) => {
+        deps.signal?.throwIfAborted()
+        if (
+          deps.approvedTools.has(request.toolName) ||
+          deps.approvedTools.has(approvalKey(request.toolName, request.input))
+        )
+          return { decision: "allow" }
+        const decision = await deps.gate(request)
+        deps.signal?.throwIfAborted()
+        return decision
+      },
       ...(deps.onEvent ? { onEvent: deps.onEvent } : {}),
     })
   } finally {

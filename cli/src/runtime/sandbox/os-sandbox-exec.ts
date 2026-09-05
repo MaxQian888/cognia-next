@@ -275,7 +275,18 @@ export function createNodeOsSandboxExecutor(
       const envelope = await runHelper(
         binary,
         ["--exec"],
-        JSON.stringify(payload),
+        JSON.stringify({
+          ...payload,
+          command: {
+            ...payload.command,
+            // run_confined clears the environment. Keep executable discovery
+            // without importing login profiles or provider credentials.
+            env: {
+              ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+              ...payload.command.env,
+            },
+          },
+        }),
         spawnFn,
         deadline
       )

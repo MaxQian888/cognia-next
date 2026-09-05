@@ -12,6 +12,7 @@ import {
 } from "./registry"
 import type { CommandDescriptor } from "./types"
 import { externalCapabilities } from "../runtime/backend-capabilities"
+import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 
 jest.mock("../render/cell-terminal-block", () => ({
   cellToTerminalBlock: (cell: { text?: string; raw?: string; result?: string }) => ({
@@ -29,6 +30,33 @@ const stub = (name: string, over: Partial<CommandDescriptor> = {}): CommandDescr
 
 describe("command registry", () => {
   beforeEach(() => __resetForTesting())
+  it("resolves aliases of mixed-case contributed command names", () => {
+    const command = stub("ProjectInfo", { aliases: ["PI"] })
+    registerCommand(command)
+    expect(getCommand("projectinfo")).toBe(command)
+    expect(getCommand("pi")).toBe(command)
+  })
+  it("passes the connected engine identity to /about", () => {
+    const effect = getCommand("about")!.handler!({
+      args: "",
+      version: "test",
+      config: {
+        ...DEFAULT_RESOLVED_CONFIG,
+        agentBackend: "codex",
+        agentBackends: { "codex-app-server": { model: "native-model" } },
+      },
+      state: {
+        backendCapabilities: externalCapabilities({
+          backend: "codex",
+          presetId: "codex-app-server",
+        }),
+      },
+    } as never)
+    expect(effect).toEqual({
+      kind: "notice",
+      message: expect.stringContaining("codex (codex-app-server) · native-model"),
+    })
+  })
 
   it("seeds a non-empty catalog of unique, described, categorised core commands", () => {
     const cmds = listCommands()

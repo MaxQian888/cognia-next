@@ -22,6 +22,8 @@ import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 
 export interface PluginToolDispatchDeps {
+  /** Restrict a persistent session subscriber to its own requests. */
+  sessionId?: string
   subscribe?: typeof subscribePluginToolExec
   handle?: (req: PluginToolExecRequest) => Promise<PluginToolExecResponse>
   send?: typeof sendPluginToolResponse
@@ -56,9 +58,17 @@ export function subscribePluginToolDispatch(
     // ran under. A ref that declared the GUI surface disabled would turn every
     // `perform_action` on this rail into a refusal instead.
     const request = req as PluginToolExecRequest
+    if (deps.sessionId && request.sessionId !== deps.sessionId) return
     const bound = request.sandboxRuntimeRef ?? runtimeRefFor(request.sessionId)
-    void handle(bound ? { ...request, sandboxRuntimeRef: bound } : request).then((resp) =>
-      send(resp)
-    )
+    void Promise.resolve()
+      .then(() => handle(bound ? { ...request, sandboxRuntimeRef: bound } : request))
+      .catch((): PluginToolExecResponse => ({
+        type: "plugin_tool_response",
+        sessionId: request.sessionId,
+        toolUseId: request.toolUseId,
+        error: "Plugin tool executor failed",
+      }))
+      .then((response) => send(response))
+      .catch(() => undefined) // transport teardown already cancels the owning turn
   })
 }

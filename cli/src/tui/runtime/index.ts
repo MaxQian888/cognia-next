@@ -371,10 +371,11 @@ export async function runRuntimeRequest(
         return impl.agentsPanel({
           dispatch,
           sessionId,
+          signal,
           inflight: inflightSubagentRows(deps.inflightTools ?? []),
         })
       if (req.action === "models")
-        return impl.agentsModelsPanel({ dispatch, cwd, roots: deps.roots, config })
+        return impl.agentsModelsPanel({ dispatch, cwd, roots: deps.roots, config, signal })
       const ad = {
         dispatch,
         cwd,
@@ -422,7 +423,7 @@ export async function runRuntimeRequest(
       return impl.teamList(td)
     }
     case "memory": {
-      const md = { dispatch }
+      const md = { dispatch, signal }
       if (req.action === "show") return impl.memoryShow(arg, md)
       if (req.action === "add") return impl.memoryAdd(arg, md)
       if (req.action === "delete") return impl.memoryDelete(arg, md)
@@ -431,6 +432,7 @@ export async function runRuntimeRequest(
     case "mcp": {
       const mc = {
         dispatch,
+        signal,
         roots: deps.roots,
         home: deps.home,
         ...(deps.mcpProbeCache ? { probeCache: deps.mcpProbeCache } : {}),
@@ -460,6 +462,7 @@ export async function runRuntimeRequest(
     case "skill": {
       const sk = {
         dispatch,
+        signal,
         home: deps.home,
         cwd,
         osHome: deps.osHome,
@@ -480,7 +483,7 @@ export async function runRuntimeRequest(
       return impl.skillPanel(sk)
     }
     case "plugin": {
-      const pl = { dispatch, roots: deps.roots, home: deps.home }
+      const pl = { dispatch, signal, roots: deps.roots, home: deps.home }
       if (req.action === "show") return impl.pluginShow(arg, pl)
       if (req.action === "tools") return impl.pluginTools(arg, pl)
       if (req.action === "enable") return impl.pluginSetEnabled(arg, true, pl)
@@ -602,6 +605,7 @@ export async function runRuntimeRequest(
     case "context":
       return impl.runContextReport({
         dispatch,
+        signal,
         config,
         sessionId: deps.sessionId,
         usage: deps.usage,

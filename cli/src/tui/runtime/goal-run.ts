@@ -23,7 +23,7 @@ import { getGoalRuntime } from "@/lib/goal/runtime"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
 import type { LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
-import { getGoal } from "@/lib/db/goals"
+import { getGoal, getOpenGoalForSession } from "@/lib/db/goals"
 import { getSession } from "@/lib/db/sessions"
 
 import { ensureCliDb } from "../../db/bootstrap"
@@ -48,6 +48,12 @@ export interface GoalRunDeps {
   signal: AbortSignal
   /** Drain a queued `btw` steer message (App-owned). */
   takeSteer?: () => string | null
+  /** Resume the persisted paused goal instead of creating a new one. */
+  resume?: boolean
+  getOpenGoal?: typeof getOpenGoalForSession
+  resumeGoal?: (id: string) => Promise<Goal | null>
+  pauseGoal?: (id: string) => Promise<unknown>
+  stopGoal?: (id: string) => Promise<unknown>
   // ── injectable seams (default to the real impls; faked in tests) ──
   ensureDb?: () => Promise<unknown>
   ensureSession?: (sessionId: string, config: ResolvedConfig) => Promise<unknown>
@@ -67,7 +73,8 @@ export interface GoalRunDeps {
 
 export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Promise<void> {
   const text = objective.trim()
-  if (!text) {
+  if (deps.signal.aborted) return
+  if (!text && !deps.resume) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /goal <objective>" })
     return
   }
@@ -84,19 +91,21 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
   await ensureSession(deps.sessionId, deps.config)
   const appSettings = resolveAppSettings(deps.sessionId, deps.config, deps.appSettings)
 
-  let goal: Goal
-  try {
-    goal = await createGoal({ sessionId: deps.sessionId, rawObjective: text, appSettings })
-  } catch (err) {
-    // GoalRuntime refuses when a self-paced loop already drives this session.
-    deps.dispatch({
-      type: "ACTIVITY_END",
-      status: "error",
-      summary: err instanceof Error ? err.message : String(err),
-    })
-    return
+  if (deps.signal.aborted) return
+  let paused: Goal | undefined
+  if (deps.resume) {
+    paused = await (deps.getOpenGoal ?? getOpenGoalForSession)(deps.sessionId)
+    if (!paused || paused.status !== "paused") {
+      deps.dispatch({
+        type: "NOTICE",
+        message: paused
+          ? "Goal is already active; pause it before resuming."
+          : "No paused goal to resume in this session.",
+      })
+      return
+    }
+    if (deps.signal.aborted) return
   }
-
   const session = await readSession(deps.sessionId)
   const judgeClient = buildJudge(session, appSettings)
   if (!judgeClient) {
@@ -104,6 +113,30 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
       type: "ACTIVITY_END",
       status: "error",
       summary: "Goal judge client unavailable — configure a provider that can grade completion.",
+    })
+    return
+  }
+
+  let goal: Goal
+  try {
+    if (deps.signal.aborted) return
+    if (deps.resume) {
+      const resumed = await (deps.resumeGoal ?? ((id) => getGoalRuntime().resumeGoal(id)))(
+        paused!.id
+      )
+      if (!resumed || resumed.status !== "active") {
+        deps.dispatch({ type: "NOTICE", message: "Goal could not be resumed; its state changed." })
+        return
+      }
+      goal = resumed
+    } else {
+      goal = await createGoal({ sessionId: deps.sessionId, rawObjective: text, appSettings })
+    }
+  } catch (err) {
+    deps.dispatch({
+      type: "ACTIVITY_END",
+      status: "error",
+      summary: err instanceof Error ? err.message : String(err),
     })
     return
   }
@@ -123,7 +156,7 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
       tokensDelta,
       judgeClient,
       signal: deps.signal,
-      capturedGenerationId: current.generationId,
+      capturedGenerationId: goal.generationId,
       firer: deps.firer,
       hookContext: {
         agentId: "goal-judge",
@@ -152,15 +185,28 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
     }
   }
 
-  await runDrivenTurns({
-    send: deps.send,
-    firstPrompt: goal.safeObjective,
-    advance,
-    dispatch: deps.dispatch,
-    signal: deps.signal,
-    label: truncate(text),
-    kind: "goal",
-    max: goal.config.maxTurns,
-    takeSteer: deps.takeSteer,
-  })
+  try {
+    await runDrivenTurns({
+      send: deps.send,
+      firstPrompt: goal.safeObjective,
+      advance,
+      dispatch: deps.dispatch,
+      signal: deps.signal,
+      label: truncate(goal.safeObjective),
+      kind: "goal",
+      max: goal.config.maxTurns,
+      takeSteer: deps.takeSteer,
+    })
+  } finally {
+    {
+      const current = await readGoal(goal.id)
+      if (current?.generationId === goal.generationId && current.status === "active") {
+        const control =
+          deps.signal.reason === "stop"
+            ? (deps.stopGoal ?? ((id: string) => getGoalRuntime().stopGoal(id)))
+            : (deps.pauseGoal ?? ((id: string) => getGoalRuntime().pauseGoal(id)))
+        await control(goal.id)
+      }
+    }
+  }
 }

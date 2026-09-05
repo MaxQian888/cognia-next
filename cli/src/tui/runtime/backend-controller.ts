@@ -249,6 +249,7 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       }
     }
 
+    let negotiated: AcpCapabilities | undefined
     try {
       // Idempotent register: the agent id is stable across reconnects (a
       // `/backend` switch, a retry), and the manager throws on a duplicate id.
@@ -257,6 +258,7 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       await host.removeAgent(agentId).catch(() => undefined)
       await host.addAgent(agentConfig)
       await host.connect(agentId)
+      negotiated = host.getAgentCapabilities(agentId)
     } catch (error) {
       // Leave nothing half-registered behind, or a retry inherits a broken agent.
       await host.removeAgent(agentId).catch(() => undefined)
@@ -268,7 +270,6 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       })
     }
 
-    const negotiated = host.getAgentCapabilities(agentId)
     // Under the default parity contract, an agent that cannot host Cognia's tool
     // bridge is INCOMPATIBLE — not "ready with fewer tools". Every Cognia tool
     // the user can see in `/tools` would be uncallable, so fail here rather than

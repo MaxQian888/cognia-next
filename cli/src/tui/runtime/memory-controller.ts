@@ -31,6 +31,8 @@ import { truncate } from "./shared"
 import type { TuiAction } from "../state/types"
 
 export interface MemoryDeps {
+  /** Suppress late results and new work after the runtime request is cancelled. */
+  signal?: AbortSignal
   dispatch: (action: TuiAction) => void
   ensureDb?: () => Promise<unknown>
   list?: () => Promise<Memory[]>
@@ -71,15 +73,21 @@ function describeRecall(mode: MemoryRetrievalMode): string {
 
 export async function memoryList(deps: MemoryDeps): Promise<void> {
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const rows = await (deps.list ?? (() => listMemories()))()
+  if (deps.signal?.aborted) return
   if (rows.length === 0) {
     deps.dispatch({ type: "NOTICE", message: "No memories stored." })
     return
   }
-  const mode = await (deps.describeMode ?? defaultDescribeMode)().catch(
-    (): MemoryRetrievalMode => ({ kind: "bm25", reason: "no_backend" })
-  )
-  deps.dispatch({ type: "NOTICE", message: describeRecall(mode) })
+  const mode = await (deps.describeMode ?? defaultDescribeMode)().catch(() => null)
+  if (deps.signal?.aborted) return
+  deps.dispatch({
+    type: "NOTICE",
+    message: mode
+      ? describeRecall(mode)
+      : "Could not determine recall mode. Showing stored memories.",
+  })
   deps.dispatch({
     type: "OVERLAY_OPEN",
     overlay: {
@@ -94,7 +102,9 @@ export async function memoryList(deps: MemoryDeps): Promise<void> {
 
 export async function memoryShow(id: string, deps: MemoryDeps): Promise<void> {
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const memory = await (deps.get ?? getMemory)(id)
+  if (deps.signal?.aborted) return
   if (!memory) {
     deps.dispatch({ type: "NOTICE", message: `Memory ${id} not found.` })
     return
@@ -118,12 +128,14 @@ const ADD_REFUSAL: Record<string, string> = {
  * the fact may become a procedural rule.
  */
 export async function memoryAdd(text: string, deps: MemoryDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const body = text.trim()
   if (!body) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /remember <text>" })
     return
   }
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const add = deps.add ?? ((t: string) => rememberFact({ text: t, scope: "global" }))
   const result = await add(body)
   if (!result.ok) {
@@ -138,14 +150,17 @@ export async function memoryAdd(text: string, deps: MemoryDeps): Promise<void> {
 
 /** Delete a stored memory by id (`/memory delete <id>`). */
 export async function memoryDelete(id: string, deps: MemoryDeps): Promise<void> {
+  if (deps.signal?.aborted) return
   const key = id.trim()
   if (!key) {
     deps.dispatch({ type: "NOTICE", message: "Usage: /memory delete <id>" })
     return
   }
   await dbOf(deps)()
+  if (deps.signal?.aborted) return
   const get = deps.get ?? getMemory
   const existing = await get(key)
+  if (deps.signal?.aborted) return
   if (!existing) {
     deps.dispatch({ type: "NOTICE", message: `Memory ${key} not found.` })
     return

@@ -37,6 +37,22 @@ describe("listSessions", () => {
     ])
   })
 
+  it("keeps readable sessions when another transcript cannot be read", () => {
+    const faultyFs = {
+      ...transcriptFs,
+      read: (p: string) => {
+        if (p.endsWith("broken.jsonl")) throw new Error("EACCES")
+        return transcriptFs.read(p)
+      },
+    }
+    expect(
+      listSessions("/home", {
+        readdir: () => ["broken.jsonl", "ses2.jsonl"],
+        transcriptFs: faultyFs,
+      })
+    ).toEqual([{ sessionId: "ses2", title: "later session", turns: 1, updatedAt: 9 }])
+  })
+
   it("returns [] when the sessions dir cannot be read", () => {
     const readdir = () => {
       throw new Error("ENOENT")

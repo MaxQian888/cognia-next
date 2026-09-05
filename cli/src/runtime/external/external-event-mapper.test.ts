@@ -7,6 +7,8 @@ import type {
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
 
+import { mapPiEvent, type PiEvent } from "@/lib/ai/agent/external/pi-rpc-events"
+
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { createInitialState } from "../../tui/state/initial"
 import { tuiReducer } from "../../tui/state/reducer"
@@ -586,6 +588,40 @@ describe("externalAgentEventToActions", () => {
     expect(classifyCanonicalEvent(projected.kind)).toBe("status")
   })
 
+  // One row per tool call, saying that the model had finished streaming that
+  // call's arguments. A turn with fourteen tool calls ended with fourteen of
+  // them stacked under it, pushing the answer off the screen.
+  it("keeps the end of a tool call's input off the transcript", () => {
+    const projected = externalAgentEventToCanonicalFallback(
+      event({ type: "tool_use_end", toolUseId: "call_09be7183", input: {} })
+    )
+    expect(projected).toMatchObject({ kind: "tool-progress", toolCallId: "call_09be7183" })
+    expect(classifyCanonicalEvent(projected.kind)).toBe("status")
+  })
+
+  it("keeps repeatable session metadata out of the transcript", () => {
+    // "External session metadata updated" is a row reporting its own
+    // existence, and agents emit it more than once per session.
+    const bare = externalAgentEventToCanonicalFallback(
+      event({ type: "session_info_update" } as never)
+    )
+    expect(classifyCanonicalEvent(bare.kind)).toBe("audit")
+
+    // A title says something, so it keeps its line.
+    const titled = externalAgentEventToCanonicalFallback(
+      event({ type: "session_info_update", title: "Refactor the parser" } as never)
+    )
+    expect(titled).toMatchObject({ kind: "informational" })
+    expect(classifyCanonicalEvent(titled.kind)).toBe("transcript")
+  })
+
+  it("keeps the configuration-option count out of the transcript", () => {
+    const projected = externalAgentEventToCanonicalFallback(
+      event({ type: "config_options_update", configOptions: [] } as never)
+    )
+    expect(classifyCanonicalEvent(projected.kind)).toBe("audit")
+  })
+
   it("routes an event this build cannot project into the audit stream", () => {
     const projected = externalAgentEventToCanonicalFallback({
       type: "some_future_protocol_event",
@@ -645,5 +681,130 @@ describe("externalAgentEventToActions", () => {
         })
       )
     ).toMatchObject({ kind: "content-part", partId: "nes:nes-1:suggestion-1" })
+  })
+})
+
+describe("pi-rpc transcript ordering at the external mapping seam", () => {
+  it("preserves execution order, ignores repeated block snapshots, and keeps follow-up reasoning after tools", () => {
+    const frames: PiEvent[] = [
+      { type: "message_start" },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "before" } },
+      { type: "message_update", assistantMessageEvent: { type: "text_end", content: "before" } },
+      {
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "toolcall_end",
+          toolCall: { id: "a", name: "read", arguments: { path: "a" } },
+        },
+      },
+      { type: "message_end" },
+      { type: "tool_execution_start", toolCallId: "a", toolName: "read", args: { path: "a" } },
+      { type: "tool_execution_start", toolCallId: "b", toolName: "read", args: { path: "b" } },
+      {
+        type: "tool_execution_end",
+        toolCallId: "b",
+        toolName: "read",
+        result: { content: [{ type: "text", text: "B" }] },
+      },
+      { type: "tool_execution_start", toolCallId: "c", toolName: "read", args: { path: "c" } },
+      {
+        type: "tool_execution_end",
+        toolCallId: "a",
+        toolName: "read",
+        result: { content: [{ type: "text", text: "A" }] },
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId: "c",
+        toolName: "read",
+        result: { content: [{ type: "text", text: "C" }] },
+      },
+      { type: "message_start" },
+      {
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", delta: "reason" },
+      },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "answer" } },
+      { type: "message_end" },
+    ]
+    let state = createInitialState({ ...DEFAULT_RESOLVED_CONFIG, cwd: "/work" }, "pi-session")
+    for (const frame of frames) {
+      for (const mapped of mapPiEvent(frame, { sessionId: "pi-session", now: () => timestamp })) {
+        const actions = externalAgentEventToActions(mapped)
+        if (mapped.type === "tool_use_end") {
+          expect(actions).toEqual([])
+          expect(classifyCanonicalEvent(externalAgentEventToCanonicalFallback(mapped).kind)).toBe(
+            "status"
+          )
+        }
+        state = actions.reduce(tuiReducer, state)
+      }
+    }
+    state = tuiReducer(state, {
+      type: "TURN_COMMIT",
+      result: { text: "answer", messageId: "pi-answer", a2uiSurfaces: {}, a2uiSurfaceOrder: [] },
+    })
+    expect(state.cells.map((cell) => cell.kind)).toEqual([
+      "assistant",
+      "tool",
+      "tool",
+      "tool",
+      "thinking",
+      "assistant",
+    ])
+    expect(state.cells[0]).toMatchObject({ raw: "before" })
+    expect(
+      state.cells.filter((cell) => cell.kind === "tool").map((cell) => [cell.callKey, cell.result])
+    ).toEqual([
+      ["a", "A"],
+      ["b", "B"],
+      ["c", "C"],
+    ])
+    expect(state.cells.at(-1)).toMatchObject({ raw: "answer" })
+  })
+})
+
+describe("Pi diagnostic progress stays in audit", () => {
+  it.each([
+    {
+      type: "extension_ui_request",
+      id: "widget",
+      method: "setWidget",
+      widgetKey: "bg",
+      widgetLines: ["background status"],
+    },
+    {
+      type: "extension_ui_request",
+      id: "status",
+      method: "setStatus",
+      statusText: "still working",
+    },
+    { type: "extension_ui_request", id: "title", method: "setTitle", title: "Pi" },
+    { type: "extension_ui_request", id: "editor", method: "set_editor_text", text: "prefill" },
+    { type: "turn_end", turnIndex: 2 },
+    { type: "agent_end", messages: [] },
+  ])("retains $type $method without transcript chatter", (frame) => {
+    const [mapped] = mapPiEvent(frame, { sessionId: "pi-session", now: () => timestamp })
+    const projected = externalAgentEventToCanonicalFallback(mapped)
+    expect(projected).toMatchObject({ kind: "diagnostic", payload: { piDiagnostic: frame } })
+    expect(classifyCanonicalEvent(projected.kind)).toBe("audit")
+    expect(externalAgentEventToActions(mapped)).toEqual([])
+  })
+
+  it("keeps explicit extension notifications visible", () => {
+    const [mapped] = mapPiEvent(
+      {
+        type: "extension_ui_request",
+        id: "notice",
+        method: "notify",
+        notifyType: "warning",
+        message: "Provider is rate limited",
+      },
+      { sessionId: "pi-session" }
+    )
+    expect(externalAgentEventToCanonicalFallback(mapped)).toMatchObject({
+      kind: "activity",
+      detail: "Provider is rate limited",
+    })
   })
 })

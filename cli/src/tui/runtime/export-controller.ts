@@ -25,27 +25,26 @@ export interface ExportDeps {
 }
 
 export async function exportSession(formatArg: string, deps: ExportDeps): Promise<void> {
-  const read = deps.read ?? ((h, s) => readTranscript(h, s, deps.transcriptFs))
-  const entries = read(deps.home, deps.sessionId)
-  if (entries.length === 0) {
+  try {
+    const read = deps.read ?? ((h, s) => readTranscript(h, s, deps.transcriptFs))
+    const entries = read(deps.home, deps.sessionId)
+    if (entries.length === 0) {
+      deps.dispatch({
+        type: "NOTICE",
+        message: "Nothing to export yet — this session has no turns.",
+      })
+      return
+    }
+    const format = normalizeExportFormat(formatArg)
+    const content = formatTranscriptExport(entries, format)
+    const target = path.join(deps.cwd, `cognia-export-${deps.sessionId}.${exportExtension(format)}`)
+    const write = deps.write ?? ((p, c) => fs.writeFileSync(p, c, "utf8"))
+    write(target, content)
     deps.dispatch({
       type: "NOTICE",
-      message: "Nothing to export yet — this session has no turns.",
+      message: `Exported ${entries.length} ${entries.length === 1 ? "entry" : "entries"} → ${target}`,
     })
-    return
-  }
-  const format = normalizeExportFormat(formatArg)
-  const content = formatTranscriptExport(entries, format)
-  const target = path.join(deps.cwd, `cognia-export-${deps.sessionId}.${exportExtension(format)}`)
-  const write = deps.write ?? ((p, c) => fs.writeFileSync(p, c, "utf8"))
-  try {
-    write(target, content)
   } catch (err) {
     deps.dispatch({ type: "NOTICE", message: `Export failed: ${errorMessage(err)}` })
-    return
   }
-  deps.dispatch({
-    type: "NOTICE",
-    message: `Exported ${entries.length} ${entries.length === 1 ? "entry" : "entries"} → ${target}`,
-  })
 }

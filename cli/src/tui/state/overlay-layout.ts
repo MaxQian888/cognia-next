@@ -9,16 +9,18 @@
  * command the assistant just decided on, and the reasoning that led there is in
  * the transcript, one line above. Blanking it left a screen with a bordered box
  * on an empty background, no command, no context, and no way to look. The same
- * goes for a question the agent asks and for a plan waiting to be approved: the
- * plan itself is in the transcript.
+ * goes for a question the agent asks. Plan review is different: the overlay
+ * contains the full document and needs the measured screen region to page it
+ * without competing with the transcript for rows.
  *
  * So a prompt raised BY the turn docks above the composer with the conversation
- * still visible, and everything the user navigated to keeps the screen.
+ * still visible, except for document-based plan review. Everything the user
+ * navigated to also keeps the screen.
  */
 import type { Overlay } from "./types"
 
 /** Overlays that dock into the conversation instead of replacing it. */
-const INLINE_OVERLAY_KINDS = new Set<Overlay["kind"]>(["permission", "askUser", "plan", "confirm"])
+const INLINE_OVERLAY_KINDS = new Set<Overlay["kind"]>(["permission", "askUser", "confirm"])
 
 /** True when this overlay should replace the transcript rather than dock under it. */
 export function overlayTakesScreen(overlay: Overlay): boolean {

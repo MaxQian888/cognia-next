@@ -3603,6 +3603,20 @@ describe("resolveSendOptions — plan mode prompt", () => {
 })
 
 describe("resolveSendOptions — artifact authoring tools", () => {
+  it("withholds dock tools and their prompt from a standalone CLI host", async () => {
+    const host = globalThis as Record<string, unknown>
+    host.__COGNIA_CLI__ = true
+    try {
+      const opts = await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+      expect(opts.backgroundProcessHost).toBe("sidecar")
+      expect((opts.pluginTools ?? []).map((tool) => tool.name)).not.toContain("canvas_open")
+      expect((opts.pluginTools ?? []).map((tool) => tool.name)).not.toContain("artifact_create")
+      expect(opts.appendSystemPrompt ?? "").not.toContain("artifact_create")
+      expect(opts.permissionRuleset?.artifact_create).toBeUndefined()
+    } finally {
+      delete host.__COGNIA_CLI__
+    }
+  })
   const toolNames = (opts: { pluginTools?: { name: string }[] }) =>
     (opts.pluginTools ?? []).map((t) => t.name)
 
@@ -4480,6 +4494,26 @@ describe("resolveSendOptions — workflow-editor (Workflow Copilot mode)", () =>
 })
 
 describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
+  it("keeps wrapped native processes available while denying SDK bypasses", async () => {
+    const builtinProcessSandbox = {
+      launcher: "/launcher",
+      writableRoots: ["/workspace"],
+      readableRoots: ["/workspace"],
+      network: false,
+    }
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "native-process", sandboxEnabled: true, sandboxTier: "os" }),
+      builtinProcessSandbox,
+    })
+    expect(opts.builtinProcessSandbox).toEqual(builtinProcessSandbox)
+    expect(opts.disallowedTools).toContain("Bash")
+    expect(opts.disallowedTools).toContain("write")
+    expect(opts.disallowedTools).not.toContain("bash")
+    expect(opts.disallowedTools).not.toContain("start_process")
+    expect(opts.disallowedTools).not.toContain("shell_execute_advanced")
+    expect(opts.appendSystemPrompt).toContain("persistent terminals")
+  })
+
   it("disallows SDK Bash/Edit/Write + filters text_editor when session sandbox is enabled", async () => {
     mGetCharacter.mockResolvedValue(
       makeChar({
@@ -4975,6 +5009,24 @@ describe("resolveSendOptions — runtime tool-search policy", () => {
 })
 
 describe("resolveSendOptions — unified LSP (sendOptions.lsp)", () => {
+  it("uses host project overrides and managed install policy without Tauri", async () => {
+    const readProjectFile = jest
+      .fn()
+      .mockResolvedValue({ servers: [{ id: "typescript", enabled: false }] })
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: { builtinTools: { lsp: true } } as AppSettings,
+      lspHost: { readProjectFile, installDir: "/cli-home/lsp", autoInstall: false },
+    })
+    expect(readProjectFile).toHaveBeenCalledWith("/proj")
+    expect(opts.lsp).toMatchObject({
+      enabled: true,
+      installDir: "/cli-home/lsp",
+      autoInstall: false,
+    })
+    expect(opts.lsp?.servers?.find((server) => server.id === "typescript")).toBeUndefined()
+  })
+
   it("resolves builtin + user layers onto opts.lsp when enabled with a cwd", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", workingDir: "/proj" }),

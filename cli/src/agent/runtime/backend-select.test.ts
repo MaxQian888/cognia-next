@@ -85,6 +85,18 @@ describe("selectBackend — resolution", () => {
 })
 
 describe("selectBackend — capabilities", () => {
+  it("does not advertise native Claude capabilities on the AI SDK rail", () => {
+    const result = selectBackend({ ...PRESETS, provider: "deepseek" })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.backend.runtimeAdapter).toBe("ai-sdk")
+    expect(result.backend.capabilities).not.toContain("subagents.native")
+    expect(result.backend.capabilities).toContain("session.resume")
+    expect(result.backend.capabilities).toContain("tools.fragmented-json")
+    expect(
+      selectBackend({ ...PRESETS, provider: "deepseek", requires: ["subagents.native"] }).ok
+    ).toBe(false)
+  })
   it("passes when every hard requirement is met", () => {
     const result = selectBackend({
       ...PRESETS,
