@@ -5,6 +5,8 @@ jest.mock("@/lib/sandbox/runtime-availability", () => ({
   updateOsSandboxAvailability: (...a: unknown[]) => mockUpdateAvailability(...a),
 }))
 
+import { __resetOsSandboxBridgeForTesting, setOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
+
 import {
   __resetCodeSandboxStatus,
   codeSandboxStatus,
@@ -91,5 +93,62 @@ describe("refreshCodeSandboxStatus", () => {
     await expect(refreshCodeSandboxStatus()).resolves.toMatchObject({ confined: true })
     await expect(codeSandboxStatus()).resolves.toMatchObject({ confined: true })
     expect(mockCall).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("host executor", () => {
+  afterEach(() => {
+    __resetOsSandboxBridgeForTesting()
+    __resetCodeSandboxStatus()
+  })
+
+  it("asks the executor that will run the commands, not the desktop's IPC", async () => {
+    // The desktop's `sandbox_health_check` describes the desktop. On a Node
+    // host that is the wrong machine.
+    setOsSandboxExec({
+      execute: async () => {
+        throw new Error("unused")
+      },
+      probe: async () => ({ confined: true, backend: "macos-sandbox-exec", detail: "ok" }),
+    })
+    await expect(codeSandboxStatus()).resolves.toEqual({
+      confined: true,
+      backend: "macos-sandbox-exec",
+      detail: "ok",
+    })
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
+  it("drops the memoised answer when an executor registers later", async () => {
+    // The probe is cached for the process lifetime. Anything that asks before
+    // bootstrap registers the executor would otherwise pin `confined: false`
+    // forever and never see the executor arrive.
+    mockCall.mockRejectedValue(new Error("tauri-only command from web mode"))
+    await expect(codeSandboxStatus()).resolves.toMatchObject({ confined: false })
+
+    setOsSandboxExec({
+      execute: async () => {
+        throw new Error("unused")
+      },
+      probe: async () => ({ confined: true, backend: "linux-bwrap", detail: "ok" }),
+    })
+    await expect(codeSandboxStatus()).resolves.toMatchObject({
+      confined: true,
+      backend: "linux-bwrap",
+    })
+  })
+
+  it("drops it again when the executor is withdrawn", async () => {
+    setOsSandboxExec({
+      execute: async () => {
+        throw new Error("unused")
+      },
+      probe: async () => ({ confined: true, backend: "linux-bwrap", detail: "ok" }),
+    })
+    await expect(codeSandboxStatus()).resolves.toMatchObject({ confined: true })
+
+    setOsSandboxExec(null)
+    mockCall.mockRejectedValue(new Error("no backend"))
+    await expect(codeSandboxStatus()).resolves.toMatchObject({ confined: false })
   })
 })

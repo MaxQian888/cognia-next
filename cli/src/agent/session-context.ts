@@ -228,7 +228,15 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
   const ensureDb = params.ensureDb ?? (() => ensureCliDb())
   const resolveApprovedTools = params.resolveApprovedTools ?? (() => readToolApprovals(home))
   const devPluginsEnabled = config.devPlugins === true
-  const pluginToolsEnabled = config.pluginTools === true || devPluginsEnabled
+  // Sandbox mode implies the plugin runtime, the same way `devPlugins` does.
+  // The four `sandbox_*` tools ARE plugin tools, and sandbox mode denies the
+  // unsandboxed Bash / Edit / Write, so a sandboxed session without the plugin
+  // runtime would reach the model with no shell tool at all. The runtime
+  // bootstrap is also what registers the OS-tier executor, so without it
+  // `sandbox/status` would report unconfined on a host that has the helper
+  // sitting next to the executable.
+  const sandboxEnabled = config.sandbox?.enabled === true
+  const pluginToolsEnabled = config.pluginTools === true || devPluginsEnabled || sandboxEnabled
   const devPluginsDir = devPluginsEnabled
     ? (resolveDevPluginsDir(config.devPluginsDir, config.cwd) ?? undefined)
     : undefined

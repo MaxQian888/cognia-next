@@ -3,6 +3,7 @@
 import { transport } from "@/lib/tauri"
 import type { HeadlessPluginChange } from "@/lib/headless/types"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+import { disposeOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
 
 import { registerHeadlessRuntime } from "../registry"
@@ -76,7 +77,10 @@ registerHeadlessRuntime({
       try {
         await runtime.stop?.()
       } finally {
-        await disposeMicrovmAdapters()
+        // Both sandbox tiers are registered by the plugin bootstrap, so both
+        // are withdrawn here. Settled rather than sequenced: one provider
+        // refusing to close must not leave the other registered.
+        await Promise.allSettled([disposeMicrovmAdapters(), disposeOsSandboxExec()])
       }
     }
   },

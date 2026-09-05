@@ -100,4 +100,29 @@ describe("os sandbox exec bridge", () => {
   it("tolerates disposing when no executor was ever registered", async () => {
     await expect(disposeOsSandboxExec()).resolves.toBeUndefined()
   })
+
+  it("keeps subscribers alive across the test reset", () => {
+    // A production subscriber registers at module load and can never
+    // re-register. If the reset cleared listeners, the first test to call it
+    // would silently disable `sandbox-status`'s cache invalidation for the rest
+    // of the file, and later tests would read a stale memoised probe.
+    let notified = 0
+    subscribeOsSandboxAvailability(() => {
+      notified += 1
+    })
+    __resetOsSandboxBridgeForTesting()
+    setOsSandboxExec(executor())
+    expect(notified).toBeGreaterThan(0)
+  })
+
+  it("notifies on withdrawal through the reset itself", () => {
+    setOsSandboxExec(executor())
+    let notified = 0
+    subscribeOsSandboxAvailability(() => {
+      notified += 1
+    })
+    __resetOsSandboxBridgeForTesting()
+    expect(notified).toBe(1)
+    expect(getOsSandboxExec()).toBeNull()
+  })
 })

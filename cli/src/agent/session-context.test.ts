@@ -107,6 +107,32 @@ describe("createCliContextAssembler — session context", () => {
     expect(hydrations).toBe(1)
   })
 
+  it("loads the plugin runtime for a sandboxed session even without pluginTools", async () => {
+    // The four `sandbox_*` tools ARE plugin tools, and sandbox mode denies the
+    // unsandboxed Bash / Edit / Write. Without the runtime the model reaches
+    // the turn with no shell tool at all, and the OS-tier executor, which the
+    // same bootstrap registers, is never installed either.
+    let hydrations = 0
+    const assembler = makeAssembler(
+      { loadPluginRuntime: async () => void (hydrations += 1) },
+      cfg({ sandbox: { enabled: true } })
+    )
+    await assembler.resolveSession()
+    expect(hydrations).toBe(1)
+  })
+
+  it("does not load it for a sandbox block that only sets a ceiling", async () => {
+    // A policy with `enabled` unset is a ceiling for Computer Use confinement,
+    // not a request to swap the shell tools.
+    let hydrations = 0
+    const assembler = makeAssembler(
+      { loadPluginRuntime: async () => void (hydrations += 1) },
+      cfg({ sandbox: { policy: { network: "off" } } })
+    )
+    await assembler.resolveSession()
+    expect(hydrations).toBe(0)
+  })
+
   it("peek stays null until the first resolve", async () => {
     const assembler = makeAssembler()
     expect(assembler.peek()).toBeNull()

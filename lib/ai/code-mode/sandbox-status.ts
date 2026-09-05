@@ -16,7 +16,7 @@
  */
 
 import { transport } from "@/lib/tauri"
-import { getOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
+import { getOsSandboxExec, subscribeOsSandboxAvailability } from "@/lib/sandbox/os-exec-bridge"
 import { updateOsSandboxAvailability } from "@/lib/sandbox/runtime-availability"
 
 export interface CodeSandboxStatus {
@@ -37,6 +37,16 @@ interface RawProbeReport {
 }
 
 let cached: Promise<CodeSandboxStatus> | null = null
+
+// The probe is memoised for the process lifetime, which is right for a
+// desktop where the backend cannot appear mid-session. On a Node host the
+// executor is registered during bootstrap, and anything that probes before
+// that (an SDK client asking `sandbox/status` before `tool/register`) would
+// otherwise pin `confined: false` forever and never see the executor arrive.
+// Registration is exactly the event that invalidates the answer.
+subscribeOsSandboxAvailability(() => {
+  cached = null
+})
 
 async function probe(): Promise<CodeSandboxStatus> {
   try {

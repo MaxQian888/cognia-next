@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+
+import { nativeHostFileNames } from "./native-host-files.mjs"
 import { fileURLToPath } from "node:url"
 
 const TARGETS = {
@@ -19,6 +21,14 @@ const TARGETS = {
     executable: "cognia-agent.exe",
     claude: "claude.exe",
   },
+}
+
+/** Why a missing helper is fatal, quoted back at whoever is missing it. */
+const HELPER_PURPOSE = {
+  "cognia-external-agent-launcher": "external agent dispatch requires its native launcher",
+  "cognia-sandbox-exec":
+    "the OS sandbox tier has no implementation on this host without it, and a sandboxed tool call is refused rather than run unconfined",
+  "cognia-task-workspace-worker": "worker dispatch requires Task Workspace",
 }
 
 const REQUIRED_RESOURCES = [
@@ -225,17 +235,12 @@ export function verifyAgentHostPackage(root, targetName) {
   requireFile(root, claude, "the full agent host requires its adjacent Claude runtime")
   requireExecutable(root, claude, targetName)
 
-  for (const [helperBaseName, purpose] of [
-    ["cognia-external-agent-launcher", "external agent dispatch requires its native launcher"],
-    [
-      "cognia-sandbox-exec",
-      "the OS sandbox tier has no implementation on this host without it, and a sandboxed tool call is refused rather than run unconfined",
-    ],
-    ["cognia-task-workspace-worker", "worker dispatch requires Task Workspace"],
-  ]) {
-    const helperName = `${helperBaseName}${targetName === "win32-x64" ? ".exe" : ""}`
+  // Names come from the same table that decides what gets built and staged, so
+  // this gate cannot fall behind a helper someone added. A literal list here is
+  // what let the set drift in the first place.
+  for (const helperName of nativeHostFileNames(targetName === "win32-x64" ? ".exe" : "")) {
     const helper = path.join(packageRoot, "bin", helperName)
-    requireFile(root, helper, purpose)
+    requireFile(root, helper, HELPER_PURPOSE[helperName.replace(/\.exe$/, "")] ?? "the agent host requires its native helpers")
     requireExecutable(root, helper, targetName)
   }
 

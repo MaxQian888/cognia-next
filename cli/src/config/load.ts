@@ -217,6 +217,9 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
       ? { ...acc.statusBar, ...stripUndefined(layer.statusBar) }
       : acc.statusBar,
     mascot: layer.mascot ? { ...acc.mascot, ...stripUndefined(layer.mascot) } : acc.mascot,
+    // Layer-merged rather than replaced, so a project config can raise the
+    // ceiling's writable roots without restating `enabled` and `tier`.
+    sandbox: layer.sandbox ? { ...acc.sandbox, ...stripUndefined(layer.sandbox) } : acc.sandbox,
     twin: layer.twin ? { ...acc.twin, ...stripUndefined(layer.twin) } : acc.twin,
     collab: layer.collab ? { ...layer.collab } : acc.collab,
     outputStyle: layer.outputStyle ?? acc.outputStyle,

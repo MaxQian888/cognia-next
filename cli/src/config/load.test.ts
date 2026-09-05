@@ -540,3 +540,107 @@ describe("editor config", () => {
     expect(cfg.editor).toEqual({ command: "code", args: ["-p"] })
   })
 })
+
+describe("applyLayer covers the config schema", () => {
+  // `applyLayer` is an exhaustive object literal: a key the schema accepts but
+  // the literal never names is parsed and then silently discarded. That is
+  // worse than rejecting it, because `.strict()` used to make the typo loud.
+  // The `sandbox` block shipped that way and made the whole CLI sandbox
+  // feature dead on arrival, which no unit test caught because every
+  // to-build-context test hand-builds a ResolvedConfig and never runs the
+  // loader.
+  //
+  // This scans the source rather than exercising 60 keys with plausible
+  // values, and asserts it actually scanned something so an empty walk cannot
+  // pass as "no gaps".
+  const KNOWN_UNMERGED = new Set([
+    // Pre-existing, all three. Recorded rather than fixed here so this guard
+    // does not quietly change three unrelated features at once. The list may
+    // only shrink.
+    //
+    // `autoRoute` is also in BOOLEAN_FLAG_KEYS (mutate.ts), so the settings
+    // panel writes a key the loader drops.
+    "autoRoute",
+    "selection",
+    // `protocol` reaches `acc` only through the `--protocol` flag
+    // (load.ts:459 reads `flags?.protocol ?? acc.protocol`), so the top-level
+    // config-file key is accepted by the schema and discarded.
+    "protocol",
+  ])
+
+  it("names every schema key, or records the gap", async () => {
+    const fs = await import("node:fs")
+    const path = await import("node:path")
+    const url = await import("node:url")
+    const { cliConfigFileSchema } = await import("./schema")
+
+    const here = path.dirname(url.fileURLToPath(import.meta.url))
+    const source = fs.readFileSync(path.join(here, "load.ts"), "utf8")
+    const read = new Set(Array.from(source.matchAll(/\blayer\.([A-Za-z0-9_]+)/g), (m) => m[1]!))
+    expect(read.size).toBeGreaterThan(20)
+
+    const schemaKeys = Object.keys(cliConfigFileSchema.shape)
+    expect(schemaKeys.length).toBeGreaterThan(20)
+
+    const dropped = schemaKeys.filter((key) => !read.has(key) && !KNOWN_UNMERGED.has(key))
+    expect(dropped).toEqual([])
+  })
+
+  it("keeps the recorded gaps honest — a fixed one must leave the list", async () => {
+    const fs = await import("node:fs")
+    const path = await import("node:path")
+    const url = await import("node:url")
+    const here = path.dirname(url.fileURLToPath(import.meta.url))
+    const source = fs.readFileSync(path.join(here, "load.ts"), "utf8")
+    const read = new Set(Array.from(source.matchAll(/\blayer\.([A-Za-z0-9_]+)/g), (m) => m[1]!))
+    const stale = [...KNOWN_UNMERGED].filter((key) => read.has(key))
+    expect(stale).toEqual([])
+  })
+})
+
+describe("sandbox settings survive the loader", () => {
+  it("carries enabled / tier / policy from the user config", () => {
+    // The behavioural half of the guard above: the source scan proves the key
+    // is named, this proves the value arrives.
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({
+        sandbox: {
+          enabled: true,
+          tier: "os",
+          policy: { network: "off", maxMemoryMb: 512, writableRoots: ["/work"] },
+        },
+      }),
+    })
+    expect(cfg.sandbox).toEqual({
+      enabled: true,
+      tier: "os",
+      policy: { network: "off", maxMemoryMb: 512, writableRoots: ["/work"] },
+    })
+  })
+
+  it("lets a project config narrow the ceiling without restating the rest", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ sandbox: { enabled: true, tier: "os" } }),
+      [projectConfigPath(CWD)]: JSON.stringify({
+        sandbox: { policy: { network: "off", writableRoots: [CWD] } },
+      }),
+    })
+    expect(cfg.sandbox).toEqual({
+      enabled: true,
+      tier: "os",
+      policy: { network: "off", writableRoots: [CWD] },
+    })
+  })
+
+  it("lets a project config turn the sandbox off again", () => {
+    const cfg = run({
+      [userConfigPath(HOME)]: JSON.stringify({ sandbox: { enabled: true } }),
+      [projectConfigPath(CWD)]: JSON.stringify({ sandbox: { enabled: false } }),
+    })
+    expect(cfg.sandbox?.enabled).toBe(false)
+  })
+
+  it("stays absent when nothing configures it", () => {
+    expect(run({}).sandbox).toBeUndefined()
+  })
+})

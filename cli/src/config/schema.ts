@@ -889,8 +889,12 @@ export const cliConfigFileSchema = z
      * `sandbox_*` tools, which run through the `cognia-sandbox-exec` helper.
      * A host with no sandbox backend refuses those calls rather than running
      * them unconfined, so turning this on can leave a session with no shell at
-     * all. That is the intended failure: `/doctor` reports whether the backend
-     * is present.
+     * all. That is the intended failure rather than a silent unconfined run.
+     * Whether a backend is actually enforcing is what the `sandbox/status` RPC
+     * answers, from an active confinement probe rather than from this field.
+     *
+     * Turning it on implies the plugin runtime (`session-context.ts`), because
+     * the four `sandbox_*` tools ARE plugin tools.
      */
     sandbox: sandboxConfigSchema.optional(),
     /** Provider-backed web search settings for the desktop-independent CLI. */

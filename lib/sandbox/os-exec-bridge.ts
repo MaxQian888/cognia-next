@@ -73,8 +73,16 @@ export async function disposeOsSandboxExec(): Promise<void> {
   if (active?.dispose) await active.dispose()
 }
 
-/** Test-only. Wipes the registry so suites do not leak an executor. */
+/**
+ * Test-only. Withdraws the executor so suites do not leak one.
+ *
+ * Deliberately does NOT clear the listener set. A production subscriber
+ * registers at module load and can never re-register, so clearing would
+ * silently disable it for the rest of the file: the first test that reset the
+ * bridge would leave `sandbox-status`'s cache invalidation dead, and every
+ * later test would read a stale memoised probe. That is exactly the bug this
+ * seam exists to test.
+ */
 export function __resetOsSandboxBridgeForTesting(): void {
-  registered = null
-  listeners.clear()
+  setOsSandboxExec(null)
 }
