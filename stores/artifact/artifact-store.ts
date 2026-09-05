@@ -68,6 +68,8 @@ import type {
   ArtifactWorkspaceState,
   ArtifactWorkspaceReturnContext,
   ArtifactVersion,
+  CanvasActionHistoryEntry,
+  CanvasAIWorkbenchState,
   CanvasEditorContext,
   CanvasDocument,
   CanvasDocumentVersion,
@@ -113,6 +115,22 @@ function reviewReceiptIdentity(r: ArtifactReviewReceipt): string {
 
 /** Maximum number of auto-save canvas versions retained per document */
 const MAX_CANVAS_AUTOSAVE_VERSIONS = 30
+
+/**
+ * How many past AI actions a document remembers. The history rides on the
+ * document row, which is mirrored to Dexie on every change, so an unbounded
+ * list would grow the write with the session.
+ */
+export const MAX_CANVAS_ACTION_HISTORY = 25
+
+/** The empty workbench, so a document written before the field existed reads. */
+export const DEFAULT_CANVAS_WORKBENCH: CanvasAIWorkbenchState = {
+  promptDraft: "",
+  selectedPresetAction: null,
+  attachments: [],
+  actionHistory: [],
+  isInlineCommandOpen: false,
+}
 /**
  * The default persist bucket. Exported because the Dexie migration
  * (`lib/artifacts/localstorage-migration.ts`) has to read the same bucket the
@@ -898,6 +916,28 @@ interface ArtifactActions {
    * from "not there" and use the difference to enumerate another workspace.
    */
   getCanvasDocumentForWorkspace: (id: string) => CanvasDocument | null
+  /**
+   * Patch a document's AI workbench state (draft prompt, chosen preset, staged
+   * attachments, action history, inline-command visibility).
+   *
+   * `CanvasAIWorkbenchState` has been on the document type since it was
+   * written, and the Dexie mirror has carried it since v206, but nothing ever
+   * wrote to it: the workbench held its draft in component state and lost it
+   * on every document switch. This is that state's only writer.
+   */
+  updateCanvasWorkbench: (documentId: string, patch: Partial<CanvasAIWorkbenchState>) => void
+  /**
+   * Record what the user asked for, so the panel can show the run again and
+   * offer a re-run. Newest first, capped so a long session does not grow the
+   * document row without bound.
+   */
+  appendCanvasActionHistory: (documentId: string, entry: CanvasActionHistoryEntry) => void
+  /** Update one history entry in place, e.g. when its review is resolved. */
+  updateCanvasActionHistoryEntry: (
+    documentId: string,
+    entryId: string,
+    patch: Partial<CanvasActionHistoryEntry>
+  ) => void
   compareVersions: (
     documentId: string,
     versionId1: string,
@@ -2165,6 +2205,67 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               [documentId]: {
                 ...doc,
                 versions: doc.versions.filter((v) => v.id !== versionId),
+              },
+            },
+          }
+        })
+      },
+
+      updateCanvasWorkbench: (documentId, patch) => {
+        set((state) => {
+          const doc = state.canvasDocuments[documentId]
+          if (!doc) return state
+          const workbench: CanvasAIWorkbenchState = {
+            ...DEFAULT_CANVAS_WORKBENCH,
+            ...doc.aiWorkbench,
+            ...patch,
+          }
+          return {
+            canvasDocuments: {
+              ...state.canvasDocuments,
+              // Deliberately not through `updateCanvasDocument`: typing in the
+              // prompt box is not an edit to the document, and bumping
+              // `updatedAt` for it would reorder the rail on every keystroke.
+              [documentId]: { ...doc, aiWorkbench: workbench },
+            },
+          }
+        })
+      },
+
+      appendCanvasActionHistory: (documentId, entry) => {
+        set((state) => {
+          const doc = state.canvasDocuments[documentId]
+          if (!doc) return state
+          const previous = doc.aiWorkbench ?? DEFAULT_CANVAS_WORKBENCH
+          const actionHistory = [entry, ...previous.actionHistory].slice(
+            0,
+            MAX_CANVAS_ACTION_HISTORY
+          )
+          return {
+            canvasDocuments: {
+              ...state.canvasDocuments,
+              [documentId]: {
+                ...doc,
+                aiWorkbench: { ...DEFAULT_CANVAS_WORKBENCH, ...previous, actionHistory },
+              },
+            },
+          }
+        })
+      },
+
+      updateCanvasActionHistoryEntry: (documentId, entryId, patch) => {
+        set((state) => {
+          const doc = state.canvasDocuments[documentId]
+          if (!doc?.aiWorkbench) return state
+          const actionHistory = doc.aiWorkbench.actionHistory.map((item) =>
+            item.id === entryId ? { ...item, ...patch } : item
+          )
+          return {
+            canvasDocuments: {
+              ...state.canvasDocuments,
+              [documentId]: {
+                ...doc,
+                aiWorkbench: { ...doc.aiWorkbench, actionHistory },
               },
             },
           }

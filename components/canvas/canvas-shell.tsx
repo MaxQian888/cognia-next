@@ -32,6 +32,7 @@ import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
 import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
 import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
+import { CanvasActionsProvider } from "./canvas-actions-context"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { CanvasSidePanels } from "./canvas-side-panels"
 import { CanvasWorkspace } from "./canvas-workspace"
@@ -46,8 +47,14 @@ export const CANVAS_SHELL_RIGHT_MAX = 28
 export function CanvasShell() {
   useCanvasLayoutShortcuts()
   const isMobile = useIsMobile()
-  if (isMobile) return <CanvasMobileShell />
-  return <CanvasDesktopShell />
+  // The provider spans the editor pane and the right rail, so an action fired
+  // from the toolbar and the panel that renders its output are looking at the
+  // same run.
+  return (
+    <CanvasActionsProvider>
+      {isMobile ? <CanvasMobileShell /> : <CanvasDesktopShell />}
+    </CanvasActionsProvider>
+  )
 }
 
 function CanvasDesktopShell() {

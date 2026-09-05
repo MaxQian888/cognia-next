@@ -13,6 +13,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
+import { nanoid } from "nanoid"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
 import {
@@ -51,7 +52,7 @@ import {
 } from "@/hooks/canvas/use-canvas-document-summaries"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
-import { useCanvasActions } from "@/hooks/canvas/use-canvas-actions"
+import { useSharedCanvasActions } from "./canvas-actions-context"
 import { useCanvasSuggestions } from "@/hooks/canvas/use-canvas-suggestions"
 import { useAutoSuggestions } from "@/hooks/canvas/use-auto-suggestions"
 import { useCanvasKeyboardShortcuts } from "@/hooks/canvas/use-canvas-keyboard-shortcuts"
@@ -72,11 +73,16 @@ import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 import { isCanvasDocumentPreviewable } from "@/lib/canvas/artifact-projection"
-import type { CanvasWorkbenchActionType } from "@/types/artifact/artifact"
+import type {
+  CanvasActionEntryPoint,
+  CanvasActionHistoryEntry,
+  CanvasWorkbenchActionType,
+} from "@/types/artifact/artifact"
 import { CanvasPreviewPane } from "./canvas-preview-pane"
 import { CanvasReviewView } from "./canvas-review-view"
 import { CanvasViewModeToggle } from "./canvas-view-mode-toggle"
 import { CANVAS_GOTO_LINE_EVENT, type CanvasGotoLineDetail } from "./canvas-outline-panel"
+import { requestCanvasExecute } from "./canvas-execute-event"
 
 const MonacoEditorView = dynamic(() => import("@monaco-editor/react").then((mod) => mod.default), {
   ssr: false,
@@ -112,6 +118,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const remove = useArtifactStore((s) => s.deleteCanvasDocument)
   const saveVersion = useArtifactStore((s) => s.saveCanvasVersion)
   const getCanvasVersions = useArtifactStore((s) => s.getCanvasVersions)
+  const updateWorkbench = useArtifactStore((s) => s.updateCanvasWorkbench)
+  const appendActionHistory = useArtifactStore((s) => s.appendCanvasActionHistory)
+  const updateActionHistoryEntry = useArtifactStore((s) => s.updateCanvasActionHistoryEntry)
+  const inlineCommandOpen = useArtifactStore((s) =>
+    Boolean(activeId && s.canvasDocuments[activeId]?.aiWorkbench?.isInlineCommandOpen)
+  )
   const proposeCanvasReview = useArtifactStore((s) => s.proposeCanvasReview)
   const previewMode = useCanvasLayoutStore((s) => s.previewMode)
   // The tab strip lists OPEN documents, not every document in the workspace.
@@ -240,7 +252,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   })
   const performanceProfile = monacoSetup.performanceProfile
 
-  const actions = useCanvasActions()
+  const actions = useSharedCanvasActions()
   const suggestions = useCanvasSuggestions()
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
@@ -486,7 +498,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const runAction = useCallback(
     async (
       actionType: CanvasActionType,
-      opts: { targetLanguage?: string; prompt?: string; proposalFirst?: boolean } = {}
+      opts: {
+        targetLanguage?: string
+        prompt?: string
+        proposalFirst?: boolean
+        entryPoint?: CanvasActionEntryPoint
+      } = {}
     ) => {
       if (!activeDoc) return
       // An AI action reads `activeDoc.content`, which is the STORE's copy. Flush
@@ -499,21 +516,89 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         editor && sel && !sel.isEmpty()
           ? (editor.getModel()?.getValueInRange(sel) ?? undefined)
           : undefined
-      const result = await actions.run({
-        actionType,
-        content: activeDoc.content,
-        language: activeDoc.language,
-        selection: selectionText,
-        targetLanguage: opts.targetLanguage,
-        prompt: opts.prompt,
-      })
-      if (actionType === "review" || actionType === "explain") return // narrative actions, don't replace
+
+      // Every run is recorded before it starts, so a failure is still visible
+      // in the history rather than vanishing with the request.
+      const attachments = activeDoc.aiWorkbench?.attachments ?? []
+      const historyId = nanoid()
+      const historyEntry: CanvasActionHistoryEntry = {
+        id: historyId,
+        requestId: historyId,
+        actionType: actionType as CanvasWorkbenchActionType,
+        prompt: opts.prompt ?? activeDoc.aiWorkbench?.promptDraft ?? "",
+        scope: selectionText ? "selection" : "document",
+        entryPoint: opts.entryPoint ?? "toolbar",
+        createdAt: new Date(),
+        status: "pending-review",
+        attachmentSummary: attachments.map((attachment) => attachment.label),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      }
+      appendActionHistory(activeDoc.id, historyEntry)
+      const settleHistory = (patch: Partial<CanvasActionHistoryEntry>) =>
+        updateActionHistoryEntry(activeDoc.id, historyId, patch)
+
+      // `run` used to ask a model to *imagine* executing the code and print
+      // what it thought would happen, next to an execution panel that actually
+      // runs it. It now delegates to that panel.
+      if (actionType === "run") {
+        requestCanvasExecute(activeDoc.id)
+        settleHistory({ status: "completed" })
+        return
+      }
+
+      // `review` used to return prose that nothing rendered. It produces
+      // anchored suggestions now, which the Suggestions panel can accept or
+      // reject one at a time.
+      if (actionType === "review") {
+        const position = editor?.getPosition() ?? null
+        const findings = await suggestions.generate(
+          {
+            documentId: activeDoc.id,
+            language: activeDoc.language,
+            content: activeDoc.content,
+            cursorLine: position?.lineNumber,
+            cursorColumn: position?.column,
+            selectionText,
+          },
+          { mode: "review" }
+        )
+        settleHistory({ status: findings.length > 0 ? "pending-review" : "completed" })
+        return
+      }
+
+      let result: string
+      try {
+        result = await actions.run({
+          actionType,
+          content: activeDoc.content,
+          language: activeDoc.language,
+          selection: selectionText,
+          targetLanguage: opts.targetLanguage,
+          prompt: opts.prompt ?? activeDoc.aiWorkbench?.promptDraft ?? undefined,
+          attachments,
+        })
+      } catch (error) {
+        settleHistory({
+          status: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return
+      }
+      // `explain` is narrative by design: it does not touch the buffer, and its
+      // output is rendered by the workbench's AI panel from the shared run
+      // state rather than discarded here.
+      if (actionType === "explain") {
+        settleHistory({ status: "completed" })
+        return
+      }
       if (selectionText && editor && sel && !opts.proposalFirst) {
         // Selection-scoped edits stay inline (fast path).
         editor.executeEdits("canvas-action", [{ range: sel, text: result, forceMoveMarkers: true }])
+        settleHistory({ status: "completed" })
       } else {
         // Whole-document rewrites open a per-hunk diff review instead of
-        // silently overwriting the buffer — accept/reject before it lands.
+        // silently overwriting the buffer, so the user accepts or rejects
+        // before it lands.
         const model = editor?.getModel()
         const proposedContent =
           selectionText && model && sel
@@ -521,12 +606,28 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
                 .getValue()
                 .slice(model.getOffsetAt(sel.getEndPosition()))}`
             : result
-        proposeCanvasReview(activeDoc.id, proposedContent, {
+        const proposal = proposeCanvasReview(activeDoc.id, proposedContent, {
           actionType: actionType as CanvasWorkbenchActionType,
+          requestId: historyId,
         })
+        settleHistory(
+          proposal
+            ? { status: "pending-review", reviewId: proposal.id }
+            : // No hunks means the model returned the document unchanged. That
+              // is a completed action, not a proposal waiting on the user.
+              { status: "completed" }
+        )
       }
     },
-    [actions, activeDoc, proposeCanvasReview, flushCommit]
+    [
+      actions,
+      activeDoc,
+      appendActionHistory,
+      proposeCanvasReview,
+      flushCommit,
+      suggestions,
+      updateActionHistoryEntry,
+    ]
   )
 
   // Keep the keyboard-action ref pointing at the freshest runAction so
@@ -774,10 +875,14 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       {aiWorkbenchEnabled && (
         <CanvasInlineCommand
           running={actions.running}
-          onAction={runAction}
+          onAction={(type, options) => void runAction(type, { ...options, entryPoint: "inline" })}
           onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
           onTriggerSuggestions={triggerSuggestions}
           onCreateDocument={onCreate}
+          open={inlineCommandOpen}
+          onOpenChange={(open) =>
+            activeId && updateWorkbench(activeId, { isInlineCommandOpen: open })
+          }
         />
       )}
 

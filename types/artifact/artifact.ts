@@ -489,11 +489,19 @@ export interface CanvasActionHistoryEntry {
   lineageId?: string
 }
 
+/**
+ * The AI panel's own state, carried on the document so it survives a switch
+ * away and back (and a reload, through the Dexie mirror).
+ *
+ * It deliberately does NOT hold the pending review. That lived here as a second
+ * copy of `useArtifactStore().pendingReviews[documentId]`, which is what the
+ * review UI, the stale-baseline check, the model tools and the workflow nodes
+ * all read. Two copies of a proposal is two answers to "is this still valid".
+ */
 export interface CanvasAIWorkbenchState {
   promptDraft: string
   selectedPresetAction: CanvasWorkbenchActionType | null
   attachments: CanvasActionAttachment[]
-  pendingReview: CanvasPendingReview | null
   actionHistory: CanvasActionHistoryEntry[]
   isInlineCommandOpen: boolean
 }

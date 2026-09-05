@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { useState } from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { CanvasInlineCommand } from "./canvas-inline-command"
 
@@ -13,7 +14,23 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = jest.fn()
 })
 
-function setup(overrides: Partial<React.ComponentProps<typeof CanvasInlineCommand>> = {}) {
+/**
+ * The palette is controlled now: its open flag is the document's
+ * `aiWorkbench.isInlineCommandOpen`, so it survives switching documents. This
+ * harness stands in for the owner that holds it.
+ */
+function ControlledPalette(
+  props: Omit<React.ComponentProps<typeof CanvasInlineCommand>, "open" | "onOpenChange">
+) {
+  const [open, setOpen] = useState(false)
+  return <CanvasInlineCommand {...props} open={open} onOpenChange={setOpen} />
+}
+
+function setup(
+  overrides: Partial<
+    Omit<React.ComponentProps<typeof CanvasInlineCommand>, "open" | "onOpenChange">
+  > = {}
+) {
   const props = {
     running: false,
     onAction: jest.fn(),
@@ -22,7 +39,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof CanvasInlineComman
     onCreateDocument: jest.fn(),
     ...overrides,
   }
-  render(<CanvasInlineCommand {...props} />)
+  render(<ControlledPalette {...props} />)
   return props
 }
 

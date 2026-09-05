@@ -11,7 +11,10 @@ jest.mock("@cognia/provider-core/core/client", () => ({
 
 import {
   ACTION_PROMPTS,
-  buildActionUserPrompt,
+  buildCanvasActionPrompts,
+  runCanvasAction,
+  streamCanvasAction,
+  CanvasActionPiiBlockedError,
   applyCanvasActionResult,
   getActionDescription,
   executeCanvasAction,
@@ -42,26 +45,98 @@ describe("ACTION_PROMPTS / getActionDescription", () => {
   })
 })
 
-describe("buildActionUserPrompt", () => {
-  it("includes language, target language, instruction, and selection", () => {
-    const out = buildActionUserPrompt({
-      actionType: "translate",
-      content: "doc body",
-      language: "english",
-      targetLanguage: "fr",
+describe("buildCanvasActionPrompts", () => {
+  // One builder for the hook and the plugin API. Previously the hook used a
+  // second one that put the instruction in the user prompt and dropped
+  // attachments entirely.
+  it("carries language, instruction and attachments in the system prompt", () => {
+    const { systemPrompt, userPrompt } = buildCanvasActionPrompts("improve", "doc body", {
+      language: "typescript",
       prompt: "polite tone",
-      selection: "specific chunk",
+      attachments: [
+        {
+          id: "a1",
+          sourceType: "artifact",
+          sourceId: "art_1",
+          label: "Spec",
+          snapshot: "spec text",
+        },
+      ],
     })
-    expect(out).toContain("Language: english")
-    expect(out).toContain("Target language: fr")
-    expect(out).toContain("Instruction: polite tone")
-    expect(out).toContain("Selection:\n\nspecific chunk")
-    expect(out).not.toContain("Document:")
+    expect(systemPrompt).toContain("Language: typescript")
+    expect(systemPrompt).toContain("User instruction:\npolite tone")
+    expect(systemPrompt).toContain("Attachment: Spec [artifact]")
+    expect(systemPrompt).toContain("spec text")
+    expect(userPrompt).toBe("doc body")
   })
 
-  it("falls back to document when no selection", () => {
-    const out = buildActionUserPrompt({ actionType: "review", content: "the doc" })
-    expect(out).toContain("Document:\n\nthe doc")
+  it("sends the selection as the user prompt when there is one", () => {
+    const { userPrompt } = buildCanvasActionPrompts("translate", "whole doc", {
+      targetLanguage: "fr",
+      selection: "specific chunk",
+    })
+    expect(userPrompt).toBe("specific chunk")
+  })
+
+  it("flags a missing or truncated attachment so the model knows", () => {
+    const { systemPrompt } = buildCanvasActionPrompts("review", "doc", {
+      attachments: [
+        {
+          id: "a1",
+          sourceType: "session-message",
+          sourceId: "m1",
+          label: "Reply",
+          snapshot: "partial",
+          isTruncated: true,
+        },
+      ],
+    })
+    expect(systemPrompt).toContain("(truncated)")
+  })
+})
+
+describe("the shared execution path", () => {
+  const model = { model: "stub" } as never
+
+  beforeEach(() => {
+    ;(generateText as jest.Mock).mockReset()
+    ;(streamText as jest.Mock).mockReset()
+  })
+
+  it("runCanvasAction refuses a prompt that would leak PII, before any dispatch", async () => {
+    // The gate lives inside the executor rather than at each call site, which
+    // is what makes it unskippable: the plugin path used to have no gate at all.
+    await expect(runCanvasAction(model, "improve", "mail jane@example.com")).rejects.toBeInstanceOf(
+      CanvasActionPiiBlockedError
+    )
+    expect(generateText).not.toHaveBeenCalled()
+  })
+
+  it("streamCanvasAction refuses the same prompt", async () => {
+    await expect(
+      streamCanvasAction(model, "improve", "mail jane@example.com", () => {})
+    ).rejects.toBeInstanceOf(CanvasActionPiiBlockedError)
+    expect(streamText).not.toHaveBeenCalled()
+  })
+
+  it("forwards the abort signal to the provider", async () => {
+    ;(generateText as jest.Mock).mockResolvedValue({ text: "ok" })
+    const controller = new AbortController()
+    await runCanvasAction(model, "improve", "doc", { abortSignal: controller.signal })
+    expect((generateText as jest.Mock).mock.calls[0][0].abortSignal).toBe(controller.signal)
+  })
+
+  it("streamCanvasAction resolves with the full text it streamed", async () => {
+    ;(streamText as jest.Mock).mockReturnValue({
+      textStream: (async function* () {
+        yield "He"
+        yield "llo"
+      })(),
+    })
+    const deltas: string[] = []
+    const full = await streamCanvasAction(model, "improve", "doc", (d) => deltas.push(d))
+    expect(deltas).toEqual(["He", "llo"])
+    expect(full).toBe("Hello")
   })
 })
 
@@ -182,6 +257,18 @@ describe("executeCanvasAction", () => {
     const call = (generateText as jest.Mock).mock.calls[0][0]
     expect(call.system).toContain("Attachment: ref [file] (truncated)")
     expect(call.system).toContain("User instruction:\ninstruction")
+  })
+
+  it("refuses a PII-bearing prompt through the plugin-facing wrapper too", async () => {
+    // This wrapper is what `lib/plugin/api/canvas-api.ts` calls. It had no gate.
+    const result = await executeCanvasAction("improve", "reach me at jane@example.com", {
+      provider: "anthropic",
+      model: "x",
+      apiKey: "k",
+    })
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("PII gate")
+    expect(generateText).not.toHaveBeenCalled()
   })
 
   it("uses selection when provided", async () => {

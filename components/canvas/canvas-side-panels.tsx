@@ -18,7 +18,7 @@
  * are still its consumers.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
@@ -31,15 +31,9 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty"
 import {
-  Bug,
-  Expand,
-  HelpCircle,
   Lightbulb,
   History as HistoryIcon,
-  Languages,
   MessageSquare,
-  Minimize2,
-  Sparkles,
   Wand2,
   Users,
   Play,
@@ -62,8 +56,10 @@ import { ContextWorkbench } from "@/components/context-workbench/context-workben
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
 import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
+import { CanvasAiPanel } from "./canvas-ai-panel"
 import { CanvasReviewView } from "./canvas-review-view"
 import { CanvasPreviewPane } from "./canvas-preview-pane"
+import { CANVAS_EXECUTE_EVENT, type CanvasExecuteDetail } from "./canvas-execute-event"
 import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
 import { CanvasExportMenu } from "./canvas-export-menu"
@@ -72,17 +68,9 @@ import {
   DocumentFormatToolbar,
   type FormatAction,
 } from "@/components/document/document-format-toolbar"
-import { TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
-import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 
 export interface CanvasSidePanelsProps {
   mobile?: boolean
@@ -163,7 +151,7 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
         order: 1,
         appliesTo: (resource) => resource.kind === "canvas-document",
         retention: "stateful",
-        renderer: () => <CanvasWorkbenchActions />,
+        renderer: () => (activeId ? <CanvasAiPanel documentId={activeId} /> : null),
       },
       {
         id: "resource-chat",
@@ -410,76 +398,6 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
   )
 }
 
-function CanvasWorkbenchActions() {
-  const t = useTranslations("canvas.actions")
-  const dispatchAction = (type: CanvasActionType, targetLanguage?: string) => {
-    window.dispatchEvent(
-      new CustomEvent("canvas-action", {
-        detail: { type, targetLanguage, proposalFirst: true },
-      })
-    )
-  }
-
-  return (
-    <div className="grid gap-2 p-3">
-      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("review")}>
-        <Wand2 className="mr-2 size-4" />
-        {t("review")}
-      </Button>
-      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("fix")}>
-        <Bug className="mr-2 size-4" />
-        {t("fix")}
-      </Button>
-      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("improve")}>
-        <Sparkles className="mr-2 size-4" />
-        {t("improve")}
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="justify-start">
-            <Languages className="mr-2 size-4" />
-            {t("translate")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {TRANSLATE_LANGUAGES.map((language) => (
-            <DropdownMenuItem
-              key={language.value}
-              onClick={() => dispatchAction("translate", language.value)}
-            >
-              {language.label}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("explain")}>
-        <HelpCircle className="mr-2 size-4" />
-        {t("explain")}
-      </Button>
-      <Button
-        variant="outline"
-        className="justify-start"
-        onClick={() => dispatchAction("simplify")}
-      >
-        <Minimize2 className="mr-2 size-4" />
-        {t("simplify")}
-      </Button>
-      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("expand")}>
-        <Expand className="mr-2 size-4" />
-        {t("expand")}
-      </Button>
-      <Button
-        variant="outline"
-        className="justify-start"
-        onClick={() => window.dispatchEvent(new CustomEvent("canvas-action-suggest"))}
-      >
-        <Lightbulb className="mr-2 size-4" />
-        {t("suggest", { default: "Suggest" })}
-      </Button>
-    </div>
-  )
-}
-
 /**
  * Wraps the Cognia SuggestionsPanel with the active document's
  * suggestions list pulled from the artifact store.
@@ -631,13 +549,34 @@ function ExecutionHost({ documentId }: { documentId: string }) {
   const doc = documents[documentId]
   const language = doc?.language ?? "javascript"
   const { execute, cancel, clear, result, isExecuting } = useCanvasCodeExecution()
+
+  const run = useCallback(() => {
+    const current = useArtifactStore.getState().canvasDocuments[documentId]
+    if (!current) return
+    void execute(current.content, current.language)
+  }, [documentId, execute])
+
+  // The `run` AI action delegates here rather than asking a model to describe
+  // what it thinks the code would do. Reading the document from the store at
+  // call time keeps the run on the newest buffer even when the event arrives
+  // from the editor pane a beat after a commit.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<CanvasExecuteDetail>).detail
+      if (detail?.documentId !== documentId) return
+      run()
+    }
+    window.addEventListener(CANVAS_EXECUTE_EVENT, handler as EventListener)
+    return () => window.removeEventListener(CANVAS_EXECUTE_EVENT, handler as EventListener)
+  }, [documentId, run])
+
   return (
     <CodeExecutionPanel
       code={doc?.content ?? ""}
       result={result}
       isExecuting={isExecuting}
       language={language}
-      onExecute={() => void execute(doc?.content ?? "", language)}
+      onExecute={run}
       onCancel={() => cancel()}
       onClear={() => clear()}
       className="border-t-0"

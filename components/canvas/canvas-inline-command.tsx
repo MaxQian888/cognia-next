@@ -12,7 +12,7 @@
  * reachable from one searchable list.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 import {
   CommandDialog,
@@ -32,6 +32,13 @@ export interface CanvasInlineCommandProps {
   onSaveVersion: () => void
   onTriggerSuggestions: () => void
   onCreateDocument: () => void
+  /**
+   * Whether the palette is open. Lifted out of local state so it is the
+   * document's `aiWorkbench.isInlineCommandOpen`, which the type has declared
+   * since it was written and nothing ever set.
+   */
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 export function CanvasInlineCommand({
@@ -40,19 +47,19 @@ export function CanvasInlineCommand({
   onSaveVersion,
   onTriggerSuggestions,
   onCreateDocument,
+  open,
+  onOpenChange,
 }: CanvasInlineCommandProps) {
   const t = useTranslations("canvas.inlineCommand")
   const tActions = useTranslations("canvas.actions")
-  const [open, setOpen] = useState(false)
-
   useEffect(() => {
-    const handler = () => setOpen((prev) => !prev)
+    const handler = () => onOpenChange(!open)
     window.addEventListener("canvas-inline-command", handler)
     return () => window.removeEventListener("canvas-inline-command", handler)
-  }, [])
+  }, [onOpenChange, open])
 
   const run = (fn: () => void) => {
-    setOpen(false)
+    onOpenChange(false)
     fn()
   }
 
@@ -62,7 +69,7 @@ export function CanvasInlineCommand({
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       title={t("title")}
       description={t("description")}
     >

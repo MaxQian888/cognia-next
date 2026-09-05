@@ -58,6 +58,7 @@ import {
 } from "./artifact-store"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { MAX_CANVAS_ACTION_HISTORY } from "@/stores/artifact/artifact-store"
 import {
   registerCanvasDocumentDisposer,
   unregisterCanvasDocumentDisposer,
@@ -902,6 +903,95 @@ describe("canvas documents", () => {
 
   it("compareVersions returns null when versions are missing", () => {
     expect(useArtifactStore.getState().compareVersions("missing", "x", "y")).toBeNull()
+  })
+})
+
+describe("canvas AI workbench state", () => {
+  function seed() {
+    return useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "body",
+      language: "markdown",
+      type: "text",
+    })
+  }
+
+  it("reads as the empty workbench before anything writes to it", () => {
+    const id = seed()
+    expect(useArtifactStore.getState().canvasDocuments[id].aiWorkbench).toBeUndefined()
+    useArtifactStore.getState().updateCanvasWorkbench(id, { promptDraft: "hi" })
+    expect(useArtifactStore.getState().canvasDocuments[id].aiWorkbench).toEqual({
+      promptDraft: "hi",
+      selectedPresetAction: null,
+      attachments: [],
+      actionHistory: [],
+      isInlineCommandOpen: false,
+    })
+  })
+
+  it("does not bump updatedAt, so typing a prompt cannot reorder the rail", () => {
+    const id = seed()
+    const before = useArtifactStore.getState().canvasDocuments[id].updatedAt
+    useArtifactStore.getState().updateCanvasWorkbench(id, { promptDraft: "a" })
+    expect(useArtifactStore.getState().canvasDocuments[id].updatedAt).toEqual(before)
+  })
+
+  it("ignores a write to a document that is gone", () => {
+    expect(() =>
+      useArtifactStore.getState().updateCanvasWorkbench("ghost", { promptDraft: "x" })
+    ).not.toThrow()
+  })
+
+  it("records history newest-first and caps it", () => {
+    const id = seed()
+    for (let i = 0; i < MAX_CANVAS_ACTION_HISTORY + 5; i += 1) {
+      useArtifactStore.getState().appendCanvasActionHistory(id, {
+        id: `h${i}`,
+        requestId: `h${i}`,
+        actionType: "improve",
+        prompt: `p${i}`,
+        scope: "document",
+        entryPoint: "toolbar",
+        createdAt: new Date(),
+        status: "completed",
+        attachmentSummary: [],
+      })
+    }
+    const history = useArtifactStore.getState().canvasDocuments[id].aiWorkbench!.actionHistory
+    // The history rides on the row the Dexie mirror rewrites on every change,
+    // so an unbounded list would grow the write with the session.
+    expect(history).toHaveLength(MAX_CANVAS_ACTION_HISTORY)
+    expect(history[0].prompt).toBe(`p${MAX_CANVAS_ACTION_HISTORY + 4}`)
+  })
+
+  it("settles a history entry in place", () => {
+    const id = seed()
+    useArtifactStore.getState().appendCanvasActionHistory(id, {
+      id: "h1",
+      requestId: "h1",
+      actionType: "improve",
+      prompt: "p",
+      scope: "document",
+      entryPoint: "toolbar",
+      createdAt: new Date(),
+      status: "pending-review",
+      attachmentSummary: [],
+    })
+
+    useArtifactStore
+      .getState()
+      .updateCanvasActionHistoryEntry(id, "h1", { status: "failed", error: "network" })
+
+    const [entry] = useArtifactStore.getState().canvasDocuments[id].aiWorkbench!.actionHistory
+    expect(entry).toMatchObject({ status: "failed", error: "network" })
+  })
+
+  it("ignores settling an entry that is not there", () => {
+    const id = seed()
+    useArtifactStore.getState().updateCanvasWorkbench(id, { promptDraft: "x" })
+    expect(() =>
+      useArtifactStore.getState().updateCanvasActionHistoryEntry(id, "ghost", { status: "failed" })
+    ).not.toThrow()
   })
 })
 

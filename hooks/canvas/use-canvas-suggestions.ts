@@ -12,10 +12,18 @@
  *    app provider is used (via `resolveStandaloneProvider`, same as canvas actions).
  *  - `maxSuggestions` caps the count, `contextLines` trims the prompt to a window
  *    around the caret so large documents don't blow the context / cost.
+ *
+ * Suggestions come back as a SCHEMA-VALIDATED object, not as JSON fished out of
+ * prose. The old reader took `indexOf("{")` to `lastIndexOf("}")`, which
+ * mis-sliced whenever the model wrapped its answer in a fence, wrote a sentence
+ * containing a brace, or emitted two objects; and the shape check that followed
+ * was a hand-written `typeof` filter that silently dropped anything it did not
+ * recognise. A rejected field is now a validation failure with a reason.
  */
 
 import { useCallback, useState } from "react"
-import { generateText } from "ai"
+import { generateObject } from "ai"
+import { z } from "zod"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
@@ -40,20 +48,58 @@ export interface SuggestionContext {
 export interface GenerateSuggestionsOptions {
   maxSuggestions?: number
   contextLines?: number
+  /**
+   * `assist` proposes polish around the caret; `review` reads the whole
+   * document and reports findings. Both produce anchored suggestions, which is
+   * what makes a review something the user can accept hunk by hunk instead of
+   * a paragraph of prose.
+   */
+  mode?: CanvasSuggestionMode
+  abortSignal?: AbortSignal
 }
 
 const SYSTEM_PROMPT = `You are an expert code/text editing assistant. Given a document and the user's
 current cursor / selection context, propose AT MOST {{N}} concise, mechanical suggestions
 that improve correctness, readability, or style.
 
-Respond as JSON: {"suggestions":[{"type":"fix|improve|edit|comment",
-  "explanation":"<one sentence>",
-  "originalText":"<verbatim>",
-  "suggestedText":"<verbatim>",
-  "confidence":<0-1, how sure you are this change is correct and wanted>,
-  "startLine":N,"endLine":N}]}.
+Quote \`originalText\` verbatim from the document and give the 1-based line range it
+covers. \`confidence\` is how sure you are the change is correct and wanted.
+If no useful suggestion exists, return an empty list.`
 
-If no useful suggestion exists, return {"suggestions":[]}.`
+/**
+ * A review pass rather than a caret-local one: the whole document is in scope,
+ * and the interesting output is problems, not polish. `review` used to produce
+ * a wall of prose that nothing rendered, so it is anchored suggestions now.
+ */
+const REVIEW_SYSTEM_PROMPT = `You are a meticulous reviewer. Read the whole document and report AT MOST {{N}}
+specific, actionable findings: bugs, incorrect logic, unhandled edge cases, factual
+errors, and clear violations of the conventions the document itself establishes.
+
+Each finding must be anchored: quote \`originalText\` verbatim from the document, give
+the 1-based line range it covers, and put the corrected text in \`suggestedText\`. When a
+finding is a warning with no mechanical fix, repeat the original text as the suggestion
+and use type "comment". \`confidence\` is how sure you are the finding is real.
+If the document has no findings worth reporting, return an empty list.`
+
+/**
+ * The contract the model answers against. Line numbers are 1-based and inclusive,
+ * matching `CanvasSuggestion["range"]` and the editor's own coordinates.
+ */
+const SUGGESTION_SCHEMA = z.object({
+  suggestions: z.array(
+    z.object({
+      type: z.enum(["fix", "improve", "edit", "comment"]).describe("What kind of change this is"),
+      explanation: z.string().describe("One sentence, in the user's own language"),
+      originalText: z.string().describe("Verbatim text from the document"),
+      suggestedText: z.string().describe("What it should say instead"),
+      confidence: z.number().min(0).max(1).optional(),
+      startLine: z.number().int().min(1),
+      endLine: z.number().int().min(1),
+    })
+  ),
+})
+
+export type CanvasSuggestionMode = "assist" | "review"
 
 /**
  * Trim `content` to a window of `±contextLines` lines around `cursorLine`
@@ -74,21 +120,15 @@ export function sliceContextWindow(
   return lines.slice(start, end).join("\n")
 }
 
-interface RawSuggestion {
-  type?: CanvasSuggestion["type"]
-  explanation?: string
-  originalText?: string
-  suggestedText?: string
-  confidence?: unknown
-  startLine?: number
-  endLine?: number
-}
-
 /**
- * A 0–1 confidence, or `undefined` when the model omitted it or answered with
+ * A 0-1 confidence, or `undefined` when the model omitted it or answered with
  * something that is not a usable number. Percentages (a model that answers
  * `85`) are normalised rather than dropped; anything else is discarded, since a
  * made-up number is worse than no badge at all.
+ *
+ * The schema already narrows confidence to 0-1, so this now runs only on the
+ * looser inputs that reach it from tests and from a provider whose structured
+ * output arrived as a string.
  */
 export function normalizeConfidence(raw: unknown): number | undefined {
   const value = typeof raw === "string" ? Number(raw.replace("%", "").trim()) : raw
@@ -98,42 +138,31 @@ export function normalizeConfidence(raw: unknown): number | undefined {
   return undefined
 }
 
-function parseSuggestions(text: string, max: number): Omit<CanvasSuggestion, "id">[] {
-  const trimmed = text.trim()
-  const start = trimmed.indexOf("{")
-  const end = trimmed.lastIndexOf("}")
-  if (start < 0 || end <= start) return []
-  let parsed: { suggestions?: RawSuggestion[] } = {}
-  try {
-    parsed = JSON.parse(trimmed.slice(start, end + 1))
-  } catch (err) {
-    loggers.canvas.warn("canvas suggestions parse failed", {
-      error: String(err),
-      preview: trimmed.slice(0, 200),
-    })
-    return []
-  }
-  const list = Array.isArray(parsed.suggestions) ? parsed.suggestions : []
-  return list
-    .slice(0, max)
-    .filter(
-      (s): s is RawSuggestion =>
-        typeof s.suggestedText === "string" &&
-        typeof s.originalText === "string" &&
-        typeof s.startLine === "number" &&
-        typeof s.endLine === "number"
-    )
-    .map((s) => ({
-      type: (s.type ?? "improve") as CanvasSuggestion["type"],
-      explanation: s.explanation ?? "",
-      originalText: s.originalText ?? "",
-      suggestedText: s.suggestedText ?? "",
-      range: { startLine: s.startLine!, endLine: s.endLine! },
-      ...(normalizeConfidence(s.confidence) !== undefined
-        ? { confidence: normalizeConfidence(s.confidence) }
-        : {}),
+/**
+ * Turn a validated object into store-shaped suggestions.
+ *
+ * The schema guarantees the field types; what it cannot guarantee is that the
+ * line range makes sense, so an inverted or degenerate range is repaired here
+ * rather than anchoring a suggestion to nothing.
+ */
+export function toCanvasSuggestions(
+  parsed: z.infer<typeof SUGGESTION_SCHEMA>,
+  max: number
+): Omit<CanvasSuggestion, "id">[] {
+  return parsed.suggestions.slice(0, max).map((s) => {
+    const startLine = Math.max(1, Math.min(s.startLine, s.endLine))
+    const endLine = Math.max(startLine, Math.max(s.startLine, s.endLine))
+    const confidence = normalizeConfidence(s.confidence)
+    return {
+      type: s.type,
+      explanation: s.explanation,
+      originalText: s.originalText,
+      suggestedText: s.suggestedText,
+      range: { startLine, endLine },
+      ...(confidence !== undefined ? { confidence } : {}),
       status: "pending" as const,
-    }))
+    }
+  })
 }
 
 export function useCanvasSuggestions() {
@@ -172,12 +201,18 @@ export function useCanvasSuggestions() {
   const generate = useCallback(
     async (ctx: SuggestionContext, opts: GenerateSuggestionsOptions = {}) => {
       const max = opts.maxSuggestions ?? ai.maxSuggestions ?? 5
-      const contextLines = opts.contextLines ?? ai.contextLines
+      const mode = opts.mode ?? "assist"
+      // A review reads the whole document by definition, so the caret window
+      // that keeps an assist pass cheap would defeat it.
+      const contextLines = mode === "review" ? 0 : (opts.contextLines ?? ai.contextLines)
       setRunning(true)
       setError(null)
       try {
         const windowed = sliceContextWindow(ctx.content, ctx.cursorLine, contextLines)
-        const system = SYSTEM_PROMPT.replace("{{N}}", String(max))
+        const system = (mode === "review" ? REVIEW_SYSTEM_PROMPT : SYSTEM_PROMPT).replace(
+          "{{N}}",
+          String(max)
+        )
         // The window above is a slice around the caret, so it drops exactly the
         // things a good suggestion needs: which function/class the caret sits in,
         // and what the file exports and depends on. Those are cheap to derive
@@ -196,12 +231,14 @@ export function useCanvasSuggestions() {
         if (!hasNoLeakingPii(system) || !hasNoLeakingPii(prompt)) {
           throw new Error("Canvas suggestions blocked by PII gate")
         }
-        const { text } = await generateText({
+        const { object } = await generateObject({
           model: buildModel(),
+          schema: SUGGESTION_SCHEMA,
           system,
           prompt,
+          abortSignal: opts.abortSignal,
         })
-        const parsed = parseSuggestions(text, max)
+        const parsed = toCanvasSuggestions(object, max)
         for (const s of parsed) {
           addSuggestion(ctx.documentId, s)
         }
@@ -211,6 +248,7 @@ export function useCanvasSuggestions() {
         loggers.canvas.error("canvas suggestion generation failed", {
           documentId: ctx.documentId,
           language: ctx.language,
+          mode,
           error: m,
         })
         setError(m)

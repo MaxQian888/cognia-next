@@ -3,9 +3,12 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-const generateTextMock = jest.fn()
+// The generator asks for a schema-validated object now, not free text it has to
+// fish JSON out of. The SDK is what enforces the schema, so the mock stands in
+// for a provider that answered in shape.
+const generateObjectMock = jest.fn()
 jest.mock("ai", () => ({
-  generateText: (args: unknown) => generateTextMock(args),
+  generateObject: (args: unknown) => generateObjectMock(args),
 }))
 
 const addSuggestionMock = jest.fn()
@@ -63,10 +66,11 @@ import {
   useCanvasSuggestions,
   normalizeConfidence,
   sliceContextWindow,
+  toCanvasSuggestions,
 } from "./use-canvas-suggestions"
 
 beforeEach(() => {
-  generateTextMock.mockReset()
+  generateObjectMock.mockReset()
   addSuggestionMock.mockClear()
   getProviderModelMock.mockClear()
   resolveStandaloneProviderMock.mockReturnValue({ kind: "unresolved" })
@@ -75,9 +79,9 @@ beforeEach(() => {
 })
 
 describe("useCanvasSuggestions", () => {
-  it("parses valid suggestion JSON and stores them", async () => {
-    generateTextMock.mockResolvedValueOnce({
-      text: JSON.stringify({
+  it("stores the validated suggestions", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
         suggestions: [
           {
             type: "improve",
@@ -88,7 +92,7 @@ describe("useCanvasSuggestions", () => {
             endLine: 1,
           },
         ],
-      }),
+      },
     })
     const { result } = renderHook(() => useCanvasSuggestions())
     let suggestions: unknown[] = []
@@ -103,70 +107,18 @@ describe("useCanvasSuggestions", () => {
     expect(addSuggestionMock).toHaveBeenCalledWith("doc", expect.any(Object))
   })
 
-  it("returns [] when JSON parsing fails", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: "not json {" })
-    const { result } = renderHook(() => useCanvasSuggestions())
-    let suggestions: unknown[] = []
-    await act(async () => {
-      suggestions = await result.current.generate({
-        documentId: "doc",
-        language: "ts",
-        content: "code",
-      })
-    })
-    expect(suggestions).toEqual([])
-  })
-
-  it("returns [] when response has no JSON object", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: "no braces here" })
-    const { result } = renderHook(() => useCanvasSuggestions())
-    let suggestions: unknown[] = []
-    await act(async () => {
-      suggestions = await result.current.generate({
-        documentId: "doc",
-        language: "ts",
-        content: "code",
-      })
-    })
-    expect(suggestions).toEqual([])
-  })
-
-  it("filters out invalid suggestion entries", async () => {
-    generateTextMock.mockResolvedValueOnce({
-      text: JSON.stringify({
-        suggestions: [
-          { suggestedText: "x" }, // missing originalText etc.
-          {
-            originalText: "a",
-            suggestedText: "b",
-            startLine: 1,
-            endLine: 1,
-          },
-        ],
-      }),
-    })
-    const { result } = renderHook(() => useCanvasSuggestions())
-    let suggestions: unknown[] = []
-    await act(async () => {
-      suggestions = await result.current.generate({
-        documentId: "doc",
-        language: "ts",
-        content: "x",
-      })
-    })
-    expect(suggestions).toHaveLength(1)
-  })
-
   it("respects maxSuggestions option", async () => {
-    generateTextMock.mockResolvedValueOnce({
-      text: JSON.stringify({
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
         suggestions: Array.from({ length: 4 }, (_, i) => ({
+          type: "improve",
+          explanation: "e",
           originalText: `${i}`,
           suggestedText: `${i}-new`,
-          startLine: i,
-          endLine: i,
+          startLine: i + 1,
+          endLine: i + 1,
         })),
-      }),
+      },
     })
     const { result } = renderHook(() => useCanvasSuggestions())
     let suggestions: unknown[] = []
@@ -179,22 +131,8 @@ describe("useCanvasSuggestions", () => {
     expect(suggestions).toHaveLength(2)
   })
 
-  it("returns [] and logs when braced content is not valid JSON", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: "{ not: valid, json }" })
-    const { result } = renderHook(() => useCanvasSuggestions())
-    let suggestions: unknown[] = []
-    await act(async () => {
-      suggestions = await result.current.generate({
-        documentId: "doc",
-        language: "ts",
-        content: "x",
-      })
-    })
-    expect(suggestions).toEqual([])
-  })
-
   it("trims the prompt to a context window around the caret", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
     const content = Array.from({ length: 100 }, (_, i) => `line-${i + 1}`).join("\n")
     const { result } = renderHook(() => useCanvasSuggestions())
     await act(async () => {
@@ -203,7 +141,7 @@ describe("useCanvasSuggestions", () => {
         { contextLines: 3 }
       )
     })
-    const prompt = generateTextMock.mock.calls[0][0].prompt as string
+    const prompt = generateObjectMock.mock.calls[0][0].prompt as string
     expect(prompt).toContain("line-50")
     expect(prompt).not.toContain("line-1\n") // far-away lines are trimmed out
   })
@@ -215,7 +153,7 @@ describe("useCanvasSuggestions", () => {
       suggestionProvider: "custom",
       customProviderUrl: "https://gateway.example/v1",
     }
-    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
     const { result } = renderHook(() => useCanvasSuggestions())
     await act(async () => {
       await result.current.generate({ documentId: "doc", language: "ts", content: "x" })
@@ -227,7 +165,7 @@ describe("useCanvasSuggestions", () => {
 
   it("uses the resolved app provider when standalone resolution succeeds", async () => {
     resolveStandaloneProviderMock.mockReturnValue({ kind: "resolved", protocol: "anthropic" })
-    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
     const { result } = renderHook(() => useCanvasSuggestions())
     await act(async () => {
       await result.current.generate({ documentId: "doc", language: "ts", content: "x" })
@@ -237,7 +175,7 @@ describe("useCanvasSuggestions", () => {
   })
 
   it("captures errors and returns []", async () => {
-    generateTextMock.mockRejectedValueOnce(new Error("api dead"))
+    generateObjectMock.mockRejectedValueOnce(new Error("api dead"))
     const { result } = renderHook(() => useCanvasSuggestions())
     let suggestions: unknown[] = []
     await act(async () => {
@@ -252,7 +190,7 @@ describe("useCanvasSuggestions", () => {
   })
 
   it("carries a scope block derived from the FULL document, not the window", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
     // The declaration sits far outside the ±2-line caret window, so the only
     // way the model can learn the caret is inside `fetchUser` is the block.
     const content = [
@@ -268,19 +206,19 @@ describe("useCanvasSuggestions", () => {
         { contextLines: 2 }
       )
     })
-    const prompt = generateTextMock.mock.calls[0][0].prompt as string
+    const prompt = generateObjectMock.mock.calls[0][0].prompt as string
     expect(prompt).toContain("Nearby scope:")
     expect(prompt).toContain("fetchUser")
     expect(prompt).not.toContain("export function fetchUser(id) {")
   })
 
   it("omits the scope block rather than emitting an empty one", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
     const { result } = renderHook(() => useCanvasSuggestions())
     await act(async () => {
       await result.current.generate({ documentId: "doc", language: "ts", content: "   " })
     })
-    expect(generateTextMock.mock.calls[0][0].prompt as string).not.toContain("Nearby scope:")
+    expect(generateObjectMock.mock.calls[0][0].prompt as string).not.toContain("Nearby scope:")
   })
 
   it("still trips the PII gate when the leak is only reachable via the scope block", async () => {
@@ -299,8 +237,49 @@ describe("useCanvasSuggestions", () => {
       )
     })
     expect(suggestions).toEqual([])
-    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(generateObjectMock).not.toHaveBeenCalled()
     expect(result.current.error).toContain("PII gate")
+  })
+
+  it("asks for the whole document in review mode, not the caret window", async () => {
+    // A review that only sees 3 lines around the caret is not a review.
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
+    const content = Array.from({ length: 100 }, (_, i) => `line-${i + 1}`).join("\n")
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate(
+        { documentId: "doc", language: "ts", content, cursorLine: 50 },
+        { contextLines: 3, mode: "review" }
+      )
+    })
+    const call = generateObjectMock.mock.calls[0][0]
+    expect(call.prompt as string).toContain("line-1\n")
+    expect(call.prompt as string).toContain("line-100")
+    expect(call.system as string).toContain("meticulous reviewer")
+  })
+
+  it("uses the assist prompt by default", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate({ documentId: "doc", language: "ts", content: "x" })
+    })
+    expect(generateObjectMock.mock.calls[0][0].system as string).toContain(
+      "expert code/text editing assistant"
+    )
+  })
+
+  it("forwards an abort signal so a long review can be cancelled", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { suggestions: [] } })
+    const controller = new AbortController()
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate(
+        { documentId: "doc", language: "ts", content: "x" },
+        { abortSignal: controller.signal }
+      )
+    })
+    expect(generateObjectMock.mock.calls[0][0].abortSignal).toBe(controller.signal)
   })
 
   it("blocks provider dispatch when the suggestion prompt contains PII", async () => {
@@ -315,7 +294,7 @@ describe("useCanvasSuggestions", () => {
     })
 
     expect(suggestions).toEqual([])
-    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(generateObjectMock).not.toHaveBeenCalled()
     expect(result.current.error).toContain("PII gate")
   })
 })
@@ -366,5 +345,71 @@ describe("normalizeConfidence", () => {
     expect(normalizeConfidence(101)).toBeUndefined()
     expect(normalizeConfidence(Number.NaN)).toBeUndefined()
     expect(normalizeConfidence(Number.POSITIVE_INFINITY)).toBeUndefined()
+  })
+})
+
+describe("toCanvasSuggestions", () => {
+  function make(overrides: Record<string, unknown> = {}) {
+    return {
+      suggestions: [
+        {
+          type: "fix" as const,
+          explanation: "e",
+          originalText: "a",
+          suggestedText: "b",
+          startLine: 3,
+          endLine: 5,
+          ...overrides,
+        },
+      ],
+    }
+  }
+
+  it("maps a validated entry onto the store shape", () => {
+    const [row] = toCanvasSuggestions(make(), 5)
+    expect(row).toMatchObject({
+      type: "fix",
+      explanation: "e",
+      originalText: "a",
+      suggestedText: "b",
+      range: { startLine: 3, endLine: 5 },
+      status: "pending",
+    })
+  })
+
+  it("repairs an inverted line range instead of anchoring to nothing", () => {
+    // The schema can guarantee both are integers; it cannot guarantee the model
+    // put them in order.
+    const [row] = toCanvasSuggestions(make({ startLine: 9, endLine: 4 }), 5)
+    expect(row.range).toEqual({ startLine: 4, endLine: 9 })
+  })
+
+  it("clamps a zero or negative start line to the first line", () => {
+    const [row] = toCanvasSuggestions(make({ startLine: 0, endLine: 0 }), 5)
+    expect(row.range).toEqual({ startLine: 1, endLine: 1 })
+  })
+
+  it("caps the list at the requested maximum", () => {
+    const many = {
+      suggestions: Array.from({ length: 6 }, (_, i) => ({
+        type: "improve" as const,
+        explanation: "e",
+        originalText: `${i}`,
+        suggestedText: `${i}!`,
+        startLine: i + 1,
+        endLine: i + 1,
+      })),
+    }
+    expect(toCanvasSuggestions(many, 2)).toHaveLength(2)
+  })
+
+  it("omits confidence entirely when the model gave none", () => {
+    const [row] = toCanvasSuggestions(make(), 5)
+    expect(row).not.toHaveProperty("confidence")
+  })
+
+  it("keeps a usable confidence", () => {
+    const [row] = toCanvasSuggestions(make({ confidence: 0.7 }), 5)
+    expect(row.confidence).toBe(0.7)
   })
 })

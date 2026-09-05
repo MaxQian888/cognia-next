@@ -1,11 +1,24 @@
 /**
- * Canvas Actions - AI-powered text/code processing for canvas
+ * Canvas Actions — the one place a Canvas AI action turns into a model call.
+ *
+ * There used to be two. `useCanvasActions` built its own prompt with
+ * `buildActionUserPrompt` and gated it with `hasNoLeakingPii`; the plugin API
+ * called `executeCanvasAction`, which built a DIFFERENT prompt with
+ * `buildCanvasPrompts` (attachments, per-action temperature) and gated nothing.
+ * So a plugin got richer prompts and no redaction check, and a fix to either
+ * half only reached one of them.
+ *
+ * Now both call `runCanvasAction` / `streamCanvasAction`. The PII gate lives
+ * inside them rather than at each call site, which is what makes it
+ * unskippable: a new caller cannot forget a step it never had to write.
  */
 
 import { generateText, streamText } from "ai"
 import { getProviderModel, type ProviderName } from "@cognia/provider-core/core/client"
 import type { ApiFlavor } from "@cognia/provider-types/provider"
 import type { CanvasActionAttachment, CanvasWorkbenchActionType } from "@/types/artifact/artifact"
+import { hasNoLeakingPii } from "@cognia/redact"
+import type { LanguageModel } from "ai"
 
 // The pure diff → hunk → apply engine was extracted to `canvas-review` (no
 // `ai`/provider imports) so persisted/widely-imported consumers (the artifact
@@ -181,7 +194,98 @@ function buildCanvasPrompts(
 }
 
 /**
- * Execute a canvas action on the given content
+ * Thrown when the composed prompt trips the redaction gate. Named so callers
+ * can tell a refusal apart from a provider failure and say so in the UI, rather
+ * than showing "Action failed" for something the user can actually fix.
+ */
+export class CanvasActionPiiBlockedError extends Error {
+  readonly code = "pii_blocked" as const
+
+  constructor() {
+    super("Canvas action blocked by PII gate")
+    this.name = "CanvasActionPiiBlockedError"
+  }
+}
+
+/** Deterministic actions get a low temperature; the rest keep some latitude. */
+function temperatureFor(actionType: CanvasActionType): number {
+  return actionType === "fix" || actionType === "format" ? 0.3 : 0.7
+}
+
+/**
+ * The gate every Canvas action passes, on both halves of the prompt. Kept here
+ * rather than at the call sites so a new caller inherits it for free.
+ */
+function assertPromptIsSendable(systemPrompt: string, userPrompt: string): void {
+  if (!hasNoLeakingPii(systemPrompt) || !hasNoLeakingPii(userPrompt)) {
+    throw new CanvasActionPiiBlockedError()
+  }
+}
+
+/**
+ * Run an action against an already-resolved model. This is the single
+ * execution path: the hook resolves the user's configured provider, the plugin
+ * API resolves the plugin's config, and both land here.
+ *
+ * Throws rather than returning a result envelope, because the two things a
+ * caller must distinguish (a redaction refusal and a provider failure) are
+ * error kinds, and swallowing them into `{ success: false }` is how the plugin
+ * path ended up unable to explain itself.
+ */
+export async function runCanvasAction(
+  model: LanguageModel,
+  actionType: CanvasActionType,
+  content: string,
+  options?: CanvasActionExecutionOptions & { abortSignal?: AbortSignal }
+): Promise<string> {
+  const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
+  assertPromptIsSendable(systemPrompt, userPrompt)
+
+  const result = await generateText({
+    model,
+    system: systemPrompt,
+    prompt: userPrompt,
+    temperature: temperatureFor(actionType),
+    abortSignal: options?.abortSignal,
+  })
+  return result.text
+}
+
+/**
+ * Streaming half of {@link runCanvasAction}. Resolves with the full text once
+ * the stream ends, so a caller that wants both the deltas and the final value
+ * does not have to accumulate twice.
+ */
+export async function streamCanvasAction(
+  model: LanguageModel,
+  actionType: CanvasActionType,
+  content: string,
+  onDelta: (delta: string) => void,
+  options?: CanvasActionExecutionOptions & { abortSignal?: AbortSignal }
+): Promise<string> {
+  const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
+  assertPromptIsSendable(systemPrompt, userPrompt)
+
+  const result = streamText({
+    model,
+    system: systemPrompt,
+    prompt: userPrompt,
+    temperature: temperatureFor(actionType),
+    abortSignal: options?.abortSignal,
+  })
+
+  let full = ""
+  for await (const delta of result.textStream) {
+    full += delta
+    onDelta(delta)
+  }
+  return full
+}
+
+/**
+ * Execute a canvas action from a provider config (the plugin-facing shape).
+ * A thin wrapper over {@link runCanvasAction} that keeps the result-envelope
+ * contract plugins are written against.
  */
 export async function executeCanvasAction(
   actionType: CanvasActionType,
@@ -193,19 +297,12 @@ export async function executeCanvasAction(
 
   try {
     const modelInstance = getProviderModel({ provider, model, apiKey, baseURL, apiFlavor, headers })
-    const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
-
-    const result = await generateText({
-      model: modelInstance,
-      system: systemPrompt,
-      prompt: userPrompt,
-      temperature: actionType === "fix" || actionType === "format" ? 0.3 : 0.7,
-    })
+    const text = await runCanvasAction(modelInstance, actionType, content, options)
 
     return {
       success: true,
-      result: result.text,
-      explanation: isContentAction(actionType) ? undefined : result.text,
+      result: text,
+      explanation: isContentAction(actionType) ? undefined : text,
     }
   } catch (error) {
     return {
@@ -220,31 +317,20 @@ export async function executeCanvasAction(
  * Handles both full content replacement and selection replacement
  */
 /**
- * cognia-next helper. Builds the user prompt the model sees for a
- * given canvas action. Matches the structure of the executors in
- * Cognia but exposed as a pure function so cognia-next's slim hooks
- * can render the prompt themselves.
+ * The prompt pair a Canvas action sends, exposed for tests and for callers that
+ * want to show or size the prompt before running it.
+ *
+ * This replaced a second builder (`buildActionUserPrompt`) that the UI hook
+ * used while the plugin path used `buildCanvasPrompts`. The two disagreed about
+ * attachments and about where the instruction went, so the same action produced
+ * different prompts depending on who asked for it.
  */
-export function buildActionUserPrompt(req: {
-  actionType: CanvasActionType
-  content: string
-  language?: string
-  selection?: string
-  prompt?: string
-  targetLanguage?: string
-}): string {
-  const lines: string[] = []
-  if (req.language) lines.push(`Language: ${req.language}`)
-  if (req.targetLanguage) lines.push(`Target language: ${req.targetLanguage}`)
-  if (req.prompt) lines.push(`Instruction: ${req.prompt}`)
-  if (req.selection) {
-    lines.push("Selection:")
-    lines.push(req.selection)
-  } else {
-    lines.push("Document:")
-    lines.push(req.content)
-  }
-  return lines.join("\n\n")
+export function buildCanvasActionPrompts(
+  actionType: CanvasActionType,
+  content: string,
+  options?: CanvasActionExecutionOptions
+): { systemPrompt: string; userPrompt: string } {
+  return buildCanvasPrompts(actionType, content, options)
 }
 
 export function applyCanvasActionResult(
@@ -310,21 +396,13 @@ export async function executeCanvasActionStreaming(
 
   try {
     const modelInstance = getProviderModel({ provider, model, apiKey, baseURL, apiFlavor, headers })
-    const { systemPrompt, userPrompt } = buildCanvasPrompts(actionType, content, options)
-
-    const result = streamText({
-      model: modelInstance,
-      system: systemPrompt,
-      prompt: userPrompt,
-      temperature: actionType === "fix" || actionType === "format" ? 0.3 : 0.7,
-    })
-
-    let fullText = ""
-    for await (const textPart of result.textStream) {
-      fullText += textPart
-      callbacks.onToken(textPart)
-    }
-
+    const fullText = await streamCanvasAction(
+      modelInstance,
+      actionType,
+      content,
+      callbacks.onToken,
+      options
+    )
     callbacks.onComplete(fullText)
   } catch (error) {
     callbacks.onError(error instanceof Error ? error.message : "Streaming action failed")

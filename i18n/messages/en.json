@@ -4835,6 +4835,7 @@
       "unfoldAll": "Unfold all"
     },
     "actions": {
+      "custom": "Custom instruction",
       "expand": "Expand",
       "explain": "Explain",
       "fix": "Fix",
@@ -4849,6 +4850,30 @@
       "translate": "Translate"
     },
     "addComment": "Add comment",
+    "aiPanel": {
+      "attachmentCount": "{count, plural, =1 {1 attachment} other {# attachments}}",
+      "attachmentMissing": "Missing",
+      "attachmentRemove": "Remove {name}",
+      "attachmentTruncated": "Truncated",
+      "cancel": "Stop",
+      "errorCancelled": "Stopped before it finished.",
+      "errorPiiBlocked": "Blocked before sending: this document contains something that looks like personal or secret data.",
+      "historyHeading": "Recent",
+      "outputHeading": "Result",
+      "promptLabel": "Instruction for the assistant",
+      "promptPlaceholder": "Tell the assistant what to change…",
+      "retry": "Try again",
+      "running": "Running {action}…",
+      "status": {
+        "completed": "Applied",
+        "failed": "Failed",
+        "invalidated": "Stale",
+        "pending-review": "In review",
+        "rejected": "Rejected"
+      },
+      "submit": "Send",
+      "submitHint": "⌘↵ to send"
+    },
     "aiSuggestions": "AI suggestions",
     "allLanguages": "All languages",
     "anonymousParticipant": "Anonymous",

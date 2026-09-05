@@ -41,6 +41,7 @@
     "unfoldAll": "全部展开"
   },
   "actions": {
+    "custom": "自定义指令",
     "expand": "扩写",
     "explain": "解释",
     "fix": "修复",
@@ -55,6 +56,30 @@
     "translate": "翻译"
   },
   "addComment": "添加评论",
+  "aiPanel": {
+    "attachmentCount": "{count, plural, other {# 个附件}}",
+    "attachmentMissing": "已丢失",
+    "attachmentRemove": "移除 {name}",
+    "attachmentTruncated": "已截断",
+    "cancel": "停止",
+    "errorCancelled": "已在完成前停止。",
+    "errorPiiBlocked": "发送前已拦截：文档中包含疑似个人信息或密钥的内容。",
+    "historyHeading": "最近",
+    "outputHeading": "结果",
+    "promptLabel": "给助手的指令",
+    "promptPlaceholder": "告诉助手你想改什么…",
+    "retry": "重试",
+    "running": "正在执行 {action}…",
+    "status": {
+      "completed": "已应用",
+      "failed": "失败",
+      "invalidated": "已过期",
+      "pending-review": "待审阅",
+      "rejected": "已拒绝"
+    },
+    "submit": "发送",
+    "submitHint": "⌘↵ 发送"
+  },
   "aiSuggestions": "AI 建议",
   "allLanguages": "所有语言",
   "anonymousParticipant": "匿名",

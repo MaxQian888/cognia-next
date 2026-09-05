@@ -10,12 +10,15 @@ jest.mock("ai", () => ({
   streamText: (args: unknown) => streamTextMock(args),
 }))
 
-jest.mock("@/lib/ai/generation/canvas-actions", () => ({
-  ACTION_PROMPTS: {
-    improve: "improve-prompt",
-    custom: "custom-prompt",
-  },
-  buildActionUserPrompt: (req: { content: string }) => `user:${req.content}`,
+// `@/lib/ai/generation/canvas-actions` is deliberately NOT mocked: it is the
+// single prompt builder and PII gate this hook was consolidated onto, and
+// stubbing it would test the seam instead of the behaviour.
+
+const canvasSettingsRef = { current: { ai: { streamingResponses: false } } }
+jest.mock("@/stores/canvas/canvas-settings-store", () => ({
+  useCanvasSettingsStore: <T>(
+    selector: (s: { settings: typeof canvasSettingsRef.current }) => T
+  ): T => selector({ settings: canvasSettingsRef.current }),
 }))
 
 const getProviderModelMock = jest.fn((..._a: unknown[]) => ({ provider: "anthropic" }))
@@ -40,6 +43,7 @@ beforeEach(() => {
   streamTextMock.mockReset()
   getProviderModelMock.mockReset().mockReturnValue({ provider: "anthropic" })
   settingsRef.current = { apiKey: "k" }
+  canvasSettingsRef.current = { ai: { streamingResponses: false } }
 })
 
 describe("useCanvasActions", () => {
@@ -49,6 +53,9 @@ describe("useCanvasActions", () => {
     expect(result.current.actionType).toBeNull()
     expect(result.current.output).toBe("")
     expect(result.current.error).toBeNull()
+    expect(result.current.errorKind).toBeNull()
+    expect(result.current.cancellable).toBe(false)
+    expect(result.current.retryable).toBe(false)
   })
 
   it("run() success populates output", async () => {
@@ -80,17 +87,42 @@ describe("useCanvasActions", () => {
     expect(generateTextMock).toHaveBeenCalled()
   })
 
-  it("run() falls back to ACTION_PROMPTS.custom for unknown action types", async () => {
-    generateTextMock.mockResolvedValueOnce({ text: "custom-out" })
+  it("sends the shared prompt pair, attachments included", async () => {
+    // The plugin path already composed attachments into the system prompt; the
+    // hook did not, because it used a second builder. One builder now.
+    generateTextMock.mockResolvedValueOnce({ text: "ok" })
     const { result } = renderHook(() => useCanvasActions())
     await act(async () => {
       await result.current.run({
-        actionType: "unknown" as never,
-        content: "x",
+        actionType: "improve" as never,
+        content: "body",
+        language: "typescript",
+        prompt: "be terse",
+        attachments: [
+          {
+            id: "a1",
+            sourceType: "canvas-document",
+            sourceId: "doc_2",
+            label: "Notes",
+            snapshot: "snapshot text",
+          },
+        ],
       })
     })
     const args = generateTextMock.mock.calls[0][0]
-    expect(args.system).toBe("custom-prompt")
+    expect(args.system).toContain("Language: typescript")
+    expect(args.system).toContain("be terse")
+    expect(args.system).toContain("snapshot text")
+    expect(args.prompt).toBe("body")
+  })
+
+  it("uses a low temperature for the deterministic actions", async () => {
+    generateTextMock.mockResolvedValueOnce({ text: "ok" })
+    const { result } = renderHook(() => useCanvasActions())
+    await act(async () => {
+      await result.current.run({ actionType: "format" as never, content: "x" })
+    })
+    expect(generateTextMock.mock.calls[0][0].temperature).toBe(0.3)
   })
 
   it("run() rethrows and surfaces error state", async () => {
@@ -104,6 +136,8 @@ describe("useCanvasActions", () => {
       }
     })
     expect(result.current.error).toBe("boom")
+    expect(result.current.errorKind).toBe("failed")
+    expect(result.current.retryable).toBe(true)
   })
 
   it("blocks provider dispatch when the assembled action prompt contains PII", async () => {
@@ -117,6 +151,10 @@ describe("useCanvasActions", () => {
 
     expect(generateTextMock).not.toHaveBeenCalled()
     expect(result.current.error).toContain("PII gate")
+    expect(result.current.errorKind).toBe("pii-blocked")
+    // A redaction refusal refuses identically next time, so a retry button here
+    // would be one that always fails.
+    expect(result.current.retryable).toBe(false)
   })
 
   it("stream() accumulates deltas and resolves with full text", async () => {
@@ -175,5 +213,101 @@ describe("useCanvasActions", () => {
     act(() => result.current.reset())
     expect(result.current.output).toBe("")
     expect(result.current.error).toBeNull()
+  })
+
+  it("streams without a delta callback when the setting asks for it", async () => {
+    // Settings, Canvas, AI, "Stream responses" had no runtime consumer at all.
+    canvasSettingsRef.current = { ai: { streamingResponses: true } }
+    streamTextMock.mockReturnValueOnce({
+      textStream: (async function* () {
+        yield "a"
+        yield "b"
+      })(),
+    })
+    const { result } = renderHook(() => useCanvasActions())
+    await act(async () => {
+      await result.current.run({ actionType: "improve" as never, content: "x" })
+    })
+    expect(streamTextMock).toHaveBeenCalled()
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.output).toBe("ab")
+  })
+
+  it("hands the provider a real abort signal, and cancel() aborts it", async () => {
+    let seenSignal: AbortSignal | undefined
+    generateTextMock.mockImplementationOnce(
+      (args: { abortSignal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          seenSignal = args.abortSignal
+          args.abortSignal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError"))
+          )
+        })
+    )
+    const { result } = renderHook(() => useCanvasActions())
+
+    let pending: Promise<string> | undefined
+    act(() => {
+      pending = result.current.run({ actionType: "improve" as never, content: "x" })
+      pending.catch(() => undefined)
+    })
+    expect(result.current.cancellable).toBe(true)
+    expect(seenSignal).toBeInstanceOf(AbortSignal)
+
+    await act(async () => {
+      result.current.cancel()
+      await expect(pending).rejects.toThrow()
+    })
+
+    expect(result.current.errorKind).toBe("cancelled")
+    expect(result.current.running).toBe(false)
+    // A cancellation is a user decision, so it offers no retry.
+    expect(result.current.retryable).toBe(false)
+  })
+
+  it("retry() replays the last invocation verbatim", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("flaky"))
+    generateTextMock.mockResolvedValueOnce({ text: "second time" })
+    const { result } = renderHook(() => useCanvasActions())
+
+    await act(async () => {
+      await result.current
+        .run({ actionType: "improve" as never, content: "body", language: "python" })
+        .catch(() => undefined)
+    })
+    expect(result.current.retryable).toBe(true)
+
+    await act(async () => {
+      await result.current.retry()
+    })
+
+    expect(result.current.output).toBe("second time")
+    expect(generateTextMock).toHaveBeenCalledTimes(2)
+    expect(generateTextMock.mock.calls[1][0].prompt).toBe(generateTextMock.mock.calls[0][0].prompt)
+  })
+
+  it("retry() is a no-op before anything has run", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe("")
+    })
+    expect(generateTextMock).not.toHaveBeenCalled()
+  })
+
+  it("aborts an in-flight run when the hook unmounts", async () => {
+    let seenSignal: AbortSignal | undefined
+    generateTextMock.mockImplementationOnce(
+      (args: { abortSignal?: AbortSignal }) =>
+        new Promise(() => {
+          seenSignal = args.abortSignal
+        })
+    )
+    const { result, unmount } = renderHook(() => useCanvasActions())
+    act(() => {
+      result.current.run({ actionType: "improve" as never, content: "x" }).catch(() => undefined)
+    })
+
+    unmount()
+    expect(seenSignal?.aborted).toBe(true)
   })
 })
