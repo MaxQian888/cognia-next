@@ -142,6 +142,23 @@ const TRANSFORMERS_WEB_ABS = path.resolve(
   "packages/transformers-runtime/node_modules/@huggingface/transformers/dist/transformers.web.js"
 )
 
+// `y-monaco` imports Monaco as a value through the legacy deep path
+// `monaco-editor/esm/vs/editor/editor.api.js`. monaco-editor 0.56 added an
+// `exports` map whose subpath patterns are already rooted at `esm/vs`
+// (`"./*": "./esm/vs/*.js"`), so that request resolves to
+// `esm/vs/esm/vs/editor/editor.api.js` and both bundlers fail with
+// MODULE_NOT_FOUND. y-monaco has shipped no release using the new path.
+//
+// The alias does NOT point at the real ESM file. Monaco is never bundled here:
+// `copy-monaco-assets.mjs` stages the `min/vs` AMD build into `public/monaco/vs`
+// and `@monaco-editor/react` loads it at runtime. Resolving to the ESM tree
+// would pull several megabytes into the canvas chunk and leave a second Monaco
+// instance whose `Range`/`Selection` are different classes from the ones every
+// editor model belongs to. The shim forwards to the already-loaded instance.
+const MONACO_API_SHIM_REL = "./lib/browser-stubs/monaco-editor-api.ts"
+const MONACO_API_SHIM_ABS = path.resolve(process.cwd(), "lib/browser-stubs/monaco-editor-api.ts")
+const MONACO_API_LEGACY_SPECIFIER = "monaco-editor/esm/vs/editor/editor.api.js"
+
 // Node.js built-ins that third-party deps reach for. Our first-party code no
 // longer touches any of these (the two surviving Node-leaning modules,
 // `lib/twin/importers/code-repo/git-repo.ts` and `lib/github/workspace.ts`,
@@ -352,6 +369,9 @@ const nextConfig: NextConfig = {
       // Collapse pixi.js to its pre-bundled single file (see above). Applies
       // in every context on purpose — the barrel is the problem everywhere.
       "pixi.js": PIXI_PREBUNDLED_REL,
+      // See MONACO_API_SHIM_REL above. Keyed on the literal request string,
+      // which is what Turbopack matches against.
+      [MONACO_API_LEGACY_SPECIFIER]: MONACO_API_SHIM_REL,
     },
   },
   // Webpack (pnpm build): client-side fallbacks for Node built-ins.
@@ -393,6 +413,9 @@ const nextConfig: NextConfig = {
       ...config.resolve.alias,
       "pixi.js$": PIXI_PREBUNDLED_ABS,
       "@huggingface/transformers$": TRANSFORMERS_WEB_ABS,
+      // Exact-match (`$`): only y-monaco's own specifier is redirected, never
+      // some other `monaco-editor/...` subpath that resolves correctly.
+      [`${MONACO_API_LEGACY_SPECIFIER}$`]: MONACO_API_SHIM_ABS,
     }
     return config
   },
