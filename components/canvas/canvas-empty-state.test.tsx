@@ -44,7 +44,13 @@ describe("CanvasEmptyState", () => {
     const user = userEvent.setup()
     render(<CanvasEmptyState />)
     expect(Object.values(useArtifactStore.getState().canvasDocuments)).toHaveLength(0)
+
+    // The CTA raises the new-document dialog, which is where the document's
+    // type, language, starter and import source are chosen.
     await user.click(screen.getByRole("button", { name: /Create your first document/i }))
+    expect(screen.getByTestId("canvas-new-document-dialog")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("canvas-new-create"))
     const docs = Object.values(useArtifactStore.getState().canvasDocuments)
     expect(docs).toHaveLength(1)
     expect(useArtifactStore.getState().activeCanvasId).toBe(docs[0]!.id)

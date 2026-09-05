@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { FileCode, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -12,12 +13,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { CanvasNewDocumentDialog } from "./canvas-new-document-dialog"
 
 export function CanvasEmptyState() {
   const t = useTranslations("canvas.empty")
-  const tRoot = useTranslations("canvas")
   const create = useArtifactStore((s) => s.createCanvasDocument)
   const setActive = useArtifactStore((s) => s.setActiveCanvas)
+  const [dialogOpen, setDialogOpen] = useState(false)
   return (
     <Empty className="h-full border-0">
       <EmptyHeader>
@@ -33,22 +35,16 @@ export function CanvasEmptyState() {
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button
-          onClick={() => {
-            const id = create({
-              title: tRoot("untitledDefault"),
-              content: "",
-              language: "markdown",
-              type: "text",
-            })
-            setActive(id)
-          }}
-          className="gap-2"
-        >
+        <Button onClick={() => setDialogOpen(true)} className="gap-2">
           <Sparkles className="size-4" />
           {t("cta", { default: "Create your first document" })}
         </Button>
       </EmptyContent>
+      <CanvasNewDocumentDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onCreate={(request) => setActive(create(request))}
+      />
     </Empty>
   )
 }

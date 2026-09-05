@@ -141,10 +141,16 @@ describe("CanvasDocumentRail", () => {
   })
 
   it("creates a new document via the rail's New button", async () => {
+    // The "+" opens the new-document dialog now, so type, language, starter and
+    // import are decided before anything is created rather than after.
     const user = userEvent.setup()
     renderWithProviders(<CanvasDocumentRail />)
-    const newBtn = screen.getByRole("button", { name: /New document/i })
-    await user.click(newBtn)
+    await user.click(screen.getByRole("button", { name: /New document/i }))
+
+    expect(screen.getByTestId("canvas-new-document-dialog")).toBeInTheDocument()
+    expect(Object.values(useArtifactStore.getState().canvasDocuments)).toHaveLength(0)
+
+    await user.click(screen.getByTestId("canvas-new-create"))
     expect(Object.values(useArtifactStore.getState().canvasDocuments)).toHaveLength(1)
   })
 

@@ -64,8 +64,11 @@ import type { CanvasDocument } from "@/types/artifact/artifact"
 import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
 import { getFileExtension } from "@/lib/canvas/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
+import { toast } from "sonner"
+import { exportCanvasDocument, getCanvasExportFormats } from "@/lib/canvas/document-export"
 import { RenameDialog } from "./rename-dialog"
 import { CanvasDeleteDocumentDialog } from "./canvas-delete-document-dialog"
+import { CanvasNewDocumentDialog } from "./canvas-new-document-dialog"
 
 type SortField = "updatedAt" | "title" | "language"
 type SortOrder = "asc" | "desc"
@@ -111,6 +114,7 @@ function groupByTime(
 
 export function CanvasDocumentRail() {
   const t = useTranslations("canvas")
+  const tExport = useTranslations("canvas.exportMenu")
   const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
   // Workspace isolation: the rail lists only the ACTIVE workspace's documents.
   // Read reactively so switching workspace re-filters in the same commit rather
@@ -144,6 +148,7 @@ export function CanvasDocumentRail() {
   // Deleting a document destroys its versions and comments, so it asks first.
   // Closing (the tab strip's X in `CanvasPanel`) is the non-destructive verb.
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
+  const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameDocId, setRenameDocId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
@@ -189,27 +194,24 @@ export function CanvasDocumentRail() {
     setRenameValue("")
   }
 
-  const handleExport = (doc: CanvasDocument) => {
-    const blob = new Blob([doc.content], { type: "text/markdown" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${doc.title || "untitled"}.md`
-    document.body.append(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+  /**
+   * Export through the shared Canvas export path.
+   *
+   * This used to be a hand-written `<a download>` with the extension and MIME
+   * hardcoded to Markdown, so a Python or SVG document downloaded as `.md`, a
+   * title containing a path separator went straight into the filename
+   * unsanitised, and the anchor silently no-ops inside a mobile WebView, which
+   * is the whole reason `saveExport` exists.
+   */
+  const handleExport = async (doc: CanvasDocument) => {
+    const format = getCanvasExportFormats(doc)[0] ?? "raw"
+    const filename = await exportCanvasDocument(doc, format)
+    if (filename) toast.success(tExport("downloaded", { filename }))
   }
 
-  const onCreateNew = () => {
-    const id = create({
-      title: t("untitledDefault"),
-      content: "",
-      language: "markdown",
-      type: "text",
-    })
-    setActive(id)
-  }
+  // The "+" opens the new-document dialog instead of minting an empty Markdown
+  // document and leaving the user to change the language from another panel.
+  const onCreateNew = () => setNewDialogOpen(true)
 
   // Single row renderer shared by the time-grouped and flat file-list views.
   // A plain function (not a nested component) so parent re-renders inline the
@@ -296,7 +298,7 @@ export function CanvasDocumentRail() {
               <Copy className="mr-2 size-3.5" />
               {t("duplicate")}
             </ContextMenuItem>
-            <ContextMenuItem onClick={() => handleExport(doc)}>
+            <ContextMenuItem onClick={() => void handleExport(doc)}>
               <Download className="mr-2 size-3.5" />
               {t("export", { default: "Export" })}
             </ContextMenuItem>
@@ -532,6 +534,11 @@ export function CanvasDocumentRail() {
         onOpenChange={setRenameDialogOpen}
         currentTitle={renameValue}
         onRename={handleConfirmRename}
+      />
+      <CanvasNewDocumentDialog
+        open={newDialogOpen}
+        onOpenChange={setNewDialogOpen}
+        onCreate={(request) => setActive(create(request))}
       />
       <CanvasDeleteDocumentDialog
         open={deleteCandidateId !== null}

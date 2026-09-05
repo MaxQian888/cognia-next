@@ -61,6 +61,7 @@ import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { RenameDialog } from "./rename-dialog"
 import { CanvasDeleteDocumentDialog } from "./canvas-delete-document-dialog"
+import { CanvasNewDocumentDialog } from "./canvas-new-document-dialog"
 import type { FormatAction } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -133,6 +134,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const openDocument = useCanvasLayoutStore((s) => s.openDocument)
   const closeDocument = useCanvasLayoutStore((s) => s.closeDocument)
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
+  const [newDialogOpen, setNewDialogOpen] = useState(false)
   const pendingReview = useArtifactStore((s) =>
     activeId ? (s.pendingReviews[activeId] ?? null) : null
   )
@@ -669,15 +671,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     trigger: triggerSuggestions,
   })
 
-  const onCreate = useCallback(() => {
-    const id = create({
-      title: t("untitledDefault"),
-      content: "",
-      language: "markdown",
-      type: "text",
-    })
-    setActive(id)
-  }, [create, setActive, t])
+  // The toolbar "+" and the palette's "new document" both raise the dialog,
+  // which is where type, language, starter and import are decided. They used to
+  // mint an empty Markdown document with no questions asked.
+  const onCreate = useCallback(() => setNewDialogOpen(true), [])
 
   // The degraded tier is announced, not silent. Monaco quietly dropping the
   // minimap and folding on a large file reads as breakage; saying why does not.
@@ -886,6 +883,11 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         />
       )}
 
+      <CanvasNewDocumentDialog
+        open={newDialogOpen}
+        onOpenChange={setNewDialogOpen}
+        onCreate={(request) => setActive(create(request))}
+      />
       <CanvasDeleteDocumentDialog
         open={deleteCandidateId !== null}
         onOpenChange={(next) => {
