@@ -78,6 +78,7 @@ export {
   decodeToPixelBuffer,
   decodeUrlToPixelBuffer,
   encodePixelBuffer,
+  encodeProviderMask,
   fromImageData,
   pixelBufferToBlob,
   pixelBufferToDataUrl,

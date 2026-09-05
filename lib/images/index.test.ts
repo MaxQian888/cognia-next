@@ -61,6 +61,7 @@ const EXPECTED_EXPORTS = [
   "decodeToPixelBuffer",
   "decodeUrlToPixelBuffer",
   "encodePixelBuffer",
+  "encodeProviderMask",
   "fromImageData",
   "pixelBufferToBlob",
   "pixelBufferToDataUrl",

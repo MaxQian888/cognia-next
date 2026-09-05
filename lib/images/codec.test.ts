@@ -287,3 +287,29 @@ describe("pixelBufferToDataUrlSync", () => {
     expect(() => pixelBufferToDataUrlSync(opaque(1, 1))).toThrow(ImageDecodeError)
   })
 })
+
+describe("encodeProviderMask", () => {
+  it("always encodes PNG, whatever the codec would prefer for a photo", async () => {
+    const { encodeProviderMask } = await import("./codec")
+    const { rasterizeMask } = await import("./mask")
+    const mask = rasterizeMask(
+      [{ mode: "add", radius: 2, hardness: 1, points: [{ x: 2, y: 2 }] }],
+      { width: 4, height: 4 }
+    )
+    const encoded = await encodeProviderMask(mask)
+    expect(encoded.mediaType).toBe("image/png")
+    expect(encoded.bytes.byteLength).toBeGreaterThan(0)
+  })
+
+  it("inverts on the way out, so the painted region is the transparent one", async () => {
+    const { encodeProviderMask } = await import("./codec")
+    const { rasterizeMask } = await import("./mask")
+    const mask = rasterizeMask(
+      [{ mode: "add", radius: 4, hardness: 1, points: [{ x: 1, y: 1 }] }],
+      { width: 2, height: 2 }
+    )
+    const encoded = await encodeProviderMask(mask)
+    const parsed = JSON.parse(new TextDecoder().decode(encoded.bytes)) as { d: number[] }
+    expect(parsed.d[3]).toBe(0)
+  })
+})

@@ -13,6 +13,7 @@
  * `convertToBlob` is a real configuration.
  */
 
+import { maskToProviderBuffer } from "./mask"
 import { hasTransparency, type PixelBuffer } from "./pixel-buffer"
 
 /** Encodings the workbench will write. */
@@ -230,6 +231,20 @@ export async function encodePixelBuffer(
   const blob = await pixelBufferToBlob(buffer, chosen, quality)
   const arrayBuffer = await blob.arrayBuffer()
   return { bytes: new Uint8Array(arrayBuffer), mediaType: blob.type || `image/${chosen}` }
+}
+
+/**
+ * Encode an in-app mask into the PNG the provider expects.
+ *
+ * Always PNG, never the WebP default: the endpoint reads the alpha channel to
+ * decide what to edit, and the format negotiation that makes sense for a photo
+ * makes none for a mask. `maskToProviderBuffer` performs the inversion, and
+ * `lib/images/mask.ts` explains why the convention flips here.
+ */
+export async function encodeProviderMask(mask: PixelBuffer): Promise<EncodedImage> {
+  const blob = await pixelBufferToBlob(maskToProviderBuffer(mask), "png")
+  const arrayBuffer = await blob.arrayBuffer()
+  return { bytes: new Uint8Array(arrayBuffer), mediaType: "image/png" }
 }
 
 /** Encode to a `Blob`, for callers that want to hand it straight to an upload. */
