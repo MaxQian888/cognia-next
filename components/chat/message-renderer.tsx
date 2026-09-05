@@ -621,9 +621,22 @@ function MessageRendererInner({
             // expand/collapse never moves the width.
             // Every image in this turn — markdown `![]()`, attachment gallery,
             // tool-result screenshots — registers with one collection so the
-            // lightbox pages across the whole message instead of dead-ending on
-            // whichever image was clicked.
-            <MessageImageCollectionProvider>
+            // viewer pages across the whole message instead of dead-ending on
+            // whichever image was clicked. With a session behind it that viewer
+            // is the editing workbench, and a saved edit lands back on THIS
+            // message as another version.
+            <MessageImageCollectionProvider
+              target={
+                branchSessionId
+                  ? {
+                      sessionId: branchSessionId,
+                      messageId: message.id,
+                      parts: message.parts,
+                      isStreaming,
+                    }
+                  : undefined
+              }
+            >
               <MessageContent
                 className={cn(
                   "leading-relaxed",
