@@ -15,7 +15,6 @@
  * per-teammate quarantine notifications.
  */
 
-import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 
 export type TeamNotifyLevel = "info" | "warn" | "critical"
@@ -28,7 +27,6 @@ export interface TeamNotifyPayload {
   teamId: string
   taskId?: string
   /** Only allowed at critical level. UI uses to open the matching gate modal. */
-  openApproval?: ApprovalKey
   /** UI navigation target. */
   detailHref?: string
   /** Same key within 5min window → suppressed. */
@@ -54,19 +52,6 @@ export interface TeamNotifierDeps {
   toast?: (msg: string, opts?: { description?: string }) => void
   osNotify?: (opts: { title: string; body?: string }) => Promise<void>
   log?: (level: "info" | "warn" | "error", message: string, payload?: unknown) => Promise<void>
-  /**
-   * Per ADR-0022 §3.4 — when a critical notification carries `openApproval`,
-   * push it into a UI store so the team workspace can render a modal.
-   * Optional so tests can omit it.
-   */
-  openGate?: (gate: {
-    key: ApprovalKey
-    title: string
-    body?: string
-    runId: string
-    teamId: string
-    taskId?: string
-  }) => void
   now?: () => number
 }
 
@@ -164,21 +149,6 @@ export function createTeamNotifier(
         if (p.level === "critical" && deps.osNotify) {
           callSafely(() => deps.osNotify!({ title: p.title, body: p.body }), "osNotify")
         }
-      }
-
-      if (p.level === "critical" && p.openApproval && deps.openGate) {
-        callSafely(
-          () =>
-            deps.openGate!({
-              key: p.openApproval!,
-              title: p.title,
-              body: p.body,
-              runId: p.runId,
-              teamId: p.teamId,
-              taskId: p.taskId,
-            }),
-          "openGate"
-        )
       }
     },
     suspend: () => {

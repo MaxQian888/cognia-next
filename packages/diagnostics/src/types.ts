@@ -285,6 +285,8 @@ export type DiagnosticCode =
   | "supervisorNotMember"
   | "squadNotFound"
   | "squadDispatchFailed"
+  | "squadNotReady"
+  | "squadAlreadyRunning"
   // --- Unified execution layer ---
   | "capabilityUnsatisfied"
   | "hostUnavailable"

@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/execution-runs"
 import { reduceRunEvents } from "./run-reducer"
 import { getRunRetryHandler } from "./run-retry-registry"
+import { validateSquadReviewDecision } from "./squad-review-decision"
 import type {
   ExecutionRun,
   ExecutionRunInitiator,
@@ -62,15 +63,6 @@ export interface RunControlResult {
      */
     | "unsupported_for_kind"
     /**
-     * The action is real for this kind, but not on the runtime THIS run uses.
-     *
-     * Separate from `unsupported_for_kind` because the two need different copy:
-     * a legacy Squad cannot be steered from the cockpit, while a durable-v2
-     * Squad can, so saying "this kind of run cannot" would be false about the
-     * kind and would send the user nowhere.
-     */
-    | "unsupported_for_runtime"
-    /**
      * The run kind CAN steer, but this run could not right now. The message is
      * intact and the caller still owns it — that is the whole point of
      * distinguishing this from a refusal.
@@ -112,12 +104,9 @@ const controlLocks = new Map<string, Promise<void>>()
  * construction. Anything unrecognised stays `source_rejected`, so a new engine
  * error is reported as a refusal rather than mislabelled as a known one.
  */
-function handlerRefusalReason(
-  error: unknown
-): "unsupported_for_kind" | "unsupported_for_runtime" | "source_rejected" {
+function handlerRefusalReason(error: unknown): "unsupported_for_kind" | "source_rejected" {
   if (!(error instanceof Error)) return "source_rejected"
   if (error.name === "UnsupportedForKindError") return "unsupported_for_kind"
-  if (error.name === "UnsupportedForRuntimeError") return "unsupported_for_runtime"
   return "source_rejected"
 }
 
@@ -405,6 +394,17 @@ async function executeRunControlCommandUnlocked(
     }
     if (interrupt.status !== "pending") {
       return reject(command, "interrupt_resolved", run.currentRevision)
+    }
+    // A Squad review is answered with a typed decision that must match the
+    // interrupt's kind (ADR-0168). A budget amount delivered to a deadlock gate
+    // is refused here, before any handler could act on it.
+    const validation = validateSquadReviewDecision(
+      interrupt,
+      command.action,
+      command.reviewDecision
+    )
+    if (!validation.ok) {
+      return reject(command, "invalid_command", run.currentRevision)
     }
     const now = options.now ?? Date.now()
     if (interrupt.expiresAt <= now) {

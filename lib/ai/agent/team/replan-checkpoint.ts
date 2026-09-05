@@ -169,6 +169,9 @@ export async function runReplanCheckpoint(
           notifier: teamCtx.notifier,
           runId,
           teamId: teamCtx.teamId,
+          ...(teamCtx.team.projectId ? { projectId: teamCtx.team.projectId } : {}),
+          // One review per checkpoint: the tasks that just ran name it.
+          instance: `after-${[...justRanTaskIds].sort().join("+") || "start"}`,
           decision: d,
           ...(teamCtx.gatePolicy ? { behavior: teamCtx.gatePolicy.replan } : {}),
           ...(signal ? { signal } : {}),

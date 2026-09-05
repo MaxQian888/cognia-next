@@ -1280,15 +1280,33 @@ export function useClaudeChat() {
           })
           if (!result.started || !result.runId) {
             store.getState().setSessionStatus(sessionId, "idle")
-            store
-              .getState()
-              .setSessionDiagnostic(
-                sessionId,
-                createDiagnostic(
-                  result.reason === "squad_not_found" ? "squadNotFound" : "squadDispatchFailed",
-                  { source: "chat", meta: { sessionId, extra: { squadId } } }
-                )
+            store.getState().setSessionDiagnostic(
+              sessionId,
+              createDiagnostic(
+                result.reason === "squad_not_found"
+                  ? "squadNotFound"
+                  : result.reason === "not_ready"
+                    ? "squadNotReady"
+                    : result.reason === "already_running"
+                      ? "squadAlreadyRunning"
+                      : "squadDispatchFailed",
+                {
+                  source: "chat",
+                  meta: {
+                    sessionId,
+                    extra: {
+                      squadId,
+                      ...(result.blockers
+                        ? { blockers: result.blockers.map((blocker) => blocker.code).join(",") }
+                        : {}),
+                      ...(result.reason === "already_running" && result.runId
+                        ? { runId: result.runId }
+                        : {}),
+                    },
+                  },
+                }
               )
+            )
             chatTurnPerformance.finish(sessionId, "failed")
             return
           }

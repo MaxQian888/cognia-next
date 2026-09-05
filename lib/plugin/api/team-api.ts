@@ -34,7 +34,7 @@
  *    obtain a Squad at all was `instantiateTemplate`, and the only way to lose
  *    one was for a human to click Delete. `createTeam` goes through
  *    `createSquad`, not the store action, so a plugin-made Squad lands on
- *    durable-v2 wherever the workspace supports it.
+ *    the workspace's repository and environment bindings (ADR-0168).
  */
 
 import { loggers } from "@cognia/logging"
@@ -253,9 +253,10 @@ export interface PluginTeamAPI {
    *
    * Goes through `createSquad` (`lib/agent-team/create-squad.ts`), not the
    * store action directly. That wrapper is async precisely because resolving
-   * the durable-v2 default needs two Dexie reads and a host preflight, and a
-   * plugin-created Squad deserves the same default a hand-created one gets.
-   * A workspace that cannot be durable still yields a Squad, on `legacy`.
+   * the repository and environment bindings needs two Dexie reads and a host
+   * preflight, and a plugin-created Squad deserves the same bindings a
+   * hand-created one gets. A workspace with no candidates still yields a
+   * Squad, reported as not ready until it is bound (ADR-0168).
    *
    * `team:write`, not `agent:dispatch`: creating spends nothing. {@link start}
    * is where tokens begin.

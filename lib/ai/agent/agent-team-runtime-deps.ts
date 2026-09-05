@@ -12,7 +12,6 @@
 
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { usePendingGatesStore, gateTypeFromScope } from "@/stores/agent/pending-gates-store"
 import { executeAgent as defaultExecuteAgent } from "./agent-executor"
 import {
   defaultLifecycleFirer,
@@ -239,9 +238,10 @@ export function buildAgentTeamRuntimeDeps(
   // Default notifierDeps route delivery through the Unified Notification Center
   // (ADR-0042): one `deliver` emit per event, lazy-loaded so the core (sonner /
   // Tauri / store) stays out of the SSR / node-test path unless used. The core
-  // routes to center/toast/OS by level + user preferences. `log` (event-log)
-  // and `openGate` (HITL modal) are unchanged. Tests override via
-  // `opts.notifierDeps`.
+  // routes to center/toast/OS by level + user preferences. There is no
+  // `openGate` any more: a Squad gate is a durable `ExecutionRunInterrupt`
+  // opened by `squad-review-gate.ts`, and the notification only points at it
+  // (ADR-0168). Tests override via `opts.notifierDeps`.
   const defaultNotifierDeps: TeamNotifierDeps = {
     deliver: (p) => {
       void import("@/lib/notifications/runtime").then(({ notify }) =>
@@ -262,17 +262,6 @@ export function buildAgentTeamRuntimeDeps(
       if (level === "error") console.error("team:", message, payload)
       else if (level === "warn") console.warn("team:", message, payload)
       else console.info("team:", message, payload)
-    },
-    openGate: (gate) => {
-      usePendingGatesStore.getState().open({
-        key: gate.key,
-        gateType: gateTypeFromScope(gate.key.scope),
-        title: gate.title,
-        body: gate.body,
-        runId: gate.runId,
-        teamId: gate.teamId,
-        taskId: gate.taskId,
-      })
     },
   }
 

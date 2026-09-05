@@ -518,12 +518,14 @@ export function reduceRunEvents(
     if (event.type === "interrupt.requested") {
       const id = stringValue(event.payload.interruptId)
       if (id) {
+        const interruptType = stringValue(event.payload.type)
         pendingInterrupt = {
           id: safeStableActivityId(id),
           title: "Approval required",
           ...(numberValue(event.payload.expiresAt) !== undefined
             ? { expiresAt: numberValue(event.payload.expiresAt) }
             : {}),
+          ...(interruptType ? { type: interruptType } : {}),
         }
       }
     }

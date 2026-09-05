@@ -57,9 +57,9 @@ jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
   getAgentTeamTemplate: (...a: unknown[]) => getAgentTeamTemplate(...(a as [])),
 }))
 
-const resolveDurable = jest.fn(async () => null as Record<string, unknown> | null)
-jest.mock("@/lib/ai/agent/team/durable-new-team", () => ({
-  resolveDurableNewTeamConfig: (...a: unknown[]) => resolveDurable(...(a as [])),
+const resolveCandidates = jest.fn(async () => ({}) as Record<string, unknown>)
+jest.mock("@/lib/agent-team/binding-candidates", () => ({
+  resolveSquadBindingCandidates: (...a: unknown[]) => resolveCandidates(...(a as [])),
 }))
 
 const publishTemplate = jest.fn(async () => {})
@@ -128,35 +128,47 @@ describe("createTeamAPI", () => {
      * a Squad was `instantiateTemplate` and the only way to lose one was for a
      * human to click Delete.
      */
-    it("creates a Squad through createSquad, so it picks up the durable default", async () => {
+    it("creates a Squad through createSquad, so it picks up the discovered bindings", async () => {
       guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
-      resolveDurable.mockResolvedValueOnce({ runtimeVersion: "durable-v2" })
+      resolveCandidates.mockResolvedValueOnce({
+        repositoryPath: "/repo",
+        environment: { environmentId: "env-1", versionId: "env-1:v1" },
+      })
       const api = createTeamAPI(PLUGIN)
       const squad = await api.createTeam({ name: "Review Crew", task: "review the diff" })
       expect(squad.name).toBe("Review Crew")
-      expect(squad.config.runtimeVersion).toBe("durable-v2")
+      expect(squad.config.repositories).toEqual([
+        { id: "primary", role: "primary", path: "/repo", writable: true },
+      ])
+      expect(squad.config.environmentRef).toEqual({ environmentId: "env-1", versionId: "env-1:v1" })
       // The lead is synthesized by the store, not by the plugin.
       expect(useAgentTeamStore.getState().teammates[squad.leadId]).toBeDefined()
     })
 
-    it("still creates a Squad when no durable default resolves", async () => {
+    it("still creates a Squad when no binding candidates resolve", async () => {
       guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
-      resolveDurable.mockRejectedValueOnce(new Error("no workspace root"))
+      resolveCandidates.mockRejectedValueOnce(new Error("no workspace root"))
       const api = createTeamAPI(PLUGIN)
       const squad = await api.createTeam({ name: "Solo", task: "x" })
       expect(squad.id).toBeTruthy()
     })
 
-    it("caller config wins over the discovered durable default", async () => {
+    it("caller bindings win over the discovered candidates, and a retired selector is dropped", async () => {
       guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
-      resolveDurable.mockResolvedValueOnce({ runtimeVersion: "durable-v2" })
+      resolveCandidates.mockResolvedValueOnce({
+        environment: { environmentId: "env-1", versionId: "env-1:v1" },
+      })
       const api = createTeamAPI(PLUGIN)
       const squad = await api.createTeam({
         name: "Pinned",
         task: "x",
-        config: { runtimeVersion: "legacy" },
+        config: {
+          environmentRef: { environmentId: "env-9", versionId: "env-9:v2" },
+          runtimeVersion: "legacy",
+        } as never,
       })
-      expect(squad.config.runtimeVersion).toBe("legacy")
+      expect(squad.config.environmentRef).toEqual({ environmentId: "env-9", versionId: "env-9:v2" })
+      expect(squad.config).not.toHaveProperty("runtimeVersion")
     })
 
     it("deleteTeam reports an unknown id instead of throwing", async () => {

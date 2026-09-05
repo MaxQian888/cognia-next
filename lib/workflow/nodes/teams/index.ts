@@ -551,10 +551,9 @@ registerNodeExecutor({
         ...(executionRoot ? { workingDir: executionRoot } : {}),
         taskId,
       })
-      const durableEvidence =
-        teamCtx.team.config?.runtimeVersion === "durable-v2"
-          ? await (await import("@/lib/db/agent-team-runtime")).listAgentTeamEvidence(ctx.runId)
-          : []
+      const durableEvidence = await (
+        await import("@/lib/db/agent-team-runtime")
+      ).listAgentTeamEvidence(ctx.runId)
       const durableEvidenceIds = durableEvidence
         .filter((item) => item.taskId === taskId)
         .map((item) => item.id)

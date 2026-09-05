@@ -587,9 +587,7 @@ export async function defaultTeamToolDeps(): Promise<TeamToolDeps> {
     },
     proposeDecision: async (input) => {
       const team = useAgentTeamStore.getState().teams[input.teamId]
-      if (!team || team.config.runtimeVersion !== "durable-v2") {
-        throw new Error("Decision proposals require a durable-v2 AgentTeam run")
-      }
+      if (!team) throw new Error(`Unknown Squad: ${input.teamId}`)
       const { createDecisionLedger } = await import("@/lib/ai/agent/team/decision-ledger")
       return createDecisionLedger({ runId: input.runId, leadId: team.leadId }).propose(input)
     },

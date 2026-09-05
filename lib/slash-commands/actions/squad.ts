@@ -216,7 +216,6 @@ async function commandStatus(ctx: SlashContext, rest: string): Promise<SquadComm
     "",
     `- Roster: ${members.length} member(s)`,
     `- Board: ${done}/${tasks.length} task(s) complete`,
-    `- Runtime: ${squad.config?.runtimeVersion ?? "legacy"}`,
   ]
   if (squad.task) lines.push(`- Objective: ${squad.task}`)
   if (squad.error) lines.push(`- Last error: ${squad.error}`)

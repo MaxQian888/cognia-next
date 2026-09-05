@@ -1,6 +1,5 @@
 /** Durable local AgentTeam runtime contracts. All timestamps are epoch milliseconds. */
 
-export type AgentTeamRuntimeVersion = "legacy" | "durable-v2"
 export type AgentTeamWriteMode = "single-writer" | "isolated-parallel"
 
 export interface AgentTeamRepositoryBinding {

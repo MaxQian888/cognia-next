@@ -16,14 +16,34 @@ describe("TeamRunControls", () => {
     expect(screen.getByTestId("team-run-controls")).toHaveAttribute("data-run-state", "idle")
     fireEvent.click(screen.getByTestId("start-team"))
     expect(onStart).toHaveBeenCalledTimes(1)
-    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stop-team")).not.toBeInTheDocument()
     expect(screen.queryByTestId("resume-team")).not.toBeInTheDocument()
   })
 
   it("treats completed as an idle, restartable state", () => {
-    render(<TeamRunControls status="completed" onStart={jest.fn()} onAbort={jest.fn()} />)
+    render(<TeamRunControls status="completed" onStart={jest.fn()} onStop={jest.fn()} />)
     expect(screen.getByTestId("start-team")).toBeInTheDocument()
-    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stop-team")).not.toBeInTheDocument()
+  })
+
+  /** A blocked Squad keeps its Start button, disabled, with the reason on it. */
+  it("disables Start with the readiness reason instead of hiding it", () => {
+    const onStart = jest.fn()
+    render(
+      <TeamRunControls
+        status="idle"
+        onStart={onStart}
+        ultracodeEnabled
+        onStartUltracode={jest.fn()}
+        startDisabledReason="missing_environment_ref"
+      />
+    )
+    const start = screen.getByTestId("start-team")
+    expect(start).toBeDisabled()
+    expect(start).toHaveAttribute("title", "missing_environment_ref")
+    expect(screen.getByTestId("start-team-ultracode")).toBeDisabled()
+    fireEvent.click(start)
+    expect(onStart).not.toHaveBeenCalled()
   })
 
   it("shows the ultracode button only when ultracode is enabled and a handler is given", () => {
@@ -33,7 +53,6 @@ describe("TeamRunControls", () => {
     )
     expect(screen.queryByTestId("start-team-ultracode")).not.toBeInTheDocument()
 
-    // Enabled but no handler → still hidden.
     rerender(<TeamRunControls status="idle" ultracodeEnabled />)
     expect(screen.queryByTestId("start-team-ultracode")).not.toBeInTheDocument()
 
@@ -42,22 +61,29 @@ describe("TeamRunControls", () => {
     expect(onStartUltracode).toHaveBeenCalledTimes(1)
   })
 
-  it.each(["executing", "planning"] as const)("offers Pause + Abort while %s", (status) => {
+  /**
+   * ADR-0168: Pause and Stop are two different verbs. The old Abort aliased
+   * Pause, so the visible destructive action did not destroy anything.
+   */
+  it.each(["executing", "planning"] as const)("offers Pause + Stop while %s", (status) => {
     const onPause = jest.fn()
-    const onAbort = jest.fn()
-    render(<TeamRunControls status={status} onPause={onPause} onAbort={onAbort} />)
+    const onStop = jest.fn()
+    render(<TeamRunControls status={status} onPause={onPause} onStop={onStop} />)
     expect(screen.getByTestId("team-run-controls")).toHaveAttribute("data-run-state", "live")
     fireEvent.click(screen.getByTestId("pause-team"))
     expect(onPause).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByTestId("abort-team"))
-    expect(onAbort).toHaveBeenCalledTimes(1)
+    expect(onStop).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId("stop-team"))
+    expect(onStop).toHaveBeenCalledTimes(1)
+    expect(onPause).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
   })
 
-  it("omits Pause when no onPause is supplied but keeps Abort", () => {
-    render(<TeamRunControls status="executing" onAbort={jest.fn()} />)
+  it("omits Pause when no onPause is supplied but keeps Stop", () => {
+    render(<TeamRunControls status="executing" onStop={jest.fn()} />)
     expect(screen.queryByTestId("pause-team")).not.toBeInTheDocument()
-    expect(screen.getByTestId("abort-team")).toBeInTheDocument()
+    expect(screen.getByTestId("stop-team")).toBeInTheDocument()
   })
 
   it("offers Resume + Stop while paused", () => {
@@ -70,7 +96,6 @@ describe("TeamRunControls", () => {
     fireEvent.click(screen.getByTestId("stop-team"))
     expect(onStop).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
   })
 
   it("omits Stop when no onStop is supplied but keeps Resume", () => {
@@ -87,9 +112,7 @@ describe("TeamRunControls", () => {
 
 /**
  * A control wired to `undefined` is worse than an absent one: it reads as "the
- * run refuses" rather than "this surface cannot". The mobile workspace shipped
- * exactly that — a paused team with an inert Resume button — because only Pause
- * and Stop were gated on their handlers.
+ * run refuses" rather than "this surface cannot".
  */
 describe("no button without a handler", () => {
   it("omits Resume when the surface cannot resume", () => {
@@ -102,9 +125,9 @@ describe("no button without a handler", () => {
     expect(screen.queryByTestId("start-team")).not.toBeInTheDocument()
   })
 
-  it("omits Abort when the surface cannot abort", () => {
+  it("omits Stop when the surface cannot stop", () => {
     render(<TeamRunControls status="executing" />)
-    expect(screen.queryByTestId("abort-team")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("stop-team")).not.toBeInTheDocument()
   })
 
   it("still renders each one when its handler is supplied", () => {
@@ -112,7 +135,7 @@ describe("no button without a handler", () => {
     expect(screen.getByTestId("resume-team")).toBeInTheDocument()
     rerender(<TeamRunControls status="idle" onStart={jest.fn()} />)
     expect(screen.getByTestId("start-team")).toBeInTheDocument()
-    rerender(<TeamRunControls status="executing" onAbort={jest.fn()} />)
-    expect(screen.getByTestId("abort-team")).toBeInTheDocument()
+    rerender(<TeamRunControls status="executing" onStop={jest.fn()} />)
+    expect(screen.getByTestId("stop-team")).toBeInTheDocument()
   })
 })

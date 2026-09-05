@@ -1,12 +1,12 @@
-const waitForDecisionMock = jest.fn()
-jest.mock("@/lib/runtime/approval-bus", () => ({
-  waitForDecision: (...args: unknown[]) => waitForDecisionMock(...args),
+const openSquadReviewMock = jest.fn()
+jest.mock("./squad-review-gate", () => ({
+  openSquadReview: (...args: unknown[]) => openSquadReviewMock(...args),
 }))
 
 import { awaitReplanApproval } from "./replan-gate"
 import { continueDecision, type ReplanDecision } from "./replan-schema"
 import type { TeamNotifier } from "./team-notifier"
-import type { ApprovalDecision } from "@/lib/runtime/approval-bus"
+import type { SquadReviewOutcome } from "./squad-review-gate"
 
 function makeNotifier() {
   const notify = jest.fn()
@@ -23,21 +23,31 @@ const decision: ReplanDecision = {
   newMembers: [],
 }
 
+const approve = async (): Promise<SquadReviewOutcome> => ({ kind: "replan", outcome: "approve" })
+
 describe("awaitReplanApproval", () => {
-  it("opens a replan gate and returns approved with the original decision", async () => {
+  beforeEach(() => openSquadReviewMock.mockReset())
+
+  it("opens a durable replan review and returns approved with the original decision", async () => {
     const { notifier, notify } = makeNotifier()
+    const openReview = jest.fn(approve)
     const out = await awaitReplanApproval({
       notifier,
       runId: "run1",
       teamId: "team1",
+      projectId: "ws1",
+      instance: "after-t1",
       decision,
-      waitFn: async () => ({ outcome: "approve" }) as ApprovalDecision,
+      openReview,
     })
 
-    expect(notify).toHaveBeenCalledWith(
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ level: "critical" }))
+    expect(openReview).toHaveBeenCalledWith(
       expect.objectContaining({
-        level: "critical",
-        openApproval: { scope: "agent-team-replan", id: "run1" },
+        runId: "run1",
+        teamId: "team1",
+        projectId: "ws1",
+        instance: "after-t1",
       })
     )
     expect(out.approved).toBe(true)
@@ -52,7 +62,11 @@ describe("awaitReplanApproval", () => {
       runId: "run1",
       teamId: "team1",
       decision,
-      waitFn: async () => ({ outcome: "approve", plan: edited }) as ApprovalDecision,
+      openReview: async () => ({
+        kind: "replan",
+        outcome: "approve",
+        edited: edited as unknown as Record<string, unknown>,
+      }),
     })
     expect(out.approved).toBe(true)
     expect(out.decision.action).toBe("continue")
@@ -66,60 +80,65 @@ describe("awaitReplanApproval", () => {
       runId: "run1",
       teamId: "team1",
       decision,
-      waitFn: async () => ({ outcome: "approve", plan: { bogus: true } }) as ApprovalDecision,
+      openReview: async () => ({ kind: "replan", outcome: "approve", edited: { bogus: true } }),
     })
     expect(out.decision).toEqual(decision)
   })
 
-  it("skips the gate on a headless behavior — info notify, no modal, original plan", async () => {
+  it("skips the review on a headless behavior: info notify, no interrupt, original plan", async () => {
     const { notifier, notify } = makeNotifier()
-    const waitFn = jest.fn(async () => ({ outcome: "approve" }) as ApprovalDecision)
+    const openReview = jest.fn(approve)
     const out = await awaitReplanApproval({
       notifier,
       runId: "run1",
       teamId: "team1",
       decision,
       behavior: "auto-reject",
-      waitFn,
+      openReview,
     })
-    expect(waitFn).not.toHaveBeenCalled()
+    expect(openReview).not.toHaveBeenCalled()
     expect(out.approved).toBe(false)
     expect(out.decision).toEqual(decision)
-    const payload = notify.mock.calls[0][0] as { level: string; openApproval?: unknown }
+    const payload = notify.mock.calls[0][0] as { level: string }
     expect(payload.level).toBe("info")
-    expect(payload.openApproval).toBeUndefined()
   })
 
-  it("returns not-approved on reject (proceed with original plan)", async () => {
+  it("returns not-approved on deny (proceed with original plan)", async () => {
     const { notifier } = makeNotifier()
     const out = await awaitReplanApproval({
       notifier,
       runId: "run1",
       teamId: "team1",
       decision,
-      waitFn: async () => ({ outcome: "reject", feedback: "no" }) as ApprovalDecision,
+      openReview: async () => ({ kind: "replan", outcome: "deny" }),
     })
     expect(out.approved).toBe(false)
     expect(out.decision).toEqual(decision)
   })
 
-  it("falls back to the approval-bus waiter when no waitFn is injected", async () => {
+  it("falls back to the durable Squad review when no opener is injected", async () => {
     const { notifier } = makeNotifier()
-    waitForDecisionMock.mockResolvedValueOnce({ outcome: "approve" })
+    openSquadReviewMock.mockResolvedValueOnce({ kind: "replan", outcome: "approve" })
     const out = await awaitReplanApproval({
       notifier,
       runId: "run1",
       teamId: "team1",
+      instance: "after-t2",
       decision,
     })
-    expect(waitForDecisionMock).toHaveBeenCalledWith(
-      { scope: "agent-team-replan", id: "run1" },
-      undefined
+    expect(openSquadReviewMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run1",
+        teamId: "team1",
+        kind: "replan",
+        instance: "after-t2",
+        subject: { action: "inject", newTasks: 1, newMembers: 0 },
+      })
     )
     expect(out.approved).toBe(true)
   })
 
-  it("propagates an abort from the waiter", async () => {
+  it("propagates an abort from the review", async () => {
     const { notifier } = makeNotifier()
     await expect(
       awaitReplanApproval({
@@ -127,7 +146,7 @@ describe("awaitReplanApproval", () => {
         runId: "run1",
         teamId: "team1",
         decision,
-        waitFn: async () => {
+        openReview: async () => {
           throw new Error("Aborted")
         },
       })

@@ -1,21 +1,26 @@
 /**
- * PendingGatesStore — UI-side mirror of open HITL gates.
+ * PendingGatesStore: UI-side mirror of the open HITL gates that still ride the
+ * in-memory approval bus.
  *
- * Two producers, one store:
- *   • ADR-0022 §3 team gates — `TeamNotifier` pushes critical notifications
- *     carrying `openApproval: { scope, id }` payloads here (team-scoped, so
- *     they carry `runId` + `teamId`).
- *   • ADR-0045 plan gates — an `approval_gate` plan step
+ * Two producers remain:
+ *   • ADR-0045 plan gates: an `approval_gate` plan step
  *     (`lib/agent/plan/step-dispatch.ts`) registers itself here before it
- *     blocks on the approval bus. Those are session-scoped, not team-scoped,
- *     which is why `runId` / `teamId` are optional.
+ *     blocks on the approval bus. Session-scoped.
+ *   • The USD cost ceiling (`lib/usage/cost-budget-runtime.ts`), which asks
+ *     for one more request through the same modal.
+ *
+ * Squad gates are NOT here any more (ADR-0168). A Squad's plan, capability
+ * audit, budget extension, deadlock, teammate repair, re-plan and recovery
+ * decisions are durable `ExecutionRunInterrupt`s opened by
+ * `lib/ai/agent/team/squad-review-gate.ts` and answered through the run
+ * control plane, which is what lets a reload, a phone and an IM card all see
+ * and settle the same question.
  *
  * `<GateModalsHost>` (mounted once at the app root, `app/layout.tsx`) renders
- * one `<ApprovalGateDialog>` per pending entry; without it a blocked waiter
- * has no release valve on whatever surface the user happens to be on.
+ * one `<ApprovalGateDialog>` per pending entry.
  *
  * Persistence: gates survive a reload, but the underlying approval-bus
- * waiter does NOT — so rehydration marks every restored gate `interrupted`.
+ * waiter does NOT, so rehydration marks every restored gate `interrupted`.
  * An interrupted gate renders a Dismiss-only stale card (never live
  * Approve/Reject buttons that would resolve into the void). When the same
  * gate re-fires after reconnect, `open()` replaces the interrupted entry
@@ -27,13 +32,14 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 
+/**
+ * ADR-0168 moved every Squad gate (plan, deadlock, teammate repair, re-plan,
+ * capability audit, token budget) onto durable `ExecutionRunInterrupt`s.
+ * What remains here is the non-Squad producers this store still serves.
+ */
 export type PendingGateType =
+  /** The USD cost ceiling (`lib/usage/cost-budget-runtime.ts`). */
   | "budget"
-  | "deadlock"
-  | "plan"
-  | "teammate_fix"
-  | "replan"
-  | "capability_audit"
   /** ADR-0045: an `approval_gate` step inside a running AgentPlan. */
   | "plan_step"
 
@@ -44,9 +50,9 @@ export interface PendingGate {
   gateType: PendingGateType
   title: string
   body?: string
-  /** Team gates only — the workflow run the gate belongs to. */
+  /** The run the gate belongs to, when the producer has one (cost budget). */
   runId?: string
-  /** Team gates only — the owning team. */
+  /** Retained for row shape compatibility. Squad gates no longer live here. */
   teamId?: string
   taskId?: string
   /** Plan gates only — the chat session that owns the plan (navigation target). */
@@ -122,28 +128,15 @@ export const usePendingGatesStore = create<PendingGatesState>()(
 
 /**
  * Map approval-bus scope strings to gate-modal variants.
- * Centralized here so the notifier and the modal host agree.
+ * Centralized here so the producers and the modal host agree.
  */
 export function gateTypeFromScope(scope: string): PendingGateType {
   switch (scope) {
-    case "agent-team-budget":
-    // The USD cost ceiling opens the same modal variant as the team's token
-    // budget — same question, different unit.
-    case "cost-budget":
-      return "budget"
-    case "agent-team-deadlock":
-      return "deadlock"
-    case "agent-team-teammate-fix":
-      return "teammate_fix"
-    case "agent-team-replan":
-      return "replan"
-    case "agent-team-capability-audit":
-      return "capability_audit"
-    // ADR-0045 `PLAN_APPROVAL_SCOPE` — a plan step's human checkpoint.
+    // ADR-0045 `PLAN_APPROVAL_SCOPE`: a plan step's human checkpoint.
     case "agent-plan":
       return "plan_step"
-    case "agent-team":
+    case "cost-budget":
     default:
-      return "plan"
+      return "budget"
   }
 }

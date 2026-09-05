@@ -28,26 +28,6 @@ export class UnsupportedForKindError extends Error {
 }
 
 /**
- * The action is real for this KIND, but not on the runtime this particular run
- * uses.
- *
- * A Squad on `durable-v2` can be steered from the cockpit, because the durable
- * coordinator holds a receipt queue to steer into. The same Squad on `legacy`
- * has no queue, so there is nowhere to put the message. Reporting that as
- * {@link UnsupportedForKindError} told the user "this kind of run cannot take
- * that action", which is false about Squads and leaves nowhere to go.
- */
-export class UnsupportedForRuntimeError extends Error {
-  constructor(
-    readonly action: string,
-    readonly kind: string
-  ) {
-    super(`Run kind "${kind}" cannot ${action} on this runtime`)
-    this.name = "UnsupportedForRuntimeError"
-  }
-}
-
-/**
  * A steer the run kind supports but could not apply right now.
  *
  * Distinct from {@link UnsupportedForKindError} on purpose: this one means the
@@ -116,6 +96,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   delegation: RunControlHandler
   workflowRetry: RunRetryHandler
   delegationRetry: RunRetryHandler
+  teamRetry: RunRetryHandler
   dispose(): void
 } {
   const agent: RunControlHandler = async (command) => {
@@ -197,85 +178,11 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   }
 
   /**
-   * A team run that has no `agentTeamRuns` record: either a `trigger.team`
-   * workflow run, or a run on the LEGACY runtime, which writes no durable
-   * record at all.
-   *
-   * Legacy was reaching `workflow` and dying quietly. Its `sourceId` is a
-   * lifecycle run id rather than a workflow run id, so `cancelWorkflowRun`
-   * looked up nothing and returned `noop`, which the workflow handler
-   * discards: Stop reported success and stopped nothing. `legacy` is the
-   * default runtime version, so that was the common case.
-   *
-   * Three answers, in the order a run can give them:
-   *
-   *   - LIVE. The run-context registry maps a run id to its team for exactly
-   *     as long as the run is controllable at all, since a legacy run keeps
-   *     its abort controller in memory and does not outlive the process. Pause
-   *     and Stop go through `agentTeamManager`, the same entry the Squad
-   *     console uses, so there is no second control implementation here.
-   *   - PAUSED. The lifecycle has exited, so there is no context entry, and
-   *     resume is addressed to the TEAM. The team is on the run's opening
-   *     journal event, and the run id is handed back so the remaining work
-   *     continues under the same row.
-   *   - NEITHER. The workflow cancel runs, and its own `noop` is reported
-   *     instead of swallowed, so the cockpit says the engine refused rather
-   *     than showing a stop that never happened.
-   */
-  const legacyOrWorkflow = async (command: RunControlCommand, sourceId: string): Promise<void> => {
-    const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
-    const live = getTeamRunContext(sourceId)
-    if (live) {
-      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
-      if (command.action === "pause") return agentTeamManager.pause(live.teamId)
-      if (command.action === "stop") return agentTeamManager.shutdown(live.teamId)
-      // Steering is the one verb with nowhere to go: it needs the durable
-      // coordinator's receipt queue, and a legacy run has no queue to put the
-      // message in. Reported against the RUNTIME rather than the kind, because
-      // a durable-v2 Squad steers from this very pane, so "this kind of run
-      // cannot take that action" would be false about Squads.
-      throw new UnsupportedForRuntimeError(command.action, "team")
-    }
-
-    // Not live, and a paused legacy run is the case that matters: its
-    // lifecycle has exited, so it holds no context entry, and resuming it is
-    // addressed to the TEAM rather than to a run id. The team is recorded on
-    // the run's own opening event, which is what lets the row answer for
-    // itself here.
-    //
-    // The run id goes back to `resume`, so the work that is left continues
-    // under THIS row rather than minting a second one and stranding the row
-    // the button was pressed on at `paused` for good.
-    if (command.action === "resume") {
-      const { teamIdForExecutionRun } = await import("@/lib/execution/agent-team-bridge")
-      const teamId = await teamIdForExecutionRun(command.runId)
-      // Rows written before the team was seeded cannot answer, and are refused
-      // rather than guessed at.
-      if (!teamId) throw new UnsupportedForRuntimeError(command.action, "team")
-      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
-      return agentTeamManager.resume(teamId, undefined, sourceId)
-    }
-
-    if (command.action !== "stop") throw new UnsupportedForRuntimeError(command.action, "team")
-    const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
-    const result = await cancelWorkflowRun(sourceId, "im_control")
-    if (result.mode === "noop") throw new Error("No live run behind this team row")
-  }
-
-  /**
-   * Team runs reach the execution journal by two routes with different
-   * `sourceId` semantics, and only one of them is a workflow:
-   *
-   *   - a `trigger.team` workflow run projected by `workflow-bridge.ts`, whose
-   *     `sourceId` is a workflow run id — `cancelWorkflowRun` is correct;
-   *   - a durable-v2 run projected by `agent-team-bridge.ts`, whose `sourceId`
-   *     is an `AgentTeamRunRecord` id — `cancelWorkflowRun` looks it up, finds
-   *     nothing, and the stop button does nothing.
-   *
-   * Both kinds were registered to the workflow handler, so half of them could
-   * not be stopped at all. Discriminate on the source row rather than on the
-   * kind, and hand a durable run to `controlDurableRun` — the function that
-   * has always known how, and had no registration.
+   * A Squad run. Every verb is the one control state machine in
+   * `lib/ai/agent/team/squad-control.ts` (ADR-0168): there is no legacy branch
+   * and no `trigger.team` workflow fallback, because every live run has its
+   * durable record from the moment it was journalled. A team row without one
+   * is backfilled history and refuses controls as `source_rejected`.
    */
   const team: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
@@ -284,20 +191,28 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
 
     const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
     const durable = await getAgentTeamRun(run.sourceId).catch(() => undefined)
-    if (!durable) return legacyOrWorkflow(command, run.sourceId)
+    if (!durable) throw new Error("No durable record behind this Squad run")
 
     if (command.action === "steer") {
       const { steerDurableRun } = await import("@/lib/ai/agent/team/durable-control")
       // The coordinator persists a receipt BEFORE attempting live delivery, so
       // "nothing is attached right now" is the durable path working, not a
-      // failure — the next provider turn drains the queued receipt. Only "no
-      // child can act at all" is a real degradation.
+      // failure. Only "no child can act at all" is a real degradation.
       const { receiptIds, childCount } = await steerDurableRun(
         run.sourceId,
         command.steerMessage ?? ""
       )
       if (childCount === 0) throw new SteerDegradedError("no_active_run")
       return { steerReceiptIds: receiptIds }
+    }
+
+    if (command.action === "approve" || command.action === "deny") {
+      // Squad reviews settle through the interrupt the gate opened. The
+      // control gate has already validated the interrupt; here the decision
+      // reaches the waiting lifecycle (or its persisted slot, after a restart).
+      const { settleSquadReviewFromControl } = await import("@/lib/ai/agent/team/squad-review-gate")
+      await settleSquadReviewFromControl(command)
+      return
     }
 
     const action =
@@ -309,8 +224,43 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
             ? "resume"
             : undefined
     if (!action) throw new UnsupportedForKindError(command.action, "team")
-    const { controlDurableRun } = await import("@/lib/ai/agent/team/durable-control")
-    await controlDurableRun(run.sourceId, action)
+    const { controlSquadRun } = await import("@/lib/ai/agent/team/squad-control")
+    const result = await controlSquadRun(run.sourceId, action)
+    if (!result.ok) {
+      if (result.reason === "recovery_required") {
+        throw new Error("recovery_required")
+      }
+      throw new Error(result.reason ?? "source_rejected")
+    }
+  }
+
+  /**
+   * Retry a settled Squad run: a linked replacement through the one launch
+   * seam. The settled row keeps its history. `startSquadRun` re-checks
+   * readiness and the one-live-run rule, so a Squad that is now blocked, or
+   * already running again, refuses here instead of forking.
+   */
+  const teamRetry: RunRetryHandler = async ({ run }) => {
+    const { teamIdForExecutionRun } = await import("@/lib/execution/agent-team-bridge")
+    const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+    const durable = await getAgentTeamRun(run.sourceId).catch(() => undefined)
+    const teamId = durable?.teamId ?? (await teamIdForExecutionRun(run.id))
+    if (!teamId) throw new UnsupportedForKindError("retry", "team")
+    const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+    const result = await startSquadRun({
+      squadId: teamId,
+      goal: "",
+      origin: "interactive",
+      triggeredFrom: { source: "ui" },
+      parentRunId: run.id,
+      ...(run.sessionId
+        ? { session: { id: run.sessionId } as import("@cognia/agent-config-types").ChatSession }
+        : {}),
+    })
+    if (!result.started || !result.executionRunId) {
+      throw new Error(result.reason ?? "source_rejected")
+    }
+    return { runId: result.executionRunId }
   }
 
   const goal: RunControlHandler = async (command) => {
@@ -651,11 +601,11 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   const unregisterDelegation = registerRunControlHandler("delegation", delegation)
   const unregisterGoal = registerRunControlHandler("goal", goal)
   const unregisterPlan = registerRunControlHandler("plan", plan)
-  // Only the kinds with a real re-dispatch register one. `agent-turn`, `team`,
-  // `goal` and `plan` deliberately do not: an agent turn's replacement is a new
-  // inbound turn rather than a new run of the same one, and a team/goal/plan
-  // retry would have to re-derive a permission ceiling and an objective that
-  // are not on the settled row. `canRetryRunKind` reads this registry, so those
+  // Only the kinds with a real re-dispatch register one. `agent-turn`, `goal`
+  // and `plan` deliberately do not: an agent turn's replacement is a new
+  // inbound turn rather than a new run of the same one, and a goal/plan retry
+  // would have to re-derive a permission ceiling and an objective that are
+  // not on the settled row. `canRetryRunKind` reads this registry, so those
   // cards simply never show the button.
   //
   // `bot` does not either, for the opposite reason: a Bot retry re-enters the
@@ -667,6 +617,10 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     registerRunRetryHandler(kind, workflowRetry)
   )
   const unregisterDelegationRetry = registerRunRetryHandler("delegation", delegationRetry)
+  // A Squad DOES register one (ADR-0168): its replacement is a new durable run
+  // of the same definition, linked to the settled one, through the one launch
+  // seam that re-checks readiness.
+  const unregisterTeamRetry = registerRunRetryHandler("team", teamRetry)
   return {
     agent,
     job,
@@ -679,6 +633,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     delegation,
     workflowRetry,
     delegationRetry,
+    teamRetry,
     dispose() {
       unregisterAgent()
       unregisterJob()
@@ -691,6 +646,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       unregisterPlan()
       for (const unregister of unregisterWorkflowRetry) unregister()
       unregisterDelegationRetry()
+      unregisterTeamRetry()
     },
   }
 }

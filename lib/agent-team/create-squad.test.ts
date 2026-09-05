@@ -1,10 +1,16 @@
 import { createSquad } from "./create-squad"
+import {
+  SQUAD_DEFINITION_CONTRACT_VERSION,
+  type SquadBindingCandidates,
+} from "./definition-contract"
 import type { AgentTeam, CreateTeamInput } from "@/types/agent/agent-team"
 import type { Project } from "@/types"
 
 const project = { id: "ws_1", name: "Work" } as Project
+const env = { environmentId: "env-1", versionId: "env-1:v2" }
+const primary = { id: "primary", role: "primary" as const, path: "/repo", writable: true }
 
-function harness(resolved: Partial<AgentTeam["config"]> | null) {
+function harness(candidates: SquadBindingCandidates | (() => Promise<never>)) {
   const created: CreateTeamInput[] = []
   const createTeam = (input: CreateTeamInput) => {
     created.push(input)
@@ -13,51 +19,70 @@ function harness(resolved: Partial<AgentTeam["config"]> | null) {
   return {
     created,
     run: (input: CreateTeamInput) =>
-      createSquad(input, { createTeam, project, resolveDurable: async () => resolved }),
+      createSquad(input, {
+        createTeam,
+        project,
+        resolveCandidates: typeof candidates === "function" ? candidates : async () => candidates,
+      }),
   }
 }
 
 describe("createSquad", () => {
+  it("binds the discovered repository and environment on the current contract", async () => {
+    const { created, run } = harness({ repositoryPath: "/repo", environment: env })
+    await run({ name: "Alpha", task: "ship" })
+    expect(created[0]?.config).toEqual({
+      writeMode: "single-writer",
+      repositories: [primary],
+      environmentRef: env,
+      contractVersion: SQUAD_DEFINITION_CONTRACT_VERSION,
+    })
+  })
+
   /**
-   * The defect this exists for: `resolveDurableNewTeamConfig` had no caller, so
-   * every new squad was legacy and durable-v2 was reachable only by migrating
-   * an existing one.
+   * There is no legacy runtime to fall back to. A Squad without candidates is
+   * created unbound and reported as not ready, never as a different kind of
+   * Squad.
    */
-  it("applies the discovered durable default", async () => {
-    const { created, run } = harness({ runtimeVersion: "durable-v2" })
+  it("creates an unbound squad when nothing can be inferred", async () => {
+    const { created, run } = harness({})
     await run({ name: "Alpha", task: "ship" })
-    expect(created[0]?.config?.runtimeVersion).toBe("durable-v2")
+    expect(created[0]?.config?.repositories).toBeUndefined()
+    expect(created[0]?.config?.environmentRef).toBeUndefined()
+    expect(created[0]?.config?.contractVersion).toBe(SQUAD_DEFINITION_CONTRACT_VERSION)
   })
 
-  it("creates a legacy squad when nothing durable is available", async () => {
-    const { created, run } = harness(null)
-    await run({ name: "Alpha", task: "ship" })
-    expect(created[0]?.config?.runtimeVersion).toBeUndefined()
+  /** An explicit binding is a decision, and discovery must not overrule it. */
+  it("lets the caller's own bindings win", async () => {
+    const own = { environmentId: "env-9", versionId: "env-9:v1" }
+    const { created, run } = harness({ repositoryPath: "/repo", environment: env })
+    await run({
+      name: "Alpha",
+      task: "ship",
+      config: { repositories: [{ ...primary, path: "/mine" }], environmentRef: own },
+    })
+    expect(created[0]?.config?.repositories).toEqual([{ ...primary, path: "/mine" }])
+    expect(created[0]?.config?.environmentRef).toEqual(own)
   })
 
-  /** An explicit choice is a decision, and discovery must not overrule it. */
-  it("lets the caller's own config win", async () => {
-    const { created, run } = harness({ runtimeVersion: "durable-v2" })
-    await run({ name: "Alpha", task: "ship", config: { runtimeVersion: "legacy" } })
-    expect(created[0]?.config?.runtimeVersion).toBe("legacy")
+  /** A template or plugin still naming a runtime has that key dropped at the door. */
+  it("drops a retired runtime selector from the caller's config", async () => {
+    const { created, run } = harness({})
+    await run({
+      name: "Alpha",
+      task: "ship",
+      config: { runtimeVersion: "legacy", maxTeammates: 2 } as CreateTeamInput["config"],
+    })
+    expect(created[0]?.config).not.toHaveProperty("runtimeVersion")
+    expect(created[0]?.config?.maxTeammates).toBe(2)
   })
 
   /** Discovery touches Dexie and the host. Neither may block creating a squad. */
   it("still creates the squad when discovery throws", async () => {
-    const created: CreateTeamInput[] = []
-    const team = await createSquad(
-      { name: "Alpha", task: "ship" },
-      {
-        createTeam: (input) => {
-          created.push(input)
-          return { id: "team_a" } as AgentTeam
-        },
-        project,
-        resolveDurable: async () => {
-          throw new Error("host unavailable")
-        },
-      }
-    )
+    const { created, run } = harness(async () => {
+      throw new Error("host unavailable")
+    })
+    const team = await run({ name: "Alpha", task: "ship" })
     expect(team.id).toBe("team_a")
     expect(created).toHaveLength(1)
   })

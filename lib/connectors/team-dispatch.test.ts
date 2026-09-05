@@ -1,7 +1,9 @@
 /**
- * Tests for lib/connectors/team-dispatch.ts — IM → Agent Team dispatch.
- * The team runtime / store / deps loaders are injected so the test never
- * imports the heavy Agent-Team graph.
+ * Tests for lib/connectors/team-dispatch.ts, the IM lane's thin wrapper over
+ * `startSquadRun`. The seam's collaborators are injected so the test never
+ * imports the heavy Agent-Team graph. What is pinned here is what the IM lane
+ * ADDS: the trigger origin, the connector binding, the plan-approval delegate
+ * and the audit vocabulary of its refusals.
  */
 
 import {
@@ -9,90 +11,90 @@ import {
   resolveTeamByNameOrId,
   type StartTeamRunFromIMDeps,
 } from "./team-dispatch"
+import type { SquadReadiness } from "@/lib/agent-team/squad-readiness"
 
 // Mocks for the modules the DEFAULT loaders dynamically import, so the
 // fallback loader paths (and resolveTeamByNameOrId) are covered.
-const runTeamLifecycleMock = jest.fn(async (_teamId: string, deps: Record<string, unknown>) => {
-  // Exercise the storeReader/storeWriter wrappers the dispatcher built so
-  // those inner functions are covered (the real runtime calls them).
-  const reader = deps.storeReader as {
-    getTeam: (id: string) => unknown
-    getTeammates: (id: string) => unknown
-    getTeamTasks: (id: string) => unknown
-  }
-  const writer = deps.storeWriter as {
-    addMessage: (m: unknown) => unknown
-    setTaskStatus: (t: string, s: unknown, r?: string, e?: string) => unknown
-    updateTeammate: (id: string, u: unknown) => unknown
-  }
-  reader.getTeam("team_real")
-  reader.getTeammates("team_real")
-  reader.getTeamTasks("team_real")
-  writer.addMessage({})
-  writer.setTaskStatus("t", "done", "ok", undefined)
-  writer.updateTeammate("m", {})
-  return { runId: "r", status: "completed" }
-})
-const ensureImTeamExecutionRunMock = jest.fn(async (_input: unknown) => "execution:team:stub")
-jest.mock("@/lib/execution/agent-team-bridge", () => ({
-  ensureImTeamExecutionRun: (input: unknown) => ensureImTeamExecutionRunMock(input),
-  agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
+const runSquadLifecycleMock = jest.fn(async (_input: Record<string, unknown>) => ({
+  runId: "r",
+  status: "completed",
+}))
+jest.mock("@/lib/ai/agent/team/squad-lifecycle-runner", () => ({
+  __esModule: true,
+  runSquadLifecycle: (input: Record<string, unknown>) => runSquadLifecycleMock(input),
+}))
+const createSquadRunRecordsMock = jest.fn(async (seed: { runId: string }) => ({
+  executionRunId: `execution:team:${seed.runId}`,
+  created: true,
+}))
+jest.mock("@/lib/ai/agent/team/squad-run-records", () => ({
+  __esModule: true,
+  createSquadRunRecords: (seed: { runId: string }) => createSquadRunRecordsMock(seed),
+  findLiveSquadRun: async () => undefined,
+}))
+jest.mock("@/lib/agent-team/squad-readiness", () => ({
+  __esModule: true,
+  evaluateSquadReadiness: async () => ({ ready: true, blockers: [], evaluatedAt: 1 }),
+}))
+const ensureConnectorRunBindingMock = jest.fn(async (..._args: unknown[]) => undefined)
+jest.mock("@/lib/execution/agent-state-bridge", () => ({
+  __esModule: true,
+  ensureConnectorRunBinding: (...args: unknown[]) => ensureConnectorRunBindingMock(...args),
 }))
 
-const getTeamMock = jest.fn((id: string) => (id === "team_real" ? { id, name: "Real" } : undefined))
+const getTeamMock = jest.fn((id: string) =>
+  id === "team_real" ? { id, name: "Real", config: {} } : undefined
+)
 jest.mock("@/stores/agent/agent-team-store", () => ({
   __esModule: true,
   useAgentTeamStore: {
     getState: () => ({
       getTeam: getTeamMock,
-      getTeammates: () => [],
+      getTeammates: () => [{ role: "teammate" }],
       getTeamTasks: () => [],
       updateTeam: jest.fn(),
-      addMessage: jest.fn(),
-      setTaskStatus: jest.fn(),
-      updateTeammate: jest.fn(),
       teams: { team_real: { id: "team_real", name: "Real" } },
     }),
   },
 }))
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
-  __esModule: true,
-  runTeamLifecycle: (...args: unknown[]) =>
-    runTeamLifecycleMock(...(args as Parameters<typeof runTeamLifecycleMock>)),
-}))
-jest.mock("@/lib/ai/agent/agent-team-runtime-deps", () => ({
-  __esModule: true,
-  buildAgentTeamRuntimeDeps: () => ({ notifierDeps: {} }),
-}))
+
+const READY: SquadReadiness = { ready: true, blockers: [], evaluatedAt: 1 }
 
 interface Harness {
-  runCalls: Array<{ teamId: string; deps: Record<string, unknown> }>
+  runCalls: Array<Record<string, unknown>>
   updates: Array<{ teamId: string; updates: { task?: string } }>
+  bindings: unknown[]
   deps: StartTeamRunFromIMDeps
 }
 
-function harness(opts: { teamExists?: boolean } = {}): Harness {
+function harness(opts: { teamExists?: boolean; readiness?: SquadReadiness } = {}): Harness {
   const runCalls: Harness["runCalls"] = []
   const updates: Harness["updates"] = []
+  const bindings: unknown[] = []
   const teamExists = opts.teamExists ?? true
   const store = {
-    getTeam: (id: string) => (teamExists ? { id, name: "T" } : undefined),
-    getTeammates: () => [],
+    getTeam: (id: string) => (teamExists ? { id, name: "T", config: {} } : undefined),
+    getTeammates: () => [{ role: "teammate" }],
     getTeamTasks: () => [],
     updateTeam: (teamId: string, u: { task?: string }) => updates.push({ teamId, updates: u }),
-    addMessage: () => undefined,
-    setTaskStatus: () => undefined,
-    updateTeammate: () => undefined,
   }
   const deps: StartTeamRunFromIMDeps = {
     loadStore: async () => store,
-    loadRunTeamLifecycle: async () => async (teamId: string, d: Record<string, unknown>) => {
-      runCalls.push({ teamId, deps: d })
-      return { runId: "run_1", status: "completed" }
+    evaluateReadiness: async () => opts.readiness ?? READY,
+    findLiveRun: async () => undefined,
+    createRunRecords: async (seed) => ({
+      executionRunId: `execution:team:${seed.runId}`,
+      created: true,
+    }),
+    bindConnectorRun: async (input) => {
+      bindings.push(input)
     },
-    loadBuildDeps: async () => () => ({ notifierDeps: { marker: true } }),
+    runLifecycle: async (input) => {
+      runCalls.push(input as unknown as Record<string, unknown>)
+      return { runId: input.runId, status: "completed" }
+    },
   }
-  return { runCalls, updates, deps }
+  return { runCalls, updates, bindings, deps }
 }
 
 describe("startTeamRunFromIM", () => {
@@ -116,11 +118,39 @@ describe("startTeamRunFromIM", () => {
     expect(h.runCalls).toHaveLength(0)
   })
 
-  it("seeds the objective and launches runTeamLifecycle with triggeredFrom", async () => {
+  /** The two refusals a person can act on pass through with their detail. */
+  it("passes readiness blockers and an open run through instead of flattening them", async () => {
+    const blocked = harness({
+      readiness: {
+        ready: false,
+        blockers: [{ code: "missing_environment_ref", action: "configure_environment" }],
+        evaluatedAt: 1,
+      },
+    })
+    await expect(
+      startTeamRunFromIM(
+        { teamId: "team_x", goal: "hi", adapterId: "tg-1", conversationKey: "k" },
+        blocked.deps
+      )
+    ).resolves.toEqual({
+      started: false,
+      reason: "not_ready",
+      blockers: [{ code: "missing_environment_ref", action: "configure_environment" }],
+    })
+
+    const busy = harness()
+    busy.deps.findLiveRun = async () => ({ id: "run_team_open" })
+    await expect(
+      startTeamRunFromIM(
+        { teamId: "team_x", goal: "hi", adapterId: "tg-1", conversationKey: "k" },
+        busy.deps
+      )
+    ).resolves.toEqual({ started: false, reason: "already_running", runId: "run_team_open" })
+  })
+
+  it("seeds the objective and launches the lifecycle with the IM trigger", async () => {
     const h = harness()
     const permissionCeiling = { disallowedTools: ["Bash"] }
-    const buildDeps = jest.fn(() => ({ notifierDeps: { marker: true } }))
-    h.deps.loadBuildDeps = async () => buildDeps
     h.deps.loadCharacter = async () => ({
       id: "char_1",
       name: "Sage",
@@ -139,30 +169,23 @@ describe("startTeamRunFromIM", () => {
       h.deps
     )
     expect(res).toEqual({ started: true, runId: expect.stringMatching(/^run_team_/) })
-    // objective seeded
     expect(h.updates).toEqual([{ teamId: "team_x", updates: { task: "build a parser" } }])
-    // lifecycle launched (await a microtask so the fire-and-forget call lands)
     await Promise.resolve()
     expect(h.runCalls).toHaveLength(1)
-    expect(h.runCalls[0].teamId).toBe("team_x")
-    expect(h.runCalls[0].deps.runId).toBe(res.runId)
-    const triggeredFrom = h.runCalls[0].deps.triggeredFrom as Record<string, unknown>
-    expect(triggeredFrom).toEqual({
-      source: "im",
-      adapterId: "tg-1",
-      conversationKey: "telegram:tg-1:9",
-      sessionId: "s1",
-      characterId: "char_1",
-    })
-    expect(h.runCalls[0].deps.parentPermissionCeiling).toBe(permissionCeiling)
-    expect(buildDeps).toHaveBeenCalledWith({
+    expect(h.runCalls[0]).toMatchObject({
+      teamId: "team_x",
+      runId: res.runId,
+      origin: "im",
+      triggeredFrom: {
+        source: "im",
+        adapterId: "tg-1",
+        conversationKey: "telegram:tg-1:9",
+        sessionId: "s1",
+        characterId: "char_1",
+      },
+      permissionCeiling,
       entryPersona: { id: "char_1", name: "Sage", systemPrompt: "Be precise" },
     })
-    // notifierDeps from buildAgentTeamRuntimeDeps merged in
-    expect(h.runCalls[0].deps.notifierDeps).toEqual({ marker: true })
-    // storeReader/storeWriter wired
-    expect(h.runCalls[0].deps.storeReader).toBeDefined()
-    expect(h.runCalls[0].deps.storeWriter).toBeDefined()
   })
 
   it("fails closed when the bound Character was deleted", async () => {
@@ -202,7 +225,7 @@ describe("startTeamRunFromIM", () => {
   })
 
   it("uses the default loaders (mocked modules) to launch a run", async () => {
-    runTeamLifecycleMock.mockClear()
+    runSquadLifecycleMock.mockClear()
     const res = await startTeamRunFromIM({
       teamId: "team_real",
       goal: "go",
@@ -210,8 +233,8 @@ describe("startTeamRunFromIM", () => {
       conversationKey: "telegram:tg-1:1",
     })
     expect(res).toEqual({ started: true, runId: expect.stringMatching(/^run_team_/) })
-    await Promise.resolve()
-    expect(runTeamLifecycleMock).toHaveBeenCalledTimes(1)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(runSquadLifecycleMock).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -241,12 +264,24 @@ describe("execution run binding", () => {
     platformBinding: { adapterId: "a1", conversationKey: "telegram:a1:c1" },
   } as never
 
-  beforeEach(() => ensureImTeamExecutionRunMock.mockClear())
+  beforeEach(() => {
+    ensureConnectorRunBindingMock.mockClear()
+    createSquadRunRecordsMock.mockClear()
+  })
 
-  it("creates the run and its conversation binding before firing the lifecycle", async () => {
-    // putExecutionRunBinding had three call sites and none was a team run, so
-    // a team dispatched from IM produced no card, no progress, and every
-    // control callback was rejected as a conversation mismatch.
+  it("creates the run records and the conversation binding before firing the lifecycle", async () => {
+    const order: string[] = []
+    createSquadRunRecordsMock.mockImplementationOnce(async (seed) => {
+      order.push("records")
+      return { executionRunId: `execution:team:${seed.runId}`, created: true }
+    })
+    ensureConnectorRunBindingMock.mockImplementationOnce(async () => {
+      order.push("binding")
+    })
+    runSquadLifecycleMock.mockImplementationOnce(async () => {
+      order.push("run")
+      return { runId: "r", status: "completed" }
+    })
     const result = await startTeamRunFromIM({
       teamId: "team_real",
       goal: "Ship the thing",
@@ -257,14 +292,21 @@ describe("execution run binding", () => {
     })
 
     expect(result.started).toBe(true)
-    expect(ensureImTeamExecutionRunMock).toHaveBeenCalledTimes(1)
-    const arg = ensureImTeamExecutionRunMock.mock.calls[0][0] as {
-      seed: { sourceRunId: string; objective: string }
-      session: unknown
-    }
-    expect(arg.seed.sourceRunId).toBe(result.runId)
-    expect(arg.seed.objective).toBe("Ship the thing")
-    expect(arg.session).toBe(session)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(order).toEqual(["records", "binding", "run"])
+    expect(createSquadRunRecordsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: result.runId,
+        objective: "Ship the thing",
+        sessionId: "s1",
+        origin: "im",
+      })
+    )
+    expect(ensureConnectorRunBindingMock).toHaveBeenCalledWith(
+      `execution:team:${result.runId}`,
+      undefined,
+      session
+    )
   })
 
   it("still dispatches when no session is available, just uncarded", async () => {
@@ -275,11 +317,11 @@ describe("execution run binding", () => {
       conversationKey: "telegram:a1:c1",
     })
     expect(result.started).toBe(true)
-    expect(ensureImTeamExecutionRunMock).not.toHaveBeenCalled()
+    expect(ensureConnectorRunBindingMock).not.toHaveBeenCalled()
   })
 
   it("never lets a binding failure reject the dispatch", async () => {
-    ensureImTeamExecutionRunMock.mockRejectedValueOnce(new Error("dexie down"))
+    ensureConnectorRunBindingMock.mockRejectedValueOnce(new Error("dexie down"))
     const result = await startTeamRunFromIM({
       teamId: "team_real",
       goal: "Ship the thing",
@@ -288,6 +330,22 @@ describe("execution run binding", () => {
       session,
     })
     expect(result.started).toBe(true)
+  })
+
+  /** Fail closed: no records, no run. */
+  it("refuses the dispatch when the records cannot be written", async () => {
+    createSquadRunRecordsMock.mockRejectedValueOnce(new Error("quota"))
+    runSquadLifecycleMock.mockClear()
+    const result = await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session,
+    })
+    expect(result).toEqual({ started: false, reason: "dispatch_error" })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(runSquadLifecycleMock).not.toHaveBeenCalled()
   })
 })
 
@@ -309,12 +367,9 @@ describe("plan approval channel", () => {
     platformBinding: { adapterId: "a1", conversationKey: "telegram:a1:c1" },
   } as never
 
-  beforeEach(() => runTeamLifecycleMock.mockClear())
+  beforeEach(() => runSquadLifecycleMock.mockClear())
 
   it("hands the lifecycle a way to ask when there is a surface to ask on", async () => {
-    // `origin: "im"` alone put the run under the headless policy, whose plan
-    // gate fails fast on the premise that there is no human. Supplying the
-    // delegate is the proof that premise is false here.
     await startTeamRunFromIM({
       teamId: "team_real",
       goal: "Ship the thing",
@@ -323,15 +378,13 @@ describe("plan approval channel", () => {
       session: withTarget,
       initiatorUserId: "ou-user",
     })
-
-    const deps = runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>
-    expect(typeof deps.planApprovalDelegate).toBe("function")
-    expect(deps.origin).toBe("im")
+    await new Promise((r) => setTimeout(r, 0))
+    const input = runSquadLifecycleMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(typeof input.planApprovalDelegate).toBe("function")
+    expect(input.origin).toBe("im")
   })
 
   it("omits the delegate when there is genuinely no surface, keeping fail-fast", async () => {
-    // Claiming a channel that cannot be serviced would turn a loud failure
-    // into a silent hang, which is strictly worse.
     await startTeamRunFromIM({
       teamId: "team_real",
       goal: "Ship the thing",
@@ -339,9 +392,9 @@ describe("plan approval channel", () => {
       conversationKey: "telegram:a1:c1",
       session: withoutTarget,
     })
-
-    const deps = runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>
-    expect(deps.planApprovalDelegate).toBeUndefined()
+    await new Promise((r) => setTimeout(r, 0))
+    const input = runSquadLifecycleMock.mock.calls[0]?.[0] as Record<string, unknown>
+    expect(input).not.toHaveProperty("planApprovalDelegate")
   })
 
   it("passes the autonomy-derived approval floor through, and only when set", async () => {
@@ -353,11 +406,12 @@ describe("plan approval channel", () => {
       session: withTarget,
       requirePlanApprovalFloor: true,
     })
-    expect(
-      (runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>).requirePlanApprovalFloor
-    ).toBe(true)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(runSquadLifecycleMock.mock.calls[0]?.[0]).toMatchObject({
+      requirePlanApprovalFloor: true,
+    })
 
-    runTeamLifecycleMock.mockClear()
+    runSquadLifecycleMock.mockClear()
     await startTeamRunFromIM({
       teamId: "team_real",
       goal: "Ship the thing",
@@ -365,8 +419,7 @@ describe("plan approval channel", () => {
       conversationKey: "telegram:a1:c1",
       session: withTarget,
     })
-    expect(
-      (runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>).requirePlanApprovalFloor
-    ).toBeUndefined()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(runSquadLifecycleMock.mock.calls[0]?.[0]).not.toHaveProperty("requirePlanApprovalFloor")
   })
 })

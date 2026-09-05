@@ -1,12 +1,42 @@
 /**
- * Tests for the F-path synthesizer (ADR-0022). The legacy in-place
- * orchestrator was rewritten to a thin synthesizer that delegates to
- * workflow runtime; tests below exercise the new contract:
+ * Tests for the F-path synthesizer (ADR-0022, durable-only under ADR-0168).
+ * The legacy in-place orchestrator was rewritten to a thin synthesizer that
+ * delegates to workflow runtime. Tests below exercise the contract:
  *  - storeReader / storeWriter shape
- *  - plan-approval gate via approval-bus
+ *  - plan-approval gate as a durable Squad review (interrupt + receipt)
  *  - terminal status mapping ({completed, failed, cancelled})
  *  - double-start prevention via inflightControllers
+ *
+ * Every team here carries the two bindings the coordinator requires, and the
+ * Registry controller plus the environment setup executor are mocked, so the
+ * durable admission path runs for real against the Dexie fixture.
  */
+
+// The Registry workspace controller opens Bundle Turn leases through the
+// native task-workspace crate. A fake keeps the durable dispatch path honest
+// (leases are opened and settled) without a Registry.
+jest.mock("./team/workspace/registry-controller", () => ({
+  AgentTeamRegistryWorkspaceController: class FakeController {
+    constructor(public readonly options: { roots: unknown[] }) {}
+    async openDispatch(input: { taskId: string }) {
+      return {
+        primaryAlias: `/alias/${input.taskId}`,
+        run: { runId: `ws-${input.taskId}` },
+        settle: async () => [],
+        abort: async () => undefined,
+      }
+    }
+    getDispatchExecutionRoot() {
+      return undefined
+    }
+    async reconcile() {
+      return { mode: "manual" }
+    }
+  },
+}))
+jest.mock("@/lib/project-environment/executor", () => ({
+  executeProjectEnvironment: async () => ({ success: true }),
+}))
 // Mock plugin hooks so we don't need to boot the plugin store.
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: jest.fn(() => ({
@@ -66,7 +96,8 @@ import {
   __resetInflightForTesting,
   type RunTeamLifecycleDeps,
 } from "./agent-team-runtime"
-import { approve, reject, __resetForTesting as resetApprovalBus } from "@/lib/runtime/approval-bus"
+import { __setSquadReviewTestHooksForTesting, settleSquadReview } from "./team/squad-review-gate"
+import type { SquadReviewKind } from "@/types/execution/run"
 import { getTeamRunContext } from "./team/team-run-context"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
@@ -103,6 +134,7 @@ const worker = (id: string): AgentTeammate =>
 
 const baseTeam: AgentTeam = {
   id: "team-1",
+  projectId: "project-1",
   name: "Test",
   description: "",
   task: "do a thing",
@@ -112,6 +144,17 @@ const baseTeam: AgentTeam = {
     maxConcurrentTeammates: 2,
     executionMode: "coordinated",
     displayMode: "expanded",
+    repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
+    environmentRef: { environmentId: "env-1", versionId: "env-1:v1" },
+    // The mocked executor writes no diff and runs no tests. The evidence gate
+    // is exercised by `durable-dispatch.test.ts`, not here.
+    evidencePolicy: {
+      requireActivity: false,
+      requireOutcome: false,
+      requireCodeDiff: false,
+      requireVerification: false,
+      requireVisualForUi: false,
+    },
   },
   leadId: "lead-1",
   teammateIds: ["lead-1", "w1", "w2"],
@@ -176,19 +219,72 @@ const buildDeps = (
 
 const dbFixture = createDbTestFixture()
 
+/**
+ * Answer the newest pending Squad review of `kind`, the way the control plane
+ * would, once it exists. Polls because the lifecycle opens the interrupt on
+ * its own schedule.
+ */
+async function answerPendingReview(
+  kind: SquadReviewKind,
+  outcome: "approve" | "deny",
+  extra: Record<string, unknown> = {}
+): Promise<void> {
+  const deadline = Date.now() + 4_000
+  while (Date.now() < deadline) {
+    const pending = (
+      await getDb().executionRunInterrupts.where("status").equals("pending").toArray()
+    )
+      .filter((row) => row.reviewKind === kind)
+      .sort((a, b) => b.createdAt - a.createdAt)
+    const row = pending[0]
+    if (row) {
+      const parts = row.id.split(":")
+      // action-review:squad-review:<runId>:<kind>:<instance>
+      const runId = parts[2]!
+      const instance = parts.slice(4).join(":")
+      await settleSquadReview({ runId, kind, instance }, { kind, outcome, ...extra } as never, {
+        authority: "human",
+        actorKind: "local-user",
+      })
+      return
+    }
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  throw new Error(`no pending ${kind} review appeared`)
+}
+
+async function pendingReviews(kind: SquadReviewKind) {
+  return (await getDb().executionRunInterrupts.where("status").equals("pending").toArray()).filter(
+    (row) => row.reviewKind === kind
+  )
+}
+
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   await getDb().workflowRuns.clear()
   await getDb().workflowRunEvents.clear()
+  await getDb().projectEnvironmentVersions.put({
+    id: "env-1:v1",
+    environmentId: "env-1",
+    projectId: "project-1",
+    version: 1,
+    name: "dev",
+    setupScript: { default: "" },
+    actions: [],
+    variables: {},
+    keyringReferences: [],
+    policy: { requiredRuntimeCapabilities: [] },
+    createdAt: 1,
+  })
   __resetInflightForTesting()
-  resetApprovalBus()
+  __setSquadReviewTestHooksForTesting({ pollIntervalMs: 10 })
   ;(executeAgent as jest.Mock).mockReset()
 })
 
 afterEach(() => {
   __resetInflightForTesting()
-  resetApprovalBus()
+  __setSquadReviewTestHooksForTesting(null)
 })
 
 afterAll(dbFixture.dispose)
@@ -458,22 +554,26 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     })
     const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
     const runPromise = runTeamLifecycle("team-1", deps)
-    await new Promise((r) => setTimeout(r, 30))
-    approve({ scope: "agent-team", id: "team-1" })
+    await answerPendingReview("plan", "approve")
     const result = await runPromise
     expect(result.status).toBe("completed")
   })
 
-  it("rejects past max revisions → failed", async () => {
+  it("rejects past max revisions → failed, feeding each rejection back as feedback", async () => {
     const deps = buildDeps(teamWithApproval(2), [task("t1")], [lead, worker("w1")])
     const runPromise = runTeamLifecycle("team-1", deps)
-    for (let i = 0; i < 2; i++) {
-      await new Promise((r) => setTimeout(r, 30))
-      reject({ scope: "agent-team", id: "team-1" }, "no good")
-    }
+    await answerPendingReview("plan", "deny", { feedback: "no good" })
+    await answerPendingReview("plan", "deny", { feedback: "still no" })
     const result = await runPromise
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/rejected/)
+    const planning = deps.runLeadPlanning as jest.Mock
+    expect(planning).toHaveBeenCalledTimes(2)
+    expect(planning.mock.calls[1]?.[0]).toMatchObject({ feedback: "no good" })
+    // Two revisions, two durable interrupts, both settled, both receipted.
+    const rows = await getDb().executionRunInterrupts.toArray()
+    expect(rows.map((row) => row.status).sort()).toEqual(["denied", "denied"])
+    expect(await getDb().actionReviewReceipts.count()).toBe(2)
   })
 
   it("publishes the plan to the board lead and opens the plan gate before waiting", async () => {
@@ -484,24 +584,33 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
     const updateTeammate = jest.fn()
     deps.storeWriter.updateTeammate = updateTeammate
-    const openGate = jest.fn()
-    deps.notifierDeps = { ...deps.notifierDeps, openGate }
 
     const runPromise = runTeamLifecycle("team-1", deps)
-    await new Promise((r) => setTimeout(r, 30))
+    const deadline = Date.now() + 4_000
+    while ((await pendingReviews("plan")).length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
 
     // While the gate is waiting: the lead carries the proposed plan and the
-    // awaiting_approval status the PlanApprovalPanel renders on, and the
-    // pending-gates modal has been opened for the same approval-bus key.
+    // awaiting_approval status the coordination panel renders on, and ONE
+    // durable interrupt parks the execution run on the plan decision.
     expect(updateTeammate).toHaveBeenCalledWith("lead-1", {
       status: "awaiting_approval",
       proposedPlan: expect.stringContaining("summary"),
     })
-    expect(openGate).toHaveBeenCalledWith(
-      expect.objectContaining({ key: { scope: "agent-team", id: "team-1" } })
+    const [interrupt] = await pendingReviews("plan")
+    expect(interrupt).toMatchObject({
+      type: "plan_approval",
+      reviewKind: "plan",
+      subject: { revision: 0, maxRevisions: 3 },
+    })
+    const parked = await getDb().executionRuns.get(interrupt!.runId)
+    expect(parked?.status).toBe("waiting")
+    expect(parked?.latestSnapshot?.allowedActions).toEqual(
+      expect.arrayContaining(["approve", "deny"])
     )
 
-    approve({ scope: "agent-team", id: "team-1" })
+    await answerPendingReview("plan", "approve")
     const result = await runPromise
     expect(result.status).toBe("completed")
     // Decision received → the lead must leave awaiting_approval.
@@ -514,8 +623,7 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     deps.storeWriter.updateTeammate = updateTeammate
 
     const runPromise = runTeamLifecycle("team-1", deps)
-    await new Promise((r) => setTimeout(r, 30))
-    reject({ scope: "agent-team", id: "team-1" }, "no good")
+    await answerPendingReview("plan", "deny", { feedback: "no good" })
     const result = await runPromise
     expect(result.status).toBe("failed")
     expect(updateTeammate).toHaveBeenCalledWith("lead-1", { status: "idle" })
@@ -578,14 +686,21 @@ describe("runTeamLifecycle — risk-raised plan approval (ADR-0070)", () => {
     deps.storeWriter.updateTeammate = updateTeammate
 
     const runPromise = runTeamLifecycle("team-1", deps)
-    await new Promise((r) => setTimeout(r, 30))
-    // The gate is live: the lead is parked awaiting approval with a plan.
+    const deadline = Date.now() + 4_000
+    while ((await pendingReviews("plan")).length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    // The gate is live: the lead is parked awaiting approval with a plan, and
+    // the interrupt names the risk that raised it.
     expect(deps.runLeadPlanning).toHaveBeenCalled()
     expect(updateTeammate).toHaveBeenCalledWith(
       "lead-1",
       expect.objectContaining({ status: "awaiting_approval" })
     )
-    reject({ scope: "agent-team", id: "team-1" }, "not today")
+    expect((await pendingReviews("plan"))[0]?.subject).toMatchObject({
+      riskReason: expect.any(String),
+    })
+    await answerPendingReview("plan", "deny", { feedback: "not today" })
     const result = await runPromise
     expect(result.status).toBe("failed")
   })

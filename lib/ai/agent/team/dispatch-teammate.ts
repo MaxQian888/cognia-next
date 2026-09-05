@@ -888,27 +888,27 @@ export async function dispatchTeammate(
     (repository) => repository.id === durableRepositoryId
   )
   const dispatchWorkingDir = durableRepository?.path ?? teamCtx.team.config?.workingDir
-  const durableDispatch =
-    teamCtx.team.config?.runtimeVersion === "durable-v2"
-      ? await (async () => {
-          const [{ beginDurableDispatch }, { getDurableTeamCoordinator }] = await Promise.all([
-            import("./durable-dispatch"),
-            import("./durable-runtime"),
-          ])
-          return beginDurableDispatch({
-            coordinator: getDurableTeamCoordinator(),
-            team: teamCtx.team,
-            runId: teamCtx.runId,
-            teammateId: teammate.id,
-            taskId: args.taskId,
-            access: args.access ?? "write",
-            ...(args.taskKind ? { taskKind: args.taskKind } : {}),
-            repositoryId: durableRepositoryId,
-            ...(args.fileOwnership ? { fileOwnership: args.fileOwnership } : {}),
-            runtime,
-          })
-        })()
-      : undefined
+  // Every Squad dispatches through the durable coordinator (ADR-0168): the
+  // child run, its lease and its checkpoints are what make pause, steer and
+  // recovery possible, so there is no non-durable branch here.
+  const durableDispatch = await (async () => {
+    const [{ beginDurableDispatch }, { getDurableTeamCoordinator }] = await Promise.all([
+      import("./durable-dispatch"),
+      import("./durable-runtime"),
+    ])
+    return beginDurableDispatch({
+      coordinator: getDurableTeamCoordinator(),
+      team: teamCtx.team,
+      runId: teamCtx.runId,
+      teammateId: teammate.id,
+      taskId: args.taskId,
+      access: args.access ?? "write",
+      ...(args.taskKind ? { taskKind: args.taskKind } : {}),
+      repositoryId: durableRepositoryId,
+      ...(args.fileOwnership ? { fileOwnership: args.fileOwnership } : {}),
+      runtime,
+    })
+  })()
 
   // Live progress streaming → workspace activity panel. Built only when the
   // store exposes an `addEvent` sink (UI runs; eval/plan fixtures omit it).

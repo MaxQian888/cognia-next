@@ -38,6 +38,15 @@ export interface ActionReviewChannelAdapter {
 export const DEFAULT_ACTION_REVIEW_TTL_MS = 10 * 60 * 1000
 
 /**
+ * A Squad gate holds a whole run open on a person, and those runs are started
+ * to be walked away from. One hour before the gate denies by expiry.
+ */
+export const SQUAD_REVIEW_TTL_MS = 60 * 60 * 1000
+
+/** A recovery decision waits a week: expiring it would decide for the person. */
+export const TEAM_RECOVERY_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
  * The built-in projection policy for every declared channel.
  *
  * Exhaustive by construction: `Record<ActionReviewChannel, …>` means adding a
@@ -54,8 +63,28 @@ export const DEFAULT_ACTION_REVIEW_ADAPTERS: Record<
     interruptType: "workflow_approval",
     defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS,
   },
-  "agent-team-plan": { interruptType: "plan_approval", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
-  "agent-team-gate": { interruptType: "plan_approval", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
+  "agent-team-plan": { interruptType: "plan_approval", defaultTtlMs: SQUAD_REVIEW_TTL_MS },
+  // The pre-run capability audit is its own decision (ADR-0168): stale
+  // capability ids, not a plan. Parking it on `plan_approval` made a card
+  // offer the plan form for a question about plugins.
+  "agent-team-gate": {
+    interruptType: "squad_capability_audit",
+    defaultTtlMs: SQUAD_REVIEW_TTL_MS,
+  },
+  "agent-team-budget": { interruptType: "squad_budget", defaultTtlMs: SQUAD_REVIEW_TTL_MS },
+  "agent-team-deadlock": { interruptType: "squad_deadlock", defaultTtlMs: SQUAD_REVIEW_TTL_MS },
+  "agent-team-teammate-repair": {
+    interruptType: "squad_teammate_repair",
+    defaultTtlMs: SQUAD_REVIEW_TTL_MS,
+  },
+  "agent-team-replan": { interruptType: "squad_replan", defaultTtlMs: SQUAD_REVIEW_TTL_MS },
+  // A recovery decision is a durable human handoff in all but name: expiring
+  // it would replay or drop work nobody chose to. Long TTL, same as a
+  // `human_handoff` in spirit.
+  "agent-team-recovery": {
+    interruptType: "team_recovery",
+    defaultTtlMs: TEAM_RECOVERY_TTL_MS,
+  },
   "github-delivery": {
     interruptType: "workflow_approval",
     defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS,

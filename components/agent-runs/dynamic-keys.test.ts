@@ -91,7 +91,6 @@ const OUTCOME_REASONS = [
   "interrupt_resolved",
   "source_rejected",
   "unsupported_for_kind",
-  "unsupported_for_runtime",
   "steer_degraded",
   "invalid_command",
   "already_retried",

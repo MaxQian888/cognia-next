@@ -14,8 +14,7 @@
 import { nanoid } from "nanoid"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
-import { approve as approveBus, reject as rejectBus } from "@/lib/runtime/approval-bus"
-import { waitForDecision } from "@/lib/runtime/approval-bus"
+import { openSquadReview, type SquadReviewOutcome } from "./team/squad-review-gate"
 import {
   buildKnownCapabilityIds,
   validateInstanceCapabilitiesWith,
@@ -386,15 +385,20 @@ export async function runTeamLifecycle(
             : { kind: "remoteDefault" },
       })
     }
+    // Every Squad runs on the durable coordinator (ADR-0168). The records
+    // already exist (`startSquadRun` wrote them transactionally), so
+    // `prepareRun` only installs the run policy and moves `queued` to
+    // `running`. The environment is admitted here, and a failure to admit it
+    // fails THIS run with a reason code rather than falling back anywhere.
     let durableEnvironment:
       | NonNullable<import("./team/team-run-context").TeamRunContext["durableEnvironment"]>
       | undefined
-    if (team.config.runtimeVersion === "durable-v2") {
+    {
       try {
         const { getDurableTeamCoordinator } = await import("./team/durable-runtime")
         await getDurableTeamCoordinator().prepareRun(team, runId)
         if (!team.config.environmentRef) {
-          throw new Error("Durable AgentTeam requires an immutable environment version")
+          throw new Error("missing_environment_ref")
         }
         const [{ getProjectEnvironmentVersion }, { createLocalTauriExecutionEnvironment }] =
           await Promise.all([
@@ -403,18 +407,18 @@ export async function runTeamLifecycle(
           ])
         const profile = await getProjectEnvironmentVersion(team.config.environmentRef.versionId)
         if (!profile || profile.environmentId !== team.config.environmentRef.environmentId) {
-          throw new Error("The selected AgentTeam environment version is unavailable")
+          throw new Error("environment_not_found")
         }
         const primary = team.config.repositories?.find(
           (repository) => repository.role === "primary"
         )
         const repositoryPath = primary?.path ?? team.config.workingDir
-        if (!repositoryPath) throw new Error("Durable AgentTeam requires a primary repository path")
+        if (!repositoryPath) throw new Error("missing_primary_repository")
         // Capability truth comes from the host adapter, never from the team's
         // requested policy. Unsupported sandbox/network guarantees therefore
         // fail closed instead of being treated as capabilities by declaration.
         if (!workspaceController) {
-          throw new Error("Durable AgentTeam requires a writable Registry repository")
+          throw new Error("workspace_controller_unavailable")
         }
         const setupAdapter = createLocalTauriExecutionEnvironment()
         const adapter = createLocalTauriExecutionEnvironment({
@@ -507,16 +511,14 @@ export async function runTeamLifecycle(
         // dots can enumerate exactly which ids are stale.
         void refreshAllInstanceCapabilityWarnings()
         if (gatePolicy.capabilityAudit === "block") {
-          // Interactive: open the HITL modal. Without this notify the gate
-          // used to wait on a scope no UI ever produced — hanging even on
-          // the desktop.
+          // Interactive: the durable interrupt is the ask. The notification
+          // only points at it.
           notifier.notify({
             level: "critical",
             title: "Stale capabilities detected",
-            body: `${auditWarnings.length} capability reference(s) no longer resolve (a contributing plugin may be disabled). Run anyway, or cancel to fix the configuration.`,
+            body: `${auditWarnings.length} capability reference(s) no longer resolve (a contributing plugin may be disabled). Review the run to continue or cancel.`,
             runId,
             teamId,
-            openApproval: { scope: "agent-team-capability-audit", id: runId },
             dedupeKey: `capability-audit:${runId}`,
           })
         } else {
@@ -530,7 +532,17 @@ export async function runTeamLifecycle(
           })
         }
         const decision = await applyGateBehavior(gatePolicy.capabilityAudit, () =>
-          waitForDecision({ scope: "agent-team-capability-audit", id: runId }, ac.signal)
+          openSquadReview({
+            runId,
+            teamId,
+            ...(team.projectId ? { projectId: team.projectId } : {}),
+            kind: "capability_audit",
+            instance: "pre-run",
+            subject: { staleCount: auditWarnings.length },
+            signal: ac.signal,
+          }).then((outcome) => ({
+            outcome: outcome.outcome === "approve" ? ("approve" as const) : ("reject" as const),
+          }))
         ).catch(() => ({ outcome: "reject" as const }))
         if (decision.outcome !== "approve") {
           return {
@@ -625,12 +637,10 @@ export async function runTeamLifecycle(
           })
           return { runId: "", status: "failed", reason }
         }
-        // Publish the plan before waiting: the workspace PlanApprovalPanel
-        // renders (and enables Approve/Reject) only while the lead is
-        // `awaiting_approval` with a non-empty `proposedPlan`, and the
-        // pending-gates modal needs the `openApproval` push — without both
-        // producers this gate waits on a decision no UI can ever emit (the
-        // same hang the capability-audit comment above records).
+        // Publish the plan before waiting: the coordination panel renders
+        // the proposed plan while the lead is `awaiting_approval`, and the
+        // durable interrupt opened below is what the cockpit, a phone and an
+        // IM card answer.
         deps.storeWriter.updateTeammate(lead.id, {
           status: "awaiting_approval",
           proposedPlan: planResult.planText,
@@ -643,35 +653,58 @@ export async function runTeamLifecycle(
             : "The lead proposed a plan. Approve to start the run, or reject with feedback for another revision.",
           runId,
           teamId,
-          openApproval: { scope: "agent-team", id: teamId },
           dedupeKey: `plan-approval:${runId}:${i}`,
         })
-        // `block` waits on the pending-gates modal; `delegate` asks through the
-        // surface that started the run. Both land in the same branch below, so
-        // a plan approved from a chat thread and one approved from the desktop
-        // modal are indistinguishable to everything downstream — including the
-        // rejection feedback, which re-enters this loop as the next revision's
-        // instruction either way.
-        const decision = await applyGateBehavior(
-          gatePolicy.planApproval,
-          () =>
-            waitForDecision({ scope: "agent-team", id: teamId }, ac.signal).catch(() => ({
+        // Both `block` and `delegate` open the SAME durable interrupt. A
+        // delegate (an IM card) is raced against it, so a plan approved from
+        // a chat thread and one approved from the cockpit are indistinguishable
+        // to everything downstream, including the rejection feedback, which
+        // re-enters this loop as the next revision's instruction either way.
+        const askPlan = (delegate?: () => Promise<SquadReviewOutcome>) =>
+          openSquadReview({
+            runId,
+            teamId,
+            ...(team.projectId ? { projectId: team.projectId } : {}),
+            kind: "plan",
+            instance: `revision-${i}`,
+            subject: {
+              revision: i,
+              maxRevisions: maxRev,
+              ...(gateIsRiskOnly ? { riskReason: riskAssessment.reason } : {}),
+            },
+            signal: ac.signal,
+            ...(delegate ? { delegate } : {}),
+          }).catch(() => ({ kind: "plan" as const, outcome: "deny" as const }))
+        const planDelegate = deps.planApprovalDelegate
+          ? async (): Promise<SquadReviewOutcome> => {
+              const answer = await deps.planApprovalDelegate!({
+                planText: planResult.planText,
+                revision: i,
+                ...(gateIsRiskOnly ? { riskReason: riskAssessment.reason } : {}),
+              })
+              return {
+                kind: "plan",
+                outcome: answer.outcome === "approve" ? "approve" : "deny",
+                ...(answer.feedback ? { feedback: answer.feedback } : {}),
+              }
+            }
+          : undefined
+        const reviewed =
+          gatePolicy.planApproval === "block" || gatePolicy.planApproval === "delegate"
+            ? await askPlan(planDelegate)
+            : undefined
+        const reviewedFeedback =
+          reviewed && reviewed.kind === "plan" && "feedback" in reviewed
+            ? reviewed.feedback
+            : undefined
+        const decision = reviewed
+          ? {
+              outcome: reviewed.outcome === "approve" ? ("approve" as const) : ("reject" as const),
+              ...(reviewedFeedback ? { feedback: reviewedFeedback } : {}),
+            }
+          : await applyGateBehavior(gatePolicy.planApproval, async () => ({
               outcome: "reject" as const,
-              feedback: "aborted",
-            })),
-          {
-            ...(deps.planApprovalDelegate
-              ? {
-                  delegate: () =>
-                    deps.planApprovalDelegate!({
-                      planText: planResult.planText,
-                      revision: i,
-                      ...(gateIsRiskOnly ? { riskReason: riskAssessment.reason } : {}),
-                    }),
-                }
-              : {}),
-          }
-        )
+            }))
         // Decision (or abort) received — lift the lead out of awaiting_approval
         // so neither answer surface keeps rendering a live-looking gate.
         deps.storeWriter.updateTeammate(lead.id, { status: "idle" })
@@ -771,6 +804,7 @@ export async function runTeamLifecycle(
           behavior: gatePolicy.deadlock,
           runId,
           teamId,
+          ...(team.projectId ? { projectId: team.projectId } : {}),
           notifier,
           concurrency,
           pool,
@@ -806,25 +840,29 @@ export async function runTeamLifecycle(
           body: `Reason: ${reason}. Fix configuration and rejoin, or skip.`,
           runId,
           teamId,
-          openApproval: {
-            scope: "agent-team-teammate-fix",
-            id: `${runId}:${teammateId}`,
-          },
           dedupeKey: `teammate-fix:${runId}:${teammateId}`,
         })
-        void waitForDecision(
-          { scope: "agent-team-teammate-fix", id: `${runId}:${teammateId}` },
-          ac.signal
-        )
+        void openSquadReview({
+          runId,
+          teamId,
+          ...(team.projectId ? { projectId: team.projectId } : {}),
+          kind: "teammate_repair",
+          instance: teammateId,
+          subject: { teammateId, reason: "disqualified" },
+          signal: ac.signal,
+        })
           .then((decision) => {
-            if (decision.outcome === "approve") {
-              const action = (decision.plan as { action?: "rejoin" | "skip_permanently" })?.action
-              if (action === "rejoin") pool.rejoin(teammateId)
+            if (
+              decision.outcome === "approve" &&
+              decision.kind === "teammate_repair" &&
+              decision.action === "rejoin"
+            ) {
+              pool.rejoin(teammateId)
             }
-            // reject: leave disqualified; run keeps going on the rest.
+            // deny or skip: leave disqualified, the run keeps going on the rest.
           })
           .catch(() => {
-            // signal aborted while waiting — no-op
+            // signal aborted while waiting: no-op
           })
       })
     )
@@ -859,6 +897,7 @@ export async function runTeamLifecycle(
     )
 
     let budgetResolverActive = false
+    let budgetCrossings = 0
     subs.push(
       budget.on("pause_for_review", () => {
         if (ac.signal.aborted || budgetResolverActive) return
@@ -869,14 +908,24 @@ export async function runTeamLifecycle(
           return
         }
         budgetResolverActive = true
+        budgetCrossings += 1
         concurrency.reduceTo(0)
-        void waitForDecision({ scope: "agent-team-budget", id: runId }, ac.signal)
+        const budgetStatus = budget.status()
+        void openSquadReview({
+          runId,
+          teamId,
+          ...(team.projectId ? { projectId: team.projectId } : {}),
+          kind: "budget_extension",
+          instance: `crossing-${budgetCrossings}`,
+          subject: { used: budgetStatus.used, limit: budgetStatus.limit },
+          signal: ac.signal,
+        })
           .then((decision) => {
-            if (decision.outcome === "approve") {
-              const extra = (decision.plan as { extraTokens?: number })?.extraTokens ?? 0
-              if (extra > 0) budget.extendLimit(extra)
+            if (decision.outcome === "approve" && decision.kind === "budget_extension") {
+              if (decision.extraTokens > 0) budget.extendLimit(decision.extraTokens)
+              else ac.abort(new Error("budget_extension_declined"))
             } else {
-              ac.abort(new Error("Operator declined budget extension"))
+              ac.abort(new Error("budget_extension_declined"))
             }
           })
           .catch(() => {
@@ -1142,28 +1191,20 @@ export async function runTeamLifecycle(
       finalReason = err instanceof Error ? err.message : String(err)
       throw err
     } finally {
-      // The terminal execution-journal event is written for EVERY runtime
-      // version. It used to be nested inside the `durable-v2` work, so a
-      // legacy run's execution row stayed at `running` for good: nothing else
-      // settles it, and `watch-squad-run.ts` waits on exactly this signal to
-      // release the conversation.
-      //
-      // `legacy` is the DEFAULT (`DEFAULT_TEAM_CONFIG.runtimeVersion`), which
-      // made this the common case rather than an edge one. A Squad made with
-      // New Squad held its conversation in `streaming` forever, against
-      // ADR-0140's "the conversation holds while the Squad works", and every
-      // legacy run the manager now records sat in the cockpit as permanently
-      // running with a Stop button that could not settle it.
+      // The terminal execution-journal event is written for EVERY run.
+      // `watch-squad-run.ts` waits on exactly this signal to release the
+      // conversation, and the cockpit's Stop button is only honest once the
+      // row settles.
       const abortMessage =
         ac.signal.reason instanceof Error
           ? ac.signal.reason.message
           : String(ac.signal.reason ?? "")
-      let persistedStatus: import("@/types/agent/agent-team-runtime").AgentTeamRunStatus | undefined
-      if (team.config.runtimeVersion === "durable-v2") {
-        const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
-        persistedStatus = (await getAgentTeamRun(runId))?.status
-        suppressCompletionFanout = persistedStatus === "needs_input"
-      }
+      const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+      const persistedStatus:
+        import("@/types/agent/agent-team-runtime").AgentTeamRunStatus | undefined = (
+        await getAgentTeamRun(runId).catch(() => undefined)
+      )?.status
+      suppressCompletionFanout = persistedStatus === "needs_input"
       // `paused` and `needs_input` are deliberately NOT terminal: a paused
       // Squad is still the conversation's turn and can be steered.
       const teamRunStatus =
@@ -1178,8 +1219,9 @@ export async function runTeamLifecycle(
                 : finalStatus === "cancelled"
                   ? "cancelled"
                   : "failed"
-      if (team.config.runtimeVersion === "durable-v2") {
-        const { updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+      // A paused or needs_input run keeps the status the control plane or the
+      // coordinator wrote. Everything else is settled from the lifecycle result.
+      if (persistedStatus !== "paused" && persistedStatus !== "needs_input") {
         await updateAgentTeamRun(runId, {
           status: teamRunStatus,
           ...(finalReason ? { recoveryReason: finalReason } : {}),
@@ -1261,16 +1303,9 @@ export async function runTeamLifecycle(
       // Cancel any pending resume timer so it can't fire after the run ends.
       rateLimitResume?.dispose()
       unregisterTeamRunContext(runId)
-      // Release any pending approval-bus waiters keyed to this run.
-      approveBus({ scope: "agent-team-deadlock", id: runId })
-      approveBus({ scope: "agent-team-budget", id: runId })
-      approveBus({ scope: "agent-team-replan", id: runId })
-      rejectBus({ scope: "agent-team-deadlock", id: runId })
-      rejectBus({ scope: "agent-team-budget", id: runId })
-      rejectBus({ scope: "agent-team-replan", id: runId })
-      for (const w of workers) {
-        rejectBus({ scope: "agent-team-teammate-fix", id: `${runId}:${w.id}` })
-      }
+      // Pending reviews are durable interrupts. A paused run keeps them for
+      // its resume, a stopped run has them denied by `squad-control.ts`. The
+      // waiters themselves are released by the abort signal.
     }
   } finally {
     inflightControllers.delete(teamId)

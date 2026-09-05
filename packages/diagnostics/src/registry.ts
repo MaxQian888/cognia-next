@@ -589,6 +589,25 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "retry" }, { kind: "dismiss" }],
     icon: "alert",
   },
+  // The Squad is missing a binding the coordinator needs (repository,
+  // environment, roster) and `startSquadRun` refused it (ADR-0168). Persistent
+  // and not retryable: retrying changes nothing until the Squad is configured.
+  squadNotReady: {
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [{ kind: "open-settings", section: "squads" }, { kind: "dismiss" }],
+    icon: "settings",
+  },
+  // One live run per Squad. A second start while one is open is refused and
+  // the open run is the place to look. Transient by nature.
+  squadAlreadyRunning: {
+    severity: "warning",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "dismiss" }],
+    icon: "alert",
+  },
 
   // -------------------------------------------------------- execution layer
   capabilityUnsatisfied: {

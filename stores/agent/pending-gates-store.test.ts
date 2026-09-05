@@ -57,11 +57,11 @@ describe("PendingGatesStore", () => {
     const g = usePendingGatesStore.getState()
     g.open(budgetGate({ title: "B1" }))
     g.open({
-      key: { scope: "agent-team-deadlock", id: "run-1" },
-      gateType: "deadlock",
+      key: { scope: "cost-budget", id: "run-1:cost" },
+      gateType: "budget",
       title: "D1",
       runId: "run-1",
-      teamId: "team-1",
+      teamId: "",
     })
     g.open(
       budgetGate({ key: { scope: "agent-team-budget", id: "run-2" }, title: "B2", runId: "run-2" })
@@ -106,20 +106,16 @@ describe("PendingGatesStore", () => {
     expect(usePendingGatesStore.getState().gates[0]?.status).toBe("interrupted")
   })
 
-  it("gateTypeFromScope maps known scopes", () => {
-    expect(gateTypeFromScope("agent-team-budget")).toBe("budget")
-    expect(gateTypeFromScope("agent-team-deadlock")).toBe("deadlock")
-    expect(gateTypeFromScope("agent-team-teammate-fix")).toBe("teammate_fix")
-    expect(gateTypeFromScope("agent-team-replan")).toBe("replan")
-    expect(gateTypeFromScope("agent-team-capability-audit")).toBe("capability_audit")
-    expect(gateTypeFromScope("agent-team")).toBe("plan")
-    expect(gateTypeFromScope("unknown")).toBe("plan")
-  })
-
-  // ADR-0045: a plan `approval_gate` step must not fall through to the team
-  // "plan" variant — the two ask different questions and read different keys.
-  it("gateTypeFromScope maps the plan-step scope", () => {
+  /**
+   * ADR-0168 moved every Squad gate onto durable run interrupts. The scopes
+   * that used to map here now have no modal variant of their own and fall to
+   * the cost-budget default rather than resurrecting a Squad gate.
+   */
+  it("gateTypeFromScope maps the remaining scopes", () => {
+    expect(gateTypeFromScope("cost-budget")).toBe("budget")
     expect(gateTypeFromScope("agent-plan")).toBe("plan_step")
+    expect(gateTypeFromScope("agent-team-deadlock")).toBe("budget")
+    expect(gateTypeFromScope("unknown")).toBe("budget")
   })
 
   it("clearForPlan drops only that plan's gates", () => {
@@ -144,7 +140,7 @@ describe("PendingGatesStore", () => {
     expect(left[0].planId).toBe("p2")
   })
 
-  it("keeps team gates when a plan is cleared", () => {
+  it("keeps run gates when a plan is cleared", () => {
     const store = usePendingGatesStore.getState()
     store.open(budgetGate())
     usePendingGatesStore.getState().clearForPlan("p1")

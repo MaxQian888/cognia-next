@@ -61,7 +61,6 @@ export function SquadInspector({ squadId, children, className }: SquadInspectorP
             void agentTeamManager.start(squad.id, { ultracode: true }).catch(() => undefined)
           }
           onPause={() => void agentTeamManager.pause(squad.id).catch(() => undefined)}
-          onAbort={() => void agentTeamManager.pause(squad.id).catch(() => undefined)}
           onResume={() => void agentTeamManager.resume(squad.id).catch(() => undefined)}
           onStop={() => void agentTeamManager.shutdown(squad.id).catch(() => undefined)}
           className="pt-1"

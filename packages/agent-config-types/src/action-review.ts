@@ -47,6 +47,16 @@ export type ActionReviewChannel =
   | "thread-handoff"
   /** A Bot handler's `step.waitForApproval`. */
   | "bot-step"
+  /** Squad token budget extension (ADR-0168). */
+  | "agent-team-budget"
+  /** Squad deadlock resolution. */
+  | "agent-team-deadlock"
+  /** Squad teammate repair (rejoin or skip a disqualified member). */
+  | "agent-team-teammate-repair"
+  /** Squad mid-run re-plan checkpoint. */
+  | "agent-team-replan"
+  /** Squad recovery from an uncertain child checkpoint. */
+  | "agent-team-recovery"
   /** Anything reaching the generic approval bus without a richer channel. */
   | "generic"
 
@@ -60,6 +70,11 @@ export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "github-delivery",
   "thread-handoff",
   "bot-step",
+  "agent-team-budget",
+  "agent-team-deadlock",
+  "agent-team-teammate-repair",
+  "agent-team-replan",
+  "agent-team-recovery",
   "generic",
 ]
 

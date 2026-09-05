@@ -258,6 +258,8 @@ export interface RunProjectionSnapshot {
     id: string
     title: string
     expiresAt?: number
+    /** The interrupt type, so a card can render the matching decision form. */
+    type?: string
   }
   artifacts: RunArtifactSnapshot[]
   allowedActions: RunControlAction[]
@@ -327,6 +329,44 @@ export interface RunEvent {
   sourceEventId?: string
 }
 
+/**
+ * What kind of decision a Squad review asks for (ADR-0168).
+ *
+ * One vocabulary for every Squad gate: the plan, the pre-run capability audit,
+ * a budget extension, a deadlock resolution, a teammate repair, a re-plan and
+ * an uncertain recovery. Each maps 1:1 onto an `ExecutionRunInterrupt["type"]`
+ * (`squadReviewInterruptType`) and onto exactly one shape of
+ * {@link SquadReviewDecision}, which the control gate validates before any
+ * handler sees it.
+ */
+export type SquadReviewKind =
+  | "plan"
+  | "capability_audit"
+  | "budget_extension"
+  | "deadlock"
+  | "teammate_repair"
+  | "replan"
+  | "team_recovery"
+
+export type TeamRecoveryChoice = "retry_same_host" | "retry_host" | "restart_run" | "terminate"
+
+/**
+ * The typed payload of a Squad review decision. Travels on
+ * {@link RunControlCommand.reviewDecision} with `action: "approve" | "deny"`.
+ *
+ * Free text (`feedback`) is the ONE unstructured member. It passes through
+ * PII redaction before it reaches the engine and is never copied into a run
+ * event: journals carry reason codes, actor references and receipt ids only.
+ */
+export type SquadReviewDecision =
+  | { kind: "plan"; feedback?: string }
+  | { kind: "capability_audit" }
+  | { kind: "budget_extension"; extraTokens: number }
+  | { kind: "deadlock"; teammateIds?: string[]; resetAll?: boolean }
+  | { kind: "teammate_repair"; action: "rejoin" | "skip" }
+  | { kind: "replan"; edited?: Record<string, unknown> }
+  | { kind: "team_recovery"; choice: TeamRecoveryChoice; hostRef?: string }
+
 export interface RunControlCommand {
   runId: string
   action: RunControlAction
@@ -334,6 +374,12 @@ export interface RunControlCommand {
   expectedRevision: number
   actor: ExecutionRunInitiator
   interruptId?: string
+  /**
+   * Typed decision for a Squad review interrupt. Required when the interrupt
+   * is a Squad kind and the action is `approve` (a `deny` may omit it). Its
+   * `kind` must match the interrupt, or the command is `invalid_command`.
+   */
+  reviewDecision?: SquadReviewDecision
   /**
    * Free text for `steer` (and the optional note on a handoff `resume`).
    *
@@ -446,6 +492,21 @@ export interface ExecutionRunInterrupt {
      * surfaces that route pending decisions have to be able to tell it apart.
      */
     | "bot_approval"
+    /** Squad pre-run capability audit: stale capability ids were found. */
+    | "squad_capability_audit"
+    /** Squad token budget exhausted, asking for an extension. */
+    | "squad_budget"
+    /** Every Squad teammate is unavailable, asking which to reset. */
+    | "squad_deadlock"
+    /** One Squad teammate was disqualified, asking to rejoin or skip. */
+    | "squad_teammate_repair"
+    /** The Squad lead proposes to re-plan mid-run. */
+    | "squad_replan"
+    /**
+     * A Squad child cannot be replayed safely (unknown side effect, missing
+     * checkpoint). Nothing is replayed until a person chooses how.
+     */
+    | "team_recovery"
   status: ExecutionRunInterruptStatus
   title: string
   toolName?: string
@@ -454,4 +515,48 @@ export interface ExecutionRunInterrupt {
   createdAt: number
   resolvedAt?: number
   resolvedBy?: ExecutionRunInitiator
+  /**
+   * Squad reviews only (ADR-0168). Which decision shape settles this
+   * interrupt, redundant with `type` on purpose so a surface can branch on one
+   * closed vocabulary.
+   */
+  reviewKind?: SquadReviewKind
+  /**
+   * Squad reviews only. Small, structured, non-sensitive context for the
+   * decision form: a plan revision number, budget counts, teammate ids,
+   * uncertain child ids. Never free text from a model or a user.
+   */
+  subject?: Record<string, unknown>
+  /**
+   * Squad reviews only. The validated decision, persisted on settlement so a
+   * lifecycle that re-arms after a restart resumes exactly once with the
+   * answer it was given. `feedback` has already passed redaction.
+   */
+  decision?: SquadReviewDecision & { outcome: "approve" | "deny" }
+}
+
+/** The interrupt type each Squad review kind parks on. */
+export const SQUAD_REVIEW_INTERRUPT_TYPES: Record<SquadReviewKind, ExecutionRunInterrupt["type"]> =
+  {
+    plan: "plan_approval",
+    capability_audit: "squad_capability_audit",
+    budget_extension: "squad_budget",
+    deadlock: "squad_deadlock",
+    teammate_repair: "squad_teammate_repair",
+    replan: "squad_replan",
+    team_recovery: "team_recovery",
+  }
+
+export function squadReviewInterruptType(kind: SquadReviewKind): ExecutionRunInterrupt["type"] {
+  return SQUAD_REVIEW_INTERRUPT_TYPES[kind]
+}
+
+/** The review kind behind an interrupt type, or `undefined` for a non-Squad interrupt. */
+export function squadReviewKindForInterrupt(
+  type: ExecutionRunInterrupt["type"]
+): SquadReviewKind | undefined {
+  for (const [kind, interruptType] of Object.entries(SQUAD_REVIEW_INTERRUPT_TYPES)) {
+    if (interruptType === type) return kind as SquadReviewKind
+  }
+  return undefined
 }

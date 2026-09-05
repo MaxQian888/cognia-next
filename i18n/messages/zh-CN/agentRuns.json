@@ -127,8 +127,7 @@
     "source_rejected": "执行引擎拒绝了这个命令。",
     "steer_degraded": "消息没有送达，内容仍然保留在你这里。",
     "unsupported": "没有任何处理器可以控制这种运行。",
-    "unsupported_for_kind": "这种运行不支持该操作。",
-    "unsupported_for_runtime": "这个小队使用 legacy 运行时，无法把该操作应用到单次运行上。请改用小队控制台，它作用于整个小队。"
+    "unsupported_for_kind": "这种运行不支持该操作。"
   },
   "report": {
     "latestForSquad": "小队的最新执行报告。报告按小队保存，不按单次运行保存。",

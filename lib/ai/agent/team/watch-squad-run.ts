@@ -104,3 +104,35 @@ export function watchSquadRunSettlement(input: WatchSquadRunInput): () => void {
 
   return dispose
 }
+
+/**
+ * Promise form of {@link watchSquadRunSettlement}, for callers that genuinely
+ * want to wait for the outcome (the scheduler, a plugin's `runTeam`, a
+ * delegation). Resolves with the terminal status. An aborted `signal` rejects
+ * and disposes the watcher.
+ */
+export function awaitSquadRunSettlement(
+  executionRunId: string,
+  options: { signal?: AbortSignal; pollIntervalMs?: number } = {}
+): Promise<ExecutionRunStatus> {
+  return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(options.signal.reason ?? new Error("Aborted"))
+      return
+    }
+    const stop = watchSquadRunSettlement({
+      executionRunId,
+      onSettled: (status) => {
+        options.signal?.removeEventListener("abort", onAbort)
+        resolve(status)
+      },
+      onError: () => undefined,
+      ...(options.pollIntervalMs ? { pollIntervalMs: options.pollIntervalMs } : {}),
+    })
+    const onAbort = () => {
+      stop()
+      reject(options.signal?.reason ?? new Error("Aborted"))
+    }
+    options.signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}

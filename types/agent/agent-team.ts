@@ -24,7 +24,6 @@ import type {
   AgentTeamRepositoryBinding,
   AgentTeamResourcePolicy,
   AgentTeamRetrospectivePolicy,
-  AgentTeamRuntimeVersion,
   AgentTeamWriteMode,
 } from "./agent-team-runtime"
 
@@ -408,13 +407,28 @@ export const EMPTY_RESOLVED_CAPABILITIES: ResolvedCapabilities = {
  * Team configuration
  */
 export interface AgentTeamConfig {
-  /** Durable local runtime rollout. Existing persisted teams default to legacy. */
-  runtimeVersion?: AgentTeamRuntimeVersion
-  /** Writable child coordination policy. Durable-v2 defaults to single-writer. */
+  /**
+   * Squad definition contract revision (ADR-0168). Every Squad executes on the
+   * one durable coordinator; there is no runtime selector. A definition below
+   * `SQUAD_DEFINITION_CONTRACT_VERSION` is upgraded in place by
+   * `lib/agent-team/definition-contract.ts` the first time it is read, and an
+   * inbound row that still carries the retired `runtimeVersion` key has it
+   * dropped at the boundary.
+   */
+  contractVersion?: number
+  /** Writable child coordination policy. Defaults to single-writer. */
   writeMode?: AgentTeamWriteMode
-  /** Exactly one primary repository; dependency repositories are optional. */
+  /**
+   * Exactly one primary repository; dependency repositories are optional.
+   * A Squad without one is not runnable — `SquadReadiness` reports
+   * `missing_primary_repository` and dispatch is refused.
+   */
   repositories?: AgentTeamRepositoryBinding[]
-  /** Immutable environment profile version captured when a run starts. */
+  /**
+   * Immutable environment profile version captured when a run starts. A Squad
+   * without one is not runnable — `SquadReadiness` reports
+   * `missing_environment_ref`.
+   */
   environmentRef?: AgentTeamEnvironmentRef
   resourcePolicy?: AgentTeamResourcePolicy
   evidencePolicy?: AgentTeamEvidencePolicy
@@ -727,7 +741,6 @@ export interface AgentTeamConfig {
  * Default team configuration
  */
 export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
-  runtimeVersion: "legacy",
   writeMode: "single-writer",
   maxTeammates: 10,
   maxConcurrentTeammates: 5,

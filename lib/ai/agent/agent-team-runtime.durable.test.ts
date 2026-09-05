@@ -80,7 +80,6 @@ const durableTeam = {
   projectId: "project-1",
   task: "Ship",
   config: {
-    runtimeVersion: "durable-v2",
     maxConcurrentTeammates: 1,
     environmentRef: { environmentId: "env-1", versionId: "env-1:v1" },
     repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
@@ -166,47 +165,17 @@ describe("runTeamLifecycle durable preflight", () => {
     await Promise.resolve()
 
     expect(result.status).toBe("completed")
-    expect(updateAgentTeamRun).toHaveBeenCalledWith(
+    // The coordinator's `needs_input` stands: the lifecycle must not settle
+    // over it, and the execution row parks on `run.waiting` instead.
+    expect(updateAgentTeamRun).not.toHaveBeenCalledWith(
       "run-durable",
-      expect.objectContaining({ status: "needs_input" })
+      expect.objectContaining({ status: "completed" })
+    )
+    expect(appendExecutionRunEvent).toHaveBeenCalledWith(
+      "execution:team:run-durable",
+      expect.objectContaining({ type: "run.waiting" })
     )
     expect(dispatchOnTeamComplete).not.toHaveBeenCalled()
     expect(dispatchTeamCompletedTriggers).not.toHaveBeenCalled()
-  })
-
-  // `legacy` is the DEFAULT runtime version, and the terminal execution event
-  // used to be written only for `durable-v2`. A legacy run therefore left its
-  // execution row at `running` for good, which is the exact signal
-  // `watch-squad-run.ts` waits on to hand the conversation back.
-  it("settles the execution row for a legacy run, which writes no durable record", async () => {
-    prepareEnvironment.mockResolvedValue({ runtime: "test" })
-    const legacyTeam = {
-      ...durableTeam,
-      config: { ...durableTeam.config, runtimeVersion: "legacy" },
-    } as AgentTeam
-
-    const result = await runTeamLifecycle("team-1", {
-      runId: "run-legacy",
-      storeReader: {
-        getTeam: () => legacyTeam,
-        getTeammates: () => [worker],
-        getTeamTasks: () => [task],
-      },
-      storeWriter: {
-        addMessage: jest.fn(),
-        setTaskStatus: jest.fn(),
-        updateTeammate: jest.fn(),
-      },
-    })
-
-    expect(result.status).toBe("completed")
-    expect(appendExecutionRunEvent).toHaveBeenCalledWith(
-      "execution:team:run-legacy",
-      expect.objectContaining({ type: "run.completed" })
-    )
-    // No `agentTeamRuns` row exists for a legacy run, so nothing may be
-    // written to one.
-    expect(updateAgentTeamRun).not.toHaveBeenCalled()
-    expect(prepareRun).not.toHaveBeenCalled()
   })
 })

@@ -10,8 +10,7 @@
  * flight, so there is no concurrency to pause. Reject = proceed with the
  * original plan (fail-open). Abort propagates (run cancellation).
  */
-import { waitForDecision } from "@/lib/runtime/approval-bus"
-import type { ApprovalDecision } from "@/lib/runtime/approval-bus"
+import { openSquadReview, type SquadReviewOutcome } from "./squad-review-gate"
 import type { TeamNotifier } from "./team-notifier"
 import { replanDecisionSchema, type ReplanDecision } from "./replan-schema"
 
@@ -28,8 +27,20 @@ export interface ReplanGateDeps {
    * the original plan proceeds. Defaults to "block" (interactive).
    */
   behavior?: import("./gate-policy").GateBehavior
-  /** Injectable waiter for tests; defaults to the approval-bus. */
-  waitFn?: (signal?: AbortSignal) => Promise<ApprovalDecision>
+  projectId?: string
+  /**
+   * Distinguishes this checkpoint's review from an earlier one in the same
+   * run. Defaults to the wave the checkpoint fired at, when the caller has it.
+   */
+  instance?: string
+  /** Injectable for tests. Defaults to the durable Squad review. */
+  openReview?: (input: {
+    runId: string
+    teamId: string
+    projectId?: string
+    instance: string
+    signal?: AbortSignal
+  }) => Promise<SquadReviewOutcome>
 }
 
 export interface ReplanGateOutcome {
@@ -59,17 +70,47 @@ export async function awaitReplanApproval(deps: ReplanGateDeps): Promise<ReplanG
     body: decision.reasoning,
     runId,
     teamId,
-    openApproval: { scope: "agent-team-replan", id: runId },
     dedupeKey: `replan:${runId}`,
   })
-  const wait =
-    deps.waitFn ?? ((signal) => waitForDecision({ scope: "agent-team-replan", id: runId }, signal))
-  const result = await wait(deps.signal)
+  const instance = deps.instance ?? `replan-${Date.now()}`
+  const openReview =
+    deps.openReview ??
+    ((input: {
+      runId: string
+      teamId: string
+      projectId?: string
+      instance: string
+      signal?: AbortSignal
+    }) =>
+      openSquadReview({
+        runId: input.runId,
+        teamId: input.teamId,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        kind: "replan",
+        instance: input.instance,
+        subject: {
+          action: decision.action,
+          newTasks: decision.newTasks?.length ?? 0,
+          newMembers: decision.newMembers?.length ?? 0,
+        },
+        ...(input.signal ? { signal: input.signal } : {}),
+      }))
+  // An abort while waiting propagates: the run is ending, and pretending the
+  // operator declined would let a wave start on a run that was just stopped.
+  const result: SquadReviewOutcome = await openReview({
+    runId,
+    teamId,
+    ...(deps.projectId ? { projectId: deps.projectId } : {}),
+    instance,
+    ...(deps.signal ? { signal: deps.signal } : {}),
+  })
   if (result.outcome !== "approve") {
-    // Operator declined the re-plan → proceed with the original plan.
+    // Operator declined the re-plan: proceed with the original plan.
     return { approved: false, decision }
   }
-  // The operator may submit an edited decision payload; validate and prefer it.
-  const edited = replanDecisionSchema.safeParse(result.plan)
+  // The operator may submit an edited decision payload. Validate and prefer it.
+  const edited = replanDecisionSchema.safeParse(
+    result.kind === "replan" ? result.edited : undefined
+  )
   return { approved: true, decision: edited.success ? edited.data : decision }
 }

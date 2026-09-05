@@ -59,7 +59,15 @@ export interface StartTeamRunFromIMInput {
 export interface StartTeamRunFromIMResult {
   started: boolean
   runId?: string
-  reason?: "team_not_found" | "no_team_id" | "dispatch_error"
+  reason?:
+    | "team_not_found"
+    | "no_team_id"
+    | "dispatch_error"
+    /** Readiness blockers stand (ADR-0168). `blockers` names them. */
+    | "not_ready"
+    /** A run is already open. `runId` is that run. */
+    | "already_running"
+  blockers?: import("@/lib/agent-team/squad-readiness").SquadReadinessBlocker[]
 }
 
 /**
@@ -140,7 +148,18 @@ export async function startTeamRunFromIM(
 
   if (result.started) return { started: true, ...(result.runId ? { runId: result.runId } : {}) }
   // The IM lane's vocabulary predates the shared primitive and is what its
-  // audit records say; translate rather than churn the audit trail.
+  // audit records say. Translate rather than churn the audit trail, but let
+  // the two refusals a person can act on through with their detail.
+  if (result.reason === "not_ready") {
+    return { started: false, reason: "not_ready", blockers: result.blockers ?? [] }
+  }
+  if (result.reason === "already_running") {
+    return {
+      started: false,
+      reason: "already_running",
+      ...(result.runId ? { runId: result.runId } : {}),
+    }
+  }
   return {
     started: false,
     reason: result.reason === "squad_not_found" ? "team_not_found" : "dispatch_error",

@@ -177,9 +177,6 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
   }
 
   const prepareRun = async (team: AgentTeam, runId = newId("team-run")): Promise<string> => {
-    if (team.config.runtimeVersion !== "durable-v2") {
-      throw new Error("Durable coordinator requires runtimeVersion=durable-v2")
-    }
     const repositories = normalizeRepositories(team)
     const at = now()
     const priority = team.config.resourcePolicy?.priority ?? 0
@@ -207,6 +204,10 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       }
     } else if (existing.teamId !== team.id) {
       throw new Error(`Durable run ${runId} belongs to another team`)
+    } else if (existing.status === "queued") {
+      // `startSquadRun` journals the row as `queued` before dispatch
+      // (ADR-0168). Admission is what moves it to `running`.
+      await updateAgentTeamRun(runId, { status: "running", startedAt: at, updatedAt: at })
     }
     // The execution row is addressed the way `agent-team-bridge` addresses it,
     // never by the bare `runId`. Both this path and `startSquadRun` create a

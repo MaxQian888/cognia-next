@@ -184,9 +184,7 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   // dispatch. Emitted here rather than by the executor so the *scheduler*
   // enforces the gate — an unapproved task's dependents are simply not
   // runnable, instead of relying on downstream nodes to check a flag.
-  const integrationReviewRequired =
-    input.team.config.runtimeVersion === "durable-v2" &&
-    input.team.config.writeMode === "isolated-parallel"
+  const integrationReviewRequired = input.team.config?.writeMode === "isolated-parallel"
   const reviewEnabled = isTaskReviewEnabled(input.team.config) || integrationReviewRequired
   if (reviewEnabled) {
     const maxRevisions = resolveMaxRevisions(input.team.config)

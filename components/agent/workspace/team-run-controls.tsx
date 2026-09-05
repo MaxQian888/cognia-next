@@ -1,7 +1,11 @@
 "use client"
 
 /**
- * Team run controls — the three-state Run / Pause / Abort / Resume / Stop block.
+ * Team run controls: the three-state Run / Pause / Resume / Stop block.
+ *
+ * There is no Abort (ADR-0168). It used to alias Pause, so the visible
+ * destructive action read as "stop this" and did not. Pause is cooperative and
+ * resumable. Stop is terminal and cascades. Those are the two verbs.
  *
  * Extracted from `overview.tsx` because two surfaces need the same block and
  * they place it differently: the desktop workspace pins it in the always-visible
@@ -16,8 +20,8 @@
  * The `data-testid`s are the historical ones from `overview.tsx` — unchanged so
  * existing suites and any external driver keep working.
  *
- * EVERY button is gated on its own handler. Pause and Stop always were; Start,
- * Abort and Resume were not, so a caller that omitted one rendered an enabled
+ * EVERY button is gated on its own handler. Pause and Stop always were; Start
+ * and Resume were not, so a caller that omitted one rendered an enabled
  * button wired to `undefined`. That is how the mobile workspace shipped a
  * paused team with a Resume button that did nothing when tapped: an inert
  * control is worse than an absent one, because it reads as "the run refuses to
@@ -38,13 +42,14 @@ export interface TeamRunControlsProps {
   onStart?: () => void
   /** Manual ultracode run — forces the pattern composition regardless of autoMode. */
   onStartUltracode?: () => void
-  onAbort?: () => void
-  /** Pause the live run (abort + mark paused; resumable). */
+  /** Pause the live run cooperatively (resumable). */
   onPause?: () => void
-  /** Resume a paused team over its not-yet-done tasks. */
+  /** Resume a paused team from its latest verified safe checkpoint. */
   onResume?: () => void
-  /** Cancel a paused team for good (shutdown). */
+  /** Stop the run for good. Offered while live AND while paused. */
   onStop?: () => void
+  /** Why Start is unavailable, when it is. Rendered as the disabled reason. */
+  startDisabledReason?: string
   className?: string
 }
 
@@ -53,10 +58,10 @@ export function TeamRunControls({
   ultracodeEnabled,
   onStart,
   onStartUltracode,
-  onAbort,
   onPause,
   onResume,
   onStop,
+  startDisabledReason,
   className,
 }: TeamRunControlsProps) {
   const t = useTranslations("agentTeamsWorkspace.overview")
@@ -75,9 +80,9 @@ export function TeamRunControls({
               {t("pauseTeam")}
             </Button>
           )}
-          {onAbort && (
-            <Button variant="outline" size="sm" onClick={onAbort} data-testid="abort-team">
-              {t("abortTeam")}
+          {onStop && (
+            <Button variant="outline" size="sm" onClick={onStop} data-testid="stop-team">
+              {t("stopTeam")}
             </Button>
           )}
         </>
@@ -101,13 +106,20 @@ export function TeamRunControls({
               variant="outline"
               size="sm"
               onClick={onStartUltracode}
+              disabled={Boolean(startDisabledReason)}
               data-testid="start-team-ultracode"
             >
               {t("startTeamUltracode")}
             </Button>
           )}
           {onStart && (
-            <Button size="sm" onClick={onStart} data-testid="start-team">
+            <Button
+              size="sm"
+              onClick={onStart}
+              disabled={Boolean(startDisabledReason)}
+              title={startDisabledReason}
+              data-testid="start-team"
+            >
               {t("startTeam")}
             </Button>
           )}

@@ -145,12 +145,11 @@ describe("TeamNotifier — unified deliver (ADR-0042)", () => {
     const toast = jest.fn()
     const osNotify = jest.fn().mockResolvedValue(undefined)
     const log = jest.fn().mockResolvedValue(undefined)
-    const openGate = jest.fn()
     const notifier = createTeamNotifier(
       { runId: "r1", teamId: "t1" },
-      { deliver, toast, osNotify, log, openGate }
+      { deliver, toast, osNotify, log }
     )
-    return { notifier, deliver, toast, osNotify, log, openGate }
+    return { notifier, deliver, toast, osNotify, log }
   }
 
   it("emits exactly one deliver per event and bypasses legacy toast/os", () => {
@@ -167,19 +166,6 @@ describe("TeamNotifier — unified deliver (ADR-0042)", () => {
     notifier.notify({ level: "info", title: "hi", runId: "r1", teamId: "t1" })
     expect(log).toHaveBeenCalledTimes(1)
     expect(deliver).toHaveBeenCalledTimes(1)
-  })
-
-  it("still opens the HITL gate for critical + openApproval", () => {
-    const { notifier, deliver, openGate } = setupDeliver()
-    notifier.notify({
-      level: "critical",
-      title: "approve",
-      runId: "r1",
-      teamId: "t1",
-      openApproval: { scope: "team", id: "g1" } as never,
-    })
-    expect(deliver).toHaveBeenCalledTimes(1)
-    expect(openGate).toHaveBeenCalledTimes(1)
   })
 
   it("suspend silences deliver but keeps the event-log", () => {

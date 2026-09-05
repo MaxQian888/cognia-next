@@ -60,7 +60,7 @@ describe("vocabulary constants", () => {
     expect(ACTION_REVIEW_VERDICTS).toEqual(["allow", "ask", "deny"])
     expect(ACTION_REVIEW_TIERS).toEqual(["low", "medium", "high"])
     expect(ACTION_REVIEW_SURFACE_IDS).toHaveLength(6)
-    expect(ACTION_REVIEW_CHANNELS).toHaveLength(9)
+    expect(ACTION_REVIEW_CHANNELS).toHaveLength(15)
     expect(ACTION_REVIEW_OUTCOMES).toHaveLength(5)
   })
 
