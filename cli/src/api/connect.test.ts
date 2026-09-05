@@ -58,15 +58,26 @@ describe("connectHost with nothing resolved", () => {
     expect(failure.details[0]).toContain("COGNIA_SERVER_URL is not set")
   })
 
-  it("points at enrollment when a desktop is running on this machine", async () => {
+  it("points at pairing when a desktop is running on this machine", async () => {
     const result = await connectHost(empty, {
       detect: async () => ({ baseUrl: "http://127.0.0.1:5599" }),
     })
-    const failure = (result as { failure: { fix: string[] } }).failure
-    // The bridge brokers a credential rather than dispatching commands, so the
-    // advice has to be "enroll", never "point the CLI at the bridge".
-    expect(failure.fix[0]).toContain("host login --enroll")
-    expect(failure.fix[0]).toContain("http://127.0.0.1:5599")
+    const fix = (result as { failure: { fix: string[] } }).failure.fix.join(" ")
+    // The desktop's CLI bridge carries 18 routes and dispatching commands is
+    // not one of them, so the advice must be to pair with the Companion API,
+    // never to point the CLI at the bridge URL.
+    expect(fix).toContain("host login desktop")
+    expect(fix).toContain("--pair-code")
+    expect(fix).not.toContain("127.0.0.1:5599")
+  })
+
+  it("does not offer a flag the CLI has no implementation for", async () => {
+    const result = await connectHost(empty, {
+      detect: async () => ({ baseUrl: "http://127.0.0.1:5599" }),
+    })
+    expect((result as { failure: { fix: string[] } }).failure.fix.join(" ")).not.toContain(
+      "--enroll"
+    )
   })
 
   it("survives a desktop probe that throws", async () => {

@@ -67,9 +67,6 @@ export const BOOLEAN_FLAGS = new Set([
   "wait",
   // `api schema --template` — print a fillable request body instead of calling.
   "template",
-  // `host login --enroll` — take the enrollment from a running desktop's CLI
-  // bridge rather than a pairing code typed by hand.
-  "enroll",
   // `host add --use` — make the new host active in the same step.
   "use",
   // `host add --local` — write ./.cognia/hosts.json instead of the CLI home.

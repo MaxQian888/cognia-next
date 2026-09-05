@@ -190,7 +190,7 @@ describe("api plane flags", () => {
     expect(parseArgv(["api", "list", "-o", "./out"]).flags.output).toBe("./out")
   })
 
-  it("never lets --debug, --wait, --template or --enroll swallow the next token", () => {
+  it("never lets --debug, --wait or --template swallow the next token", () => {
     const args = parseArgv([
       "api",
       "call",
@@ -198,14 +198,20 @@ describe("api plane flags", () => {
       "--debug",
       "--wait",
       "--template",
-      "--enroll",
       "--format",
       "json",
     ])
     expect(args.flags.debug).toBe(true)
     expect(args.flags.wait).toBe(true)
     expect(args.flags.template).toBe(true)
-    expect(args.flags.enroll).toBe(true)
     expect(args.flags.format).toBe("json")
+  })
+
+  it("still reads a value after each of them", () => {
+    // A trailing boolean degrades to `true` whether or not it is declared, so
+    // the token-swallowing test above only bites when a value follows.
+    const args = parseArgv(["api", "call", "x", "--wait", "--id", "abc"])
+    expect(args.flags.wait).toBe(true)
+    expect(args.flags.id).toBe("abc")
   })
 })

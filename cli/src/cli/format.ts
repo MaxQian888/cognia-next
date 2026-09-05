@@ -51,7 +51,6 @@ export const GLOBAL_FLAG_NAMES: ReadonlySet<string> = new Set([
   "data",
   "wait",
   "template",
-  "enroll",
   "yes",
   "idempotency-key",
 ])

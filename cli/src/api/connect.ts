@@ -47,9 +47,13 @@ async function noHostFailure(resolution: HostResolution, deps: ConnectDeps): Pro
   const desktop = await detect().catch(() => null)
   const fix = desktop
     ? [
-        // The bridge brokers a credential and never dispatches commands, so
-        // the useful advice is to enroll, not to point the CLI at the bridge.
-        `a Cognia desktop is running here: cognia-agent host login --enroll --endpoint ${desktop.baseUrl}`,
+        // A desktop is running, but its CLI bridge only carries the 18 routes
+        // ADR-0078 gave it, and dispatching commands is deliberately not one
+        // of them. The desktop's own Companion API is the reachable surface,
+        // and pairing is how a CLI gets onto it.
+        "a Cognia desktop is running here, so pair with its Companion API:",
+        "take a pairing code from Settings then Companion, then run",
+        "cognia-agent host login desktop --endpoint https://127.0.0.1:27890 --pair-code <code>",
       ]
     : [
         "cognia-agent host add <name> --endpoint https://127.0.0.1:27890",
