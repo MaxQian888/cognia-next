@@ -26,6 +26,8 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
+use crate::canvas_api::CanvasHub;
+use crate::canvas_store::{CanvasStore, InMemoryCanvasStore};
 use crate::chat_api::ChatHub;
 use crate::chat_store::{ChatStore, InMemoryChatStore};
 use crate::logto_management::{LogtoManagement, LogtoManagementError, UnconfiguredLogtoManagement};
@@ -60,6 +62,10 @@ pub struct AppState {
     pub chat_attachments: Arc<dyn crate::chat_attachment_store::ChatAttachmentObjectStore>,
     pub chat_metrics: Arc<crate::chat_metrics::ChatMetrics>,
     pub shared_chat_enabled: bool,
+    pub canvas_store: Arc<dyn CanvasStore>,
+    pub canvas_hub: Arc<CanvasHub>,
+    /// Rollout gate for the Canvas routes: `COLLAB_CANVAS_ENABLED`.
+    pub canvas_enabled: bool,
     pub signer: Arc<GrantSigner>,
     /// Verifies the OIDC access token a grant is exchanged for.
     pub oidc: Arc<dyn Authenticator>,
@@ -108,6 +114,9 @@ impl AppState {
             ),
             chat_metrics: Arc::new(crate::chat_metrics::ChatMetrics::default()),
             shared_chat_enabled: true,
+            canvas_store: Arc::new(InMemoryCanvasStore::new()),
+            canvas_hub: Arc::new(CanvasHub::default()),
+            canvas_enabled: true,
             signer: Arc::new(signer),
             oidc,
             now: Arc::new(|| {
@@ -134,6 +143,16 @@ impl AppState {
 
     pub fn with_shared_chat_enabled(mut self, enabled: bool) -> Self {
         self.shared_chat_enabled = enabled;
+        self
+    }
+
+    pub fn with_canvas_store(mut self, canvas_store: Arc<dyn CanvasStore>) -> Self {
+        self.canvas_store = canvas_store;
+        self
+    }
+
+    pub fn with_canvas_enabled(mut self, enabled: bool) -> Self {
+        self.canvas_enabled = enabled;
         self
     }
 
@@ -212,6 +231,11 @@ pub fn router(state: AppState) -> Router {
     } else {
         routes
     };
+    let routes = if state.canvas_enabled {
+        routes.merge(crate::canvas_api::routes())
+    } else {
+        routes
+    };
     routes.with_state(state)
 }
 
@@ -227,6 +251,9 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let mut features = vec!["issue-writes", "plan-writes", "run-writes"];
     if state.shared_chat_enabled {
         features.push("shared-chat");
+    }
+    if state.canvas_enabled {
+        features.push("canvas");
     }
     if state.account_control.enabled {
         features.push("account-bootstrap");

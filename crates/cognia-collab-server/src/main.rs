@@ -57,6 +57,9 @@ struct Args {
     /// Rollout gate for server-authoritative shared chat routes.
     #[arg(long, env = "COLLAB_SHARED_CHAT_ENABLED", default_value_t = false)]
     shared_chat_enabled: bool,
+    /// Rollout gate for server-authoritative Canvas documents.
+    #[arg(long, env = "COLLAB_CANVAS_ENABLED", default_value_t = false)]
+    canvas_enabled: bool,
     /// Rollout gate for the account control plane: membership discovery,
     /// first-owner bootstrap and generic invitation acceptance.
     #[arg(
@@ -167,9 +170,11 @@ async fn main() -> anyhow::Result<()> {
         member_role_name: args.logto_member_role,
     };
     let state = AppState::new(store.clone(), signer, Arc::new(oidc))
+        .with_canvas_store(store.clone())
         .with_chat_store(store)
         .with_chat_attachments(Arc::new(attachment_store))
         .with_shared_chat_enabled(args.shared_chat_enabled)
+        .with_canvas_enabled(args.canvas_enabled)
         .with_logto_management(logto)
         .with_account_control(account_control);
 

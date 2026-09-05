@@ -55,6 +55,9 @@
 
 pub mod api;
 pub mod auth;
+pub mod canvas;
+pub mod canvas_api;
+pub mod canvas_store;
 pub mod chat;
 pub mod chat_api;
 pub mod chat_attachment_store;

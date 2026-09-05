@@ -28,6 +28,7 @@ bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["grants", "oidc"] }
 deadpool-postgres = "0.14"
+futures-util = { version = "0.3", default-features = false }
 parking_lot = "0.12"
 object_store = { version = "0.12", features = ["aws"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }

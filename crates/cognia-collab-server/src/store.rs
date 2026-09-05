@@ -2262,6 +2262,9 @@ impl PgStore {
         client
             .batch_execute(include_str!("../migrations/0009_account_bootstrap.sql"))
             .await?;
+        client
+            .batch_execute(include_str!("../migrations/0010_canvas.sql"))
+            .await?;
         Ok(())
     }
 
