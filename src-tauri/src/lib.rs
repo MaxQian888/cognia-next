@@ -790,6 +790,7 @@ pub fn run() {
             claude_has_oauth_bearer,
             claude_restart_sidecar,
             canvas::python_exec::canvas_run_python,
+            canvas::python_exec::canvas_cancel_python,
             window_behavior::set_close_behavior,
             window_behavior::get_close_behavior,
             window_behavior::resolve_close_request,

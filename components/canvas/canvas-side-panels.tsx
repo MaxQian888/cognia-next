@@ -548,7 +548,9 @@ function ExecutionHost({ documentId }: { documentId: string }) {
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const doc = documents[documentId]
   const language = doc?.language ?? "javascript"
-  const { execute, cancel, clear, result, isExecuting } = useCanvasCodeExecution()
+  const { execute, cancel, clear, result, isExecuting, showOutput, availabilityFor } =
+    useCanvasCodeExecution()
+  const availability = availabilityFor(language)
 
   const run = useCallback(() => {
     const current = useArtifactStore.getState().canvasDocuments[documentId]
@@ -579,6 +581,8 @@ function ExecutionHost({ documentId }: { documentId: string }) {
       onExecute={run}
       onCancel={() => cancel()}
       onClear={() => clear()}
+      unavailableReason={availability.reason}
+      showOutput={showOutput}
       className="border-t-0"
     />
   )

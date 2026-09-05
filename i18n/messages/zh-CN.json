@@ -5111,6 +5111,8 @@
     "restoreVersion": "恢复版本",
     "reviewingChanges": "正在审阅更改",
     "run": "运行",
+    "runUnavailableDesktopOnly": "运行 {language} 需要桌面端应用。",
+    "runUnavailableLanguage": "此处没有可运行 {language} 的运行时。",
     "running": "AI 处理中…",
     "save": "保存",
     "saveVersion": "保存版本",
@@ -6592,18 +6594,18 @@
     },
     "imageWorkbench": {
       "adjust": {
-        "blur": "模糊",
+        "exposure": "曝光",
         "brightness": "亮度",
         "contrast": "对比度",
-        "exposure": "曝光",
         "gamma": "伽马",
-        "hue": "色相",
-        "reset": "重置调整",
-        "saturation": "饱和度",
-        "sharpen": "锐化",
         "temperature": "色温",
         "tint": "色调",
-        "vibrance": "自然饱和度"
+        "saturation": "饱和度",
+        "vibrance": "自然饱和度",
+        "hue": "色相",
+        "blur": "模糊",
+        "sharpen": "锐化",
+        "reset": "重置调整"
       },
       "ai": {
         "billingNotice": "每次执行都会向所选服务商发起一次计费请求。",
@@ -6613,6 +6615,15 @@
         "brushSubtract": "减少选择",
         "cancel": "取消",
         "clearSelection": "清空选择",
+        "error": {
+          "blocked": "该 Prompt 未被发送，因为其中包含不应离开本机的信息。",
+          "cancelled": "编辑已取消。",
+          "empty-selection": "当前没有选中任何区域，请先涂抹要修改的部分。",
+          "mask-unsupported": "该服务商不支持区域编辑。",
+          "no-output": "服务商没有返回图片，所选模型可能不支持编辑。",
+          "provider": "服务商未能完成这次编辑。",
+          "unavailable": "图像编辑服务商尚不可用。"
+        },
         "generate": "生成",
         "maskUnsupported": "{provider} 不支持区域编辑，整图 Prompt 编辑仍可使用。",
         "modelLine": "模型：{model}",
@@ -6624,15 +6635,15 @@
         "retry": "重试",
         "running": "生成中",
         "unavailable": {
+          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。",
           "needs-auth": "图像编辑服务商还缺少 API Key。",
-          "needs-config": "图像编辑服务商还缺少模型或 Base URL。",
-          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。"
+          "needs-config": "图像编辑服务商还缺少模型或 Base URL。"
         }
       },
       "blocked": {
         "cors": "该图片托管在其他站点，无法读取像素，因此可以查看和下载但无法编辑。",
-        "decode": "无法解码这张图片以进行编辑。",
-        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。"
+        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。",
+        "decode": "无法解码这张图片以进行编辑。"
       },
       "close": "关闭",
       "compare": "与原图对比",
@@ -6643,27 +6654,31 @@
         "apply": "应用裁剪",
         "aspect": {
           "free": "自由",
-          "landscape16x9": "16:9",
+          "square": "1:1",
           "landscape4x3": "4:3",
           "portrait3x4": "3:4",
-          "portrait9x16": "9:16",
-          "square": "1:1"
+          "landscape16x9": "16:9",
+          "portrait9x16": "9:16"
         },
         "clear": "清除",
+        "sizeReadout": "{width} x {height}",
         "title": "裁剪"
       },
       "dialogDescription": "查看、编辑并管理这张图片的版本，原图始终保留。",
       "discard": {
+        "title": "放弃编辑",
         "body": "现在关闭将丢弃尚未保存的编辑。",
-        "cancel": "继续编辑",
         "confirm": "放弃",
-        "title": "放弃编辑"
+        "cancel": "继续编辑"
       },
       "download": "下载",
+      "downloadAs": "下载为 {format}",
       "next": "下一张图片",
       "previewAlt": "编辑后的图片预览",
       "previous": "上一张图片",
       "rail": {
+        "aiBadge": "AI",
+        "aiVersionAria": "模型生成的版本：{operations}",
         "label": "图片版本",
         "original": "原图",
         "originalAria": "原图",
@@ -6676,31 +6691,40 @@
         "apply": "应用尺寸",
         "height": "高度",
         "lockAspect": "锁定比例",
+        "separator": "x",
         "title": "尺寸",
         "width": "宽度"
       },
       "save": {
         "blockedReadOnly": "该会话为只读，无法在此保存版本。",
         "blockedStreaming": "该回合仍在生成，生成结束后即可保存。",
+        "error": {
+          "locked": "该会话正在迁移到另一台设备并被锁定，无法保存版本。",
+          "message-missing": "这条消息已不在当前会话中。",
+          "lineage-missing": "这张图片已不属于这条消息。",
+          "too-large": "编辑后的图片过大，无法保存。可以先裁剪或缩小尺寸。",
+          "unknown": "版本保存失败。"
+        },
         "save": "保存为版本",
         "saving": "保存中"
       },
       "selectionOverlayAria": "已选区域",
       "tools": {
-        "adjust": "调整",
-        "ai": "AI",
+        "view": "查看",
         "transform": "裁剪",
-        "view": "查看"
+        "adjust": "调整",
+        "ai": "AI"
       },
       "toolsLabel": "编辑工具",
       "transform": {
-        "flipHorizontal": "水平翻转",
-        "flipVertical": "垂直翻转",
+        "title": "旋转与翻转",
         "rotateLeft": "向左旋转",
         "rotateRight": "向右旋转",
-        "title": "旋转与翻转"
+        "flipHorizontal": "水平翻转",
+        "flipVertical": "垂直翻转"
       },
       "undo": "撤销",
+      "untitled": "图片",
       "viewHint": "{width} x {height} 像素",
       "viewHintLoading": "正在加载图片",
       "zoomIn": "放大",
@@ -10153,6 +10177,10 @@
         "hint": "本地智能体后端未在运行——请重启后端后再发送消息。",
         "label": "后端未运行"
       },
+      "squadAlreadyRunning": {
+        "hint": "该小队已有一次运行在进行中。请先引导或停止那次运行，再启动新的。",
+        "label": "小队正在运行"
+      },
       "squadDispatchFailed": {
         "hint": "小队存在，但本次运行未能启动——请重试，或检查小队成员配置。",
         "label": "小队无法启动"
@@ -10160,6 +10188,10 @@
       "squadNotFound": {
         "hint": "该会话绑定的小队已不存在——请另选一个，或解除绑定。",
         "label": "找不到小队"
+      },
+      "squadNotReady": {
+        "hint": "该小队缺少运行所需的仓库、环境或成员。请在设置中补齐后重试。",
+        "label": "小队尚未就绪"
       },
       "strictFailure": {
         "hint": "外部智能体失败，且本会话为严格模式，因此没有在别处重试。",
@@ -29694,21 +29726,10 @@
         "wordWrap": "自动换行"
       },
       "execution": {
-        "autoExecute": "保存时自动执行",
         "clearOutputOnRun": "每次运行时清空输出",
         "maxExecutionTime": "最大执行时间",
-        "preserveVariables": "跨运行保留变量",
+        "pythonAvailable": "Python 通过本应用的受限解释器运行。",
         "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。",
-        "pythonRuntime": "Python 运行时",
-        "pythonRuntimeOptions": {
-          "none": "禁用",
-          "tauriSidecar": "Tauri Python sidecar（桌面端）"
-        },
-        "sandboxMode": "沙盒模式",
-        "sandboxModeOptions": {
-          "permissive": "宽松",
-          "strict": "严格（无网络/存储）"
-        },
         "showOutput": "显示输出面板"
       },
       "resetAll": "重置全部",

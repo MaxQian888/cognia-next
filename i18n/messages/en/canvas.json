@@ -317,6 +317,8 @@
   "restoreVersion": "Restore version",
   "reviewingChanges": "Reviewing changes",
   "run": "Run",
+  "runUnavailableDesktopOnly": "Running {language} needs the desktop app.",
+  "runUnavailableLanguage": "There is no runtime for {language} here.",
   "running": "AI working…",
   "save": "Save",
   "saveVersion": "Save version",

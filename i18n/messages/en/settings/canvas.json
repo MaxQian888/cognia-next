@@ -126,21 +126,10 @@
     "wordWrap": "Word wrap"
   },
   "execution": {
-    "autoExecute": "Auto-execute on save",
     "clearOutputOnRun": "Clear output on each run",
     "maxExecutionTime": "Max execution time",
-    "preserveVariables": "Preserve variables across runs",
+    "pythonAvailable": "Python runs through this app's confined interpreter.",
     "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable.",
-    "pythonRuntime": "Python runtime",
-    "pythonRuntimeOptions": {
-      "none": "Disabled",
-      "tauriSidecar": "Tauri Python sidecar (desktop)"
-    },
-    "sandboxMode": "Sandbox mode",
-    "sandboxModeOptions": {
-      "permissive": "Permissive",
-      "strict": "Strict (no network/storage)"
-    },
     "showOutput": "Show output panel"
   },
   "resetAll": "Reset all",

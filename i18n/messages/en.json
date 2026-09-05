@@ -5111,6 +5111,8 @@
     "restoreVersion": "Restore version",
     "reviewingChanges": "Reviewing changes",
     "run": "Run",
+    "runUnavailableDesktopOnly": "Running {language} needs the desktop app.",
+    "runUnavailableLanguage": "There is no runtime for {language} here.",
     "running": "AI working…",
     "save": "Save",
     "saveVersion": "Save version",
@@ -6592,18 +6594,18 @@
     },
     "imageWorkbench": {
       "adjust": {
-        "blur": "Blur",
+        "exposure": "Exposure",
         "brightness": "Brightness",
         "contrast": "Contrast",
-        "exposure": "Exposure",
         "gamma": "Gamma",
-        "hue": "Hue",
-        "reset": "Reset adjustments",
-        "saturation": "Saturation",
-        "sharpen": "Sharpen",
         "temperature": "Temperature",
         "tint": "Tint",
-        "vibrance": "Vibrance"
+        "saturation": "Saturation",
+        "vibrance": "Vibrance",
+        "hue": "Hue",
+        "blur": "Blur",
+        "sharpen": "Sharpen",
+        "reset": "Reset adjustments"
       },
       "ai": {
         "billingNotice": "Each run is a billed request to the selected provider.",
@@ -6613,6 +6615,15 @@
         "brushSubtract": "Remove from selection",
         "cancel": "Cancel",
         "clearSelection": "Clear selection",
+        "error": {
+          "blocked": "The prompt was not sent, because it contains information that must not leave this device.",
+          "cancelled": "Edit cancelled.",
+          "empty-selection": "Nothing is selected. Paint over the area you want changed.",
+          "mask-unsupported": "This provider cannot edit a selected region.",
+          "no-output": "The provider returned no image. The selected model may not support editing.",
+          "provider": "The provider could not complete the edit.",
+          "unavailable": "The image-editing provider is not ready to run."
+        },
         "generate": "Generate",
         "maskUnsupported": "{provider} cannot edit a selected region. Whole-image prompts still work.",
         "modelLine": "Model: {model}",
@@ -6624,15 +6635,15 @@
         "retry": "Try again",
         "running": "Generating",
         "unavailable": {
+          "no-provider": "No image-editing provider is set up yet. Add one in Settings to edit with AI.",
           "needs-auth": "The image-editing provider needs an API key before it can run.",
-          "needs-config": "The image-editing provider needs a model or base URL before it can run.",
-          "no-provider": "No image-editing provider is set up yet. Add one in Settings to edit with AI."
+          "needs-config": "The image-editing provider needs a model or base URL before it can run."
         }
       },
       "blocked": {
         "cors": "This image is hosted elsewhere and its pixels cannot be read, so it can be viewed and downloaded but not edited.",
-        "decode": "This image could not be decoded for editing.",
-        "unsupported": "This device cannot process images in the browser, so editing is unavailable."
+        "unsupported": "This device cannot process images in the browser, so editing is unavailable.",
+        "decode": "This image could not be decoded for editing."
       },
       "close": "Close",
       "compare": "Compare with original",
@@ -6643,27 +6654,31 @@
         "apply": "Apply crop",
         "aspect": {
           "free": "Free",
-          "landscape16x9": "16:9",
+          "square": "1:1",
           "landscape4x3": "4:3",
           "portrait3x4": "3:4",
-          "portrait9x16": "9:16",
-          "square": "1:1"
+          "landscape16x9": "16:9",
+          "portrait9x16": "9:16"
         },
         "clear": "Clear",
+        "sizeReadout": "{width} x {height}",
         "title": "Crop"
       },
       "dialogDescription": "View, edit and version this image without replacing the original.",
       "discard": {
+        "title": "Discard edits",
         "body": "Closing now discards the edits you have not saved.",
-        "cancel": "Keep editing",
         "confirm": "Discard",
-        "title": "Discard edits"
+        "cancel": "Keep editing"
       },
       "download": "Download",
+      "downloadAs": "Download as {format}",
       "next": "Next image",
       "previewAlt": "Edited image preview",
       "previous": "Previous image",
       "rail": {
+        "aiBadge": "AI",
+        "aiVersionAria": "Version made by a model: {operations}",
         "label": "Image versions",
         "original": "Original",
         "originalAria": "Original image",
@@ -6676,31 +6691,40 @@
         "apply": "Apply size",
         "height": "Height",
         "lockAspect": "Lock proportions",
+        "separator": "x",
         "title": "Resize",
         "width": "Width"
       },
       "save": {
         "blockedReadOnly": "This conversation is read-only, so a version cannot be saved here.",
         "blockedStreaming": "This turn is still streaming. You can save once it finishes.",
+        "error": {
+          "locked": "This conversation is locked while it moves to another device, so a version cannot be saved.",
+          "message-missing": "That message is no longer in this conversation.",
+          "lineage-missing": "That image is no longer part of this message.",
+          "too-large": "The edited image is too large to store. Try cropping or reducing its size.",
+          "unknown": "The version could not be saved."
+        },
         "save": "Save as version",
         "saving": "Saving"
       },
       "selectionOverlayAria": "Selected region",
       "tools": {
-        "adjust": "Adjust",
-        "ai": "AI",
+        "view": "View",
         "transform": "Crop",
-        "view": "View"
+        "adjust": "Adjust",
+        "ai": "AI"
       },
       "toolsLabel": "Editing tools",
       "transform": {
-        "flipHorizontal": "Flip horizontally",
-        "flipVertical": "Flip vertically",
+        "title": "Rotate and flip",
         "rotateLeft": "Rotate left",
         "rotateRight": "Rotate right",
-        "title": "Rotate and flip"
+        "flipHorizontal": "Flip horizontally",
+        "flipVertical": "Flip vertically"
       },
       "undo": "Undo",
+      "untitled": "Image",
       "viewHint": "{width} x {height} pixels",
       "viewHintLoading": "Loading image",
       "zoomIn": "Zoom in",
@@ -10153,6 +10177,10 @@
         "hint": "The local agent backend isn't running — restart it to send messages again.",
         "label": "Backend not running"
       },
+      "squadAlreadyRunning": {
+        "hint": "This Squad already has a run open. Steer or stop that run before starting another.",
+        "label": "Squad already running"
+      },
       "squadDispatchFailed": {
         "hint": "The Squad exists but its run could not be started — try again, or check the Squad's members.",
         "label": "Squad could not start"
@@ -10160,6 +10188,10 @@
       "squadNotFound": {
         "hint": "This conversation is bound to a Squad that no longer exists — pick another one, or unbind it.",
         "label": "Squad not found"
+      },
+      "squadNotReady": {
+        "hint": "This Squad is missing a repository, an environment, or a teammate it needs to run. Configure it in Settings, then try again.",
+        "label": "Squad is not ready"
       },
       "strictFailure": {
         "hint": "The external agent failed and this session is set to strict mode, so nothing was retried elsewhere.",
@@ -29694,21 +29726,10 @@
         "wordWrap": "Word wrap"
       },
       "execution": {
-        "autoExecute": "Auto-execute on save",
         "clearOutputOnRun": "Clear output on each run",
         "maxExecutionTime": "Max execution time",
-        "preserveVariables": "Preserve variables across runs",
+        "pythonAvailable": "Python runs through this app's confined interpreter.",
         "pythonRequiresDesktop": "Python execution requires the desktop build (Tauri). Run `pnpm tauri dev` to enable.",
-        "pythonRuntime": "Python runtime",
-        "pythonRuntimeOptions": {
-          "none": "Disabled",
-          "tauriSidecar": "Tauri Python sidecar (desktop)"
-        },
-        "sandboxMode": "Sandbox mode",
-        "sandboxModeOptions": {
-          "permissive": "Permissive",
-          "strict": "Strict (no network/storage)"
-        },
         "showOutput": "Show output panel"
       },
       "resetAll": "Reset all",

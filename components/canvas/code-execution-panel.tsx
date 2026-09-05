@@ -50,6 +50,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui"
 import type { CodeSandboxExecutionResult } from "@/hooks/canvas/use-code-execution"
+import type { CodeExecutionUnavailableReason } from "@/lib/native/code-execution-strategy"
 import type { BundledLanguage } from "shiki"
 
 interface CodeExecutionPanelProps {
@@ -60,6 +61,18 @@ interface CodeExecutionPanelProps {
   onExecute: () => void
   onCancel: () => void
   onClear: () => void
+  /**
+   * Why this language cannot be run here, or `null` when it can.
+   *
+   * Run used to be offered for every document and answered with
+   * `sandbox: "unsupported"` after the click. Rendering the control disabled
+   * with a reason is the alternative to hiding it, which would collapse
+   * "never runnable here" and "runnable on the desktop app" into the same
+   * blank space.
+   */
+  unavailableReason?: CodeExecutionUnavailableReason | null
+  /** Settings → Canvas → Execution → "Show output". */
+  showOutput?: boolean
   className?: string
 }
 
@@ -71,6 +84,8 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
   onExecute,
   onCancel,
   onClear,
+  unavailableReason = null,
+  showOutput = true,
   className,
 }: CodeExecutionPanelProps) {
   const t = useTranslations("canvas")
@@ -132,7 +147,14 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
               {t("stop")}
             </Button>
           ) : (
-            <Button variant="default" size="sm" className="h-9 px-2" onClick={onExecute}>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-9 px-2"
+              onClick={onExecute}
+              disabled={unavailableReason !== null}
+              data-testid="canvas-execution-run"
+            >
               <Play className="h-3 w-3 mr-1" />
               {t("run")}
             </Button>
@@ -140,8 +162,19 @@ export const CodeExecutionPanel = memo(function CodeExecutionPanel({
         </div>
       </div>
 
+      {unavailableReason && (
+        <p
+          className="border-b px-4 py-2 text-xs text-muted-foreground"
+          data-testid="canvas-execution-unavailable"
+        >
+          {unavailableReason === "desktop-only"
+            ? t("runUnavailableDesktopOnly", { language })
+            : t("runUnavailableLanguage", { language })}
+        </p>
+      )}
+
       {/* Output */}
-      {(result || isExecuting) && (
+      {showOutput && (result || isExecuting) && (
         <SandboxTabs defaultValue="output">
           <SandboxTabsBar>
             <SandboxTabsList>

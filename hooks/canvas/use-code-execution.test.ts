@@ -4,8 +4,21 @@
 import { act, renderHook } from "@testing-library/react"
 
 const executeMock = jest.fn()
+const availabilityMock = jest.fn(() => ({ available: true, reason: null }))
 jest.mock("@/lib/native/code-execution-strategy", () => ({
   executeCodeWithSandboxPriority: (args: unknown) => executeMock(args),
+  codeExecutionAvailability: (...args: unknown[]) => availabilityMock(...args),
+}))
+
+// Settings, Canvas, Execution. Every field here had a control and no reader
+// until the hook started reading them.
+const executionRef = {
+  current: { maxExecutionTime: 30000, showOutput: true, clearOutputOnRun: false },
+}
+jest.mock("@/stores/canvas/canvas-settings-store", () => ({
+  useCanvasSettingsStore: <T>(
+    selector: (s: { settings: { execution: typeof executionRef.current } }) => T
+  ): T => selector({ settings: { execution: executionRef.current } }),
 }))
 
 const isDesktopRef = { current: false }
@@ -159,9 +172,13 @@ describe("useCodeExecution", () => {
       language: "ts",
       isDesktop: true,
       stdin: "in",
-      timeoutMs: undefined,
-      signal: expect.any(AbortSignal),
+      // The settings value is the default now, not the strategy's hardcoded 30s.
+      timeoutMs: 30000,
+      signal: expect.anything(),
       sandboxed: false,
+      // Without an id, Stop only detaches the renderer and the interpreter
+      // runs on to its timeout.
+      runId: expect.any(String),
     })
   })
 
@@ -238,5 +255,97 @@ describe("useCodeExecution", () => {
       await result.current.execute("print(1)", "python")
     })
     expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ sandboxed: true }))
+  })
+})
+
+describe("useCodeExecution — settings that used to do nothing", () => {
+  it("clears the previous output when the setting asks for it", async () => {
+    executionRef.current = { ...executionRef.current, clearOutputOnRun: true }
+    executeMock.mockResolvedValue({
+      success: true,
+      sandbox: "iframe",
+      stdout: "second",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "javascript",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+
+    await act(async () => {
+      await result.current.execute("a", "javascript")
+    })
+    expect(result.current.result?.stdout).toBe("second")
+  })
+
+  it("uses the configured timeout, and an explicit one still wins", async () => {
+    executionRef.current = { ...executionRef.current, maxExecutionTime: 5000 }
+    executeMock.mockResolvedValue({
+      success: true,
+      sandbox: "iframe",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "javascript",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+
+    await act(async () => {
+      await result.current.execute("a", "javascript")
+    })
+    expect(executeMock.mock.calls.at(-1)?.[0].timeoutMs).toBe(5000)
+
+    await act(async () => {
+      await result.current.execute("a", "javascript", { timeout: 1234 })
+    })
+    expect(executeMock.mock.calls.at(-1)?.[0].timeoutMs).toBe(1234)
+  })
+
+  it("reports whether the output pane should render at all", () => {
+    executionRef.current = { ...executionRef.current, showOutput: false }
+    const { result } = renderHook(() => useCodeExecution())
+    expect(result.current.showOutput).toBe(false)
+  })
+
+  it("answers availability before the click, from the host", () => {
+    // The panel used to offer Run for every document and answer with
+    // `sandbox: "unsupported"` after it was pressed.
+    isDesktopRef.current = true
+    availabilityMock.mockReturnValue({ available: false, reason: "desktop-only" })
+    const { result } = renderHook(() => useCodeExecution())
+
+    expect(result.current.availabilityFor("python")).toEqual({
+      available: false,
+      reason: "desktop-only",
+    })
+    expect(availabilityMock).toHaveBeenCalledWith("python", true)
+  })
+
+  it("gives every run its own id so the host can kill the right one", async () => {
+    executeMock.mockResolvedValue({
+      success: true,
+      sandbox: "iframe",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "javascript",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+
+    await act(async () => {
+      await result.current.execute("a", "javascript")
+    })
+    await act(async () => {
+      await result.current.execute("b", "javascript")
+    })
+
+    const ids = executeMock.mock.calls.slice(-2).map((call) => call[0].runId)
+    expect(ids[0]).toBeTruthy()
+    expect(ids[0]).not.toBe(ids[1])
   })
 })

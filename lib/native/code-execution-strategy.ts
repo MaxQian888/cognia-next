@@ -11,6 +11,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { injectFrameCsp, injectFrameHead, serializeFrameCsp } from "@/lib/security/frame-csp"
+import { loggers } from "@cognia/logging"
 
 export type CodeSandboxKind = "iframe" | "tauri-python" | "unsupported"
 
@@ -35,8 +36,16 @@ export interface CodeExecutionRequest {
   code: string
   language?: string
   timeoutMs?: number
-  /** When set, abort early; consumers re-issue the request to retry. */
+  /** When set, abort early. Consumers re-issue the request to retry. */
   signal?: AbortSignal
+  /**
+   * Identifies this run to the host so it can be killed.
+   *
+   * Without one, `signal` only detaches the renderer: the Python child keeps
+   * running to its timeout, holding whatever it had opened. The iframe path
+   * needs no id because tearing down the frame IS the kill.
+   */
+  runId?: string
   /** Cognia compatibility: lets callers force the desktop path. */
   isDesktop?: boolean
   /** Cognia compatibility: stdin payload for stdin-driven sandboxes. */
@@ -45,12 +54,16 @@ export interface CodeExecutionRequest {
    * ADR-0028 Phase 3 — when true, Python runs through the OS sandbox
    * backend (`bwrap` / `sandbox-exec`) instead of a bare interpreter.
    * Driven by the renderer's global sandbox toggle
-   * (`AppSettings.sandboxDefaultEnabled`). Ignored by the iframe path
+   * (`AppSettings.canvasCodeSandboxEnabled`). Ignored by the iframe path
    * (JS/HTML/CSS are already confined to a `sandbox="allow-scripts"`
    * iframe).
    */
   sandboxed?: boolean
 }
+
+/** The two runtimes this app has, and nothing else claims to. */
+const PYTHON_LANGUAGES: ReadonlySet<string> = new Set(["python", "py"])
+const IFRAME_LANGUAGES: ReadonlySet<string> = new Set(["javascript", "js", "html", "css"])
 
 const DEFAULT_TIMEOUT_MS = 30000
 const CANVAS_FRAME_CSP = serializeFrameCsp([
@@ -190,11 +203,24 @@ async function executePythonViaTauri(
     }
   }
   const start = nowMs()
+  const runId = req.runId
+  // Aborting the renderer's controller used to be the whole of "Stop", and the
+  // interpreter never heard about it. The host kills the process now, and the
+  // in-flight invoke returns with exit code 130.
+  const onAbort = runId
+    ? () => {
+        void invoke("canvas_cancel_python", { runId }).catch((err) => {
+          loggers.canvas.warn("canvas python cancel failed", { runId, error: String(err) })
+        })
+      }
+    : null
+  if (onAbort) req.signal?.addEventListener("abort", onAbort, { once: true })
   try {
     const res = (await invoke("canvas_run_python", {
       code: req.code,
       timeoutMs: req.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       sandboxed: req.sandboxed ?? false,
+      runId,
     })) as TauriPythonResponse
     return {
       success: res.exit_code === 0,
@@ -213,18 +239,46 @@ async function executePythonViaTauri(
       durationMs: Math.round(nowMs() - start),
       error: String(err),
     }
+  } finally {
+    if (onAbort) req.signal?.removeEventListener("abort", onAbort)
   }
+}
+
+/** Why a language cannot be run here, or `null` when it can. */
+export type CodeExecutionUnavailableReason = "unsupported-language" | "desktop-only"
+
+/**
+ * Whether this host can run this language, and if not, why.
+ *
+ * The panel used to offer Run for every document and answer with
+ * `sandbox: "unsupported"` after the click. Deriving it up front is what lets
+ * the button be disabled with a reason instead of failing on press, and it is
+ * the same table `executeCodeWithSandboxPriority` dispatches on, so the two
+ * cannot drift.
+ */
+export function codeExecutionAvailability(
+  language: string | undefined,
+  isDesktop: boolean
+): { available: boolean; reason: CodeExecutionUnavailableReason | null } {
+  const lang = (language ?? "javascript").toLowerCase()
+  if (PYTHON_LANGUAGES.has(lang)) {
+    // Python is a child process, so only the desktop shell has one to spawn.
+    return isDesktop
+      ? { available: true, reason: null }
+      : { available: false, reason: "desktop-only" }
+  }
+  if (IFRAME_LANGUAGES.has(lang)) return { available: true, reason: null }
+  return { available: false, reason: "unsupported-language" }
 }
 
 export async function executeCodeWithSandboxPriority(
   req: CodeExecutionRequest
 ): Promise<UnifiedCodeExecutionResult> {
   const lang = (req.language ?? "javascript").toLowerCase()
-  if (lang === "python" || lang === "py") {
+  if (PYTHON_LANGUAGES.has(lang)) {
     return executePythonViaTauri(req)
   }
-  const iframeLanguages = new Set(["javascript", "js", "html", "css"])
-  if (iframeLanguages.has(lang)) {
+  if (IFRAME_LANGUAGES.has(lang)) {
     return executeInIframeSandbox(req)
   }
   return {

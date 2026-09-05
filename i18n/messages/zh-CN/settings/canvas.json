@@ -126,21 +126,10 @@
     "wordWrap": "自动换行"
   },
   "execution": {
-    "autoExecute": "保存时自动执行",
     "clearOutputOnRun": "每次运行时清空输出",
     "maxExecutionTime": "最大执行时间",
-    "preserveVariables": "跨运行保留变量",
+    "pythonAvailable": "Python 通过本应用的受限解释器运行。",
     "pythonRequiresDesktop": "Python 执行需要桌面端（Tauri）。运行 `pnpm tauri dev` 以启用。",
-    "pythonRuntime": "Python 运行时",
-    "pythonRuntimeOptions": {
-      "none": "禁用",
-      "tauriSidecar": "Tauri Python sidecar（桌面端）"
-    },
-    "sandboxMode": "沙盒模式",
-    "sandboxModeOptions": {
-      "permissive": "宽松",
-      "strict": "严格（无网络/存储）"
-    },
     "showOutput": "显示输出面板"
   },
   "resetAll": "重置全部",

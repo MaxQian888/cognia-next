@@ -1,7 +1,7 @@
 /**
  * Canvas Settings Types — editor configuration & preferences.
  * Ported from D:\Project\Cognia\types\canvas\settings.ts with two
- * cognia-next additions: collaboration.serverUrl and execution.pythonRuntime.
+ * cognia-next addition: collaboration.serverUrl.
  */
 
 export interface CanvasEditorSettings {
@@ -92,22 +92,29 @@ export interface CanvasCollaborationSettings {
 }
 
 /**
- * Where to run Python code blocks. cognia-next addition.
- * - "none" — Python execution disabled.
- * - "tauri-sidecar" — invoke `canvas_run_python` via Tauri (desktop only).
- *   Web mode falls back to "none" automatically.
+ * What the Canvas execution panel can actually be told to do.
+ *
+ * Four fields were removed rather than left inert, because each one read as a
+ * capability or a security control and had no implementation behind it:
+ *
+ * - `autoExecute`: nothing ever ran code without a click.
+ * - `preserveVariables`: every run gets a fresh iframe or a fresh child
+ *   process, so there is no session to preserve anything in.
+ * - `sandboxMode` ("strict" / "permissive"): the real switch is
+ *   `AppSettings.canvasCodeSandboxEnabled` in Settings, Sandbox, which is what
+ *   `use-code-execution.ts` reads and what reaches the Rust confinement.
+ * - `pythonRuntime` ("none" / "tauri-sidecar"): dispatch is by language and
+ *   host, and setting it to "none" did not disable Python. Whether Python can
+ *   run here is now answered by `codeExecutionAvailability`, which asks the
+ *   host rather than a preference.
  */
-export type CanvasPythonRuntime = "none" | "tauri-sidecar"
-
 export interface CanvasExecutionSettings {
-  autoExecute: boolean
+  /** Hard limit per run, in ms. Read by `use-code-execution.ts`. */
   maxExecutionTime: number
+  /** Whether the output pane is rendered at all. */
   showOutput: boolean
+  /** Discard the previous run's output when a new one starts. */
   clearOutputOnRun: boolean
-  preserveVariables: boolean
-  sandboxMode: "strict" | "permissive"
-  /** cognia-next addition. */
-  pythonRuntime: CanvasPythonRuntime
 }
 
 export interface CanvasAccessibilitySettings {
@@ -197,13 +204,9 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
     syncInterval: 100,
   },
   execution: {
-    autoExecute: false,
     maxExecutionTime: 30000,
     showOutput: true,
     clearOutputOnRun: false,
-    preserveVariables: true,
-    sandboxMode: "strict",
-    pythonRuntime: "none",
   },
   accessibility: {
     screenReaderOptimized: false,

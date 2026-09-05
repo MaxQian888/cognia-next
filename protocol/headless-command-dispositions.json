@@ -276,6 +276,7 @@
         "browser_embed_start_record",
         "browser_embed_stop",
         "browser_embed_stop_record",
+        "canvas_cancel_python",
         "canvas_run_python",
         "ccswitch_list_mcp_servers",
         "ccswitch_list_prompts",

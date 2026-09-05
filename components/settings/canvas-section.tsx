@@ -506,7 +506,6 @@ function AITab({ settings }: SectionProps) {
         label={t("streamingResponses")}
         checked={a.streamingResponses}
         onChange={(v) => update({ streamingResponses: v })}
-        disabledReason={tDormant("streamingResponses")}
         testid="canvas-ai-streaming-responses"
       />
       <SliderRow
@@ -692,11 +691,6 @@ function ExecutionTab({ settings }: SectionProps) {
   const desktop = isTauri()
   return (
     <div className="space-y-5">
-      <Toggle
-        label={t("autoExecute")}
-        checked={e.autoExecute}
-        onChange={(v) => set({ execution: { ...e, autoExecute: v } })}
-      />
       <SliderRow
         label={t("maxExecutionTime")}
         value={e.maxExecutionTime}
@@ -716,45 +710,17 @@ function ExecutionTab({ settings }: SectionProps) {
         checked={e.clearOutputOnRun}
         onChange={(v) => set({ execution: { ...e, clearOutputOnRun: v } })}
       />
-      <Toggle
-        label={t("preserveVariables")}
-        checked={e.preserveVariables}
-        onChange={(v) => set({ execution: { ...e, preserveVariables: v } })}
-      />
-      <Row label={t("sandboxMode")}>
-        <Select
-          value={e.sandboxMode}
-          onValueChange={(v) =>
-            set({ execution: { ...e, sandboxMode: v as typeof e.sandboxMode } })
-          }
-        >
-          <SelectTrigger className="w-48 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="strict">{t("sandboxModeOptions.strict")}</SelectItem>
-            <SelectItem value="permissive">{t("sandboxModeOptions.permissive")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </Row>
-      <Row label={t("pythonRuntime")}>
-        <Select
-          value={e.pythonRuntime}
-          onValueChange={(v) =>
-            set({ execution: { ...e, pythonRuntime: v as typeof e.pythonRuntime } })
-          }
-          disabled={!desktop}
-        >
-          <SelectTrigger className="w-full text-xs sm:w-64">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">{t("pythonRuntimeOptions.none")}</SelectItem>
-            <SelectItem value="tauri-sidecar">{t("pythonRuntimeOptions.tauriSidecar")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </Row>
-      {!desktop && <p className="text-xs text-muted-foreground">{t("pythonRequiresDesktop")}</p>}
+      {/*
+        The four controls that used to live here are gone rather than disabled:
+        auto-execute, variable preservation, a "strict / permissive" sandbox
+        mode and a Python runtime picker. None had an implementation, and the
+        last two read as security and capability controls while doing nothing.
+        Confinement is Settings, Sandbox ("Confine Canvas code execution"), and
+        whether Python can run is a question about the host, answered below.
+      */}
+      <p className="text-xs text-muted-foreground">
+        {desktop ? t("pythonAvailable") : t("pythonRequiresDesktop")}
+      </p>
     </div>
   )
 }

@@ -78,7 +78,6 @@ describe("CanvasSection — fields with no runtime consumer", () => {
    * Either way the change should be deliberate, so it is pinned here.
    */
   const DORMANT = [
-    { tab: "AI", testid: "canvas-ai-streaming-responses" },
     { tab: "AI", testid: "canvas-ai-inline-completion" },
     { tab: "Versioning", testid: "canvas-version-compress" },
   ]
@@ -114,6 +113,29 @@ describe("CanvasSection — fields with no runtime consumer", () => {
       expect(others.length).toBeGreaterThan(0)
       expect(others.filter((s) => s.hasAttribute("disabled"))).toEqual([])
     }
+  })
+
+  it("keeps the streaming toggle live — it drives the AI path now", async () => {
+    // It shipped disabled because both Canvas execution paths were hard-wired,
+    // one to generate and one to stream. `useCanvasActions` reads it.
+    render(<CanvasSection />)
+    await openTab("AI")
+    const row = screen.getByTestId("canvas-ai-streaming-responses")
+    expect(within(row).getByRole("switch")).not.toBeDisabled()
+  })
+
+  it("leaves nothing inert on the Execution tab", async () => {
+    // Four controls used to live here with no implementation, two of them
+    // reading as security and capability controls: auto-execute, variable
+    // preservation, a strict/permissive sandbox mode and a Python runtime
+    // picker. They were removed rather than disabled.
+    render(<CanvasSection />)
+    await openTab("Execution")
+    const switches = screen.getAllByRole("switch")
+    expect(switches.length).toBeGreaterThan(0)
+    expect(switches.filter((s) => s.hasAttribute("disabled"))).toEqual([])
+    expect(screen.queryByText(/auto.?execute/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/sandboxMode/i)).not.toBeInTheDocument()
   })
 
   it("keeps the confidence toggle live — it was wired up", async () => {

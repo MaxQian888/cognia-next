@@ -317,6 +317,8 @@
   "restoreVersion": "恢复版本",
   "reviewingChanges": "正在审阅更改",
   "run": "运行",
+  "runUnavailableDesktopOnly": "运行 {language} 需要桌面端应用。",
+  "runUnavailableLanguage": "此处没有可运行 {language} 的运行时。",
   "running": "AI 处理中…",
   "save": "保存",
   "saveVersion": "保存版本",

@@ -12,7 +12,10 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriValue,
 }))
 
-import { executeCodeWithSandboxPriority } from "./code-execution-strategy"
+import {
+  codeExecutionAvailability,
+  executeCodeWithSandboxPriority,
+} from "./code-execution-strategy"
 
 const mockedInvoke = invoke as unknown as jest.Mock
 
@@ -372,5 +375,105 @@ describe("executeCodeWithSandboxPriority — unsupported language", () => {
     postCanvas("done", null)
     const result = await promise
     expect(result.sandbox).toBe("iframe")
+  })
+})
+
+describe("codeExecutionAvailability", () => {
+  it("allows the iframe languages on every host", () => {
+    for (const language of ["javascript", "JS", "html", "css"]) {
+      expect(codeExecutionAvailability(language, false)).toEqual({
+        available: true,
+        reason: null,
+      })
+    }
+  })
+
+  it("allows Python only where there is a process to spawn", () => {
+    expect(codeExecutionAvailability("python", true)).toEqual({ available: true, reason: null })
+    expect(codeExecutionAvailability("py", false)).toEqual({
+      available: false,
+      reason: "desktop-only",
+    })
+  })
+
+  it("names an unsupported language as unsupported, not as a host problem", () => {
+    // The two reasons lead to different advice: install the desktop app, or
+    // there is no runtime for this at all.
+    expect(codeExecutionAvailability("rust", true)).toEqual({
+      available: false,
+      reason: "unsupported-language",
+    })
+  })
+
+  it("defaults to javascript when no language is given, matching dispatch", () => {
+    expect(codeExecutionAvailability(undefined, false)).toEqual({
+      available: true,
+      reason: null,
+    })
+  })
+})
+
+describe("a Python run is addressable", () => {
+  beforeEach(() => {
+    isTauriValue = true
+  })
+
+  it("carries the run id to the host", async () => {
+    // Without it, Stop aborts a controller only the renderer can see and the
+    // interpreter runs on to its timeout.
+    ;(invoke as jest.Mock).mockResolvedValueOnce({
+      stdout: "ok",
+      stderr: "",
+      exit_code: 0,
+      duration_ms: 5,
+    })
+    await executeCodeWithSandboxPriority({
+      code: "print(1)",
+      language: "python",
+      runId: "run-1",
+    })
+    expect(invoke).toHaveBeenCalledWith(
+      "canvas_run_python",
+      expect.objectContaining({ runId: "run-1" })
+    )
+  })
+
+  it("asks the host to kill the run when the signal aborts", async () => {
+    const controller = new AbortController()
+    ;(invoke as jest.Mock).mockImplementation(async (command: string) => {
+      if (command === "canvas_run_python") {
+        controller.abort()
+        // Let the abort listener run before the invoke settles.
+        await Promise.resolve()
+        return { stdout: "", stderr: "cancelled", exit_code: 130, duration_ms: 3 }
+      }
+      return true
+    })
+
+    await executeCodeWithSandboxPriority({
+      code: "import time; time.sleep(30)",
+      language: "python",
+      runId: "run-2",
+      signal: controller.signal,
+    })
+
+    expect(invoke).toHaveBeenCalledWith("canvas_cancel_python", { runId: "run-2" })
+  })
+
+  it("does not try to cancel a run it never named", async () => {
+    const controller = new AbortController()
+    ;(invoke as jest.Mock).mockImplementation(async () => {
+      controller.abort()
+      await Promise.resolve()
+      return { stdout: "", stderr: "", exit_code: 0, duration_ms: 1 }
+    })
+
+    await executeCodeWithSandboxPriority({
+      code: "print(1)",
+      language: "python",
+      signal: controller.signal,
+    })
+
+    expect(invoke).not.toHaveBeenCalledWith("canvas_cancel_python", expect.anything())
   })
 })
