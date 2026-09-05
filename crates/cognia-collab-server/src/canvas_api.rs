@@ -67,6 +67,10 @@ const CATCH_UP_PAGE: i64 = 512;
 struct SocketTicket {
     org_id: String,
     document_id: String,
+    /// Resolved when the ticket is minted. A document never moves between
+    /// workspaces, so carrying it here turns the per-frame authorization check
+    /// into one membership lookup instead of two round trips.
+    workspace_id: String,
     user_id: String,
     expires_at: i64,
 }
@@ -838,7 +842,7 @@ async fn create_stream_ticket(
     Path((org_id, document_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<TicketResponse>, CanvasFailure> {
-    let (caller, _) =
+    let (caller, workspace_id) =
         document_caller(&state, &headers, &org_id, &document_id, CanvasAction::Read).await?;
     let now = (state.now)();
     state.canvas_hub.sweep_tickets(now);
@@ -846,6 +850,7 @@ async fn create_stream_ticket(
     let ticket = state.canvas_hub.issue_ticket(SocketTicket {
         org_id,
         document_id,
+        workspace_id,
         user_id: caller.user_id,
         expires_at,
     });
@@ -894,6 +899,7 @@ async fn open_stream(
 struct Connection {
     org_id: String,
     document_id: String,
+    workspace_id: String,
     user_id: String,
     /// Unknown until the client's first presence frame names it.
     participant_id: std::sync::Arc<RwLock<Option<String>>>,
@@ -910,6 +916,7 @@ async fn stream_loop(
     let connection = Connection {
         org_id: ticket.org_id,
         document_id: ticket.document_id,
+        workspace_id: ticket.workspace_id,
         user_id: ticket.user_id,
         participant_id: std::sync::Arc::new(RwLock::new(None)),
     };
@@ -1211,16 +1218,16 @@ async fn handle_sync(
 
 /// Whether this connection may still write to this document.
 async fn may_edit(state: &AppState, connection: &Connection) -> bool {
-    let Ok(workspace_id) = state
-        .canvas_store
-        .document_workspace(&connection.org_id, &connection.document_id)
-        .await
-    else {
-        return false;
-    };
+    // The workspace came from the ticket, so this is one lookup rather than
+    // two. A document cannot change workspace, and there is no route that
+    // would let it, so the cached value cannot go stale.
     let Ok(membership) = state
         .store
-        .membership(&connection.org_id, &connection.user_id, Some(&workspace_id))
+        .membership(
+            &connection.org_id,
+            &connection.user_id,
+            Some(&connection.workspace_id),
+        )
         .await
     else {
         return false;
@@ -1690,38 +1697,33 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
+    fn ticket(expires_at: i64) -> SocketTicket {
+        SocketTicket {
+            org_id: ORG.into(),
+            document_id: DOCUMENT.into(),
+            workspace_id: "proj-1".into(),
+            user_id: "usr".into(),
+            expires_at,
+        }
+    }
+
     #[test]
     fn socket_tickets_are_single_use_and_expire() {
         let hub = CanvasHub::default();
-        let value = hub.issue_ticket(SocketTicket {
-            org_id: ORG.into(),
-            document_id: DOCUMENT.into(),
-            user_id: "usr".into(),
-            expires_at: 20,
-        });
+        let value = hub.issue_ticket(ticket(20));
         assert!(hub.consume_ticket(&value, 10).is_some());
         assert!(
             hub.consume_ticket(&value, 10).is_none(),
             "a ticket must not be replayable"
         );
-        let expired = hub.issue_ticket(SocketTicket {
-            org_id: ORG.into(),
-            document_id: DOCUMENT.into(),
-            user_id: "usr".into(),
-            expires_at: 20,
-        });
+        let expired = hub.issue_ticket(ticket(20));
         assert!(hub.consume_ticket(&expired, 20).is_none());
     }
 
     #[test]
     fn sweeping_drops_expired_tickets_so_the_map_cannot_grow_without_bound() {
         let hub = CanvasHub::default();
-        let stale = hub.issue_ticket(SocketTicket {
-            org_id: ORG.into(),
-            document_id: DOCUMENT.into(),
-            user_id: "usr".into(),
-            expires_at: 10,
-        });
+        let stale = hub.issue_ticket(ticket(10));
         hub.sweep_tickets(50);
         assert!(hub.consume_ticket(&stale, 5).is_none());
     }
