@@ -233,7 +233,14 @@
     "deleteBody": "{count, plural, =0 {The project has no issues.} one {Its # issue goes too, with its activity trail and run history.} other {Its # issues go too, with their activity trails and run histories.}} Identifiers starting {key}- will not be reused. This cannot be undone.",
     "deleted": "Deleted {name}",
     "openIssues": "View these issues",
-    "icon": "Icon"
+    "icon": "Icon",
+    "syncModeImport": "Imported",
+    "resourceKindLabel": {
+      "lark-tasklist": "Lark tasklist",
+      "lark-bitable": "Lark Bitable",
+      "github-repo": "GitHub",
+      "workspace-root": "Directory"
+    }
   },
   "workspace": {
     "title": "Workspace",

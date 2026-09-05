@@ -14,7 +14,7 @@
  * (`MERC-2`) embeds it, so changing it orphans them all.
  */
 
-import { FolderGitIcon, FolderIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import { FolderGitIcon, FolderIcon, PlusIcon, RefreshCwIcon, Trash2Icon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +32,7 @@ import {
   EMPTY_ISSUE_PROJECT_PROGRESS,
   type IssueProjectProgress,
 } from "@/lib/issues/project-progress"
+import { resourceKey, resourceLabel } from "@/lib/issues/sync/bindings"
 import type { IssueProjectUpdatePatch } from "@/lib/db/issue-projects"
 import { ISSUE_PRIORITIES, ISSUE_PROJECT_STATUSES, type IssueProject } from "@/types/issues"
 import { IssueTextEditor } from "../editors/issue-text-editor"
@@ -221,21 +222,38 @@ export function ProjectInspector({
           ) : (
             <ul className="flex flex-col gap-1.5" data-testid="project-resources">
               {project.resources.map((resource, index) => (
-                <li
-                  key={resource.kind === "github-repo" ? resource.repoFullName : resource.rootId}
-                  className="flex items-center gap-2 text-xs"
-                >
+                <li key={resourceKey(resource)} className="flex items-center gap-2 text-xs">
                   {resource.kind === "github-repo" ? (
                     <>
                       <FolderGitIcon aria-hidden className="size-3.5 shrink-0" />
                       <span className="min-w-0 flex-1 truncate font-mono">
                         {resource.repoFullName}
                       </span>
+                      {resource.sync?.mode === "import" ? (
+                        <Badge
+                          variant="outline"
+                          className="h-5 shrink-0 px-1.5 text-[10px] font-normal"
+                          data-testid="project-resource-import-badge"
+                        >
+                          {t("projects.syncModeImport")}
+                        </Badge>
+                      ) : null}
                     </>
-                  ) : (
+                  ) : resource.kind === "workspace-root" ? (
                     <>
                       <FolderIcon aria-hidden className="size-3.5 shrink-0" />
                       <span className="min-w-0 flex-1 truncate">{resource.rootId}</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCwIcon aria-hidden className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{resourceLabel(resource)}</span>
+                      <Badge
+                        variant="outline"
+                        className="h-5 shrink-0 px-1.5 text-[10px] font-normal"
+                      >
+                        {t(`projects.resourceKindLabel.${resource.kind}`)}
+                      </Badge>
                     </>
                   )}
                   <Button

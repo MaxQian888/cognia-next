@@ -14,7 +14,8 @@
 // whitelists api.github.com), so this runs in the browser shell too.
 
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
-import { isMissingGithubCredential, runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
+import { isMissingGithubCredential } from "@/lib/issues/sync-runner"
+import { runWorkspaceIssueSync } from "@/lib/issues/sync/runner"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
@@ -45,43 +46,66 @@ export async function executeGithubIssueSyncTask(
   _signal: AbortSignal
 ): Promise<ExecutorResult> {
   try {
-    const result = await runWorkspaceGithubSync(readPayload(task))
+    // One entry point for the mirror AND every import/Lark/plugin binding
+    // (spec 2026-09-06 D1), so the schedule can never drift from "Sync now".
+    const sync = await runWorkspaceIssueSync(readPayload(task))
+    const result = sync.mirror
 
     const written = result.results.reduce((sum, repo) => sum + repo.written, 0)
     const notModified = result.results.filter((repo) => repo.notModified).length
     const truncated = result.results.filter((repo) => repo.truncated).length
+    const failures = [
+      ...result.failures.map((failure) => ({ name: failure.repoFullName, error: failure.error })),
+      ...sync.failures.map((failure) => ({ name: failure.binding.key, error: failure.error })),
+    ]
     // Distinguished from a plain failure so the UI can say "connect GitHub"
     // rather than "sync failed", which sends the user hunting for the wrong bug.
-    const unauthorized = result.failures.filter((failure) =>
+    const unauthorized = failures.filter((failure) =>
       isMissingGithubCredential(failure.error)
     ).length
+    const imported = sync.outcomes.reduce((sum, outcome) => sum + outcome.created, 0)
+    const updated = sync.outcomes.reduce((sum, outcome) => sum + outcome.updated, 0)
+    const pushed = sync.outcomes.reduce((sum, outcome) => sum + outcome.pushed, 0)
+    const queued = sync.outcomes.reduce((sum, outcome) => sum + outcome.queued, 0)
+    const conflicts = sync.outcomes.reduce((sum, outcome) => sum + outcome.conflicts, 0)
 
     log.info("Scheduler github-issue-sync complete", {
       taskId: task.id,
       executionId: execution.id,
-      repoCount: result.repoCount,
+      bindingCount: sync.bindingCount,
       written,
       notModified,
-      failures: result.failures.length,
+      imported,
+      updated,
+      pushed,
+      queued,
+      conflicts,
+      failures: failures.length,
     })
 
-    // A repo that failed is a failed execution — otherwise a revoked token
-    // looks like a healthy 15-minute cadence forever. Repos that DID sync keep
-    // their rows regardless; `syncWorkspaceRepos` isolates each one.
+    // A binding that failed is a failed execution, otherwise a revoked token
+    // looks like a healthy 15-minute cadence forever. Bindings that DID sync
+    // keep their rows regardless: both runners isolate each one.
     return {
-      success: result.failures.length === 0,
+      success: failures.length === 0,
       output: {
         repoCount: result.repoCount,
+        bindingCount: sync.bindingCount,
         written,
         notModified,
         truncated,
         unauthorized,
-        failedRepos: result.failures.map((failure) => failure.repoFullName),
+        imported,
+        updated,
+        pushed,
+        queued,
+        conflicts,
+        failedRepos: failures.map((failure) => failure.name),
       },
-      ...(result.failures.length > 0
+      ...(failures.length > 0
         ? {
-            error: `${result.failures.length} repo(s) failed to sync: ${result.failures
-              .map((failure) => failure.repoFullName)
+            error: `${failures.length} binding(s) failed to sync: ${failures
+              .map((failure) => failure.name)
               .join(", ")}`,
           }
         : {}),

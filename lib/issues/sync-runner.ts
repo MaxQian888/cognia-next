@@ -51,6 +51,9 @@ export async function resolveWorkspaceGithubBindings(
   for (const container of [...containers].sort((a, b) => a.id.localeCompare(b.id))) {
     for (const resource of container.resources) {
       if (resource.kind !== "github-repo") continue
+      // Import-mode bindings belong to `lib/issues/sync/` (spec 2026-09-06
+      // D1): their rows are local issues, not mirror rows.
+      if (resource.sync?.mode === "import") continue
       if (seen.has(resource.repoFullName)) continue
       seen.add(resource.repoFullName)
       bindings.push({ repoFullName: resource.repoFullName, issueProjectId: container.id })

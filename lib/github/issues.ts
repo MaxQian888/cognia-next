@@ -116,6 +116,7 @@ interface RawGithubIssue {
   labels?: Array<{ name?: string; color?: string } | string | null> | null
   /** Present iff this "issue" is actually a pull request. */
   pull_request?: unknown
+  milestone?: { number?: number; title?: string } | null
 }
 
 function toEpoch(value: string | null | undefined): number | undefined {
@@ -167,6 +168,8 @@ export function toMirrorRow(
       .filter((login): login is string => Boolean(login)),
     labels,
     htmlUrl: raw.html_url,
+    ...(typeof raw.milestone?.number === "number" ? { milestoneNumber: raw.milestone.number } : {}),
+    ...(raw.milestone?.title ? { milestoneTitle: raw.milestone.title } : {}),
     commentCount: raw.comments ?? 0,
     createdAt: toEpoch(raw.created_at) ?? context.syncedAt,
     updatedAt: toEpoch(raw.updated_at) ?? context.syncedAt,

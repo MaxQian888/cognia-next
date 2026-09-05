@@ -233,7 +233,14 @@
     "deleteBody": "{count, plural, =0 {该项目下没有议题。} other {其下 # 个议题会一并删除，连同它们的活动记录与运行历史。}} 以 {key}- 开头的标识符不会被重新使用。此操作无法撤销。",
     "deleted": "已删除 {name}",
     "openIssues": "查看这些议题",
-    "icon": "图标"
+    "icon": "图标",
+    "syncModeImport": "已导入",
+    "resourceKindLabel": {
+      "lark-tasklist": "飞书任务清单",
+      "lark-bitable": "飞书多维表格",
+      "github-repo": "GitHub",
+      "workspace-root": "目录"
+    }
   },
   "workspace": {
     "title": "工作区",

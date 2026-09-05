@@ -33,6 +33,12 @@ jest.mock("@/lib/issues/notify", () => ({
 jest.mock("@/lib/db/labels", () => ({
   seedBuiltinIssueLabels: (...args: unknown[]) => mockSeedBuiltinIssueLabels(...args),
 }))
+jest.mock("@/lib/issues/sync/registry", () => ({
+  registerIssueSyncProvider: jest.fn(),
+}))
+jest.mock("@/lib/issues/sync/providers/github", () => ({
+  createGithubSyncProvider: () => ({ id: "github" }),
+}))
 jest.mock("@/lib/issues/github-sync-schedule", () => ({
   syncGithubIssueSchedule: (...args: unknown[]) => mockSyncSchedule(...args),
 }))

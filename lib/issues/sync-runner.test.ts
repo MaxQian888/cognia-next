@@ -56,6 +56,28 @@ describe("resolveWorkspaceGithubBindings", () => {
     expect(mockListIssueProjects).toHaveBeenCalledWith({ projectId: "ws-1" })
   })
 
+  it("leaves import-mode repos to the sync engine", async () => {
+    mockListIssueProjects.mockResolvedValue([
+      project("p1", [
+        {
+          kind: "github-repo",
+          repoFullName: "acme/imported",
+          addedAt: 1,
+          sync: { mode: "import" },
+        },
+        {
+          kind: "github-repo",
+          repoFullName: "acme/mirrored",
+          addedAt: 1,
+          sync: { mode: "mirror" },
+        },
+      ]),
+    ])
+    await expect(resolveWorkspaceGithubBindings("w1")).resolves.toEqual([
+      { repoFullName: "acme/mirrored", issueProjectId: "p1" },
+    ])
+  })
+
   it("ignores workspace-root resources — only GitHub repos are syncable", async () => {
     mockListIssueProjects.mockResolvedValue([
       project("a", [{ kind: "workspace-root", rootId: "root-1", addedAt: 1 }, repo("acme/one")]),

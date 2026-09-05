@@ -29,6 +29,10 @@ export interface GithubIssueMirrorLabel {
 }
 
 export interface GithubIssueMirrorRow {
+  /** The milestone number, when the issue is in one. Feeds `issueCycles` in import mode. */
+  milestoneNumber?: number
+  /** Milestone title, cached so the cycle can be named before its own row exists. */
+  milestoneTitle?: string
   /** `${repoFullName}#${number}` — stable, human-legible, collision-free. */
   id: string
   repoFullName: string

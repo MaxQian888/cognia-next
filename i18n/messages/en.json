@@ -14572,6 +14572,12 @@
       "repoTaken": "That repository is already bound to a project.",
       "resourceDirectory": "Local directory",
       "resourceKind": "Kind",
+      "resourceKindLabel": {
+        "github-repo": "GitHub",
+        "lark-bitable": "Lark Bitable",
+        "lark-tasklist": "Lark tasklist",
+        "workspace-root": "Directory"
+      },
       "resourceRepo": "GitHub repository",
       "resources": "Resources",
       "startDate": "Start date",
@@ -14584,6 +14590,7 @@
         "planned": "Planned"
       },
       "summary": "{count, plural, =0 {No projects} one {# project} other {# projects}}",
+      "syncModeImport": "Imported",
       "targetDate": "Due date",
       "title": "Projects"
     },

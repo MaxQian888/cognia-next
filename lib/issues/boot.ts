@@ -31,6 +31,8 @@ import { registerCollabIssueSource } from "@/lib/issues/sources/collab-source"
 import { registerAgentTeamIssueSource } from "@/lib/issues/sources/agent-team-source"
 import { registerGithubIssueSource } from "@/lib/issues/sources/github-source"
 import { registerLocalIssueSource } from "@/lib/issues/sources/local-source"
+import { registerIssueSyncProvider } from "@/lib/issues/sync/registry"
+import { createGithubSyncProvider } from "@/lib/issues/sync/providers/github"
 
 const log = loggers.shell
 
@@ -61,6 +63,9 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
   // on a profile nobody has signed in on — the mirror is empty until a pull
   // runs, and the board simply shows the local rows.
   registerCollabIssueSource()
+  // Spec 2026-09-06 D1: the bidirectional sync providers. Registering costs
+  // nothing until a container binds a resource of the provider's kind.
+  registerIssueSyncProvider(createGithubSyncProvider())
   const disposeRunBridge = installIssueRunBridge({
     onError: (error) => log.warn("issue-tracker: run bridge error", { error: String(error) }),
   })

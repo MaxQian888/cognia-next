@@ -16,6 +16,10 @@ const mockResolveBindings = jest.fn()
 jest.mock("./sync-runner", () => ({
   resolveWorkspaceGithubBindings: (...args: unknown[]) => mockResolveBindings(...args),
 }))
+const mockResolveSyncBindings = jest.fn(async (): Promise<unknown[]> => [])
+jest.mock("./sync/runner", () => ({
+  resolveWorkspaceSyncBindings: (...args: unknown[]) => mockResolveSyncBindings(...args),
+}))
 
 import {
   GITHUB_ISSUE_SYNC_INTERVAL_MS,

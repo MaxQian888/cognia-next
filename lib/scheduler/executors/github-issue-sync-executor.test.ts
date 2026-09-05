@@ -1,8 +1,16 @@
 const mockRun = jest.fn()
 jest.mock("@/lib/issues/sync-runner", () => ({
-  runWorkspaceGithubSync: (...args: unknown[]) => mockRun(...args),
   isMissingGithubCredential: (error: unknown) =>
     error instanceof Error && error.name === "MissingGithubCredentialError",
+}))
+// The executor now goes through the one runner that covers the mirror AND
+// every import/Lark binding. This test still drives the mirror half through
+// `mockRun`, which is what every assertion below was written against.
+jest.mock("@/lib/issues/sync/runner", () => ({
+  runWorkspaceIssueSync: async (...args: unknown[]) => {
+    const mirror = await mockRun(...args)
+    return { bindingCount: mirror.repoCount, mirror, outcomes: [], failures: [] }
+  },
 }))
 
 jest.mock("@cognia/logging", () => ({

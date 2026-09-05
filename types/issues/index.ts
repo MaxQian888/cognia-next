@@ -112,9 +112,60 @@ export interface IssueActor {
   label?: string
 }
 
+/**
+ * How a `github-repo` binding feeds the board (spec 2026-09-06, D1).
+ *
+ *   mirror  (default) read-only federated rows from `githubIssueMirror`.
+ *   import  every issue becomes a local row linked through `externalRefs`,
+ *           kept in step both ways by `lib/issues/sync/`.
+ *
+ * `projectV2Number` names the repository's Projects v2 board whose iteration
+ * field populates `issueCycles` (D11). Milestones are pulled regardless.
+ */
+export interface GithubRepoSyncSettings {
+  mode: "mirror" | "import"
+  projectV2Number?: number
+}
+
+/**
+ * Which Bitable column carries which issue field. Values are Bitable field
+ * NAMES, never ids, because that is what `records/search` returns and what a
+ * person sees in the table header. `statusValues` maps an issue status to the
+ * option text a single-select column uses for it.
+ */
+export interface LarkBitableFieldMap {
+  title: string
+  description?: string
+  status?: string
+  statusValues?: Partial<Record<IssueStatus, string>>
+  priority?: string
+  assignee?: string
+  dueDate?: string
+  estimate?: string
+}
+
 /** A resource attached to an issue-project. Reference-only — see below. */
 export type IssueProjectResource =
-  | { kind: "github-repo"; repoFullName: string; addedAt: number }
+  | { kind: "github-repo"; repoFullName: string; addedAt: number; sync?: GithubRepoSyncSettings }
+  /** A Feishu/Lark tasklist (Task v2), synced both ways through the bound adapter. */
+  | {
+      kind: "lark-tasklist"
+      /** Bound Lark adapter instance id (`cai_...`) whose credentials to use. */
+      adapterId: string
+      tasklistGuid: string
+      name: string
+      addedAt: number
+    }
+  /** One table of a Feishu/Lark Bitable app, mapped column by column. */
+  | {
+      kind: "lark-bitable"
+      adapterId: string
+      appToken: string
+      tableId: string
+      name: string
+      fieldMap: LarkBitableFieldMap
+      addedAt: number
+    }
   /**
    * References a `WorkspaceRoot.id` already mounted on the owning workspace.
    * The tracker NEVER mounts a directory itself — doing so would create a

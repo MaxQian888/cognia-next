@@ -22,6 +22,7 @@
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import type { ScheduledTask, TaskExecutionConfig, TaskNotificationConfig } from "@/types/scheduler"
 import { resolveWorkspaceGithubBindings } from "./sync-runner"
+import { resolveWorkspaceSyncBindings } from "@/lib/issues/sync/runner"
 
 export const GITHUB_ISSUE_SYNC_TASK_ID = "github-issue-sync::singleton"
 
@@ -56,8 +57,9 @@ function buildTask(existing: ScheduledTask | null): ScheduledTask {
   const now = new Date()
   return {
     id: GITHUB_ISSUE_SYNC_TASK_ID,
-    name: "Issues — GitHub mirror refresh",
-    description: "Incremental refresh of the GitHub issues mirrored onto the issue board.",
+    name: "Issues — external sync",
+    description:
+      "Incremental refresh of every external binding on the issue board: the GitHub mirror, imported GitHub repositories, Lark tasklists and Bitables.",
     type: "github-issue-sync",
     trigger: {
       type: "interval",
@@ -94,7 +96,12 @@ export interface SyncGithubIssueScheduleResult {
  * to call on boot, after adding a resource, and after removing one.
  */
 export async function syncGithubIssueSchedule(): Promise<SyncGithubIssueScheduleResult> {
-  const bindings = await resolveWorkspaceGithubBindings()
+  // Mirror bindings plus every provider binding (spec 2026-09-06 D1): the one
+  // task exists as long as anything at all is bound.
+  const bindings = [
+    ...(await resolveWorkspaceGithubBindings()),
+    ...(await resolveWorkspaceSyncBindings()),
+  ]
   const existing = await schedulerDb.getTask(GITHUB_ISSUE_SYNC_TASK_ID)
 
   if (bindings.length === 0) {

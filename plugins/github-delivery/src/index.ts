@@ -324,6 +324,34 @@ export const closeIssue: IntegrationActionHandler = (input, context) =>
     state_reason: input.reason ?? "completed",
   })
 
+/**
+ * Field-level edit of an issue: the write half of the issue tracker's
+ * bidirectional sync. Only the keys present in the input are sent, so a
+ * patch that carries one field never resets the others. `milestone: null`
+ * clears the milestone, which is how GitHub spells it.
+ */
+export const updateIssue: IntegrationActionHandler = (input, context) => {
+  const body: Record<string, unknown> = {}
+  if (typeof input.title === "string") body.title = input.title
+  if (typeof input.body === "string") body.body = input.body
+  if (input.state === "open" || input.state === "closed") body.state = input.state
+  if (input.stateReason === "completed" || input.stateReason === "not_planned") {
+    body.state_reason = input.stateReason
+  }
+  if (Array.isArray(input.labels)) body.labels = input.labels
+  if (input.milestone === null || typeof input.milestone === "number") {
+    body.milestone = input.milestone
+  }
+  if (Array.isArray(input.assignees)) body.assignees = input.assignees
+  return actionRequest(
+    context,
+    input,
+    `/issues/${positiveInteger(input, "issueNumber")}`,
+    "PATCH",
+    body
+  )
+}
+
 export const createRelease: IntegrationActionHandler = (input, context) =>
   actionRequest(context, input, "/releases", "POST", {
     tag_name: requiredString(input, "tag"),
@@ -455,6 +483,22 @@ const actionDefinitions = [
     properties: {
       ...issueProperty,
       reason: { type: "string", enum: ["completed", "not_planned"] },
+    },
+  },
+  {
+    id: "updateIssue",
+    handler: "updateIssue",
+    risk: "write",
+    required: ["repoFullName", "issueNumber"],
+    properties: {
+      ...issueProperty,
+      title: { type: "string" },
+      body: { type: "string" },
+      state: { type: "string", enum: ["open", "closed"] },
+      stateReason: { type: "string", enum: ["completed", "not_planned"] },
+      labels: { type: "array", items: { type: "string" } },
+      milestone: { type: ["integer", "null"] },
+      assignees: { type: "array", items: { type: "string" } },
     },
   },
   {
