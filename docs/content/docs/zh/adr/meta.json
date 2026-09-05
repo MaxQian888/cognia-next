@@ -169,6 +169,7 @@
     "0167-the-schedule-belongs-to-the-account",
     "0168-an-edit-is-a-new-version-of-the-same-message",
     "0169-one-runtime-one-review-one-control-machine",
-    "0170-cognia-relay-and-connectivity-center"
+    "0170-cognia-relay-and-connectivity-center",
+    "0171-the-cli-speaks-the-protocol-not-a-copy-of-it"
   ]
 }

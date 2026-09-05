@@ -39,6 +39,95 @@ cognia-agent config get [key]
 cognia-agent config set model claude-opus-4-8
 ```
 
+## Calling a Cognia Host
+
+Beyond running an agent, the CLI is a complete client for a Host's command
+plane. The surface is generated from the frozen protocol contract
+(`protocol/companion-commands.json` plus the two Companion OpenAPI specs), so
+every command the Host exposes is reachable without the CLI growing a
+hand-written verb for each one.
+
+```bash
+# Where to call. Records live in ~/.cognia/hosts.json at 0600.
+cognia-agent host add local --endpoint https://127.0.0.1:27890 --token "$COGNIA_SERVICE_TOKEN"
+cognia-agent host login desktop --endpoint https://127.0.0.1:27890 --pair-code ABC123
+cognia-agent host show          # every value, and where it came from
+cognia-agent host use local
+
+# Discover.
+cognia-agent api groups --wire http
+cognia-agent api list --group plugin --search install
+cognia-agent api describe scheduled_task_create
+cognia-agent api schema adapter_update_policy --template > body.json
+
+# Call. Flags come from the request schema.
+cognia-agent api call adapter_update_policy --id bot_1 --default-mode auto
+cognia-agent api call agent_send --data @body.json --wait
+cognia-agent api request GET /api/devices
+
+# Derived resource commands mirror the wire names.
+cognia-agent plugin list
+cognia-agent adapter update-policy --id bot_1 --muted
+cognia-agent plugin list --help   # describes that command's own fields
+```
+
+### Two wires
+
+The Host admits exactly two authority modes, and the CLI speaks both.
+
+| Wire       | Route                        | Credential             | Reach                                | Capability check   | Approval check               |
+| ---------- | ---------------------------- | ---------------------- | ------------------------------------ | ------------------ | ---------------------------- |
+| `internal` | `POST /internal/_rpc/{name}` | loopback service token | **656** commands                     | bypassed by design | bypassed by design           |
+| `http`     | `POST /api/_rpc/{name}`      | DPoP device session    | **527** (`execution` / `host-admin`) | per-device grant   | admin lease or signed policy |
+
+A loopback service principal is the policy authority for the Brain plane, which
+is why the internal wire carries everything unchecked. On the device wire the
+CLI is a device like any other: the owner grants and revokes it in the Device
+Console, and an `interactive` command needs a lease a human granted on the host.
+
+The desktop is reached through the device wire, by pairing with its Companion
+API. Its CLI bridge (ADR-0078) carries 18 routes and does not dispatch
+commands.
+
+### Output and failures
+
+```
+--format raw|json|pretty   compact JSON | indented JSON | rendered
+-o, --output <dir>         write into <dir> instead of stdout (implies raw)
+--timeout 30s|1m|500ms     per-request budget
+--debug                    log the request envelope to stderr
+--json                     alias for --format raw
+```
+
+An explicit `--format` always wins. Otherwise `-o` implies `raw` and a bare
+terminal gets `pretty`.
+
+Failures print a block on stderr:
+
+```
+Error: adapter_update_policy has no field for --muted-x
+Details: --muted-x is not a field of adapter_update_policy (did you mean --muted?)
+Cause: invalid-request
+Fix: cognia-agent api describe adapter_update_policy
+Fix: the host rejects unknown fields outright, so this would have failed on the wire
+```
+
+Because the index carries the whole request shape, a bad call fails locally.
+Unknown fields, missing required fields and out-of-range enums are refused
+before anything is sent, rather than arriving as the 422 that
+`additionalProperties: false` guarantees. Exit codes are 0 for success, 2 for a
+usage mistake, and 1 for everything the host or the network refused.
+
+### Regenerating the index
+
+```bash
+pnpm cli:api:gen     # rebuild cli/src/api/generated/command-index.ts
+pnpm cli:api:check   # fail if it drifts from the protocol contract
+```
+
+Run it after changing `protocol/companion-commands.json` or regenerating the
+Companion specs with `pnpm companion-api:gen`.
+
 ## Configuration
 
 Layered, low → high precedence for model providers:
