@@ -77,7 +77,7 @@ const GEOMETRY_SAMPLE_EVERY_TICKS: u32 = 4;
 /// `reaper_running` pattern).
 static HOVER_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Per-display notch heights (physical px), keyed by [`monitor_cache_key`].
+/// Per-display notch metrics (physical px), keyed by [`monitor_cache_key`].
 ///
 /// A display's camera housing is a **physical property** — it does not come and
 /// go with the menu bar. `NSScreen.safeAreaInsets.top`, however, is queried
@@ -86,10 +86,19 @@ static HOVER_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 /// ever observed per display makes the island's notch padding Space-independent
 /// no matter which way that API behaves, which is the other half of the fix
 /// begun when the anchor moved off `work_area` (see the module docs).
-static NOTCH_CACHE: OnceLock<Mutex<HashMap<String, f64>>> = OnceLock::new();
+static NOTCH_CACHE: OnceLock<Mutex<HashMap<String, NotchMetrics>>> = OnceLock::new();
 
-fn notch_cache() -> &'static Mutex<HashMap<String, f64>> {
+fn notch_cache() -> &'static Mutex<HashMap<String, NotchMetrics>> {
     NOTCH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The camera housing as one display reports it, in physical px: its height
+/// (`NSScreen.safeAreaInsets.top`) and its width (the frame minus the two
+/// `auxiliaryTop*Area` rects beside it). Both are 0 on a display without one.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct NotchMetrics {
+    pub inset: f64,
+    pub width: f64,
 }
 
 /// Fold a fresh `safeAreaInsets.top` sample into the cached value: monotonic,
@@ -97,6 +106,16 @@ fn notch_cache() -> &'static Mutex<HashMap<String, f64>> {
 pub(crate) fn fold_notch_sample(cached: f64, sampled: f64) -> f64 {
     let sampled = if sampled.is_finite() { sampled } else { 0.0 };
     cached.max(sampled).max(0.0)
+}
+
+/// [`fold_notch_sample`] over both metrics. The width folds the same way as
+/// the height and for the same reason: the housing is a physical property, and
+/// a Space that hides the menu bar may report neither.
+pub(crate) fn fold_notch_metrics(cached: NotchMetrics, sampled: NotchMetrics) -> NotchMetrics {
+    NotchMetrics {
+        inset: fold_notch_sample(cached.inset, sampled.inset),
+        width: fold_notch_sample(cached.width, sampled.width),
+    }
 }
 
 /// Stable identity for the notch cache. `Monitor::name` when the OS provides
@@ -126,6 +145,11 @@ pub struct IslandGeometry {
     /// Top safe-area inset (logical px) of the island's current display —
     /// the notch height on built-in notched displays, 0 everywhere else.
     pub top_inset: f64,
+    /// Width (logical px) of the camera housing itself, so the renderer can
+    /// paint the housing's column and leave the menu bar beside it visible.
+    /// 0 when the display has no housing, or when the OS could not report the
+    /// auxiliary areas — the renderer then falls back to the full card width.
+    pub notch_width: f64,
     /// Whether the island should withdraw because a full-screen app owns its
     /// display. This is the *effective* flag, not the raw verdict: it is only
     /// ever true when the user turned [`IslandConfig::hide_on_fullscreen`] on.
@@ -228,6 +252,8 @@ struct IslandAnchor {
     /// Notch / camera-housing height (physical px); 0 off macOS and on
     /// non-notched displays.
     top_inset: f64,
+    /// Camera-housing width (physical px); 0 when there is none or unknown.
+    notch_width: f64,
     /// Whether a full-screen app owns this display right now.
     fullscreen: bool,
 }
@@ -241,6 +267,7 @@ impl IslandAnchor {
             h: 1080.0,
             scale: 1.0,
             top_inset: 0.0,
+            notch_width: 0.0,
             fullscreen: false,
         }
     }
@@ -248,6 +275,7 @@ impl IslandAnchor {
     fn geometry(&self) -> IslandGeometry {
         IslandGeometry {
             top_inset: self.top_inset_logical(),
+            notch_width: self.notch_width / self.scale,
             fullscreen: self.fullscreen,
         }
     }
@@ -320,16 +348,22 @@ fn resolve_target_monitor<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Monit
 /// never a deadlock risk because off-main implies the main loop is free.
 #[cfg(target_os = "macos")]
 fn monitor_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> f64 {
-    let sampled = raw_top_safe_inset(app, monitor);
+    monitor_notch_metrics(app, monitor).inset
+}
 
-    // Fold through the monotonic cache: a Space where the menu bar is hidden
-    // may report 0 for a display that demonstrably has a notch, and trusting
-    // that zero is what slid the card up under the camera housing.
+/// Both housing metrics (physical px), folded through the monotonic cache: a
+/// Space where the menu bar is hidden may report 0 for a display that
+/// demonstrably has a notch, and trusting that zero is what slid the card up
+/// under the camera housing.
+#[cfg(target_os = "macos")]
+fn monitor_notch_metrics<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> NotchMetrics {
+    let sampled = raw_notch_metrics(app, monitor);
+
     let key = monitor_cache_key(monitor);
     let Ok(mut cache) = notch_cache().lock() else {
-        return sampled.max(0.0);
+        return fold_notch_metrics(NotchMetrics::default(), sampled);
     };
-    let folded = fold_notch_sample(cache.get(&key).copied().unwrap_or(0.0), sampled);
+    let folded = fold_notch_metrics(cache.get(&key).copied().unwrap_or_default(), sampled);
     cache.insert(key, folded);
     folded
 }
@@ -340,24 +374,52 @@ fn monitor_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monit
 /// should call [`monitor_top_safe_inset`].
 #[cfg(target_os = "macos")]
 fn raw_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> f64 {
+    raw_notch_metrics(app, monitor).inset
+}
+
+/// Housing width from the auxiliary areas Apple exposes beside it: the frame
+/// minus the top-left and top-right rects. Only meaningful with a non-zero
+/// inset; a display that reports either rect empty yields 0 (unknown), which
+/// the renderer treats as "paint the whole strip", the pre-existing look.
+pub(crate) fn notch_width_from_aux(
+    frame_width: f64,
+    inset: f64,
+    left_width: f64,
+    right_width: f64,
+) -> f64 {
+    if inset <= 0.0 || left_width <= 0.0 || right_width <= 0.0 {
+        return 0.0;
+    }
+    let width = frame_width - left_width - right_width;
+    if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        0.0
+    }
+}
+
+/// The un-cached housing sample (physical px) for the screen backing
+/// `monitor`; see [`raw_top_safe_inset`] for the screen matching.
+#[cfg(target_os = "macos")]
+fn raw_notch_metrics<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) -> NotchMetrics {
     use objc2::MainThreadMarker;
 
     let scale = monitor.scale_factor();
     if scale <= 0.0 {
-        return 0.0;
+        return NotchMetrics::default();
     }
     let logical_x = monitor.position().x as f64 / scale;
     let logical_y = monitor.position().y as f64 / scale;
     let logical_w = monitor.size().width as f64 / scale;
     let logical_h = monitor.size().height as f64 / scale;
 
-    let compute = move || -> f64 {
+    let compute = move || -> NotchMetrics {
         let Some(mtm) = MainThreadMarker::new() else {
-            return 0.0;
+            return NotchMetrics::default();
         };
         let screens = objc2_app_kit::NSScreen::screens(mtm);
         let Some(primary) = screens.iter().next() else {
-            return 0.0;
+            return NotchMetrics::default();
         };
         let primary_frame = primary.frame();
         let primary_top = primary_frame.origin.y + primary_frame.size.height;
@@ -369,10 +431,20 @@ fn raw_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) 
                 && (frame.size.width - logical_w).abs() < 1.0
                 && (frame.size.height - logical_h).abs() < 1.0
             {
-                return screen.safeAreaInsets().top.max(0.0) * scale;
+                let inset = screen.safeAreaInsets().top.max(0.0);
+                let width = notch_width_from_aux(
+                    frame.size.width,
+                    inset,
+                    screen.auxiliaryTopLeftArea().size.width,
+                    screen.auxiliaryTopRightArea().size.width,
+                );
+                return NotchMetrics {
+                    inset: inset * scale,
+                    width: width * scale,
+                };
             }
         }
-        0.0
+        NotchMetrics::default()
     };
 
     if MainThreadMarker::new().is_some() {
@@ -385,10 +457,10 @@ fn raw_top_safe_inset<R: Runtime>(app: &AppHandle<R>, monitor: &tauri::Monitor) 
         })
         .is_err()
     {
-        return 0.0;
+        return NotchMetrics::default();
     }
     rx.recv_timeout(std::time::Duration::from_millis(500))
-        .unwrap_or(0.0)
+        .unwrap_or_default()
 }
 
 fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
@@ -408,13 +480,15 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
             w: monitor.size().width as f64,
             h: monitor.size().height as f64,
         };
+        let notch = monitor_notch_metrics(app, &monitor);
         IslandAnchor {
             x: frame.x,
             y: frame.y,
             w: frame.w,
             h: frame.h,
             scale,
-            top_inset: monitor_top_safe_inset(app, &monitor),
+            top_inset: notch.inset,
+            notch_width: notch.width,
             // `&&` on purpose, not a helper taking both values: the left side
             // must short-circuit, or the window sweep would run on every
             // geometry tick for users who never asked the island to hide.
@@ -433,6 +507,7 @@ fn island_anchor<R: Runtime>(app: &AppHandle<R>) -> IslandAnchor {
             h: rect.size.height as f64,
             scale,
             top_inset: 0.0,
+            notch_width: 0.0,
             fullscreen: false,
         }
     }
@@ -1121,6 +1196,7 @@ mod tests {
             h: 1964.0,
             scale: 2.0,
             top_inset: 74.0,
+            notch_width: 400.0,
             fullscreen: false,
         };
         assert_eq!(anchor.top_inset_logical(), 37.0);
@@ -1129,7 +1205,57 @@ mod tests {
             anchor.geometry(),
             IslandGeometry {
                 top_inset: 37.0,
+                notch_width: 200.0,
                 fullscreen: false
+            }
+        );
+    }
+
+    #[test]
+    fn notch_width_comes_from_the_auxiliary_areas() {
+        // 14" MacBook Pro: 1512 logical wide, ~656 per side beside the housing.
+        assert_eq!(notch_width_from_aux(1512.0, 32.0, 656.0, 656.0), 200.0);
+        // No inset means no housing, whatever the rects say.
+        assert_eq!(notch_width_from_aux(1512.0, 0.0, 656.0, 656.0), 0.0);
+        // An empty auxiliary rect means the OS did not report it: unknown.
+        assert_eq!(notch_width_from_aux(1512.0, 32.0, 0.0, 656.0), 0.0);
+        assert_eq!(notch_width_from_aux(1512.0, 32.0, 656.0, 0.0), 0.0);
+        // Nonsense never yields a negative or infinite width.
+        assert_eq!(notch_width_from_aux(100.0, 32.0, 656.0, 656.0), 0.0);
+        assert_eq!(notch_width_from_aux(f64::NAN, 32.0, 656.0, 656.0), 0.0);
+    }
+
+    #[test]
+    fn notch_metrics_fold_both_fields_monotonically() {
+        let seeded = fold_notch_metrics(
+            NotchMetrics::default(),
+            NotchMetrics {
+                inset: 74.0,
+                width: 400.0,
+            },
+        );
+        assert_eq!(
+            seeded,
+            NotchMetrics {
+                inset: 74.0,
+                width: 400.0
+            }
+        );
+        // A menu-bar-hidden Space reporting nothing keeps both.
+        assert_eq!(fold_notch_metrics(seeded, NotchMetrics::default()), seeded);
+        // Each field folds independently.
+        let wider = fold_notch_metrics(
+            seeded,
+            NotchMetrics {
+                inset: 0.0,
+                width: 420.0,
+            },
+        );
+        assert_eq!(
+            wider,
+            NotchMetrics {
+                inset: 74.0,
+                width: 420.0
             }
         );
     }
@@ -1178,10 +1304,14 @@ mod tests {
     fn geometry_event_payload_is_camel_case() {
         let json = serde_json::to_string(&IslandGeometry {
             top_inset: 37.0,
+            notch_width: 200.0,
             fullscreen: true,
         })
         .unwrap();
-        assert_eq!(json, r#"{"topInset":37.0,"fullscreen":true}"#);
+        assert_eq!(
+            json,
+            r#"{"topInset":37.0,"notchWidth":200.0,"fullscreen":true}"#
+        );
     }
 
     #[test]

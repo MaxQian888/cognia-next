@@ -23,7 +23,7 @@ import {
   permissionRiskMarker,
 } from "@/lib/settings/permission-mode-meta"
 import type { PermissionMode } from "@/lib/settings/permission-mode-escalation"
-import type { FleetSession } from "@/lib/fleet/types"
+import type { IslandRowDetail } from "@/lib/island/types"
 import { cn } from "@/lib/utils"
 
 /** Chip appearance per mode, keyed by the shared meta's i18n key. */
@@ -45,7 +45,8 @@ export function SessionMetaChips({
   session,
   className,
 }: {
-  session: FleetSession
+  /** See `SessionDetail`: the redacted fact block, or any session-like value. */
+  session: Pick<IslandRowDetail, "model" | "permissionMode">
   className?: string
 }) {
   const t = useTranslations("fleet.row.meta")

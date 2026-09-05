@@ -28,10 +28,15 @@ export function IslandQuestionActions({
   request,
   questions,
   className,
+  respond: respondVia = fleetQuestionRespond,
+  reject: rejectVia = fleetQuestionReject,
 }: {
   request: PendingQuestionRequest
   questions: PendingQuestion[]
   className?: string
+  /** See `IslandPermissionActions` for why these are injectable. */
+  respond?: (requestId: string, selections: number[][]) => Promise<boolean>
+  reject?: (requestId: string) => Promise<boolean>
 }) {
   const t = useTranslations("fleet")
   // Countdown ticks off the shared fleet ticker (one interval for the whole
@@ -54,7 +59,7 @@ export function IslandQuestionActions({
 
   const locked = submitting || submitted || rejected || expired
 
-  // `selections` is keyed to the request (island-row remounts on a new
+  // `selections` is keyed to the request (the row remounts on a new
   // requestId) and questions are stable within a request, so `selections[qi]`
   // always exists for a rendered question — no nullish guards needed.
   const isSelected = (qi: number, oi: number) => selections[qi].includes(oi)
@@ -83,7 +88,7 @@ export function IslandQuestionActions({
   const submit = async () => {
     setSubmitting(true)
     try {
-      const ok = await fleetQuestionRespond(request.requestId, selections)
+      const ok = await respondVia(request.requestId, selections)
       if (ok) setSubmitted(true)
     } finally {
       setSubmitting(false)
@@ -93,7 +98,7 @@ export function IslandQuestionActions({
   const reject = async () => {
     setSubmitting(true)
     try {
-      const ok = await fleetQuestionReject(request.requestId)
+      const ok = await rejectVia(request.requestId)
       if (ok) setRejected(true)
     } finally {
       setSubmitting(false)

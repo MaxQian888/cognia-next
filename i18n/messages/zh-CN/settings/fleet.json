@@ -34,6 +34,15 @@
   },
   "island": {
     "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+    "detailVisibility": {
+      "desc": "灵动岛可以接收多少任务详情。提示词、路径、命令、计划和完整错误文本永远不会随常规列表下发。",
+      "label": "灵动岛详情",
+      "options": {
+        "click-to-reveal": "点击后显示",
+        "hover": "悬停即显示",
+        "summary-only": "仅显示摘要"
+      }
+    },
     "diagnostics": {
       "copied": "灵动岛诊断信息已复制到剪贴板。",
       "copy": "复制",

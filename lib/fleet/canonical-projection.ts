@@ -4,7 +4,7 @@ import type {
 } from "@cognia/agent-config-types/agent-execution"
 import { redactText } from "@cognia/redact"
 
-import type { FleetOrigin, FleetSession } from "./types"
+import type { FleetOrigin, FleetSession, FleetStatus } from "./types"
 
 const SEQUENCE_SCALE = 100
 
@@ -256,13 +256,26 @@ function originOf(envelope: AgentEventEnvelope): FleetOrigin {
   return "built-in"
 }
 
-export function projectCanonicalFleetSession(
-  previous: FleetSession | undefined,
-  envelope: AgentEventEnvelope,
-  now = Date.now()
-): FleetSession {
-  const event = envelope.event as { kind?: string } & Record<string, unknown>
-  const base: FleetSession = previous ?? {
+/**
+ * How long a finished canonical session stays visible in its result state.
+ *
+ * A run that ends is still news for a moment. Keeping the row lets the user see
+ * that it finished rather than watching it vanish mid-glance, and the sweep
+ * below is what stops "kept for a moment" from becoming "kept forever".
+ */
+export const CANONICAL_SESSION_LINGER_MS = 10_000
+
+/** Terminal lifecycle phases. `interrupted` ends a session, it does not resume it. */
+const TERMINAL_PHASES = new Set(["ended", "interrupted"])
+
+/** True once a finished session has outlived its result state. */
+export function canonicalSessionExpired(session: FleetSession, now: number): boolean {
+  if (session.status !== "ended") return false
+  return now - (session.endedAt ?? session.lastEventAt) > CANONICAL_SESSION_LINGER_MS
+}
+
+function seedSession(envelope: AgentEventEnvelope, now: number): FleetSession {
+  return {
     agent: "cognia",
     origin: originOf(envelope),
     lifecycleConfidence: "native",
@@ -283,51 +296,210 @@ export function projectCanonicalFleetSession(
       sendMessage: false,
       focusTerminal: false,
       openTranscript: false,
-      interrupt: true,
+      // A Cognia run has no agent pid, so the Rust process-signal path has
+      // nothing to signal. Claiming the capability produced a stop button that
+      // could never do anything. The honest affordance is the owning page,
+      // until a real Cognia control adapter exists to back this flag.
+      interrupt: false,
     },
     startedAt: Date.parse(envelope.timestamp) || now,
     lastEventAt: now,
     toolUseCount: 0,
     turnCount: 0,
+    ...(envelope.runId ? { executionRunId: envelope.runId } : {}),
+    ...(envelope.parentRunId ? { agentTeamRunId: envelope.parentRunId } : {}),
+    ...(envelope.hostRef ? { hostRef: envelope.hostRef } : {}),
   }
+}
+
+/**
+ * Whether the session is parked on a human. A blocked session keeps its status
+ * through unrelated activity and state events: only the matching
+ * `permission-resolved` / `elicitation-resolved` (or the end of the session)
+ * releases it. Without this an incidental `session-state: running` cleared a
+ * permission prompt the user had not answered.
+ */
+function blockedStatus(session: FleetSession): FleetStatus | null {
+  if (session.pendingPermission) return "waiting-permission"
+  if (session.pendingQuestionRequest) return "waiting-input"
+  return null
+}
+
+function textOf(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? (safe(value) ?? null) : null
+}
+
+/** Last path segment of a working directory, or null when there is none. */
+export function projectNameOf(cwd: string | null): string | null {
+  if (!cwd) return null
+  const segments = cwd.split(/[\\/]+/).filter(Boolean)
+  return segments.length > 0 ? segments[segments.length - 1] : null
+}
+
+/**
+ * Fold one canonical envelope into the session row Agent Fleet shows.
+ *
+ * Handles the full set the runtimes actually emit rather than the five kinds
+ * the first pass covered, because every unhandled kind was a fact the island
+ * could not show and, worse, a state transition it could get wrong.
+ */
+export function projectCanonicalFleetSession(
+  previous: FleetSession | undefined,
+  envelope: AgentEventEnvelope,
+  now = Date.now()
+): FleetSession {
+  const event = envelope.event as { kind?: string } & Record<string, unknown>
+  const base: FleetSession = previous ?? seedSession(envelope, now)
   const next: FleetSession = { ...base, lastEventAt: now }
 
+  // Late-arriving lineage. A run id or a parent run id can show up after the
+  // first event, and it is what routes the row to its owning page.
+  if (envelope.runId && !next.executionRunId) next.executionRunId = envelope.runId
+  if (envelope.parentRunId && !next.agentTeamRunId) {
+    next.agentTeamRunId = envelope.parentRunId
+    next.origin = "team"
+  }
+
   switch (event.kind) {
-    case "lifecycle":
-      if (event.phase === "ended") {
+    case "lifecycle": {
+      const phase = String(event.phase ?? "")
+      if (TERMINAL_PHASES.has(phase)) {
         next.status = "ended"
         next.endedAt = now
         next.activity = null
         next.pendingPermission = null
+        next.pendingQuestions = undefined
+        next.pendingQuestionRequest = null
+        if (phase === "interrupted") {
+          next.lastError = {
+            kind: "turn",
+            detail: textOf(event.detail),
+            at: now,
+          }
+        }
       } else {
         next.status = "working"
-        next.turnCount += 1
+        next.endedAt = undefined
+        next.lastError = null
       }
       break
+    }
+
+    case "session-init":
+      next.model = textOf(event.model) ?? next.model
+      next.permissionMode = textOf(event.permissionMode) ?? next.permissionMode
+      next.cwd = textOf(event.cwd) ?? next.cwd
+      // The same derivation the Rust registry applies to external agents: the
+      // island and the fleet list title a row by project, and without this a
+      // Cognia row's only name was its session UUID.
+      next.projectName = next.projectName ?? projectNameOf(next.cwd)
+      break
+
+    case "user-input":
+      next.turnCount += 1
+      next.lastPrompt = textOf(event.text) ?? next.lastPrompt
+      next.status = blockedStatus(next) ?? "working"
+      next.lastError = null
+      break
+
     case "tool-call":
-      next.status = "working"
       next.toolUseCount += 1
-      next.activity = {
-        toolName: String(event.toolName ?? "tool"),
-        detail: null,
-      }
+      next.activity = { toolName: String(event.toolName ?? "tool"), detail: null }
+      next.status = blockedStatus(next) ?? "working"
       break
+
     case "tool-result":
       next.activity = null
+      if (event.isError === true) {
+        next.lastError = {
+          kind: "tool",
+          detail: textOf(event.toolName),
+          at: now,
+        }
+      }
       break
+
     case "permission-request":
-      next.status = "waiting-permission"
       next.pendingPermission = {
         requestId: String(event.requestId ?? ""),
-        toolName: typeof event.toolName === "string" ? event.toolName : null,
+        toolName: textOf(event.toolName),
         detail: null,
         requestedAt: now,
       }
+      next.status = "waiting-permission"
       break
+
+    case "permission-resolved":
+      // Only the matching request clears the prompt. An unrelated resolution
+      // used to release a permission the user was still looking at.
+      if (next.pendingPermission?.requestId === String(event.requestId ?? "")) {
+        next.pendingPermission = null
+        next.status = blockedStatus(next) ?? "working"
+      }
+      break
+
+    case "elicitation-request": {
+      const requestId = String(event.requestId ?? "")
+      const schema = event.schema as { enum?: unknown[]; type?: unknown } | undefined
+      const options = Array.isArray(schema?.enum)
+        ? schema.enum.filter((option): option is string => typeof option === "string")
+        : []
+      next.pendingQuestions = [
+        {
+          question: textOf(event.prompt) ?? "",
+          options,
+          multiSelect: schema?.enum != null && String(schema.type ?? "") === "array",
+        },
+      ]
+      next.pendingQuestionRequest = { requestId, requestedAt: now }
+      next.status = "waiting-input"
+      break
+    }
+
+    case "elicitation-resolved":
+      if (next.pendingQuestionRequest?.requestId === String(event.requestId ?? "")) {
+        next.pendingQuestionRequest = null
+        next.pendingQuestions = undefined
+        next.status = blockedStatus(next) ?? "working"
+      }
+      break
+
+    case "activity": {
+      const phase = String(event.phase ?? "")
+      if (phase === "idle") {
+        next.activity = null
+        next.status = blockedStatus(next) ?? "idle"
+      } else {
+        if (!next.activity) {
+          const detail = textOf(event.detail)
+          if (detail) next.activity = { toolName: detail, detail: null }
+        }
+        next.status = blockedStatus(next) ?? "working"
+      }
+      break
+    }
+
+    case "session-state": {
+      const state = String(event.state ?? "")
+      const blocked = blockedStatus(next)
+      if (blocked) {
+        next.status = blocked
+      } else if (state === "running") {
+        next.status = "working"
+      } else if (state === "idle") {
+        next.status = "idle"
+      } else if (state === "requires-action") {
+        // The runtime says a human is needed but has not said what for. Show
+        // the wait rather than inventing a prompt the island cannot answer.
+        next.status = "waiting-input"
+      }
+      break
+    }
+
     case "failure":
       next.lastError = {
         kind: "turn",
-        detail: typeof event.message === "string" ? event.message : null,
+        detail: textOf(event.message),
         at: now,
       }
       break

@@ -6,17 +6,76 @@
     "opencode": "OpenCode"
   },
   "island": {
-    "empty": "暂无活动 Agent",
-    "legend": {
-      "detached": "{count} 个已断开监控",
-      "done": "{count} 个已结束",
-      "idle": "{count} 个空闲",
-      "needsYou": "{count} 个待处理",
-      "working": "{count} 个工作中"
+    "actionError": {
+      "callFailed": "操作未生效，请重试。",
+      "emptyInput": "请先输入内容。",
+      "interrupt_identity_mismatch": "该进程已不是目标代理，未发送任何信号。",
+      "interrupt_not_running": "该会话已不可达。",
+      "interrupt_unsupported": "当前平台不支持中断。",
+      "noRoute": "该任务没有可打开的页面。",
+      "notPermitted": "该任务不支持此操作。",
+      "requestChanged": "请求已变化，请重试。",
+      "staleRevision": "操作前任务已发生变化，请重试。",
+      "timeout": "应用未响应，请重试。",
+      "unknown": "无法完成该操作。",
+      "unknownRow": "该任务已不在列表中。"
     },
-    "summary": "{count} 个 Agent",
-    "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
-    "toggle": "展开/收起 Agent 列表"
+    "announceActive": "{count, plural, =0 {暂无进行中的任务} other {# 个进行中的任务}}",
+    "announceWaiting": "{count} 个任务，{waiting} 个等待你处理",
+    "decideInMain": "请在主窗口处理",
+    "detail": {
+      "hide": "隐藏详情",
+      "loading": "正在加载详情…",
+      "show": "显示详情"
+    },
+    "detailError": {
+      "notPermitted": "灵动岛的详情展示已关闭。",
+      "staleRevision": "任务已变化，请重新打开详情。",
+      "unavailable": "暂无可用详情。",
+      "unknownRow": "该任务已不在列表中。"
+    },
+    "dismiss": "清除",
+    "empty": "暂无进行中的任务",
+    "focusTerminal": "聚焦终端",
+    "interrupt": "中断当前回合",
+    "legend": {
+      "blocked": "{count} 个待处理",
+      "done": "{count} 个已结束",
+      "failed": "{count} 个失败",
+      "idle": "{count} 个空闲",
+      "stale": "{count} 个已失效",
+      "working": "{count} 个执行中"
+    },
+    "listLabel": "进行中的任务与待处理事项",
+    "more": "+{count}",
+    "openOwner": {
+      "chat": "打开所属对话",
+      "external": "打开所属会话",
+      "run": "打开运行控制台",
+      "team": "打开团队工作区"
+    },
+    "openTranscript": "在文件管理器中显示记录",
+    "source": {
+      "chat": "对话",
+      "external": "外部代理",
+      "run": "运行",
+      "team": "团队"
+    },
+    "state": {
+      "awaitingApproval": "等待你处理",
+      "awaitingInput": "等待你的回答",
+      "awaitingPermission": "等待你的授权",
+      "blocked": "等待你处理",
+      "done": "已结束",
+      "failed": "已失败",
+      "idle": "空闲",
+      "stale": "已不再等待",
+      "working": "执行中…"
+    },
+    "summary": "{count} 个任务",
+    "summaryWaiting": "{count} 个任务 · {waiting} 个待处理",
+    "toggle": "展开或收起任务列表",
+    "waitingFor": "已等待 {duration}"
   },
   "permission": {
     "allow": "允许",

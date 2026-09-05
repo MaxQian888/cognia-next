@@ -17,9 +17,17 @@ import { cn } from "@/lib/utils"
 export function IslandPermissionActions({
   pending,
   className,
+  respond: respondVia = fleetPermissionRespond,
 }: {
   pending: PendingPermission
   className?: string
+  /**
+   * How the decision actually travels. Defaults to the direct Tauri command,
+   * which is what the main window's Attention panel wants. The island window
+   * injects an intent dispatcher instead, because it holds no business
+   * permissions of its own.
+   */
+  respond?: (requestId: string, behavior: "allow" | "deny") => Promise<boolean>
 }) {
   const t = useTranslations("fleet.permission")
   // Countdown ticks off the shared fleet ticker (one interval for the whole
@@ -45,7 +53,7 @@ export function IslandPermissionActions({
     if (answering || answered || expired) return
     setAnswering(true)
     try {
-      const ok = await fleetPermissionRespond(pending.requestId, behavior)
+      const ok = await respondVia(pending.requestId, behavior)
       if (ok) setAnswered(behavior)
     } finally {
       setAnswering(false)

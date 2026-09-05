@@ -6,17 +6,76 @@
     "opencode": "OpenCode"
   },
   "island": {
-    "empty": "No active agents",
+    "actionError": {
+      "callFailed": "That did not go through. Try again.",
+      "emptyInput": "Type something first.",
+      "interrupt_identity_mismatch": "That process is no longer the agent, so nothing was sent.",
+      "interrupt_not_running": "That session is no longer reachable.",
+      "interrupt_unsupported": "Interrupting isn't supported on this platform.",
+      "noRoute": "There is no page to open for this task.",
+      "notPermitted": "That is not available for this task.",
+      "requestChanged": "The request changed. Try again.",
+      "staleRevision": "This task changed before the action ran. Try again.",
+      "timeout": "No response from the app. Try again.",
+      "unknown": "Could not complete that.",
+      "unknownRow": "This task is no longer listed."
+    },
+    "announceActive": "{count, plural, =0 {No active tasks} one {# active task} other {# active tasks}}",
+    "announceWaiting": "{count, plural, one {# task} other {# tasks}}, {waiting} waiting for you",
+    "decideInMain": "Decide in the main window",
+    "detail": {
+      "hide": "Hide details",
+      "loading": "Loading details…",
+      "show": "Show details"
+    },
+    "detailError": {
+      "notPermitted": "Details are turned off for the island.",
+      "staleRevision": "This task changed. Reopen the details.",
+      "unavailable": "No details available.",
+      "unknownRow": "This task is no longer listed."
+    },
+    "dismiss": "Dismiss",
+    "empty": "No active tasks",
+    "focusTerminal": "Focus terminal",
+    "interrupt": "Interrupt this turn",
     "legend": {
-      "detached": "{count} detached",
+      "blocked": "{count} waiting",
       "done": "{count} done",
+      "failed": "{count} failed",
       "idle": "{count} idle",
-      "needsYou": "{count} waiting",
+      "stale": "{count} stale",
       "working": "{count} working"
     },
-    "summary": "{count, plural, one {# agent} other {# agents}}",
-    "summaryWaiting": "{count, plural, one {# agent} other {# agents}} · {waiting} waiting",
-    "toggle": "Toggle agent list"
+    "listLabel": "Active tasks and pending items",
+    "more": "+{count}",
+    "openOwner": {
+      "chat": "Open the chat that owns this",
+      "external": "Open the owning session",
+      "run": "Open the run cockpit",
+      "team": "Open the team workspace"
+    },
+    "openTranscript": "Reveal transcript",
+    "source": {
+      "chat": "Chat",
+      "external": "Agent",
+      "run": "Run",
+      "team": "Team"
+    },
+    "state": {
+      "awaitingApproval": "Waiting for you",
+      "awaitingInput": "Waiting for your answer",
+      "awaitingPermission": "Waiting for your approval",
+      "blocked": "Waiting for you",
+      "done": "Finished",
+      "failed": "Failed",
+      "idle": "Idle",
+      "stale": "No longer waiting",
+      "working": "Working…"
+    },
+    "summary": "{count, plural, one {# task} other {# tasks}}",
+    "summaryWaiting": "{count, plural, one {# task} other {# tasks}} · {waiting} waiting",
+    "toggle": "Toggle task list",
+    "waitingFor": "waiting {duration}"
   },
   "permission": {
     "allow": "Allow",

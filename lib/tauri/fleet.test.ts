@@ -122,7 +122,7 @@ describe("off Tauri (web)", () => {
     expect(await openIslandWindow()).toBe(false)
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
-    expect(await islandResize(400, 44)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandResize(400, 44)).toEqual({ topInset: 0, notchWidth: 0, fullscreen: false })
     expect(await islandDebugGeometry()).toBeNull()
     expect(await islandSetTucked(true)).toBe(false)
     expect(await fleetRevealTranscript("/x/t.jsonl")).toBe(false)
@@ -310,17 +310,17 @@ describe("on Tauri", () => {
     // island_resize answers with the display's full geometry (notch inset +
     // full-screen regime); a malformed / older-backend answer normalizes to the
     // conservative "no notch, not full screen".
-    expect(await islandResize(640, 200)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandResize(640, 200)).toEqual({ topInset: 0, notchWidth: 0, fullscreen: false })
     expect(invokeMock).toHaveBeenCalledWith("island_resize", { width: 640, height: 200 })
-    invokeMock.mockResolvedValueOnce({ topInset: 37, fullscreen: true })
-    expect(await islandResize(420, 44)).toEqual({ topInset: 37, fullscreen: true })
+    invokeMock.mockResolvedValueOnce({ topInset: 37, notchWidth: 200, fullscreen: true })
+    expect(await islandResize(420, 44)).toEqual({ topInset: 37, notchWidth: 200, fullscreen: true })
     // Negative / non-boolean junk can't reach the shell.
     invokeMock.mockResolvedValueOnce({ topInset: -5, fullscreen: "yes" })
-    expect(await islandResize(420, 44)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandResize(420, 44)).toEqual({ topInset: 0, notchWidth: 0, fullscreen: false })
     // A bare number is what the pre-geometry backend returned — it must not
     // resurrect as a truthy notch.
     invokeMock.mockResolvedValueOnce(37)
-    expect(await islandResize(420, 44)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandResize(420, 44)).toEqual({ topInset: 0, notchWidth: 0, fullscreen: false })
     invokeMock.mockResolvedValueOnce(undefined)
     expect(await closeIslandWindow()).toBe(true)
     invokeMock.mockResolvedValue(true)
@@ -375,7 +375,7 @@ describe("on Tauri", () => {
     expect(await openIslandWindow()).toBe(false)
     expect(await closeIslandWindow()).toBe(false)
     expect(await isIslandWindowOpen()).toBe(false)
-    expect(await islandResize(1, 1)).toEqual({ topInset: 0, fullscreen: false })
+    expect(await islandResize(1, 1)).toEqual({ topInset: 0, notchWidth: 0, fullscreen: false })
     expect(await islandSetTucked(true)).toBe(false)
     // A failed read must answer `false` — "show the island everywhere" — rather
     // than fail closed into hiding it, which is the state being fixed.
@@ -441,7 +441,7 @@ describe("on Tauri", () => {
       windowPosition: [1302, 0],
       windowSize: [420, 44],
       windowVisible: true,
-      geometry: { topInset: 37, fullscreen: true },
+      geometry: { topInset: 37, notchWidth: 200, fullscreen: true },
     }
     invokeMock.mockResolvedValueOnce(dump)
     expect(await islandDebugGeometry()).toEqual(dump)

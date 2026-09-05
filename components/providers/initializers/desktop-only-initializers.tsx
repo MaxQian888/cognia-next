@@ -151,6 +151,13 @@ const UsageDockInitializer = dynamic(
   () => import("./usage-dock-initializer").then((m) => m.UsageDockInitializer),
   { ssr: false }
 )
+// The task control island's main-window half. Desktop-only for the same reason
+// as the Capacity Dock: the island is a native overlay window, and this is the
+// only thing that gives it a projection to paint or executes its intents.
+const IslandInitializer = dynamic(
+  () => import("./island-initializer").then((m) => m.IslandInitializer),
+  { ssr: false }
+)
 const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
@@ -204,6 +211,7 @@ export function DesktopOnlyInitializers() {
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />
       <UsageDockInitializer />
+      <IslandInitializer />
       <SessionImportWatchInitializer />
       <SitesInitializer />
     </>

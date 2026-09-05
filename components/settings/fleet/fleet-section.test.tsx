@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { FleetSection } from "./fleet-section"
 
@@ -92,6 +93,8 @@ jest.mock("@/lib/tauri/fleet", () => ({
 // Radix Select can't be driven in jsdom (pointer-capture APIs missing); a
 // native <select> stand-in keeps the value/onValueChange contract testable.
 jest.mock("@/components/ui/select", () => ({
+  // There is more than one Select in this card now, so the stand-in names
+  // itself after its own trigger rather than hard-coding one test id.
   Select: ({
     value,
     onValueChange,
@@ -102,16 +105,27 @@ jest.mock("@/components/ui/select", () => ({
     onValueChange: (v: string) => void
     disabled?: boolean
     children: React.ReactNode
-  }) => (
-    <select
-      data-testid="fleet-island-monitor-select"
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onValueChange(e.target.value)}
-    >
-      {children}
-    </select>
-  ),
+  }) => {
+    const trigger = React.Children.toArray(children).find(
+      (child) =>
+        React.isValidElement<{ "data-testid"?: string }>(child) &&
+        typeof child.props["data-testid"] === "string"
+    ) as React.ReactElement<{ "data-testid"?: string }> | undefined
+    const testId = (trigger?.props["data-testid"] ?? "fleet-island-monitor-trigger").replace(
+      "-trigger",
+      "-select"
+    )
+    return (
+      <select
+        data-testid={testId}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onValueChange(e.target.value)}
+      >
+        {children}
+      </select>
+    )
+  },
   SelectTrigger: () => null,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -559,6 +573,28 @@ describe("FleetSection", () => {
     await waitFor(() => expect(mockFleet.islandSetMonitor).toHaveBeenCalledWith(null))
   })
 
+  describe("island detail visibility", () => {
+    it("defaults to the most private policy and persists a change", async () => {
+      render(<FleetSection />)
+      await waitFor(() => expect(screen.getByTestId("fleet-island-switch")).toBeInTheDocument())
+
+      const select = screen.getByTestId("fleet-island-detail-select") as HTMLSelectElement
+      expect(select.value).toBe("click-to-reveal")
+      expect(Array.from(select.options).map((option) => option.value)).toEqual([
+        "click-to-reveal",
+        "hover",
+        "summary-only",
+      ])
+
+      fireEvent.change(select, { target: { value: "summary-only" } })
+      await waitFor(() =>
+        expect((screen.getByTestId("fleet-island-detail-select") as HTMLSelectElement).value).toBe(
+          "summary-only"
+        )
+      )
+    })
+  })
+
   describe("placement diagnostics", () => {
     const dump = {
       displays: [],
@@ -566,7 +602,7 @@ describe("FleetSection", () => {
       windowPosition: null,
       windowSize: null,
       windowVisible: false,
-      geometry: { topInset: 0, fullscreen: false },
+      geometry: { topInset: 0, notchWidth: 0, fullscreen: false },
     }
 
     it("copies the placement dump to the clipboard", async () => {

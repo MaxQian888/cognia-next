@@ -2,7 +2,7 @@
 
 /**
  * Mobile-tailored fleet row — a theme-aware shadcn `Card` (NOT the dark-overlay
- * `island-row`, which is styled for the frameless island). Reuses the pure
+ * the island's own task row, which is styled for the frameless island). Reuses the pure
  * `lib/fleet/format` helpers and the shared `useNowTicker`. Reveal-transcript is
  * omitted (no OS file manager on a phone); a parked permission can be answered,
  * an OpenCode session replied to, and the terminal focused (best-effort — the

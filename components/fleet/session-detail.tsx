@@ -13,7 +13,7 @@ import { useFormatter, useTranslations } from "next-intl"
 import { useReducedMotion } from "motion/react"
 import { useCountUp } from "@/hooks/usage/use-count-up"
 import { formatCwdMiddle, formatElapsed } from "@/lib/fleet/format"
-import type { FleetSession } from "@/lib/fleet/types"
+import type { IslandRowDetail } from "@/lib/island/types"
 import { cn } from "@/lib/utils"
 
 const KNOWN_SOURCES = new Set(["startup", "resume", "clear", "compact"])
@@ -24,7 +24,12 @@ export function SessionDetail({
   session,
   className,
 }: {
-  session: FleetSession
+  /**
+   * The redacted, capped fact block the main window hands over on demand.
+   * Structurally a subset of `FleetSession`, so a caller that still holds a
+   * whole session can pass it straight through.
+   */
+  session: IslandRowDetail
   className?: string
 }) {
   const t = useTranslations("fleet.row.detail")

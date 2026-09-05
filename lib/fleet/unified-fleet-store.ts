@@ -7,7 +7,11 @@ import { redactAgentEventEnvelope } from "@/lib/ai/agent/execution/event-envelop
 import { subscribeAgentEvents } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type { TauriEventStore } from "@/lib/tauri/event-store"
-import { projectCanonicalFleetSession } from "./canonical-projection"
+import {
+  CANONICAL_SESSION_LINGER_MS,
+  canonicalSessionExpired,
+  projectCanonicalFleetSession,
+} from "./canonical-projection"
 import { EMPTY_FLEET_SNAPSHOT, fleetStreamStore } from "./fleet-stream-store"
 import type { FleetSession, FleetSnapshot } from "./types"
 
@@ -35,8 +39,17 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
   let detachExternal: (() => void) | undefined
   let detachCanonical: (() => void) | undefined
   let generation = 0
+  /** Per-session sweep timers for finished rows. Keyed by canonical sessionId. */
+  const sweeps = new Map<string, ReturnType<typeof setTimeout>>()
 
   const emit = () => listeners.forEach((listener) => listener())
+  const cancelSweep = (sessionId: string) => {
+    const timer = sweeps.get(sessionId)
+    if (timer) {
+      clearTimeout(timer)
+      sweeps.delete(sessionId)
+    }
+  }
   const refresh = () => {
     const latestCanonicalEvent = Math.max(
       0,
@@ -45,18 +58,46 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     snapshot = mergeFleetSnapshots(fleetStreamStore.getSnapshot(), canonical, latestCanonicalEvent)
     emit()
   }
+  /**
+   * Drop canonical rows whose result state has expired.
+   *
+   * Runs on the sweep timer and again on every resubscribe, because a store
+   * that was detached while a session ended has no timer left to fire and would
+   * otherwise resurrect a finished row on the next mount.
+   */
+  const evictExpired = (now = Date.now()): boolean => {
+    let changed = false
+    for (const [sessionId, session] of canonical) {
+      if (!canonicalSessionExpired(session, now)) continue
+      canonical.delete(sessionId)
+      cancelSweep(sessionId)
+      changed = true
+    }
+    return changed
+  }
   const onEnvelope = (raw: AgentEventEnvelope) => {
     const envelope = redactAgentEventEnvelope(raw)
-    canonical.set(
-      envelope.sessionId,
-      projectCanonicalFleetSession(canonical.get(envelope.sessionId), envelope)
-    )
+    const next = projectCanonicalFleetSession(canonical.get(envelope.sessionId), envelope)
+    canonical.set(envelope.sessionId, next)
+    // A session that starts again cancels the pending sweep of its previous
+    // ending, so a restarted run is never swept out from under itself.
+    cancelSweep(envelope.sessionId)
+    if (next.status === "ended") {
+      sweeps.set(
+        envelope.sessionId,
+        setTimeout(() => {
+          sweeps.delete(envelope.sessionId)
+          if (evictExpired()) refresh()
+        }, CANONICAL_SESSION_LINGER_MS + 100)
+      )
+    }
     void appendCanonicalEnvelopes(envelope.runId, [envelope])
     refresh()
   }
 
   const attach = () => {
     const currentGeneration = generation
+    evictExpired()
     detachExternal = fleetStreamStore.subscribe(refresh)
     refresh()
     void subscribeAgentEvents(onEnvelope).then((unlisten) => {
@@ -70,6 +111,8 @@ function createUnifiedFleetStore(): TauriEventStore<FleetSnapshot> {
     detachCanonical?.()
     detachExternal = undefined
     detachCanonical = undefined
+    for (const timer of sweeps.values()) clearTimeout(timer)
+    sweeps.clear()
   }
 
   return {

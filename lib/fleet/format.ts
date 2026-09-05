@@ -7,7 +7,16 @@
 import type { FleetSession, FleetStatus, IslandGeometry } from "./types"
 
 /** Island geometry with every field defaulted — the shape callers can rely on. */
-export const EMPTY_ISLAND_GEOMETRY: IslandGeometry = { topInset: 0, fullscreen: false }
+export const EMPTY_ISLAND_GEOMETRY: IslandGeometry = {
+  topInset: 0,
+  notchWidth: 0,
+  fullscreen: false,
+}
+
+/** A logical-px length from an untrusted payload: finite and positive, else 0. */
+function positiveLength(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+}
 
 /**
  * Coerce an untrusted geometry payload into a total {@link IslandGeometry}.
@@ -22,10 +31,9 @@ export const EMPTY_ISLAND_GEOMETRY: IslandGeometry = { topInset: 0, fullscreen: 
  */
 export function normalizeIslandGeometry(raw: unknown): IslandGeometry {
   const g = raw as Partial<IslandGeometry> | null | undefined
-  const topInset = g?.topInset
   return {
-    topInset:
-      typeof topInset === "number" && Number.isFinite(topInset) && topInset > 0 ? topInset : 0,
+    topInset: positiveLength(g?.topInset),
+    notchWidth: positiveLength(g?.notchWidth),
     fullscreen: g?.fullscreen === true,
   }
 }

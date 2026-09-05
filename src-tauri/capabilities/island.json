@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "island-window",
-  "description": "Least-privilege capabilities for the fleet agent-monitor island overlay window.",
+  "description": "Least-privilege capabilities for the task control island overlay window. Window shape, event listen and a scoped emit-to only; no business commands.",
   "windows": ["island"],
   "permissions": [
     "core:default",
@@ -14,7 +14,6 @@
     "core:window:allow-inner-size",
     "core:window:allow-set-size",
     "core:window:allow-set-resizable",
-    "allow-island-app-commands",
-    "opener:allow-reveal-item-in-dir"
+    "allow-island-app-commands"
   ]
 }

@@ -1,14 +1,14 @@
 [[permission]]
 identifier = "allow-island-app-commands"
-description = "Enables the application commands invoked by the trusted local fleet island window."
+description = """
+Window-shape commands for the task control island overlay.
+
+Deliberately does NOT include any fleet_* business command. The island holds no
+business permissions: it emits typed intents over island://action-intent and the
+main window re-validates and executes them. Everything left here only resizes,
+tucks or reveals the island's own window.
+"""
 commands.allow = [
-  "fleet_focus_terminal",
-  "fleet_get_snapshot",
-  "fleet_interrupt_session",
-  "fleet_opencode_send_message",
-  "fleet_permission_respond",
-  "fleet_question_reject",
-  "fleet_question_respond",
   "island_resize",
   "island_set_tucked",
   "reveal_island_window",

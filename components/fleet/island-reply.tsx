@@ -12,7 +12,14 @@ import { useTranslations } from "next-intl"
 import { SendHorizontalIcon } from "lucide-react"
 import { fleetOpencodeSendMessage } from "@/lib/tauri/fleet"
 
-export function IslandReply({ sessionId }: { sessionId: string }) {
+export function IslandReply({
+  sessionId,
+  send: sendVia = fleetOpencodeSendMessage,
+}: {
+  sessionId: string
+  /** See `IslandPermissionActions` for why this is injectable. */
+  send?: (sessionId: string, text: string) => Promise<string | null>
+}) {
   const t = useTranslations("fleet.reply")
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
@@ -23,7 +30,7 @@ export function IslandReply({ sessionId }: { sessionId: string }) {
     if (!trimmed || sending) return
     setSending(true)
     try {
-      const id = await fleetOpencodeSendMessage(sessionId, trimmed)
+      const id = await sendVia(sessionId, trimmed)
       if (id) {
         setText("")
         setOpen(false)

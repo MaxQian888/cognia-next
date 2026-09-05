@@ -86,6 +86,8 @@ import { FleetHistoryPanel } from "./fleet-history-panel"
 import { AgentLivenessChip } from "./agent-liveness-chip"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { createLogger } from "@cognia/logging"
+import { useIslandStore } from "@/lib/island/store"
+import { ISLAND_DETAIL_VISIBILITIES, type IslandDetailVisibility } from "@/lib/island/types"
 import { ExecutionWorkersCard } from "./execution-workers-card"
 
 const log = createLogger("settings.fleet")
@@ -114,6 +116,10 @@ export function FleetSection() {
   const [codexCapabilities, setCodexCapabilities] = useState<CodexHookCapabilityReport | null>(null)
   const [opencodeStatus, setOpencodeStatus] = useState<OpencodeStatus>("not-installed")
   const [opencodeOutbox, setOpencodeOutbox] = useState<OpencodeOutboxStatus | null>(null)
+  const islandPreferences = useIslandStore((state) => state.preferences)
+  const islandHydrated = useIslandStore((state) => state.hydrated)
+  const hydrateIsland = useIslandStore((state) => state.hydrate)
+  const setIslandPreferences = useIslandStore((state) => state.setPreferences)
   const [islandOpen, setIslandOpen] = useState(false)
   const [islandMonitors, setIslandMonitors] = useState<IslandMonitorInfo[]>([])
   const [islandHideOnFullscreen, setIslandHideOnFullscreen] = useState(false)
@@ -184,6 +190,13 @@ export function FleetSection() {
   const refresh = useCallback(async () => {
     applyStatus(await fetchStatus())
   }, [fetchStatus, applyStatus])
+
+  // Island preferences live in their own persisted store rather than in
+  // `AppSettings`, because the main window has to know the detail policy before
+  // it builds the very first projection. Hydrating is idempotent.
+  useEffect(() => {
+    void hydrateIsland()
+  }, [hydrateIsland])
 
   useEffect(() => {
     let alive = true
@@ -721,6 +734,48 @@ export function FleetSection() {
             </Select>
           </div>
         ) : null}
+
+        {/*
+         * Privacy, not cosmetics. The island runs in a window that anyone
+         * walking past a desk can read, so this decides how much of a task
+         * crosses into it at all. `click-to-reveal` is the default and the
+         * main window refuses a detail request outright under `summary-only`,
+         * rather than sending it and trusting the overlay to hide it.
+         */}
+        <div
+          className="flex items-center justify-between gap-3"
+          data-testid="fleet-island-detail-row"
+        >
+          <div className="space-y-0.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {t("island.detailVisibility.label")}
+            </Label>
+            <p className="text-[11px] text-muted-foreground">{t("island.detailVisibility.desc")}</p>
+          </div>
+          <Select
+            value={islandPreferences.detailVisibility}
+            disabled={!islandHydrated}
+            onValueChange={(value) =>
+              setIslandPreferences({ detailVisibility: value as IslandDetailVisibility })
+            }
+          >
+            <SelectTrigger
+              size="sm"
+              className="w-44 shrink-0 text-xs"
+              aria-label={t("island.detailVisibility.label")}
+              data-testid="fleet-island-detail-trigger"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ISLAND_DETAIL_VISIBILITIES.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {t(`island.detailVisibility.options.${option}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <div
           className="flex items-center justify-between gap-3"

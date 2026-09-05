@@ -252,6 +252,12 @@ export interface IslandGeometry {
   /** Top safe-area inset (logical px): notch height, 0 on non-notched displays. */
   topInset: number
   /**
+   * Width (logical px) of the camera housing itself, from the auxiliary areas
+   * macOS reports beside it. 0 when there is no housing or the OS did not
+   * report it; the shell then paints the whole strip, as it did before.
+   */
+  notchWidth: number
+  /**
    * Whether a full-screen app currently owns the island's display. The top
    * strip belongs to that app, so the shell suppresses the idle pill entirely
    * in this regime and only materializes when a session needs the user.

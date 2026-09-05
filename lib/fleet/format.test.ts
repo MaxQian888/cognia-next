@@ -218,10 +218,18 @@ describe("formatCwdMiddle", () => {
 
 describe("normalizeIslandGeometry", () => {
   it("passes a well-formed payload through", () => {
-    expect(normalizeIslandGeometry({ topInset: 37, fullscreen: true })).toEqual({
+    expect(normalizeIslandGeometry({ topInset: 37, notchWidth: 200, fullscreen: true })).toEqual({
       topInset: 37,
+      notchWidth: 200,
       fullscreen: true,
     })
+  })
+
+  it("defaults a missing or malformed notch width to 0 (paint the whole strip)", () => {
+    expect(normalizeIslandGeometry({ topInset: 37, fullscreen: false }).notchWidth).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: 37, notchWidth: NaN }).notchWidth).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: 37, notchWidth: -1 }).notchWidth).toBe(0)
+    expect(normalizeIslandGeometry({ topInset: 37, notchWidth: "200" }).notchWidth).toBe(0)
   })
 
   it("treats a missing or malformed payload as no-notch, not-full-screen", () => {
@@ -229,7 +237,11 @@ describe("normalizeIslandGeometry", () => {
     // under the camera housing, and a wrong full-screen verdict makes the whole
     // island vanish.
     for (const raw of [undefined, null, {}, 37, "37", [], { topInset: null }]) {
-      expect(normalizeIslandGeometry(raw)).toEqual({ topInset: 0, fullscreen: false })
+      expect(normalizeIslandGeometry(raw)).toEqual({
+        topInset: 0,
+        notchWidth: 0,
+        fullscreen: false,
+      })
     }
   })
 

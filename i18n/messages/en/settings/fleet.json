@@ -34,6 +34,15 @@
   },
   "island": {
     "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+    "detailVisibility": {
+      "desc": "How much of a task's detail the island may receive. Prompts, paths, commands, plans and full error text never travel with the regular list.",
+      "label": "Detail in the island",
+      "options": {
+        "click-to-reveal": "Click to reveal",
+        "hover": "Show on hover",
+        "summary-only": "Summary only"
+      }
+    },
     "diagnostics": {
       "copied": "Island diagnostics copied to the clipboard.",
       "copy": "Copy",
