@@ -69,8 +69,8 @@ spacing:
   control-gap: 8px
   content-gap: 24px
   section-tight: 80px
-  section-normal: 160px
-  section-open: 224px
+  section-normal: 112px
+  section-open: 160px
 components:
   button-primary:
     backgroundColor: "{colors.ink}"
@@ -179,7 +179,17 @@ The homepage follows an evidence-oriented AIDA sequence:
 3. **Desire:** desktop depth, model boundaries, connections, and trust evidence.
 4. **Action:** one high-contrast close with download/source routes.
 
-Gapless Bento layouts use `grid-flow-dense` and must close mathematically at every explicit breakpoint. Mobile layouts become one readable primary surface per screen; desktop-only pinning or large visual crops must degrade to ordinary document flow.
+Gapless Bento layouts use `grid-flow-dense` and must close mathematically at every explicit breakpoint. A grid whose entries leave cells open fills them with a labelled interface reconstruction of the surface the section is about, never with the bare hairline track. Mobile layouts become one readable primary surface per screen; desktop-only pinning or large visual crops must degrade to ordinary document flow.
+
+**The Stage Bookends Rule (2026-09-05).** The homepage opens and closes on the execution stage: the hero is the dark stage with the live workbench running the signature task, and the final call to action mirrors it. The paper argument sits between them. Both regions are built from the ordinary reading vocabulary inside a `.stage-scope`, which remaps `ink`, `paper`, `muted` and the hairlines onto their stage counterparts, so no second set of on-stage components exists.
+
+**Section rhythm.** `tight` 80, `normal` 112, `open` 160 on desktop, alternating. Measured full-page captures of the earlier 96/128/160/224 scale showed 400 to 500px of empty paper between blocks, which read as the page having ended.
+
+**Index tags (2026-09-05).** Every homepage section carries its one-based position as a zero-padded mono tag with a short tick rule ahead of the eyebrow (`SectionHeading index`). The page is ten sections and fourteen thousand pixels, and the side rail only exists past 1760px, so the tag is how a reader on a laptop knows where in the argument they are. Sub-pages do not number their sections.
+
+**Texture (2026-09-05).** The paper layer may carry `.paper-grain`, a monochrome noise film at about five percent opacity, and `.dot-field`, a 24px lattice of hairline points masked towards the edges. Both are achromatic and both sit under the content, so they are inside the No AI Gradient Rule. They are stock and ruling, not decoration: use them on sections that hold an instrument (a reconstruction, a figure strip, a lane grid), never on a text-only section.
+
+**The Counted Figures Rule (2026-09-05).** A number on the site is either read from the evidence snapshot or counted from the checkout at build time (`web/scripts/build-inventory.mjs`). A count of zero is shown as a dash, because zero means the count did not run. No figure is written by hand.
 
 ## Elevation & Depth
 
@@ -217,6 +227,12 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 - Reconstructions expose one accurate alt description, not a tree of fake controls.
 - Scale/fade motion may support entry, but the content must remain complete under reduced motion.
 
+### Marks
+
+- Lucide icons (`Icon`) name controls and states. Bespoke marks (`Glyph`) name the product's subsystems, one each, on a 24 unit grid with a 1 unit stroke and no fill.
+- A subsystem's mark appears wherever that subsystem is discussed, so the mark is learned once. Do not use a mark as a bullet or an ornament.
+- Marks may draw their stroke on entry (`draw`), once, when their section reaches the viewport. Reduced motion shows the finished stroke.
+
 ### Navigation
 
 - Keep the brand, primary product routes, docs/source access, locale, theme, and current install action visible without building a mega-menu.
@@ -228,6 +244,7 @@ The recurring silhouette is a bounded work surface: rectangular, cropped, and di
 - Motion demonstrates sequence, state, or provenance; it does not decorate idle chrome.
 - Use transform and opacity for entry effects.
 - Keep one pinned narrative section and one canvas provenance surface as the site-wide budget established by ADR-0092.
+- A surface that builds itself up in phases runs through `useScene`: it starts when it reaches the viewport, runs once, and ends on its static picture. Off screen it holds its opening state, never a finished picture that would flash to empty. Under reduced motion it renders the finished picture at once.
 - Respect `prefers-reduced-motion` in JavaScript as well as CSS. Reduced motion renders a complete static state, not an empty start frame.
 
 ## Do's and Don'ts

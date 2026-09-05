@@ -1,10 +1,10 @@
-import { Section, SectionHeading } from "@web/components/section"
 import { SiteShell } from "@web/components/site-shell"
 import { getCopy } from "@web/content"
 import type { Locale } from "@web/lib/locale"
 import { docsUrl } from "@web/lib/site"
 import { CapabilitySections } from "./capability-sections"
 import { PageHeader } from "./page-header"
+import { RunnerGuarantees } from "./runner-guarantees"
 import { SystemFlow } from "./system-flow"
 
 /**
@@ -32,6 +32,7 @@ export function WorkflowsPage({ locale }: { locale: Locale }) {
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}
+        reconstruction={copy.reconstruction}
       />
       <SystemFlow
         copy={copy.workflows.flow}
@@ -39,22 +40,7 @@ export function WorkflowsPage({ locale }: { locale: Locale }) {
         locale={locale}
         docsOrigin={docsOrigin}
       />
-      <Section tone="stage">
-        <SectionHeading title={copy.workflows.guarantees.title} tone="stage" />
-        <ul className="mt-10 flex max-w-3xl flex-col">
-          {copy.workflows.guarantees.items.map((item) => (
-            <li
-              key={item}
-              className="border-t border-on-stage-hairline py-5 text-on-stage-muted first:border-t-0 first:pt-0"
-            >
-              <span aria-hidden className="mr-3 text-action">
-                —
-              </span>
-              {item}
-            </li>
-          ))}
-        </ul>
-      </Section>
+      <RunnerGuarantees copy={copy.workflows.guarantees} />
     </SiteShell>
   )
 }

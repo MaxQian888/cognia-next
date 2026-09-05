@@ -54,6 +54,17 @@ describe("HeroTaskTicket", () => {
     }
   })
 
+  it("passes a layout class through", () => {
+    const { container } = render(
+      <HeroTaskTicket
+        copy={en.home.hero.ticket}
+        reconstruction={en.reconstruction}
+        className="my-class"
+      />
+    )
+    expect(container.querySelector(".my-class")).toBeInTheDocument()
+  })
+
   it("keeps its decorative marks out of the accessibility tree", () => {
     const { container } = renderTicket()
     for (const svg of container.querySelectorAll("svg")) {

@@ -23,6 +23,15 @@ function evidence(overrides: Partial<Evidence> = {}): Evidence {
     contributors: 2,
     releases: [],
     changesets: [],
+    inventory: {
+      plugins: 59,
+      connectors: 11,
+      workflowNodeKinds: 185,
+      crates: 35,
+      packages: 32,
+      adrs: 167,
+      testFiles: 9496,
+    },
     ...overrides,
   }
 }
@@ -60,6 +69,13 @@ describe("FinalCta", () => {
       "href",
       `${DOCS}/en/docs`
     )
+  })
+
+  it("closes on the execution stage, bookending the hero", () => {
+    const { container } = renderCta()
+    const section = container.querySelector("section#start")
+    expect(section).toHaveClass("bg-stage")
+    expect(section).toHaveClass("stage-scope")
   })
 
   it("carries the support line", () => {

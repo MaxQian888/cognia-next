@@ -40,6 +40,25 @@ export interface ChangesetEntry {
   date: string | null
 }
 
+/**
+ * The figures the capability panorama shows, in display order. Each is a
+ * directory listing or a file count over the checkout, taken at build time by
+ * `web/scripts/build-inventory.mjs`, and each is reproducible with `ls`.
+ */
+export const INVENTORY_KEYS = [
+  "plugins",
+  "connectors",
+  "workflowNodeKinds",
+  "crates",
+  "packages",
+  "adrs",
+  "testFiles",
+] as const
+
+export type InventoryKey = (typeof INVENTORY_KEYS)[number]
+
+export type Inventory = Record<InventoryKey, number>
+
 export interface Evidence {
   readAt: string
   lastGoodReadAt: string | null
@@ -48,6 +67,17 @@ export interface Evidence {
   contributors: number | null
   releases: Release[]
   changesets: ChangesetEntry[]
+  inventory: Inventory
+}
+
+/**
+ * A figure of zero means the count did not run, not that the repository holds
+ * nothing of the kind, so the panorama shows a dash for it rather than a
+ * confident `0`.
+ */
+export function inventoryFigure(inventory: Inventory, key: InventoryKey): number | null {
+  const value = inventory[key]
+  return Number.isInteger(value) && value > 0 ? value : null
 }
 
 /**
@@ -195,6 +225,14 @@ export function groupChangelog(entries: ChangesetEntry[]): ChangelogGroup[] {
     })
     .map(([key, bucketEntries]) => ({ key, entries: bucketEntries }))
 }
+
+/** Anchor id for a month group, shared by the feed and the index that links to it. */
+export function monthAnchor(key: string): string {
+  return `month-${key}`
+}
+
+/** How many entries a month of the changelog shows before it asks. */
+export const CHANGELOG_PAGE_SIZE = 20
 
 export interface Freshness {
   /** The timestamp to show the reader. */

@@ -26,6 +26,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { collectInventory } from "./build-inventory.mjs"
+
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")
 const REPO_ROOT = join(WEB_ROOT, "..")
 const OUT_DIR = join(WEB_ROOT, "content", "generated")
@@ -46,8 +48,24 @@ function headers() {
   return token ? { ...base, Authorization: `Bearer ${token}` } : base
 }
 
+/**
+ * How long one GitHub call may take before it is treated as unreachable.
+ *
+ * `fetch` has no default deadline. On a machine without a route to
+ * api.github.com the connection attempt can hang for minutes, and because this
+ * script runs as `predev`, that hang was `pnpm web:dev` never starting. The
+ * failure policy below already knows what to do with an unreachable source —
+ * keep the previous snapshot — so a bounded wait just gets it there sooner.
+ */
+export const FETCH_TIMEOUT_MS = 15_000
+
+/** A `fetch` that gives up after {@link FETCH_TIMEOUT_MS}. */
+export function fetchWithTimeout(url, init = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+}
+
 async function getJson(url) {
-  const response = await fetch(url, { headers: headers() })
+  const response = await fetchWithTimeout(url, { headers: headers() })
   if (!response.ok) throw new Error(`${response.status} ${response.statusText} for ${url}`)
   return response.json()
 }
@@ -119,7 +137,9 @@ async function collectRepo() {
 async function collectContributors() {
   // `per_page=1` plus the Link header is the cheap way to a total; without a
   // last page the project has at most one contributor.
-  const response = await fetch(`${API}/contributors?per_page=1&anon=false`, { headers: headers() })
+  const response = await fetchWithTimeout(`${API}/contributors?per_page=1&anon=false`, {
+    headers: headers(),
+  })
   if (!response.ok) throw new Error(`${response.status} for contributors`)
   const link = response.headers.get("link")
   const last = link && /[?&]page=(\d+)>;\s*rel="last"/.exec(link)
@@ -158,6 +178,8 @@ async function main() {
   // The changeset feed is local: it never fails for network reasons, so it is
   // always current even when GitHub is unreachable.
   const changesets = collectChangesets()
+  // So is the inventory: directory listings and file counts over the checkout.
+  const inventory = collectInventory(REPO_ROOT)
 
   let repo = previous?.repo ?? { stars: null, license: null, description: null }
   let contributors = previous?.contributors ?? null
@@ -190,6 +212,7 @@ async function main() {
     contributors,
     releases,
     changesets,
+    inventory,
   }
 
   mkdirSync(OUT_DIR, { recursive: true })

@@ -61,7 +61,7 @@ describe("CapabilitySections", () => {
       expect(rhythm[i]).not.toBe(rhythm[i - 1])
     }
     // The opening block is the page's upper bound.
-    expect(rhythm[0]).toBe("py-32")
+    expect(rhythm[0]).toBe("py-20")
   })
 
   it("draws the rhythm lines on the opening block only", () => {
@@ -140,5 +140,34 @@ describe("CapabilitySections", () => {
       />
     )
     expect(screen.getByRole("heading", { name: zh.product.sections[0].title })).toBeInTheDocument()
+  })
+
+  it("fills the workflow and plugin sections' open cells with the matching reconstruction", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.workflows.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+        reconstruction={en.reconstruction}
+      />
+    )
+    const asides = container.querySelectorAll('[data-slot="capability-aside"]')
+    expect(asides).toHaveLength(2)
+    expect(screen.getAllByText(en.reconstruction.workflow.triggerName).length).toBe(1)
+    expect(screen.getAllByText(en.reconstruction.workflow.runsLabel).length).toBeGreaterThan(0)
+  })
+
+  it("renders no filler for sections whose entries already close the grid", () => {
+    const { container } = render(
+      <CapabilitySections
+        sections={en.product.sections}
+        learnMore={en.common.learnMore}
+        locale="en"
+        docsOrigin={DOCS}
+        reconstruction={en.reconstruction}
+      />
+    )
+    expect(container.querySelector('[data-slot="capability-aside"]')).toBeNull()
   })
 })

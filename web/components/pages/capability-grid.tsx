@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { SiteLink } from "@web/components/site-link"
 import type { CapabilityEntry } from "@web/content/types"
@@ -10,6 +11,26 @@ interface CapabilityGridProps {
   /** Cell background; must match the surrounding section's tone. */
   tone?: "paper" | "surface"
   docsOrigin?: string
+  /**
+   * What fills the cells the entries leave empty. A gapless grid paints its
+   * hairline track wherever there is no cell, so a section with two or four
+   * entries used to show a grey slab where the third and sixth would be. The
+   * aside spans exactly that remainder at each breakpoint, or a whole row when
+   * the entries already close the grid, so the grid always closes.
+   */
+  aside?: ReactNode
+}
+
+/**
+ * Column span of the aside at each breakpoint, from the entry count. Static
+ * class strings, because Tailwind only emits what it can read.
+ */
+export function asideSpan(count: number): string {
+  const md = count % 2 === 0 ? "md:col-span-2" : "md:col-span-1"
+  const xlRemainder = (3 - (count % 3)) % 3
+  const xl =
+    xlRemainder === 0 ? "xl:col-span-3" : xlRemainder === 1 ? "xl:col-span-1" : "xl:col-span-2"
+  return `${md} ${xl}`
 }
 
 /**
@@ -31,13 +52,14 @@ export function CapabilityGrid({
   locale,
   tone = "paper",
   docsOrigin,
+  aside,
 }: CapabilityGridProps) {
   const cell = tone === "paper" ? "bg-paper" : "bg-surface"
 
   return (
     <RevealGroup
       as="ul"
-      count={entries.length}
+      count={entries.length + (aside ? 1 : 0)}
       className="grid gap-px bg-hairline md:grid-cols-2 xl:grid-cols-3"
     >
       {entries.map((entry, index) => (
@@ -57,6 +79,16 @@ export function CapabilityGrid({
           ) : null}
         </RevealItem>
       ))}
+      {aside ? (
+        <RevealItem
+          as="li"
+          aria-hidden
+          data-slot="capability-aside"
+          className={`flex min-w-0 flex-col justify-center p-6 md:p-8 ${cell} ${asideSpan(entries.length)}`}
+        >
+          {aside}
+        </RevealItem>
+      ) : null}
     </RevealGroup>
   )
 }

@@ -6,6 +6,9 @@ import {
   freshness,
   bumpCounts,
   groupChangelog,
+  INVENTORY_KEYS,
+  inventoryFigure,
+  monthAnchor,
   isInstallerAsset,
   latestRelease,
   releaseState,
@@ -22,9 +25,38 @@ function evidence(overrides: Partial<Evidence> = {}): Evidence {
     contributors: 3,
     releases: [],
     changesets: [],
+    inventory: {
+      plugins: 59,
+      connectors: 11,
+      workflowNodeKinds: 120,
+      crates: 37,
+      packages: 30,
+      adrs: 167,
+      testFiles: 9600,
+    },
     ...overrides,
   }
 }
+
+describe("inventoryFigure", () => {
+  it("reports a positive count and treats zero as not counted", () => {
+    const { inventory } = evidence()
+    expect(inventoryFigure(inventory, "plugins")).toBe(59)
+    expect(inventoryFigure({ ...inventory, crates: 0 }, "crates")).toBeNull()
+  })
+
+  it("lists every key once, in display order", () => {
+    expect(INVENTORY_KEYS).toEqual([
+      "plugins",
+      "connectors",
+      "workflowNodeKinds",
+      "crates",
+      "packages",
+      "adrs",
+      "testFiles",
+    ])
+  })
+})
 
 function release(overrides: Partial<Release> = {}): Release {
   return {
@@ -251,5 +283,12 @@ describe("date formatting", () => {
 
   it("passes a malformed key through instead of inventing a month", () => {
     expect(formatMonth("garbage", "en")).toBe("garbage")
+  })
+})
+
+describe("monthAnchor", () => {
+  it("derives a stable id from the month key", () => {
+    expect(monthAnchor("2026-07")).toBe("month-2026-07")
+    expect(monthAnchor("undated")).toBe("month-undated")
   })
 })

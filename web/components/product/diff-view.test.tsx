@@ -78,4 +78,17 @@ describe("DiffView", () => {
     const { container } = renderDiff({ className: "my-class" })
     expect(container.querySelector(".my-class")).toBeInTheDocument()
   })
+
+  it("staggers the lines' arrival only when asked, in document order", () => {
+    const { container } = renderDiff({ reveal: true })
+    const delays = [...container.querySelectorAll("[data-reveal-line]")].map(
+      (line) => (line as HTMLElement).style.animationDelay
+    )
+    expect(delays).toEqual(["0ms", "90ms", "180ms"])
+  })
+
+  it("arrives all at once by default", () => {
+    const { container } = renderDiff()
+    expect(container.querySelector("[data-reveal-line]")).toBeNull()
+  })
 })

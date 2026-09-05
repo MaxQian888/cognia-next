@@ -11,6 +11,12 @@
  * `.tsx` file must come from here.
  */
 
+// Type-only imports, erased at build: the copy names a bespoke mark and a
+// build-time figure by key, and both keys are owned by the module that draws
+// or counts them, so a rename there is a typecheck failure here.
+import type { GlyphName } from "@web/components/glyph"
+import type { InventoryKey } from "@web/lib/evidence"
+
 /** Per-route `<title>` / `<meta name="description">`. */
 export interface RouteMeta {
   title: string
@@ -349,19 +355,98 @@ export interface FinalCtaCopy {
   changesSuffix: string
 }
 
-/** The eight homepage section ids, in document order. */
+/** The ten homepage section ids, in document order. */
 export const HOME_SECTIONS = [
   "hero",
   "task",
   "workbench",
   "desktop",
+  "entries",
   "run",
   "connections",
+  "system",
   "trust",
   "start",
 ] as const
 
 export type HomeSectionId = (typeof HOME_SECTIONS)[number]
+
+/* -------------------------------------------------------------------------- */
+/* Entry points: one task moving between devices                              */
+/* -------------------------------------------------------------------------- */
+
+/** The surfaces that reach one workspace, in the order the handoff visits them. */
+export type EntryPointKey = "desktop" | "mobile" | "im" | "cli" | "browser"
+
+export interface EntryPointStation {
+  key: EntryPointKey
+  name: string
+  /** What this surface does with the task: runs it, approves it, receives it. */
+  role: string
+  body: string
+}
+
+/**
+ * Labels inside the five miniature reconstructions. Values (repository,
+ * branch, the checkpoint's command, the diff figures) come from `DEMO_TASK`
+ * and the approval sheet reuses `ReconstructionCopy.artifacts.approval`.
+ */
+export interface EntryPointFramesCopy {
+  desktop: { threadLabel: string; stateLabel: string }
+  mobile: { heading: string }
+  im: { sender: string; heading: string; filesLabel: string; notesLabel: string; replyHint: string }
+  cli: { comment: string }
+  browser: { heading: string; pageTitle: string; captureLabel: string; shortcutLabel: string }
+}
+
+export interface EntryPointsCopy {
+  eyebrow: string
+  title: string
+  subtitle: string
+  /** One sentence for assistive technology describing the whole sequence. */
+  sequenceLabel: string
+  stations: EntryPointStation[]
+  frames: EntryPointFramesCopy
+  channelsLabel: string
+  /** Chat platforms with an adapter under `lib/connectors/adapters/`. */
+  channels: string[]
+  note: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Capability panorama                                                        */
+/* -------------------------------------------------------------------------- */
+
+export type PanoramaLaneKey = "work" | "remember" | "reach" | "control"
+
+export interface PanoramaItem {
+  /** The bespoke mark for this subsystem, from `components/glyph.tsx`. */
+  glyph: GlyphName
+  name: string
+  body: string
+  /** Site route, when a page on this site covers it. */
+  route?: string
+  /** Docs path, when the documentation is the better next step. */
+  docsPath?: string
+}
+
+export interface PanoramaLane {
+  key: PanoramaLaneKey
+  label: string
+  claim: string
+  items: PanoramaItem[]
+}
+
+export interface PanoramaCopy {
+  eyebrow: string
+  title: string
+  subtitle: string
+  figuresLabel: string
+  /** One label per build-time figure, keyed by `InventoryKey`. */
+  figures: Record<InventoryKey, string>
+  figuresNote: string
+  lanes: PanoramaLane[]
+}
 
 /* -------------------------------------------------------------------------- */
 /* Magic UI composition copy                                                   */
@@ -405,8 +490,12 @@ export interface HomeCopy {
   signature: SignatureCopy
   workbench: WorkbenchCopy
   desktop: DesktopCopy
+  /** One task moving between the desktop, a phone, chat, a terminal and the browser. */
+  entryPoints: EntryPointsCopy
   run: RunCopy
   connections: ConnectionsCopy
+  /** The whole instrument: build-time figures and every subsystem by lane. */
+  panorama: PanoramaCopy
   trust: TrustCopy
   finalCta: FinalCtaCopy
   /**
@@ -496,7 +585,7 @@ export interface WorkflowsPageCopy {
   header: PageHeader
   sections: CapabilitySection[]
   flow: SystemFlowCopy
-  guarantees: { title: string; items: string[] }
+  guarantees: RunnerGuaranteesCopy
 }
 
 export interface PluginsPageCopy {
@@ -569,6 +658,11 @@ export interface ChangelogPageCopy {
   distributionLabel: string
   /** Accessible name for the sticky month rail. */
   monthIndexLabel: string
+  /** Toggle on a folded entry. */
+  expandEntry: string
+  collapseEntry: string
+  /** Button under a month showing only its first page of entries. `{count}` is the remainder. */
+  showMoreEntries: string
 }
 
 /* -------------------------------------------------------------------------- */
@@ -590,7 +684,71 @@ export interface ReconstructionCopy {
   note: string
   workbench: WorkbenchShellCopy
   desktop: DesktopShellCopy
+  workflow: WorkflowShellCopy
+  plugin: PluginShellCopy
   artifacts: TaskArtifactsCopy
+}
+
+/**
+ * The workflow editor and its run ledger, rebuilt for the /workflows page.
+ * Node titles come from the plan the signature task already carries, so the
+ * graph is the same work the rest of the site follows, made repeatable.
+ */
+export interface WorkflowShellCopy {
+  graphLabel: string
+  /** The node that starts the graph when nobody is typing. */
+  triggerLabel: string
+  triggerName: string
+  runsLabel: string
+  /** Column headings of the run ledger. */
+  runHeadings: { step: string; tool: string; state: string }
+  /** Tag on the back-edge the live graph draws and refuses (validation rejects every cycle). */
+  cycleRejectedLabel: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Runner guarantees, demonstrated                                            */
+/* -------------------------------------------------------------------------- */
+
+export type NodeDemoState = "succeeded" | "failed" | "skipped" | "pending"
+
+export interface RunnerGuaranteeDemosCopy {
+  /** Eyebrow over the demonstration column. */
+  label: string
+  /** One execution path: the ways a run can start, all reaching one runner. */
+  triggers: string[]
+  runnerLabel: string
+  recordLabel: string
+  /** Cycles rejected on save: three node names and the tag the back-edge gets. */
+  cycle: { nodes: string[]; attemptLabel: string; rejectedLabel: string }
+  /** Depth bound: labels around the nesting counter (`workflowLabel` is the unit word). The limit itself is code. */
+  depth: { label: string; limitLabel: string; workflowLabel: string }
+  /** Every node recorded: a run in which one node fails and the rest never run. */
+  states: {
+    label: string
+    items: Array<{ name: string; state: NodeDemoState }>
+    stateLabels: Record<NodeDemoState, string>
+  }
+}
+
+export interface RunnerGuaranteesCopy {
+  title: string
+  items: string[]
+  demos: RunnerGuaranteeDemosCopy
+}
+
+/**
+ * A plugin's declaration, rebuilt for the /plugins page from a manifest that
+ * ships in the repository (`plugins/web-tools/plugin.json`).
+ */
+export interface PluginShellCopy {
+  manifestLabel: string
+  capabilitiesLabel: string
+  permissionsLabel: string
+  /** Heading over the call the runtime refused. */
+  deniedLabel: string
+  deniedNote: string
+  grantedLabel: string
 }
 
 export interface WorkbenchShellCopy {

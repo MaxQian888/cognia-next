@@ -281,6 +281,113 @@ gate 47 exists to do: every reconstruction is labelled in its own title bar, `Pr
 the "not a screenshot" note in the figure caption, and a real capture still wins the moment one
 exists. Gate 47 continues to apply everywhere else on the site.
 
+## Amendment, 2026-09-05 — the stage bookends, a live hero, and grids that close
+
+Four changes, recorded so the next redesign starts from the reasons rather than the pixels. The
+review that produced them is a set of full-page captures of every route at 1440 and 390 wide, in
+both themes; the defects named below are what those captures showed.
+
+### A. The hero is the execution stage, and the workbench on it is live
+
+The first screen was the paper brand layer with the product stage pushed below the fold. It is now
+the dark stage itself: headline and actions on the left, and on the right the same
+`WorkbenchReconstruction` that `ProductStage` renders, driven forward through five phases once the
+page is interactive (request, reply typed, tool call, diff landing, `Waiting for approval`). The
+sequence runs **once** and halts on the approval checkpoint, which is spec §6.1's narrative beat;
+a loop would undo it every few seconds.
+
+Three renders, each complete: the server paint shows the opening state with the request visible,
+reduced motion shows the finished state immediately, everything else runs the sequence. The
+depicted interface stays `aria-hidden` behind one `role="img"` exactly as §8 prescribes.
+
+The mechanism is `.stage-scope` in `globals.css`: a class that remaps the reading tokens (`ink`,
+`paper`, `surface`, `muted`, the hairlines, the four state colours) onto their stage counterparts
+for everything inside it. The hero and the closing call to action are written in the ordinary
+vocabulary and become stage surfaces by scope, so there is still one button, one rail, one
+reconstruction. This is the same move `.signature-stage` already made in the other direction.
+
+The hover lens moved from the hero to the desktop section: a magnifier over a surface that is
+animating itself is two motions fighting.
+
+### B. The section rhythm steps down one rung
+
+`tight` / `normal` / `open` were 80 / 160 / 224 on desktop. Stacked on the sections' own inner
+margins, the default produced 400–500px of empty paper between blocks, and on the sub-pages the
+opening block's ruled ground read as the page having stalled. The scale is now 80 / 112 / 160 with
+the same alternation, and the first capability section uses `normal` rather than `open`.
+
+### C. Gapless grids fill their open cells with a reconstruction
+
+`CapabilityGrid` paints its hairline track wherever there is no cell, so a section with two or four
+entries showed a grey slab where the third and sixth would be (Workflows: Build and Run; Plugins:
+what a plugin contributes). The grid now takes an `aside` that spans exactly the remainder at each
+breakpoint, and the sections supply a labelled reconstruction of the surface they are about: the
+workflow graph, the run ledger, and a plugin manifest read verbatim from
+`plugins/web-tools/plugin.json` (a test pins the fixture to the file). This is §8's amendment
+applied to a second place: a reconstruction that says it is one, never an empty frame.
+
+The Workflows, Plugins and Trust sections also gain anchor ids, which gives their page headers the
+"On this page" index the Product page already had.
+
+### D. The changelog is a folded, paged feed with its index rendered
+
+586 unreleased entries printed in full, with their Markdown markers literal, made the page
+183,000px tall. Entries now render through a small parser that knows only the constructs the
+entries use (`lib/markdown-inline.ts`) and refuses the rest as text; long bodies open folded to
+their first block; months are `<details>` with twenty entries a page; and the bump-distribution
+bar and month index that the copy had declared for months are finally rendered.
+
+### E. Bounded evidence fetches
+
+`build-evidence.mjs` runs as `predev`, and its GitHub calls had no deadline: on a machine with no
+route to `api.github.com`, `pnpm web:dev` never started. The calls now abort after fifteen
+seconds and fall through to the existing keep-the-previous-snapshot policy.
+
+### F. Two more homepage sections: entry points and the whole instrument
+
+The homepage argued for one workbench and never said where else it could be reached, or how
+much of it there was. Two sections fill that, and the section order is now ten: hero, task,
+workbench, desktop, **entry points**, run, connections, **the instrument**, trust, close.
+
+*Entry points* puts five surfaces on one rail: the desktop runs the task, the paired phone
+approves the checkpoint, a chat platform receives the result, the terminal resumes the
+session, the browser companion adds a page. A marker travels the rail once and each station's
+rule lights as it arrives, driven by the same one-shot `useScriptedPhases` the hero uses.
+Every station holds a labelled miniature reconstruction of the same demo task. The two
+commands shown are quoted from the modules that define them (`cognia-agent chat --continue`
+from `cli/src/cli/args.ts`, the capture shortcut from `browser-extension/wxt.config.ts`) and the
+chat platform list is pinned by test to the adapter directories under
+`lib/connectors/adapters/`.
+
+*The whole instrument* shows figures counted from the checkout at build time and places every
+subsystem on one of four lanes that follow the page's spine: work, remember, reach, control.
+`web/scripts/build-inventory.mjs` counts in-tree plugins, chat adapters, workflow node kinds,
+Rust crates, workspace packages, numbered ADRs and test files, and writes them into
+`evidence.json` beside the network figures. They are directory listings, not KPIs, and a zero
+renders as a dash because zero means the count did not run.
+
+### G. Texture, bespoke marks and index tags
+
+Three additions to the visual system, each within the No AI Gradient Rule: a monochrome grain
+film and a masked dot lattice for sections that hold an instrument, a registry of bespoke
+1-unit-stroke marks (`components/glyph.tsx`) that name subsystems and can draw their stroke on
+entry, and a zero-padded index tag with a tick rule on every homepage section heading. The
+rules for each are in `web/DESIGN.md`.
+
+### H. The workflows page demonstrates instead of listing
+
+Four surfaces on `/workflows` now play once when they reach the viewport, all through one hook
+(`useScene`: hydrated, on screen, motion permitted, which phase). The Build graph lands one node
+per plan step and then draws a back-edge that is tagged as rejected, because validation refuses
+every cycle on save. The Run ledger plays the four steps from not started to the fixture's
+states. The event-to-evidence rail sends a marker across its four boundaries. And the closing
+"What the runner guarantees" list became `RunnerGuarantees`: each of the four sentences sits
+beside a miniature of the property it states, five triggers reaching one runner, a refused
+cycle, a nesting counter stopping at `MAX_SUBWORKFLOW_DEPTH` (pinned by test to
+`executor-support.ts`), and a run whose failed node leaves the rest recorded as skipped. Every
+demonstration ends on its static picture, which is also what reduced motion renders, and every
+picture is hidden from assistive technology behind the sentence it illustrates.
+
 ## Consequences
 
 **Positive.** The website can iterate without rebuilding MDX collections or touching documented

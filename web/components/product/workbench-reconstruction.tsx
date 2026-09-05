@@ -1,27 +1,64 @@
 import { AppFrame, PaneHeading } from "@web/components/product/app-frame"
 import { DiffView } from "@web/components/product/diff-view"
+import { TypingAnimation } from "@web/components/ui/terminal"
 import { DEMO_TASK } from "@web/content/demo-task"
 import type { ReconstructionCopy } from "@web/content/types"
 
+/**
+ * The states the thread passes through when it is shown building itself up.
+ *
+ *  0  the request
+ *  1  the agent's reply, typed when live
+ *  2  the tool call it made
+ *  3  the diff landing in the dock
+ *  4  work paused on `Waiting for approval`
+ *
+ * `WORKBENCH_COMPLETE` is the default: a static rendering shows the finished
+ * state, which is also what reduced motion gets.
+ */
+export const WORKBENCH_PHASES = ["request", "reply", "tool", "diff", "approval"] as const
+export const WORKBENCH_COMPLETE = WORKBENCH_PHASES.length - 1
+
 interface WorkbenchReconstructionProps {
   copy: ReconstructionCopy
+  /** How far the thread has got. Defaults to the finished state. */
+  phase?: number
+  /**
+   * Types the agent's reply and lets each later turn fade in. Only meaningful while
+   * `phase` is being driven forward by a caller. Never set under reduced
+   * motion: the caller decides that, so this component stays free of the
+   * motion hook and renderable on the server.
+   */
+  live?: boolean
   className?: string
 }
 
+/** Fade-through for a turn arriving in the live thread. */
+const ARRIVE = "animate-[fade-through_320ms_ease-out_both]"
+
 /**
- * The Cognia workbench, rebuilt in DOM (ADR-0092 §8, amended).
+ * The Cognia workbench, rebuilt in DOM (ADR-0092 8, amended).
  *
  * Three regions, in the shipping arrangement: the activity rail, the thread that
  * carries the task, and the workspace dock holding what the task produced. The
  * chrome sits on the light product surface and the diff sits on the graphite
- * execution substrate — the light-reading / dark-execution split the spec asks
- * for (§2.1), inside one frame rather than across two sections.
+ * execution substrate, the light-reading / dark-execution split the spec asks
+ * for (2.1), inside one frame rather than across two sections.
  *
- * It stops on `Waiting for approval` (spec §6.1) because that is the state the
+ * It stops on `Waiting for approval` (spec 6.1) because that is the state the
  * page argues about: work paused on a human decision, not a spinner.
+ *
+ * Inside a `.stage-scope` region the same markup renders on the dark stage,
+ * because the scope remaps the reading tokens this component is written in.
  */
-export function WorkbenchReconstruction({ copy, className }: WorkbenchReconstructionProps) {
+export function WorkbenchReconstruction({
+  copy,
+  phase = WORKBENCH_COMPLETE,
+  live = false,
+  className,
+}: WorkbenchReconstructionProps) {
   const { workbench } = copy
+  const reached = (step: number) => phase >= step
 
   return (
     <AppFrame
@@ -30,7 +67,7 @@ export function WorkbenchReconstruction({ copy, className }: WorkbenchReconstruc
       label={copy.label}
       className={className}
     >
-      {/* The stage runs near full width (spec §4.1), so it needs height to read
+      {/* The stage runs near full width (spec 4.1), so it needs height to read
        * as a workspace rather than as a letterboxed strip. */}
       <div className="grid lg:min-h-96 lg:grid-cols-[7rem_minmax(0,1fr)_minmax(0,22rem)]">
         {/* Activity rail. Horizontal on narrow widths, where a vertical rail
@@ -68,29 +105,77 @@ export function WorkbenchReconstruction({ copy, className }: WorkbenchReconstruc
             <p className="text-sm leading-relaxed text-ink">{workbench.userTurn}</p>
           </div>
 
-          <div className="border-l-2 border-action pl-4">
-            <PaneHeading className="mb-1.5">{workbench.agentLabel}</PaneHeading>
-            <p className="text-sm leading-relaxed text-muted">{workbench.agentTurn}</p>
-          </div>
+          {/* The reply is the one turn that is typed: it is the agent's, and
+           * watching it arrive is what "an agent working in here" looks like.
+           * The request above is never typed, so the server render already
+           * carries the task statement. */}
+          {reached(1) ? (
+            <div
+              data-phase="reply"
+              className={`border-l-2 border-action pl-4 ${live ? ARRIVE : ""}`}
+            >
+              <PaneHeading className="mb-1.5">{workbench.agentLabel}</PaneHeading>
+              {live ? (
+                <TypingAnimation
+                  as="p"
+                  duration={14}
+                  startOnView={false}
+                  className="min-h-[3lh] text-sm leading-relaxed tracking-normal text-muted"
+                >
+                  {workbench.agentTurn}
+                </TypingAnimation>
+              ) : (
+                <p className="text-sm leading-relaxed text-muted">{workbench.agentTurn}</p>
+              )}
+            </div>
+          ) : null}
 
           {/* Tool call: the one place cyan means "this ran". */}
-          <div className="flex items-center gap-3 rounded-control border border-hairline bg-paper px-3 py-2.5">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-action" />
-            <p className="font-mono text-[10px] uppercase tracking-widest text-ink">
-              {workbench.toolCallLabel}
-            </p>
-            <p className="ml-auto truncate font-mono text-[10px] text-muted">
-              {workbench.toolCallDetail}
-            </p>
-          </div>
+          {reached(2) ? (
+            <div
+              data-phase="tool"
+              className={`flex items-center gap-3 rounded-control border border-hairline bg-paper px-3 py-2.5 ${
+                live ? ARRIVE : ""
+              }`}
+            >
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-action" />
+              <p className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-widest text-ink">
+                {workbench.toolCallLabel}
+              </p>
+              <p className="ml-auto truncate font-mono text-[10px] text-muted">
+                {workbench.toolCallDetail}
+              </p>
+            </div>
+          ) : null}
 
-          <div className="mt-auto flex items-center gap-2 border-t border-hairline pt-4">
-            <span aria-hidden className="font-mono text-xs text-approval">
-              !
-            </span>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-approval">
-              {workbench.statusLine}
-            </p>
+          <div className="mt-auto flex min-h-9 items-center gap-2 border-t border-hairline pt-4">
+            {reached(4) ? (
+              <>
+                <span
+                  aria-hidden
+                  data-phase="approval"
+                  className={`font-mono text-xs text-approval ${live ? ARRIVE : ""}`}
+                >
+                  !
+                </span>
+                <p
+                  className={`font-mono text-[10px] uppercase tracking-widest text-approval ${
+                    live ? ARRIVE : ""
+                  }`}
+                >
+                  {workbench.statusLine}
+                </p>
+              </>
+            ) : (
+              /* Before the checkpoint the thread is still working. Three
+               * stations in the stage hairline, no words: an unlabelled state
+               * here would be a claim the sequence has not reached. */
+              <span aria-hidden className="flex items-center gap-1">
+                <span className="size-1 rounded-full bg-hairline-strong" />
+                <span className="size-1 rounded-full bg-hairline-strong" />
+                <span className="size-1 rounded-full bg-hairline-strong" />
+              </span>
+            )}
           </div>
         </div>
 
@@ -118,10 +203,11 @@ export function WorkbenchReconstruction({ copy, className }: WorkbenchReconstruc
           <DiffView
             path={DEMO_TASK.diff.path}
             hunk={DEMO_TASK.diff.hunk}
-            lines={DEMO_TASK.diff.lines}
+            lines={reached(3) ? DEMO_TASK.diff.lines : []}
             label={copy.artifacts.diff.heading}
             limit={8}
             showHunk={false}
+            reveal={live}
             className="flex-1"
           />
         </div>

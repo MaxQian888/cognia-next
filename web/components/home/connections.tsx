@@ -11,6 +11,8 @@ import { cn } from "@web/lib/utils"
 import { ConnectionFlow } from "./connection-flow"
 
 interface ConnectionsProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: ConnectionsCopy
   flowCopy?: ConnectionFlowCopy
 }
@@ -25,7 +27,7 @@ interface ConnectionsProps {
  * The full provider, MCP, plugin and connector catalogs stay in the
  * documentation; a homepage that lists them goes stale the week it ships.
  */
-export function Connections({ copy, flowCopy }: ConnectionsProps) {
+export function Connections({ copy, flowCopy, index }: ConnectionsProps) {
   const terms = [copy.headings.reads, copy.headings.canAct, copy.headings.requiresApproval]
   const [activeReceipt, setActiveReceipt] = useState<number | null>(null)
   const receiptColumns = copy.items
@@ -34,8 +36,13 @@ export function Connections({ copy, flowCopy }: ConnectionsProps) {
   const receiptStyle = { "--receipt-columns": receiptColumns } as CSSProperties
 
   return (
-    <Section id="connections" tone="surface" density="open">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+    <Section id="connections" tone="surface">
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
       {flowCopy ? (
         <Reveal className="mt-14">

@@ -46,6 +46,11 @@ describe("ConnectionFlow", () => {
     expect(container.querySelectorAll('[data-slot="animated-beam"]')).toHaveLength(5)
   })
 
+  it("bounds the diagram's width so no path stretches to the shell edge", () => {
+    render(<ConnectionFlow copy={copy} nodeLabels={nodeLabels} approvalLabel="Approval" />)
+    expect(screen.getByRole("group", { name: copy.label })).toHaveClass("max-w-5xl")
+  })
+
   it("has an accessible label on the interactive flow", () => {
     render(<ConnectionFlow copy={copy} nodeLabels={nodeLabels} />)
     expect(

@@ -1,10 +1,24 @@
+import { Icon, type IconName } from "@web/components/icon"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
 import type { RunCopy } from "@web/content/types"
 import type { Locale } from "@web/lib/locale"
 
+/**
+ * One mark per strategy, keyed by the strategy id the copy already carries.
+ * Presentation, not content, so it lives here rather than in `SiteCopy`.
+ */
+const STRATEGY_ICON: Record<string, IconName> = {
+  local: "laptop",
+  byok: "approval",
+  subscription: "model",
+  fallback: "workflow",
+}
+
 interface RunMatrixProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: RunCopy
   learnMore: string
   locale: Locale
@@ -23,7 +37,7 @@ interface RunMatrixProps {
  * Rendered as a real table so the row/column relationships survive a screen
  * reader; on narrow viewports the same data becomes stacked definition blocks.
  */
-export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProps) {
+export function RunMatrix({ copy, learnMore, locale, docsOrigin, index }: RunMatrixProps) {
   const headings = [
     copy.headings.leaves,
     copy.headings.receives,
@@ -33,17 +47,26 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProp
 
   return (
     <Section id="run" tone="paper">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
-      {/* Desktop: one table. */}
+      {/* Desktop: one table, drawn as a matrix of bounded cells rather than
+       * ruled prose. Every cell has its own boundary, so the eye reads across a
+       * row and down a column equally, which is what a boundary comparison is
+       * for. Still a real `<table>`: the row and column relationships have to
+       * survive a screen reader. */}
       <Reveal className="mt-14 hidden lg:block">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
+          <table className="w-full border-separate border-spacing-px bg-hairline text-left [border:1px_solid_var(--hairline)]">
             <thead>
-              <tr className="border-b border-hairline-strong">
+              <tr>
                 <th
                   scope="col"
-                  className="py-3 pr-6 font-mono text-xs uppercase tracking-widest text-muted"
+                  className="bg-surface px-5 py-3.5 font-mono text-xs uppercase tracking-widest text-muted"
                 >
                   {copy.headings.strategy}
                 </th>
@@ -51,7 +74,7 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProp
                   <th
                     key={heading}
                     scope="col"
-                    className="py-3 pr-6 font-mono text-xs uppercase tracking-widest text-muted"
+                    className="bg-surface px-5 py-3.5 font-mono text-xs uppercase tracking-widest text-muted"
                   >
                     {heading}
                   </th>
@@ -60,9 +83,17 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProp
             </thead>
             <tbody>
               {copy.strategies.map((strategy) => (
-                <tr key={strategy.key} className="border-b border-hairline align-top">
-                  <th scope="row" className="py-6 pr-6 font-medium text-ink">
-                    {strategy.name}
+                <tr key={strategy.key} className="group align-top">
+                  <th
+                    scope="row"
+                    className="bg-paper px-5 py-6 font-medium text-ink transition-colors group-hover:bg-surface"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      {STRATEGY_ICON[strategy.key] ? (
+                        <Icon name={STRATEGY_ICON[strategy.key]} size={16} className="text-muted" />
+                      ) : null}
+                      {strategy.name}
+                    </span>
                     <span className="mt-2 block max-w-56 text-sm font-normal leading-relaxed text-muted">
                       {strategy.summary}
                     </span>
@@ -73,14 +104,16 @@ export function RunMatrix({ copy, learnMore, locale, docsOrigin }: RunMatrixProp
                       className="mt-3 inline-block font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4"
                     />
                   </th>
-                  <td className="py-6 pr-6 text-sm leading-relaxed text-muted">
-                    {strategy.leaves}
-                  </td>
-                  <td className="py-6 pr-6 text-sm leading-relaxed text-muted">
-                    {strategy.receives}
-                  </td>
-                  <td className="py-6 pr-6 text-sm leading-relaxed text-muted">{strategy.tools}</td>
-                  <td className="py-6 text-sm leading-relaxed text-muted">{strategy.approval}</td>
+                  {[strategy.leaves, strategy.receives, strategy.tools, strategy.approval].map(
+                    (answer, index) => (
+                      <td
+                        key={index}
+                        className="bg-paper px-5 py-6 text-sm leading-relaxed text-ink transition-colors group-hover:bg-surface"
+                      >
+                        {answer}
+                      </td>
+                    )
+                  )}
                 </tr>
               ))}
             </tbody>

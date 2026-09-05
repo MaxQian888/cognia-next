@@ -3,7 +3,7 @@ import { DownloadCta } from "@web/components/download-cta"
 import { Hairline } from "@web/components/hairline"
 import { Icon, type IconName } from "@web/components/icon"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
-import { Section } from "@web/components/section"
+import { Section, formatIndex } from "@web/components/section"
 import { SiteLink } from "@web/components/site-link"
 import type { FinalCtaRowKey, SiteCopy } from "@web/content/types"
 import type { Evidence, ReleaseState } from "@web/lib/evidence"
@@ -15,6 +15,8 @@ interface FinalCtaProps {
   releaseState: ReleaseState
   evidence: Evidence
   docsOrigin?: string
+  /** One-based position on the page, rendered as the eyebrow's index tag. */
+  index?: number
 }
 
 const ROW_ICON: Record<FinalCtaRowKey, IconName> = {
@@ -39,8 +41,20 @@ const ROW_ICON: Record<FinalCtaRowKey, IconName> = {
  * claim. A testimonial strip, a logo wall or a table of what a future release
  * *will* contain would all fill the same space and are all banned by spec §9;
  * this is the honest version.
+ *
+ * On the stage, like the hero: the page opens and closes on the execution
+ * surface, with the paper argument between them. `stage-scope` remaps the
+ * reading tokens so the same `DownloadCta`, rows and hairline render here
+ * unchanged.
  */
-export function FinalCta({ locale, copy, releaseState, evidence, docsOrigin }: FinalCtaProps) {
+export function FinalCta({
+  locale,
+  copy,
+  releaseState,
+  evidence,
+  docsOrigin,
+  index,
+}: FinalCtaProps) {
   const { finalCta } = copy.home
 
   const values: Record<FinalCtaRowKey, { value: string | number; suffix?: string }> = {
@@ -62,12 +76,21 @@ export function FinalCta({ locale, copy, releaseState, evidence, docsOrigin }: F
   }
 
   return (
-    <Section id="start" tone="paper" density="open">
+    <Section id="start" tone="stage" density="open" className="stage-scope overflow-hidden">
+      <div aria-hidden className="stage-grid pointer-events-none absolute inset-0 opacity-60" />
       <Hairline />
       <div className="pt-14 lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
         <div>
-          <p className="font-mono text-xs uppercase tracking-widest text-muted">
-            {finalCta.eyebrow}
+          <p className="flex items-center gap-3 font-mono text-xs uppercase tracking-widest text-muted">
+            {index !== undefined ? (
+              <span
+                data-slot="section-index"
+                className="index-tick flex items-center gap-3 tabular-nums text-ink"
+              >
+                {formatIndex(index)}
+              </span>
+            ) : null}
+            <span>{finalCta.eyebrow}</span>
           </p>
           <h2 className="mt-6 max-w-3xl text-balance text-3xl font-medium leading-tight tracking-tight text-ink md:text-4xl lg:text-5xl">
             {finalCta.title}

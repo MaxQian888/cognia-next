@@ -33,8 +33,17 @@ interface DiffViewProps {
    * ellipsise into nothing.
    */
   showHunk?: boolean
+  /**
+   * Lets the lines arrive one after another instead of all at once. Used by
+   * the live hero, where the diff is the moment the change lands. Time-driven
+   * CSS, so the reduced-motion belt collapses it to the finished state.
+   */
+  reveal?: boolean
   className?: string
 }
+
+/** Per-line offset of the staggered arrival, in milliseconds. */
+export const REVEAL_STAGGER_MS = 90
 
 /**
  * A unified diff on the graphite execution substrate (spec §2.1 — diffs, logs
@@ -53,6 +62,7 @@ export function DiffView({
   label,
   limit,
   showHunk = true,
+  reveal = false,
   className,
 }: DiffViewProps) {
   const shown = limit ? lines.slice(0, limit) : lines
@@ -70,7 +80,11 @@ export function DiffView({
         {shown.map((line, index) => (
           <li
             key={`${line.kind}-${index}-${line.text}`}
-            className={`flex gap-3 px-4 font-mono text-[11px] leading-5 md:text-xs ${LINE_CLASS[line.kind]}`}
+            data-reveal-line={reveal ? "" : undefined}
+            style={reveal ? { animationDelay: `${index * REVEAL_STAGGER_MS}ms` } : undefined}
+            className={`flex gap-3 px-4 font-mono text-[11px] leading-5 md:text-xs ${LINE_CLASS[line.kind]} ${
+              reveal ? "animate-[fade-through_320ms_ease-out_both]" : ""
+            }`}
           >
             <span aria-hidden className={`w-2 shrink-0 ${MARK_CLASS[line.kind]}`}>
               {MARK[line.kind]}

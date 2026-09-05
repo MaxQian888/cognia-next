@@ -1,11 +1,13 @@
-import { Hairline } from "@web/components/hairline"
 import { Reveal } from "@web/components/reveal"
 import { Section, SectionHeading } from "@web/components/section"
 import { BentoGrid } from "@web/components/ui/bento-grid"
+import type { CSSProperties } from "react"
 import { DEMO_TASK } from "@web/content/demo-task"
 import type { CommonCopy, ReconstructionCopy, WorkbenchCopy } from "@web/content/types"
 
 interface WorkbenchBentoProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: WorkbenchCopy
   common: CommonCopy
   reconstruction: ReconstructionCopy
@@ -39,38 +41,46 @@ function Detail({ lines, tone = "muted" }: { lines: string[]; tone?: "muted" | "
  * write one working context is visible in the panels instead of only asserted
  * above them.
  *
- * The context path is a cyan rule across the grid with a station dot on each
- * region. It is decorative — the borders and the copy carry the meaning — so it
- * is hidden from assistive technology and described by one screen-reader
+ * The context path is drawn as a sequence, not a line: each region carries a
+ * station dot, and its top rule lights in cyan one after another in the order
+ * the task reaches them. A single rule across the grid's middle used to carry
+ * this and ran straight through the text of the Knowledge and Plugins cells.
+ * The path is decorative, the borders and the copy carry the meaning, so it is
+ * hidden from assistive technology and described by one screen-reader
  * sentence instead.
  */
-export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoProps) {
+
+/** Per-region delay of the lighting sequence, in milliseconds. */
+const STATION_STEP_MS = 180
+export function WorkbenchBento({ copy, common, reconstruction, index }: WorkbenchBentoProps) {
   const [task, chat, artifact, workflow, knowledge, plugins] = copy.panels
   const { workbench, artifacts } = reconstruction
   const tools = DEMO_TASK.plan.map((step) => step.tool)
 
-  const cell = "relative bg-surface p-6 md:p-8 flex flex-col min-h-40 lg:min-h-48 min-w-0"
+  const cell =
+    "station-lit relative bg-surface p-6 md:p-8 flex flex-col min-h-40 lg:min-h-48 min-w-0"
   const label = "flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-muted"
   const body = "mt-4 text-sm leading-relaxed text-ink"
   const station = <span aria-hidden className="size-1 shrink-0 rounded-full bg-action" />
+  /** The order the task reaches each region: chat, task, workflow, knowledge, plugins, artifact. */
+  const at = (order: number) =>
+    ({ "--station-delay": `${order * STATION_STEP_MS}ms` }) as CSSProperties
 
   return (
-    <Section id="workbench" tone="paper" density="open">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+    <Section id="workbench" tone="paper">
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
       <Reveal className="mt-14">
         <div className="relative border-y border-hairline">
           <span className="sr-only">{common.contextPathLabel}</span>
-          {/* Drawn, not painted. A cyan rule threading six regions is the one
-           * place on the page where the motion *is* the argument — the shared
-           * context arriving across the workbench — so it earns the Draw
-           * vocabulary rather than sitting there as a static line. */}
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 hidden lg:block">
-            <Hairline tone="action" className="opacity-60" />
-          </div>
 
           <BentoGrid className="lg:grid-cols-4">
-            <div className={cell}>
+            <div className={cell} style={at(0)}>
               <p className={label}>
                 {station}
                 {chat.label}
@@ -83,7 +93,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
 
             {/* The hub. On `paper` rather than `surface` so the region the others
              * feed reads as the centre without a shadow or a border of its own. */}
-            <div className={`${cell} bg-paper lg:col-span-2 lg:row-span-2`}>
+            <div className={`${cell} bg-paper lg:col-span-2 lg:row-span-2`} style={at(1)}>
               <p className={label}>
                 {station}
                 {task.label}
@@ -104,7 +114,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
               </ul>
             </div>
 
-            <div className={cell}>
+            <div className={cell} style={at(2)}>
               <p className={label}>
                 {station}
                 {workflow.label}
@@ -113,7 +123,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
               <Detail lines={[tools.join(" → ")]} />
             </div>
 
-            <div className={cell}>
+            <div className={cell} style={at(3)}>
               <p className={label}>
                 {station}
                 {knowledge.label}
@@ -122,7 +132,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
               <Detail lines={DEMO_TASK.files.map((file) => file.path)} />
             </div>
 
-            <div className={cell}>
+            <div className={cell} style={at(4)}>
               <p className={label}>
                 {station}
                 {plugins.label}
@@ -131,7 +141,7 @@ export function WorkbenchBento({ copy, common, reconstruction }: WorkbenchBentoP
               <Detail lines={[DEMO_TASK.approval.command, DEMO_TASK.test.command]} />
             </div>
 
-            <div className={`${cell} lg:col-span-4`}>
+            <div className={`${cell} lg:col-span-4`} style={at(5)}>
               <p className={label}>
                 {station}
                 {artifact.label}

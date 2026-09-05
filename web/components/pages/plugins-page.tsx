@@ -31,6 +31,7 @@ export function PluginsPage({ locale }: { locale: Locale }) {
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}
+        reconstruction={copy.reconstruction}
       />
       <SystemFlow
         copy={copy.plugins.flow}

@@ -1,82 +1,86 @@
 import { DownloadCta } from "@web/components/download-cta"
 import { Icon, type IconName } from "@web/components/icon"
-import { ProductStage } from "@web/components/product-stage"
 import { Reveal } from "@web/components/reveal"
+import { formatIndex } from "@web/components/section"
 import { RevealGroup, RevealItem } from "@web/components/reveal-group"
 import { HeroTaskTicket } from "@web/components/home/hero-task-ticket"
-import { InteractiveGridPattern } from "@web/components/ui/interactive-grid-pattern"
+import { HeroWorkbench } from "@web/components/home/hero-workbench"
 import type { SiteCopy } from "@web/content/types"
 import type { ReleaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
-import { StageLens } from "./stage-lens"
 
 interface HeroProps {
   locale: Locale
   copy: SiteCopy
   releaseState: ReleaseState
   docsOrigin?: string
+  /** One-based position on the page, rendered as the eyebrow's index tag. */
+  index?: number
 }
 
 /**
- * Hero (spec §4.1) — Editorial Split.
- *
- * The upper band is the bone-white brand layer; the lower band is a
- * near-full-width product stage. Deliberately *not* the conventional
- * text-left / screenshot-right arrangement, which shrinks the product to a
- * thumbnail.
- *
- * The trust rail is a structured index — four hairline-separated cells with a
- * label and a qualifying detail — rather than a row of pill badges, because a
- * badge asserts without saying anything.
- */
-/**
- * One mark per trust-rail cell, by position — the rail is a fixed four, and its
+ * One mark per trust-rail cell, by position. The rail is a fixed four, and its
  * copy carries no key to index by.
  */
 const TRUST_RAIL_ICONS: IconName[] = ["source", "model", "approval", "system"]
 
-export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
+/**
+ * Hero (spec 4.1), on the execution stage.
+ *
+ * The first screen used to be the paper brand layer with the product pushed
+ * below the fold. It is now the dark stage itself: the headline and the two
+ * actions on the left, and on the right the workbench running the site's one
+ * task, live, from the moment the page is interactive. The reader meets the
+ * product doing the thing before reading a sentence about it.
+ *
+ * `stage-scope` is what makes this cheap. The section is written in the
+ * ordinary reading vocabulary, and the scope remaps `ink`, `paper`, `muted` and
+ * the hairlines onto their stage counterparts, so the button, the rail and the
+ * reconstruction all render correctly here without a second variant of each.
+ *
+ * Under the two-line rule (spec 3.2) the display size steps with the column:
+ * six of twelve tracks from `lg`, five from `xl`, and the type follows so the
+ * headline holds two lines at every width from 1024 up.
+ */
+export function Hero({ locale, copy, releaseState, docsOrigin, index }: HeroProps) {
   const { hero } = copy.home
 
   return (
-    <section id="hero" className="relative border-b border-hairline bg-paper">
-      <div aria-hidden className="absolute inset-x-0 top-0 h-[48rem] overflow-hidden">
-        <InteractiveGridPattern
-          width={56}
-          height={56}
-          squares={[28, 16]}
-          className="[mask-image:linear-gradient(to_bottom,black,transparent_88%)] opacity-35"
-          squaresClassName="hover:fill-action/15"
-        />
-      </div>
-      {/* Vertical rhythm lines (spec §2.3): a twelve-column measure behind the
-       * brand band, faint enough to read as a ruled page rather than as a grid
-       * overlay. Decorative, so it is masked from assistive technology. */}
-      <div
-        aria-hidden
-        className="rhythm-lines pointer-events-none absolute inset-x-0 top-0 hidden h-full opacity-50 md:block"
-      />
+    <section
+      id="hero"
+      className="stage-scope relative overflow-hidden border-b border-hairline bg-stage"
+    >
+      {/* The stage's ruled ground, faded towards the edges so the workbench
+       * reads as the lit part of the bench. Decorative, so hidden from
+       * assistive technology. */}
+      <div aria-hidden className="stage-grid pointer-events-none absolute inset-0 opacity-70" />
 
-      <div className="relative mx-auto max-w-shell px-5 pb-16 pt-20 md:pt-28 lg:px-8 lg:pb-20 lg:pt-32">
-        {/* Two columns from `lg`. In one column the brand band left roughly
-         * 45% of a 1440px viewport as blank paper, and the right column is
-         * where the page's argument belongs: the task it is about to follow,
-         * stated rather than described. */}
-        <div className="lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:gap-16">
-          <div>
-            <p className="font-mono text-xs uppercase tracking-widest text-muted">{hero.eyebrow}</p>
+      <div className="relative mx-auto max-w-shell px-5 pb-14 pt-14 lg:px-8 lg:pb-16 lg:pt-20">
+        <div className="grid items-start gap-12 lg:grid-cols-12 lg:gap-10">
+          <div className="lg:col-span-6 lg:pt-4 xl:col-span-5">
+            <p className="flex items-center gap-3 font-mono text-xs uppercase tracking-widest text-muted">
+              {index !== undefined ? (
+                <span
+                  data-slot="section-index"
+                  className="index-tick flex items-center gap-3 tabular-nums text-ink"
+                >
+                  {formatIndex(index)}
+                </span>
+              ) : (
+                <span aria-hidden className="size-1.5 rounded-full bg-action" />
+              )}
+              <span>{hero.eyebrow}</span>
+            </p>
 
-            {/* Two lines maximum on desktop (spec §3.2), which `max-w` enforces
-             * more reliably than a character count. */}
-            <h1 className="mt-8 max-w-5xl text-balance text-4xl font-medium leading-[1.08] tracking-tight text-ink md:text-6xl lg:text-7xl">
+            <h1 className="mt-7 text-balance text-4xl font-medium leading-[1.06] tracking-tight text-ink md:text-5xl lg:text-[2.75rem] xl:text-[3.25rem] 2xl:text-6xl">
               {hero.title}
             </h1>
 
-            <p className="mt-8 max-w-2xl text-lg leading-relaxed text-muted md:text-xl">
+            <p className="mt-7 max-w-xl text-lg leading-relaxed text-muted md:text-xl">
               {hero.subtitle}
             </p>
 
-            <div className="mt-10">
+            <div className="mt-9">
               <DownloadCta
                 locale={locale}
                 copy={copy.common}
@@ -86,20 +90,29 @@ export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
             </div>
           </div>
 
-          <div className="mt-14 lg:mt-2">
-            <Reveal trigger="mount" delay={0.1}>
-              <HeroTaskTicket copy={hero.ticket} reconstruction={copy.reconstruction} />
-            </Reveal>
-          </div>
+          {/* `mount`, not `view`: this is the first screen, and an in-view
+           * trigger would hold the page's largest visual at opacity 0 for a
+           * reader who never scrolls. */}
+          <Reveal variant="scale" trigger="mount" className="min-w-0 lg:col-span-6 xl:col-span-7">
+            <HeroWorkbench
+              copy={copy.reconstruction}
+              alt={hero.stageAlt}
+              caption={hero.stageCaption}
+            />
+          </Reveal>
         </div>
+
+        <Reveal trigger="mount" delay={0.15} className="mt-12">
+          <HeroTaskTicket copy={hero.ticket} reconstruction={copy.reconstruction} />
+        </Reveal>
 
         <RevealGroup
           as="ul"
           count={hero.trustRail.length}
-          className="mt-16 grid grid-cols-2 gap-px border-t border-hairline bg-hairline md:grid-cols-4"
+          className="mt-10 grid grid-cols-2 gap-px bg-hairline md:grid-cols-4"
         >
           {hero.trustRail.map((item, index) => (
-            <RevealItem key={item.label} as="li" className="bg-paper px-1 pt-5 md:px-0 md:pr-6">
+            <RevealItem key={item.label} as="li" className="bg-paper pt-1 md:pr-6">
               <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-ink">
                 <Icon name={TRUST_RAIL_ICONS[index]} size={14} className="text-muted" />
                 {item.label}
@@ -108,26 +121,6 @@ export function Hero({ locale, copy, releaseState, docsOrigin }: HeroProps) {
             </RevealItem>
           ))}
         </RevealGroup>
-      </div>
-
-      {/* The stage runs wider than the reading column but never past the
-       * viewport — spec §7 allows the product to break the measure, not the
-       * page to scroll sideways. */}
-      <div className="relative mx-auto max-w-[1720px] px-5 pb-20 lg:px-8">
-        {/* `mount`, not `view`: the stage's top sits at the fold, so an in-view
-         * trigger would hold the page's largest visual at opacity 0 for anyone
-         * who reads the first screen without scrolling. */}
-        <Reveal variant="scale" trigger="mount">
-          <StageLens ariaLabel={copy.home.lensLabel}>
-            <ProductStage
-              section="hero"
-              locale={locale}
-              alt={hero.stageAlt}
-              caption={hero.stageCaption}
-              signalBorder
-            />
-          </StageLens>
-        </Reveal>
       </div>
     </section>
   )

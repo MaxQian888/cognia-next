@@ -28,6 +28,7 @@ export function ProductPage({ locale }: { locale: Locale }) {
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}
+        reconstruction={copy.reconstruction}
       />
       <FeatureShowcase
         copy={copy.product.showcase}

@@ -84,6 +84,34 @@
   --on-stage-hairline: var(--hairline);
 }
 
+/* --------------------------------------------------------------------------
+ * Stage scope (ADR-0092 §10, amended 2026-09-05)
+ *
+ * A region that sits ON the dark execution stage in both themes — the hero and
+ * the closing call to action — but is built from the ordinary reading
+ * vocabulary (`text-ink`, `bg-paper`, `border-hairline`, the primary button).
+ * Rather than a second set of components with `on-stage` classes, the scope
+ * remaps the reading tokens onto their stage counterparts for everything
+ * inside it, the same move `.signature-stage` makes in the other direction.
+ *
+ * `ink` therefore means "the text colour on this surface", which is what every
+ * component already assumes it means. The four state colours are lifted to the
+ * dark-mode values so they keep AA against the stage in light mode as well.
+ * -------------------------------------------------------------------------- */
+.stage-scope {
+  --paper: var(--stage);
+  --surface: var(--graphite);
+  --ink: var(--on-stage);
+  --muted: var(--on-stage-muted);
+  --hairline: var(--on-stage-hairline);
+  --hairline-strong: #3c464e;
+  --action: #4fdcea;
+  --approval: #e5ac57;
+  --success: #57c08a;
+  --destructive: #f2837c;
+  color: var(--ink);
+}
+
 @theme inline {
   --color-paper: var(--paper);
   --color-surface: var(--surface);
@@ -317,5 +345,128 @@
   .rhythm-lines {
     background-image: linear-gradient(to right, var(--hairline) 1px, transparent 1px);
     background-size: calc(100% / 12) 100%;
+  }
+
+  /* The stage's ruled ground: a 56px measurement grid in the stage hairline,
+   * faded towards the edges so the workbench sitting on it reads as the lit
+   * part of the bench. The fade is an alpha mask over hairlines, not a colour
+   * gradient — the No AI Gradient Rule is about hue, and there is none here. */
+  .stage-grid {
+    background-image:
+      linear-gradient(to right, var(--on-stage-hairline) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--on-stage-hairline) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 80% at 65% 40%, black 30%, transparent 100%);
+  }
+
+  /* Cell in a gapless grid that lights its top rule when the sequence reaches
+   * it. Driven by `animation-delay` set inline per cell; the reduced-motion
+   * belt collapses the duration so every cell ends lit, which is the finished
+   * state rather than a suppressed one. */
+  .station-lit::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: var(--action);
+    transform: scaleX(0);
+    transform-origin: left;
+    animation: station-lit 600ms var(--ease-entrance) forwards;
+    animation-delay: var(--station-delay, 0ms);
+    pointer-events: none;
+  }
+
+  @keyframes station-lit {
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  /* Paper grain: a film of monochrome noise over the reading layer, so the
+   * paper reads as stock rather than as a flat fill. It is an SVG turbulence
+   * tile at very low opacity and it carries no hue, which keeps it inside the
+   * No AI Gradient Rule. Painted on a pseudo-element so the section keeps its
+   * own background token and the grain never sits above the content. */
+  .paper-grain {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .paper-grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.055;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+  }
+
+  .dark .paper-grain::before {
+    opacity: 0.09;
+  }
+
+  /* Dot field: a 24px lattice of hairline points, the paper layer's answer to
+   * the stage's ruled grid. Alpha-masked towards the edges for the same reason
+   * `.stage-grid` is: the pattern belongs under the instrument, not over the
+   * whole page. */
+  .dot-field {
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      var(--hairline-strong) 1px,
+      transparent 1px
+    );
+    background-size: 24px 24px;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, black 20%, transparent 100%);
+  }
+
+  /* Index tick: the short rule that hangs off a numbered section tag, drawn
+   * on entry so the number reads as a mark on a scale. */
+  .index-tick::after {
+    content: "";
+    display: block;
+    width: 2.5rem;
+    height: 1px;
+    background: var(--hairline-strong);
+    transform: scaleX(0);
+    transform-origin: left;
+    animation: station-lit 500ms var(--ease-entrance) 120ms forwards;
+  }
+
+  /* Handoff rail: a marker travelling along a rule between stations, for the
+   * sequence in which one task moves between devices. The marker's position is
+   * the only animated property and it stops at the final station. */
+  .handoff-marker {
+    animation: handoff var(--handoff-duration, 6s) var(--ease-entrance) forwards;
+  }
+
+  @keyframes handoff {
+    from {
+      left: 0%;
+    }
+    to {
+      left: 100%;
+    }
+  }
+
+  /* Glyph draw: a bespoke mark draws its stroke on entry. `pathLength="1"` on
+   * every path normalises the dash so one rule fits every glyph. */
+  .glyph-draw path,
+  .glyph-draw circle,
+  .glyph-draw rect,
+  .glyph-draw line,
+  .glyph-draw polyline {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: glyph-draw 900ms var(--ease-entrance) forwards;
+    animation-delay: var(--glyph-delay, 0ms);
+  }
+
+  @keyframes glyph-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
   }
 }

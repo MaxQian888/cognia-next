@@ -1,7 +1,11 @@
+import type { ReactNode } from "react"
 import { Hairline } from "@web/components/hairline"
 import { Icon, type IconName } from "@web/components/icon"
+import { PluginManifestReconstruction } from "@web/components/product/plugin-manifest-reconstruction"
+import { RunLedgerReconstruction } from "@web/components/product/run-ledger-reconstruction"
+import { WorkflowGraphReconstruction } from "@web/components/product/workflow-graph-reconstruction"
 import { Section } from "@web/components/section"
-import type { CapabilitySection } from "@web/content/types"
+import type { CapabilitySection, ReconstructionCopy } from "@web/content/types"
 import type { Locale } from "@web/lib/locale"
 import { CapabilityGrid } from "./capability-grid"
 
@@ -10,6 +14,26 @@ interface CapabilitySectionsProps {
   learnMore: string
   locale: Locale
   docsOrigin?: string
+  /**
+   * Copy for the interface reconstructions that fill a section's spare grid
+   * cells. Omit and sections render their entries alone.
+   */
+  reconstruction?: ReconstructionCopy
+}
+
+/**
+ * The reconstruction that fills a section's spare cells, keyed by anchor id.
+ *
+ * Only sections whose entry count leaves the three-column grid open have one,
+ * and each shows the surface the section is about: the graph for Build, the
+ * run ledger for Run, the manifest for what a plugin contributes. A section
+ * with no entry closes its grid on its own.
+ */
+const SECTION_ASIDE: Record<string, (copy: ReconstructionCopy) => ReactNode> = {
+  // Live: the graph builds itself and refuses a cycle, the ledger plays a run.
+  build: (copy) => <WorkflowGraphReconstruction copy={copy} live />,
+  run: (copy) => <RunLedgerReconstruction copy={copy} live />,
+  surfaces: (copy) => <PluginManifestReconstruction copy={copy} />,
 }
 
 /**
@@ -63,6 +87,7 @@ export function CapabilitySections({
   learnMore,
   locale,
   docsOrigin,
+  reconstruction,
 }: CapabilitySectionsProps) {
   return (
     <>
@@ -70,8 +95,15 @@ export function CapabilitySections({
         const tone = index % 2 === 0 ? "paper" : "surface"
         // The first block sets the page's upper bound; after it the rhythm
         // alternates, so no two adjacent sections are the same height.
-        const density = index === 0 ? "open" : index % 2 === 1 ? "tight" : "normal"
+        // `normal`, not `open`: measured on the shipped pages the opening block
+        // carried 400px of ruled paper above its heading, which read as the
+        // page having stalled rather than as an index beginning.
+        const density = index === 0 ? "normal" : index % 2 === 1 ? "tight" : "normal"
         const icon = section.id ? SECTION_ICON[section.id] : undefined
+        const aside =
+          reconstruction && section.id && SECTION_ASIDE[section.id]
+            ? SECTION_ASIDE[section.id](reconstruction)
+            : undefined
         return (
           <Section
             key={section.title}
@@ -109,6 +141,7 @@ export function CapabilitySections({
                 locale={locale}
                 tone={tone}
                 docsOrigin={docsOrigin}
+                aside={aside}
               />
             </div>
           </Section>

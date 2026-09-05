@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react"
-import { Section, SectionHeading } from "./section"
+import { Section, SectionHeading, formatIndex } from "./section"
 
 describe("Section", () => {
   it("renders its children inside a landmark", () => {
@@ -32,14 +32,14 @@ describe("Section", () => {
     const { container } = render(<Section>content</Section>)
     const shell = container.querySelector("section > div")
     expect(shell).toHaveClass("max-w-shell")
-    expect(shell?.className).toMatch(/lg:py-40/)
+    expect(shell?.className).toMatch(/lg:py-28/)
   })
 
   it.each([
     ["flush", "py-0"],
     ["tight", "py-12"],
-    ["normal", "py-24"],
-    ["open", "py-32"],
+    ["normal", "py-20"],
+    ["open", "py-24"],
   ] as const)("gives %s sections their own vertical rhythm", (density, expected) => {
     const { container } = render(<Section density={density}>content</Section>)
     expect(container.querySelector("section > div")).toHaveClass(expected)
@@ -88,6 +88,23 @@ describe("Section", () => {
     const { container } = render(<Section rule>content</Section>)
     expect(container.querySelector("section")).toHaveClass("relative")
     expect(container.querySelector("section > div")).toHaveClass("relative")
+  })
+})
+
+describe("SectionHeading index", () => {
+  it("prints a zero-padded index tag ahead of the eyebrow", () => {
+    render(<SectionHeading index={3} eyebrow="Your workbench" title="Title" />)
+    const tag = screen.getByText("03")
+    expect(tag).toHaveAttribute("data-slot", "section-index")
+    expect(tag.className).toContain("index-tick")
+    expect(formatIndex(12)).toBe("12")
+  })
+
+  it("renders no tag without an index, and none without an eyebrow to hang it on", () => {
+    const { container, rerender } = render(<SectionHeading eyebrow="Eyebrow" title="Title" />)
+    expect(container.querySelector('[data-slot="section-index"]')).toBeNull()
+    rerender(<SectionHeading index={2} title="Title" />)
+    expect(container.querySelector('[data-slot="section-index"]')).toBeNull()
   })
 })
 

@@ -6,9 +6,11 @@ import { HOME_SECTIONS } from "@web/content/types"
 import { releaseState } from "@web/lib/evidence"
 import type { Locale } from "@web/lib/locale"
 import { RELEASES_URL, docsUrl } from "@web/lib/site"
+import { CapabilityPanorama } from "./capability-panorama"
 import { Connections } from "./connections"
 import { ContextTrace } from "./context-trace"
 import { DesktopSection } from "./desktop-section"
+import { EntryPoints } from "./entry-points"
 import { FinalCta } from "./final-cta"
 import { Hero } from "./hero"
 import { RunMatrix } from "./run-matrix"
@@ -41,32 +43,51 @@ export function HomePage({ locale }: { locale: Locale }) {
         labels={copy.home.sectionIndex}
         label={copy.nav.sectionIndexLabel}
       />
-      <Hero locale={locale} copy={copy} releaseState={state} docsOrigin={docsOrigin} />
+      <Hero locale={locale} copy={copy} releaseState={state} docsOrigin={docsOrigin} index={1} />
       <ContextTrace copy={copy.home.contextTrace} />
       <SignatureDemo
         copy={copy.home.signature}
         reconstruction={copy.reconstruction}
         fileTreeLabel={copy.home.fileTreeLabel}
+        index={2}
       />
       <WorkbenchBento
         copy={copy.home.workbench}
         common={copy.common}
         reconstruction={copy.reconstruction}
+        index={3}
       />
-      <DesktopSection copy={copy.home.desktop} terminalCopy={copy.home.terminal} locale={locale} />
+      <DesktopSection
+        copy={copy.home.desktop}
+        terminalCopy={copy.home.terminal}
+        locale={locale}
+        lensLabel={copy.home.lensLabel}
+        index={4}
+      />
+      <EntryPoints copy={copy.home.entryPoints} reconstruction={copy.reconstruction} index={5} />
       <RunMatrix
         copy={copy.home.run}
         learnMore={copy.common.learnMore}
         locale={locale}
         docsOrigin={docsOrigin}
+        index={6}
       />
-      <Connections copy={copy.home.connections} flowCopy={copy.home.connectionFlow} />
+      <Connections copy={copy.home.connections} flowCopy={copy.home.connectionFlow} index={7} />
+      <CapabilityPanorama
+        copy={copy.home.panorama}
+        common={copy.common}
+        evidence={evidence}
+        locale={locale}
+        docsOrigin={docsOrigin}
+        index={8}
+      />
       <TrustSection
         copy={copy.home.trust}
         common={copy.common}
         evidence={evidence}
         locale={locale}
         docsOrigin={docsOrigin}
+        index={9}
       />
       <FinalCta
         locale={locale}
@@ -74,6 +95,7 @@ export function HomePage({ locale }: { locale: Locale }) {
         releaseState={state}
         evidence={evidence}
         docsOrigin={docsOrigin}
+        index={10}
       />
     </SiteShell>
   )

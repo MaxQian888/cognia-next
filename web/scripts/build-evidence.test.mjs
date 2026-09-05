@@ -55,3 +55,40 @@ test("parseChangeset rejects an entry with an empty body", () => {
   // An entry with a bump but nothing to say would render as a blank row.
   assert.equal(parseChangeset("x", '---\n"cognia-next": patch\n---\n\n   \n'), null)
 })
+
+test("fetchWithTimeout gives up instead of hanging when the source never answers", async () => {
+  const { fetchWithTimeout } = await import("./build-evidence.mjs")
+  const original = globalThis.fetch
+  // A fetch that resolves only when its signal aborts — the shape of a host
+  // with no route to api.github.com, which is what stalled `pnpm web:dev`.
+  globalThis.fetch = (_url, init) =>
+    new Promise((_, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason))
+    })
+  try {
+    await assert.rejects(
+      fetchWithTimeout("https://example.invalid", {}, 20),
+      (error) => error.name === "TimeoutError" || error.name === "AbortError"
+    )
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test("fetchWithTimeout passes the caller's init through alongside the signal", async () => {
+  const { fetchWithTimeout } = await import("./build-evidence.mjs")
+  const original = globalThis.fetch
+  let seen
+  globalThis.fetch = (url, init) => {
+    seen = { url, init }
+    return Promise.resolve({ ok: true })
+  }
+  try {
+    await fetchWithTimeout("https://example.invalid", { headers: { Accept: "x" } })
+    assert.equal(seen.url, "https://example.invalid")
+    assert.equal(seen.init.headers.Accept, "x")
+    assert.ok(seen.init.signal instanceof AbortSignal)
+  } finally {
+    globalThis.fetch = original
+  }
+})

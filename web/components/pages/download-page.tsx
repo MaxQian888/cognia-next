@@ -39,53 +39,58 @@ export function DownloadPage({ locale }: { locale: Locale }) {
         docsOrigin={docsOrigin}
       />
 
-      <Section tone="paper">
-        <DownloadCta locale={locale} copy={copy.common} state={state} docsOrigin={docsOrigin} />
+      {/* `flush` with its own top margin: the header above already closes with
+       * its hairline and 64px of paper, so a full section step here left the
+       * primary action 200px below the sentence that introduces it. */}
+      <Section tone="paper" density="flush">
+        <div className="pt-10 pb-16 lg:pt-12 lg:pb-20">
+          <DownloadCta locale={locale} copy={copy.common} state={state} docsOrigin={docsOrigin} />
 
-        <div className="mt-6">
-          <PlatformHint common={copy.common} copy={copy.download.platformHint} />
-        </div>
-
-        {state.hasRelease ? (
-          <div className="mt-16">
-            <h2 className="font-mono text-xs uppercase tracking-widest text-muted">
-              {copy.download.platformsTitle}
-            </h2>
-            <p className="mt-4 font-mono text-xs text-muted">
-              {copy.common.download.version} {state.version} · {copy.common.download.published}{" "}
-              {formatDate(state.publishedAt)}
-            </p>
-            <div className="mt-8 grid gap-px bg-hairline md:grid-cols-3">
-              {platforms.map((platform) => (
-                <div key={platform.key} className="bg-paper p-6">
-                  <p className="font-medium text-ink">{platform.label}</p>
-                  <ul className="mt-4 flex flex-col gap-2">
-                    {state.byPlatform[platform.key].map((asset) => (
-                      <li key={asset.name}>
-                        <a
-                          href={asset.url}
-                          className="font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4"
-                        >
-                          {asset.name}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-            <p className="mt-6 font-mono text-xs text-muted">
-              <a
-                href={state.htmlUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-ink underline decoration-hairline-strong underline-offset-4"
-              >
-                {copy.common.download.allPlatforms}
-              </a>
-            </p>
+          <div className="mt-6">
+            <PlatformHint common={copy.common} copy={copy.download.platformHint} />
           </div>
-        ) : null}
+
+          {state.hasRelease ? (
+            <div className="mt-16">
+              <h2 className="font-mono text-xs uppercase tracking-widest text-muted">
+                {copy.download.platformsTitle}
+              </h2>
+              <p className="mt-4 font-mono text-xs text-muted">
+                {copy.common.download.version} {state.version} · {copy.common.download.published}{" "}
+                {formatDate(state.publishedAt)}
+              </p>
+              <div className="mt-8 grid gap-px bg-hairline md:grid-cols-3">
+                {platforms.map((platform) => (
+                  <div key={platform.key} className="bg-paper p-6">
+                    <p className="font-medium text-ink">{platform.label}</p>
+                    <ul className="mt-4 flex flex-col gap-2">
+                      {state.byPlatform[platform.key].map((asset) => (
+                        <li key={asset.name}>
+                          <a
+                            href={asset.url}
+                            className="font-mono text-xs text-ink underline decoration-hairline-strong underline-offset-4"
+                          >
+                            {asset.name}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-6 font-mono text-xs text-muted">
+                <a
+                  href={state.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-ink underline decoration-hairline-strong underline-offset-4"
+                >
+                  {copy.common.download.allPlatforms}
+                </a>
+              </p>
+            </div>
+          ) : null}
+        </div>
       </Section>
 
       <FeatureShowcase

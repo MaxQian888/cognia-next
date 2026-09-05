@@ -208,6 +208,22 @@ export const en: SiteCopy = {
       notificationTitle: "Task needs you",
       notificationBody: "The push to origin is waiting for confirmation.",
     },
+    workflow: {
+      graphLabel: "Workflow",
+      triggerLabel: "Trigger",
+      triggerName: "On schedule",
+      runsLabel: "Runs",
+      runHeadings: { step: "Step", tool: "Tool", state: "State" },
+      cycleRejectedLabel: "Cycle rejected on save",
+    },
+    plugin: {
+      manifestLabel: "Manifest",
+      capabilitiesLabel: "Contributes",
+      permissionsLabel: "Declares",
+      deniedLabel: "Undeclared call",
+      deniedNote: "Refused by the runtime before it ran.",
+      grantedLabel: "Granted",
+    },
     artifacts: {
       context: {
         repositoryLabel: "Repository",
@@ -648,13 +664,252 @@ export const en: SiteCopy = {
       changesSuffix: "entries since the last release",
     },
 
+    entryPoints: {
+      eyebrow: "One workspace, many entry points",
+      title: "Start on the desktop. Decide from wherever you are.",
+      subtitle:
+        "The task lives on your machine. The desktop runs it, and your phone, the chat platform you already use, a terminal and the browser all reach the same thread, each with only the authority you gave that device.",
+      sequenceLabel:
+        "How one task moves between devices: started on the desktop, approved from the phone, reported in chat, resumed from the terminal, and fed a page from the browser.",
+      stations: [
+        {
+          key: "desktop",
+          name: "Desktop",
+          role: "Runs the task",
+          body: "macOS, Windows and Linux. The files, the terminal and the agent are on the same machine.",
+        },
+        {
+          key: "mobile",
+          name: "Phone",
+          role: "Approves the checkpoint",
+          body: "The paired iOS or Android app shows the approval that is waiting, and nothing the pairing did not grant.",
+        },
+        {
+          key: "im",
+          name: "Chat",
+          role: "Receives the result",
+          body: "Progress and questions arrive where you already are. A reply that would change anything still asks first.",
+        },
+        {
+          key: "cli",
+          name: "Terminal",
+          role: "Resumes the session",
+          body: "The same agent loop as the desktop, from a shell, picking up the session where it left off.",
+        },
+        {
+          key: "browser",
+          name: "Browser",
+          role: "Adds a page",
+          body: "The companion extension captures a page you chose and hands it to the workspace over a paired, loopback-only channel.",
+        },
+      ],
+      frames: {
+        desktop: { threadLabel: "Thread", stateLabel: "State" },
+        mobile: { heading: "Approval waiting" },
+        im: {
+          sender: "Cognia",
+          heading: "Check fixed",
+          filesLabel: "files changed",
+          notesLabel: "Launch notes drafted",
+          replyHint: "Reply to decide the next step",
+        },
+        cli: { comment: "resume the most recent session" },
+        browser: {
+          heading: "Browser companion",
+          pageTitle: "Rounding rules for zero-decimal currencies",
+          captureLabel: "Capture page",
+          shortcutLabel: "Shortcut",
+        },
+      },
+      channelsLabel: "Chat platforms with an adapter in the repository",
+      channels: [
+        "Telegram",
+        "Slack",
+        "Discord",
+        "Lark",
+        "DingTalk",
+        "WeCom",
+        "WeChat Official Accounts",
+        "WeChat",
+        "Matrix",
+        "OneBot",
+        "QQ",
+      ],
+      note: "Every surface above is rebuilt in this page from the same demo task. Each device holds only the capability the host granted it.",
+    },
+
+    panorama: {
+      eyebrow: "The whole instrument",
+      title: "One codebase. Every part in the open.",
+      subtitle:
+        "What is inside the workspace, counted from the repository when this page was built rather than claimed in a slide.",
+      figuresLabel: "Counted at build time",
+      figures: {
+        plugins: "In-tree plugins",
+        connectors: "Chat platform adapters",
+        workflowNodeKinds: "Workflow node kinds",
+        crates: "Rust crates",
+        packages: "Workspace packages",
+        adrs: "Recorded design decisions",
+        testFiles: "Test files",
+      },
+      figuresNote:
+        "Directory listings and file counts over the checkout. Any of them can be reproduced with a single ls.",
+      lanes: [
+        {
+          key: "work",
+          label: "Work",
+          claim: "Where a task is planned and run.",
+          items: [
+            {
+              glyph: "chat",
+              name: "Chat",
+              body: "The thread that starts a task, with the files, mentions and instructions it was given.",
+              route: "/product#chat",
+            },
+            {
+              glyph: "agents",
+              name: "Agent tasks",
+              body: "A plan you approve, steps with the tools each one needs, and the state each reached.",
+              route: "/product#agents",
+            },
+            {
+              glyph: "squads",
+              name: "Squads",
+              body: "Several agents on one task, with roles, a shared record and one place to review their work.",
+              docsPath: "/docs/chat/agent-teams",
+            },
+            {
+              glyph: "workflows",
+              name: "Workflows",
+              body: "The repeatable version of work already done once, drawn as a graph and run on a trigger.",
+              route: "/workflows",
+            },
+            {
+              glyph: "scheduler",
+              name: "Scheduler",
+              body: "Tasks and workflows on a calendar, with a ledger of every run and what it produced.",
+              route: "/workflows#run",
+            },
+            {
+              glyph: "tasks",
+              name: "Background runs",
+              body: "Work that takes minutes keeps going while you do something else, and reports back.",
+              route: "/product#desktop",
+            },
+          ],
+        },
+        {
+          key: "remember",
+          label: "Remember",
+          claim: "What the workspace keeps between tasks.",
+          items: [
+            {
+              glyph: "knowledge",
+              name: "Knowledge and repo wiki",
+              body: "Documents, a generated wiki of the repository, and cited search over both.",
+              route: "/product#knowledge",
+            },
+            {
+              glyph: "memory",
+              name: "Long-term memory",
+              body: "Facts the workspace learned, reviewable before they are kept and traceable to their source.",
+              route: "/product#knowledge",
+            },
+            {
+              glyph: "canvas",
+              name: "Artifacts and canvas",
+              body: "What a task produced, kept as a versioned file in the workspace rather than in a message.",
+              route: "/product#agents",
+            },
+            {
+              glyph: "ocr",
+              name: "OCR",
+              body: "Text lifted from screenshots, scans and PDFs, on the machine, before it reaches a model.",
+              docsPath: "/docs/subsystems/ocr",
+            },
+          ],
+        },
+        {
+          key: "reach",
+          label: "Reach",
+          claim: "What it can touch, and on what terms.",
+          items: [
+            {
+              glyph: "plugins",
+              name: "Plugins",
+              body: "WebAssembly, TypeScript and Python plugins that declare every capability they use.",
+              route: "/plugins",
+            },
+            {
+              glyph: "mcp",
+              name: "MCP servers",
+              body: "Tools exposed by any MCP server, granted per session and confirmed on first use.",
+              route: "/plugins#surfaces",
+            },
+            {
+              glyph: "connectors",
+              name: "Chat connectors",
+              body: "Inbound messages and outbound reports over the platforms listed above.",
+              route: "/product#desktop",
+            },
+            {
+              glyph: "browser",
+              name: "Browser companion",
+              body: "An extension that sends a page you chose into a task, and nothing it did not ask for.",
+              docsPath: "/docs/subsystems/companion-api",
+            },
+            {
+              glyph: "computerUse",
+              name: "Computer use",
+              body: "The agent drives applications on your desktop, each action visible and interruptible.",
+              docsPath: "/docs/subsystems/computer-use",
+            },
+          ],
+        },
+        {
+          key: "control",
+          label: "Control",
+          claim: "How every action stays accountable.",
+          items: [
+            {
+              glyph: "permissions",
+              name: "Permission model",
+              body: "Tools declare what they touch. Anything that reaches outside the project stops and names itself.",
+              route: "/trust#permission",
+            },
+            {
+              glyph: "receipts",
+              name: "Traces and cost",
+              body: "Every call, token and tool result recorded against the task that made it.",
+              route: "/trust#data",
+            },
+            {
+              glyph: "sourceControl",
+              name: "Source control",
+              body: "Diffs, commits and stacked branches from inside the workspace, pushed only when you say.",
+              route: "/product#desktop",
+            },
+            {
+              glyph: "terminal",
+              name: "Integrated terminal",
+              body: "Real shells beside the thread, shareable to a paired device with the roster in view.",
+              route: "/product#desktop",
+            },
+          ],
+        },
+      ],
+    },
+
     sectionIndex: {
       hero: "Overview",
       task: "One task",
       workbench: "Workbench",
       desktop: "Desktop",
+      entries: "Entry points",
       run: "Run",
       connections: "Connections",
+      system: "The instrument",
       trust: "Trust",
       start: "Start",
     },
@@ -842,6 +1097,7 @@ export const en: SiteCopy = {
     },
     sections: [
       {
+        id: "build",
         title: "Build",
         subtitle: "A visual editor over a typed graph, not a diagram that has to be kept in sync.",
         entries: [
@@ -860,6 +1116,7 @@ export const en: SiteCopy = {
         ],
       },
       {
+        id: "run",
         title: "Run",
         subtitle: "The same runner, whether the trigger is you, a schedule, or an agent.",
         entries: [
@@ -917,6 +1174,33 @@ export const en: SiteCopy = {
         "Nesting is depth-bounded, so a workflow calling a workflow cannot recurse forever.",
         "Every node's state is recorded, including the ones that never ran.",
       ],
+      demos: {
+        label: "Each guarantee, shown",
+        triggers: ["Manual", "Chat", "Schedule", "Connector", "Workflow"],
+        runnerLabel: "One runner",
+        recordLabel: "The same run record",
+        cycle: {
+          nodes: ["Read", "Fix", "Verify"],
+          attemptLabel: "Back-edge",
+          rejectedLabel: "Rejected on save",
+        },
+        depth: { label: "Nesting depth", limitLabel: "Limit", workflowLabel: "levels" },
+        states: {
+          label: "Node states, one run",
+          items: [
+            { name: "Fetch the release", state: "succeeded" },
+            { name: "Run the check", state: "failed" },
+            { name: "Open the pull request", state: "skipped" },
+            { name: "Post the summary", state: "skipped" },
+          ],
+          stateLabels: {
+            succeeded: "Succeeded",
+            failed: "Failed",
+            skipped: "Skipped",
+            pending: "Pending",
+          },
+        },
+      },
     },
   },
 
@@ -929,6 +1213,7 @@ export const en: SiteCopy = {
     },
     sections: [
       {
+        id: "surfaces",
         title: "What a plugin can contribute",
         subtitle: "Surfaces a plugin can add, each under the same permission rules.",
         entries: [
@@ -959,6 +1244,7 @@ export const en: SiteCopy = {
         ],
       },
       {
+        id: "capabilities",
         title: "How permission works",
         subtitle: "The declaration is the contract, and it is enforced rather than advertised.",
         entries: [
@@ -1034,6 +1320,7 @@ export const en: SiteCopy = {
     },
     sections: [
       {
+        id: "data",
         title: "Data boundaries",
         subtitle: "Where your work lives, and what a model call actually carries.",
         entries: [
@@ -1058,6 +1345,7 @@ export const en: SiteCopy = {
         ],
       },
       {
+        id: "permission",
         title: "Permission and record",
         subtitle: "What stops before it acts, and what remains afterwards.",
         entries: [
@@ -1457,5 +1745,8 @@ export const en: SiteCopy = {
     entryCount: "{count} entries",
     distributionLabel: "By bump",
     monthIndexLabel: "Jump to a month",
+    expandEntry: "Read the full entry",
+    collapseEntry: "Show less",
+    showMoreEntries: "Show {count} more",
   },
 }

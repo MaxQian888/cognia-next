@@ -23,7 +23,7 @@ const ITEM_ICON: IconName[] = ["files", "appWindow", "external", "workflow"]
  */
 export function FeatureShowcase({ copy, learnMore, locale, docsOrigin }: FeatureShowcaseProps) {
   return (
-    <Section tone="stage" density="open">
+    <Section tone="stage">
       <SectionHeading
         title={copy.title}
         subtitle={copy.subtitle}

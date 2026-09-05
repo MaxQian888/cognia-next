@@ -101,6 +101,18 @@ export const DEMO_TASK = {
     version: "2.4.0",
   },
 
+  /**
+   * A plugin declaration, verbatim from `plugins/web-tools/plugin.json` in
+   * this repository. `denied` is a real permission id the manifest does not
+   * declare, which is exactly the call the runtime refuses.
+   */
+  plugin: {
+    id: "cognia-web-tools",
+    capabilities: ["tools"],
+    permissions: ["network:fetch", "agent:control"],
+    denied: "secrets:read",
+  },
+
   /** Activity rail entries, in shipping order. `chat` is the active one. */
   rail: ["chat", "agents", "workflows", "knowledge", "plugins"] as const,
 } as const

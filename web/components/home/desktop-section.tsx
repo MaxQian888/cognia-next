@@ -4,11 +4,16 @@ import { Section, SectionHeading } from "@web/components/section"
 import type { DesktopCopy, TerminalCopy } from "@web/content/types"
 import type { Locale } from "@web/lib/locale"
 import { DesktopTerminal } from "./desktop-terminal"
+import { StageLens } from "./stage-lens"
 
 interface DesktopSectionProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: DesktopCopy
   terminalCopy?: TerminalCopy
   locale: Locale
+  /** Accessible name for the hover lens over the stage. Omit to render none. */
+  lensLabel?: string
 }
 
 /**
@@ -19,10 +24,22 @@ interface DesktopSectionProps {
  * section argues for installing the application, so an aspirational entry here
  * would be the most expensive kind of overclaim.
  */
-export function DesktopSection({ copy, terminalCopy, locale }: DesktopSectionProps) {
+export function DesktopSection({
+  copy,
+  terminalCopy,
+  locale,
+  lensLabel,
+  index,
+}: DesktopSectionProps) {
+  const stage = <ProductStage section="desktop" locale={locale} alt={copy.stageAlt} />
   return (
     <Section id="desktop" tone="surface" density="tight">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
       <div className="mt-16 border-y border-hairline">
         <div className="grid lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -40,8 +57,11 @@ export function DesktopSection({ copy, terminalCopy, locale }: DesktopSectionPro
             ))}
           </ul>
 
+          {/* The lens lives here rather than on the hero: a magnifier over a
+           * surface that is animating itself is two motions fighting, while
+           * this crop is still and dense enough to reward a closer look. */}
           <Reveal variant="scale" className="min-w-0 py-6 lg:pl-10">
-            <ProductStage section="desktop" locale={locale} alt={copy.stageAlt} />
+            {lensLabel ? <StageLens ariaLabel={lensLabel}>{stage}</StageLens> : stage}
           </Reveal>
         </div>
 

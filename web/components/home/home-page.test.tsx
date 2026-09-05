@@ -17,7 +17,7 @@ jest.mock("motion/react", () => ({
 }))
 
 describe("HomePage", () => {
-  it("renders all eight sections in the order the spec fixes", () => {
+  it("renders all ten sections in the order the spec fixes", () => {
     render(<HomePage locale="en" />)
     const headings = screen
       .getAllByRole("heading", { level: 1 })
@@ -29,14 +29,27 @@ describe("HomePage", () => {
       en.home.signature.title,
       en.home.workbench.title,
       en.home.desktop.title,
+      en.home.entryPoints.title,
       en.home.run.title,
       en.home.connections.title,
+      en.home.panorama.title,
       en.home.trust.title,
       en.home.finalCta.title,
     ]
     for (const title of expected) {
       expect(headings).toContain(title)
     }
+    // In that order, not merely present.
+    const positions = expected.map((title) => headings.indexOf(title))
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
+  })
+
+  it("numbers every section from 01 to 10 in document order", () => {
+    const { container } = render(<HomePage locale="en" />)
+    const tags = [...container.querySelectorAll('[data-slot="section-index"]')].map(
+      (tag) => tag.textContent
+    )
+    expect(tags).toEqual(["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"])
   })
 
   it("advances one signature task, never a second scenario", () => {

@@ -207,6 +207,22 @@ export const zh: SiteCopy = {
       notificationTitle: "任务需要你",
       notificationBody: "推送到 origin 正在等待确认。",
     },
+    workflow: {
+      graphLabel: "工作流",
+      triggerLabel: "触发",
+      triggerName: "按计划",
+      runsLabel: "运行记录",
+      runHeadings: { step: "步骤", tool: "工具", state: "状态" },
+      cycleRejectedLabel: "保存时拒绝成环",
+    },
+    plugin: {
+      manifestLabel: "清单",
+      capabilitiesLabel: "贡献",
+      permissionsLabel: "声明",
+      deniedLabel: "未声明的调用",
+      deniedNote: "运行时在执行前拒绝。",
+      grantedLabel: "已授权",
+    },
     artifacts: {
       context: {
         repositoryLabel: "仓库",
@@ -611,13 +627,250 @@ export const zh: SiteCopy = {
       changesSuffix: "条，自上次发布以来",
     },
 
+    entryPoints: {
+      eyebrow: "一个工作区，多个入口",
+      title: "在桌面开工，在任何地方做决定。",
+      subtitle:
+        "任务留在你的机器上。桌面端负责运行，而手机、你已在用的聊天平台、终端和浏览器都能触达同一条线程，每台设备只握有你授予它的那部分权限。",
+      sequenceLabel:
+        "一条任务如何在设备之间流转：在桌面启动，在手机上批准，在聊天里收到结果，从终端续跑，再从浏览器送入一个页面。",
+      stations: [
+        {
+          key: "desktop",
+          name: "桌面",
+          role: "运行任务",
+          body: "macOS、Windows 和 Linux。文件、终端和 agent 都在同一台机器上。",
+        },
+        {
+          key: "mobile",
+          name: "手机",
+          role: "批准检查点",
+          body: "已配对的 iOS 或 Android 应用只显示正在等待的批准，配对没有授予的一概不显示。",
+        },
+        {
+          key: "im",
+          name: "聊天",
+          role: "接收结果",
+          body: "进度和提问送到你已经在的地方。任何会改变什么的回复，仍然先问过你。",
+        },
+        {
+          key: "cli",
+          name: "终端",
+          role: "续跑会话",
+          body: "与桌面端同一套 agent 循环，在 shell 里从上次停下的地方接着跑。",
+        },
+        {
+          key: "browser",
+          name: "浏览器",
+          role: "送入页面",
+          body: "伴侣扩展捕获你选中的页面，通过已配对、仅限本机回环的通道交给工作区。",
+        },
+      ],
+      frames: {
+        desktop: { threadLabel: "线程", stateLabel: "状态" },
+        mobile: { heading: "等待批准" },
+        im: {
+          sender: "Cognia",
+          heading: "检查已修复",
+          filesLabel: "个文件改动",
+          notesLabel: "发布说明已起草",
+          replyHint: "回复以决定下一步",
+        },
+        cli: { comment: "续跑最近一次会话" },
+        browser: {
+          heading: "浏览器伴侣",
+          pageTitle: "零小数货币的取整规则",
+          captureLabel: "捕获页面",
+          shortcutLabel: "快捷键",
+        },
+      },
+      channelsLabel: "仓库中带有适配器的聊天平台",
+      channels: [
+        "Telegram",
+        "Slack",
+        "Discord",
+        "飞书",
+        "钉钉",
+        "企业微信",
+        "微信公众号",
+        "微信",
+        "Matrix",
+        "OneBot",
+        "QQ",
+      ],
+      note: "以上每个界面都由本页基于同一条演示任务重建。每台设备只握有宿主授予它的能力。",
+    },
+
+    panorama: {
+      eyebrow: "整台仪器",
+      title: "一套代码库，每个部件都公开。",
+      subtitle: "工作区里有什么，在本页构建时直接从仓库数出来，而不是在幻灯片里宣称。",
+      figuresLabel: "构建时计数",
+      figures: {
+        plugins: "仓内插件",
+        connectors: "聊天平台适配器",
+        workflowNodeKinds: "工作流节点类型",
+        crates: "Rust crate",
+        packages: "工作区包",
+        adrs: "已记录的设计决策",
+        testFiles: "测试文件",
+      },
+      figuresNote: "都是对检出目录的列举与文件计数，任何一项都能用一条 ls 复现。",
+      lanes: [
+        {
+          key: "work",
+          label: "工作",
+          claim: "任务在哪里被计划并执行。",
+          items: [
+            {
+              glyph: "chat",
+              name: "聊天",
+              body: "发起任务的那条线程，连同交给它的文件、引用和指令。",
+              route: "/product#chat",
+            },
+            {
+              glyph: "agents",
+              name: "Agent 任务",
+              body: "一份由你批准的计划，每一步需要的工具，以及每一步到达的状态。",
+              route: "/product#agents",
+            },
+            {
+              glyph: "squads",
+              name: "Squads",
+              body: "多个 agent 处理同一任务，有角色分工、共享记录，以及一个统一的审阅入口。",
+              docsPath: "/docs/chat/agent-teams",
+            },
+            {
+              glyph: "workflows",
+              name: "工作流",
+              body: "把做过一次的工作变成可重复的版本，画成图，由触发器运行。",
+              route: "/workflows",
+            },
+            {
+              glyph: "scheduler",
+              name: "日程",
+              body: "任务和工作流排上日历，每次运行及其产物都有台账。",
+              route: "/workflows#run",
+            },
+            {
+              glyph: "tasks",
+              name: "后台运行",
+              body: "耗时数分钟的工作在你做别的事时继续进行，并向你回报。",
+              route: "/product#desktop",
+            },
+          ],
+        },
+        {
+          key: "remember",
+          label: "记忆",
+          claim: "工作区在任务之间保留什么。",
+          items: [
+            {
+              glyph: "knowledge",
+              name: "知识与仓库 wiki",
+              body: "文档、自动生成的仓库 wiki，以及对两者带引用的检索。",
+              route: "/product#knowledge",
+            },
+            {
+              glyph: "memory",
+              name: "长期记忆",
+              body: "工作区学到的事实，保留前可审阅，且能追溯到来源。",
+              route: "/product#knowledge",
+            },
+            {
+              glyph: "canvas",
+              name: "产物与画布",
+              body: "任务产出的内容作为带版本的文件留在工作区里，而不是留在一条消息里。",
+              route: "/product#agents",
+            },
+            {
+              glyph: "ocr",
+              name: "OCR",
+              body: "在本机从截图、扫描件和 PDF 中提取文字，再决定是否交给模型。",
+              docsPath: "/docs/subsystems/ocr",
+            },
+          ],
+        },
+        {
+          key: "reach",
+          label: "触达",
+          claim: "它能碰到什么，以什么条件。",
+          items: [
+            {
+              glyph: "plugins",
+              name: "插件",
+              body: "WebAssembly、TypeScript 和 Python 插件，声明它们用到的每一项能力。",
+              route: "/plugins",
+            },
+            {
+              glyph: "mcp",
+              name: "MCP 服务器",
+              body: "任何 MCP 服务器暴露的工具，按会话授予，首次使用时确认。",
+              route: "/plugins#surfaces",
+            },
+            {
+              glyph: "connectors",
+              name: "聊天连接器",
+              body: "通过上面列出的平台接收消息、发出回报。",
+              route: "/product#desktop",
+            },
+            {
+              glyph: "browser",
+              name: "浏览器伴侣",
+              body: "把你选中的页面送进任务的扩展，不多拿它没有申请的任何东西。",
+              docsPath: "/docs/subsystems/companion-api",
+            },
+            {
+              glyph: "computerUse",
+              name: "计算机操作",
+              body: "agent 操作你桌面上的应用，每一步都可见、可打断。",
+              docsPath: "/docs/subsystems/computer-use",
+            },
+          ],
+        },
+        {
+          key: "control",
+          label: "控制",
+          claim: "每个动作如何保持可问责。",
+          items: [
+            {
+              glyph: "permissions",
+              name: "权限模型",
+              body: "工具声明它会触碰什么。任何越出项目的动作都会停下并报出自己的名字。",
+              route: "/trust#permission",
+            },
+            {
+              glyph: "receipts",
+              name: "追踪与成本",
+              body: "每次调用、每个 token、每个工具结果都记在发起它的任务名下。",
+              route: "/trust#data",
+            },
+            {
+              glyph: "sourceControl",
+              name: "源代码管理",
+              body: "在工作区内看 diff、提交、堆叠分支，只在你同意时推送。",
+              route: "/product#desktop",
+            },
+            {
+              glyph: "terminal",
+              name: "集成终端",
+              body: "线程旁的真实 shell，可分享给已配对设备，名单随时可见。",
+              route: "/product#desktop",
+            },
+          ],
+        },
+      ],
+    },
+
     sectionIndex: {
       hero: "概览",
       task: "一条任务",
       workbench: "工作台",
       desktop: "桌面",
+      entries: "入口",
       run: "运行方式",
       connections: "连接",
+      system: "整台仪器",
       trust: "信任",
       start: "开始",
     },
@@ -801,6 +1054,7 @@ export const zh: SiteCopy = {
     },
     sections: [
       {
+        id: "build",
         title: "搭建",
         subtitle: "可视化编辑器覆盖在一张有类型的图之上，而不是一张需要人去同步的示意图。",
         entries: [
@@ -819,6 +1073,7 @@ export const zh: SiteCopy = {
         ],
       },
       {
+        id: "run",
         title: "运行",
         subtitle: "无论触发者是你、定时器还是 Agent，都是同一个执行器。",
         entries: [
@@ -875,6 +1130,33 @@ export const zh: SiteCopy = {
         "嵌套深度有上界，因此工作流调用工作流不会无限递归。",
         "每个节点的状态都被记录，包括那些从未运行的节点。",
       ],
+      demos: {
+        label: "每条保证，演示给你看",
+        triggers: ["手动", "对话", "定时", "连接器", "工作流"],
+        runnerLabel: "同一个执行器",
+        recordLabel: "同一份运行记录",
+        cycle: {
+          nodes: ["读取", "修复", "验证"],
+          attemptLabel: "回边",
+          rejectedLabel: "保存时拒绝",
+        },
+        depth: { label: "嵌套深度", limitLabel: "上限", workflowLabel: "层" },
+        states: {
+          label: "一次运行里的节点状态",
+          items: [
+            { name: "拉取发布", state: "succeeded" },
+            { name: "运行检查", state: "failed" },
+            { name: "打开 pull request", state: "skipped" },
+            { name: "发布摘要", state: "skipped" },
+          ],
+          stateLabels: {
+            succeeded: "成功",
+            failed: "失败",
+            skipped: "已跳过",
+            pending: "等待中",
+          },
+        },
+      },
     },
   },
 
@@ -887,6 +1169,7 @@ export const zh: SiteCopy = {
     },
     sections: [
       {
+        id: "surfaces",
         title: "插件能贡献什么",
         subtitle: "插件可以添加的界面，每一种都受同一套权限规则约束。",
         entries: [
@@ -917,6 +1200,7 @@ export const zh: SiteCopy = {
         ],
       },
       {
+        id: "capabilities",
         title: "权限如何生效",
         subtitle: "那份声明就是契约，而且它是被强制执行的，不只是被展示的。",
         entries: [
@@ -992,6 +1276,7 @@ export const zh: SiteCopy = {
     },
     sections: [
       {
+        id: "data",
         title: "数据边界",
         subtitle: "你的工作住在哪里，以及一次模型调用实际携带了什么。",
         entries: [
@@ -1016,6 +1301,7 @@ export const zh: SiteCopy = {
         ],
       },
       {
+        id: "permission",
         title: "权限与记录",
         subtitle: "什么会在动手之前停下，以及事后留下了什么。",
         entries: [
@@ -1407,5 +1693,8 @@ export const zh: SiteCopy = {
     entryCount: "{count} 条",
     distributionLabel: "按版本级别",
     monthIndexLabel: "跳到某个月份",
+    expandEntry: "展开全文",
+    collapseEntry: "收起",
+    showMoreEntries: "再显示 {count} 条",
   },
 }

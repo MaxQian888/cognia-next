@@ -8,6 +8,8 @@ import { type Evidence, formatDate, freshness, latestRelease } from "@web/lib/ev
 import type { Locale } from "@web/lib/locale"
 
 interface TrustSectionProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: TrustCopy
   common: CommonCopy
   evidence: Evidence
@@ -28,7 +30,14 @@ interface TrustSectionProps {
  * not be refreshed says so rather than quietly ageing behind a fresh-looking
  * label.
  */
-export function TrustSection({ copy, common, evidence, locale, docsOrigin }: TrustSectionProps) {
+export function TrustSection({
+  copy,
+  common,
+  evidence,
+  locale,
+  docsOrigin,
+  index,
+}: TrustSectionProps) {
   const state = freshness(evidence)
   const release = latestRelease(evidence)
 
@@ -49,7 +58,12 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
 
   return (
     <Section id="trust" tone="paper" density="tight">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
       <Reveal className="mt-14">
         <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] lg:gap-16">
@@ -106,15 +120,17 @@ export function TrustSection({ copy, common, evidence, locale, docsOrigin }: Tru
         </div>
       </Reveal>
 
-      <div className="mt-16 border-t border-hairline pt-8">
+      <div className="mt-16">
         <p className="font-mono text-xs uppercase tracking-widest text-muted">{copy.statsLabel}</p>
-        <dl className="mt-6 grid grid-cols-2 gap-8 md:grid-cols-4">
+        {/* One strip, not four floating figures: the numbers are read from the
+         * same snapshot at the same moment, and sharing hairlines says so. */}
+        <dl className="mt-6 grid grid-cols-2 gap-px border-y border-hairline bg-hairline md:grid-cols-4">
           {stats.map((stat) => (
-            <div key={stat.label}>
+            <div key={stat.label} className="trace relative bg-paper py-6 pr-6">
               <dt className="font-mono text-xs uppercase tracking-widest text-muted">
                 {stat.label}
               </dt>
-              <dd className="mt-2 text-2xl font-medium tracking-tight text-ink">
+              <dd className="mt-3 text-3xl font-medium tracking-tight text-ink">
                 {typeof stat.value === "number" ? (
                   <NumberTicker value={stat.value} locale={locale === "zh" ? "zh-CN" : "en-US"} />
                 ) : (

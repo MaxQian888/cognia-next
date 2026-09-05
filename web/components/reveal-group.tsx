@@ -2,7 +2,7 @@
 
 import { motion } from "motion/react"
 import { useReducedMotion } from "motion/react"
-import { createElement, type ReactNode } from "react"
+import { createElement, type CSSProperties, type ReactNode } from "react"
 import { EASE_ENTRANCE } from "@web/lib/motion"
 
 /**
@@ -102,7 +102,11 @@ export function RevealGroup({
 interface RevealItemProps {
   children: ReactNode
   className?: string
+  style?: CSSProperties
   as?: RevealTag
+  /** Set on a purely visual member, such as a grid's filler reconstruction. */
+  "aria-hidden"?: boolean
+  "data-slot"?: string
 }
 
 /**
@@ -110,11 +114,22 @@ interface RevealItemProps {
  * `staggerChildren`, so an item never states its own delay and the cascade
  * stays correct when items are added or removed.
  */
-export function RevealItem({ children, className, as = "div" }: RevealItemProps) {
+export function RevealItem({
+  children,
+  className,
+  style,
+  as = "div",
+  "aria-hidden": ariaHidden,
+  "data-slot": dataSlot,
+}: RevealItemProps) {
   const reduced = useReducedMotion()
 
   if (reduced) {
-    return createElement(as, { className }, children)
+    return createElement(
+      as,
+      { className, style, "aria-hidden": ariaHidden, "data-slot": dataSlot },
+      children
+    )
   }
 
   const Component = MOTION_TAG[as]
@@ -122,7 +137,10 @@ export function RevealItem({ children, className, as = "div" }: RevealItemProps)
   return (
     <Component
       data-reveal-item=""
+      aria-hidden={ariaHidden}
+      data-slot={dataSlot}
       className={className}
+      style={style}
       variants={{
         hidden: { opacity: 0, y: 10 },
         visible: { opacity: 1, y: 0 },

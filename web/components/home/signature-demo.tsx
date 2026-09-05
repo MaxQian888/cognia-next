@@ -12,6 +12,8 @@ import { DemoActivityList } from "./demo-activity-list"
 import { DemoFileTree } from "./demo-file-tree"
 
 interface SignatureDemoProps {
+  /** One-based position on the page, rendered as the heading index tag. */
+  index?: number
   copy: SignatureCopy
   reconstruction: ReconstructionCopy
   fileTreeLabel?: string
@@ -136,7 +138,7 @@ function StepPanel({
  *    Spec §6.3 requires this to be the absence of the effect, not a fast
  *    version of it.
  */
-export function SignatureDemo({ copy, reconstruction, fileTreeLabel }: SignatureDemoProps) {
+export function SignatureDemo({ copy, reconstruction, fileTreeLabel, index }: SignatureDemoProps) {
   const reduced = useReducedMotion() ?? false
   const rail = useStepRail({
     total: copy.steps.length,
@@ -161,7 +163,12 @@ export function SignatureDemo({ copy, reconstruction, fileTreeLabel }: Signature
 
   return (
     <Section id="task" tone="surface">
-      <SectionHeading eyebrow={copy.eyebrow} title={copy.title} subtitle={copy.subtitle} />
+      <SectionHeading
+        index={index}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+      />
 
       <p className="mt-12 border-l-2 border-action pl-4 text-lg leading-relaxed text-ink md:text-xl">
         <span className="mr-3 font-mono text-xs uppercase tracking-widest text-muted">

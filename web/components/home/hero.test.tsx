@@ -6,7 +6,11 @@ import { Hero } from "./hero"
 
 jest.mock("motion/react", () => ({
   useReducedMotion: () => true,
-  motion: { div: ({ children }: { children: React.ReactNode }) => <div>{children}</div> },
+  useInView: () => true,
+  motion: {
+    div: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    p: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  },
 }))
 
 const releaseState: ReleaseState = {
@@ -59,11 +63,24 @@ describe("Hero", () => {
     }
   })
 
-  it("puts a product stage in the first screen with a described visual", () => {
+  it("puts the live workbench in the first screen with a described visual", () => {
     const { container } = renderHero()
     expect(screen.getByRole("img", { name: en.home.hero.stageAlt })).toBeInTheDocument()
     expect(screen.getByText(en.home.hero.stageCaption)).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="interactive-grid-pattern"]')).toBeInTheDocument()
+    expect(container.querySelector(".stage-grid")).toHaveAttribute("aria-hidden")
+  })
+
+  it("sits on the execution stage and remaps the reading tokens onto it", () => {
+    const { container } = renderHero()
+    const section = container.querySelector("section#hero")
+    expect(section).toHaveClass("bg-stage")
+    expect(section).toHaveClass("stage-scope")
+  })
+
+  it("states the task beneath the workbench, from the shared fixture", () => {
+    renderHero()
+    expect(screen.getByText(en.home.hero.ticket.label)).toBeInTheDocument()
+    expect(screen.getAllByText(en.reconstruction.workbench.statusLine).length).toBeGreaterThan(0)
   })
 
   it("localises the whole hero", () => {

@@ -41,7 +41,7 @@ describe("WorkbenchBento", () => {
     expect(screen.getByText(en.common.contextPathLabel)).toBeInTheDocument()
   })
 
-  it("hides the decorative path line from assistive technology", () => {
+  it("lights the six stations in the order the task reaches them, and hides the marks", () => {
     const { container } = render(
       <WorkbenchBento
         copy={en.home.workbench}
@@ -49,11 +49,27 @@ describe("WorkbenchBento", () => {
         reconstruction={en.reconstruction}
       />
     )
-    // The path is now drawn by `Hairline`, which is `aria-hidden` in both the
-    // animated and the reduced-motion branch. The meaning it carries lives in
-    // the borders, the copy and the one screen-reader sentence beside it.
-    const line = container.querySelector('[aria-hidden="true"].bg-action')
-    expect(line).toBeInTheDocument()
+    const cells = [...container.querySelectorAll(".station-lit")] as HTMLElement[]
+    expect(cells).toHaveLength(en.home.workbench.panels.length)
+    const delays = cells.map((cell) => parseInt(cell.style.getPropertyValue("--station-delay"), 10))
+    expect(delays).toEqual([...delays].sort((a, b) => a - b))
+    expect(new Set(delays).size).toBe(delays.length)
+    // Every station dot is decoration. The meaning lives in the borders, the
+    // copy and the one screen-reader sentence beside them.
+    for (const dot of container.querySelectorAll(".bg-action")) {
+      expect(dot).toHaveAttribute("aria-hidden")
+    }
+  })
+
+  it("no longer draws a rule across the middle of the grid", () => {
+    const { container } = render(
+      <WorkbenchBento
+        copy={en.home.workbench}
+        common={en.common}
+        reconstruction={en.reconstruction}
+      />
+    )
+    expect(container.querySelector(".top-1\\/2")).toBeNull()
   })
 
   it("uses shared hairlines so the panels read as one surface, not five cards", () => {

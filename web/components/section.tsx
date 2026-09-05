@@ -54,9 +54,13 @@ const TONE_CLASS: Record<SectionTone, string> = {
 const DENSITY_CLASS: Record<SectionDensity, string> = {
   flush: "py-0",
   tight: "py-12 md:py-16 lg:py-20",
-  // The shipped value, kept as the default so no existing caller moves.
-  normal: "py-24 md:py-32 lg:py-40",
-  open: "py-32 md:py-44 lg:py-56",
+  // Re-measured 2026-09-05 against full-page captures of the shipped site: at
+  // 96/128/160 the default rhythm, stacked on the sections' own inner margins,
+  // produced 400–500px of empty paper between blocks — read as the page having
+  // ended rather than as a breath. The scale keeps its 1 : 1.4 : 2 alternation
+  // one rung down, so `open` now sits where `normal` used to.
+  normal: "py-20 md:py-24 lg:py-28",
+  open: "py-24 md:py-32 lg:py-40",
 }
 
 const ALIGN_CLASS: Record<SectionAlign, string> = {
@@ -103,7 +107,19 @@ interface SectionHeadingProps {
   title: string
   subtitle?: string
   tone?: SectionTone
+  /**
+   * The section's position in the page's argument, one-based. Rendered as a
+   * zero-padded index tag with a tick rule ahead of the eyebrow, so a reader
+   * can tell where in the sequence they are without the side rail, which only
+   * exists on very wide viewports.
+   */
+  index?: number
   className?: string
+}
+
+/** `1` reads `01`: the tag is a scale mark, and marks on a scale share a width. */
+export function formatIndex(index: number): string {
+  return String(index).padStart(2, "0")
 }
 
 /**
@@ -116,18 +132,28 @@ export function SectionHeading({
   title,
   subtitle,
   tone = "paper",
+  index,
   className,
 }: SectionHeadingProps) {
   const onStage = tone === "stage"
+  const mutedText = onStage ? "text-on-stage-muted" : "text-muted"
   return (
     <div className={`max-w-3xl ${className ?? ""}`}>
       {eyebrow ? (
         <p
-          className={`mb-6 font-mono text-xs uppercase tracking-widest ${
-            onStage ? "text-on-stage-muted" : "text-muted"
-          }`}
+          className={`mb-6 flex items-center gap-3 font-mono text-xs uppercase tracking-widest ${mutedText}`}
         >
-          {eyebrow}
+          {index !== undefined ? (
+            <span
+              data-slot="section-index"
+              className={`index-tick flex items-center gap-3 tabular-nums ${
+                onStage ? "text-on-stage" : "text-ink"
+              }`}
+            >
+              {formatIndex(index)}
+            </span>
+          ) : null}
+          <span>{eyebrow}</span>
         </p>
       ) : null}
       <h2
