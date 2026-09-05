@@ -28,6 +28,10 @@ import {
   detachCommand as defaultDetach,
   syncStatusCommand as defaultSyncStatus,
 } from "../handoff/host-state-client"
+import { apiCommand as defaultApi } from "./api-command"
+import { dispatchDerived, matchDerived } from "./api-dispatch"
+import { hostCommand as defaultHost } from "./host-command"
+import { KNOWN_COMMANDS } from "./known-commands"
 import { realOutput, type OutputSink } from "./output"
 import { VERSION } from "../version"
 
@@ -84,6 +88,13 @@ Usage:
                      [--provider id] [--operation id] [--refresh] [--days n]
                      [--model m] [--transport auto|bridge|rpc|local] [--live] [--yes] [--json]
                      the provider operation plane: profiles, inventory, meters, spend, probes
+  cognia-agent api <call|list|groups|describe|schema|request> ...
+                     every command a Cognia Host exposes, driven from the frozen
+                     protocol contract (656 on the headless wire, 527 on the
+                     paired-device wire). Derived resource commands mirror it:
+                     \`cognia-agent plugin list\` is \`api call plugin_list\`
+  cognia-agent host <add|list|use|show|login|remove|path> ...
+                     the hosts this CLI can call, and where each value came from
   cognia-agent rpc [--model m] [--provider p] [--backend id]
   Bidirectional JSON-RPC 2.0 host on stdin/stdout (for @cognia/agent)
   cognia-agent worker <enroll|bind|list|remove|connect|daemon|service>
@@ -128,32 +139,6 @@ Flags:
   -v, --version         print the version
 `
 
-/** Real subcommands — anything else under `--print` is treated as a prompt. */
-const KNOWN_COMMANDS = new Set([
-  "run",
-  "auth",
-  "config",
-  "handoff",
-  "resume",
-  "chat",
-  "serve",
-  "logto",
-  "lark",
-  "eval",
-  "durability",
-  "sdk",
-  "x",
-  "rpc",
-  "worker",
-  "attach",
-  "detach",
-  "sync",
-  "backend",
-  "security",
-  "provider",
-  "update",
-])
-
 export interface MainDeps {
   run?: typeof defaultRun
   auth?: typeof defaultAuth
@@ -177,6 +162,8 @@ export interface MainDeps {
   security?: typeof defaultSecurity
   provider?: typeof defaultProvider
   update?: typeof defaultUpdate
+  api?: typeof defaultApi
+  host?: typeof defaultHost
   out?: OutputSink
 }
 
@@ -266,8 +253,18 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.update ?? defaultUpdate)(args, { out })
     case "provider":
       return (deps.provider ?? defaultProvider)(args, { out })
-    default:
+    case "api":
+      return (deps.api ?? defaultApi)(args, { out, argv })
+    case "host":
+      return (deps.host ?? defaultHost)(args, { out })
+    default: {
+      // Derived resource commands are consulted only after every hand-written
+      // command has declined, so a protocol group can never take a name this
+      // CLI already owns.
+      const derived = matchDerived(args)
+      if (derived) return dispatchDerived(args, derived, { out, argv })
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2
+    }
   }
 }

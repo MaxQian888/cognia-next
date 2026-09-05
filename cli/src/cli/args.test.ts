@@ -146,3 +146,66 @@ describe("parseArgv", () => {
     expect(boolFlag(args, "verbose")).toBe(true)
   })
 })
+
+describe("per-command boolean flags", () => {
+  it("treats an injected name as boolean without consuming the next token", () => {
+    const args = parseArgv(["api", "call", "plugin_list", "--muted", "--id", "abc"], {
+      booleanFlags: ["muted"],
+    })
+    expect(args.flags.muted).toBe(true)
+    expect(args.flags.id).toBe("abc")
+  })
+
+  it("leaves the global set unchanged for the next parse", () => {
+    parseArgv(["api", "call", "x", "--muted", "value"], { booleanFlags: ["muted"] })
+    const plain = parseArgv(["api", "call", "x", "--muted", "value"])
+    expect(plain.flags.muted).toBe("value")
+  })
+
+  it("keeps the global booleans alongside the injected ones", () => {
+    const args = parseArgv(["api", "call", "x", "--json", "--muted", "--id", "abc"], {
+      booleanFlags: ["muted"],
+    })
+    expect(args.flags.json).toBe(true)
+    expect(args.flags.muted).toBe(true)
+    expect(args.flags.id).toBe("abc")
+  })
+})
+
+describe("api plane flags", () => {
+  it("groups api and host so the verb lands in subcommand", () => {
+    expect(parseArgv(["api", "call", "plugin_list"])).toMatchObject({
+      command: "api",
+      subcommand: "call",
+      positionals: ["plugin_list"],
+    })
+    expect(parseArgv(["host", "use", "prod"])).toMatchObject({
+      command: "host",
+      subcommand: "use",
+      positionals: ["prod"],
+    })
+  })
+
+  it("maps -o to output so a directory is not read as a format", () => {
+    expect(parseArgv(["api", "list", "-o", "./out"]).flags.output).toBe("./out")
+  })
+
+  it("never lets --debug, --wait, --template or --enroll swallow the next token", () => {
+    const args = parseArgv([
+      "api",
+      "call",
+      "x",
+      "--debug",
+      "--wait",
+      "--template",
+      "--enroll",
+      "--format",
+      "json",
+    ])
+    expect(args.flags.debug).toBe(true)
+    expect(args.flags.wait).toBe(true)
+    expect(args.flags.template).toBe(true)
+    expect(args.flags.enroll).toBe(true)
+    expect(args.flags.format).toBe("json")
+  })
+})

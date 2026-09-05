@@ -59,6 +59,21 @@ export const BOOLEAN_FLAGS = new Set([
   "live",
   // `provider models --refresh` — bypass the cached inventory.
   "refresh",
+  // `--debug` — log the request/response envelope to stderr. Never takes a
+  // value, so `--debug --format json` cannot swallow the format.
+  "debug",
+  // `api call --wait` — poll the operation receipt for a command the host
+  // answered with 202 instead of a result.
+  "wait",
+  // `api schema --template` — print a fillable request body instead of calling.
+  "template",
+  // `host login --enroll` — take the enrollment from a running desktop's CLI
+  // bridge rather than a pairing code typed by hand.
+  "enroll",
+  // `host add --use` — make the new host active in the same step.
+  "use",
+  // `host add --local` — write ./.cognia/hosts.json instead of the CLI home.
+  "local",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
@@ -75,6 +90,8 @@ export const GROUPED_COMMANDS = new Set([
   "backend",
   "security",
   "provider",
+  "api",
+  "host",
 ])
 
 const SHORT_ALIAS: Record<string, string> = {
@@ -83,6 +100,7 @@ const SHORT_ALIAS: Record<string, string> = {
   y: "yes",
   p: "print",
   c: "continue",
+  o: "output",
 }
 
 function normalizeFlagName(token: string): { name: string; inlineValue?: string } {
@@ -92,10 +110,25 @@ function normalizeFlagName(token: string): { name: string; inlineValue?: string 
   return { name: body }
 }
 
-export function parseArgv(argv: string[]): ParsedArgs {
+export interface ParseOptions {
+  /**
+   * Boolean flags that exist only for the command being parsed.
+   *
+   * The derived API commands each carry their own booleans, taken from the
+   * generated request schemas. Appending those to {@link BOOLEAN_FLAGS} would
+   * make one command's field change how every other command parses, so they
+   * are passed in for a second parse once the command is known.
+   */
+  booleanFlags?: Iterable<string>
+}
+
+export function parseArgv(argv: string[], options: ParseOptions = {}): ParsedArgs {
   const flags: Record<string, string | boolean> = {}
   const positionals: string[] = []
   const rest: string[] = []
+  const booleanFlags = options.booleanFlags
+    ? new Set([...BOOLEAN_FLAGS, ...options.booleanFlags])
+    : BOOLEAN_FLAGS
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i]
@@ -108,7 +141,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
       const isShort = !token.startsWith("--")
       const { name: rawName, inlineValue } = normalizeFlagName(token)
       const name = isShort ? (SHORT_ALIAS[rawName] ?? rawName) : rawName
-      if (BOOLEAN_FLAGS.has(name)) {
+      if (booleanFlags.has(name)) {
         flags[name] = true
         continue
       }

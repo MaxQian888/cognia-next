@@ -72,6 +72,8 @@
     "mobile:sync:ios": "cross-env NEXT_PUBLIC_PLATFORM=mobile pnpm run build && pnpm --filter mobile run sync:ios",
     "// 05 ─── CLI ───": "",
     "cli:dev": "node scripts/build/dev-cli.mjs",
+    "cli:api:gen": "node scripts/build/gen-cli-api-index.mjs",
+    "cli:api:check": "node scripts/build/gen-cli-api-index.mjs --check",
     "cli:build": "node scripts/build/build-cli.mjs",
     "cli:build:binary": "bun scripts/build/build-cli-bun.mjs",
     "cli:external-host:build": "cargo build -p cognia-automation --bin cognia-external-agent-launcher --release",

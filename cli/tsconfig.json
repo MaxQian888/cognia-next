@@ -33,7 +33,9 @@
       "@cognia/ocr": ["packages/ocr/src/index.ts"],
       "@cognia/ocr/*": ["packages/ocr/src/*"],
       "@cognia/security-findings": ["packages/security-findings/src/index.ts"],
-      "@cognia/security-findings/*": ["packages/security-findings/src/*"]
+      "@cognia/security-findings/*": ["packages/security-findings/src/*"],
+      "@cognia/companion-client": ["packages/companion-client/src/index.ts"],
+      "@cognia/companion-client/*": ["packages/companion-client/src/*"]
     }
   }
 }
