@@ -430,18 +430,93 @@ scheme or host. It carries three identifiers now. The two halves also disagreed
 about encoding, so no link this app ever produced decoded, and the page reported
 success without joining anything.
 
+## Amendment, 2026-09-05: the plane learns to hold a Canvas document
+
+The amendment above recorded that `cognia-collab-server` served no Canvas route,
+so the transport was unreachable and failed closed. It serves them now, and the
+client reaches them.
+
+### The server does not link Yjs, and does not need to
+
+Every payload in `canvas_document_updates` and `canvas_documents.snapshot` is an
+opaque update. The server orders them, hands them back in order, refuses a
+duplicate operation id, and never decodes one. That is sound because Yjs updates
+commute: a joiner that applies the snapshot and then each later update arrives
+where everyone else is, whatever order the writes landed in.
+
+Compaction is a client act for the same reason. A peer holding the whole
+document posts `Y.encodeStateAsUpdate` naming the sequence it covers, and the
+rows at or below it become redundant. Only a maintainer may, because a snapshot
+from a stale peer would retire edits it never saw, and the store refuses a
+`coversSequence` that walks the marker backwards or past what exists.
+
+`yrs` therefore stays out of the build. The only new dependency on either side
+is the one the client already needed.
+
+### Membership is the workspace's
+
+There is no per-document member table. A Canvas document is not invited to
+individually the way a shared chat session is, so a second membership system
+next to `workspace_memberships` would only be somewhere for the two to drift
+apart. `CanvasAction` maps onto the ladder that already exists: viewer reads,
+member edits and comments, maintainer deletes, compacts and manages sharing. An
+org owner or admin traverses in as a maintainer, which `resolve_workspace_access`
+decides rather than anything in the Canvas modules.
+
+A caller outside the workspace is answered 404, not 403. Confirming that an id
+names a real document somewhere they cannot see is the leak.
+
+### Authorization runs per frame
+
+A ticket proves the bearer could read 30 seconds ago. A socket lives hours. Each
+inbound write re-resolves the caller's workspace role, one indexed lookup beside
+a transaction that already inserts and updates, so removing somebody from a
+workspace stops their typing at the next keystroke rather than at their next
+reconnect.
+
+### What made the offline queue possible
+
+`(document_id, operation_id)` is unique. A drain interrupted halfway leaves a
+client unsure which writes landed, and the honest recovery is to send them all
+again: the second attempt returns the update already stored rather than
+recording the edit twice. The same property is what lets `POST .../updates`
+serve both the live path and the catch-up path.
+
+### The client half
+
+The provider no longer holds a URL or a token. It takes a factory and calls it
+again for every retry, which answers three separate problems: a bare
+`WebSocket` in the renderer misses the desktop proxy settings, a single-use
+ticket cannot be replayed on reconnect, and a caller-supplied URL is exactly how
+the old join page pointed the transport at an arbitrary host.
+
+Canvas calls ride `CollabClient`, sharing its grant cache, its
+one-retry-on-401 and its transport. Share links now carry the real organisation
+from the sign-in binding, replacing the literal `"personal"` that no server
+could have honoured.
+
+Two behaviour changes are worth naming. A failed connection reports `error`
+rather than `disconnected`, so a refused socket is distinguishable from never
+having tried. And a reconnect rejoins as the actual participant instead of one
+named `"Reconnecting..."` in grey, which is what peers used to see in the
+roster.
+
+Off by default behind `COLLAB_CANVAS_ENABLED`.
+
 ### What is deliberately still open
 
-- **The collaboration server has no Canvas routes.** `cognia-collab-server`
-  exposes exactly one WebSocket route, `…/chat-sessions/{id}/stream` behind
-  `COLLAB_SHARED_CHAT_ENABLED`, with a one-time ticket and RLS. Canvas points at
-  `ws://localhost:8080/canvas` with subprotocol `cognia.canvas.v1`, which no
-  route serves, and nothing in the app mints `remoteAuthorization`, so the
-  transport is unreachable and fails closed. Multi-user Canvas needs that server
-  work. The client is now correct when it arrives.
+- **Editor bindings.** Monaco, CodeMirror and the comment anchors are not yet
+  bound to the shared Yjs document, and comments still carry their anchor as an
+  opaque string the server stores without interpreting. The column is there and
+  the type is Yjs-relative, but nothing computes one yet.
+- **The offline replay queue is in memory.** Frames a down socket refuses are
+  queued and flushed on reconnect, which covers a blip but not a reload. A
+  durable queue is an additive Dexie table and is not in this cut.
 - **Rich Markdown editing** is not shipped. The plan named Milkdown. The reuse
   path is CodeMirror 6 decorations over `@codemirror/lang-markdown`, which is
   already a dependency and, unlike a ProseMirror round-trip, cannot lose an
   unsupported construct because the buffer never stops being Markdown.
-- **The collaboration settings block (8 fields) is still inert**, because what
-  would read it is the transport above.
+- **The collaboration settings block (8 fields) is still inert.** The transport
+  exists now, so these are wiring rather than blocked work: presence settings
+  should drive cursor and avatar rendering, and the reconnect fields should
+  reach the provider's own budget instead of its defaults.
