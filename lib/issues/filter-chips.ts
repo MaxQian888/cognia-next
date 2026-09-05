@@ -106,7 +106,7 @@ export function toggleFilterValue(
  */
 export function setSoleFilterValue(
   filter: IssueBoardFilter,
-  facet: "issueProjectIds",
+  facet: "issueProjectIds" | "cycleIds",
   value: string | null
 ): IssueBoardFilter {
   return { ...filter, [facet]: value === null ? [] : [value] }

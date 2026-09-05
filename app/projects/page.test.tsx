@@ -9,6 +9,12 @@ jest.mock("@/components/issues/projects/project-console", () => ({
     return <div data-testid="project-console-stub" />
   },
 }))
+jest.mock("@/components/issues/cycles/cycle-console", () => ({
+  CycleConsole: () => <div data-testid="cycle-console-stub" />,
+}))
+jest.mock("@/components/mobile/issues/cycles-mobile-body", () => ({
+  CyclesMobileBody: () => <div data-testid="cycles-mobile-stub" />,
+}))
 let mobileProps: Record<string, unknown> | null = null
 jest.mock("@/components/mobile/issues/projects-mobile-body", () => ({
   ProjectsMobileBody: (props: Record<string, unknown>) => {
@@ -69,6 +75,29 @@ describe("ProjectsPage", () => {
       search = new URLSearchParams("id=iprj_9")
       render(<ProjectsPage />)
       expect(mobileProps).toMatchObject({ initialSelectedId: "iprj_9" })
+    })
+  })
+
+  describe("?tab=cycles", () => {
+    it("renders the cycle console on a wide viewport", () => {
+      search = new URLSearchParams("tab=cycles")
+      render(<ProjectsPage />)
+      expect(screen.getByTestId("cycle-console-stub")).toBeInTheDocument()
+      expect(screen.queryByTestId("project-console-stub")).not.toBeInTheDocument()
+    })
+
+    it("renders the compact cycles body on a narrow one", () => {
+      compact = true
+      search = new URLSearchParams("tab=cycles")
+      render(<ProjectsPage />)
+      expect(screen.getByTestId("cycles-mobile-stub")).toBeInTheDocument()
+      expect(screen.queryByTestId("projects-mobile-stub")).not.toBeInTheDocument()
+    })
+
+    it("treats any other tab value as the projects list", () => {
+      search = new URLSearchParams("tab=nonsense")
+      render(<ProjectsPage />)
+      expect(screen.getByTestId("project-console-stub")).toBeInTheDocument()
     })
   })
 })

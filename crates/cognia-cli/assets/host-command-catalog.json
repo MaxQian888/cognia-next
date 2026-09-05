@@ -203,6 +203,11 @@
       "category": "connectors"
     },
     {
+      "id": "issue",
+      "title": "Issue",
+      "category": "tasks"
+    },
+    {
       "id": "langfuse-tracing",
       "title": "Langfuse Tracing",
       "category": "system"
@@ -22947,6 +22952,177 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "issue_apply_action",
+      "category": "tasks",
+      "resource": "issue",
+      "target": "execution",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "issue_apply_action (client.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "issueId",
+          "action"
+        ],
+        "properties": {
+          "issueId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "status",
+                  "assignee",
+                  "comment",
+                  "priority",
+                  "title",
+                  "description",
+                  "dueDate",
+                  "estimate",
+                  "cycle",
+                  "addLabel",
+                  "removeLabel"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "applied",
+          "skipped",
+          "failed"
+        ],
+        "properties": {
+          "applied": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "federated-read-only",
+              "runtime-owned",
+              "illegal-transition"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "issue_create",
+      "category": "tasks",
+      "resource": "issue",
+      "target": "execution",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "issue_create (client.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "issueProjectId",
+          "title"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string"
+          },
+          "issueProjectId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "assignee": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "parentId": {
+            "type": "string"
+          },
+          "cycleId": {
+            "type": "string"
+          },
+          "dueDate": {
+            "type": "number"
+          },
+          "estimate": {
+            "type": "number"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "id",
+          "identifier"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -48500,5 +48676,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "d6adc413f732179af9e5a640fa2029dba02a68f13abc1fc8f450911709b8a2c3"
+  "catalogHash": "7b2134ce44cb484e52872b642b126ad609802d78a2c47b8059718d0a84112cce"
 }

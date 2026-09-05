@@ -181,6 +181,28 @@ const mockMemoryStore = jest.fn()
 jest.mock("@/lib/memory/api/store-memory", () => ({
   storeExternalMemory: (...args: unknown[]) => mockMemoryStore(...(args as [])),
 }))
+const mockGetIssue = jest.fn(async (..._a: unknown[]): Promise<unknown> => undefined)
+const mockCreateIssue = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
+  id: "iss_new",
+  identifier: "MERC-9",
+}))
+jest.mock("@/lib/db/issues", () => ({
+  getIssue: (...a: unknown[]) => mockGetIssue(...a),
+  createIssue: (...a: unknown[]) => mockCreateIssue(...a),
+}))
+const mockApplyBulk = jest.fn(async (..._a: unknown[]) => ({ applied: 1, skipped: 0, failed: 0 }))
+jest.mock("@/lib/issues/bulk-actions", () => ({
+  applyIssueBulkAction: (...a: unknown[]) => mockApplyBulk(...a),
+}))
+jest.mock("@/lib/issues/sources/local-source", () => ({
+  toUnifiedIssue: (issue: { id: string }) => ({
+    unifiedId: `local:${issue.id}`,
+    kind: "local",
+    sourceId: issue.id,
+  }),
+}))
+jest.mock("@/lib/db/issue-runs", () => ({ hasActiveIssueRun: async () => true }))
+
 const mockMemoryUpdate = jest.fn()
 const mockMemoryForget = jest.fn()
 jest.mock("@/lib/memory/api/mutate-memory", () => ({
@@ -1845,6 +1867,57 @@ describe("dispatchCommand: memory_* (ADR-0069)", () => {
     )
     expect(await dispatchCommand("memory_forget", { id: "m1" })).toEqual({ ok: true })
     expect(mockMemoryForget).toHaveBeenCalledWith("m1")
+  })
+
+  it("issue_apply_action validates, allowlists kinds and runs the board gate with the run state", async () => {
+    await expect(dispatchCommand("issue_apply_action", {})).rejects.toThrow(/issueId is required/)
+    await expect(
+      dispatchCommand("issue_apply_action", { issueId: "i1", action: { kind: "delete" } })
+    ).rejects.toThrow(/not allowed/)
+    mockGetIssue.mockResolvedValueOnce(undefined)
+    await expect(
+      dispatchCommand("issue_apply_action", {
+        issueId: "ghost",
+        action: { kind: "status", to: "done" },
+      })
+    ).rejects.toThrow(/unknown issue/)
+    mockGetIssue.mockResolvedValueOnce({ id: "i1" })
+    const outcome = await dispatchCommand("issue_apply_action", {
+      issueId: "i1",
+      action: { kind: "status", to: "done" },
+    })
+    expect(outcome).toEqual({ applied: 1, skipped: 0, failed: 0 })
+    expect(mockApplyBulk).toHaveBeenCalledWith(
+      [expect.objectContaining({ unifiedId: "local:i1" })],
+      { kind: "status", to: "done" },
+      { kind: "human" },
+      new Set(["local:i1"])
+    )
+  })
+
+  it("issue_create validates the three required fields and forwards the optional ones", async () => {
+    await expect(
+      dispatchCommand("issue_create", { projectId: "w", issueProjectId: "p" })
+    ).rejects.toThrow(/title is required/)
+    const out = await dispatchCommand("issue_create", {
+      projectId: "w",
+      issueProjectId: "p",
+      title: "T",
+      status: "todo",
+      dueDate: 5,
+      labelIds: ["l1", 7],
+      junk: "ignored",
+    })
+    expect(out).toEqual({ id: "iss_new", identifier: "MERC-9" })
+    expect(mockCreateIssue).toHaveBeenCalledWith({
+      projectId: "w",
+      issueProjectId: "p",
+      title: "T",
+      status: "todo",
+      dueDate: 5,
+      labelIds: ["l1"],
+      createdBy: { kind: "human" },
+    })
   })
 
   it("memory_list is policy-gated and clamps the limit", async () => {

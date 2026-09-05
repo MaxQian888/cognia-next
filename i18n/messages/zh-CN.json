@@ -14365,6 +14365,8 @@
       "manageTitle": "迭代与里程碑",
       "name": "名称",
       "namePlaceholder": "Sprint 12、v2.0…",
+      "noWorkspace": "未选择工作区",
+      "noWorkspaceHint": "迭代和里程碑属于工作区，请先选择一个再规划。",
       "progress": "完成 {done}/{total} · {pointsDone}/{points} 点",
       "progressBar": "迭代进度",
       "scope": "范围",
@@ -14375,7 +14377,10 @@
         "active": "进行中",
         "completed": "已完成",
         "planned": "计划中"
-      }
+      },
+      "summary": "{count, plural, =0 {暂无迭代} other {# 个迭代}}",
+      "title": "迭代",
+      "viewIssues": "查看事项"
     },
     "delete": {
       "bodyMany": "它们的活动记录与运行历史都会一并删除，且无法恢复。",
@@ -14466,6 +14471,12 @@
     "list": {
       "moreLabels": "+{count}",
       "select": "选中 {identifier}"
+    },
+    "mobile": {
+      "createQueued": "已排队：{title}",
+      "queued": "已排队：{identifier}",
+      "queuedHint": "更改会发送到你的主机，下次同步后在此显示。",
+      "sendComment": "发送"
     },
     "notify": {
       "actor": {

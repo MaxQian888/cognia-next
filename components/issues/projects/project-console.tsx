@@ -33,7 +33,7 @@ import { toast } from "sonner"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
-import { TrackerNav } from "@/components/issues/rail/tracker-nav"
+import { TrackerTabs } from "@/components/issues/tracker-tabs"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listIssues } from "@/lib/db/issues"
@@ -189,6 +189,8 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
           icon={<FolderIcon />}
           title={t("projects.title")}
           summary={t("projects.summary", { count: (projects ?? []).length })}
+          navigation={<TrackerTabs active="projects" />}
+          navigationPlacement="inline"
           primaryAction={{
             id: "create",
             label: t("projects.create"),
@@ -208,14 +210,6 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
           ]}
         />
       }
-      leftPane={{
-        // The same rail position `/issues` uses, so moving between the board
-        // and its containers changes what is on screen without moving the
-        // navigation out from under the pointer.
-        label: t("rail.trackerNav"),
-        defaultSize: "13rem",
-        content: <TrackerNav active="projects" />,
-      }}
       rightPane={
         selected
           ? {

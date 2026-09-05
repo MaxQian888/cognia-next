@@ -551,7 +551,7 @@ const HOST_CATEGORIES = [
     title: "Tasks and workspaces",
     description: "Task lifecycle, resources, patches, runs, and workspace settlement.",
     skill: "cognia-host-tasks",
-    pattern: /^(task_|execution_)/,
+    pattern: /^(task_|execution_|issue_)/,
   },
   {
     id: "automation",

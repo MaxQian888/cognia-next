@@ -33,6 +33,23 @@ jest.mock("@/hooks/data/use-dexie-first-query", () => ({
   },
 }))
 jest.mock("@/lib/db/issues", () => ({ listIssues: jest.fn() }))
+jest.mock("@/components/issues/tracker-tabs", () => ({
+  TrackerTabs: ({ active, compact }: { active: string; compact?: boolean }) => (
+    <nav data-testid="tabs-stub" data-compact={String(Boolean(compact))}>
+      {active}
+    </nav>
+  ),
+}))
+let createProps: Record<string, unknown> = {}
+jest.mock("./issue-create-sheet", () => ({
+  IssueCreateSheet: (props: Record<string, unknown>) => {
+    createProps = props
+    return props.open ? <div data-testid="create-sheet-stub" /> : null
+  },
+}))
+jest.mock("./issue-mobile-actions", () => ({
+  IssueMobileActions: () => <div data-testid="actions-stub" />,
+}))
 jest.mock("@/lib/db/issue-projects", () => ({ listIssueProjects: jest.fn() }))
 jest.mock("@/lib/db/labels", () => ({ listLabels: jest.fn() }))
 jest.mock("@/stores/project/project-store", () => ({
@@ -102,13 +119,28 @@ describe("IssuesMobileBody", () => {
     expect(screen.getByTestId("issues-mobile-row-i1")).toHaveTextContent("MERC-1")
   })
 
-  it("offers no drag affordance — mobile is read-only until sync lands", () => {
+  it("offers no drag affordance and no inline editing on the rows", () => {
     issuesResult = [issue()]
     const { container } = render(<IssuesMobileBody />)
     expect(container.querySelector("[data-dragging]")).toBeNull()
-    // Rows open a read-only sheet, so they ARE buttons; what must not exist is
-    // anything that writes.
+    // Rows open the detail sheet, so they ARE buttons; what must not exist on
+    // the list itself is an inline editor.
     expect(container.querySelector("input, textarea, select")).toBeNull()
+  })
+
+  it("shows the tracker tabs as full-width segments with issues active", () => {
+    render(<IssuesMobileBody />)
+    expect(screen.getByTestId("tabs-stub")).toHaveTextContent("issues")
+    expect(screen.getByTestId("tabs-stub")).toHaveAttribute("data-compact", "true")
+  })
+
+  it("opens the create sheet from the header with the workspace's containers", () => {
+    projectsResult = [{ id: "p1", name: "Mercury" }]
+    render(<IssuesMobileBody />)
+    expect(screen.queryByTestId("create-sheet-stub")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("issues-mobile-create-trigger"))
+    expect(screen.getByTestId("create-sheet-stub")).toBeInTheDocument()
+    expect(createProps).toMatchObject({ projectId: "w1", projects: [{ id: "p1", name: "Mercury" }] })
   })
 
   it("highlights the deep-linked issue", () => {

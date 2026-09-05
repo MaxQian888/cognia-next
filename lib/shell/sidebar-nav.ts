@@ -59,7 +59,6 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   discover: CompassIcon,
   templates: LayoutTemplateIcon,
   issues: CircleDotIcon,
-  "issue-projects": FolderKanbanIcon,
   workspace: LayoutDashboardIcon,
   skills: SparklesIcon,
   plugins: PlugIcon,

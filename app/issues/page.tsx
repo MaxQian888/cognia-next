@@ -32,6 +32,7 @@ function IssuesPageInner() {
       <IssueConsole
         initialSelectedId={initialSelectedId}
         initialProjectId={params.get("project") ?? undefined}
+        initialCycleId={params.get("cycle") ?? undefined}
       />
     </div>
   )

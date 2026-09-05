@@ -605,7 +605,12 @@
     "startsAt": "Starts",
     "endsAt": "Ends",
     "progress": "{done}/{total} done · {pointsDone}/{points} pts",
-    "progressBar": "Cycle progress"
+    "progressBar": "Cycle progress",
+    "title": "Cycles",
+    "summary": "{count, plural, =0 {No cycles} one {# cycle} other {# cycles}}",
+    "viewIssues": "View issues",
+    "noWorkspace": "No workspace selected",
+    "noWorkspaceHint": "Cycles and milestones belong to a workspace. Pick one to plan into."
   },
   "activitySide": {
     "local": "local",
@@ -658,5 +663,11 @@
       "estimate": "Estimate",
       "cycle": "Cycle"
     }
+  },
+  "mobile": {
+    "queuedHint": "Changes are sent to your host and appear here after the next sync.",
+    "queued": "Queued for {identifier}",
+    "sendComment": "Send",
+    "createQueued": "Queued: {title}"
   }
 }

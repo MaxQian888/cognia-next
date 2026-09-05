@@ -7,6 +7,13 @@ jest.mock("next-intl", () => ({
 
 jest.mock("@/lib/db/issue-projects", () => ({ listIssueProjects: jest.fn() }))
 jest.mock("@/lib/db/issues", () => ({ listIssues: jest.fn() }))
+jest.mock("@/components/issues/tracker-tabs", () => ({
+  TrackerTabs: ({ active, compact }: { active: string; compact?: boolean }) => (
+    <nav data-testid="tabs-stub" data-compact={String(Boolean(compact))}>
+      {active}
+    </nav>
+  ),
+}))
 
 let projectsForTest: unknown[] = []
 let issuesForTest: unknown[] = []
@@ -114,5 +121,11 @@ describe("ProjectsMobileBody", () => {
     activeProjectId = null
     render(<ProjectsMobileBody />)
     expect(screen.getByTestId("projects-mobile-empty")).toBeInTheDocument()
+  })
+
+  it("shows the tracker tabs as full-width segments with projects active", () => {
+    render(<ProjectsMobileBody />)
+    expect(screen.getByTestId("tabs-stub")).toHaveTextContent("projects")
+    expect(screen.getByTestId("tabs-stub")).toHaveAttribute("data-compact", "true")
   })
 })

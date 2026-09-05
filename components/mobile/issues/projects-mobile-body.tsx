@@ -16,6 +16,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 
+import { TrackerTabs } from "@/components/issues/tracker-tabs"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
@@ -63,11 +64,14 @@ export function ProjectsMobileBody({ initialSelectedId }: ProjectsMobileBodyProp
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="projects-mobile-body">
-      <header className="flex items-center gap-2 border-b px-4 py-3">
-        <h1 className="text-base font-semibold">{t("projects.title")}</h1>
-        <Badge variant="secondary" className="font-normal">
-          {t("projects.summary", { count: rows.length })}
-        </Badge>
+      <header className="flex flex-col gap-2 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-base font-semibold">{t("projects.title")}</h1>
+          <Badge variant="secondary" className="font-normal">
+            {t("projects.summary", { count: rows.length })}
+          </Badge>
+        </div>
+        <TrackerTabs active="projects" compact />
       </header>
 
       {rows.length === 0 && projectsQuery.isSyncing ? (

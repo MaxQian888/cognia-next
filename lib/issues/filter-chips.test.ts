@@ -147,4 +147,10 @@ describe("setSoleFilterValue", () => {
     const filter = { ...EMPTY_ISSUE_FILTER, issueProjectIds: ["p1"] }
     expect(setSoleFilterValue(filter, "issueProjectIds", null).issueProjectIds).toEqual([])
   })
+
+  it("covers the cycle facet the Cycles tab deep-links through", () => {
+    const filter = { ...EMPTY_ISSUE_FILTER, cycleIds: ["c1"] }
+    expect(setSoleFilterValue(filter, "cycleIds", "c2").cycleIds).toEqual(["c2"])
+    expect(setSoleFilterValue(filter, "cycleIds", "c2").issueProjectIds).toEqual([])
+  })
 })

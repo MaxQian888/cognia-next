@@ -30,6 +30,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    "issue_apply_action",
+    "issue_create",
     "mcp_set_enabled",
     "mcp_set_tool_rules",
     "adapter_update_policy",
@@ -647,6 +649,11 @@ pub(super) async fn dispatch(
         | "character_bind_twin"
         | "skill_set_enabled"
         | "plugin_set_enabled"
+        // Issue tracker writes from a paired phone (spec 2026-09-06 D8). The
+        // TS arm re-runs the board's own gates, so a stale phone cannot move
+        // an issue the runtime currently owns.
+        | "issue_apply_action"
+        | "issue_create"
         // MCP server enable/disable + per-tool deny rules. Definition CRUD is
         // deliberately absent: it carries credentials and a trust decision.
         | "mcp_set_enabled"

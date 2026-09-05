@@ -62,7 +62,6 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // The tracker's low-frequency management surfaces. `issues` is the daily
   // entry point and is pinned by default; these two live in "More" until the
   // user pins them, rather than tripling the rail for everyone.
-  { id: "issue-projects", route: "/projects", i18nKey: "issueProjects", group: "auxiliary" },
   { id: "workspace", route: "/workspace", i18nKey: "workspace", group: "auxiliary" },
   // Reachable from the Go menu (`src-tauri/src/menu.rs`) long before they were
   // reachable from the navigation — the menubar could go somewhere the rail

@@ -71,6 +71,9 @@ const COMMAND_KINDS = [
   "mcp_set_tool_rules",
   "adapter_update_policy",
   "app_settings_update",
+  // Issue tracker (spec 2026-09-06 D8)
+  "issue_apply_action",
+  "issue_create",
   // Long-term memory
   "memory_update",
   "memory_forget",

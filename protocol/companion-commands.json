@@ -7611,6 +7611,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "issue_apply_action",
+      "target": "execution",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "issue_create",
+      "target": "execution",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "keyring_secret_clear",
       "target": "service",
       "operation": "write",

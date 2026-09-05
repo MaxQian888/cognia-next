@@ -17,6 +17,11 @@ jest.mock("@/hooks/data/use-dexie-first-query", () => ({
 }))
 jest.mock("@/lib/db/issue-events", () => ({ listIssueEvents: jest.fn() }))
 jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
+jest.mock("./issue-mobile-actions", () => ({
+  IssueMobileActions: ({ item }: { item: { sourceId: string } }) => (
+    <div data-testid="actions-stub">{item.sourceId}</div>
+  ),
+}))
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
@@ -106,14 +111,16 @@ describe("IssueDetailSheet", () => {
     expect(screen.getByText("Because reasons")).toBeInTheDocument()
   })
 
-  it("says it is read-only rather than leaving the user hunting for controls", () => {
+  it("mounts the phone's write block for a local issue", () => {
     renderSheet()
-    expect(screen.getByText("detail.mobileReadOnly")).toBeInTheDocument()
+    expect(screen.getByTestId("actions-stub")).toHaveTextContent("i1")
+    expect(screen.queryByText("detail.mobileReadOnly")).not.toBeInTheDocument()
   })
 
-  it("offers nothing that writes", () => {
-    const { container } = renderSheet({ item: item({ description: "x", labelIds: ["l1"] }) })
-    expect(container.querySelector("input, textarea, select")).toBeNull()
+  it("keeps a federated row read-only and says so", () => {
+    renderSheet({ item: item({ kind: "github", unifiedId: "github:1", sourceId: "1" }) })
+    expect(screen.getByText("detail.mobileReadOnly")).toBeInTheDocument()
+    expect(screen.queryByTestId("actions-stub")).not.toBeInTheDocument()
   })
 
   it("reports a close", () => {

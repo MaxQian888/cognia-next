@@ -75,6 +75,13 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "mcp_set_tool_rules",
   "adapter_update_policy",
   "app_settings_update",
+  // Issue tracker writes from a paired phone (spec 2026-09-06 D8). One
+  // generic action carries the board's own `IssueBulkAction` vocabulary so
+  // every gate (capabilities, run-active) runs on the host; create is the
+  // only write with its own shape. Delete, container management and runs
+  // stay desktop-only.
+  "issue_apply_action",
+  "issue_create",
   // Long-term memory mutations — mobile edits must reach the desktop
   // authority instead of only changing the offline sync mirror.
   "memory_update",

@@ -531,6 +531,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "character_bind_twin",
     "skill_set_enabled",
     "plugin_set_enabled",
+    // Issue tracker writes from a paired phone (spec 2026-09-06 D8), round-
+    // tripped through desktop_writes_bridge like the Wave 2 commands above.
+    "issue_apply_action",
+    "issue_create",
     "mcp_set_enabled",
     "mcp_set_tool_rules",
     "adapter_update_policy",

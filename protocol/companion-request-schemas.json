@@ -6922,6 +6922,97 @@
       },
       "additionalProperties": false
     },
+    "issue_apply_action": {
+      "type": "object",
+      "required": [
+        "issueId",
+        "action"
+      ],
+      "properties": {
+        "issueId": {
+          "type": "string"
+        },
+        "action": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "status",
+                "assignee",
+                "comment",
+                "priority",
+                "title",
+                "description",
+                "dueDate",
+                "estimate",
+                "cycle",
+                "addLabel",
+                "removeLabel"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "issue_create": {
+      "type": "object",
+      "required": [
+        "projectId",
+        "issueProjectId",
+        "title"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "issueProjectId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "status": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "cycleId": {
+          "type": "string"
+        },
+        "dueDate": {
+          "type": "number"
+        },
+        "estimate": {
+          "type": "number"
+        },
+        "labelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "keyring_secret_clear": {
       "type": "object",
       "required": [

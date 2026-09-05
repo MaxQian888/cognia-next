@@ -414,6 +414,14 @@ describe("IssueConsole", () => {
       )
     })
 
+    it("applies the ?cycle= deep link from the Cycles tab as a cycle filter", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole initialCycleId="c9" />)
+      await waitFor(() =>
+        expect((filterBarProps.filter as { cycleIds?: string[] }).cycleIds).toEqual(["c9"])
+      )
+    })
+
     it("turns a project click into a filter, not a navigation", async () => {
       render(<IssueConsole />)
       await screen.findByTestId("rail-stub")

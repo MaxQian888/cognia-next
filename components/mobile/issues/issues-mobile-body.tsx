@@ -1,14 +1,17 @@
 "use client"
 
 /**
- * Read-only issue list for the mobile (Capacitor) shell.
+ * Issue list for the mobile (Capacitor) shell.
  *
- * Deliberately read-mostly, following `components/mobile/agent-teams/team-board-mobile.tsx`:
- * no touch drag, no inline editing. The tables are companion-synced now, so
- * the board actually has contents to show. Writes stay off: there is no
- * `issue_*` command at all, so a control here would have nothing to call.
+ * Read-mostly, following `components/mobile/agent-teams/team-board-mobile.tsx`:
+ * no touch drag, no inline editing on the rows. The tables are
+ * companion-synced, so the board has contents to show. The phone's writes are
+ * the few that matter away from a desk (spec 2026-09-06 D8): a new issue from
+ * the header's plus button, and status, assignee and a comment from the detail
+ * sheet. Each is a queued job for the host, never a local write.
  */
 
+import { PlusIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
@@ -22,10 +25,13 @@ import { listIssueProjects } from "@/lib/db/issue-projects"
 import { listIssueCycles } from "@/lib/db/issue-cycles"
 import { buildPlanningHints } from "@/lib/issues/planning-hints"
 import { PlanningBadges } from "@/components/issues/planning/planning-badges"
+import { TrackerTabs } from "@/components/issues/tracker-tabs"
+import { Button } from "@/components/ui/button"
 import { listLabels } from "@/lib/db/labels"
 import { buildIssueGroups } from "@/lib/issues/board-model"
 import { toUnifiedIssue } from "@/lib/issues/sources/local-source"
 import { useProjectStore } from "@/stores/project/project-store"
+import { IssueCreateSheet } from "./issue-create-sheet"
 import { IssueDetailSheet } from "./issue-detail-sheet"
 import type { IssueCycle, IssueStatus } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
@@ -100,17 +106,32 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
    * notification actually arrives somewhere.
    */
   const [openId, setOpenId] = useState<string | undefined>(initialSelectedId)
+  const [createOpen, setCreateOpen] = useState(false)
   const openItem =
     groups.flatMap((group) => group.items).find((candidate) => candidate.sourceId === openId) ??
     null
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="issues-mobile-body">
-      <header className="safe-area-pt flex items-center gap-2 border-b px-4 py-3">
-        <h1 className="text-base font-semibold">{t("title")}</h1>
-        <Badge variant="secondary" className="font-normal">
-          {t("summary", { count: total })}
-        </Badge>
+      <header className="safe-area-pt flex flex-col gap-2 border-b px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-base font-semibold">{t("title")}</h1>
+          <Badge variant="secondary" className="font-normal">
+            {t("summary", { count: total })}
+          </Badge>
+          <span className="flex-1" />
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t("create.trigger")}
+            disabled={!projectId}
+            onClick={() => setCreateOpen(true)}
+            data-testid="issues-mobile-create-trigger"
+          >
+            <PlusIcon className="size-4" />
+          </Button>
+        </div>
+        <TrackerTabs active="issues" compact />
       </header>
 
       {total === 0 && issuesQuery.isSyncing ? (
@@ -193,6 +214,13 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
           ))}
         </div>
       )}
+
+      <IssueCreateSheet
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        projectId={projectId}
+        projects={projects ?? []}
+      />
 
       <IssueDetailSheet
         item={openItem}

@@ -93,6 +93,7 @@ import { IssueBulkToolbar } from "./list/issue-bulk-toolbar"
 import { IssueList } from "./list/issue-list"
 import { ManageLabelsDialog } from "./rail/manage-labels-dialog"
 import { ManageCyclesDialog } from "./rail/manage-cycles-dialog"
+import { TrackerTabs } from "./tracker-tabs"
 import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
@@ -119,9 +120,15 @@ export interface IssueConsoleProps {
    * projects console's "view these issues" produces.
    */
   initialProjectId?: string
+  /** Deep-linked cycle (`/issues?cycle=…`), from the Cycles tab. */
+  initialCycleId?: string
 }
 
-export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConsoleProps) {
+export function IssueConsole({
+  initialSelectedId,
+  initialProjectId,
+  initialCycleId,
+}: IssueConsoleProps) {
   const t = useTranslations("issues")
   const projectId = useProjectStore((s) => s.activeProjectId)
 
@@ -151,18 +158,18 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
    */
   const deepLinkApplied = useRef(false)
   useEffect(() => {
-    if (deepLinkApplied.current || !initialProjectId) return
+    if (deepLinkApplied.current || (!initialProjectId && !initialCycleId)) return
     deepLinkApplied.current = true
     const current = useIssueViewStore.getState()
     const active = resolveIssueViewPreferences(
       findIssueView(current.viewId) ?? BUILTIN_ISSUE_VIEWS[0],
       current.overrides[current.viewId]
     )
-    current.setFilter(
-      current.viewId,
-      setSoleFilterValue(active.filter, "issueProjectIds", initialProjectId)
-    )
-  }, [initialProjectId])
+    let filter = active.filter
+    if (initialProjectId) filter = setSoleFilterValue(filter, "issueProjectIds", initialProjectId)
+    if (initialCycleId) filter = setSoleFilterValue(filter, "cycleIds", initialCycleId)
+    current.setFilter(current.viewId, filter)
+  }, [initialProjectId, initialCycleId])
 
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialSelectedId ? `local:${initialSelectedId}` : undefined
@@ -595,6 +602,8 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           icon={<CircleDotIcon />}
           title={t("title")}
           summary={t("summary", { count: sorted.length })}
+          navigation={<TrackerTabs active="issues" />}
+          navigationPlacement="inline"
           status={
             <div className="flex items-center gap-1.5">
               <CollabRefreshStaleBadge />

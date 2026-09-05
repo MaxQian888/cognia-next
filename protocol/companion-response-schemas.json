@@ -1,6 +1,29 @@
 {
   "schemaVersion": 1,
   "$defs": {
+    "IssueBulkOutcome": {
+      "type": "object",
+      "required": ["applied", "skipped", "failed"],
+      "properties": {
+        "applied": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "reason": {
+          "type": "string",
+          "enum": ["federated-read-only", "runtime-owned", "illegal-transition"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "IssueCreateResult": {
+      "type": "object",
+      "required": ["id", "identifier"],
+      "properties": {
+        "id": { "type": "string" },
+        "identifier": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "AgentReadResult": {
       "type": "object",
       "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all \u2014 the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
@@ -8208,6 +8231,12 @@
     },
     "plugin_set_enabled": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "issue_apply_action": {
+      "$ref": "#/$defs/IssueBulkOutcome"
+    },
+    "issue_create": {
+      "$ref": "#/$defs/IssueCreateResult"
     },
     "plugin_set_network_allowlist": {
       "$ref": "#/$defs/NullResult"

@@ -14365,6 +14365,8 @@
       "manageTitle": "Cycles and milestones",
       "name": "Name",
       "namePlaceholder": "Sprint 12, v2.0…",
+      "noWorkspace": "No workspace selected",
+      "noWorkspaceHint": "Cycles and milestones belong to a workspace. Pick one to plan into.",
       "progress": "{done}/{total} done · {pointsDone}/{points} pts",
       "progressBar": "Cycle progress",
       "scope": "Scope",
@@ -14375,7 +14377,10 @@
         "active": "Active",
         "completed": "Completed",
         "planned": "Planned"
-      }
+      },
+      "summary": "{count, plural, =0 {No cycles} one {# cycle} other {# cycles}}",
+      "title": "Cycles",
+      "viewIssues": "View issues"
     },
     "delete": {
       "bodyMany": "Their activity trails and run histories go with them. This cannot be undone.",
@@ -14466,6 +14471,12 @@
     "list": {
       "moreLabels": "+{count}",
       "select": "Select {identifier}"
+    },
+    "mobile": {
+      "createQueued": "Queued: {title}",
+      "queued": "Queued for {identifier}",
+      "queuedHint": "Changes are sent to your host and appear here after the next sync.",
+      "sendComment": "Send"
     },
     "notify": {
       "actor": {

@@ -7,15 +7,14 @@
  * consumed it beyond a background tint, so a deep link highlighted a row the
  * user could not open. This is what it opens.
  *
- * Read-only, like everything else on mobile. The tracker has no `issue_*`
- * command at all, so a control here would have nothing to call, and offering
- * one that could not round-trip is worse than offering none. What the phone
- * can do is read: the activity trail and the dispatch history sync now, and
- * this is where they are shown.
+ * A local issue gets the phone's three writes at the bottom
+ * (`IssueMobileActions`): status, assignee, comment, each queued for the host
+ * as an `issue_apply_action` job. Everything else here is read: the activity
+ * trail and the dispatch history sync now, and this is where they are shown.
  *
- * Only local issues have either. A row federated in from GitHub or an agent
- * board keeps its history in that system, so both sections stay off for it
- * rather than rendering a convincing empty trail.
+ * Only local issues have any of it. A row federated in from GitHub or an agent
+ * board keeps its history and its edits in that system, so the sections stay
+ * off for it and the read-only badge says so.
  */
 
 import { useTranslations } from "next-intl"
@@ -33,6 +32,7 @@ import type { IssueEvent, IssueRun } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
+import { IssueMobileActions } from "./issue-mobile-actions"
 
 export interface IssueDetailSheetProps {
   item: UnifiedIssueItem | null
@@ -276,10 +276,15 @@ export function IssueDetailSheet({
                 </div>
               ) : null}
 
-              {/* Says what mobile cannot do, instead of leaving the user hunting. */}
-              <Badge variant="outline" className="w-fit font-normal">
-                {t("detail.mobileReadOnly")}
-              </Badge>
+              {localId ? (
+                <IssueMobileActions item={item} />
+              ) : (
+                // Says what mobile cannot do with a federated row, instead of
+                // leaving the user hunting for controls.
+                <Badge variant="outline" className="w-fit font-normal">
+                  {t("detail.mobileReadOnly")}
+                </Badge>
+              )}
             </div>
           </>
         ) : null}

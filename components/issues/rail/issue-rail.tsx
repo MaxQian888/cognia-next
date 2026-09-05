@@ -12,7 +12,9 @@
  * Every row is a FILTER, not a destination. Clicking a project narrows the
  * board in place (`filter.issueProjectIds`) rather than navigating to
  * `/projects`; the hover-revealed arrow is the navigation. Mixing the two into
- * one click is how a user loses the board they were reading.
+ * one click is how a user loses the board they were reading. Moving between
+ * the tracker's destinations is the header's job (`TrackerTabs`), not the
+ * rail's.
  */
 
 import { ArrowUpRightIcon, FlagIcon, RotateCwIcon, SettingsIcon } from "lucide-react"
@@ -28,7 +30,6 @@ import type { IssueCycle, IssueProject } from "@/types/issues"
 import { defaultLabelColor, type LabelRow } from "@/types/labels"
 import { IssueRailRow } from "./issue-rail-row"
 import { IssueRailSection } from "./issue-rail-section"
-import { TrackerNav } from "./tracker-nav"
 
 export interface IssueRailProps {
   viewId: string
@@ -92,9 +93,6 @@ export function IssueRail({
       data-testid="issue-rail"
       className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2"
     >
-      {/* Above the filter sections, because it navigates and they narrow. */}
-      <TrackerNav active="issues" />
-
       <IssueRailSection
         id="views"
         title={t("rail.views")}

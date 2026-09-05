@@ -605,7 +605,12 @@
     "startsAt": "开始",
     "endsAt": "结束",
     "progress": "完成 {done}/{total} · {pointsDone}/{points} 点",
-    "progressBar": "迭代进度"
+    "progressBar": "迭代进度",
+    "title": "迭代",
+    "summary": "{count, plural, =0 {暂无迭代} other {# 个迭代}}",
+    "viewIssues": "查看事项",
+    "noWorkspace": "未选择工作区",
+    "noWorkspaceHint": "迭代和里程碑属于工作区，请先选择一个再规划。"
   },
   "activitySide": {
     "local": "本地",
@@ -658,5 +663,11 @@
       "estimate": "估点",
       "cycle": "迭代"
     }
+  },
+  "mobile": {
+    "queuedHint": "更改会发送到你的主机，下次同步后在此显示。",
+    "queued": "已排队：{identifier}",
+    "sendComment": "发送",
+    "createQueued": "已排队：{title}"
   }
 }

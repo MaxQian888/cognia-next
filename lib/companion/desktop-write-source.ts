@@ -352,6 +352,10 @@ export async function dispatchCommand(
       return adapterUpdatePolicy(payload)
     case "app_settings_update":
       return appSettingsUpdate(payload)
+    case "issue_apply_action":
+      return issueApplyActionRpc(payload)
+    case "issue_create":
+      return issueCreateRpc(payload)
     case "twin_profile_get":
       return twinProfileGet(payload)
     case "host_capabilities":
@@ -1415,6 +1419,103 @@ async function adapterUpdatePolicy(payload: Record<string, unknown>): Promise<nu
     await updateAdapterConfigSection(id, section, patch, "mobile")
   }
   return null
+}
+
+/**
+ * One board action from a paired phone (spec 2026-09-06 D8). Routed through
+ * `applyIssueBulkAction`, never a bare Dexie write, so the capability bits
+ * and the run-active guard the desktop enforces apply to the phone too. The
+ * outcome is returned as counted, so the phone can say "refused" honestly.
+ */
+async function issueApplyActionRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const issueId = payload.issueId
+  if (typeof issueId !== "string" || !issueId.trim()) {
+    throw new Error("issue_apply_action.issueId is required")
+  }
+  const action = payload.action
+  if (
+    !action ||
+    typeof action !== "object" ||
+    typeof (action as { kind?: unknown }).kind !== "string"
+  ) {
+    throw new Error("issue_apply_action.action is required")
+  }
+  const kind = (action as { kind: string }).kind
+  if (!MOBILE_ISSUE_ACTION_KINDS.has(kind)) {
+    throw new Error(`issue_apply_action.action.kind "${kind}" is not allowed from a paired client`)
+  }
+  const { getIssue } = await import("@/lib/db/issues")
+  const issue = await getIssue(issueId)
+  if (!issue) throw new Error(`issue_apply_action: unknown issue ${issueId}`)
+  const { toUnifiedIssue } = await import("@/lib/issues/sources/local-source")
+  const { hasActiveIssueRun } = await import("@/lib/db/issue-runs")
+  const { applyIssueBulkAction } = await import("@/lib/issues/bulk-actions")
+  const item = toUnifiedIssue(issue)
+  const running = (await hasActiveIssueRun(issue.id))
+    ? new Set([item.unifiedId])
+    : new Set<string>()
+  const outcome = await applyIssueBulkAction(
+    [item],
+    action as Parameters<typeof applyIssueBulkAction>[1],
+    { kind: "human" },
+    running
+  )
+  return outcome
+}
+
+/** The subset of `IssueBulkAction` kinds a paired client may send (D8). */
+const MOBILE_ISSUE_ACTION_KINDS: ReadonlySet<string> = new Set([
+  "status",
+  "assignee",
+  "comment",
+  "priority",
+  "title",
+  "description",
+  "dueDate",
+  "estimate",
+  "cycle",
+  "addLabel",
+  "removeLabel",
+])
+
+async function issueCreateRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const projectId = payload.projectId
+  const issueProjectId = payload.issueProjectId
+  const title = payload.title
+  if (typeof projectId !== "string" || !projectId.trim()) {
+    throw new Error("issue_create.projectId is required")
+  }
+  if (typeof issueProjectId !== "string" || !issueProjectId.trim()) {
+    throw new Error("issue_create.issueProjectId is required")
+  }
+  if (typeof title !== "string" || !title.trim()) {
+    throw new Error("issue_create.title is required")
+  }
+  const { createIssue } = await import("@/lib/db/issues")
+  const issue = await createIssue({
+    projectId,
+    issueProjectId,
+    title,
+    ...(typeof payload.description === "string" ? { description: payload.description } : {}),
+    ...(typeof payload.status === "string"
+      ? { status: payload.status as Parameters<typeof createIssue>[0]["status"] }
+      : {}),
+    ...(typeof payload.priority === "string"
+      ? { priority: payload.priority as Parameters<typeof createIssue>[0]["priority"] }
+      : {}),
+    ...(payload.assignee && typeof payload.assignee === "object"
+      ? { assignee: payload.assignee as Parameters<typeof createIssue>[0]["assignee"] }
+      : {}),
+    ...(typeof payload.parentId === "string" ? { parentId: payload.parentId } : {}),
+    ...(typeof payload.cycleId === "string" ? { cycleId: payload.cycleId } : {}),
+    ...(typeof payload.dueDate === "number" ? { dueDate: payload.dueDate } : {}),
+    ...(typeof payload.estimate === "number" ? { estimate: payload.estimate } : {}),
+    ...(Array.isArray(payload.labelIds)
+      ? { labelIds: payload.labelIds.filter((id): id is string => typeof id === "string") }
+      : {}),
+    createdBy: { kind: "human" },
+  })
+  return { id: issue.id, identifier: issue.identifier }
 }
 
 async function appSettingsUpdate(
