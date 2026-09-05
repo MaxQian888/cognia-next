@@ -104,17 +104,54 @@ export async function agentTeamRunStatus(
   try {
     const [{ getDb }, { isSynthesizedTeamRunPayload }, { hasNoLeakingPii }] = await Promise.all([
       import("@/lib/db/schema"),
-      import("@/components/agent/team/runs-list"),
+      import("@/lib/ai/agent/team/team-workflow-id"),
       import("@cognia/redact"),
     ])
     const db = getDb()
+
+    // The durable run is the record (ADR-0169): the newest `agentTeamRuns`
+    // row and its execution journal, projected the same way the cockpit and an
+    // IM card project it. Only ids, codes and PII-gated summaries cross.
+    const durableRuns = await db.agentTeamRuns.where("teamId").equals(teamId).toArray()
+    const durable = durableRuns.sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (durable) {
+      const executionRunId = `execution:team:${durable.id}`
+      const executionRun = await db.executionRuns.get(executionRunId)
+      const journal = await db.executionRunEvents.where("runId").equals(executionRunId).sortBy("ts")
+      const events = journal
+        .filter((e) => e.ts > sinceTs && e.visibility !== "private")
+        .map((e) => {
+          const payload = (e.payload ?? {}) as { stepId?: unknown; summary?: unknown }
+          const summary = typeof payload.summary === "string" ? payload.summary : undefined
+          return {
+            ts: e.ts,
+            type: String(e.type),
+            ...(typeof payload.stepId === "string" ? { stepId: payload.stepId } : {}),
+            ...(summary && hasNoLeakingPii(summary) ? { message: summary } : {}),
+          }
+        })
+      return {
+        ok: true,
+        run: {
+          runId: durable.id,
+          status: String(executionRun?.status ?? durable.status),
+          startedAt: durable.startedAt ?? durable.createdAt,
+          ...(durable.completedAt ? { completedAt: durable.completedAt } : {}),
+          // A reason CODE, never text: the record carries codes by contract.
+          ...(durable.recoveryReason ? { error: durable.recoveryReason } : {}),
+        },
+        events,
+      }
+    }
+
+    // Legacy history only: a Squad that ran before ADR-0169 and whose runs
+    // were not backfilled yet still has `workflowRuns` rows under a
+    // `__team__:` id. Read-only.
     const all = await db.workflowRuns
       .where("triggerKind")
       .equals("trigger.team")
       .reverse()
       .sortBy("startedAt")
-    // Reuse the runs-list filter: synthesized team runs only — never the
-    // "on team finished" fan-out runs that share the trigger kind.
     const run = all.find((r) => isSynthesizedTeamRunPayload(r.triggerPayload, teamId))
     if (!run) return { ok: true }
 
@@ -122,8 +159,6 @@ export async function agentTeamRunStatus(
     const events = rows
       .filter((e) => e.ts > sinceTs)
       .map((e) => {
-        // Forward run_log text only when it clears the PII gate; every
-        // other event is projected without its payload.
         let message: string | undefined
         if (e.type === "run_log") {
           const raw = (e.payload as { message?: unknown } | undefined)?.message

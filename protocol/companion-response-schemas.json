@@ -6902,6 +6902,9 @@
     "ensure_system_lsp_host": {
       "$ref": "#/$defs/NullResult"
     },
+    "execution_run_control": {
+      "$ref": "#/$defs/LegacyResult"
+    },
     "external_agent_admit_run": {
       "type": "object",
       "required": ["admitted"],

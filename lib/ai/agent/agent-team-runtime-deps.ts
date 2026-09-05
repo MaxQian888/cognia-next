@@ -241,7 +241,7 @@ export function buildAgentTeamRuntimeDeps(
   // routes to center/toast/OS by level + user preferences. There is no
   // `openGate` any more: a Squad gate is a durable `ExecutionRunInterrupt`
   // opened by `squad-review-gate.ts`, and the notification only points at it
-  // (ADR-0168). Tests override via `opts.notifierDeps`.
+  // (ADR-0169). Tests override via `opts.notifierDeps`.
   const defaultNotifierDeps: TeamNotifierDeps = {
     deliver: (p) => {
       void import("@/lib/notifications/runtime").then(({ notify }) =>

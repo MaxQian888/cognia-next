@@ -2,7 +2,7 @@
  * `agentTeamManager`: the team-addressed facade over the Squad execution chain.
  *
  * `list/get/create/update/delete` proxy the store's definition CRUD. Every
- * runtime verb is a thin adapter onto the two seams ADR-0168 leaves:
+ * runtime verb is a thin adapter onto the two seams ADR-0169 leaves:
  *
  *   - `start()` goes through `startSquadRun`, the one launch seam, and then
  *     waits for the run to settle. Callers that await a start (the scheduler,
@@ -85,10 +85,17 @@ export async function recoverDurableAgentTeams(): Promise<
       if (!team) return
       if (outcome.status === "needs_input") {
         useAgentTeamStore.getState().setTeamStatus(team.id, "paused")
+        const { ensureTeamRecoveryInterrupt } = await import("./team/team-recovery")
+        await ensureTeamRecoveryInterrupt(outcome.runId).catch(() => undefined)
         return
       }
-      const { prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
+      const { guardSquadResume, prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
         await import("./team/squad-lifecycle-runner")
+      const guard = await guardSquadResume(team.id, outcome.runId)
+      if (guard.blocked) {
+        outcome.status = "needs_input"
+        return
+      }
       await prepareSquadResume(team.id)
       await runSquadLifecycle({
         teamId: team.id,

@@ -1,7 +1,7 @@
 /**
  * Whether a Squad can dispatch right now, and if not, exactly why.
  *
- * ADR-0168 removed the runtime selector, so there is no legacy path for a
+ * ADR-0169 removed the runtime selector, so there is no legacy path for a
  * Squad that is missing what the durable coordinator needs. Instead of failing
  * inside `runTeamLifecycle` with an English `Error`, the gap is computed here
  * as a list of stable blocker codes. A blocked Squad stays visible and

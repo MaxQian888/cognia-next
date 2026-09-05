@@ -34,7 +34,7 @@
  *    obtain a Squad at all was `instantiateTemplate`, and the only way to lose
  *    one was for a human to click Delete. `createTeam` goes through
  *    `createSquad`, not the store action, so a plugin-made Squad lands on
- *    the workspace's repository and environment bindings (ADR-0168).
+ *    the workspace's repository and environment bindings (ADR-0169).
  */
 
 import { loggers } from "@cognia/logging"
@@ -256,7 +256,7 @@ export interface PluginTeamAPI {
    * the repository and environment bindings needs two Dexie reads and a host
    * preflight, and a plugin-created Squad deserves the same bindings a
    * hand-created one gets. A workspace with no candidates still yields a
-   * Squad, reported as not ready until it is bound (ADR-0168).
+   * Squad, reported as not ready until it is bound (ADR-0169).
    *
    * `team:write`, not `agent:dispatch`: creating spends nothing. {@link start}
    * is where tokens begin.

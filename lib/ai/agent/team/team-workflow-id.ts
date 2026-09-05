@@ -62,3 +62,15 @@ export function parseTeamWorkflowId(workflowId: string): { teamId: string; nonce
   if (!teamId) return null
   return { teamId, nonce: rest.slice(separator + 1) }
 }
+
+/**
+ * Whether a `trigger.team` workflow-run row is one of THIS team's synthesized
+ * runs. Synthesized team runs stamp exactly `{ teamId }`; user workflows
+ * started by the "on team finished" fan-out share the trigger kind but carry
+ * `event: "team.completed"`. Lived in the retired `TeamRunsList`; kept here
+ * for the history backfill and the CLI projection, which apply the same rule.
+ */
+export function isSynthesizedTeamRunPayload(payload: unknown, teamId: string): boolean {
+  const p = payload as { teamId?: string; event?: string } | undefined
+  return p?.teamId === teamId && p?.event === undefined
+}

@@ -3,6 +3,14 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+jest.mock("@/hooks/squads/use-squad-readiness", () => ({
+  useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
+}))
+jest.mock("@/components/squads/squad-readiness-card", () => ({
+  SquadReadinessCard: ({ squadId }: { squadId: string }) => (
+    <div data-testid="squad-readiness" data-squad={squadId} />
+  ),
+}))
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,

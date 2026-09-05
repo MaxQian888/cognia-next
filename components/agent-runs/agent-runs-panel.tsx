@@ -61,6 +61,16 @@ export interface AgentRunsPanelProps {
   onStatusGroup?: (group: CockpitStatusGroup | "all") => void
   filterKind?: ExecutionFilterKind | "all"
   onFilterKind?: (kind: ExecutionFilterKind | "all") => void
+  /**
+   * Only this Squad's runs (ADR-0169). The `/squads` Runs tab is this panel
+   * with the Squad pinned, not a second history implementation.
+   */
+  teamId?: string
+  /**
+   * Hosted inside another page. Drops the page header (the host has one) and
+   * keeps the filter controls and the list/detail split.
+   */
+  embedded?: boolean
 }
 
 export function AgentRunsPanel({
@@ -70,12 +80,15 @@ export function AgentRunsPanel({
   onStatusGroup,
   filterKind = "all",
   onFilterKind,
+  teamId,
+  embedded = false,
 }: AgentRunsPanelProps) {
   const t = useTranslations("agentRuns")
   const { rows, allRows, selectedRow, statusCounts, kindCounts, isLoading, hasMore, loadMore } =
     useExecutionCockpit({
       ...(statusGroup !== "all" ? { statusGroup } : {}),
       ...(filterKind !== "all" ? { kind: filterKind } : {}),
+      ...(teamId ? { teamId } : {}),
       ...(selectedId ? { selectedId } : {}),
     })
   const actions = useRunControlActions()
@@ -97,56 +110,64 @@ export function AgentRunsPanel({
     [rows, allRows, selectedRow, selectedId]
   )
 
+  const controls = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
+        <FilterChip
+          label={t("filters.all")}
+          count={allRows.length}
+          selected={statusGroup === "all"}
+          onSelect={() => onStatusGroup?.("all")}
+        />
+        {COCKPIT_STATUS_GROUPS.map((group) => (
+          <FilterChip
+            key={group}
+            label={t(`filters.${group}`)}
+            count={statusCounts[group]}
+            selected={statusGroup === group}
+            onSelect={() => onStatusGroup?.(group)}
+          />
+        ))}
+      </div>
+      <Select
+        value={filterKind}
+        onValueChange={(value) => onFilterKind?.(value as ExecutionFilterKind | "all")}
+      >
+        <SelectTrigger size="sm" aria-label={t("filters.kindLabel")} className="w-auto">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{t("filters.allKinds")}</SelectItem>
+          {EXECUTION_FILTER_KINDS.map((kind) => {
+            const label = t(`kind.${filterKindLabelKey(kind)}`)
+            return (
+              <SelectItem key={kind} value={kind}>
+                {kindCounts[kind]
+                  ? t("filters.kindOption", { label, count: kindCounts[kind] })
+                  : label}
+              </SelectItem>
+            )
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <FeaturePageHeader
-        variant="compact"
-        icon={<ActivityIcon />}
-        title={t("title")}
-        description={t("description")}
-        controls={
-          <div className="flex flex-wrap items-center gap-1.5">
-            <div className="flex gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
-              <FilterChip
-                label={t("filters.all")}
-                count={allRows.length}
-                selected={statusGroup === "all"}
-                onSelect={() => onStatusGroup?.("all")}
-              />
-              {COCKPIT_STATUS_GROUPS.map((group) => (
-                <FilterChip
-                  key={group}
-                  label={t(`filters.${group}`)}
-                  count={statusCounts[group]}
-                  selected={statusGroup === group}
-                  onSelect={() => onStatusGroup?.(group)}
-                />
-              ))}
-            </div>
-            <Select
-              value={filterKind}
-              onValueChange={(value) => onFilterKind?.(value as ExecutionFilterKind | "all")}
-            >
-              <SelectTrigger size="sm" aria-label={t("filters.kindLabel")} className="w-auto">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("filters.allKinds")}</SelectItem>
-                {EXECUTION_FILTER_KINDS.map((kind) => {
-                  const label = t(`kind.${filterKindLabelKey(kind)}`)
-                  return (
-                    <SelectItem key={kind} value={kind}>
-                      {kindCounts[kind]
-                        ? t("filters.kindOption", { label, count: kindCounts[kind] })
-                        : label}
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
-          </div>
-        }
-      />
+    <div className="flex h-full min-h-0 w-full flex-col" data-testid="agent-runs-panel">
+      {embedded ? (
+        <div className="shrink-0 border-b px-3 py-2" data-testid="agent-runs-embedded-controls">
+          {controls}
+        </div>
+      ) : (
+        <FeaturePageHeader
+          variant="compact"
+          icon={<ActivityIcon />}
+          title={t("title")}
+          description={t("description")}
+          controls={controls}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/*

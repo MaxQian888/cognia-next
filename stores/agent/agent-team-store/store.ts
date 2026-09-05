@@ -4,6 +4,7 @@ import { persistLocalStorage } from "@/stores/persist-storage"
 import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
+import { stripLegacyRuntimeSelector } from "@/lib/agent-team/definition-contract"
 import { initialState } from "./initial-state"
 import { createAgentTeamActionsSlice } from "./slices/actions.slice"
 import type { AgentTeamState } from "./types"
@@ -79,8 +80,14 @@ import type { AgentTeamState } from "./types"
  *     tables do not on its first sync. That way the move happens once the
  *     account database is actually open, rather than inside a synchronous
  *     storage callback that has no way to await one.
+ *
+ *   - v9: the runtime selector is retired (ADR-0169). `runtimeVersion` is
+ *     dropped from `defaultConfig` and from every template's `config`, so a
+ *     persisted default cannot reintroduce a legacy/durable choice. Bindings
+ *     are not inferred here: templates are workspace-less, and the default is
+ *     applied at creation, where `createSquad` resolves candidates.
  */
-const PERSIST_VERSION = 8
+const PERSIST_VERSION = 9
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
 
 function agentTeamAccountStorageKey(accountId: string): string {
@@ -227,7 +234,42 @@ export function migrateAgentTeamPersisted(
   // v7: every team belongs to a workspace. Backfill the pre-isolation rows.
   backfillTeamProjectIds(raw.teams)
 
+  // v9: no runtime selector anywhere in the persisted blob.
+  stripLegacyRuntimeSelectors(raw)
+
   return raw as unknown as AgentTeamState
+}
+
+/**
+ * Drop the retired `runtimeVersion` key from the persisted default config and
+ * from every template's config. Idempotent, mutates in place, ignores
+ * malformed rows. Applied by `migrate` (v8 → v9) and by
+ * `activateAgentTeamAccountStorage`, whose read path bypasses `migrate`.
+ */
+export function stripLegacyRuntimeSelectors(raw: {
+  defaultConfig?: Record<string, unknown>
+  templates?: Record<string, { config?: Record<string, unknown> } & Record<string, unknown>>
+}): number {
+  let stripped = 0
+  if (raw.defaultConfig && typeof raw.defaultConfig === "object") {
+    const result = stripLegacyRuntimeSelector(raw.defaultConfig)
+    if (result.stripped) {
+      raw.defaultConfig = result.config
+      stripped += 1
+    }
+  }
+  if (raw.templates && typeof raw.templates === "object") {
+    for (const template of Object.values(raw.templates)) {
+      if (!template || typeof template !== "object" || !template.config) continue
+      if (typeof template.config !== "object") continue
+      const result = stripLegacyRuntimeSelector(template.config)
+      if (result.stripped) {
+        template.config = result.config
+        stripped += 1
+      }
+    }
+  }
+  return stripped
 }
 
 /**

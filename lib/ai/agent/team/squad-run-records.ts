@@ -1,7 +1,7 @@
 /**
  * The two rows a Squad run is made of, created together or not at all.
  *
- * ADR-0168 makes run creation fail-closed and transactional. Before it, the
+ * ADR-0169 makes run creation fail-closed and transactional. Before it, the
  * `AgentTeamRunRecord` was written by the coordinator's `prepareRun` some time
  * after dispatch, and the `ExecutionRun` by whichever caller remembered to,
  * "best-effort", inside a `catch {}`. A run could therefore be executing with

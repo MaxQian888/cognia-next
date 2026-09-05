@@ -5006,6 +5006,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "execution_run_control",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "external_agent_admit_run",
       "target": "execution",
       "operation": "side-effect",

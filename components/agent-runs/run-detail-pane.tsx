@@ -44,8 +44,13 @@ import { changeKindLabelKey, changesAreComplete } from "@/lib/execution/run-deta
 import { runKindLabelKey } from "@/lib/execution/cockpit-model"
 import type { RunControlActions, RunControlOutcome } from "@/hooks/agent-runs/use-agent-run-actions"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
-import type { RunControlAction, RunVerificationConclusion } from "@/types/execution/run"
+import type {
+  RunControlAction,
+  RunVerificationConclusion,
+  SquadReviewDecision,
+} from "@/types/execution/run"
 import { ExecutionStatusPill } from "./agent-run-status-pill"
+import { SquadReviewForm, isRenderableSquadReview } from "./squad-review-form"
 
 /** Verbs the pane offers, in the order they are shown. */
 const CONTROL_ORDER: readonly RunControlAction[] = [
@@ -90,13 +95,31 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   // Only a Squad run has consensus and delegations to show.
   const squadRun = isSquadRun(row)
 
-  const dispatch = async (action: RunControlAction, steerMessage?: string) => {
-    const result = await actions.dispatch(row, action, steerMessage ? { steerMessage } : {})
+  const dispatch = async (
+    action: RunControlAction,
+    steerMessage?: string,
+    reviewDecision?: SquadReviewDecision
+  ) => {
+    const result = await actions.dispatch(row, action, {
+      ...(steerMessage ? { steerMessage } : {}),
+      ...(reviewDecision ? { reviewDecision } : {}),
+    })
     setOutcome(result)
     // A steer that was not accepted leaves the text in the box: the message is
     // still the user's and clearing it would drop what they typed.
     if (result.accepted && action === "steer") setSteerText("")
   }
+
+  // The Squad review waiting on a person, if the pending interrupt is one.
+  // Its typed form replaces the bare Approve / Deny buttons: the gate refuses
+  // an approve that does not say how much budget, which teammates or which
+  // host, so offering the bare verb would be offering a refusal.
+  const pendingReview = interrupts.find(
+    (interrupt) =>
+      interrupt.status === "pending" &&
+      interrupt.id === run?.latestSnapshot?.pendingInterrupt?.id &&
+      isRenderableSquadReview(interrupt)
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -109,8 +132,17 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         row={row}
         actions={actions}
         busy={busy}
+        hideDecisionVerbs={pendingReview !== undefined}
         onDispatch={(action) => void dispatch(action)}
       />
+
+      {pendingReview && (
+        <SquadReviewForm
+          interrupt={pendingReview}
+          busy={busy}
+          onDecide={(action, decision) => void dispatch(action, undefined, decision)}
+        />
+      )}
 
       {actions.can(row, "steer") && (
         <form
@@ -226,7 +258,7 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
           {run?.latestSnapshot?.waitingReason && (
             <InspectRow
               label={t("detail.waitingReason")}
-              value={run.latestSnapshot.waitingReason}
+              value={waitingReasonLabel(t, run.latestSnapshot.waitingReason)}
             />
           )}
           {row.error && <InspectRow label={t("detail.error")} value={row.error} />}
@@ -385,6 +417,19 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   )
 }
 
+/**
+ * The waiting reason is a code (`waiting_review`, `recovery_required`). A
+ * code this catalogue does not know (an older journal, another engine's own
+ * vocabulary) is shown verbatim rather than as a missing-key marker.
+ */
+function waitingReasonLabel(
+  t: ReturnType<typeof useTranslations<"agentRuns">>,
+  code: string
+): string {
+  const key = `waitingReasons.${code}` as const
+  return typeof t.has === "function" && t.has(key as never) ? t(key as never) : code
+}
+
 function SectionCount({ value }: { value: number }) {
   if (value === 0) return null
   return <span className="ml-1 tabular-nums opacity-70">{value}</span>
@@ -426,15 +471,22 @@ function ControlBar({
   row,
   actions,
   busy,
+  hideDecisionVerbs = false,
   onDispatch,
 }: {
   row: UnifiedExecutionRow
   actions: RunControlActions
   busy: boolean
+  /** True while a typed review form owns approve / deny. */
+  hideDecisionVerbs?: boolean
   onDispatch: (action: RunControlAction) => void
 }) {
   const t = useTranslations("agentRuns")
-  const available = CONTROL_ORDER.filter((action) => actions.can(row, action))
+  const available = CONTROL_ORDER.filter(
+    (action) =>
+      actions.can(row, action) &&
+      !(hideDecisionVerbs && (action === "approve" || action === "deny"))
+  )
   if (available.length === 0) return null
   return (
     <div className="flex flex-wrap gap-2">

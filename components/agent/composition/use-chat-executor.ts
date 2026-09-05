@@ -31,7 +31,7 @@ import { getSession, updateSession } from "@/lib/db/sessions"
 import { collectSquadPresence, type SquadPresenceRow } from "@/lib/agent/squad-presence"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { selectTeammates, selectTeams } from "@/stores/agent/agent-team-store/selectors"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { usePendingSquadReviews } from "@/hooks/squads/use-pending-squad-reviews"
 import { useProjectStore } from "@/stores/project/project-store"
 
 /** Name, roster size, and whether it is running or waiting on a person. */
@@ -53,7 +53,7 @@ export interface ChatExecutor {
 export function useChatExecutor(sessionId?: string): ChatExecutor {
   const teams = useAgentTeamStore(selectTeams)
   const teammates = useAgentTeamStore(selectTeammates)
-  const gates = usePendingGatesStore((state) => state.gates)
+  const gates = usePendingSquadReviews()
   const workspaceId = useProjectStore((state) => state.activeProjectId)
   const session = useClientLiveQuery(
     () => (sessionId ? getSession(sessionId) : Promise.resolve(undefined)),

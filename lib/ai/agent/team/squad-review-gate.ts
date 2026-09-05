@@ -1,5 +1,5 @@
 /**
- * Squad human-in-the-loop, on the Action Review contract (ADR-0168).
+ * Squad human-in-the-loop, on the Action Review contract (ADR-0169).
  *
  * Before this module the six Squad gates blocked on an in-memory approval bus
  * (`lib/runtime/approval-bus.ts`), mirrored into a persisted UI store that
@@ -244,24 +244,38 @@ function defaultDecisionFor(kind: SquadReviewKind): SquadReviewDecision {
  * and is settled, the stored decision is returned without waiting. If it
  * exists and is pending, the wait attaches to it. Otherwise it is created.
  */
-export async function openSquadReview(
+export interface ArmedSquadReview {
+  interruptId: string
+  /** Set when the review was already answered: nothing is waiting. */
+  settled?: SquadReviewOutcome
+}
+
+/**
+ * Raise the interrupt without waiting on it.
+ *
+ * The half of {@link openSquadReview} a caller that is NOT a running lifecycle
+ * needs: the recovery module parks a run and returns, and the bootstrap
+ * re-arms interrupts for runs whose lifecycle is not alive. Idempotent per
+ * `(runId, kind, instance)`, checkpoint first, same projection.
+ */
+export async function armSquadReview(
   input: OpenSquadReviewInput,
   deps: SquadReviewDeps = {}
-): Promise<SquadReviewOutcome> {
+): Promise<ArmedSquadReview> {
   const now = deps.now ?? Date.now
   const interruptId = squadReviewInterruptIdFor(input.runId, input.kind, input.instance)
   const request = buildRequest(input, now())
 
   const existing = await getDb().executionRunInterrupts.get(interruptId)
   if (existing && existing.status !== "pending") {
-    return outcomeFromRow(existing, input.kind)
+    return { interruptId, settled: outcomeFromRow(existing, input.kind) }
   }
   if (!existing) {
     await (deps.checkpoint ?? defaultCheckpoint)(input).catch(() => undefined)
     const projected = await projectActionReviewOpened(request, now())
     if (!projected) {
       // No execution run to park on. That is a programming error under
-      // ADR-0168 (records exist before dispatch), and a silent auto-approve
+      // ADR-0169 (records exist before dispatch), and a silent auto-approve
       // would be the worst possible reading of it.
       throw new Error(`squad_review_unprojectable:${input.kind}`)
     }
@@ -270,6 +284,20 @@ export async function openSquadReview(
       ...(input.subject ? { subject: input.subject } : {}),
     })
   }
+  // The gate-wait span. Opened here (also for a re-armed row after a
+  // restart) and closed by whichever settle path answers it.
+  const { beginSquadReviewSpan } = await import("./squad-telemetry")
+  beginSquadReviewSpan({ runId: input.runId, teamId: input.teamId, interruptId, kind: input.kind })
+  return { interruptId }
+}
+
+export async function openSquadReview(
+  input: OpenSquadReviewInput,
+  deps: SquadReviewDeps = {}
+): Promise<SquadReviewOutcome> {
+  const armed = await armSquadReview(input, deps)
+  if (armed.settled) return armed.settled
+  const interruptId = armed.interruptId
 
   return new Promise<SquadReviewOutcome>((resolve, reject) => {
     let settled = false
@@ -369,6 +397,8 @@ export async function settleSquadReview(
     },
     row.createdAt
   )
+  const { endSquadReviewSpan } = await import("./squad-telemetry")
+  endSquadReviewSpan({ interruptId, outcome: outcome.outcome, source: source.actorKind })
   await projectActionReviewSettled(request, {
     contractVersion: ACTION_REVIEW_CONTRACT_VERSION,
     requestId: request.requestId,
@@ -432,6 +462,12 @@ export async function settleSquadReviewFromControl(
   // the handler returns. Writing the decision first means a waiter that wakes
   // on the status flip always finds the payload beside it.
   await getDb().executionRunInterrupts.update(row.id, { decision })
+  const { endSquadReviewSpan } = await import("./squad-telemetry")
+  endSquadReviewSpan({
+    interruptId: row.id,
+    outcome: outcome.outcome,
+    source: command.actor.remoteUserId ? "device" : "cockpit",
+  })
 
   const requestId = squadReviewRequestIdFromInterrupt(row)
   if (requestId) {

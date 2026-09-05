@@ -58,13 +58,14 @@ import {
   type EventStreamConnection,
 } from "@/lib/companion/device-presence-registry"
 import {
-  handleTeamRunPause,
-  handleTeamRunResume,
-  handleTeamRunStop,
   handleTeamTaskComment,
   handleTeamTaskCreate,
   handleTeamTaskMove,
 } from "@/lib/companion/agent-team-write-handlers"
+import {
+  handleExecutionRunControl,
+  handleLegacyTeamRunControl,
+} from "@/lib/companion/execution-run-control-handler"
 import {
   handleAgentTaskCancel,
   handleAgentTaskComment,
@@ -471,12 +472,16 @@ export async function dispatchCommand(
       return handleTeamTaskCreate(payload)
     case "team_task_comment":
       return handleTeamTaskComment(payload)
+    // Retired with ADR-0169: a team-addressed control carried no revision and
+    // no decision. An older client that still sends one is told to upgrade.
     case "team_run_pause":
-      return handleTeamRunPause(payload)
     case "team_run_resume":
-      return handleTeamRunResume(payload)
     case "team_run_stop":
-      return handleTeamRunStop(payload)
+      return handleLegacyTeamRunControl()
+    // The one remote control seam for a run: the cockpit's own command,
+    // revision-checked and idempotent, through the same gate.
+    case "execution_run_control":
+      return handleExecutionRunControl(payload)
     // Single-Agent task board control. Task ownership is revalidated against
     // the live Dexie row before every Scheduler or state-machine action.
     case "agent_task_start":

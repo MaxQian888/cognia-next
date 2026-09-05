@@ -1,7 +1,7 @@
 /**
  * Creating a squad, including the part that has to happen asynchronously.
  *
- * Every Squad is created on the one durable contract (ADR-0168). What varies
+ * Every Squad is created on the one durable contract (ADR-0169). What varies
  * per workspace is whether the two bindings the coordinator needs can be
  * resolved at creation time: the primary repository and the environment
  * version. Resolving them needs two Dexie reads and a host preflight, and

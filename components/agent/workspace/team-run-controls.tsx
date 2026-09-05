@@ -3,7 +3,7 @@
 /**
  * Team run controls: the three-state Run / Pause / Resume / Stop block.
  *
- * There is no Abort (ADR-0168). It used to alias Pause, so the visible
+ * There is no Abort (ADR-0169). It used to alias Pause, so the visible
  * destructive action read as "stop this" and did not. Pause is cooperative and
  * resumable. Stop is terminal and cascades. Those are the two verbs.
  *

@@ -107,7 +107,7 @@ describe("PendingGatesStore", () => {
   })
 
   /**
-   * ADR-0168 moved every Squad gate onto durable run interrupts. The scopes
+   * ADR-0169 moved every Squad gate onto durable run interrupts. The scopes
    * that used to map here now have no modal variant of their own and fall to
    * the cost-budget default rather than resurrecting a Squad gate.
    */

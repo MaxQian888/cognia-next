@@ -8,6 +8,8 @@ description: "Agent teams stop being a place you go to and become something a co
 **Status:** Accepted
 **Date:** 2026-08-22
 
+> **Amended by ADR-0169 (2026-09-05).** The `agentTeamManager` control surface, the `/squads` command centre and the optimistic `team.status` this document wired are superseded: one durable runtime, one review contract, one control machine, and the `/squads` Runs tab is the `/agent-runs` panel.
+
 ## Context
 
 `/agent-teams` and `/agent-teams/workspace` were six surfaces wearing one

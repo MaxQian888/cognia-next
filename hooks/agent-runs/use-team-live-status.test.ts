@@ -1,88 +1,99 @@
 import { renderHook } from "@testing-library/react"
 import {
   deriveTeamStatus,
-  workflowRunStatusToTeamStatus,
   pickNewestRunStatus,
+  runRecordStatusToTeamStatus,
   useTeamLiveStatus,
 } from "./use-team-live-status"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
-import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
+import type { AgentTeamRunRecord, AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 
-// useTeamLiveStatus calls useLiveQuery once (the newest team run row's status).
-let liveRunStatus: RunStatus | undefined
+// useTeamLiveStatus calls useLiveQuery once (the newest run record's status).
+let liveRunStatus: AgentTeamRunStatus | undefined
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => liveRunStatus,
 }))
-// The Dexie querier closure never runs under the mock; stub the import.
+// The Dexie querier closure never runs under the mock. Stub the import.
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
 
 const teamWith = (status: TeamStatus): AgentTeam => ({ id: "team-1", status }) as AgentTeam
 
-describe("workflowRunStatusToTeamStatus", () => {
-  const cases: Array<[RunStatus, string]> = [
-    ["pending", "executing"],
+describe("runRecordStatusToTeamStatus", () => {
+  const cases: Array<[AgentTeamRunStatus, TeamStatus]> = [
+    ["queued", "executing"],
     ["running", "executing"],
-    ["waiting", "executing"],
+    ["recovering", "executing"],
+    ["pausing", "paused"],
     ["paused", "paused"],
-    ["succeeded", "completed"],
+    ["sleeping", "paused"],
+    ["needs_input", "paused"],
+    ["completed", "completed"],
     ["failed", "failed"],
     ["cancelled", "cancelled"],
+    ["terminated", "cancelled"],
   ]
   it.each(cases)("maps run status %s to team status %s", (run, team) => {
-    expect(workflowRunStatusToTeamStatus(run)).toBe(team)
+    expect(runRecordStatusToTeamStatus(run)).toBe(team)
   })
 })
 
 describe("deriveTeamStatus", () => {
   it("prefers a live (non-terminal) store status so an in-flight run shows immediately", () => {
-    // run row still says succeeded from a prior run, but store is executing now
-    expect(deriveTeamStatus("executing", "succeeded")).toBe("executing")
+    expect(deriveTeamStatus("executing", "completed")).toBe("executing")
     expect(deriveTeamStatus("planning", undefined)).toBe("planning")
     expect(deriveTeamStatus("paused", "running")).toBe("paused")
   })
 
-  it("derives from the newest durable run row when the store is terminal/idle", () => {
+  it("falls through to the newest durable run when the store is terminal or idle", () => {
     expect(deriveTeamStatus("idle", "running")).toBe("executing")
     expect(deriveTeamStatus("completed", "failed")).toBe("failed")
-    expect(deriveTeamStatus("idle", "succeeded")).toBe("completed")
+    expect(deriveTeamStatus("idle", "needs_input")).toBe("paused")
   })
 
-  it("falls back to the store status when there is no run row yet", () => {
+  it("keeps the store status when no run record exists yet", () => {
     expect(deriveTeamStatus("idle", undefined)).toBe("idle")
     expect(deriveTeamStatus("completed", undefined)).toBe("completed")
   })
 })
 
 describe("pickNewestRunStatus", () => {
-  const row = (id: string, startedAt: number, status: RunStatus): WorkflowRunRow =>
-    ({ id, workflowId: "__team__:t:1", startedAt, status }) as WorkflowRunRow
+  const row = (id: string, status: AgentTeamRunStatus, updatedAt: number): AgentTeamRunRecord =>
+    ({ id, teamId: "team-1", status, updatedAt }) as AgentTeamRunRecord
 
-  it("returns undefined for an empty list", () => {
+  it("returns undefined for no rows", () => {
     expect(pickNewestRunStatus([])).toBeUndefined()
   })
 
-  it("returns the status of the most-recently-started row", () => {
-    const rows = [row("a", 100, "succeeded"), row("b", 300, "running"), row("c", 200, "failed")]
-    expect(pickNewestRunStatus(rows)).toBe("running")
+  it("returns the status of the most recently updated row regardless of order", () => {
+    expect(
+      pickNewestRunStatus([
+        row("a", "completed", 100),
+        row("b", "running", 300),
+        row("c", "failed", 200),
+      ])
+    ).toBe("running")
   })
 })
 
 describe("useTeamLiveStatus", () => {
-  it("derives from the newest run row when the store is terminal", () => {
-    liveRunStatus = "running"
-    const { result } = renderHook(() => useTeamLiveStatus(teamWith("completed")))
-    expect(result.current).toBe("executing")
-  })
-
-  it("keeps the live store status while a run is in flight", () => {
-    liveRunStatus = "succeeded"
-    const { result } = renderHook(() => useTeamLiveStatus(teamWith("executing")))
-    expect(result.current).toBe("executing")
-  })
-
-  it("falls back to the store status when no run row exists", () => {
+  beforeEach(() => {
     liveRunStatus = undefined
+  })
+
+  it("returns the store status when there is no durable run", () => {
     const { result } = renderHook(() => useTeamLiveStatus(teamWith("idle")))
     expect(result.current).toBe("idle")
+  })
+
+  it("returns the durable run status when the store is idle", () => {
+    liveRunStatus = "running"
+    const { result } = renderHook(() => useTeamLiveStatus(teamWith("idle")))
+    expect(result.current).toBe("executing")
+  })
+
+  it("keeps a live store status over a stale durable status", () => {
+    liveRunStatus = "completed"
+    const { result } = renderHook(() => useTeamLiveStatus(teamWith("executing")))
+    expect(result.current).toBe("executing")
   })
 })

@@ -201,6 +201,97 @@ describe("execution run controls", () => {
   })
 })
 
+describe("stop against a handler that settles the journal itself", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("answers accepted when the stop handler journals the terminal event before the gate", async () => {
+    await createExecutionRun({
+      id: "run-team-1",
+      kind: "team",
+      sourceId: "run_team_1",
+      title: "Squad",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const { runEventJournal, semanticRunEvent } = await import("@/lib/db/execution-runs")
+    const handler = jest.fn(async () => {
+      // What controlSquadRun does when no lifecycle is alive to abort.
+      await runEventJournal.append(
+        "run-team-1",
+        semanticRunEvent(
+          "run.cancelled",
+          { reason: "operator_stop" },
+          { ts: 5, sourceEventId: "agent-team:run_team_1:run.cancelled:5" }
+        )
+      )
+    })
+    const unregister = registerRunControlHandler("team", handler)
+    try {
+      const result = await executeRunControlCommand(
+        {
+          runId: "run-team-1",
+          action: "stop",
+          idempotencyKey: "cmd-stop",
+          expectedRevision: 0,
+          actor: { remoteUserId: "operator" },
+        },
+        { operatorIds: ["operator"] }
+      )
+      expect(result.accepted).toBe(true)
+      const run = await getDb().executionRuns.get("run-team-1")
+      expect(run?.status).toBe("cancelled")
+      expect(result.currentRevision).toBe(run?.currentRevision)
+    } finally {
+      unregister()
+    }
+  })
+
+  it("still throws for a non-stop action whose handler settled the run", async () => {
+    await createExecutionRun({
+      id: "run-team-2",
+      kind: "team",
+      sourceId: "run_team_2",
+      title: "Squad",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    const { runEventJournal, semanticRunEvent } = await import("@/lib/db/execution-runs")
+    const unregister = registerRunControlHandler("team", async () => {
+      await runEventJournal.append(
+        "run-team-2",
+        semanticRunEvent(
+          "run.completed",
+          { reason: "done" },
+          { ts: 5, sourceEventId: "agent-team:run_team_2:run.completed:5" }
+        )
+      )
+    })
+    try {
+      await expect(
+        executeRunControlCommand(
+          {
+            runId: "run-team-2",
+            action: "pause",
+            idempotencyKey: "cmd-pause",
+            expectedRevision: 0,
+            actor: { remoteUserId: "operator" },
+          },
+          { operatorIds: ["operator"] }
+        )
+      ).rejects.toThrow(/terminal/)
+    } finally {
+      unregister()
+    }
+  })
+})
+
 describe("execution run retry", () => {
   beforeEach(async () => {
     await getDb().delete()

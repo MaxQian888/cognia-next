@@ -1,26 +1,68 @@
 ---
-title: Human-in-the-Loop Gates
-description: The approval-bus primitive and the five HITL gates of the Agent Team runtime — plan, budget, deadlock, teammate-fix, and capability-audit — how each one pauses a run, what payload approves it, and how the UI mirror (PendingGatesStore + ApprovalGateDialog) resolves the waiter.
+title: Human-in-the-Loop Reviews
+description: Squad reviews on the Action Review contract (ADR-0169). ExecutionRunInterrupt is the only pending record, the seven review kinds and their typed decisions, restart safety, the team_recovery review, and where the approval-bus era went.
 ---
 
-# Human-in-the-Loop Gates
+# Human-in-the-Loop Reviews
 
-A team run is autonomous until something needs a human. ADR-0022 §4 defines **five HITL (human-in-the-loop) gates** that the synthesizer can open mid-run: an approval before a plan executes, a pause when the token budget hits critical, a freeze when every teammate is unavailable, a per-teammate fix prompt when one is disqualified, and a pre-run confirmation when capability ids are stale. Every gate rides the **same** generic primitive — `waitForDecision` on the approval bus — so the runtime blocks (or doesn't) on a single, well-tested seam, and the UI renders one modal family for all of them.
-
-The runtime side lives in `lib/ai/agent/agent-team-runtime.ts`; the primitive in `lib/runtime/approval-bus.ts`; the UI mirror in `stores/agent/pending-gates-store.ts` and `components/agent/team/approval-gate-dialog.tsx`.
+A Squad run is autonomous until something needs a person. Since ADR-0169 every such moment is one thing: a durable `ExecutionRunInterrupt` with a `reviewKind`, projected by the Action Review contract, answered through the one control seam (`RunControlCommand` with a typed `reviewDecision`), and settled with a receipt. There is no in-memory bus, no per-tab gate store and no modal host left on the Squad path. A review raised on the desktop is answered from a phone, an IM card, the CLI or the cockpit, and it survives a restart.
 
 <TLDR>
-  `runTeamLifecycle` calls `waitForDecision(key, signal)` (`lib/runtime/approval-bus.ts:41`) which returns
-  a promise that resolves on `approve(key, plan)` / `reject(key, feedback)` or rejects when the run's
-  `AbortSignal` fires. For blocking gates (deadlock, budget) it first `concurrency.reduceTo(0)` so the
-  orchestrator schedules nothing while awaiting. `TeamNotifier` carries `openApproval: { scope, id }` into
-  `notifierDeps.openGate`, which pushes a `PendingGate` into `usePendingGatesStore`
-  (`stores/agent/pending-gates-store.ts:38`, deduped by scope+id, NOT persisted). `GateModalsHost` renders
-  one `ApprovalGateDialog` (`components/agent/team/approval-gate-dialog.tsx:42`) per gate; its approve/reject
-  buttons forward to `useApprovalGate` (`use-approval-gate.ts:13`), which calls `approve` / `reject` back into
-  the bus — resolving the runtime's waiter. The synthesizer's `finally` block (`agent-team-runtime.ts:515-522`)
-  releases any waiters left open so nothing leaks.
+  The runtime calls `openSquadReview({ runId, teamId, kind, instance, subject })`
+  (`lib/ai/agent/team/squad-review-gate.ts`). That writes a run-level checkpoint, projects an
+  `ActionReviewRequest` onto the run as an `ExecutionRunInterrupt` with a deterministic id
+  (`action-review:squad-review:<runId>:<kind>:<instance>`), and waits on the row through a Dexie
+  live query plus a poll backstop. Any surface answers it with `executeRunControlCommand({ action:
+  "approve" | "deny", interruptId, reviewDecision })`. The control gate validates the decision
+  against the interrupt's kind (`lib/execution/squad-review-decision.ts`), the team handler
+  persists the sanitized decision beside the row and writes the receipt
+  (`settleSquadReviewFromControl`), and the waiter wakes on the status flip. A re-armed lifecycle
+  after a restart finds the same row and resumes exactly once. Expiry denies.
 </TLDR>
+
+## Invariants
+
+1. **One pending record.** `executionRunInterrupts` is the only place a waiting Squad question exists. `usePendingSquadReviews` reads it for the fleet badge, the composer chip and the context panel.
+2. **One protocol.** `ActionReviewRequest` / `ActionReviewDecision` / `ActionReviewReceipt` (`packages/agent-config-types/src/action-review.ts`), channels `agent-team-plan`, `agent-team-gate`, `agent-team-budget`, `agent-team-deadlock`, `agent-team-teammate-repair`, `agent-team-replan`, `agent-team-recovery`.
+3. **Typed decisions.** `SquadReviewDecision` is a discriminated union. An `approve` with the wrong or a missing payload is `invalid_command` before any handler runs.
+4. **No free text in the journal.** Plan feedback rides the command, is redacted by `sanitizeDecision`, and is stored on the interrupt row only.
+5. **Restart-safe.** Checkpoint before open. Deterministic ids. `recoverPendingRunInterrupts` expires what is past its deadline (durable human handoffs excepted). `armPendingTeamRecoveries` re-raises a recovery for every parked run at bootstrap.
+
+## The review kinds
+
+| Kind | Interrupt type | Decision payload | Raised by |
+| --- | --- | --- | --- |
+| `plan` | `plan_approval` | `{ kind: "plan", feedback? }` | the plan-approval loop, one instance per revision |
+| `capability_audit` | `squad_capability_audit` | `{ kind: "capability_audit" }` | the pre-run audit when capability ids are stale |
+| `budget_extension` | `squad_budget` | `{ kind: "budget_extension", extraTokens }` | the budget guard at each critical crossing |
+| `deadlock` | `squad_deadlock` | `{ kind: "deadlock", teammateIds? , resetAll? }` | the pool when every teammate is unavailable |
+| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" | "skip" }` | the pool when one teammate is disqualified |
+| `replan` | `squad_replan` | `{ kind: "replan", edited? }` | the lead when it proposes a mid-run re-plan |
+| `team_recovery` | `team_recovery` | `{ kind: "team_recovery", choice, hostRef? }` | the control machine when a run cannot be replayed safely |
+
+`deny` needs no payload for any kind. `approve` needs none for `plan` and `capability_audit` only.
+
+## Recovery
+
+A resume that cannot prove a safe replay (a child with no checkpoint, a `needs_input` checkpoint, an unknown or unsafe pending side effect) parks the run as `needs_input` with a reason code and raises `team_recovery` (`lib/ai/agent/team/team-recovery.ts`). The subject carries `reason`, `uncertainChildIds`, the common `hostRef` when there is one, and `choices`:
+
+- `retry_same_host` re-queues the uncertain children where they ran and resumes.
+- `retry_host` re-queues them on a named host. The coordinator refuses a cross-host move without a safe checkpoint, and the run stays parked.
+- `restart_run` launches a linked replacement through `startSquadRun` first, then stops the parked run.
+- `terminate` stops it.
+
+A backfilled legacy run (`legacy_run_not_resumable`) offers `restart_run` and `terminate` only. The validator refuses any other choice against `subject.choices`.
+
+## Where each surface answers
+
+- **Cockpit** (`/agent-runs`, and the `/squads` Runs tab, which is the same panel): `SquadReviewForm` renders the decision form for the pending interrupt's kind and dispatches through `useRunControlActions`. The bare Approve / Deny verbs are hidden while a typed form owns them.
+- **Companion shells** submit `execution_run_control` to the desktop host. Same command, same gate.
+- **IM cards** race the interrupt through the delegate seam of `openSquadReview`. Whichever answers first settles both.
+- **CLI** submits the same `RunControlCommand`.
+
+## History: the approval-bus era
+
+Everything below this line describes the mechanics ADR-0022 shipped and ADR-0169 retired. It is kept because the *reasons* for each gate are unchanged, and because older journals and receipts still reference these names. Nothing in it is on the Squad path any more: `lib/runtime/approval-bus.ts` and `stores/agent/pending-gates-store.ts` have no Squad readers, and `GateModalsHost` renders no Squad gate.
 
 ## The approval primitive
 

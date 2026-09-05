@@ -64,7 +64,7 @@ export const DEFAULT_ACTION_REVIEW_ADAPTERS: Record<
     defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS,
   },
   "agent-team-plan": { interruptType: "plan_approval", defaultTtlMs: SQUAD_REVIEW_TTL_MS },
-  // The pre-run capability audit is its own decision (ADR-0168): stale
+  // The pre-run capability audit is its own decision (ADR-0169): stale
   // capability ids, not a plan. Parking it on `plan_approval` made a card
   // offer the plan form for a question about plugins.
   "agent-team-gate": {

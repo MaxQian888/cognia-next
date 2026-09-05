@@ -40,6 +40,8 @@ export type SquadFilter = (typeof SQUAD_FILTERS)[number]
 
 export interface SquadRouteState {
   selectedId: string | undefined
+  /** `?run=`: the execution run open in the Runs tab. Same id space as `/agent-runs?run=`. */
+  runId: string | undefined
   /** `undefined` when the URL names none, so each surface can pick its own landing tab. */
   tab: SquadFleetTab | undefined
   query: string
@@ -47,6 +49,7 @@ export interface SquadRouteState {
   /** Whether the list is narrowed at all, for a badge and for the empty copy. */
   narrowed: boolean
   setSelectedId: (id: string | undefined) => void
+  setRunId: (runId: string | undefined) => void
   setTab: (tab: SquadFleetTab) => void
   setQuery: (value: string) => void
   setFilter: (value: SquadFilter) => void
@@ -84,11 +87,13 @@ export function useSquadRouteState(): SquadRouteState {
   return useMemo(
     () => ({
       selectedId: searchParams?.get("id") ?? undefined,
+      runId: searchParams?.get("run") ?? undefined,
       tab: oneOf(searchParams?.get("tab") ?? null, SQUAD_TABS),
       query,
       filter,
       narrowed: filter !== "all" || query.trim().length > 0,
       setSelectedId: (id) => setParams({ id }),
+      setRunId: (runId) => setParams({ run: runId }),
       // `runs` is the wide-pane default, so naming it in the URL would be
       // noise. Every other tab is worth linking to.
       setTab: (tab) => setParams({ tab: tab === "runs" ? undefined : tab }),

@@ -1,7 +1,7 @@
 /**
  * The Squad definition contract, and the one migration that upgrades to it.
  *
- * ADR-0168: every Squad executes on the durable coordinator. There is no
+ * ADR-0169: every Squad executes on the durable coordinator. There is no
  * runtime selector. `config.runtimeVersion` ("legacy" | "durable-v2") is
  * retired, together with the legacy manager branches it used to pick between.
  * What a definition needs to be RUNNABLE is therefore fixed: exactly one

@@ -25,6 +25,8 @@ export type SquadReviewDecisionProblem =
   | "malformed"
   /** The interrupt is not a Squad review, but a decision was supplied. */
   | "not_a_squad_review"
+  /** A recovery choice the interrupt did not offer (a legacy run cannot retry). */
+  | "choice_not_offered"
 
 export interface SquadReviewDecisionValidation {
   ok: boolean
@@ -100,7 +102,7 @@ export function isWellFormedSquadReviewDecision(value: unknown): value is SquadR
  * its own does not say how much budget, which teammates, or which host.
  */
 export function validateSquadReviewDecision(
-  interrupt: Pick<ExecutionRunInterrupt, "type">,
+  interrupt: Pick<ExecutionRunInterrupt, "type"> & Partial<Pick<ExecutionRunInterrupt, "subject">>,
   action: "approve" | "deny",
   decision: unknown
 ): SquadReviewDecisionValidation {
@@ -118,5 +120,11 @@ export function validateSquadReviewDecision(
   if (!isPlainObject(decision)) return { ok: false, problem: "malformed", kind }
   if (decision.kind !== kind) return { ok: false, problem: "kind_mismatch", kind }
   if (!isWellFormedSquadReviewDecision(decision)) return { ok: false, problem: "malformed", kind }
+  if (decision.kind === "team_recovery") {
+    const offered = (interrupt.subject as { choices?: unknown } | undefined)?.choices
+    if (Array.isArray(offered) && !offered.includes(decision.choice)) {
+      return { ok: false, problem: "choice_not_offered", kind }
+    }
+  }
   return { ok: true, kind }
 }

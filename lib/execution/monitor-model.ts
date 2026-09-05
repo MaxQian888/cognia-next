@@ -90,6 +90,8 @@ export interface UnifiedExecutionRow {
   progressRatio?: number
   /** Approval this run is currently blocked on. */
   pendingInterruptId?: string
+  /** The Squad behind a `team` journal row, when its opening event named one. */
+  teamId?: string
 }
 
 export interface BuildMonitorModelInput {
@@ -302,6 +304,7 @@ export function journalRunRow(run: ExecutionRun): UnifiedExecutionRow {
     ...(snapshot?.error ? { error: snapshot.error } : {}),
     ...(ratio !== undefined ? { progressRatio: ratio } : {}),
     ...(snapshot?.pendingInterrupt ? { pendingInterruptId: snapshot.pendingInterrupt.id } : {}),
+    ...(snapshot?.teamId ? { teamId: snapshot.teamId } : {}),
   }
 }
 

@@ -7,6 +7,8 @@ description: Converge the agent-team runtime onto the workflow orchestrator via 
 
 > **Status**: Proposed on 2026-05-17. Implementation planned across 6 PRs over ~4 weeks. PR 1 (workflow orchestrator concurrent scheduling) is the cutover-risk PR; PR 4 is the team-runtime cutover.
 
+> **Amended by ADR-0169 (2026-09-05).** The approval-bus HITL gates and the `workflowRuns`-backed run history described here are retired. Squad reviews ride the Action Review contract as `ExecutionRunInterrupt` rows, `durable-v2` is the only runtime, and `startSquadRun` is the only launch seam. The section on *why* each gate exists still holds.
+
 ## Context
 
 The agent-team subsystem (`lib/ai/agent/agent-team-runtime.ts:runTeamLifecycle`) advertises itself as a multi-agent orchestrator but only delivers ~30% of its declared capabilities. A read-through against the project's "production reliable" bar surfaced these gaps:

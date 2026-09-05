@@ -9,8 +9,8 @@
  *
  * `setProviderRoutingRuntimeAdapters` must run exactly once; the `useRef`
  * guard makes this idempotent under React 18 Strict Mode's double-invoke.
- * Returns null — provider-shaped, not a render component. Mirrors
- * `AgentTeamRuntimeInitializer`.
+ * Returns null — provider-shaped, not a render component. Mirrors the
+ * retired `AgentTeamRuntimeInitializer` (now `SquadBootstrapInitializer`).
  *
  * It also installs the host's pricing resolver into `@cognia/provider-core`.
  * That package cannot import `lib/`, so it ships a `defaultModelPricingResolver`

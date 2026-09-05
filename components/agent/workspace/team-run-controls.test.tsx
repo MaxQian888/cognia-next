@@ -62,7 +62,7 @@ describe("TeamRunControls", () => {
   })
 
   /**
-   * ADR-0168: Pause and Stop are two different verbs. The old Abort aliased
+   * ADR-0169: Pause and Stop are two different verbs. The old Abort aliased
    * Pause, so the visible destructive action did not destroy anything.
    */
   it.each(["executing", "planning"] as const)("offers Pause + Stop while %s", (status) => {

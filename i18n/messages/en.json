@@ -2291,6 +2291,89 @@
       "none": "This Squad has not produced an execution report yet.",
       "unavailable": "This device does not carry this Squad run's record."
     },
+    "review": {
+      "budget": {
+        "extraTokensLabel": "Extra tokens"
+      },
+      "capabilityAudit": {
+        "missingLabel": "Missing capabilities"
+      },
+      "deadlock": {
+        "pick": "Teammates to reset",
+        "resetAll": "Reset every teammate"
+      },
+      "kinds": {
+        "budget_extension": {
+          "approve": "Grant extension",
+          "deny": "End run",
+          "description": "The token budget is used up. Grant more, or let the run end here.",
+          "title": "Budget extension"
+        },
+        "capability_audit": {
+          "approve": "Continue without them",
+          "deny": "Stop",
+          "description": "Some capabilities this Squad was configured with no longer exist. Continue without them, or stop.",
+          "title": "Capability audit"
+        },
+        "deadlock": {
+          "approve": "Reset and continue",
+          "deny": "Stop",
+          "description": "Every teammate is unavailable. Choose who to reset, or reset them all.",
+          "title": "Deadlock"
+        },
+        "plan": {
+          "approve": "Approve plan",
+          "deny": "Request changes",
+          "description": "The lead proposed a plan. Approve it to start the work, or send it back with feedback.",
+          "title": "Plan approval"
+        },
+        "replan": {
+          "approve": "Accept new plan",
+          "deny": "Keep current plan",
+          "description": "The lead wants to change the plan mid-run.",
+          "title": "Re-plan"
+        },
+        "team_recovery": {
+          "approve": "Apply",
+          "deny": "Terminate",
+          "description": "This run cannot be resumed from a verified safe point. Choose how to proceed.",
+          "title": "Recovery required"
+        },
+        "teammate_repair": {
+          "approve": "Apply",
+          "deny": "Stop",
+          "description": "A teammate was disqualified. Let it rejoin, or continue without it.",
+          "title": "Teammate repair"
+        }
+      },
+      "plan": {
+        "feedbackLabel": "Feedback for the lead",
+        "feedbackPlaceholder": "Optional. What should change? Personal data is redacted before it is stored."
+      },
+      "recovery": {
+        "choices": {
+          "restart_run": "Restart as a new run",
+          "retry_host": "Retry on another host",
+          "retry_same_host": "Retry where it ran",
+          "terminate": "Terminate"
+        },
+        "hostRefPlaceholder": "Host to retry on",
+        "label": "Recovery choice",
+        "reason": "Why: {reason}",
+        "reasons": {
+          "legacy_run_not_resumable": "this run predates the durable runtime and left no checkpoint",
+          "missing_checkpoint": "no checkpoint was written",
+          "recover_needs_input": "the last checkpoint needs a decision",
+          "squad_not_ready": "the Squad is missing a binding it needs to run",
+          "uncertain_side_effect": "a side effect may or may not have happened"
+        }
+      },
+      "teammateRepair": {
+        "label": "What to do with the teammate",
+        "rejoin": "Let it rejoin",
+        "skip": "Continue without it"
+      }
+    },
     "status": {
       "cancelled": "Cancelled",
       "done": "Done",
@@ -2317,7 +2400,11 @@
       "inconclusiveHint": "The output could not be parsed — this is not a pass.",
       "passed": "Passed"
     },
-    "title": "Agent Runs"
+    "title": "Agent Runs",
+    "waitingReasons": {
+      "recovery_required": "Recovery required",
+      "waiting_review": "Waiting for review"
+    }
   },
   "agentRuntime": {
     "addExternalAgent": "Add an external agent…",
@@ -2998,6 +3085,12 @@
         "title": "Child sessions and takeover",
         "waitingReason": "Waiting: {value}"
       },
+      "decisionStatus": {
+        "accepted": "Accepted",
+        "constraint": "Constraint",
+        "proposed": "Proposed",
+        "rejected": "Rejected"
+      },
       "decisions": {
         "accept": "Accept",
         "accepted": "Decision accepted.",
@@ -3012,6 +3105,18 @@
         "merged": "Delivery stack merged.",
         "title": "Delivery graph"
       },
+      "deliveryNodeStatus": {
+        "awaiting_approval": "Awaiting approval",
+        "blocked": "Blocked",
+        "cancelled": "Cancelled",
+        "ci_pending": "CI pending",
+        "failed": "Failed",
+        "merged": "Merged",
+        "merging": "Merging",
+        "needs_remediation": "Needs remediation",
+        "publishing": "Publishing",
+        "ready": "Ready"
+      },
       "empty": "No durable run exists for this team yet.",
       "environment": {
         "blocked": "Blocked: missing {capabilities}",
@@ -3023,19 +3128,6 @@
       "evidence": {
         "empty": "No evidence collected yet.",
         "title": "Evidence bundle"
-      },
-      "legacy": "This team remains on the legacy runtime until you accept a durable-v2 migration preview.",
-      "migration": {
-        "accept": "Accept migration",
-        "blocked": "Migration blocked: {reason}",
-        "environment": "Freeze the selected environment version for each run.",
-        "migrated": "Team migrated to durable-v2.",
-        "preview": "Preview durable-v2 migration",
-        "primaryRepository": "exactly one primary repository is required",
-        "retention": "Keep local trajectories until explicit cleanup.",
-        "runtime": "Use checkpoint-based durable-v2 execution.",
-        "summary": "This migration changes only future runs. Existing definitions and runtime records remain readable.",
-        "writer": "Serialize repository writes by default."
       },
       "retrospective": {
         "approve": "Approve and apply",
@@ -3066,7 +3158,6 @@
       }
     },
     "overview": {
-      "abortTeam": "Stop",
       "budget": "Budget",
       "concurrency": "Concurrency",
       "configSummary": "Configuration",
@@ -40004,6 +40095,39 @@
       },
       "title": "Squads",
       "waiting": "Needs you"
+    },
+    "readiness": {
+      "actions": {
+        "addTeammate": "Add a teammate",
+        "bindEnvironment": "Bind environment",
+        "bindWorkspaceRepository": "Bind workspace repository",
+        "createDefaultEnvironment": "Create a default environment",
+        "openEnvironments": "Open environments",
+        "openOnHost": "Open on the desktop"
+      },
+      "blockedSummary": "{count, plural, =1 {1 thing} other {# things}} to fix before this Squad can run",
+      "blockers": {
+        "ambiguous_primary_repository": "More than one primary repository is bound ({repositoryIds}). Keep exactly one.",
+        "environment_not_found": "The bound environment version no longer exists ({versionId}).",
+        "environment_unenforceable": "This host cannot enforce the environment's requirements ({missingCapabilities}).",
+        "host_unavailable": "This device is not the authoritative host. Squads dispatch from the desktop app.",
+        "missing_environment_ref": "No execution environment is bound. Every run needs an immutable environment version.",
+        "missing_primary_repository": "No repository is bound. Squads work inside one primary repository.",
+        "no_teammates": "No teammate to dispatch. Add at least one member besides the lead.",
+        "workspace_controller_unavailable": "This host has no workspace controller. Squads dispatch from the desktop app."
+      },
+      "bound": {
+        "environment": "Environment bound: {name}",
+        "repository": "Repository bound: {path}"
+      },
+      "defaultEnvironmentName": "Default",
+      "errors": {
+        "bindFailed": "Could not save the binding.",
+        "noWorkspaceRoot": "The active workspace has no root directory to bind."
+      },
+      "loading": "Checking…",
+      "ready": "Ready to run",
+      "title": "Readiness"
     }
   },
   "structuredConfig": {

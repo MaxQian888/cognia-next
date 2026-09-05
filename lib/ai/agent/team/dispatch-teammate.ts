@@ -888,7 +888,7 @@ export async function dispatchTeammate(
     (repository) => repository.id === durableRepositoryId
   )
   const dispatchWorkingDir = durableRepository?.path ?? teamCtx.team.config?.workingDir
-  // Every Squad dispatches through the durable coordinator (ADR-0168): the
+  // Every Squad dispatches through the durable coordinator (ADR-0169): the
   // child run, its lease and its checkpoints are what make pause, steer and
   // recovery possible, so there is no non-durable branch here.
   const durableDispatch = await (async () => {

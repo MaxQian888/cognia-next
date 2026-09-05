@@ -236,6 +236,48 @@ describe("runSquadLifecycle", () => {
   })
 })
 
+describe("guardSquadResume", () => {
+  it("lets a ready Squad through without parking anything", async () => {
+    const { guardSquadResume } = await import("./squad-lifecycle-runner")
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    useAgentTeamStore.setState({
+      teams: { t1: { id: "t1", name: "S", config: {} } as never },
+      teammates: {},
+    } as never)
+    const park = jest.fn(async () => undefined)
+    const result = await guardSquadResume("t1", "run-1", {
+      evaluate: async () => ({ ready: true, blockers: [] }),
+      park,
+    })
+    expect(result).toEqual({ blocked: false, blockers: [] })
+    expect(park).not.toHaveBeenCalled()
+  })
+
+  it("parks a blocked Squad and reports the blockers", async () => {
+    const { guardSquadResume } = await import("./squad-lifecycle-runner")
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    useAgentTeamStore.setState({
+      teams: { t1: { id: "t1", name: "S", config: {} } as never },
+      teammates: {},
+    } as never)
+    const park = jest.fn(async () => undefined)
+    const result = await guardSquadResume("t1", "run-1", {
+      evaluate: async () => ({ ready: false, blockers: [{ code: "missing_environment_ref" }] }),
+      park,
+    })
+    expect(result).toEqual({ blocked: true, blockers: [{ code: "missing_environment_ref" }] })
+    expect(park).toHaveBeenCalledWith("run-1", "t1")
+  })
+
+  it("does nothing for a Squad the store does not hold", async () => {
+    const { guardSquadResume } = await import("./squad-lifecycle-runner")
+    const evaluate = jest.fn()
+    const result = await guardSquadResume("ghost", "run-1", { evaluate })
+    expect(result.blocked).toBe(false)
+    expect(evaluate).not.toHaveBeenCalled()
+  })
+})
+
 describe("prepareSquadResume", () => {
   it("unstrands mid-flight tasks and teammates, re-seeds the blackboard, and counts what is left", async () => {
     const store = useAgentTeamStore.getState()

@@ -8,12 +8,18 @@ import { renderHook } from "@testing-library/react"
 
 import { useSquadFleet } from "./use-squad-fleet"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { AgentTeam, AgentTeammate, TeamStatus } from "@/types/agent/agent-team"
 
 let mirroredCount: number | undefined = 0
 jest.mock("@/hooks/data", () => ({ useClientLiveQuery: () => mirroredCount }))
+
+// Durable Squad reviews (ADR-0169). The hook only ever yields PENDING rows, so
+// the helper below models what the table would answer, not a UI mirror.
+let pendingReviews: Array<{ teamId: string; status: "open" }> = []
+jest.mock("./use-pending-squad-reviews", () => ({
+  usePendingSquadReviews: () => pendingReviews,
+}))
 
 function squad(
   id: string,
@@ -42,16 +48,10 @@ function seed(teams: AgentTeam[], members: Partial<AgentTeammate>[] = []) {
 }
 
 function gates(entries: Array<{ teamId?: string; status?: "open" | "interrupted" }>) {
-  usePendingGatesStore.setState({
-    gates: entries.map((entry, i) => ({
-      key: { scope: "team", id: `g${i}` },
-      gateType: "plan",
-      title: "Approve the plan",
-      openedAt: 0,
-      status: entry.status ?? "open",
-      ...(entry.teamId ? { teamId: entry.teamId } : {}),
-    })) as never,
-  })
+  // A review that is no longer pending is simply not in the durable answer.
+  pendingReviews = entries
+    .filter((entry) => entry.teamId && entry.status !== "interrupted")
+    .map((entry) => ({ teamId: entry.teamId!, status: "open" as const }))
 }
 
 beforeEach(() => {
@@ -85,11 +85,10 @@ describe("triage", () => {
   })
 
   /**
-   * An interrupted gate is one whose approval-bus waiter died with the page.
-   * It renders a Dismiss-only stale card, so treating it as "needs you" would
-   * put a Squad nothing can unblock at the top of the list.
+   * Only a PENDING durable review counts. A settled or expired one is not in
+   * the answer at all, so a Squad nothing can unblock never floats to the top.
    */
-  it("ignores an interrupted gate", () => {
+  it("ignores a review that is no longer pending", () => {
     seed([squad("a", "Alpha"), squad("z", "Zulu")])
     gates([{ teamId: "z", status: "interrupted" }])
     const { result } = renderHook(() => useSquadFleet())

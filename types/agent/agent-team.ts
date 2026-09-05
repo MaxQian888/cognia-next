@@ -408,7 +408,7 @@ export const EMPTY_RESOLVED_CAPABILITIES: ResolvedCapabilities = {
  */
 export interface AgentTeamConfig {
   /**
-   * Squad definition contract revision (ADR-0168). Every Squad executes on the
+   * Squad definition contract revision (ADR-0169). Every Squad executes on the
    * one durable coordinator; there is no runtime selector. A definition below
    * `SQUAD_DEFINITION_CONTRACT_VERSION` is upgraded in place by
    * `lib/agent-team/definition-contract.ts` the first time it is read, and an

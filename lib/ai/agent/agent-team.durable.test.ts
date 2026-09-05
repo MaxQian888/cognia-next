@@ -48,9 +48,11 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
   getAgentTeamChildRun: () => getAgentTeamChildRun(),
 }))
 
+const guardSquadResume = jest.fn(async () => ({ blocked: false, blockers: [] }))
 jest.mock("./team/squad-lifecycle-runner", () => ({
   runSquadLifecycle: (input: unknown) => runSquadLifecycle(input),
   prepareSquadResume: () => prepareSquadResume(),
+  guardSquadResume: (teamId: string, runId: string) => guardSquadResume(teamId, runId),
   resumeTaskFilter: () => true,
   configureAgentTeamRuntime: jest.fn(),
   __resetAgentTeamRuntimeForTesting: jest.fn(),
@@ -86,6 +88,17 @@ describe("durable AgentTeam manager", () => {
         taskFilter: expect.any(Function),
       })
     )
+  })
+
+  it("does not re-enter a run whose Squad is no longer ready", async () => {
+    guardSquadResume.mockResolvedValueOnce({
+      blocked: true,
+      blockers: [{ code: "missing_environment_ref" }],
+    })
+    const outcomes = await recoverDurableAgentTeams()
+    expect(prepareSquadResume).not.toHaveBeenCalled()
+    expect(runSquadLifecycle).not.toHaveBeenCalled()
+    expect(outcomes.map((o) => o.status)).toContain("needs_input")
   })
 
   /** Team-addressed verbs are adapters onto the one control state machine. */

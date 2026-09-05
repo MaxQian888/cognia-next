@@ -29,7 +29,6 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useClientLiveQuery } from "@/hooks/data"
 import { getAgentTeamRun } from "@/lib/db/agent-team-runtime"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
-import type { AgentTeam } from "@/types/agent/agent-team"
 
 export interface RunOperationsTabProps {
   row: UnifiedExecutionRow
@@ -45,7 +44,6 @@ export function RunOperationsTab({ row }: RunOperationsTabProps) {
     undefined
   )
   const team = useAgentTeamStore((s) => (teamRun ? s.teams[teamRun.teamId] : undefined))
-  const updateTeam = useAgentTeamStore((s) => s.updateTeam)
 
   // The panel's three "open something" callbacks pointed at tabs of the retired
   // workspace. The editor and the terminal live on the workspace surface now,
@@ -53,12 +51,6 @@ export function RunOperationsTab({ row }: RunOperationsTabProps) {
   // route. Sending the reader there beats a button that does nothing.
   const openWorkspace = useCallback(() => router.push("/workspace"), [router])
   const openBrowser = useCallback(() => router.push("/browser"), [router])
-  const migrate = useCallback(
-    (config: AgentTeam["config"]) => {
-      if (team) updateTeam(team.id, { config })
-    },
-    [team, updateTeam]
-  )
 
   if (!teamRun || !team) {
     return (
@@ -79,7 +71,6 @@ export function RunOperationsTab({ row }: RunOperationsTabProps) {
         onOpenEditor={openWorkspace}
         onOpenTerminal={openWorkspace}
         onOpenBrowser={openBrowser}
-        onMigrate={migrate}
       />
     </div>
   )

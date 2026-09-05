@@ -1,5 +1,5 @@
 /**
- * Start a Squad run. The only launch seam (ADR-0140, hardened by ADR-0168).
+ * Start a Squad run. The only launch seam (ADR-0140, hardened by ADR-0169).
  *
  * Chat, IM, workflow nodes, the scheduler, slash commands, plugins, Issues,
  * Bots, the CLI and paired devices all arrive here. What differs per surface is
@@ -88,6 +88,8 @@ export type StartSquadRunRefusal =
   | "already_running"
   /** The run records could not be written. Nothing was started. */
   | "journal_failed"
+  /** The Squad bootstrap has not finished (or failed). Nothing was started. */
+  | "runtime_not_ready"
 
 export interface StartSquadRunResult {
   started: boolean
@@ -129,6 +131,11 @@ export interface SquadRunRecordsSeed {
 }
 
 export interface StartSquadRunDeps {
+  /**
+   * Waits for the ordered Squad bootstrap (ADR-0169). Resolves `false` when it
+   * failed or timed out. Defaults to `awaitSquadRuntimeReady`.
+   */
+  awaitRuntimeReady?: () => Promise<boolean>
   /** Returns the live Agent-Team store state (`useAgentTeamStore.getState()`). */
   loadStore?: () => Promise<SquadStoreLike>
   /** Readiness gate. Defaults to `evaluateSquadReadiness` with live readers. */
@@ -168,6 +175,11 @@ export interface StartSquadRunDeps {
   /** Returns `resolveEffectiveCwdForSession` (ADR-0144). */
   resolveSessionCwd?: (session: ChatSession) => Promise<string | null>
   now?: () => number
+}
+
+async function defaultAwaitRuntimeReady(): Promise<boolean> {
+  const { awaitSquadRuntimeReady } = await import("@/lib/agent-team/bootstrap")
+  return awaitSquadRuntimeReady()
 }
 
 async function defaultLoadStore(): Promise<SquadStoreLike> {
@@ -258,6 +270,17 @@ export async function startSquadRun(
   const squadId = input.squadId?.trim()
   if (!squadId) return { started: false, reason: "no_squad_id" }
   const now = deps.now ?? Date.now
+
+  // 0. The runtime. Definitions still hydrating, adapters not yet installed
+  // or recovery still walking live runs: a launch waits, and if the wait
+  // ends without a ready runtime it is refused rather than raced.
+  let runtimeReady = false
+  try {
+    runtimeReady = await (deps.awaitRuntimeReady ?? defaultAwaitRuntimeReady)()
+  } catch {
+    runtimeReady = false
+  }
+  if (!runtimeReady) return { started: false, reason: "runtime_not_ready" }
 
   let store: SquadStoreLike
   try {

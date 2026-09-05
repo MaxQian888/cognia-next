@@ -63,7 +63,7 @@ export interface StartTeamRunFromIMResult {
     | "team_not_found"
     | "no_team_id"
     | "dispatch_error"
-    /** Readiness blockers stand (ADR-0168). `blockers` names them. */
+    /** Readiness blockers stand (ADR-0169). `blockers` names them. */
     | "not_ready"
     /** A run is already open. `runId` is that run. */
     | "already_running"

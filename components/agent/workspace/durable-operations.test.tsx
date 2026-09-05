@@ -20,14 +20,14 @@ jest.mock("@/lib/ai/agent/execution/local-tauri-environment", () => ({
 
 import { DurableOperations } from "./durable-operations"
 
-const team = (runtimeVersion: "legacy" | "durable-v2"): AgentTeam =>
+const team = (): AgentTeam =>
   ({
     id: "team-1",
     name: "Team",
     description: "",
     task: "Ship",
     status: "idle",
-    config: { runtimeVersion },
+    config: {},
     teammateIds: [],
     taskIds: [],
     messageIds: [],
@@ -40,27 +40,13 @@ describe("DurableOperations", () => {
     liveValue = null
   })
 
-  it("keeps legacy teams on the legacy runtime", () => {
-    render(
-      <DurableOperations
-        team={team("legacy")}
-        onOpenEditor={jest.fn()}
-        onOpenTerminal={jest.fn()}
-        onOpenBrowser={jest.fn()}
-        onMigrate={jest.fn()}
-      />
-    )
-    expect(screen.getByText(/legacy/i)).toBeInTheDocument()
-  })
-
   it("shows the durable empty state before a run exists", () => {
     render(
       <DurableOperations
-        team={team("durable-v2")}
+        team={team()}
         onOpenEditor={jest.fn()}
         onOpenTerminal={jest.fn()}
         onOpenBrowser={jest.fn()}
-        onMigrate={jest.fn()}
       />
     )
     expect(screen.getByText(/no durable run/i)).toBeInTheDocument()
@@ -93,11 +79,10 @@ describe("DurableOperations", () => {
     }
     render(
       <DurableOperations
-        team={team("durable-v2")}
+        team={team()}
         onOpenEditor={jest.fn()}
         onOpenTerminal={onOpenTerminal}
         onOpenBrowser={jest.fn()}
-        onMigrate={jest.fn()}
       />
     )
 
@@ -135,11 +120,10 @@ describe("DurableOperations", () => {
     }
     render(
       <DurableOperations
-        team={team("durable-v2")}
+        team={team()}
         onOpenEditor={jest.fn()}
         onOpenTerminal={jest.fn()}
         onOpenBrowser={jest.fn()}
-        onMigrate={jest.fn()}
       />
     )
 

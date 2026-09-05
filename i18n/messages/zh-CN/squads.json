@@ -45,5 +45,38 @@
     },
     "title": "小队",
     "waiting": "等你答复"
+  },
+  "readiness": {
+    "title": "就绪状态",
+    "ready": "可以运行",
+    "loading": "检查中…",
+    "blockedSummary": "还有 {count} 项需要处理，小队才能运行",
+    "blockers": {
+      "no_teammates": "没有可派发的成员。请在负责人之外至少添加一名成员。",
+      "missing_primary_repository": "尚未绑定仓库。小队需要在一个主仓库内工作。",
+      "ambiguous_primary_repository": "绑定了多个主仓库（{repositoryIds}）。请只保留一个。",
+      "missing_environment_ref": "尚未绑定执行环境。每次运行都需要一个不可变的环境版本。",
+      "environment_not_found": "绑定的环境版本已不存在（{versionId}）。",
+      "environment_unenforceable": "当前主机无法满足该环境的要求（{missingCapabilities}）。",
+      "host_unavailable": "当前设备不是权威主机。小队由桌面应用派发。",
+      "workspace_controller_unavailable": "当前主机没有工作区控制器。小队由桌面应用派发。"
+    },
+    "actions": {
+      "bindWorkspaceRepository": "绑定工作区仓库",
+      "bindEnvironment": "绑定环境",
+      "createDefaultEnvironment": "创建默认环境",
+      "openEnvironments": "打开环境设置",
+      "addTeammate": "添加成员",
+      "openOnHost": "在桌面端打开"
+    },
+    "bound": {
+      "repository": "已绑定仓库：{path}",
+      "environment": "已绑定环境：{name}"
+    },
+    "defaultEnvironmentName": "默认",
+    "errors": {
+      "noWorkspaceRoot": "当前工作区没有可绑定的根目录。",
+      "bindFailed": "无法保存绑定。"
+    }
   }
 }

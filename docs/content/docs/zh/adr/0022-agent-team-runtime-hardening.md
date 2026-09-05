@@ -7,6 +7,8 @@ description: "通过并发预设调度、一个精简团队合成器产生Visual
 
 > **状态**：提议于2026-05-17。计划在6 PRs内实施，历时~4周。PR 1（工作流编排器并发调度）是切换风险PR;PR 4是团队运行时切换。
 
+> **由 ADR-0169 修订（2026-09-05）。** 本文描述的 approval-bus HITL 闸门与基于 `workflowRuns` 的运行历史已退役。小队审批作为 `ExecutionRunInterrupt` 行骑在 Action Review 契约上，`durable-v2` 是唯一运行时，`startSquadRun` 是唯一启动入口。关于每道门*为什么*存在的部分仍然成立。
+
 ## 背景
 
 代理团队子系统（`lib/ai/agent/agent-team-runtime.ts:runTeamLifecycle`）自称是多代理编排器，但实际上只实现了其宣称能力的 ~30%。对项目的“生产可靠性”标准进行读取后，发现了以下空白：

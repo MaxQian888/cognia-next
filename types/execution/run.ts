@@ -261,6 +261,12 @@ export interface RunProjectionSnapshot {
     /** The interrupt type, so a card can render the matching decision form. */
     type?: string
   }
+  /**
+   * The Squad a `team` run belongs to, read from its opening event. Lets a
+   * team-scoped list (the `/squads` Runs tab) filter journal rows without a
+   * second query per row.
+   */
+  teamId?: string
   artifacts: RunArtifactSnapshot[]
   allowedActions: RunControlAction[]
   locale?: string
@@ -330,7 +336,7 @@ export interface RunEvent {
 }
 
 /**
- * What kind of decision a Squad review asks for (ADR-0168).
+ * What kind of decision a Squad review asks for (ADR-0169).
  *
  * One vocabulary for every Squad gate: the plan, the pre-run capability audit,
  * a budget extension, a deadlock resolution, a teammate repair, a re-plan and
@@ -516,7 +522,7 @@ export interface ExecutionRunInterrupt {
   resolvedAt?: number
   resolvedBy?: ExecutionRunInitiator
   /**
-   * Squad reviews only (ADR-0168). Which decision shape settles this
+   * Squad reviews only (ADR-0169). Which decision shape settles this
    * interrupt, redundant with `type` on purpose so a surface can branch on one
    * closed vocabulary.
    */

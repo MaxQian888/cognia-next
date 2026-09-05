@@ -28,8 +28,18 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
 
 const runsRows: Array<Record<string, unknown>> = []
 const eventRows: Array<Record<string, unknown>> = []
+const durableRuns: Array<Record<string, unknown>> = []
+const executionRuns: Record<string, Record<string, unknown>> = {}
+const executionEvents: Array<Record<string, unknown>> = []
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
+    agentTeamRuns: {
+      where: () => ({ equals: () => ({ toArray: async () => durableRuns }) }),
+    },
+    executionRuns: { get: async (id: string) => executionRuns[id] },
+    executionRunEvents: {
+      where: () => ({ equals: () => ({ sortBy: async () => executionEvents }) }),
+    },
     workflowRuns: {
       where: () => ({
         equals: () => ({
@@ -45,7 +55,7 @@ jest.mock("@/lib/db/schema", () => ({
   }),
 }))
 
-jest.mock("@/components/agent/team/runs-list", () => ({
+jest.mock("@/lib/ai/agent/team/team-workflow-id", () => ({
   isSynthesizedTeamRunPayload: (payload: unknown, teamId: string) => {
     const p = payload as { teamId?: string; event?: string } | undefined
     return p?.teamId === teamId && p?.event === undefined
@@ -58,6 +68,9 @@ beforeEach(() => {
   storeState.teams = {}
   runsRows.length = 0
   eventRows.length = 0
+  durableRuns.length = 0
+  executionEvents.length = 0
+  for (const key of Object.keys(executionRuns)) delete executionRuns[key]
   redactTextMock.mockClear().mockImplementation((text: string) => ({ redacted: text, map: {} }))
   hasNoLeakingPiiMock.mockClear().mockReturnValue(true)
   managerGetMock.mockReset()
@@ -105,6 +118,60 @@ describe("agentTeamRun", () => {
 })
 
 describe("agentTeamRunStatus", () => {
+  /**
+   * ADR-0169: the durable run is the record. The CLI reads the same execution
+   * journal the cockpit projects, gated the same way, and never the legacy
+   * workflow row when a durable one exists.
+   */
+  it("projects the durable run and its journal before any legacy row", async () => {
+    durableRuns.push({
+      id: "run_team_1",
+      teamId: "t1",
+      status: "needs_input",
+      recoveryReason: "evidence_incomplete",
+      createdAt: 5,
+      startedAt: 10,
+      updatedAt: 50,
+    })
+    executionRuns["execution:team:run_team_1"] = {
+      id: "execution:team:run_team_1",
+      status: "waiting",
+    }
+    executionEvents.push(
+      { ts: 5, type: "run.started", visibility: "summary", payload: { teamId: "t1" } },
+      { ts: 20, type: "step.started", visibility: "summary", payload: { stepId: "task-1" } },
+      {
+        ts: 25,
+        type: "tool.started",
+        visibility: "private",
+        payload: { summary: "NEVER FORWARDED" },
+      },
+      { ts: 30, type: "run.waiting", visibility: "summary", payload: { summary: "leaky secret" } }
+    )
+    runsRows.push({
+      id: "r-legacy",
+      status: "running",
+      triggerPayload: { teamId: "t1" },
+      startedAt: 1,
+    })
+    hasNoLeakingPiiMock.mockImplementation((text) => text !== "leaky secret")
+
+    const out = await agentTeamRunStatus({ teamId: "t1", sinceTs: 10 })
+    expect(out.run).toEqual({
+      runId: "run_team_1",
+      status: "waiting",
+      startedAt: 10,
+      error: "evidence_incomplete",
+    })
+    expect(out.events).toEqual([
+      { ts: 20, type: "step.started", stepId: "task-1" },
+      { ts: 30, type: "run.waiting" },
+    ])
+    expect(JSON.stringify(out)).not.toContain("NEVER FORWARDED")
+    expect(JSON.stringify(out)).not.toContain("leaky secret")
+    expect(JSON.stringify(out)).not.toContain("r-legacy")
+  })
+
   it("returns ok without a run when the team has no synthesized run", async () => {
     runsRows.push({
       id: "r-fanout",

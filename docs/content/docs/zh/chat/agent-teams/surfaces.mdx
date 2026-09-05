@@ -129,13 +129,13 @@ flowchart TD
 
 `app/squads/page.tsx` 在宽布局下渲染 `SquadFleetConsole`，在紧凑布局下渲染 `SquadsMobileBody`。它刻意只管运行面，因为一切关于*配置*小队的事情都住在设置里。
 
-深链接以 `?id=` 到达，从来不是 `[id]`。本应用以静态导出发布，由 Tauri 和 Capacitor 消费，那里运行期根本不存在动态段。`use-squad-route-state.ts` 拥有四个参数：`?id=`、`?tab=`（`squads`、`runs`、`board` 之一）、`?q=` 和 `?filter=`（`all`、`waiting`、`live` 之一）。取默认值时参数会从 URL 中消失，每一次写入都是带 `scroll: false` 的 `router.replace`。
+深链接以 `?id=` 到达，从来不是 `[id]`。本应用以静态导出发布，由 Tauri 和 Capacitor 消费，那里运行期根本不存在动态段。`use-squad-route-state.ts` 拥有五个参数：`?id=`、`?run=`（运行页签里打开的执行运行，与 `/agent-runs?run=` 同一个 id 空间）、`?tab=`（`squads`、`runs`、`board` 之一）、`?q=` 和 `?filter=`（`all`、`waiting`、`live` 之一）。取默认值时参数会从 URL 中消失，每一次写入都是带 `scroll: false` 的 `router.replace`。
 
 桌面控制台由一个列表窗格、一个带两个标签页的中栏和一个检视面板构成。
 
-- **Runs** 渲染 `AgentTeamCommandCenter`。
+- **Runs** 内嵌渲染规范的 `AgentRunsPanel`，钉住 `kind = team` 与选中的小队（ADR-0169）。与 `/agent-runs` 同样的行、同样的详情窗格、同样的 `allowedActions` 和同样的审批表单。退役的指挥中心与逐小队运行列表，连同各自的历史查询，已经不在。
 - **Board** 为选中的小队渲染 `AgentTeamTasks`，未选中时给出明确的空状态。
-- **检视面板**显示名称和描述，然后是接到六个 `agentTeamManager` 调用上的 `TeamRunControls`（启动、以 ultracode 启动、暂停、中止、恢复、停止），再往下是回到设置的「Configure this Squad」链接。这些控件以前只存在于已退役工作区的一个标签页上。
+- **检视面板**显示名称和描述，然后是 `TeamRunControls`（启动、以 ultracode 启动、暂停、恢复、停止，启动按钮被第一个就绪阻塞项禁用），再往下是列出每个阻塞项及其清除动作的 `SquadReadinessCard`，最后是回到设置的「Configure this Squad」链接。中止已删除：可见的破坏性动作只有停止，而且是终态。
 
 头部提供 **Manage Squads**（就是设置深链接）以及在存在舰队快照时通向 `/fleet` 的 **Live host activity**。手机端在三个标签页下渲染同样这些部件，检视面板放在一个 sheet 里。
 

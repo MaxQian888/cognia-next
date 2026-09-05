@@ -385,7 +385,7 @@ export async function runTeamLifecycle(
             : { kind: "remoteDefault" },
       })
     }
-    // Every Squad runs on the durable coordinator (ADR-0168). The records
+    // Every Squad runs on the durable coordinator (ADR-0169). The records
     // already exist (`startSquadRun` wrote them transactionally), so
     // `prepareRun` only installs the run policy and moves `queued` to
     // `running`. The environment is admitted here, and a failure to admit it

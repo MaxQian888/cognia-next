@@ -179,7 +179,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
 
   /**
    * A Squad run. Every verb is the one control state machine in
-   * `lib/ai/agent/team/squad-control.ts` (ADR-0168): there is no legacy branch
+   * `lib/ai/agent/team/squad-control.ts` (ADR-0169): there is no legacy branch
    * and no `trigger.team` workflow fallback, because every live run has its
    * durable record from the moment it was journalled. A team row without one
    * is backfilled history and refuses controls as `source_rejected`.
@@ -212,6 +212,22 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       // reaches the waiting lifecycle (or its persisted slot, after a restart).
       const { settleSquadReviewFromControl } = await import("@/lib/ai/agent/team/squad-review-gate")
       await settleSquadReviewFromControl(command)
+      // A recovery decision has no lifecycle waiting on it: the run is parked
+      // and its process may be long gone. The decision is applied here, and a
+      // choice that could not be carried out rejects the command so the
+      // interrupt stays open for another answer.
+      const { getDb } = await import("@/lib/db/schema")
+      const row = command.interruptId
+        ? await getDb().executionRunInterrupts.get(command.interruptId)
+        : undefined
+      if (row?.type === "team_recovery") {
+        const { applyTeamRecoveryFromControl } = await import("@/lib/ai/agent/team/team-recovery")
+        const applied = await applyTeamRecoveryFromControl(command)
+        if (!applied.applied) throw new Error(applied.reason ?? "source_rejected")
+        return applied.replacementExecutionRunId
+          ? { retryRunId: applied.replacementExecutionRunId }
+          : undefined
+      }
       return
     }
 
@@ -617,7 +633,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     registerRunRetryHandler(kind, workflowRetry)
   )
   const unregisterDelegationRetry = registerRunRetryHandler("delegation", delegationRetry)
-  // A Squad DOES register one (ADR-0168): its replacement is a new durable run
+  // A Squad DOES register one (ADR-0169): its replacement is a new durable run
   // of the same definition, linked to the settled one, through the one launch
   // seam that re-checks readiness.
   const unregisterTeamRetry = registerRunRetryHandler("team", teamRetry)

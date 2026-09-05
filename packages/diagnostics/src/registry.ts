@@ -590,7 +590,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     icon: "alert",
   },
   // The Squad is missing a binding the coordinator needs (repository,
-  // environment, roster) and `startSquadRun` refused it (ADR-0168). Persistent
+  // environment, roster) and `startSquadRun` refused it (ADR-0169). Persistent
   // and not retryable: retrying changes nothing until the Squad is configured.
   squadNotReady: {
     severity: "error",

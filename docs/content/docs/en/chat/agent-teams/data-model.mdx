@@ -142,9 +142,10 @@ export function partializeAgentTeamState(state: AgentTeamState) {
 
 Storage key `cognia-agent-teams`, re-pointed per account by `activateAgentTeamAccountStorage` (`:303`) to `cognia-agent-teams:<accountId>`. That path bypasses `migrate` and `onRehydrateStorage`, so it re-runs `resetStaleTeamStatuses` and `backfillTeamProjectIds` itself.
 
-`PERSIST_VERSION` is **8**. The migration ladder in the file header records every step, and two of them matter for reading old data.
+`PERSIST_VERSION` is **9**. The migration ladder in the file header records every step, and three of them matter for reading old data.
 
 - **v3 to v4** made `teams`, `teammates` and `tasks` durable at all, so a scheduled `agent-team` task could re-instantiate its Squad after a restart.
+- **v8 to v9** (ADR-0169) strips the legacy runtime selector (`config.runtimeVersion`) from every persisted definition, template and `defaultConfig`. The same strip runs on Dexie hydration (`migrateHydratedDefinitions`), on sync inbound rows and at the CLI and plugin boundaries, so no reader ever sees one.
 - **v7 to v8** moved those three back out of `localStorage` into Dexie. The migration does *not* move the rows itself. It leaves them in the rehydrated state and lets `dexie-bridge.ts` write anything memory holds that the tables do not, on its first sync, because a synchronous storage callback has no way to await an account database.
 
 `migrate` and `onRehydrateStorage` both reset any Squad left in `planning`, `executing` or `paused` to `idle`. `migrate` alone is not enough: it short-circuits on a same-version reload, which would rehydrate a phantom "executing" run.
@@ -156,7 +157,11 @@ Dexie is authoritative for definitions from persist v8 on. `dexie-bridge.ts` sub
 1. **Never write to a database it was not built against.** Locking an account clears the Dexie selection *before* the store, so a live subscription would otherwise observe an empty store pointed at another account's database and delete every row in it.
 2. **A failed hydration disables the mirror entirely.** Deletes are derived from "in the mirror, absent from memory", and if hydration threw then memory is an unknown subset of the tables.
 
-Templates and `defaultConfig` are not mirrored. Squad templates are profile-shared by design and the unified template platform owns them. The bridge is started by `components/providers/initializers/agent-team-bridge-initializer.tsx`.
+Templates and `defaultConfig` are not mirrored. Squad templates are profile-shared by design and the unified template platform owns them. The bridge is started by the ordered Squad bootstrap (`lib/agent-team/bootstrap.ts`, mounted by `components/providers/initializers/squad-bootstrap-initializer.tsx`), which awaits its hydration before it installs the runtime, imports legacy history and recovers live runs. A launch that arrives before the bootstrap flips ready is refused with `runtime_not_ready`, never raced.
+
+### Run records (ADR-0169)
+
+`AgentTeam` is a definition. Everything about a *run* (status, progress, result, cost, recovery reason) lives on `AgentTeamRunRecord` in `agentTeamRuns`, and `ExecutionRun` (`execution:team:<runId>`) is the one-way projection every surface reads. `createSquadRunRecords` writes both plus the `run.started` event in one transaction before anything dispatches. The store's `status` field is a mirror written by the lifecycle runner and nowhere else. Legacy `workflowRuns` rows under a `__team__:` id are imported once by `backfillLegacyTeamRunHistory` and no surface queries them live any more.
 
 | Table | Key and indexes | Row type |
 | --- | --- | --- |
@@ -176,7 +181,7 @@ Rows flatten `Date` to epoch milliseconds and add an `updatedAt` the domain type
 | `displayMode`, `workspaceTab` | `localStorage` blob | Yes, but read by nothing |
 | Messages, events, consensus, shared memory, delegations | RAM only | No |
 | `activeTeamId` | RAM only | No |
-| Run history | Dexie `agentTeamRuns` and children, plus `workflowRuns` with `triggerKind: "team"` | Yes |
+| Run history | Dexie `agentTeamRuns` and children, projected to `executionRuns` / `executionRunEvents` (legacy `workflowRuns` rows are imported once at bootstrap) | Yes |
 | Chat binding | `sessions.squadId`, indexed. Introduced at Dexie v177, today part of the collapsed schema | Yes |
 
 `sessions.squadId` (which Squad runs this conversation) is deliberately distinct from `sessions.teamId` (which Character Team this conversation *is*). `lib/db/schema.test.ts` pins the pair.

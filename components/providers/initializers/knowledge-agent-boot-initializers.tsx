@@ -5,13 +5,12 @@ import { useEffect } from "react"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
 import { ProjectKnowledgeWorkerInitializer } from "@/components/shell/project-kb-worker-initializer"
 import { TwinWorkerInitializer } from "@/components/twin/twin-worker-initializer"
-import { AgentTeamRuntimeInitializer } from "./agent-team-runtime-initializer"
 import { ExternalAgentInitializer } from "./external-agent-initializer"
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"
 import { OcrRuntimeInitializer } from "./ocr-runtime-initializer"
-import { AgentTeamBridgeInitializer } from "./agent-team-bridge-initializer"
 import { CloudIdentityInitializer } from "./cloud-identity-initializer"
 import { SftpTransferInitializer } from "./sftp-transfer-initializer"
+import { SquadBootstrapInitializer } from "./squad-bootstrap-initializer"
 import { TemplatePlatformInitializer } from "./template-platform-initializer"
 import { VectorCredentialMigrationInitializer } from "./vector-credential-migration-initializer"
 
@@ -21,14 +20,15 @@ export function KnowledgeAgentBootInitializers() {
     <>
       <CloudIdentityInitializer />
       <ExternalAgentInitializer />
-      <AgentTeamRuntimeInitializer />
+      {/* One ordered bootstrap owns the Squad mirror, runtime and recovery
+          (ADR-0169). It replaced the runtime + bridge initializer pair. */}
+      <SquadBootstrapInitializer />
       <MemoryJobWorkerInitializer />
       <OcrRuntimeInitializer />
       <TwinWorkerInitializer />
       <ProjectKnowledgeWorkerInitializer />
       <VectorCredentialMigrationInitializer />
       <TemplatePlatformInitializer />
-      <AgentTeamBridgeInitializer />
       <SftpTransferInitializer />
     </>
   )

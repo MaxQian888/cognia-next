@@ -33,6 +33,7 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { SquadDeriveActions } from "./squad-derive-actions"
+import { SquadReadinessCard } from "@/components/squads/squad-readiness-card"
 import { SquadTemplateProvenance } from "./squad-template-provenance"
 import {
   AlertDialog,
@@ -152,6 +153,11 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
         </div>
         <AgentTeamMembers team={squad} teammates={members} leadId={squad.leadId} />
       </div>
+
+      {/* Whether this Squad can run, and the one-click fixes when it cannot
+          (ADR-0169). The two bindings the coordinator needs are edited here
+          and nowhere else. */}
+      <SquadReadinessCard squadId={squadId} />
 
       {/* Plugin-contributed Squad insight / governance panels. Context carries
           ids and counts only, never task or message bodies.

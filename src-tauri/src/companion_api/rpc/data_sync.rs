@@ -67,6 +67,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    "execution_run_control",
     "agent_task_start",
     "agent_task_pause",
     "agent_task_resume",
@@ -715,6 +716,9 @@ pub(super) async fn dispatch(
         | "team_run_pause"
         | "team_run_resume"
         | "team_run_stop"
+        // ADR-0169 run control: the cockpit's `RunControlCommand` from a
+        // paired device, through the same TS gate. Gated by CONTROL_COMMANDS.
+        | "execution_run_control"
         // Single-Agent task board control — TS arms validate Agent ownership,
         // state-machine moves, and Scheduler lifecycle actions.
         | "agent_task_start"

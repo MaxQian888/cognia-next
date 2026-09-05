@@ -24,7 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { StatusBadge } from "@/components/status-badge"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { usePendingSquadReviews } from "@/hooks/squads/use-pending-squad-reviews"
 import type { TeammateStatus } from "@/types/agent/agent-team"
 import { cn } from "@/lib/utils"
 
@@ -57,7 +57,7 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
   const t = useTranslations("contextWorkbench.squadPanel")
   const executor = useChatExecutor(sessionId ?? undefined)
   const teammatesRecord = useAgentTeamStore((s) => s.teammates)
-  const gates = usePendingGatesStore((s) => s.gates)
+  const gates = usePendingSquadReviews()
   const squadId = executor.squadId
 
   // Derived in a memo, not in the selector: mapping inside a zustand selector
@@ -114,9 +114,10 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
       </div>
 
       {openGates.length > 0 ? (
-        // The dialog is app-root mounted and answerable anywhere; this is the
-        // conversation's own "you are being asked something" marker, so the
-        // panel does not look idle while the run is blocked.
+        // The review is a durable run interrupt, answerable from the cockpit,
+        // a phone or an IM card. This is the conversation's own "you are being
+        // asked something" marker, so the panel does not look idle while the
+        // run is blocked.
         <div
           className="flex shrink-0 items-center gap-2 border-b bg-amber-500/10 px-3 py-2 text-xs"
           data-testid="squad-panel-gates"

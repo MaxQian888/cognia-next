@@ -258,6 +258,12 @@ export interface CockpitFilter {
   kind?: ExecutionFilterKind
   /** Case-insensitive substring over the row label. */
   query?: string
+  /**
+   * Keep only the runs of one Squad. Rows that carry no `teamId` (a legacy
+   * workflow row, a run whose opening event predates the stamp) are dropped
+   * rather than shown under a Squad they may not belong to.
+   */
+  teamId?: string
 }
 
 export function filterCockpitRows(
@@ -268,6 +274,7 @@ export function filterCockpitRows(
   return rows.filter((row) => {
     if (filter.statusGroup && cockpitStatusGroup(row) !== filter.statusGroup) return false
     if (filter.kind && executionRowFilterKind(row) !== filter.kind) return false
+    if (filter.teamId && row.teamId !== filter.teamId) return false
     if (query && !row.label.toLowerCase().includes(query)) return false
     return true
   })

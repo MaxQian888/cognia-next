@@ -1,6 +1,6 @@
 /**
  * The team-addressed facade. Definition CRUD proxies the store. Every runtime
- * verb is an adapter onto the two seams ADR-0168 leaves: `startSquadRun` and
+ * verb is an adapter onto the two seams ADR-0169 leaves: `startSquadRun` and
  * `controlSquadTeam`. Both are mocked here so the facade's own contract is
  * what is pinned.
  */

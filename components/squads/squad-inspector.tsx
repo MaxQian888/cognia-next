@@ -19,6 +19,8 @@ import { ExternalLinkIcon, SettingsIcon } from "lucide-react"
 
 import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
+import { SquadReadinessCard } from "@/components/squads/squad-readiness-card"
+import { useSquadReadiness } from "@/hooks/squads/use-squad-readiness"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { settingsHref } from "@/lib/settings/deep-link"
@@ -32,7 +34,22 @@ export interface SquadInspectorProps {
 
 export function SquadInspector({ squadId, children, className }: SquadInspectorProps) {
   const t = useTranslations("squads.fleet")
+  const tReadiness = useTranslations("squads.readiness")
   const squad = useAgentTeamStore((s) => s.teams[squadId])
+  const readiness = useSquadReadiness(squadId)
+  // The first blocker is the disabled reason on Start. The card below says
+  // all of them, with the action that clears each.
+  const firstBlocker = readiness.loading ? undefined : readiness.blockers[0]
+  const startDisabledReason = readiness.loading
+    ? tReadiness("loading")
+    : firstBlocker
+      ? tReadiness(`blockers.${firstBlocker.code}`, {
+          versionId: firstBlocker.detail?.versionId ?? "",
+          environmentId: firstBlocker.detail?.environmentId ?? "",
+          repositoryIds: (firstBlocker.detail?.repositoryIds ?? []).join(", "),
+          missingCapabilities: (firstBlocker.detail?.missingCapabilities ?? []).join(", "),
+        })
+      : undefined
   if (!squad) return null
 
   return (
@@ -63,8 +80,10 @@ export function SquadInspector({ squadId, children, className }: SquadInspectorP
           onPause={() => void agentTeamManager.pause(squad.id).catch(() => undefined)}
           onResume={() => void agentTeamManager.resume(squad.id).catch(() => undefined)}
           onStop={() => void agentTeamManager.shutdown(squad.id).catch(() => undefined)}
+          {...(startDisabledReason ? { startDisabledReason } : {})}
           className="pt-1"
         />
+        <SquadReadinessCard squadId={squad.id} className="mt-2" />
         <Link
           href={settingsHref("squads", { params: { squadTab: squadPanelId(squad.id) } })}
           className="inline-flex items-center gap-1 pt-1 text-xs text-muted-foreground hover:text-foreground"

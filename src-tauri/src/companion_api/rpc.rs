@@ -705,6 +705,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    // ADR-0169: the one remote control seam for an execution run. Same
+    // elevation as the team controls above, which it retires (they now answer
+    // `upgrade-required` on the TS side).
+    "execution_run_control",
     "thread_handoff_offer",
     "thread_handoff_preflight",
     "thread_handoff_accept",
@@ -1614,6 +1618,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "team_run_pause",
     "team_run_resume",
     "team_run_stop",
+    "execution_run_control",
     "agent_task_start",
     "agent_task_pause",
     "agent_task_resume",
@@ -1990,6 +1995,10 @@ pub(super) const BROWSER_COMPANION_COMMANDS: &[&str] = &[
 ];
 
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    // ADR-0169 run control. The command's actor is the authenticated device:
+    // it becomes the operator the control gate authorizes and the actor the
+    // receipt names, so a payload must not be able to borrow another one.
+    "execution_run_control",
     // Remote Session Control — the attach registry keys watchers by device and
     // the host routes a `permission_request` to whoever is attached. Trusting
     // `payload.deviceId` let any paired device attach (and collect another

@@ -31,6 +31,8 @@ import type {
   RunActivityStatus,
   RunControlAction,
   RunVerificationConclusion,
+  SquadReviewKind,
+  TeamRecoveryChoice,
 } from "@/types/execution/run"
 
 /** Fails to compile when `Values` has a member `List` does not cover. */
@@ -103,8 +105,28 @@ const _outcomes: Covers<RunControlOutcomeReason, typeof OUTCOME_REASONS> = true
 const CONTROL_ACTIONS = ["stop", "pause", "resume", "approve", "deny", "retry", "steer"] as const
 const _controls: Covers<Exclude<RunControlAction, "open_details">, typeof CONTROL_ACTIONS> = true
 
+/** Every Squad review kind has a form title, description and two verbs (ADR-0169). */
+const REVIEW_KINDS = [
+  "plan",
+  "capability_audit",
+  "budget_extension",
+  "deadlock",
+  "teammate_repair",
+  "replan",
+  "team_recovery",
+] as const
+const _reviewKinds: Covers<SquadReviewKind, typeof REVIEW_KINDS> = true
+
+const RECOVERY_CHOICES = ["retry_same_host", "retry_host", "restart_run", "terminate"] as const
+const _recoveryChoices: Covers<TeamRecoveryChoice, typeof RECOVERY_CHOICES> = true
+
+/** The reason codes `run-reducer.ts` writes into `waitingReason`. */
+const WAITING_REASONS = ["waiting_review", "recovery_required"] as const
+
 // Reference the compile-time witnesses so lint does not strip them.
 void [
+  _reviewKinds,
+  _recoveryChoices,
   _statusGroups,
   _statuses,
   _categories,
@@ -129,6 +151,23 @@ function expectKeys(
 }
 
 describe("cockpit dynamic translation keys", () => {
+  it("covers every Squad review kind, recovery choice and waiting reason", () => {
+    for (const kind of REVIEW_KINDS) {
+      const enKind = (en.review.kinds as Record<string, Record<string, unknown>>)[kind]
+      const zhKind = (zh.review.kinds as Record<string, Record<string, unknown>>)[kind]
+      expect([kind, typeof enKind]).toEqual([kind, "object"])
+      expect([kind, typeof zhKind]).toEqual([kind, "object"])
+      expectKeys(enKind!, zhKind!, ["title", "description", "approve", "deny"], `review.${kind}`)
+    }
+    expectKeys(
+      en.review.recovery.choices,
+      zh.review.recovery.choices,
+      RECOVERY_CHOICES,
+      "agentRuns.review.recovery.choices"
+    )
+    expectKeys(en.waitingReasons, zh.waitingReasons, WAITING_REASONS, "agentRuns.waitingReasons")
+  })
+
   it("covers every run-kind label in both locales", () => {
     expectKeys(en.kind, zh.kind, RUN_KIND_LABEL_KEYS, "agentRuns.kind")
   })

@@ -3,7 +3,7 @@
  *
  * Replaces `resolveDurableNewTeamConfig`, which returned a `runtimeVersion:
  * "durable-v2"` config or `null`. There is no runtime to select any more
- * (ADR-0168). What a new or migrating Squad needs is candidates for the two
+ * (ADR-0169). What a new or migrating Squad needs is candidates for the two
  * bindings the coordinator requires, resolved under the one-candidate rule
  * that `definition-contract.ts` applies: exactly one deterministic option, or
  * nothing.

@@ -1,42 +1,45 @@
 "use client"
 
 /**
- * Derive a single team's status from the DURABLE `workflowRuns` row rather than
- * the optimistic in-memory `agent-team-store` mirror (ADR-0022 "PR 5" follow-up).
+ * One Squad's status, from its DURABLE run record (ADR-0169).
  *
- * The store's `team.status` is written optimistically by `agentTeamManager.start`
- * and mirrored back at terminal — it is a UI convenience, not the source of
- * truth. The newest `workflowRuns` row under this team's
- * `teamWorkflowIdPrefix` is the durable record. This hook joins the two: the
- * live store status wins while it is non-terminal (so an in-flight run shows
- * immediately, before its run row lands or updates); otherwise the newest run
- * row's status is the truth; with no run row yet, the store status is the only
- * signal.
+ * The store's `team.status` is a mirror the lifecycle runner writes, kept so
+ * synchronous callers (board guards, presence) do not each open a query. The
+ * newest `agentTeamRuns` row is the record. This hook joins the two: the live
+ * mirror wins while it is non-terminal (an in-flight run shows at once, before
+ * its row updates), otherwise the newest run row's status is the truth, and
+ * with no run row yet the mirror is the only signal.
+ *
+ * It used to read `workflowRuns` under a `__team__:` id. That was the legacy
+ * runtime's only record, and it is gone with it.
  */
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
-import { teamWorkflowIdPrefix } from "@/lib/ai/agent/team/team-workflow-id"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
-import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
+import type { AgentTeamRunRecord, AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 
-/** Store statuses backed by a live controller (non-terminal). */
+/** Store statuses backed by a live lifecycle (non-terminal). */
 const LIVE_STORE_STATUSES: ReadonlySet<TeamStatus> = new Set(["planning", "executing", "paused"])
 
-/** Map a durable workflow-run status onto the equivalent team status. */
-export function workflowRunStatusToTeamStatus(status: RunStatus): TeamStatus {
+/** Map a durable run status onto the equivalent team status. */
+export function runRecordStatusToTeamStatus(status: AgentTeamRunStatus): TeamStatus {
   switch (status) {
-    case "pending":
+    case "queued":
     case "running":
-    case "waiting":
+    case "recovering":
       return "executing"
+    case "pausing":
     case "paused":
+    case "sleeping":
+    case "needs_input":
       return "paused"
-    case "succeeded":
+    case "completed":
       return "completed"
     case "failed":
       return "failed"
     case "cancelled":
+    case "terminated":
       return "cancelled"
     default:
       return "failed"
@@ -49,29 +52,26 @@ export function workflowRunStatusToTeamStatus(status: RunStatus): TeamStatus {
  */
 export function deriveTeamStatus(
   storeStatus: TeamStatus,
-  newestRunStatus: RunStatus | undefined
+  newestRunStatus: AgentTeamRunStatus | undefined
 ): TeamStatus {
   if (LIVE_STORE_STATUSES.has(storeStatus)) return storeStatus
-  if (newestRunStatus) return workflowRunStatusToTeamStatus(newestRunStatus)
+  if (newestRunStatus) return runRecordStatusToTeamStatus(newestRunStatus)
   return storeStatus
 }
 
-/** Pick the status of the most-recently-started run row (pure; exposed for tests). */
-export function pickNewestRunStatus(rows: WorkflowRunRow[]): RunStatus | undefined {
+/** Pick the status of the most recently updated run record. Pure, exposed for tests. */
+export function pickNewestRunStatus(rows: AgentTeamRunRecord[]): AgentTeamRunStatus | undefined {
   if (rows.length === 0) return undefined
-  let newest = rows[0]
-  for (const row of rows) if (row.startedAt > newest.startedAt) newest = row
+  let newest = rows[0]!
+  for (const row of rows) if (row.updatedAt > newest.updatedAt) newest = row
   return newest.status
 }
 
 export function useTeamLiveStatus(team: AgentTeam): TeamStatus {
-  const prefix = teamWorkflowIdPrefix(team.id)
   const newestRunStatus = useLiveQuery(
     async () =>
-      pickNewestRunStatus(
-        await getDb().workflowRuns.where("workflowId").startsWith(prefix).toArray()
-      ),
-    [prefix]
+      pickNewestRunStatus(await getDb().agentTeamRuns.where("teamId").equals(team.id).toArray()),
+    [team.id]
   )
 
   return useMemo(

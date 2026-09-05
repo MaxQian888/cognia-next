@@ -134,6 +134,89 @@
     "none": "这个小队还没有产出执行报告。",
     "unavailable": "本设备没有这次小队运行的记录。"
   },
+  "review": {
+    "kinds": {
+      "plan": {
+        "title": "计划审批",
+        "description": "队长提出了一份计划。批准即开始执行，或附上反馈退回。",
+        "approve": "批准计划",
+        "deny": "要求修改"
+      },
+      "capability_audit": {
+        "title": "能力核查",
+        "description": "该小队配置的部分能力已不存在。可以去掉它们继续，或停止。",
+        "approve": "去掉后继续",
+        "deny": "停止"
+      },
+      "budget_extension": {
+        "title": "追加预算",
+        "description": "Token 预算已用尽。可以追加，或让运行到此结束。",
+        "approve": "追加预算",
+        "deny": "结束运行"
+      },
+      "deadlock": {
+        "title": "死锁",
+        "description": "所有队员都不可用。选择要重置的队员，或全部重置。",
+        "approve": "重置并继续",
+        "deny": "停止"
+      },
+      "teammate_repair": {
+        "title": "队员修复",
+        "description": "一名队员被取消资格。可以让其归队，或不带它继续。",
+        "approve": "应用",
+        "deny": "停止"
+      },
+      "replan": {
+        "title": "重新规划",
+        "description": "队长希望在运行中调整计划。",
+        "approve": "接受新计划",
+        "deny": "保留当前计划"
+      },
+      "team_recovery": {
+        "title": "需要恢复决策",
+        "description": "此运行无法从已验证的安全点恢复。请选择处理方式。",
+        "approve": "应用",
+        "deny": "终止"
+      }
+    },
+    "plan": {
+      "feedbackLabel": "给队长的反馈",
+      "feedbackPlaceholder": "可选。需要改什么？个人信息会在存储前脱敏。"
+    },
+    "capabilityAudit": {
+      "missingLabel": "缺失的能力"
+    },
+    "budget": {
+      "extraTokensLabel": "追加 token 数"
+    },
+    "deadlock": {
+      "resetAll": "重置所有队员",
+      "pick": "要重置的队员"
+    },
+    "teammateRepair": {
+      "label": "如何处理该队员",
+      "rejoin": "让其归队",
+      "skip": "不带它继续"
+    },
+    "recovery": {
+      "label": "恢复方式",
+      "reason": "原因：{reason}",
+      "hostRefPlaceholder": "要重试的主机",
+      "choices": {
+        "retry_same_host": "在原主机重试",
+        "retry_host": "在另一台主机重试",
+        "restart_run": "作为新运行重新开始",
+        "terminate": "终止"
+      },
+      "reasons": {
+        "legacy_run_not_resumable": "此运行早于持久化运行时，没有留下检查点",
+        "missing_checkpoint": "没有写入检查点",
+        "recover_needs_input": "最后一个检查点需要人工决定",
+        "squad_not_ready": "该小队缺少运行所需的绑定",
+        "uncertain_side_effect": "某个副作用可能已发生也可能未发生"
+      }
+    }
+  },
   "status": {
     "cancelled": "已取消",
     "done": "已完成",
@@ -160,5 +243,9 @@
     "inconclusiveHint": "输出无法解析——这不等于通过。",
     "passed": "通过"
   },
-  "title": "运行中心"
+  "title": "运行中心",
+  "waitingReasons": {
+    "waiting_review": "等待审核",
+    "recovery_required": "需要恢复"
+  }
 }

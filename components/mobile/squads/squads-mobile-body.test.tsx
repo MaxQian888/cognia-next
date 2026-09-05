@@ -14,11 +14,34 @@ import { useProjectStore } from "@/stores/project/project-store"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
 import type { SquadRouteState } from "@/hooks/squads/use-squad-route-state"
 
-jest.mock("@/components/agent/team/command-center", () => ({
-  AgentTeamCommandCenter: () => <div data-testid="command-center" />,
+jest.mock("@/hooks/squads/use-squad-readiness", () => ({
+  useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
 }))
-jest.mock("@/components/agent/team/runs-list", () => ({
-  TeamRunsList: ({ teamId }: { teamId: string }) => <div data-testid="runs-list">{teamId}</div>,
+jest.mock("@/components/squads/squad-readiness-card", () => ({
+  SquadReadinessCard: ({ squadId }: { squadId: string }) => (
+    <div data-testid="squad-readiness" data-squad={squadId} />
+  ),
+}))
+jest.mock("@/components/agent-runs/agent-runs-panel", () => ({
+  AgentRunsPanel: ({
+    teamId,
+    embedded,
+    filterKind,
+    selectedId,
+  }: {
+    teamId?: string
+    embedded?: boolean
+    filterKind?: string
+    selectedId?: string
+  }) => (
+    <div
+      data-testid="agent-runs-panel"
+      data-team={teamId ?? ""}
+      data-embedded={String(Boolean(embedded))}
+      data-kind={filterKind ?? "all"}
+      data-run={selectedId ?? ""}
+    />
+  ),
 }))
 jest.mock("@/components/agent/workspace/tasks", () => ({
   AgentTeamTasks: ({ teamId }: { teamId: string }) => <div data-testid="task-board">{teamId}</div>,
@@ -57,16 +80,19 @@ function seed(teams: AgentTeam[]) {
 }
 
 const setSelectedId = jest.fn()
+const setRunId = jest.fn()
 const setTab = jest.fn()
 
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
   return {
     selectedId: undefined,
+    runId: undefined,
     tab: undefined,
     query: "",
     filter: "all",
     narrowed: false,
     setSelectedId,
+    setRunId,
     setTab,
     setQuery: jest.fn(),
     setFilter: jest.fn(),
@@ -112,7 +138,10 @@ describe("SquadsMobileBody", () => {
 
   it("honours a tab the URL does name", () => {
     render(<SquadsMobileBody route={route({ tab: "runs" })} />)
-    expect(screen.getByTestId("command-center")).toBeInTheDocument()
+    // The canonical run cockpit, pinned to Squad runs (ADR-0169).
+    const panel = screen.getByTestId("agent-runs-panel")
+    expect(panel).toHaveAttribute("data-embedded", "true")
+    expect(panel).toHaveAttribute("data-kind", "team")
   })
 
   it("reports a tab change instead of owning it", async () => {
@@ -133,7 +162,6 @@ describe("detail", () => {
   it("opens the detail sheet from the URL selection", () => {
     render(<SquadsMobileBody route={route({ selectedId: "b" })} />)
     expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
-    expect(screen.getByTestId("runs-list")).toHaveTextContent("b")
   })
 
   /** Said, not hidden. A control that simply is not there reads as a bug. */

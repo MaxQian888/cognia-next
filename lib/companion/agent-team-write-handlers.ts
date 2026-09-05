@@ -15,7 +15,6 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { loggers } from "@cognia/logging"
 import type { SubAgentPriority } from "@/types/agent/sub-agent"
 import type { TeamTaskStatus } from "@/types/agent/agent-team"
@@ -114,39 +113,7 @@ export async function handleTeamTaskComment(
   return comment ? { ok: true, commentId: comment.id } : { ok: false, reason: "empty-comment" }
 }
 
-export async function handleTeamRunPause(
-  payload: Record<string, unknown>
-): Promise<TeamCommandResult> {
-  const teamId = readString(payload, "teamId")
-  if (!teamId) return { ok: false, reason: "invalid-payload" }
-  if (!useAgentTeamStore.getState().teams[teamId]) return { ok: false, reason: "team-not-found" }
-  await agentTeamManager.pause(teamId)
-  return { ok: true }
-}
-
-export async function handleTeamRunResume(
-  payload: Record<string, unknown>
-): Promise<TeamCommandResult> {
-  const teamId = readString(payload, "teamId")
-  if (!teamId) return { ok: false, reason: "invalid-payload" }
-  const team = useAgentTeamStore.getState().teams[teamId]
-  if (!team) return { ok: false, reason: "team-not-found" }
-  if (team.status !== "paused") return { ok: false, reason: "not-paused" }
-  // Fire-and-forget: resume() awaits the whole re-entered lifecycle, which
-  // can run for minutes — the RPC acks the acceptance, and progress flows
-  // back through the board sync mirror.
-  void agentTeamManager.resume(teamId).catch((err) => {
-    log.warn("team_run_resume lifecycle failed", { teamId, err: String(err) })
-  })
-  return { ok: true }
-}
-
-export async function handleTeamRunStop(
-  payload: Record<string, unknown>
-): Promise<TeamCommandResult> {
-  const teamId = readString(payload, "teamId")
-  if (!teamId) return { ok: false, reason: "invalid-payload" }
-  if (!useAgentTeamStore.getState().teams[teamId]) return { ok: false, reason: "team-not-found" }
-  await agentTeamManager.shutdown(teamId)
-  return { ok: true }
-}
+// `handleTeamRunPause` / `handleTeamRunResume` / `handleTeamRunStop` were
+// retired with ADR-0169. Run control is `execution_run_control`
+// (`lib/companion/execution-run-control-handler.ts`), and the old
+// team-addressed commands answer `upgrade-required`.

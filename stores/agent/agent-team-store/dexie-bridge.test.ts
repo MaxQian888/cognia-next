@@ -8,7 +8,12 @@ import {
   writeAgentTeamDefinitions,
 } from "@/lib/db/agent-team-definitions"
 import type { AgentTeam } from "@/types/agent/agent-team"
-import { __resetAgentTeamDexieBridgeForTesting, startAgentTeamDexieBridge } from "./dexie-bridge"
+import {
+  __resetAgentTeamDexieBridgeForTesting,
+  setAgentTeamBindingCandidateResolver,
+  startAgentTeamDexieBridge,
+  whenAgentTeamDexieBridgeHydrated,
+} from "./dexie-bridge"
 import { useAgentTeamStore } from "./store"
 
 function team(id: string, over: Partial<AgentTeam> = {}): AgentTeam {
@@ -115,6 +120,46 @@ describe("agent-team dexie bridge", () => {
     await settle()
 
     expect((await loadAgentTeamDefinitions()).teams).toEqual([])
+  })
+
+  /**
+   * ADR-0169: a definition still carrying the retired runtime selector is
+   * upgraded the first time it comes out of Dexie, bindings are inferred only
+   * from the single candidate the resolver returns, and the upgraded row goes
+   * back down. A second boot changes nothing.
+   */
+  it("migrates stored definitions onto the durable contract on hydration", async () => {
+    await writeAgentTeamDefinitions({
+      teams: [
+        team("legacy", {
+          config: { runtimeVersion: "legacy", workingDir: "/repo", maxTeammates: 3 } as never,
+        }),
+      ],
+      teammates: [],
+      tasks: [],
+    })
+    setAgentTeamBindingCandidateResolver(async () => ({
+      environment: { environmentId: "env-1", versionId: "env-1:v1" },
+    }))
+    stop = startAgentTeamDexieBridge()
+    await whenAgentTeamDexieBridgeHydrated()
+    const migrated = useAgentTeamStore.getState().teams.legacy!
+    expect(migrated.config).not.toHaveProperty("runtimeVersion")
+    expect(migrated.config.repositories).toEqual([
+      { id: "primary", role: "primary", path: "/repo", writable: true },
+    ])
+    expect(migrated.config.environmentRef).toEqual({
+      environmentId: "env-1",
+      versionId: "env-1:v1",
+    })
+    expect(migrated.config.contractVersion).toBe(2)
+    await settle()
+    const stored = await loadAgentTeamDefinitions()
+    expect(stored.teams[0]?.config).not.toHaveProperty("runtimeVersion")
+    expect(stored.teams[0]?.config.environmentRef).toEqual({
+      environmentId: "env-1",
+      versionId: "env-1:v1",
+    })
   })
 
   it("is idempotent, so a second boot does not start a second mirror", async () => {

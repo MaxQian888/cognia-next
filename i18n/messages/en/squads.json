@@ -45,5 +45,38 @@
     },
     "title": "Squads",
     "waiting": "Needs you"
+  },
+  "readiness": {
+    "title": "Readiness",
+    "ready": "Ready to run",
+    "loading": "Checking…",
+    "blockedSummary": "{count, plural, =1 {1 thing} other {# things}} to fix before this Squad can run",
+    "blockers": {
+      "no_teammates": "No teammate to dispatch. Add at least one member besides the lead.",
+      "missing_primary_repository": "No repository is bound. Squads work inside one primary repository.",
+      "ambiguous_primary_repository": "More than one primary repository is bound ({repositoryIds}). Keep exactly one.",
+      "missing_environment_ref": "No execution environment is bound. Every run needs an immutable environment version.",
+      "environment_not_found": "The bound environment version no longer exists ({versionId}).",
+      "environment_unenforceable": "This host cannot enforce the environment's requirements ({missingCapabilities}).",
+      "host_unavailable": "This device is not the authoritative host. Squads dispatch from the desktop app.",
+      "workspace_controller_unavailable": "This host has no workspace controller. Squads dispatch from the desktop app."
+    },
+    "actions": {
+      "bindWorkspaceRepository": "Bind workspace repository",
+      "bindEnvironment": "Bind environment",
+      "createDefaultEnvironment": "Create a default environment",
+      "openEnvironments": "Open environments",
+      "addTeammate": "Add a teammate",
+      "openOnHost": "Open on the desktop"
+    },
+    "bound": {
+      "repository": "Repository bound: {path}",
+      "environment": "Environment bound: {name}"
+    },
+    "defaultEnvironmentName": "Default",
+    "errors": {
+      "noWorkspaceRoot": "The active workspace has no root directory to bind.",
+      "bindFailed": "Could not save the binding."
+    }
   }
 }

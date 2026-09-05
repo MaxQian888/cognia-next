@@ -2,11 +2,7 @@
  * @jest-environment jsdom
  */
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import {
-  handleTeamRunPause,
-  handleTeamRunResume,
-  handleTeamRunStop,
   handleTeamTaskComment,
   handleTeamTaskCreate,
   handleTeamTaskMove,
@@ -160,30 +156,5 @@ describe("handleTeamTaskComment", () => {
       ok: false,
       reason: "task-not-found",
     })
-  })
-})
-
-describe("run controls", () => {
-  it("pause/stop forward to the manager for known teams", async () => {
-    const { team } = seed()
-    expect(await handleTeamRunPause({ teamId: team.id })).toEqual({ ok: true })
-    expect(agentTeamManager.pause).toHaveBeenCalledWith(team.id)
-    expect(await handleTeamRunStop({ teamId: team.id })).toEqual({ ok: true })
-    expect(agentTeamManager.shutdown).toHaveBeenCalledWith(team.id)
-    expect(await handleTeamRunPause({ teamId: "ghost" })).toEqual({
-      ok: false,
-      reason: "team-not-found",
-    })
-  })
-
-  it("resume acks fire-and-forget only for paused teams", async () => {
-    const { team } = seed()
-    expect(await handleTeamRunResume({ teamId: team.id })).toEqual({
-      ok: false,
-      reason: "not-paused",
-    })
-    useAgentTeamStore.getState().setTeamStatus(team.id, "paused")
-    expect(await handleTeamRunResume({ teamId: team.id })).toEqual({ ok: true })
-    expect(agentTeamManager.resume).toHaveBeenCalledWith(team.id)
   })
 })

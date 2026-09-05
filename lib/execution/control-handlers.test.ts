@@ -366,7 +366,7 @@ describe("team run control", () => {
   })
 
   /**
-   * ADR-0168: one control state machine. Every verb reaches `controlSquadRun`
+   * ADR-0169: one control state machine. Every verb reaches `controlSquadRun`
    * with the DURABLE run id, never the workflow cancel and never a legacy
    * manager branch.
    */

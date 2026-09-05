@@ -141,7 +141,9 @@ export function partializeAgentTeamState(state: AgentTeamState) {
 
 存储键是 `cognia-agent-teams`，由 `activateAgentTeamAccountStorage`（`:303`）按账户改指到 `cognia-agent-teams:<accountId>`。那条路径绕开了 `migrate` 和 `onRehydrateStorage`，所以它自己又跑了一遍 `resetStaleTeamStatuses` 和 `backfillTeamProjectIds`。
 
-`PERSIST_VERSION` 是 **8**。文件头的迁移阶梯记录了每一步，其中两步对读取旧数据尤其重要。
+`PERSIST_VERSION` 是 **9**。文件头的迁移阶梯记录了每一步，其中三步对读取旧数据尤其重要。
+
+- **v8 到 v9**（ADR-0169）从每个已持久化的定义、模板和 `defaultConfig` 上剥掉旧的运行时选择器（`config.runtimeVersion`）。同样的剥离也在 Dexie 水合（`migrateHydratedDefinitions`）、同步入站行以及 CLI 与插件边界上执行，因此任何读者都不会再看到它。
 
 - **v3 到 v4** 才第一次让 `teams`、`teammates` 和 `tasks` 变成持久的，这样一个定时的 `agent-team` 任务才能在应用重启后重新实例化它的小队。
 - **v7 到 v8** 又把这三者从 `localStorage` 搬回 Dexie。这次迁移*不*自己搬行：它把行留在 rehydrate 后的状态里，让 `dexie-bridge.ts` 在第一次同步时把内存里有、表里没有的写进去，因为一个同步的存储回调根本没办法 await 一个账户数据库。
@@ -155,7 +157,11 @@ export function partializeAgentTeamState(state: AgentTeamState) {
 1. **绝不写入不是自己所对应的那个数据库。** 锁定账户时会*先*清掉 Dexie 选择再清 store，否则一个仍然活着的订阅就会看到一个指向别人数据库的空 store，然后把里面每一行都删掉。
 2. **hydration 失败就整体停用镜像。** 删除是由「镜像里有、内存里没有」推导出来的，而如果 hydration 抛过错，内存就是表的一个未知子集。
 
-模板和 `defaultConfig` 不在镜像范围内。小队模板按设计是跨 profile 共享的，由统一模板平台拥有。桥由 `components/providers/initializers/agent-team-bridge-initializer.tsx` 启动。
+模板和 `defaultConfig` 不在镜像范围内。小队模板按设计是跨 profile 共享的，由统一模板平台拥有。桥由有序的小队引导（`lib/agent-team/bootstrap.ts`，由 `components/providers/initializers/squad-bootstrap-initializer.tsx` 挂载）启动，引导先等它水合完成，再安装运行时、导入旧历史、恢复活跃运行。在引导翻转就绪之前到达的启动请求会以 `runtime_not_ready` 被拒绝，绝不竞态。
+
+### 运行记录（ADR-0169）
+
+`AgentTeam` 只是定义。关于一次*运行*的一切（状态、进度、结果、成本、恢复原因）都在 `agentTeamRuns` 的 `AgentTeamRunRecord` 上，`ExecutionRun`（`execution:team:<runId>`）是所有界面读取的单向投影。`createSquadRunRecords` 在任何派发之前于一个事务内写入两者以及 `run.started` 事件。store 的 `status` 字段是生命周期运行器写的镜像，别处不写。`__team__:` 前缀的旧 `workflowRuns` 行由 `backfillLegacyTeamRunHistory` 一次性导入，不再有任何界面实时查询它们。
 
 | 表 | 主键与索引 | 行类型 |
 | --- | --- | --- |
@@ -175,7 +181,7 @@ export function partializeAgentTeamState(state: AgentTeamState) {
 | `displayMode`、`workspaceTab` | `localStorage` blob | 在，但没人读 |
 | 消息、事件、共识、共享内存、委派 | 仅内存 | 不在 |
 | `activeTeamId` | 仅内存 | 不在 |
-| 运行历史 | Dexie `agentTeamRuns` 及其子表，以及 `triggerKind: "team"` 的 `workflowRuns` | 在 |
+| 运行历史 | Dexie `agentTeamRuns` 及其子表，投影到 `executionRuns` / `executionRunEvents`（旧 `workflowRuns` 行在引导时一次性导入） | 在 |
 | 会话绑定 | `sessions.squadId`，带索引。在 Dexie v177 引入，如今属于合并后的单一 schema | 在 |
 
 `sessions.squadId`（这段对话交给哪支小队跑）与 `sessions.teamId`（这段对话本身*是*哪个角色团队房间）是刻意分开的两件事，`lib/db/schema.test.ts` 把这对关系钉死。

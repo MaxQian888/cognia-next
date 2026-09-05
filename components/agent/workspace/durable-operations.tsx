@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
+
+import { getProjectEnvironmentVersion } from "@/lib/db/project-environments"
 import { GitMergeIcon, HandIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -20,7 +22,6 @@ import { createDecisionLedger } from "@/lib/ai/agent/team/decision-ledger"
 import { getDurableTeamCoordinator } from "@/lib/ai/agent/team/durable-runtime"
 import { approveAndMergeGithubStack } from "@/lib/ai/agent/team/github-delivery-adapter"
 import { createLocalTauriExecutionEnvironment } from "@/lib/ai/agent/execution/local-tauri-environment"
-import { getProjectEnvironmentVersion } from "@/lib/db/project-environments"
 import { getRunRetrospectiveBundle } from "@/lib/db/run-retrospectives"
 import { generateConfiguredRunRetrospective } from "@/lib/execution/run-retrospective"
 import {
@@ -47,7 +48,6 @@ export interface DurableOperationsProps {
   onOpenEditor: () => void
   onOpenTerminal: (workspacePath?: string) => void
   onOpenBrowser: () => void
-  onMigrate: (config: AgentTeam["config"]) => void
 }
 
 export function DurableOperations({
@@ -56,7 +56,6 @@ export function DurableOperations({
   onOpenEditor,
   onOpenTerminal,
   onOpenBrowser,
-  onMigrate,
 }: DurableOperationsProps) {
   const t = useTranslations("agentTeamsWorkspace.operations")
   const [now] = useState(() => Date.now())
@@ -64,19 +63,9 @@ export function DurableOperations({
   const [manualCommands, setManualCommands] = useState<Record<string, string>>({})
   const [manualDiffs, setManualDiffs] = useState<Record<string, string>>({})
   const [retryHosts, setRetryHosts] = useState<Record<string, string>>({})
-  const [showMigration, setShowMigration] = useState(false)
   const [generatingRetrospective, setGeneratingRetrospective] = useState(false)
   const [busyProposalId, setBusyProposalId] = useState<string | null>(null)
   const { snapshot: fleetSnapshot } = useFleetSnapshot()
-  const selectedEnvironment = useLiveQuery(
-    () =>
-      team.config.environmentRef
-        ? getProjectEnvironmentVersion(team.config.environmentRef.versionId)
-        : Promise.resolve(undefined),
-    [team.config.environmentRef?.versionId],
-    undefined
-  )
-
   const data = useLiveQuery(
     async () => {
       const db = getDb()
@@ -152,69 +141,6 @@ export function DurableOperations({
     }
   }
 
-  if (team.config.runtimeVersion !== "durable-v2") {
-    const preflight = selectedEnvironment
-      ? createLocalTauriExecutionEnvironment().preflight(selectedEnvironment)
-      : { ok: false, missing: ["environment_version"] }
-    const primaryCount =
-      team.config.repositories?.filter((repository) => repository.role === "primary").length ??
-      (team.config.workingDir ? 1 : 0)
-    const canMigrate = preflight.ok && primaryCount === 1
-    return (
-      <Card className="space-y-3 p-6 text-sm">
-        <p className="text-muted-foreground">{t("legacy")}</p>
-        <Button size="sm" variant="outline" onClick={() => setShowMigration((value) => !value)}>
-          {t("migration.preview")}
-        </Button>
-        {showMigration ? (
-          <div className="space-y-3 rounded-md border p-3">
-            <p>{t("migration.summary")}</p>
-            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-              <li>{t("migration.runtime")}</li>
-              <li>{t("migration.writer")}</li>
-              <li>{t("migration.environment")}</li>
-              <li>{t("migration.retention")}</li>
-            </ul>
-            {!canMigrate ? (
-              <p className="text-destructive">
-                {t("migration.blocked", {
-                  reason:
-                    primaryCount !== 1
-                      ? t("migration.primaryRepository")
-                      : preflight.missing.join(", "),
-                })}
-              </p>
-            ) : null}
-            <Button
-              size="sm"
-              disabled={!canMigrate}
-              onClick={() => {
-                const repositories =
-                  team.config.repositories && team.config.repositories.length > 0
-                    ? team.config.repositories
-                    : [
-                        {
-                          id: "primary",
-                          role: "primary" as const,
-                          path: team.config.workingDir!,
-                          writable: true,
-                        },
-                      ]
-                onMigrate({
-                  ...team.config,
-                  runtimeVersion: "durable-v2",
-                  writeMode: "single-writer",
-                  repositories,
-                })
-              }}
-            >
-              {t("migration.accept")}
-            </Button>
-          </div>
-        ) : null}
-      </Card>
-    )
-  }
   if (!data) return <Card className="p-6 text-sm text-muted-foreground">{t("empty")}</Card>
 
   const environmentCheck = data.environment
@@ -264,7 +190,7 @@ export function DurableOperations({
             <div key={decision.id} className="rounded-md border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium">{decision.title}</span>
-                <Badge variant="outline">{decision.status}</Badge>
+                <Badge variant="outline">{t(`decisionStatus.${decision.status}`)}</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">{decision.detail}</p>
               {decision.status === "proposed" && team.leadId ? (
@@ -539,7 +465,7 @@ export function DurableOperations({
               <span>
                 {node.repositoryId} · {node.title}
               </span>
-              <Badge variant="outline">{node.status}</Badge>
+              <Badge variant="outline">{t(`deliveryNodeStatus.${node.status}`)}</Badge>
             </div>
           ))
         )}

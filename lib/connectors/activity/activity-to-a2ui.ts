@@ -198,7 +198,15 @@ export function formatRunStoppedNote(
   snapshot: RunProjectionSnapshot,
   i18n: ActivityI18n
 ): string | undefined {
-  const reason = snapshot.waitingReason
+  // `waitingReason` is a code since ADR-0169. The two the reducer writes map
+  // onto run statuses this i18n already names; anything else is shown as is.
+  const code = snapshot.waitingReason
+  const reason =
+    code === "waiting_review"
+      ? i18n.runStatus("waiting")
+      : code === "recovery_required"
+        ? i18n.runStatus("recovery_required")
+        : code
   const notRun = [...snapshot.activeSteps, ...snapshot.pendingSteps].filter(
     (step) => step.status === "pending" || step.status === "in_progress"
   ).length

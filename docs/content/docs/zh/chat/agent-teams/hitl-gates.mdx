@@ -1,26 +1,66 @@
 ---
-title: 人工审批门
-description: 审批总线原语与 Agent Team 运行时的五道 HITL 审批门——计划、预算、死锁、队友修复、能力审计——每一道如何暂停一次运行、何种 payload 批准它，以及 UI 镜像（PendingGatesStore + ApprovalGateDialog）如何解析等待者。
+title: 人工审批
+description: 骑在 Action Review 契约上的小队审批（ADR-0169）。ExecutionRunInterrupt 是唯一待决记录，七种审批及其类型化决策、重启安全、team_recovery 审批，以及 approval-bus 时代去了哪里。
 ---
 
-# 人工审批门
+# 人工审批
 
-一次团队运行在需要人工介入之前都是自治的。ADR-0022 §4 定义了合成器可以在运行中途打开的**五道 HITL（human-in-the-loop，人在回路）审批门**：计划执行前的审批、token 预算触及临界值时的暂停、所有队友都不可用时的冻结、某个队友被取消资格时的逐队友修复提示，以及能力 id 过期时的运行前确认。每一道门都骑乘**同一个**通用原语——审批总线上的 `waitForDecision`——因此运行时阻塞（或不阻塞）于单一、经过充分测试的接缝上，而 UI 为所有这些门渲染同一个模态框家族。
-
-运行时一侧位于 `lib/ai/agent/agent-team-runtime.ts`；原语位于 `lib/runtime/approval-bus.ts`；UI 镜像位于 `stores/agent/pending-gates-store.ts` 与 `components/agent/team/approval-gate-dialog.tsx`。
+一次小队运行在需要人之前都是自治的。自 ADR-0169 起，每一个这样的时刻都是同一件事：一条带 `reviewKind` 的持久化 `ExecutionRunInterrupt`，由 Action Review 契约投影，经唯一控制入口（带类型化 `reviewDecision` 的 `RunControlCommand`）回答，并以回执结算。小队路径上不再有内存总线、按标签页的闸门 store、模态框宿主。桌面上提出的审批可以在手机、IM 卡片、CLI 或驾驶舱里回答，而且跨重启存活。
 
 <TLDR>
-  `runTeamLifecycle` 调用 `waitForDecision(key, signal)`（`lib/runtime/approval-bus.ts:41`），它返回
-  一个 promise，在 `approve(key, plan)` / `reject(key, feedback)` 时 resolve，或在运行的
-  `AbortSignal` 触发时 reject。对于阻塞型门（死锁、预算），它会先 `concurrency.reduceTo(0)`，使得
-  编排器在等待期间不调度任何任务。`TeamNotifier` 把 `openApproval: { scope, id }` 带入
-  `notifierDeps.openGate`，后者将一个 `PendingGate` 推入 `usePendingGatesStore`
-  （`stores/agent/pending-gates-store.ts:38`，按 scope+id 去重，且**不**持久化）。`GateModalsHost` 为每道门渲染
-  一个 `ApprovalGateDialog`（`components/agent/team/approval-gate-dialog.tsx:42`）；其批准/拒绝
-  按钮转发给 `useApprovalGate`（`use-approval-gate.ts:13`），后者把 `approve` / `reject` 调回
-  总线——从而解析运行时的等待者。合成器的 `finally` 块（`agent-team-runtime.ts:515-522`）
-  释放任何仍然打开的等待者，使其不会泄漏。
+  运行时调用 `openSquadReview({ runId, teamId, kind, instance, subject })`
+  （`lib/ai/agent/team/squad-review-gate.ts`）。它先写一个运行级检查点，再把一份
+  `ActionReviewRequest` 以确定性 id（`action-review:squad-review:<runId>:<kind>:<instance>`）投影成
+  该运行的 `ExecutionRunInterrupt`，然后通过 Dexie live query 加轮询兜底等待这一行。任何界面用
+  `executeRunControlCommand({ action: "approve" | "deny", interruptId, reviewDecision })` 回答它。
+  控制门按中断的种类校验决策（`lib/execution/squad-review-decision.ts`），team 处理器把脱敏后的决策
+  存在行旁并写回执（`settleSquadReviewFromControl`），等待者在状态翻转时醒来。重启后重新武装的
+  生命周期找到的是同一行，并且恰好恢复一次。过期即拒绝。
 </TLDR>
+
+## 不变量
+
+1. **唯一待决记录。** 小队等待中的问题只存在于 `executionRunInterrupts`。`usePendingSquadReviews` 为舰队徽章、编辑器芯片和上下文面板读取它。
+2. **唯一协议。** `ActionReviewRequest` / `ActionReviewDecision` / `ActionReviewReceipt`（`packages/agent-config-types/src/action-review.ts`），通道为 `agent-team-plan`、`agent-team-gate`、`agent-team-budget`、`agent-team-deadlock`、`agent-team-teammate-repair`、`agent-team-replan`、`agent-team-recovery`。
+3. **类型化决策。** `SquadReviewDecision` 是可辨识联合。载荷错误或缺失的 `approve` 在任何处理器运行前就是 `invalid_command`。
+4. **日志里没有自由文本。** 计划反馈随命令传递，由 `sanitizeDecision` 脱敏，只存在中断行上。
+5. **重启安全。** 打开前先写检查点。确定性 id。`recoverPendingRunInterrupts` 让超期的过期（持久化人工交接除外）。`armPendingTeamRecoveries` 在引导时为每个停驻的运行重新提出恢复审批。
+
+## 审批种类
+
+| 种类 | 中断类型 | 决策载荷 | 由谁提出 |
+| --- | --- | --- | --- |
+| `plan` | `plan_approval` | `{ kind: "plan", feedback? }` | 计划审批循环，每个修订一个实例 |
+| `capability_audit` | `squad_capability_audit` | `{ kind: "capability_audit" }` | 能力 id 过期时的运行前核查 |
+| `budget_extension` | `squad_budget` | `{ kind: "budget_extension", extraTokens }` | 预算守卫，每次触及临界值 |
+| `deadlock` | `squad_deadlock` | `{ kind: "deadlock", teammateIds?, resetAll? }` | 队员池，所有队员都不可用时 |
+| `teammate_repair` | `squad_teammate_repair` | `{ kind: "teammate_repair", action: "rejoin" | "skip" }` | 队员池，某个队员被取消资格时 |
+| `replan` | `squad_replan` | `{ kind: "replan", edited? }` | 队长在运行中提出重新规划时 |
+| `team_recovery` | `team_recovery` | `{ kind: "team_recovery", choice, hostRef? }` | 控制状态机，运行无法安全重放时 |
+
+任何种类的 `deny` 都不需要载荷。只有 `plan` 与 `capability_audit` 的 `approve` 不需要载荷。
+
+## 恢复
+
+无法证明可以安全重放的 resume（某个子运行没有检查点、检查点为 `needs_input`、存在未知或不安全的待定副作用）会把运行停在 `needs_input` 并带上原因码，同时提出 `team_recovery`（`lib/ai/agent/team/team-recovery.ts`）。subject 带 `reason`、`uncertainChildIds`、公共的 `hostRef`（若有）以及 `choices`：
+
+- `retry_same_host` 把不确定的子运行在原主机重新排队并恢复。
+- `retry_host` 把它们排到指定主机。协调器拒绝没有安全检查点的跨主机迁移，运行保持停驻。
+- `restart_run` 先经 `startSquadRun` 启动一个关联的替代运行，再停止停驻的运行。
+- `terminate` 停止它。
+
+回填的旧运行（`legacy_run_not_resumable`）只提供 `restart_run` 与 `terminate`。校验器对照 `subject.choices` 拒绝其他选项。
+
+## 各界面在哪里回答
+
+- **驾驶舱**（`/agent-runs`，以及同一个面板的 `/squads` 运行页签）：`SquadReviewForm` 按待决中断的种类渲染决策表单，经 `useRunControlActions` 派发。类型化表单接管期间，裸的批准 / 拒绝按钮隐藏。
+- **伴侣壳**向桌面宿主提交 `execution_run_control`。同一条命令，同一道门。
+- **IM 卡片**通过 `openSquadReview` 的 delegate 接缝与中断赛跑。谁先回答谁结算。
+- **CLI** 提交同样的 `RunControlCommand`。
+
+## 历史：approval-bus 时代
+
+下面的内容描述的是 ADR-0022 交付、ADR-0169 退役的机制。保留它是因为每道门存在的*理由*没有变，也因为旧日志与回执仍引用这些名字。其中没有任何东西还在小队路径上：`lib/runtime/approval-bus.ts` 与 `stores/agent/pending-gates-store.ts` 已没有小队读者，`GateModalsHost` 不再渲染任何小队闸门。
 
 ## 审批原语
 

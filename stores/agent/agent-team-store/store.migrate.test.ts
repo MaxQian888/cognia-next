@@ -18,9 +18,52 @@ import {
   migrateAgentTeamPersisted,
   resetStaleTeamStatuses,
   rehydrateResetStaleTeams,
+  stripLegacyRuntimeSelectors,
 } from "./store"
 
 describe("migrateAgentTeamPersisted", () => {
+  /**
+   * ADR-0169: no persisted default or template may name a runtime. A v8 blob
+   * with `runtimeVersion` on either comes out without it, and the fields the
+   * durable contract actually needs are left to creation time.
+   */
+  it("upgrades v8 → v9: strips the retired runtime selector from defaults and templates", () => {
+    const out = migrateAgentTeamPersisted(
+      {
+        defaultConfig: { runtimeVersion: "legacy", maxTeammates: 4 },
+        templates: {
+          a: { id: "a", config: { runtimeVersion: "durable-v2", maxTeammates: 2 } },
+          b: { id: "b" },
+        },
+        teams: {},
+        teammates: {},
+        tasks: {},
+        editorSession: {},
+        lastAdapterSyncVersion: {},
+      },
+      8
+    ) as unknown as {
+      defaultConfig: Record<string, unknown>
+      templates: Record<string, { config?: Record<string, unknown> }>
+    }
+    // Earlier steps still backfill governance defaults. What v9 pins is that
+    // no selector survives and nothing else was lost.
+    expect(out.defaultConfig).not.toHaveProperty("runtimeVersion")
+    expect(out.defaultConfig).toMatchObject({ maxTeammates: 4 })
+    expect(out.templates.a?.config).not.toHaveProperty("runtimeVersion")
+    expect(out.templates.a?.config).toMatchObject({ maxTeammates: 2 })
+    expect(out.templates.b).toEqual({ id: "b" })
+  })
+
+  it("stripLegacyRuntimeSelectors is idempotent and counts what it changed", () => {
+    const raw = {
+      defaultConfig: { runtimeVersion: "legacy" },
+      templates: { a: { config: { runtimeVersion: "legacy" } }, c: { config: "bogus" } },
+    } as never
+    expect(stripLegacyRuntimeSelectors(raw)).toBe(2)
+    expect(stripLegacyRuntimeSelectors(raw)).toBe(0)
+  })
+
   it("returns non-object input as-is", () => {
     expect(migrateAgentTeamPersisted(null, 1)).toBeNull()
     expect(migrateAgentTeamPersisted(undefined, 1)).toBeUndefined()

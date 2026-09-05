@@ -32,6 +32,12 @@
     "title": "子会话与人工接管",
     "waitingReason": "等待原因：{value}"
   },
+  "decisionStatus": {
+    "constraint": "约束",
+    "proposed": "待定",
+    "accepted": "已接受",
+    "rejected": "已拒绝"
+  },
   "decisions": {
     "accept": "接受",
     "accepted": "决策已接受。",
@@ -46,6 +52,18 @@
     "merged": "交付栈已合并。",
     "title": "交付图"
   },
+  "deliveryNodeStatus": {
+    "blocked": "阻塞",
+    "ready": "就绪",
+    "publishing": "发布中",
+    "ci_pending": "等待 CI",
+    "needs_remediation": "需要修复",
+    "awaiting_approval": "等待审批",
+    "merging": "合并中",
+    "merged": "已合并",
+    "failed": "失败",
+    "cancelled": "已取消"
+  },
   "empty": "此团队尚无持久化运行。",
   "environment": {
     "blocked": "已阻止：缺少 {capabilities}",
@@ -57,19 +75,6 @@
   "evidence": {
     "empty": "尚未收集证据。",
     "title": "证据包"
-  },
-  "legacy": "此团队将继续使用旧版运行时，直到你接受 durable-v2 迁移预览。",
-  "migration": {
-    "accept": "接受迁移",
-    "blocked": "迁移已阻止：{reason}",
-    "environment": "每次运行冻结所选环境版本。",
-    "migrated": "团队已迁移到 durable-v2。",
-    "preview": "预览 durable-v2 迁移",
-    "primaryRepository": "必须且只能配置一个主仓库",
-    "retention": "本地轨迹保留到显式清理。",
-    "runtime": "使用基于检查点的 durable-v2 执行。",
-    "summary": "迁移只影响未来运行；现有定义和运行记录仍可读取。",
-    "writer": "默认串行化仓库写入。"
   },
   "retrospective": {
     "approve": "批准并应用",

@@ -32,11 +32,11 @@ import {
   type SquadPresenceRow,
 } from "@/lib/agent/squad-presence"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useClientLiveQuery } from "@/hooks/data"
 import { getDb } from "@/lib/db/schema"
 import type { TeamStatus } from "@/types/agent/agent-team"
+import { usePendingSquadReviews } from "./use-pending-squad-reviews"
 import type { SquadFilter } from "./use-squad-route-state"
 
 /**
@@ -84,9 +84,9 @@ export function useSquadFleet(options: SquadFleetOptions = {}): SquadFleetSnapsh
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
   const workspaceId = useProjectStore((state) => state.activeProjectId)
-  // `PendingGate.teamId` has carried this all along, so nothing new is stored
-  // to sort by it.
-  const gates = usePendingGatesStore((state) => state.gates)
+  // Durable Squad reviews (ADR-0169): what the cockpit's Approvals tab shows
+  // is what makes a Squad "waiting" here, so the two can never disagree.
+  const gates = usePendingSquadReviews()
 
   // Whether the mirror holds anything at all, asked of Dexie rather than of the
   // store, because the store is what is still filling. The `try` matters: a

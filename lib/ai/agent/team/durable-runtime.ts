@@ -206,7 +206,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
       throw new Error(`Durable run ${runId} belongs to another team`)
     } else if (existing.status === "queued") {
       // `startSquadRun` journals the row as `queued` before dispatch
-      // (ADR-0168). Admission is what moves it to `running`.
+      // (ADR-0169). Admission is what moves it to `running`.
       await updateAgentTeamRun(runId, { status: "running", startedAt: at, updatedAt: at })
     }
     // The execution row is addressed the way `agent-team-bridge` addresses it,

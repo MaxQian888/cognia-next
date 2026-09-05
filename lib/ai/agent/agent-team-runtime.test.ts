@@ -1,5 +1,5 @@
 /**
- * Tests for the F-path synthesizer (ADR-0022, durable-only under ADR-0168).
+ * Tests for the F-path synthesizer (ADR-0022, durable-only under ADR-0169).
  * The legacy in-place orchestrator was rewritten to a thin synthesizer that
  * delegates to workflow runtime. Tests below exercise the contract:
  *  - storeReader / storeWriter shape

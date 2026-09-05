@@ -16,6 +16,14 @@ const start = jest.fn(async () => {})
 const pause = jest.fn(async () => {})
 const resume = jest.fn(async () => {})
 const shutdown = jest.fn(async () => {})
+jest.mock("@/hooks/squads/use-squad-readiness", () => ({
+  useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
+}))
+jest.mock("@/components/squads/squad-readiness-card", () => ({
+  SquadReadinessCard: ({ squadId }: { squadId: string }) => (
+    <div data-testid="squad-readiness" data-squad={squadId} />
+  ),
+}))
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   agentTeamManager: {
     start: (...a: unknown[]) => start(...(a as [])),

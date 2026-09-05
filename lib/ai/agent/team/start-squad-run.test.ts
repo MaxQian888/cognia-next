@@ -58,6 +58,7 @@ function harness(
     updateTeam: (squadId: string, u: { task?: string }) => updates.push({ squadId, updates: u }),
   }
   const deps: StartSquadRunDeps = {
+    awaitRuntimeReady: async () => true,
     loadStore: async () => store,
     evaluateReadiness: async () => opts.readiness ?? READY,
     findLiveRun: async () => (opts.liveRunId ? { id: opts.liveRunId } : undefined),
@@ -94,6 +95,33 @@ const start = (h: Harness, extra: Record<string, unknown> = {}) =>
   )
 
 describe("startSquadRun: fast failures", () => {
+  it("refuses with runtime_not_ready when the bootstrap has not finished, touching nothing", async () => {
+    const h = harness()
+    const result = await startSquadRun(
+      { squadId: "squad-1", goal: "go", origin: "chat", triggeredFrom: { source: "ui" } },
+      { ...h.deps, awaitRuntimeReady: async () => false }
+    )
+    expect(result).toEqual({ started: false, reason: "runtime_not_ready" })
+    expect(h.seeds).toEqual([])
+    expect(h.runCalls).toEqual([])
+    expect(h.updates).toEqual([])
+  })
+
+  it("treats a readiness wait that throws as not ready", async () => {
+    const h = harness()
+    const result = await startSquadRun(
+      { squadId: "squad-1", goal: "go", origin: "chat", triggeredFrom: { source: "ui" } },
+      {
+        ...h.deps,
+        awaitRuntimeReady: async () => {
+          throw new Error("boom")
+        },
+      }
+    )
+    expect(result.reason).toBe("runtime_not_ready")
+    expect(h.seeds).toEqual([])
+  })
+
   it("refuses a blank Squad id before touching a loader", async () => {
     const h = harness()
     const loadStore = jest.fn(h.deps.loadStore!)

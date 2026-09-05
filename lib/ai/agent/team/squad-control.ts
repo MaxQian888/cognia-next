@@ -1,5 +1,5 @@
 /**
- * The one control state machine for a Squad run (ADR-0168).
+ * The one control state machine for a Squad run (ADR-0169).
  *
  * Every surface that pauses, resumes, stops or retries a Squad lands here:
  * the cockpit's control plane (`control-handlers.ts`), the fleet inspector,
@@ -26,6 +26,7 @@
  * renderer projects the same outcome.
  */
 
+import { LEGACY_RUN_NOT_RESUMABLE } from "@/lib/agent-team/legacy-run-history"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import {
   getAgentTeamRun,
@@ -73,6 +74,13 @@ export interface SquadControlDeps {
   isLive?: (runId: string) => boolean
   /** Deny every pending interrupt of the run (stop). */
   denyPendingInterrupts?: (executionRunId: string, now: number) => Promise<void>
+  /** Raise the `team_recovery` interrupt for a run that cannot be replayed. */
+  openRecovery?: (runId: string) => Promise<unknown>
+}
+
+async function defaultOpenRecovery(runId: string): Promise<unknown> {
+  const { ensureTeamRecoveryInterrupt } = await import("./team-recovery")
+  return ensureTeamRecoveryInterrupt(runId)
 }
 
 async function journal(
@@ -110,8 +118,12 @@ async function defaultDenyPendingInterrupts(executionRunId: string, now: number)
 }
 
 async function defaultReenter(input: { teamId: string; runId: string }): Promise<unknown> {
-  const { prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
+  const { guardSquadResume, prepareSquadResume, resumeTaskFilter, runSquadLifecycle } =
     await import("./squad-lifecycle-runner")
+  // A Squad that could not start must not resume either. The guard parks the
+  // run and raises the recovery review; there is nothing to re-enter.
+  const guard = await guardSquadResume(input.teamId, input.runId)
+  if (guard.blocked) return undefined
   const { remaining } = await prepareSquadResume(input.teamId)
   if (remaining === 0) {
     const now = Date.now()
@@ -184,6 +196,11 @@ export async function controlSquadRun(
     if (!RESUMABLE.has(run.status)) {
       return { ok: false, reason: "not_resumable", status: run.status }
     }
+    // A legacy-runtime run has no checkpoint to resume from: the process that
+    // ran it is gone. It restarts as a NEW run (`retry`) or stops. Never resumes.
+    if (run.recoveryReason === LEGACY_RUN_NOT_RESUMABLE) {
+      return { ok: false, reason: "not_resumable", status: run.status }
+    }
     if (isLive(runId)) {
       await controlDurableRun(runId, "resume", { now })
       await journal(runId, "run.resumed", "operator_resume", now())
@@ -200,6 +217,9 @@ export async function controlSquadRun(
       })
       await journal(runId, "run.waiting", "team_recovery", at)
       useAgentTeamStore.getState().setTeamStatus(run.teamId, "paused")
+      // The question a person has to answer, as a durable interrupt every
+      // surface can see. Best-effort here: the bootstrap re-arms it.
+      await (deps.openRecovery ?? defaultOpenRecovery)(runId).catch(() => undefined)
       return { ok: false, reason: "recovery_required", status: "needs_input" }
     }
     const at = now()

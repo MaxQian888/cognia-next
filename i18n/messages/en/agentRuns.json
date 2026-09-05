@@ -134,6 +134,89 @@
     "none": "This Squad has not produced an execution report yet.",
     "unavailable": "This device does not carry this Squad run's record."
   },
+  "review": {
+    "kinds": {
+      "plan": {
+        "title": "Plan approval",
+        "description": "The lead proposed a plan. Approve it to start the work, or send it back with feedback.",
+        "approve": "Approve plan",
+        "deny": "Request changes"
+      },
+      "capability_audit": {
+        "title": "Capability audit",
+        "description": "Some capabilities this Squad was configured with no longer exist. Continue without them, or stop.",
+        "approve": "Continue without them",
+        "deny": "Stop"
+      },
+      "budget_extension": {
+        "title": "Budget extension",
+        "description": "The token budget is used up. Grant more, or let the run end here.",
+        "approve": "Grant extension",
+        "deny": "End run"
+      },
+      "deadlock": {
+        "title": "Deadlock",
+        "description": "Every teammate is unavailable. Choose who to reset, or reset them all.",
+        "approve": "Reset and continue",
+        "deny": "Stop"
+      },
+      "teammate_repair": {
+        "title": "Teammate repair",
+        "description": "A teammate was disqualified. Let it rejoin, or continue without it.",
+        "approve": "Apply",
+        "deny": "Stop"
+      },
+      "replan": {
+        "title": "Re-plan",
+        "description": "The lead wants to change the plan mid-run.",
+        "approve": "Accept new plan",
+        "deny": "Keep current plan"
+      },
+      "team_recovery": {
+        "title": "Recovery required",
+        "description": "This run cannot be resumed from a verified safe point. Choose how to proceed.",
+        "approve": "Apply",
+        "deny": "Terminate"
+      }
+    },
+    "plan": {
+      "feedbackLabel": "Feedback for the lead",
+      "feedbackPlaceholder": "Optional. What should change? Personal data is redacted before it is stored."
+    },
+    "capabilityAudit": {
+      "missingLabel": "Missing capabilities"
+    },
+    "budget": {
+      "extraTokensLabel": "Extra tokens"
+    },
+    "deadlock": {
+      "resetAll": "Reset every teammate",
+      "pick": "Teammates to reset"
+    },
+    "teammateRepair": {
+      "label": "What to do with the teammate",
+      "rejoin": "Let it rejoin",
+      "skip": "Continue without it"
+    },
+    "recovery": {
+      "label": "Recovery choice",
+      "reason": "Why: {reason}",
+      "hostRefPlaceholder": "Host to retry on",
+      "choices": {
+        "retry_same_host": "Retry where it ran",
+        "retry_host": "Retry on another host",
+        "restart_run": "Restart as a new run",
+        "terminate": "Terminate"
+      },
+      "reasons": {
+        "legacy_run_not_resumable": "this run predates the durable runtime and left no checkpoint",
+        "missing_checkpoint": "no checkpoint was written",
+        "recover_needs_input": "the last checkpoint needs a decision",
+        "squad_not_ready": "the Squad is missing a binding it needs to run",
+        "uncertain_side_effect": "a side effect may or may not have happened"
+      }
+    }
+  },
   "status": {
     "cancelled": "Cancelled",
     "done": "Done",
@@ -160,5 +243,9 @@
     "inconclusiveHint": "The output could not be parsed — this is not a pass.",
     "passed": "Passed"
   },
-  "title": "Agent Runs"
+  "title": "Agent Runs",
+  "waitingReasons": {
+    "waiting_review": "Waiting for review",
+    "recovery_required": "Recovery required"
+  }
 }

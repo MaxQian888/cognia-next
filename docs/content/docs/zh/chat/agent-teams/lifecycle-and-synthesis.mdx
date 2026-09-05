@@ -17,7 +17,8 @@ description: ADR-0022 的 F 路径主干 —— agentTeamManager.start、runTeam
   `action.team.task.dispatch` 节点（`built-ins.ts:1537-1590`），后者针对已注册的上下文调用
   `dispatchTeammate`。`abortTeam`（`agent-team-runtime.ts:530`）触发持有于
   `inflightControllers`（`:99`）中的按团队 `AbortController`。依赖项由
-  `AgentTeamRuntimeInitializer`（`agent-team-runtime-initializer.tsx:22`）在启动时一次性接线。
+  有序的小队引导（`lib/agent-team/bootstrap.ts`，由 `SquadBootstrapInitializer` 挂载）在启动时接线。
+  自 ADR-0169 起 UI 从不直接调用生命周期：每次启动都经 `startSquadRun`，每道门都经 Action Review 契约。
 </TLDR>
 
 ## F 路径时序
@@ -103,16 +104,12 @@ start: async (id, opts) => {
 依赖项在应用启动时恰好接线一次，并通过 `useRef` 防范 React 严格模式下的双重挂载：
 
 ```tsx
-// components/providers/initializers/agent-team-runtime-initializer.tsx:16-28
-export function AgentTeamRuntimeInitializer() {
-  const hasInitialized = useRef(false)
-  useEffect(() => {
-    if (hasInitialized.current) return
-    hasInitialized.current = true
-    configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
-  }, [])
-  return null
-}
+// lib/agent-team/bootstrap.ts（阶段）
+hydrate         setAgentTeamBindingCandidateResolver + startAgentTeamDexieBridge + whenHydrated
+adapters        configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
+import_history  backfillLegacyTeamRunHistory
+recover         recoverPendingRunInterrupts + recoverDurableAgentTeams + armPendingTeamRecoveries
+ready           每个 startSquadRun 调用等待的信号
 ```
 
 ## `runTeamLifecycle` —— 十项有序职责
@@ -130,7 +127,7 @@ export function AgentTeamRuntimeInitializer() {
 | 7 | `registerTeamRunContext(ctx)` | `:397-411` |
 | 8 | 合成 —— 启用时用 ultracode 模式，否则用扁平任务 DAG | `:413-437` |
 | 9 | `runWorkflow({ workflow, trigger, runId, signal, concurrency })` | `:444-489` |
-| 10 | `finally` —— `unregisterTeamRunContext`、释放订阅、放行 approval-bus 等待者 | `:500-523` |
+| 10 | `finally` —— `unregisterTeamRunContext`、释放订阅、结算持久化运行记录（停在 `needs_input` / `paused` 时除外） | `:500-523` |
 
 第 5 步构造经由运行上下文传给执行器的共享状态对象：
 

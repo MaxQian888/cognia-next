@@ -113,6 +113,82 @@ export const resumeTaskFilter: NonNullable<RunTeamLifecycleDeps["taskFilter"]> =
  * Returns how many tasks are still runnable, so the caller can settle a team
  * with nothing left instead of entering a lifecycle that fails on it.
  */
+export const SQUAD_NOT_READY_REASON = "squad_not_ready"
+
+export interface GuardSquadResumeDeps {
+  evaluate?: (
+    team: AgentTeam,
+    teammates: readonly AgentTeammate[]
+  ) => Promise<{ ready: boolean; blockers: Array<{ code: string }> }>
+  park?: (runId: string, teamId: string) => Promise<void>
+  now?: () => number
+}
+
+/**
+ * The readiness gate every RE-ENTRY passes (ADR-0169). `startSquadRun` refuses
+ * a blocked Squad before it writes anything. A resume or a restart-time
+ * recovery arrives with the run record already written, so a blocked Squad
+ * is PARKED instead: `needs_input` with the `squad_not_ready` reason, a
+ * `run.recovery_required` event, and a `team_recovery` review whose only
+ * choices are restart or terminate. Nothing dispatches on a Squad that could
+ * not have started.
+ */
+export async function guardSquadResume(
+  teamId: string,
+  runId: string,
+  deps: GuardSquadResumeDeps = {}
+): Promise<{ blocked: boolean; blockers: Array<{ code: string }> }> {
+  const store = useAgentTeamStore.getState()
+  const team = store.teams[teamId]
+  if (!team) return { blocked: false, blockers: [] }
+  const teammates = Object.values(store.teammates).filter((m) => m.teamId === teamId)
+  const evaluate =
+    deps.evaluate ??
+    (async (t: AgentTeam, ms: readonly AgentTeammate[]) => {
+      const { evaluateSquadReadiness } = await import("@/lib/agent-team/squad-readiness")
+      return evaluateSquadReadiness({ team: t, teammates: ms })
+    })
+  const readiness = await evaluate(team, teammates)
+  if (readiness.ready) return { blocked: false, blockers: [] }
+  await (deps.park ?? defaultParkUnreadyRun)(runId, teamId)
+  return { blocked: true, blockers: readiness.blockers }
+}
+
+async function defaultParkUnreadyRun(runId: string, teamId: string): Promise<void> {
+  const at = Date.now()
+  const [
+    { updateAgentTeamRun },
+    { agentTeamExecutionRunId },
+    { runEventJournal, semanticRunEvent, getExecutionRun },
+  ] = await Promise.all([
+    import("@/lib/db/agent-team-runtime"),
+    import("@/lib/execution/agent-team-bridge"),
+    import("@/lib/db/execution-runs"),
+  ])
+  await updateAgentTeamRun(runId, {
+    status: "needs_input",
+    recoveryReason: SQUAD_NOT_READY_REASON,
+    updatedAt: at,
+  })
+  const executionRunId = agentTeamExecutionRunId(runId)
+  const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
+  if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
+    await runEventJournal
+      .append(
+        executionRunId,
+        semanticRunEvent(
+          "run.recovery_required",
+          { reason: SQUAD_NOT_READY_REASON },
+          { ts: at, sourceEventId: `agent-team:${runId}:recovery_required:${at}` }
+        )
+      )
+      .catch(() => undefined)
+  }
+  useAgentTeamStore.getState().setTeamStatus(teamId, "paused")
+  const { ensureTeamRecoveryInterrupt } = await import("./team-recovery")
+  await ensureTeamRecoveryInterrupt(runId).catch(() => undefined)
+}
+
 export async function prepareSquadResume(teamId: string): Promise<{ remaining: number }> {
   const store = useAgentTeamStore.getState()
   const teamTasks = Object.values(store.tasks).filter((t) => t.teamId === teamId)
@@ -196,9 +272,21 @@ export async function runSquadLifecycle(
   const run = deps.run ?? runTeamLifecycle
 
   // The store's `status` is a mirror of the durable run, written here and only
-  // here (ADR-0168): surfaces read the run record, and the mirror exists so
+  // here (ADR-0169): surfaces read the run record, and the mirror exists so
   // synchronous callers (board guards, presence) do not each open a query.
   useAgentTeamStore.getState().setTeamStatus(teamId, "executing")
+
+  // The root span. Teammate dispatch spans join it through `traceId`, reviews
+  // and recovery hang off it, and the terminal reason closes it.
+  const { startSquadRunSpan } = await import("./squad-telemetry")
+  const team = useAgentTeamStore.getState().teams[teamId]
+  const rootSpan = startSquadRunSpan({
+    runId,
+    teamId,
+    ...(team?.projectId ? { projectId: team.projectId } : {}),
+    ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.traceId ? { traceId: input.traceId } : {}),
+  })
 
   const result = await run(teamId, {
     runId,
@@ -219,7 +307,7 @@ export async function runSquadLifecycle(
     ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
     ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
     ...(input.sessionWorkingDir ? { sessionWorkingDir: input.sessionWorkingDir } : {}),
-    ...(input.traceId ? { traceId: input.traceId } : {}),
+    traceId: input.traceId ?? rootSpan.traceId,
     // Manual "Run with ultracode" forces orchestration, an explicit normal run
     // turns it off, omitted lets the team's autoMode decide.
     ...(input.ultracode === true
@@ -231,6 +319,45 @@ export async function runSquadLifecycle(
 
   await settleSquadRun(teamId, runId, result, runtimeDeps)
   return result
+}
+
+/** Close the root span with the terminal status, the reason code and the token totals. */
+async function closeSquadRunSpan(
+  runId: string,
+  durableRun: { status: AgentTeamRunStatus; recoveryReason?: string } | undefined,
+  result: RunTeamLifecycleResult
+): Promise<void> {
+  const [{ endSquadRunSpan, squadDuplicateControlCount }, { aggregateAgentTeamRunUsage }] =
+    await Promise.all([import("./squad-telemetry"), import("@/lib/db/agent-team-runtime")])
+  const parked = durableRun?.status === "needs_input" || durableRun?.status === "paused"
+  // Suites stub the db module without the aggregate. No totals is a span
+  // without usage, not a failed settle.
+  const totals =
+    typeof aggregateAgentTeamRunUsage === "function"
+      ? ((await aggregateAgentTeamRunUsage(runId).catch(() => undefined)) as
+          Record<string, unknown> | undefined)
+      : undefined
+  const num = (key: string) => (typeof totals?.[key] === "number" ? (totals[key] as number) : 0)
+  endSquadRunSpan({
+    runId,
+    terminalStatus: parked ? durableRun!.status : result.status,
+    ...(durableRun?.recoveryReason
+      ? { terminalReason: durableRun.recoveryReason }
+      : result.reason
+        ? { terminalReason: result.reason }
+        : {}),
+    ...(totals
+      ? {
+          usage: {
+            inputTokens: num("promptTokens"),
+            outputTokens: num("completionTokens"),
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          },
+        }
+      : {}),
+    duplicateControls: squadDuplicateControlCount(runId),
+  })
 }
 
 /**
@@ -259,6 +386,7 @@ async function settleSquadRun(
     )
 
   const terminal = ["completed", "failed", "cancelled"].includes(result.status)
+  await closeSquadRunSpan(runId, durableRun, result)
   if (durableRun && durableStatus !== "needs_input" && durableStatus !== "paused" && terminal) {
     await settleAgentTeamExecutionRun(
       durableRun,

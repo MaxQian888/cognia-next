@@ -9,7 +9,7 @@
  *   • The USD cost ceiling (`lib/usage/cost-budget-runtime.ts`), which asks
  *     for one more request through the same modal.
  *
- * Squad gates are NOT here any more (ADR-0168). A Squad's plan, capability
+ * Squad gates are NOT here any more (ADR-0169). A Squad's plan, capability
  * audit, budget extension, deadlock, teammate repair, re-plan and recovery
  * decisions are durable `ExecutionRunInterrupt`s opened by
  * `lib/ai/agent/team/squad-review-gate.ts` and answered through the run
@@ -33,7 +33,7 @@ import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ApprovalKey } from "@/lib/runtime/approval-bus"
 
 /**
- * ADR-0168 moved every Squad gate (plan, deadlock, teammate repair, re-plan,
+ * ADR-0169 moved every Squad gate (plan, deadlock, teammate repair, re-plan,
  * capability audit, token budget) onto durable `ExecutionRunInterrupt`s.
  * What remains here is the non-Squad producers this store still serves.
  */

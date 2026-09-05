@@ -6,7 +6,11 @@ import { SquadContextPanel } from "./squad-context-panel"
 import type { ChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+
+let pendingReviews: Array<{ teamId: string; status: "open" }> = []
+jest.mock("@/hooks/squads/use-pending-squad-reviews", () => ({
+  usePendingSquadReviews: () => pendingReviews,
+}))
 
 const executorState: { current: ChatExecutor } = {
   current: {
@@ -47,7 +51,7 @@ beforeEach(() => {
     bindable: true,
   }
   seed([])
-  usePendingGatesStore.setState({ gates: [] })
+  pendingReviews = []
 })
 
 describe("SquadContextPanel", () => {
@@ -105,27 +109,12 @@ describe("SquadContextPanel", () => {
     // Otherwise the panel looks idle while the run is actually waiting.
     executorState.current = { ...executorState.current, squadId: "sq-1", squadName: "Research" }
     seed([member()])
-    usePendingGatesStore.setState({
-      gates: [
-        {
-          key: { scope: "agent-team-budget", id: "run-1" },
-          gateType: "budget",
-          title: "Budget",
-          teamId: "sq-1",
-          openedAt: 1,
-          status: "open",
-        },
-        // A gate for another Squad must not show here.
-        {
-          key: { scope: "agent-team-budget", id: "run-2" },
-          gateType: "budget",
-          title: "Other",
-          teamId: "sq-2",
-          openedAt: 1,
-          status: "open",
-        },
-      ] as never,
-    })
+    // Durable reviews (ADR-0169). One for this Squad, one for another, which
+    // must not show here.
+    pendingReviews = [
+      { teamId: "sq-1", status: "open" },
+      { teamId: "sq-2", status: "open" },
+    ]
     render(<SquadContextPanel sessionId="s1" />)
     expect(screen.getByTestId("squad-panel-gates")).toHaveTextContent(/waiting on your decision/i)
   })

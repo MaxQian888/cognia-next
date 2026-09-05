@@ -15,6 +15,15 @@ jest.mock("@/lib/execution/run-control", () => ({
   executeRunControlCommand: (...args: unknown[]) => executeRunControlCommand(...args),
 }))
 
+let hostProfile = "desktop"
+jest.mock("@/hooks/use-host-profile", () => ({
+  useHostProfile: () => hostProfile,
+}))
+const transportCall = jest.fn()
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: (...args: unknown[]) => transportCall(...args) },
+}))
+
 function row(over: Partial<UnifiedExecutionRow> = {}): UnifiedExecutionRow {
   return {
     rowId: "journal:run-1",
@@ -69,6 +78,62 @@ beforeEach(() => {
   getExecutionRun.mockReset()
   executeRunControlCommand.mockReset()
   executeRunControlCommand.mockResolvedValue({ accepted: true, currentRevision: 8 })
+})
+
+describe("useRunControlActions on a companion", () => {
+  beforeEach(() => {
+    hostProfile = "mobile-companion"
+    getExecutionRun.mockReset()
+    executeRunControlCommand.mockReset()
+    transportCall.mockReset()
+  })
+  afterEach(() => {
+    hostProfile = "desktop"
+  })
+
+  it("submits the same revision-checked command to the desktop host instead of acting locally", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({}, ["pause", "stop", "open_details"]))
+    transportCall.mockResolvedValue({ accepted: true, currentRevision: 8 })
+    const { result } = renderHook(() => useRunControlActions())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.dispatch(
+        row({ allowedActions: ["pause", "stop", "open_details"] }),
+        "pause"
+      )
+    })
+    expect(outcome).toEqual({ accepted: true })
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
+    expect(transportCall).toHaveBeenCalledWith(
+      "execution_run_control",
+      expect.objectContaining({
+        runId: "run-1",
+        action: "pause",
+        expectedRevision: 7,
+        idempotencyKey: "cockpit:run-1:pause:7",
+      })
+    )
+    const payload = transportCall.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(payload.actor).toBeUndefined()
+  })
+
+  it("reads a host refusal as the gate's own refusal", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({}, ["stop", "open_details"]))
+    transportCall.mockResolvedValue({
+      accepted: false,
+      reason: "revision_conflict",
+      currentRevision: 9,
+    })
+    const { result } = renderHook(() => useRunControlActions())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.dispatch(
+        row({ allowedActions: ["stop", "open_details"] }),
+        "stop"
+      )
+    })
+    expect(outcome).toEqual({ accepted: false, reason: "revision_conflict" })
+  })
 })
 
 describe("useRunControlActions", () => {

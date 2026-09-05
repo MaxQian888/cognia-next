@@ -81,6 +81,40 @@ async function events() {
   )
 }
 
+describe("controlSquadRun legacy history", () => {
+  let disableDbRuntime: (() => void) | undefined
+
+  beforeEach(async () => {
+    disableDbRuntime = __enableDbRuntimeForTesting()
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    disableDbRuntime?.()
+  })
+
+  it("never resumes a backfilled legacy run, even when its status looks resumable", async () => {
+    await seedRun("needs_input")
+    await getDb().agentTeamRuns.update(RUN, { recoveryReason: "legacy_run_not_resumable" })
+    const result = await controlSquadRun(RUN, "resume", { isLive: () => false })
+    expect(result).toEqual({ ok: false, reason: "not_resumable", status: "needs_input" })
+    expect(controlDurableRun).not.toHaveBeenCalled()
+    expect(await events()).not.toContain("run.resumed")
+  })
+
+  it("still lets a backfilled legacy run stop", async () => {
+    await seedRun("needs_input")
+    await getDb().agentTeamRuns.update(RUN, { recoveryReason: "legacy_run_not_resumable" })
+    const result = await controlSquadRun(RUN, "stop")
+    expect(result).toEqual({ ok: true, status: "cancelled" })
+    expect(await events()).toContain("run.cancelled")
+  })
+})
+
 describe("controlSquadRun", () => {
   let disableDbRuntime: (() => void) | undefined
 

@@ -38,8 +38,10 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { getExecutionRun } from "@/lib/db/execution-runs"
 import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
 import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/local-operator"
+import { useHostProfile } from "@/hooks/use-host-profile"
+import { transport } from "@/lib/tauri/transport-instance"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
-import type { RunControlAction } from "@/types/execution/run"
+import type { RunControlAction, SquadReviewDecision } from "@/types/execution/run"
 
 /**
  * Everything the cockpit needs to explain what happened.
@@ -69,6 +71,11 @@ export interface RunControlOutcome {
 export interface RunControlDispatchOptions {
   /** Required for `steer`; ignored otherwise. Never journalled. */
   steerMessage?: string
+  /**
+   * The typed answer to a Squad review (ADR-0169). Required by the gate for
+   * an `approve` of every review kind except plan and capability audit.
+   */
+  reviewDecision?: SquadReviewDecision
 }
 
 export interface RunControlActions {
@@ -100,8 +107,21 @@ function outcomeFrom(result: RunControlResult): RunControlOutcome {
   }
 }
 
+/**
+ * A companion shell (a paired phone, a browser driving a desktop) has no
+ * lifecycle to control in-process: its control commands go to the desktop
+ * host as `execution_run_control` (ADR-0169), the same `RunControlCommand`
+ * through the same gate, and the host answers with the same result. The
+ * revision check happens against the host's journal, so a stale mirror on
+ * this device is answered `revision_conflict`, never acted on.
+ */
+function remoteControlHost(profile: string): boolean {
+  return profile === "mobile-companion" || profile === "cloud-companion"
+}
+
 export function useRunControlActions(): RunControlActions {
   const [pendingRowId, setPendingRowId] = useState<string | null>(null)
+  const hostProfile = useHostProfile()
   /**
    * Distinguishes two deliberate steers from one double-click.
    *
@@ -147,24 +167,32 @@ export function useRunControlActions(): RunControlActions {
             ? `cockpit:${run.id}:steer:${(steerSequence.current += 1)}`
             : `cockpit:${run.id}:${action}:${run.currentRevision}`
 
-        const result = await executeRunControlCommand(
-          {
-            runId: run.id,
-            action,
-            idempotencyKey,
-            expectedRevision: run.currentRevision,
-            actor: localConsoleActor(),
-            ...(interruptId ? { interruptId } : {}),
-            ...(options.steerMessage ? { steerMessage: options.steerMessage } : {}),
-          },
-          { operatorIds: [...localConsoleOperatorIds()] }
-        )
+        const command = {
+          runId: run.id,
+          action,
+          idempotencyKey,
+          expectedRevision: run.currentRevision,
+          actor: localConsoleActor(),
+          ...(interruptId ? { interruptId } : {}),
+          ...(options.steerMessage ? { steerMessage: options.steerMessage } : {}),
+          ...(options.reviewDecision ? { reviewDecision: options.reviewDecision } : {}),
+        }
+        if (remoteControlHost(hostProfile)) {
+          const { actor: _actor, ...payload } = command
+          const remote = (await transport.call("execution_run_control", payload)) as
+            RunControlResult | { ok: false; reason: string } | null
+          if (remote && "accepted" in remote) return outcomeFrom(remote)
+          return { accepted: false, reason: "invalid_command" }
+        }
+        const result = await executeRunControlCommand(command, {
+          operatorIds: [...localConsoleOperatorIds()],
+        })
         return outcomeFrom(result)
       } finally {
         setPendingRowId((current) => (current === row.rowId ? null : current))
       }
     },
-    []
+    [hostProfile]
   )
 
   return useMemo<RunControlActions>(

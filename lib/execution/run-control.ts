@@ -181,6 +181,10 @@ export async function expireRunInterruptFromSource(
   const interrupt = await getDb().executionRunInterrupts.get(interruptId)
   if (!interrupt || interrupt.runId !== runId || interrupt.status !== "pending") return
   await getDb().executionRunInterrupts.update(interruptId, { status: "expired", resolvedAt: now })
+  if (interrupt.reviewKind) {
+    const { endSquadReviewSpan } = await import("@/lib/ai/agent/team/squad-telemetry")
+    endSquadReviewSpan({ interruptId, outcome: "expired", source: "expiry" })
+  }
   await runEventJournal.append(
     runId,
     semanticRunEvent(
@@ -349,6 +353,10 @@ async function executeRunControlCommandUnlocked(
     (event) => event.sourceEventId === sourceEventId
   )
   if (existing) {
+    if (run.kind === "team") {
+      const { recordSquadDuplicateControl } = await import("@/lib/ai/agent/team/squad-telemetry")
+      recordSquadDuplicateControl({ runId: run.sourceId, action: command.action })
+    }
     return {
       accepted: existing.type === "control.accepted",
       reason:
@@ -396,7 +404,7 @@ async function executeRunControlCommandUnlocked(
       return reject(command, "interrupt_resolved", run.currentRevision)
     }
     // A Squad review is answered with a typed decision that must match the
-    // interrupt's kind (ADR-0168). A budget amount delivered to a deadlock gate
+    // interrupt's kind (ADR-0169). A budget amount delivered to a deadlock gate
     // is refused here, before any handler could act on it.
     const validation = validateSquadReviewDecision(
       interrupt,
@@ -474,21 +482,37 @@ async function executeRunControlCommandUnlocked(
     )
   }
   const steerReceiptIds = outcome?.steerReceiptIds ?? []
-  const accepted = await runEventJournal.append(
-    run.id,
-    semanticRunEvent(
-      "control.accepted",
-      {
-        action: command.action,
-        actorId: actorId(command.actor),
-        // Receipt ids only. `command.steerMessage` is free user text and the
-        // journal is projected onto twelve platforms' cards — putting it here
-        // would be one redaction hole in all of them at once.
-        ...(steerReceiptIds.length > 0 ? { steerReceiptIds: [...steerReceiptIds] } : {}),
-      },
-      { ts: now, sourceEventId }
+  let accepted: Awaited<ReturnType<typeof runEventJournal.append>>
+  try {
+    accepted = await runEventJournal.append(
+      run.id,
+      semanticRunEvent(
+        "control.accepted",
+        {
+          action: command.action,
+          actorId: actorId(command.actor),
+          // Receipt ids only. `command.steerMessage` is free user text and the
+          // journal is projected onto twelve platforms' cards — putting it here
+          // would be one redaction hole in all of them at once.
+          ...(steerReceiptIds.length > 0 ? { steerReceiptIds: [...steerReceiptIds] } : {}),
+        },
+        { ts: now, sourceEventId }
+      )
     )
-  )
+  } catch (error) {
+    // A stop handler with no live lifecycle to abort settles the journal
+    // itself (a Squad run after a restart journals `run.cancelled` directly),
+    // and a settled journal refuses further events. The stop did exactly what
+    // was asked: answer accepted at the revision the journal reached, rather
+    // than throwing a "terminal" error at the person who pressed Stop.
+    const latest = command.action === "stop" ? await getExecutionRun(run.id) : undefined
+    if (!latest || !TERMINAL_STATUSES.has(latest.status)) throw error
+    return {
+      accepted: true,
+      currentRevision: latest.currentRevision,
+      ...(steerReceiptIds.length > 0 ? { steerReceiptIds: [...steerReceiptIds] } : {}),
+    }
+  }
   return {
     accepted: true,
     currentRevision: accepted.seq,

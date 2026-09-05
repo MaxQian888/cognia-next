@@ -32,6 +32,12 @@
     "title": "Child sessions and takeover",
     "waitingReason": "Waiting: {value}"
   },
+  "decisionStatus": {
+    "constraint": "Constraint",
+    "proposed": "Proposed",
+    "accepted": "Accepted",
+    "rejected": "Rejected"
+  },
   "decisions": {
     "accept": "Accept",
     "accepted": "Decision accepted.",
@@ -46,6 +52,18 @@
     "merged": "Delivery stack merged.",
     "title": "Delivery graph"
   },
+  "deliveryNodeStatus": {
+    "blocked": "Blocked",
+    "ready": "Ready",
+    "publishing": "Publishing",
+    "ci_pending": "CI pending",
+    "needs_remediation": "Needs remediation",
+    "awaiting_approval": "Awaiting approval",
+    "merging": "Merging",
+    "merged": "Merged",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
   "empty": "No durable run exists for this team yet.",
   "environment": {
     "blocked": "Blocked: missing {capabilities}",
@@ -57,19 +75,6 @@
   "evidence": {
     "empty": "No evidence collected yet.",
     "title": "Evidence bundle"
-  },
-  "legacy": "This team remains on the legacy runtime until you accept a durable-v2 migration preview.",
-  "migration": {
-    "accept": "Accept migration",
-    "blocked": "Migration blocked: {reason}",
-    "environment": "Freeze the selected environment version for each run.",
-    "migrated": "Team migrated to durable-v2.",
-    "preview": "Preview durable-v2 migration",
-    "primaryRepository": "exactly one primary repository is required",
-    "retention": "Keep local trajectories until explicit cleanup.",
-    "runtime": "Use checkpoint-based durable-v2 execution.",
-    "summary": "This migration changes only future runs. Existing definitions and runtime records remain readable.",
-    "writer": "Serialize repository writes by default."
   },
   "retrospective": {
     "approve": "Approve and apply",

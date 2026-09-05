@@ -47,7 +47,7 @@ export type ActionReviewChannel =
   | "thread-handoff"
   /** A Bot handler's `step.waitForApproval`. */
   | "bot-step"
-  /** Squad token budget extension (ADR-0168). */
+  /** Squad token budget extension (ADR-0169). */
   | "agent-team-budget"
   /** Squad deadlock resolution. */
   | "agent-team-deadlock"

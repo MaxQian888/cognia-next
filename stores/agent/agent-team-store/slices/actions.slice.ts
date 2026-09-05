@@ -387,7 +387,7 @@ export const createAgentTeamActionsSlice = (
       set((current) => shutDownTeammates(current, teamId))
     }
     set((current) => cleanUpTeam(current, teamId))
-    // Every Squad has durable run tables (ADR-0168), so the purge is
+    // Every Squad has durable run tables (ADR-0169), so the purge is
     // unconditional. `purgeAgentTeam` is a no-op for a Squad that never ran.
     void import("@/lib/db/agent-team-runtime")
       .then(({ purgeAgentTeam }) => purgeAgentTeam(teamId))

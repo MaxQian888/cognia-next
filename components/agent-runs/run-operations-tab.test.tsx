@@ -88,14 +88,6 @@ describe("RunOperationsTab", () => {
     expect(push).toHaveBeenCalledWith("/browser")
   })
 
-  it("writes a migrated config back to the Squad", () => {
-    render(<RunOperationsTab row={row()} />)
-    capturedProps.onMigrate!({ runtimeVersion: "durable-v2" })
-    expect(updateTeam).toHaveBeenCalledWith("squad-1", {
-      config: { runtimeVersion: "durable-v2" },
-    })
-  })
-
   it("says the device lacks the record rather than rendering empty controls", () => {
     teamRun = undefined
     render(<RunOperationsTab row={row()} />)

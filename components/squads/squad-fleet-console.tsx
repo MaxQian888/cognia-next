@@ -38,11 +38,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { AgentTeamCommandCenter } from "@/components/agent/team/command-center"
+import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { SquadListPane } from "@/components/squads/squad-list-pane"
 import { SquadInspector } from "@/components/squads/squad-inspector"
-import { TeamRunsList } from "@/components/agent/team/runs-list"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { useSquadFleet } from "@/hooks/squads/use-squad-fleet"
@@ -150,11 +149,7 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
         ? {
             rightPane: {
               label: t("inspectorLabel"),
-              content: (
-                <SquadInspector squadId={inspectorId}>
-                  <TeamRunsList teamId={inspectorId} />
-                </SquadInspector>
-              ),
+              content: <SquadInspector squadId={inspectorId} />,
             },
           }
         : {})}
@@ -177,8 +172,18 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
             {t("tabs.board")}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto p-4">
-          <AgentTeamCommandCenter heading={false} />
+        <TabsContent value="runs" className="min-h-0 flex-1 overflow-hidden">
+          {/* The canonical run cockpit, pinned to Squad runs and, when one is
+              selected, to that Squad (ADR-0169). Same rows, same detail pane,
+              same `allowedActions` as `/agent-runs`; `?run=` deep-links share
+              the id space, so a card's `/agent-runs?run=…` opens the same run. */}
+          <AgentRunsPanel
+            embedded
+            filterKind="team"
+            {...(inspectorId ? { teamId: inspectorId } : {})}
+            selectedId={route.runId}
+            onSelect={(id) => route.setRunId(id ?? undefined)}
+          />
         </TabsContent>
         <TabsContent value="board" className="min-h-0 flex-1 overflow-y-auto p-4">
           {inspectorId ? (

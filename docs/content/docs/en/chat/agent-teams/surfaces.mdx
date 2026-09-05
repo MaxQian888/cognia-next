@@ -129,13 +129,13 @@ Exactly two cases still take the legacy path, and both say so. Either the platfo
 
 `app/squads/page.tsx` renders `SquadFleetConsole` on a wide layout and `SquadsMobileBody` on a compact one. It is deliberately runtime-only, because everything about *configuring* a Squad lives in Settings.
 
-Deep links arrive as `?id=`, never `[id]`. This app ships as a static export consumed by Tauri and Capacitor, where dynamic segments do not exist at runtime. `use-squad-route-state.ts` owns four parameters: `?id=`, `?tab=` (one of `squads`, `runs`, `board`), `?q=` and `?filter=` (one of `all`, `waiting`, `live`). Defaults drop out of the URL, and every write is a `router.replace` with `scroll: false`.
+Deep links arrive as `?id=`, never `[id]`. This app ships as a static export consumed by Tauri and Capacitor, where dynamic segments do not exist at runtime. `use-squad-route-state.ts` owns five parameters: `?id=`, `?run=` (the execution run open in the Runs tab, the same id space as `/agent-runs?run=`), `?tab=` (one of `squads`, `runs`, `board`), `?q=` and `?filter=` (one of `all`, `waiting`, `live`). Defaults drop out of the URL, and every write is a `router.replace` with `scroll: false`.
 
 The desktop console is a list pane, a centre with two tabs, and an inspector.
 
-- **Runs** renders `AgentTeamCommandCenter`.
+- **Runs** renders the canonical `AgentRunsPanel` embedded, pinned to `kind = team` and to the selected Squad (ADR-0169). Same rows, same detail pane, same `allowedActions` and the same review form as `/agent-runs`. The retired command centre and per-team runs list, with their own history queries, are gone.
 - **Board** renders `AgentTeamTasks` for the selected Squad, and an explicit empty state when none is selected.
-- The **inspector** shows name and description, then `TeamRunControls` wired to six `agentTeamManager` calls (start, start with ultracode, pause, abort, resume, stop), then a "Configure this Squad" link back into Settings. These controls only ever existed on a tab of the retired workspace.
+- The **inspector** shows name and description, then `TeamRunControls` (start, start with ultracode, pause, resume, stop, with Start disabled by the first readiness blocker), then the `SquadReadinessCard` with every blocker and the action that clears it, then a "Configure this Squad" link back into Settings. Abort is gone: the visible destructive action is Stop, and it is terminal.
 
 The header offers **Manage Squads**, which is the Settings deep link, and **Live host activity** into `/fleet` when a fleet snapshot exists. The phone renders the same pieces under three tabs, with the inspector in a sheet.
 

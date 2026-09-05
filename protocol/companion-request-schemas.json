@@ -3499,6 +3499,57 @@
     "ensure_system_lsp_host": {
       "type": "object"
     },
+    "execution_run_control": {
+      "type": "object",
+      "required": [
+        "runId",
+        "action",
+        "idempotencyKey",
+        "expectedRevision"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "pause",
+            "resume",
+            "stop",
+            "retry",
+            "approve",
+            "deny",
+            "steer",
+            "open_details"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": "integer"
+        },
+        "interruptId": {
+          "type": "string"
+        },
+        "reviewDecision": {
+          "type": "object",
+          "description": "Typed SquadReviewDecision. Its `kind` must match the pending interrupt. Validated by the control gate."
+        },
+        "steerMessage": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string",
+          "deprecated": true,
+          "description": "Ignored. The host stamps the authenticated caller: the device is the actor the receipt names and the operator the gate authorizes."
+        },
+        "deviceName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "external_agent_admit_run": {
       "type": "object",
       "required": [

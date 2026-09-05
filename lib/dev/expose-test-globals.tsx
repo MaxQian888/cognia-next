@@ -46,6 +46,21 @@ declare global {
     }) => Promise<string>
     __cogniaSeedTeam?: (draft: { name: string; description?: string }) => Promise<string>
     /**
+     * Seed a Squad definition (ADR-0169) with no bindings, so its readiness
+     * card has blockers to show. Returns the team id.
+     */
+    __cogniaSeedSquad?: (draft: { name: string; task: string }) => Promise<string>
+    /**
+     * Seed a durable Squad run plus its canonical execution run, optionally
+     * parked on a pending review, so the cockpit has a controllable row.
+     */
+    __cogniaSeedSquadRun?: (draft: {
+      teamId: string
+      objective: string
+      status?: "running" | "paused" | "needs_input"
+      review?: "budget_extension" | "team_recovery"
+    }) => Promise<{ runId: string; executionRunId: string }>
+    /**
      * Seed a conversation of `turns` user/assistant pairs and return its id.
      * Long enough to exercise the virtualized path and the timeline minimap,
      * which is what the conversation-anchor specs need and what no amount of
@@ -431,6 +446,113 @@ export function ExposeTestGlobals(): null {
         return t.id
       }
 
+      window.__cogniaSeedSquad = async (draft) => {
+        const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+        const [{ useAccountStore }, { getSquadRuntimeState }] = await Promise.all([
+          import("@/stores/account/account-store"),
+          import("@/lib/agent-team/bootstrap"),
+        ])
+        // The bootstrap runs once the account is unlocked and the mirror is
+        // written against the account database. Seeding before both would
+        // put the row in memory only (or in the legacy database).
+        const readyBy = Date.now() + 20_000
+        while (Date.now() < readyBy) {
+          if (useAccountStore.getState().unlockedAccountId && getSquadRuntimeState() === "ready") {
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        const team = useAgentTeamStore.getState().createTeam({
+          name: draft.name,
+          task: draft.task,
+          description: "",
+        })
+        // The fleet list is workspace-scoped. A row with no projectId is
+        // filtered out of the very list the spec is looking at.
+        if (!team.projectId) {
+          const { useProjectStore } = await import("@/stores/project/project-store")
+          const activeProjectId = useProjectStore.getState().activeProjectId
+          if (activeProjectId) {
+            useAgentTeamStore.getState().updateTeam(team.id, { projectId: activeProjectId })
+          }
+        }
+        // The mirror debounces store writes by 400 ms. A spec that navigates
+        // right after seeding must find the row in Dexie, not only in memory.
+        const { getDb } = await import("@/lib/db/schema")
+        const deadline = Date.now() + 5_000
+        let mirrored = false
+        while (Date.now() < deadline) {
+          if (await getDb().agentTeams.get(team.id)) {
+            mirrored = true
+            break
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        if (!mirrored) {
+          const [{ getSquadRuntimeState }, { useAccountStore }, bridge] = await Promise.all([
+            import("@/lib/agent-team/bootstrap"),
+            import("@/stores/account/account-store"),
+            import("@/stores/agent/agent-team-store/dexie-bridge"),
+          ])
+          throw new Error(
+            `seeded squad ${team.id} never reached Dexie (projectId=${String(team.projectId)}, runtime=${getSquadRuntimeState()}, unlocked=${String(useAccountStore.getState().unlockedAccountId)}, db=${getDb().name}, bridge=${JSON.stringify(bridge.getAgentTeamDexieBridgeDiagnostics())})`
+          )
+        }
+        return team.id
+      }
+
+      window.__cogniaSeedSquadRun = async (draft) => {
+        const [{ createSquadRunRecords }, { getDb }, { runEventJournal, semanticRunEvent }] =
+          await Promise.all([
+            import("@/lib/ai/agent/team/squad-run-records"),
+            import("@/lib/db/schema"),
+            import("@/lib/db/execution-runs"),
+          ])
+        const runId = `run_team_e2e_${Date.now().toString(36)}`
+        const startedAt = Date.now()
+        const { executionRunId } = await createSquadRunRecords({
+          runId,
+          teamId: draft.teamId,
+          objective: draft.objective,
+          origin: "interactive",
+          startedAt,
+        })
+        const status = draft.status ?? "running"
+        await getDb().agentTeamRuns.update(runId, {
+          status,
+          ...(status === "needs_input" ? { recoveryReason: "uncertain_side_effect" } : {}),
+          updatedAt: startedAt,
+        })
+        if (status === "paused") {
+          await runEventJournal.append(
+            executionRunId,
+            semanticRunEvent(
+              "run.paused",
+              { reason: "operator_pause" },
+              { ts: startedAt + 1, sourceEventId: `e2e:${runId}:paused` }
+            )
+          )
+        }
+        if (draft.review) {
+          const { armSquadReview } = await import("@/lib/ai/agent/team/squad-review-gate")
+          await armSquadReview({
+            runId,
+            teamId: draft.teamId,
+            kind: draft.review,
+            instance: "e2e-1",
+            subject:
+              draft.review === "team_recovery"
+                ? {
+                    reason: "uncertain_side_effect",
+                    choices: ["retry_same_host", "retry_host", "restart_run", "terminate"],
+                    uncertainChildIds: [],
+                  }
+                : { crossing: 1 },
+          })
+        }
+        return { runId, executionRunId }
+      }
+
       window.__cogniaSeedSkill = async (draft) => {
         const { createSkill } = await import("@/lib/db/skills")
         const s = await createSkill({
@@ -732,6 +854,8 @@ export function ExposeTestGlobals(): null {
       delete window.__cogniaSeedCharacter
       delete window.__cogniaSeedConversation
       delete window.__cogniaSeedTeam
+      delete window.__cogniaSeedSquad
+      delete window.__cogniaSeedSquadRun
       delete window.__cogniaSeedSkill
       delete window.__cogniaSeedConnectorDraft
       delete window.__cogniaEnqueueOutbound

@@ -19,13 +19,34 @@ import type { SquadRouteState } from "@/hooks/squads/use-squad-route-state"
 
 // Both are surfaces of their own with live Dexie queries. This suite is about
 // the fleet frame around them.
-jest.mock("@/components/agent/team/command-center", () => ({
-  AgentTeamCommandCenter: ({ heading }: { heading?: boolean }) => (
-    <div data-testid="command-center" data-heading={String(heading)} />
+jest.mock("@/hooks/squads/use-squad-readiness", () => ({
+  useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
+}))
+jest.mock("@/components/squads/squad-readiness-card", () => ({
+  SquadReadinessCard: ({ squadId }: { squadId: string }) => (
+    <div data-testid="squad-readiness" data-squad={squadId} />
   ),
 }))
-jest.mock("@/components/agent/team/runs-list", () => ({
-  TeamRunsList: ({ teamId }: { teamId: string }) => <div data-testid="runs-list">{teamId}</div>,
+jest.mock("@/components/agent-runs/agent-runs-panel", () => ({
+  AgentRunsPanel: ({
+    teamId,
+    embedded,
+    filterKind,
+    selectedId,
+  }: {
+    teamId?: string
+    embedded?: boolean
+    filterKind?: string
+    selectedId?: string
+  }) => (
+    <div
+      data-testid="agent-runs-panel"
+      data-team={teamId ?? ""}
+      data-embedded={String(Boolean(embedded))}
+      data-kind={filterKind ?? "all"}
+      data-run={selectedId ?? ""}
+    />
+  ),
 }))
 // The board is `AgentTeamTasks`, its own surface with its own suite.
 jest.mock("@/components/agent/workspace/tasks", () => ({
@@ -81,6 +102,7 @@ function seed(teams: AgentTeam[], members: AgentTeammate[] = []) {
 }
 
 const setSelectedId = jest.fn()
+const setRunId = jest.fn()
 const setTab = jest.fn()
 
 /**
@@ -90,11 +112,13 @@ const setTab = jest.fn()
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
   return {
     selectedId: undefined,
+    runId: undefined,
     tab: undefined,
     query: "",
     filter: "all",
     narrowed: false,
     setSelectedId,
+    setRunId,
     setTab,
     setQuery: jest.fn(),
     setFilter: jest.fn(),
@@ -126,17 +150,26 @@ describe("SquadFleetConsole", () => {
     expect(screen.getAllByTestId("squad-fleet-row")).toHaveLength(2)
   })
 
-  it("shows the command centre without a selection, and without a second title", () => {
-    // The page header already says what this is.
+  /**
+   * ADR-0169: the Runs tab IS the canonical run cockpit, embedded and pinned
+   * to Squad runs. Without a selection it lists every Squad's runs.
+   */
+  it("shows the unified run cockpit without a selection, and without a second title", () => {
     renderConsole(route())
-    expect(screen.getByTestId("command-center")).toHaveAttribute("data-heading", "false")
+    const panel = screen.getByTestId("agent-runs-panel")
+    expect(panel).toHaveAttribute("data-embedded", "true")
+    expect(panel).toHaveAttribute("data-kind", "team")
+    expect(panel).toHaveAttribute("data-team", "")
     expect(screen.queryByTestId("squad-fleet-inspector")).not.toBeInTheDocument()
   })
 
-  it("opens the inspector on the selected Squad's runs", () => {
-    renderConsole(route({ selectedId: "b" }))
+  it("opens the inspector and pins the cockpit to the selected Squad's runs", () => {
+    renderConsole(route({ selectedId: "b", runId: "execution:team:run_9" }))
     expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
-    expect(screen.getByTestId("runs-list")).toHaveTextContent("b")
+    const panel = screen.getByTestId("agent-runs-panel")
+    expect(panel).toHaveAttribute("data-team", "b")
+    // `?run=` shares the `/agent-runs` id space, so a card's deep link lands here too.
+    expect(panel).toHaveAttribute("data-run", "execution:team:run_9")
   })
 
   it("sends configuration to Settings rather than growing a second editor", () => {
@@ -166,7 +199,8 @@ describe("SquadFleetConsole", () => {
   it("keeps the inspector open on a Squad the filter has hidden", () => {
     renderConsole(route({ selectedId: "b", query: "Alpha", narrowed: true }))
     expect(screen.queryAllByTestId("squad-fleet-row")).toHaveLength(1)
-    expect(screen.getByTestId("runs-list")).toHaveTextContent("b")
+    expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runs-panel")).toHaveAttribute("data-team", "b")
   })
 })
 

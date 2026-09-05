@@ -28,9 +28,8 @@ import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { SettingsIcon } from "lucide-react"
 
-import { AgentTeamCommandCenter } from "@/components/agent/team/command-center"
+import { AgentRunsPanel } from "@/components/agent-runs/agent-runs-panel"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
-import { TeamRunsList } from "@/components/agent/team/runs-list"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { SquadInspector } from "@/components/squads/squad-inspector"
 import { SquadListPane } from "@/components/squads/squad-list-pane"
@@ -120,8 +119,14 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
           <SquadListPane fleet={fleet} route={route} onCreate={onCreate} />
         </TabsContent>
 
-        <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto p-3">
-          <AgentTeamCommandCenter heading={false} />
+        <TabsContent value="runs" className="min-h-0 flex-1 overflow-hidden">
+          <AgentRunsPanel
+            embedded
+            filterKind="team"
+            {...(selectedId ? { teamId: selectedId } : {})}
+            selectedId={route.runId}
+            onSelect={(id) => route.setRunId(id ?? undefined)}
+          />
         </TabsContent>
 
         <TabsContent value="board" className="min-h-0 flex-1">
@@ -149,9 +154,7 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
       >
         {selected ? (
           <div className="space-y-3">
-            <SquadInspector squadId={selected.id}>
-              <TeamRunsList teamId={selected.id} />
-            </SquadInspector>
+            <SquadInspector squadId={selected.id} />
             {/* Said, not hidden. A control that simply is not there reads as a
                 bug, where a sentence naming where it lives does not. */}
             <p className="text-xs text-muted-foreground" data-testid="squads-mobile-configure-note">

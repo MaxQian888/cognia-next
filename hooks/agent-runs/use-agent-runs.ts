@@ -57,6 +57,8 @@ export interface UseExecutionCockpitOptions {
   statusGroup?: CockpitStatusGroup
   kind?: ExecutionFilterKind
   query?: string
+  /** Only this Squad's runs. See `CockpitFilter.teamId`. */
+  teamId?: string
   projectId?: string
   /** Run id carried by a deep link; fetched independently of the page ceiling. */
   selectedId?: string
@@ -158,8 +160,9 @@ export function useExecutionCockpit(
         ...(options.statusGroup ? { statusGroup: options.statusGroup } : {}),
         ...(options.kind ? { kind: options.kind } : {}),
         ...(options.query ? { query: options.query } : {}),
+        ...(options.teamId ? { teamId: options.teamId } : {}),
       }),
-    [allRows, options.statusGroup, options.kind, options.query]
+    [allRows, options.statusGroup, options.kind, options.query, options.teamId]
   )
 
   const loadMore = useCallback(() => setLimit((current) => current + COCKPIT_PAGE_SIZE), [])

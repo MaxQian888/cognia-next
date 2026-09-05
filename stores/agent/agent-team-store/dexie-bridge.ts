@@ -37,6 +37,10 @@ import {
   writeAgentTeamDefinitions,
 } from "@/lib/db/agent-team-definitions"
 import { getDb } from "@/lib/db/schema"
+import {
+  migrateSquadDefinition,
+  type SquadBindingCandidates,
+} from "@/lib/agent-team/definition-contract"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "./store"
 
@@ -61,6 +65,48 @@ let mirror: Mirror = { teams: {}, teammates: {}, tasks: {} }
 let mirroredDbName: string | null = null
 /** Rule 2: nothing is written until a hydration has actually succeeded. */
 let hydrated = false
+/**
+ * Settles when the current bridge's hydration (and the definition migration
+ * that follows it) is done. The Squad bootstrap orders itself on this:
+ * recovery must not run over definitions that are still coming out of Dexie.
+ */
+let hydration: Promise<void> = Promise.resolve()
+let resolveCandidates: BindingCandidateResolver | undefined
+
+/**
+ * Resolves the binding candidates for a workspace. Injected by the bootstrap
+ * (it is an async Dexie + host read the bridge must not import eagerly) and
+ * absent in tests that only exercise the mirror.
+ */
+export type BindingCandidateResolver = (
+  projectId: string | undefined
+) => Promise<SquadBindingCandidates>
+
+export function setAgentTeamBindingCandidateResolver(
+  resolver: BindingCandidateResolver | undefined
+): void {
+  resolveCandidates = resolver
+}
+
+/** The current bridge's hydration. Resolves at once when no bridge is running. */
+export function whenAgentTeamDexieBridgeHydrated(): Promise<void> {
+  return hydration
+}
+
+/** Diagnostics for the dev bridge and boot logs: which database the mirror is bound to. */
+export function getAgentTeamDexieBridgeDiagnostics(): {
+  started: boolean
+  hydrated: boolean
+  mirroredDbName: string | null
+  mirroredTeamCount: number
+} {
+  return {
+    started,
+    hydrated,
+    mirroredDbName,
+    mirroredTeamCount: Object.keys(mirror.teams).length,
+  }
+}
 
 /** Test-only: drop the module state so suites do not leak into each other. */
 export function __resetAgentTeamDexieBridgeForTesting(): void {
@@ -68,6 +114,8 @@ export function __resetAgentTeamDexieBridgeForTesting(): void {
   mirror = { teams: {}, teammates: {}, tasks: {} }
   mirroredDbName = null
   hydrated = false
+  hydration = Promise.resolve()
+  resolveCandidates = undefined
 }
 
 function changedIds<T extends { id: string }>(
@@ -154,6 +202,48 @@ async function hydrate(): Promise<void> {
   mirror = { teams: teamPatch, teammates: teammatePatch, tasks: taskPatch }
   mirroredDbName = getDb().name
   hydrated = true
+
+  await migrateHydratedDefinitions()
+}
+
+/**
+ * Bring every definition in memory onto the current contract (ADR-0169).
+ *
+ * Runs after hydration and before the subscription, so a changed team differs
+ * from the primed mirror and the first sync writes it down. Idempotent: on a
+ * boot where nothing changes it touches nothing. Candidates are resolved once
+ * per workspace, never per team, and only when a team is missing a binding.
+ */
+export async function migrateHydratedDefinitions(): Promise<number> {
+  const state = useAgentTeamStore.getState()
+  const teams = Object.values(state.teams)
+  const candidateCache = new Map<string, Promise<SquadBindingCandidates>>()
+  const candidatesFor = (projectId: string | undefined): Promise<SquadBindingCandidates> => {
+    if (!resolveCandidates) return Promise.resolve({})
+    const key = projectId ?? ""
+    let pending = candidateCache.get(key)
+    if (!pending) {
+      pending = resolveCandidates(projectId).catch(() => ({}))
+      candidateCache.set(key, pending)
+    }
+    return pending
+  }
+  let changed = 0
+  const next: Record<string, AgentTeam> = {}
+  for (const team of teams) {
+    const needsCandidates =
+      !team.config.repositories?.some((r) => r.role === "primary") || !team.config.environmentRef
+    const candidates = needsCandidates ? await candidatesFor(team.projectId) : {}
+    const result = migrateSquadDefinition(team, candidates)
+    if (result.changed) {
+      next[team.id] = result.team
+      changed += 1
+    }
+  }
+  if (changed > 0) {
+    useAgentTeamStore.setState((current) => ({ teams: { ...current.teams, ...next } }))
+  }
+  return changed
 }
 
 /**
@@ -183,7 +273,11 @@ export function startAgentTeamDexieBridge(): () => void {
     )
   }
 
-  void hydrate()
+  hydration = hydrate().catch((err) => {
+    log.warn("agent-team dexie-bridge hydration failed", { err: String(err) })
+    throw err
+  })
+  void hydration
     .then(() => {
       if (disposed) return
       const initial = useAgentTeamStore.getState()

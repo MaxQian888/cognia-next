@@ -17,7 +17,9 @@ Per ADR-0022 ("Agent Team runtime hardening"), a team run is **not** a second or
   `action.team.task.dispatch` node (`built-ins.ts:1537-1590`), which calls `dispatchTeammate` against
   the registered context. `abortTeam` (`agent-team-runtime.ts:530`) fires the per-team
   `AbortController` held in `inflightControllers` (`:99`). Deps are wired once at startup by
-  `AgentTeamRuntimeInitializer` (`agent-team-runtime-initializer.tsx:22`).
+  the ordered Squad bootstrap (`lib/agent-team/bootstrap.ts`, mounted by
+  `SquadBootstrapInitializer`). Since ADR-0169 the UI never calls the lifecycle directly: every
+  launch goes through `startSquadRun`, and every gate through the Action Review contract.
 </TLDR>
 
 ## The F-path sequence
@@ -100,19 +102,15 @@ start: async (id, opts) => {
 | `pause(id)` | `agent-team.ts:116-119` | Call `abortTeam(id)`, set status `paused` |
 | `shutdown(id)` | `agent-team.ts:120-123` | Call `abortTeam(id)`, set status `cancelled` |
 
-Deps are wired exactly once at app startup, guarded against React Strict-Mode double-mount with a `useRef`:
+Deps are installed by the ordered Squad bootstrap (ADR-0169), after definitions have hydrated and before any recovery runs. A launch that arrives before the bootstrap flips ready waits on `awaitSquadRuntimeReady` and is refused with `runtime_not_ready` if it never does:
 
-```tsx
-// components/providers/initializers/agent-team-runtime-initializer.tsx:16-28
-export function AgentTeamRuntimeInitializer() {
-  const hasInitialized = useRef(false)
-  useEffect(() => {
-    if (hasInitialized.current) return
-    hasInitialized.current = true
-    configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
-  }, [])
-  return null
-}
+```ts
+// lib/agent-team/bootstrap.ts (stages)
+hydrate         setAgentTeamBindingCandidateResolver + startAgentTeamDexieBridge + whenHydrated
+adapters        configureAgentTeamRuntime(buildAgentTeamRuntimeDeps())
+import_history  backfillLegacyTeamRunHistory
+recover         recoverPendingRunInterrupts + recoverDurableAgentTeams + armPendingTeamRecoveries
+ready           the signal every startSquadRun call awaits
 ```
 
 ## `runTeamLifecycle` — ten ordered responsibilities
@@ -130,7 +128,7 @@ export function AgentTeamRuntimeInitializer() {
 | 7 | `registerTeamRunContext(ctx)` | `:397-411` |
 | 8 | Synthesize — ultracode patterns when active, else flat task DAG | `:413-437` |
 | 9 | `runWorkflow({ workflow, trigger, runId, signal, concurrency })` | `:444-489` |
-| 10 | `finally` — `unregisterTeamRunContext`, dispose subscriptions, release approval-bus waiters | `:500-523` |
+| 10 | `finally` — `unregisterTeamRunContext`, dispose subscriptions, settle the durable run record (unless it is parked as `needs_input` / `paused`) | `:500-523` |
 
 Step 5 constructs the shared state objects passed to the executor through the run context:
 

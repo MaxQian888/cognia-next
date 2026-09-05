@@ -14,6 +14,25 @@ jest.mock("next-intl", () => ({
 }))
 
 let detailState: Record<string, unknown>
+jest.mock("./squad-review-form", () => ({
+  isRenderableSquadReview: (interrupt: { reviewKind?: string }) =>
+    interrupt.reviewKind !== undefined,
+  SquadReviewForm: ({
+    interrupt,
+    onDecide,
+  }: {
+    interrupt: { reviewKind: string }
+    onDecide: (action: string, decision: unknown) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="squad-review-form"
+      onClick={() => onDecide("approve", { kind: interrupt.reviewKind, extraTokens: 5000 })}
+    >
+      form:{interrupt.reviewKind}
+    </button>
+  ),
+}))
 jest.mock("@/hooks/agent-runs/use-execution-run-detail", () => ({
   useExecutionRunDetail: () => detailState,
 }))
@@ -254,6 +273,101 @@ describe("RunDetailPane", () => {
     await userEvent.setup().click(screen.getByRole("tab", { name: /tabs\.approvals/ }))
     expect(screen.getByText("Run tests?")).toBeInTheDocument()
     expect(screen.getByText("approvals.denied")).toBeInTheDocument()
+  })
+
+  it("hands approve / deny to the typed review form when the pending interrupt is a Squad review", async () => {
+    detailState = {
+      ...detailState,
+      run: {
+        id: "run-1",
+        kind: "team",
+        sourceId: "team-run-1",
+        title: "t",
+        status: "waiting_input",
+        currentRevision: 3,
+        startedAt: 1,
+        updatedAt: 2,
+        latestSnapshot: {
+          runId: "run-1",
+          revision: 3,
+          status: "waiting_input",
+          elapsedMs: 1,
+          artifacts: [],
+          allowedActions: ["approve", "deny", "stop", "open_details"],
+          pendingInterrupt: { id: "i-budget", title: "Approval required", type: "squad_budget" },
+        },
+      } as never,
+      interrupts: [
+        {
+          id: "i-budget",
+          runId: "run-1",
+          type: "squad_budget",
+          reviewKind: "budget_extension",
+          title: "Budget",
+          status: "pending",
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        } as never,
+      ],
+    }
+    const dispatch = jest.fn().mockResolvedValue({ accepted: true })
+    render(
+      <RunDetailPane
+        row={row({ allowedActions: ["approve", "deny", "stop", "open_details"] })}
+        actions={makeActions({ dispatch })}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "actions.approve" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "actions.deny" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "actions.stop" })).toBeInTheDocument()
+    await userEvent.setup().click(screen.getByTestId("squad-review-form"))
+    expect(dispatch).toHaveBeenCalledWith(expect.anything(), "approve", {
+      reviewDecision: { kind: "budget_extension", extraTokens: 5000 },
+    })
+  })
+
+  it("keeps the bare approve / deny for a pending interrupt that is not a Squad review", () => {
+    detailState = {
+      ...detailState,
+      run: {
+        id: "run-1",
+        kind: "agent-turn",
+        sourceId: "s",
+        title: "t",
+        status: "waiting_input",
+        currentRevision: 3,
+        startedAt: 1,
+        updatedAt: 2,
+        latestSnapshot: {
+          runId: "run-1",
+          revision: 3,
+          status: "waiting_input",
+          elapsedMs: 1,
+          artifacts: [],
+          allowedActions: ["approve", "deny", "open_details"],
+          pendingInterrupt: { id: "i-tool", title: "Approval required", type: "tool_approval" },
+        },
+      } as never,
+      interrupts: [
+        {
+          id: "i-tool",
+          runId: "run-1",
+          type: "tool_approval",
+          title: "Run tests?",
+          status: "pending",
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        } as never,
+      ],
+    }
+    render(
+      <RunDetailPane
+        row={row({ allowedActions: ["approve", "deny", "open_details"] })}
+        actions={makeActions()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "actions.approve" })).toBeInTheDocument()
+    expect(screen.queryByTestId("squad-review-form")).not.toBeInTheDocument()
   })
 
   it("reports the activity the rolling window dropped", async () => {

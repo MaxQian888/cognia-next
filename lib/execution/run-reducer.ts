@@ -441,12 +441,16 @@ export function reduceRunEvents(
   let error: string | undefined
   let waitingReason: string | undefined
   let pendingInterrupt: RunProjectionSnapshot["pendingInterrupt"]
+  let teamId: string | undefined
   const artifacts: RunProjectionSnapshot["artifacts"] = []
 
   for (const event of events) {
     revision = event.seq
     updatedAt = Math.max(updatedAt, event.ts)
     if (event.visibility === "private") continue
+    if (event.type === "run.started" && run.kind === "team") {
+      teamId = stringValue(event.payload.teamId) ?? teamId
+    }
     upsertActivity(activities, event)
     const nextStatus = eventStatus(event.type)
     if (nextStatus && !TERMINAL.has(status)) {
@@ -512,8 +516,10 @@ export function reduceRunEvents(
       event.type === "run.recovery_required" ||
       event.type === "interrupt.requested"
     ) {
+      // A reason CODE. Surfaces localize it (`agentRuns.waitingReasons.*`,
+      // the connector activity i18n); the journal never carries the sentence.
       waitingReason =
-        event.type === "run.recovery_required" ? "Recovery required" : "Waiting for review"
+        event.type === "run.recovery_required" ? "recovery_required" : "waiting_review"
     }
     if (event.type === "interrupt.requested") {
       const id = stringValue(event.payload.interruptId)
@@ -591,6 +597,7 @@ export function reduceRunEvents(
     ...(error ? { error } : {}),
     ...(waitingReason ? { waitingReason } : {}),
     ...(pendingInterrupt ? { pendingInterrupt } : {}),
+    ...(teamId ? { teamId } : {}),
     artifacts,
     allowedActions: allowedActions(status, run.kind, pendingInterrupt !== undefined, {
       alreadyRetried: run.retry !== undefined,
