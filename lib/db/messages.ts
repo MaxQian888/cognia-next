@@ -10,6 +10,13 @@ import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events
 import { getDb, withDbReopenRetry } from "./schema"
 import { resolveScopeProjectId } from "./project-scope"
 import { collectUnreferencedMessageMedia, messageMediaRefRows } from "./message-media-refs"
+import { parseMediaRef } from "./message-media"
+import {
+  isImagePart,
+  readImageEditVersion,
+  withImageEditVersion,
+  type ImageEditVersionV1,
+} from "@/lib/chat/image-edit/version"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
 
 function newId() {
@@ -808,4 +815,163 @@ export async function truncateAfter(
     await collectUnreferencedMessageMedia(orphanCandidates)
   }
   if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Why an image edit could not be appended.
+ *
+ * Distinguishable because this operation is also reachable over the companion
+ * RPC from a phone, and "your session moved on" has to read differently from
+ * "that image is not in that message". A single opaque failure there would
+ * leave a remote client retrying something that can never succeed.
+ */
+export type ImageEditAppendFailure =
+  "message-missing" | "session-mismatch" | "lineage-missing" | "media-missing"
+
+export class ImageEditAppendError extends Error {
+  readonly code: ImageEditAppendFailure
+
+  constructor(code: ImageEditAppendFailure, message: string) {
+    super(message)
+    this.name = "ImageEditAppendError"
+    this.code = code
+  }
+}
+
+export interface AppendImageEditVersionInput {
+  sessionId: string
+  messageId: string
+  /** The already-ingested result. Ingestion happens before the transaction. */
+  media: {
+    ref: string
+    mediaType: string
+    width: number
+    height: number
+    byteSize: number
+  }
+  version: ImageEditVersionV1
+  /** Shown in the lightbox title and used as the download name. */
+  filename?: string
+}
+
+export interface AppendImageEditVersionResult {
+  /** False when this exact `versionId` was already on the message. */
+  appended: boolean
+  /** The message's parts after the append, for an optimistic UI update. */
+  parts: StoredMessage["parts"]
+}
+
+/**
+ * Append an edited image to a message as a new `file` part, atomically.
+ *
+ * Non-destructive: nothing already on the message is rewritten. The original
+ * image part is left exactly as it was, and the result is added at the end.
+ *
+ * The message is re-read INSIDE the transaction rather than taken from the
+ * caller. An editing session is long (open the workbench, drag a crop, wait for
+ * a model), and in that time the same message can be rewritten by a streaming
+ * turn, a sync leg or another device. Writing a caller-held snapshot back would
+ * silently undo all of it, which is the classic lost-update bug and the reason
+ * this is a dedicated helper instead of a `commitMessageDelta` call.
+ *
+ * `versionId` is the idempotency key. A double-clicked save button, an RPC the
+ * transport retried, and a companion client resending after a reconnect all
+ * carry the same id, and all of them must produce one version rather than
+ * three.
+ *
+ * On any failure the newly ingested media is reclaimed, so a rejected append
+ * cannot leave an unreferenced blob behind in the content-addressed store.
+ */
+export async function appendImageEditVersion({
+  sessionId,
+  messageId,
+  media,
+  version,
+  filename,
+}: AppendImageEditVersionInput): Promise<AppendImageEditVersionResult> {
+  const db = getDb()
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "send-message")
+
+  let appended = false
+  let resultParts: StoredMessage["parts"] = []
+  let publishedRevision: number | null = null
+
+  try {
+    await db.transaction("rw", db.messages, db.messageMediaRefs, db.sessions, async () => {
+      const row = await db.messages.get(messageId)
+      if (!row) {
+        throw new ImageEditAppendError("message-missing", `No message ${messageId}`)
+      }
+      if (row.sessionId !== sessionId) {
+        throw new ImageEditAppendError(
+          "session-mismatch",
+          `Message ${messageId} does not belong to session ${sessionId}`
+        )
+      }
+
+      const parts = row.parts ?? []
+
+      // Idempotent replay: the same version already landed.
+      const existing = parts.find(
+        (part) => readImageEditVersion(part)?.versionId === version.versionId
+      )
+      if (existing) {
+        resultParts = parts
+        return
+      }
+
+      // The lineage must actually be in this message. Without this an edit can
+      // be attached to a message that never held the image, which produces a
+      // version rail pointing at an origin nobody can see.
+      const holdsLineage = parts.some((part) => {
+        if (!isImagePart(part)) return false
+        if ((part as { url?: unknown }).url === version.lineageId) return true
+        return readImageEditVersion(part)?.lineageId === version.lineageId
+      })
+      if (!holdsLineage) {
+        throw new ImageEditAppendError(
+          "lineage-missing",
+          `Message ${messageId} does not contain image ${version.lineageId}`
+        )
+      }
+
+      const part = withImageEditVersion(
+        {
+          type: "file" as const,
+          url: media.ref,
+          mediaType: media.mediaType,
+          width: media.width,
+          height: media.height,
+          byteSize: media.byteSize,
+          ...(filename ? { filename } : {}),
+        },
+        version
+      )
+
+      const nextParts = [...parts, part] as StoredMessage["parts"]
+      await db.messages.update(messageId, { parts: nextParts })
+      // Rebuilt from the whole part list rather than added to, so the ref table
+      // stays a pure projection of the row it describes.
+      await db.messageMediaRefs.where("messageId").equals(messageId).delete()
+      const refs = messageMediaRefRows(messageId, sessionId, nextParts)
+      if (refs.length > 0) await db.messageMediaRefs.bulkPut(refs)
+      publishedRevision = await bumpTranscriptRevision(db, sessionId)
+      resultParts = nextParts
+      appended = true
+    })
+  } catch (error) {
+    const hash = parseMediaRef(media.ref)
+    if (hash) await collectUnreferencedMessageMedia([hash]).catch(() => {})
+    throw error
+  }
+
+  if (appended) {
+    invalidatePersistSnapshot(sessionId)
+    markSessionDirty(sessionId)
+    if (publishedRevision !== null) {
+      await publishTranscriptRevision(sessionId, publishedRevision)
+    }
+  }
+  return { appended, parts: resultParts }
 }

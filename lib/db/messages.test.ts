@@ -4,6 +4,7 @@
 
 import type { UIMessage } from "ai"
 import {
+  appendImageEditVersion,
   clearMessages,
   commitMessageDelta,
   deleteStoredMessage,
@@ -14,11 +15,17 @@ import {
   replaceSessionTranscript,
   truncateAfter,
   updateMessageMetadata,
+  ImageEditAppendError,
 } from "./messages"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import { isMediaRef, putMessageMedia } from "./message-media"
 import { listMessageMediaRefsForSession } from "./message-media-refs"
+import {
+  readImageEditVersion,
+  IMAGE_EDIT_SCHEMA_VERSION,
+  type ImageEditVersionV1,
+} from "@/lib/chat/image-edit/version"
 
 jest.setTimeout(30_000)
 
@@ -599,5 +606,246 @@ describe("deletion publishes what it removed, for the memory closure", () => {
     await clearMessages("s-clear-claims")
     expect(mockRevokeForSession).toHaveBeenCalledWith("s-clear-claims")
     expect(mockRevokeForMessages).not.toHaveBeenCalled()
+  })
+})
+
+describe("appendImageEditVersion", () => {
+  const SESSION = "s-image-edit"
+
+  async function seedImageMessage(
+    parts: unknown[] = [{ type: "file", url: "cognia-media:origin", mediaType: "image/png" }]
+  ): Promise<void> {
+    await putSession(SESSION)
+    await getDb().messages.put({
+      id: "m-image",
+      sessionId: SESSION,
+      role: "assistant",
+      parts,
+      createdAt: 1,
+    } as never)
+    await getDb().messageMediaRefs.put({
+      messageId: "m-image",
+      sessionId: SESSION,
+      hash: "origin",
+    })
+  }
+
+  async function putEditedMedia(hash = "edited"): Promise<void> {
+    await putMessageMedia({
+      hash,
+      mediaType: "image/webp",
+      width: 4,
+      height: 2,
+      blob: new Blob(["edited"], { type: "image/webp" }),
+      byteSize: 6,
+      createdAt: 0,
+      lastUsedAt: 0,
+    })
+  }
+
+  function version(overrides: Partial<ImageEditVersionV1> = {}): ImageEditVersionV1 {
+    return {
+      schemaVersion: IMAGE_EDIT_SCHEMA_VERSION,
+      lineageId: "cognia-media:origin",
+      versionId: "iev_one",
+      parentVersionId: null,
+      operations: ["crop"],
+      editedAt: 4242,
+      ...overrides,
+    }
+  }
+
+  const media = {
+    ref: "cognia-media:edited",
+    mediaType: "image/webp",
+    width: 4,
+    height: 2,
+    byteSize: 6,
+  }
+
+  it("appends the result without touching the original part", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+
+    const result = await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+      filename: "cropped.webp",
+    })
+
+    expect(result.appended).toBe(true)
+    const row = await getDb().messages.get("m-image")
+    expect(row?.parts).toHaveLength(2)
+    expect(row?.parts?.[0]).toEqual({
+      type: "file",
+      url: "cognia-media:origin",
+      mediaType: "image/png",
+    })
+    expect(row?.parts?.[1]).toMatchObject({
+      type: "file",
+      url: "cognia-media:edited",
+      mediaType: "image/webp",
+      filename: "cropped.webp",
+    })
+    expect(readImageEditVersion(row?.parts?.[1])).toEqual(version())
+  })
+
+  it("rebuilds the media ref rows so the new blob is protected from collection", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+
+    await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+    })
+
+    const refs = await listMessageMediaRefsForSession(SESSION)
+    expect(refs.map((ref) => ref.hash).sort()).toEqual(["edited", "origin"])
+  })
+
+  it("bumps the transcript revision so other views refetch", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+    const before = (await getDb().sessions.get(SESSION))?.transcriptRevision ?? 0
+
+    await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+    })
+
+    expect((await getDb().sessions.get(SESSION))?.transcriptRevision).toBe(before + 1)
+  })
+
+  it("is idempotent on the version id, so a retried save adds one version", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+    const input = {
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+    }
+
+    const first = await appendImageEditVersion(input)
+    const second = await appendImageEditVersion(input)
+
+    expect(first.appended).toBe(true)
+    expect(second.appended).toBe(false)
+    expect((await getDb().messages.get("m-image"))?.parts).toHaveLength(2)
+  })
+
+  it("reads the message inside the transaction, keeping a concurrent write", async () => {
+    // The workbench stays open across a model round trip. Anything the caller
+    // held when it opened is stale by the time it saves.
+    await seedImageMessage()
+    await putEditedMedia()
+    await getDb().messages.update("m-image", {
+      parts: [
+        { type: "file", url: "cognia-media:origin", mediaType: "image/png" },
+        { type: "text", text: "arrived while the editor was open" },
+      ],
+    } as never)
+
+    await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+    })
+
+    const parts = (await getDb().messages.get("m-image"))?.parts ?? []
+    expect(parts).toHaveLength(3)
+    expect(parts[1]).toMatchObject({ type: "text", text: "arrived while the editor was open" })
+  })
+
+  it("chains a second edit onto the first", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+    await putEditedMedia("edited2")
+
+    await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media,
+      version: version(),
+    })
+    await appendImageEditVersion({
+      sessionId: SESSION,
+      messageId: "m-image",
+      media: { ...media, ref: "cognia-media:edited2" },
+      version: version({ versionId: "iev_two", parentVersionId: "iev_one" }),
+    })
+
+    const parts = (await getDb().messages.get("m-image"))?.parts ?? []
+    expect(parts).toHaveLength(3)
+    expect(readImageEditVersion(parts[2])?.parentVersionId).toBe("iev_one")
+  })
+
+  it("refuses a message that does not hold the lineage, and reclaims the media", async () => {
+    await seedImageMessage([{ type: "text", text: "no images here" }])
+    await putEditedMedia()
+
+    await expect(
+      appendImageEditVersion({
+        sessionId: SESSION,
+        messageId: "m-image",
+        media,
+        version: version(),
+      })
+    ).rejects.toMatchObject({ code: "lineage-missing" })
+
+    // A refused append must not leave an unreferenced blob in the store.
+    expect(await getDb().messageMedia.get("edited")).toBeUndefined()
+  })
+
+  it("refuses an unknown message", async () => {
+    await putSession(SESSION)
+    await putEditedMedia()
+    await expect(
+      appendImageEditVersion({
+        sessionId: SESSION,
+        messageId: "nope",
+        media,
+        version: version(),
+      })
+    ).rejects.toBeInstanceOf(ImageEditAppendError)
+  })
+
+  it("refuses a message that belongs to another session", async () => {
+    await seedImageMessage()
+    await putSession("s-other")
+    await putEditedMedia()
+
+    await expect(
+      appendImageEditVersion({
+        sessionId: "s-other",
+        messageId: "m-image",
+        media,
+        version: version(),
+      })
+    ).rejects.toMatchObject({ code: "session-mismatch" })
+  })
+
+  it("refuses while the session is handoff-locked", async () => {
+    await seedImageMessage()
+    await putEditedMedia()
+    await getDb().sessions.update(SESSION, {
+      handoffLock: { ticketId: "t-1" },
+    } as never)
+
+    await expect(
+      appendImageEditVersion({
+        sessionId: SESSION,
+        messageId: "m-image",
+        media,
+        version: version(),
+      })
+    ).rejects.toThrow()
   })
 })
