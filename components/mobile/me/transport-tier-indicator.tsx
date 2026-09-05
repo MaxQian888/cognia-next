@@ -24,6 +24,7 @@ const TIER_KEY: Record<TransportTier, string> = {
   "rtc-relay": "rtcRelay",
   "ws-lan": "wsLan",
   "ws-tunnel": "wsTunnel",
+  relay: "relay",
   offline: "offline",
 }
 

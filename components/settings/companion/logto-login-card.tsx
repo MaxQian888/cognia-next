@@ -24,7 +24,7 @@ import { useTranslations } from "next-intl"
 import { CloudIcon, LoaderIcon, LogInIcon, LogOutIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
@@ -255,63 +255,124 @@ export function LogtoLoginCard() {
       : null
 
   return (
-    <Card data-testid="logto-login-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CloudIcon className="size-4" aria-hidden />
-          {t("title")}
-        </CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Not a desktop-only gate any more: `openUrl` already routes through
+    <SettingsBlock
+      icon={<CloudIcon />}
+      title={t("title")}
+      description={t("description")}
+      testid="logto-login-card"
+      settingId="companion-logto"
+      contentClassName="space-y-3"
+    >
+      {/* Not a desktop-only gate any more: `openUrl` already routes through
             the Tauri opener, the Capacitor in-app browser or `window.open`, and
             the session store falls back to an encrypted IndexedDB vault. What
             differs is where the token ends up, which is worth saying out loud
             rather than implying the feature is missing. */}
-        {!isTauri() && (
-          <p className="text-xs text-muted-foreground" data-testid="logto-storage-note">
-            {t("storageFallback")}
-          </p>
-        )}
+      {!isTauri() && (
+        <p className="text-xs text-muted-foreground" data-testid="logto-storage-note">
+          {t("storageFallback")}
+        </p>
+      )}
 
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderIcon className="size-4 animate-spin" aria-hidden />
-            {t("loading")}
-          </div>
-        ) : session ? (
-          <div className="space-y-2" data-testid="logto-signed-in">
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-              <dt className="text-muted-foreground">{t("field.issuer")}</dt>
-              <dd className="truncate font-mono text-xs">{session.issuer}</dd>
-              <dt className="text-muted-foreground">{t("field.resource")}</dt>
-              <dd className="truncate font-mono text-xs">{session.resource}</dd>
-              {session.organizationId && (
-                <>
-                  <dt className="text-muted-foreground">{t("field.org")}</dt>
-                  <dd className="truncate font-mono text-xs">{session.organizationId}</dd>
-                </>
-              )}
-              <dt className="text-muted-foreground">{t("field.person")}</dt>
-              <dd className="truncate text-xs" data-testid="logto-person">
-                {identity ? (identity.displayName ?? identity.userId) : t("field.personNone")}
-              </dd>
-              <dt className="text-muted-foreground">{t("field.expires")}</dt>
-              <dd className="text-xs">
-                {session.expiresAt
-                  ? new Date(session.expiresAt).toLocaleString()
-                  : t("field.expiresUnknown")}
-              </dd>
-            </dl>
-            {/* The Logto session and the profile binding can disagree: signing
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderIcon className="size-4 animate-spin" aria-hidden />
+          {t("loading")}
+        </div>
+      ) : session ? (
+        <div className="space-y-2" data-testid="logto-signed-in">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted-foreground">{t("field.issuer")}</dt>
+            <dd className="truncate font-mono text-xs">{session.issuer}</dd>
+            <dt className="text-muted-foreground">{t("field.resource")}</dt>
+            <dd className="truncate font-mono text-xs">{session.resource}</dd>
+            {session.organizationId && (
+              <>
+                <dt className="text-muted-foreground">{t("field.org")}</dt>
+                <dd className="truncate font-mono text-xs">{session.organizationId}</dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">{t("field.person")}</dt>
+            <dd className="truncate text-xs" data-testid="logto-person">
+              {identity ? (identity.displayName ?? identity.userId) : t("field.personNone")}
+            </dd>
+            <dt className="text-muted-foreground">{t("field.expires")}</dt>
+            <dd className="text-xs">
+              {session.expiresAt
+                ? new Date(session.expiresAt).toLocaleString()
+                : t("field.expiresUnknown")}
+            </dd>
+          </dl>
+          {/* The Logto session and the profile binding can disagree: signing
                 in genuinely succeeded while the profile turned out to belong to
                 somebody else. Without this the refusal was invisible, because
                 the error only rendered on the form branches. */}
-            {error && (
-              <p className="text-xs text-destructive" data-testid="logto-error">
-                {error}
-              </p>
+          {error && (
+            <p className="text-xs text-destructive" data-testid="logto-error">
+              {error}
+            </p>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void signOut()}
+            data-testid="logto-sign-out"
+          >
+            <LogOutIcon className="size-4" aria-hidden />
+            {t("signOut")}
+          </Button>
+        </div>
+      ) : lapsed && !showForm && step === "idle" ? (
+        <div className="space-y-2" data-testid={`logto-state-${lapsed.status}`}>
+          <p className="text-sm font-medium">
+            {lapsed.status === "reauth-required"
+              ? t("reauth.title")
+              : lapsed.status === "offline"
+                ? t("offline.title")
+                : t("errorState.title")}
+          </p>
+          <p className="text-xs text-muted-foreground" data-testid="logto-state-reason">
+            {lapsed.status === "reauth-required"
+              ? t(
+                  lapsed.reason === "expired"
+                    ? "reauth.expired"
+                    : lapsed.reason === "revoked"
+                      ? "reauth.revoked"
+                      : "reauth.bindingMissing"
+                )
+              : lapsed.status === "offline"
+                ? t("offline.note")
+                : t("errorState.note", { reason: lapsed.reason })}
+          </p>
+          {lapsed.sessionMetadata && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              <dt className="text-muted-foreground">{t("field.issuer")}</dt>
+              <dd className="truncate font-mono text-xs">{lapsed.sessionMetadata.issuer}</dd>
+              {lapsed.sessionMetadata.organizationId && (
+                <>
+                  <dt className="text-muted-foreground">{t("field.org")}</dt>
+                  <dd className="truncate font-mono text-xs">
+                    {lapsed.sessionMetadata.organizationId}
+                  </dd>
+                </>
+              )}
+            </dl>
+          )}
+          {error && (
+            <p className="text-xs text-destructive" data-testid="logto-error">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {lapsed.status === "offline" ? (
+              <Button size="sm" onClick={() => void reload()} data-testid="logto-retry">
+                {t("offline.retry")}
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => setShowForm(true)} data-testid="logto-sign-in-again">
+                <LogInIcon className="size-4" aria-hidden />
+                {t("reauth.signInAgain")}
+              </Button>
             )}
             <Button
               variant="outline"
@@ -323,164 +384,92 @@ export function LogtoLoginCard() {
               {t("signOut")}
             </Button>
           </div>
-        ) : lapsed && !showForm && step === "idle" ? (
-          <div className="space-y-2" data-testid={`logto-state-${lapsed.status}`}>
-            <p className="text-sm font-medium">
-              {lapsed.status === "reauth-required"
-                ? t("reauth.title")
-                : lapsed.status === "offline"
-                  ? t("offline.title")
-                  : t("errorState.title")}
+        </div>
+      ) : step === "idle" ? (
+        <div className="space-y-2" data-testid="logto-sign-in-form">
+          <Field
+            id="logto-issuer"
+            label={t("field.issuer")}
+            value={form.issuer}
+            onChange={onField("issuer")}
+            placeholder="https://logto.example.com/oidc"
+          />
+          <Field
+            id="logto-client-id"
+            label={t("field.clientId")}
+            value={form.clientId}
+            onChange={onField("clientId")}
+          />
+          <Field
+            id="logto-resource"
+            label={t("field.resource")}
+            value={form.resource}
+            onChange={onField("resource")}
+            placeholder="https://api.example.com"
+          />
+          <Field
+            id="logto-redirect"
+            label={t("field.redirectUri")}
+            value={form.redirectUri}
+            onChange={onField("redirectUri")}
+          />
+          <Field
+            id="logto-scope"
+            label={t("field.scope")}
+            value={form.scope}
+            onChange={onField("scope")}
+            // i18n-exempt: OAuth scope identifiers, not translatable UI copy
+            placeholder="brain:rpc brain:read"
+          />
+          <Field id="logto-org" label={t("field.org")} value={form.org} onChange={onField("org")} />
+          {error && (
+            <p className="text-xs text-destructive" data-testid="logto-error">
+              {error}
             </p>
-            <p className="text-xs text-muted-foreground" data-testid="logto-state-reason">
-              {lapsed.status === "reauth-required"
-                ? t(
-                    lapsed.reason === "expired"
-                      ? "reauth.expired"
-                      : lapsed.reason === "revoked"
-                        ? "reauth.revoked"
-                        : "reauth.bindingMissing"
-                  )
-                : lapsed.status === "offline"
-                  ? t("offline.note")
-                  : t("errorState.note", { reason: lapsed.reason })}
-            </p>
-            {lapsed.sessionMetadata && (
-              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                <dt className="text-muted-foreground">{t("field.issuer")}</dt>
-                <dd className="truncate font-mono text-xs">{lapsed.sessionMetadata.issuer}</dd>
-                {lapsed.sessionMetadata.organizationId && (
-                  <>
-                    <dt className="text-muted-foreground">{t("field.org")}</dt>
-                    <dd className="truncate font-mono text-xs">
-                      {lapsed.sessionMetadata.organizationId}
-                    </dd>
-                  </>
-                )}
-              </dl>
-            )}
-            {error && (
-              <p className="text-xs text-destructive" data-testid="logto-error">
-                {error}
-              </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {lapsed.status === "offline" ? (
-                <Button size="sm" onClick={() => void reload()} data-testid="logto-retry">
-                  {t("offline.retry")}
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  onClick={() => setShowForm(true)}
-                  data-testid="logto-sign-in-again"
-                >
-                  <LogInIcon className="size-4" aria-hidden />
-                  {t("reauth.signInAgain")}
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void signOut()}
-                data-testid="logto-sign-out"
-              >
-                <LogOutIcon className="size-4" aria-hidden />
-                {t("signOut")}
-              </Button>
-            </div>
+          )}
+          <Button size="sm" onClick={() => void startSignIn()} data-testid="logto-sign-in">
+            <LogInIcon className="size-4" aria-hidden />
+            {t("signIn")}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-2" data-testid="logto-awaiting-code">
+          <p className="text-sm text-muted-foreground">{t("awaitingCode")}</p>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="logto-code">{t("field.code")}</Label>
+            <Input
+              id="logto-code"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              placeholder={t("field.codePlaceholder")}
+              data-testid="logto-code-input"
+              disabled={step === "exchanging"}
+            />
           </div>
-        ) : step === "idle" ? (
-          <div className="space-y-2" data-testid="logto-sign-in-form">
-            <Field
-              id="logto-issuer"
-              label={t("field.issuer")}
-              value={form.issuer}
-              onChange={onField("issuer")}
-              placeholder="https://logto.example.com/oidc"
-            />
-            <Field
-              id="logto-client-id"
-              label={t("field.clientId")}
-              value={form.clientId}
-              onChange={onField("clientId")}
-            />
-            <Field
-              id="logto-resource"
-              label={t("field.resource")}
-              value={form.resource}
-              onChange={onField("resource")}
-              placeholder="https://api.example.com"
-            />
-            <Field
-              id="logto-redirect"
-              label={t("field.redirectUri")}
-              value={form.redirectUri}
-              onChange={onField("redirectUri")}
-            />
-            <Field
-              id="logto-scope"
-              label={t("field.scope")}
-              value={form.scope}
-              onChange={onField("scope")}
-              // i18n-exempt: OAuth scope identifiers, not translatable UI copy
-              placeholder="brain:rpc brain:read"
-            />
-            <Field
-              id="logto-org"
-              label={t("field.org")}
-              value={form.org}
-              onChange={onField("org")}
-            />
-            {error && (
-              <p className="text-xs text-destructive" data-testid="logto-error">
-                {error}
-              </p>
-            )}
-            <Button size="sm" onClick={() => void startSignIn()} data-testid="logto-sign-in">
-              <LogInIcon className="size-4" aria-hidden />
-              {t("signIn")}
+          {error && (
+            <p className="text-xs text-destructive" data-testid="logto-error">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={submitCode}
+              disabled={step === "exchanging"}
+              data-testid="logto-submit-code"
+            >
+              {step === "exchanging" ? (
+                <LoaderIcon className="size-4 animate-spin" aria-hidden />
+              ) : null}
+              {t("submitCode")}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={cancelSignIn} data-testid="logto-cancel">
+              {t("cancel")}
             </Button>
           </div>
-        ) : (
-          <div className="space-y-2" data-testid="logto-awaiting-code">
-            <p className="text-sm text-muted-foreground">{t("awaitingCode")}</p>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="logto-code">{t("field.code")}</Label>
-              <Input
-                id="logto-code"
-                value={codeInput}
-                onChange={(e) => setCodeInput(e.target.value)}
-                placeholder={t("field.codePlaceholder")}
-                data-testid="logto-code-input"
-                disabled={step === "exchanging"}
-              />
-            </div>
-            {error && (
-              <p className="text-xs text-destructive" data-testid="logto-error">
-                {error}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={submitCode}
-                disabled={step === "exchanging"}
-                data-testid="logto-submit-code"
-              >
-                {step === "exchanging" ? (
-                  <LoaderIcon className="size-4 animate-spin" aria-hidden />
-                ) : null}
-                {t("submitCode")}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={cancelSignIn} data-testid="logto-cancel">
-                {t("cancel")}
-              </Button>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </SettingsBlock>
   )
 }
 

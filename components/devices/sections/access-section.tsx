@@ -25,6 +25,7 @@ import { isGrantEnabled } from "@/lib/devices/grant-capabilities"
 import type { DeviceGrantRow, DeviceRow } from "@/lib/devices/types"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
+import { useHostAdminReach } from "@/hooks/connectivity/use-host-admin-reach"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { cn } from "@/lib/utils"
 
@@ -243,6 +244,14 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
    */
   const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
   const shellBlocked = !shellReach.available
+  /**
+   * Pause / Resume / Revoke are the exception: every Host mounts owner routes
+   * for them, so a paired companion that is the owner device reaches them over
+   * HTTP (`lib/devices/lifecycle-http.ts`, ADR-0170 batch 4). Only a standalone
+   * browser has nowhere to send the change.
+   */
+  const lifecycleReach = useHostAdminReach("host-admin")
+  const lifecycleBlocked = !lifecycleReach.available
 
   if (row.kind !== "paired-device") {
     return (
@@ -314,7 +323,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
               <Button
                 size="sm"
                 variant="outline"
-                disabled={shellBlocked}
+                disabled={lifecycleBlocked}
                 onClick={() => void actions.pause(deviceId, row.label)}
                 data-testid={`paired-device-pause-${deviceId}`}
               >
@@ -326,7 +335,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
               <Button
                 size="sm"
                 variant="outline"
-                disabled={shellBlocked}
+                disabled={lifecycleBlocked}
                 onClick={() => void actions.resume(deviceId, row.label)}
                 data-testid={`paired-device-resume-${deviceId}`}
               >
@@ -337,7 +346,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
             <Button
               size="sm"
               variant="destructive"
-              disabled={revoked || shellBlocked}
+              disabled={revoked || lifecycleBlocked}
               onClick={() => void actions.revoke(deviceId, row.label)}
               data-testid={`paired-device-revoke-${deviceId}`}
             >

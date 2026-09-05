@@ -18,7 +18,7 @@ const RESOLVER = `const DEFAULT_PORT = 27890\n`
 function fixtureReader(overrides = {}) {
   const files = {
     "src-tauri/src/companion_api/server.rs": RUST,
-    "components/settings/companion/companion-section.tsx": TSX,
+    "components/settings/connectivity/blocks/companion-server-commands.ts": TSX,
     "lib/connectivity/lan-scanner.ts": SCANNER,
     "lib/connectivity/lan-resolver.ts": RESOLVER,
     ...overrides,
@@ -83,7 +83,9 @@ test("checkConfigs flags a drifted PROBE_PORTS head as checkOnly", () => {
 
 test("checkConfigs reports a vanished pattern as missing (hard error), not drift", () => {
   const { drifted, missing } = checkConfigs(
-    fixtureReader({ "components/settings/companion/companion-section.tsx": `// refactored away\n` })
+    fixtureReader({
+      "components/settings/connectivity/blocks/companion-server-commands.ts": `// refactored away\n`,
+    })
   )
   assert.deepEqual(drifted, [])
   assert.equal(missing.length, 1)

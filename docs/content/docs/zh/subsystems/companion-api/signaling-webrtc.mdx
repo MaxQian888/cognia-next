@@ -1,12 +1,41 @@
 ---
-title: WebRTC 信令与 DataChannel
-description: 单一协议的桌面/headless answerer、端到端加密信令、受界 peer 会话、RPC 桥与事件恢复。
+title: 中继、WebRTC 信令与 DataChannel
+description: 会合点作为端到端加密的应用层中继（ADR-0170）、单一协议的桌面/headless answerer、在其之上的点对点升级、中继配对房间、RPC 桥与事件恢复。
 ---
 
-# WebRTC 信令与 DataChannel
+# 中继、WebRTC 信令与 DataChannel
 
 同一套 answerer 同时运行在 Tauri 和全新启动的 `cognia-server` 中，不依赖
-renderer 参与。
+renderer 参与。自 ADR-0170 起，会合点同时也是广域网传输：双方经中继互道
+`hello` 的那一刻会话即已打开，DataChannel 是在其之上协商出来的升级。
+
+## 中继数据通道
+
+`hello` 信封双向携带 `relay: true`。从这一帧起，`data` 通道上的
+`EnvelopeKind::Data` 信封原样承载 DataChannel 帧（RPC、`event` /
+`event-batch`、二进制资源及其分片），`dispatch.rs` 通过同一个入站队列消费。
+offer、answer 与 ICE 交换在后台进行；DataChannel 打开即提升载体，掉线即降级，
+不重连、不丢事件游标。不应答 `relay: true` 的主机是旧版主机，客户端保持旧行为：
+要么 DataChannel，要么没有。
+
+## 经中继配对
+
+所有者邀请（`cgnp4`）携带一个配对房间：会合点 URL、一个 `RoomDescriptor`
+（其移动端密钥是主机刚铸造的一次性 P-256 密钥）以及该密钥私钥的 JWK。主机在
+邀请有效期内驻留房间。受邀方经数据通道发送 `pair.http` RPC 帧
+（`{ method, path, headers, body }`），主机在进程内调用自己的 axum 路由应答，
+且只放行四条路由：`/api/auth/config`、`/api/auth/device/challenge`、
+`/api/auth/device/register`、`/api/auth/token`。其余请求在到达路由前即被拒绝。
+客户端先对邀请里的直连地址探测四秒（`registerPairPayload`），失败再走中继。
+
+## 中继通道预算
+
+服务端按 `lane` 字段给 `relay` 帧分桶，不解密任何内容。`signal` 通道保留每秒
+补 10 帧的 20 帧桶与 8 KiB 软上限；`data` 通道单独一桶，256 帧、每秒补 64 帧，
+上限 64 KiB，足以容纳 base64 后的 21 KiB 二进制分片加信封。按通道的计数器以
+`signaling_relay_frames_total{lane}` 与 `signaling_relay_bytes_total{lane}`
+导出。拒绝仍使用稳定的 `rate_limited` 与 `frame_too_large` 码；已打开的传输把
+一帧被丢视为该帧自己的超时，而不是重连的理由。
 
 ## 模块
 

@@ -148,6 +148,11 @@
       "category": "system"
     },
     {
+      "id": "execution",
+      "title": "Execution",
+      "category": "tasks"
+    },
+    {
       "id": "external-agents",
       "title": "External Agents",
       "category": "agents"
@@ -9558,6 +9563,197 @@
       "outputTyped": true
     },
     {
+      "name": "companion_browser_access_get",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_browser_access_get (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::BrowserAccessSummary",
+        "required": [
+          "enabled",
+          "allowedOrigins",
+          "port",
+          "boundPort",
+          "suggestedOrigins",
+          "browserBaseUrl",
+          "primaryOrigin"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "port": {
+            "type": "integer"
+          },
+          "boundPort": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "suggestedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "browserBaseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "primaryOrigin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_browser_access_set",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_browser_access_set (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": false
+          },
+          "allowed_origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [],
+            "description": "Also accepted as `allowedOrigins`."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [],
+            "description": "Also accepted as `allowedOrigins`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "allowed_origins"
+                ]
+              },
+              {
+                "required": [
+                  "allowedOrigins"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::BrowserAccessSummary",
+        "required": [
+          "enabled",
+          "allowedOrigins",
+          "port",
+          "boundPort",
+          "suggestedOrigins",
+          "browserBaseUrl",
+          "primaryOrigin"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "port": {
+            "type": "integer"
+          },
+          "boundPort": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "suggestedOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "browserBaseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "primaryOrigin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "companion_can_control",
       "category": "system",
       "resource": "companion",
@@ -9586,6 +9782,119 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "companion"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_create_owner_invitation",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_create_owner_invitation (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::OwnerInvitationIssue",
+        "required": [
+          "invitation",
+          "expiresAtMs",
+          "baseUrl",
+          "fingerprint",
+          "appVersion",
+          "hostId",
+          "tenantId"
+        ],
+        "properties": {
+          "invitation": {
+            "type": "string"
+          },
+          "expiresAtMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "appVersion": {
+            "type": "string"
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "relay": {
+            "type": "object",
+            "x-cognia-wire-source": "companion_api::signaling::pairing::PairingRoomIssue",
+            "description": "ADR-0170 relay pairing room. The mobile private key is a one-shot P-256 JWK worth exactly what the invitation next to it is worth.",
+            "required": [
+              "url",
+              "room",
+              "mobilePrivateKeyJwk"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "room": {
+                "type": "object",
+                "x-cognia-wire-source": "cognia_signaling_core::proto::RoomDescriptor",
+                "required": [
+                  "v",
+                  "roomId",
+                  "roomNonce",
+                  "desktopSigningKey",
+                  "mobileSigningKey",
+                  "notAfter"
+                ],
+                "properties": {
+                  "v": {
+                    "type": "integer"
+                  },
+                  "roomId": {
+                    "type": "string"
+                  },
+                  "roomNonce": {
+                    "type": "string"
+                  },
+                  "desktopSigningKey": {
+                    "type": "string"
+                  },
+                  "mobileSigningKey": {
+                    "type": "string"
+                  },
+                  "notAfter": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "mobilePrivateKeyJwk": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -9635,6 +9944,590 @@
           },
           "serverId": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_clear_apns",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_clear_apns (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_clear_fcm",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_clear_fcm (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_configure_apns",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_configure_apns (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "production"
+        ],
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `keyId`."
+          },
+          "team_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `teamId`."
+          },
+          "bundle_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `bundleId`."
+          },
+          "private_key_pem": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `privateKeyPem`."
+          },
+          "production": {
+            "type": "boolean",
+            "example": false
+          },
+          "keyId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `keyId`."
+          },
+          "teamId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `teamId`."
+          },
+          "bundleId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `bundleId`."
+          },
+          "privateKeyPem": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `privateKeyPem`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "key_id"
+                ]
+              },
+              {
+                "required": [
+                  "keyId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "team_id"
+                ]
+              },
+              {
+                "required": [
+                  "teamId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "bundle_id"
+                ]
+              },
+              {
+                "required": [
+                  "bundleId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "private_key_pem"
+                ]
+              },
+              {
+                "required": [
+                  "privateKeyPem"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_configure_fcm",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_configure_fcm (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "service_account_json": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `serviceAccountJson`."
+          },
+          "serviceAccountJson": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `serviceAccountJson`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "service_account_json"
+                ]
+              },
+              {
+                "required": [
+                  "serviceAccountJson"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_notification",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_push_notification (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "level",
+          "source"
+        ],
+        "properties": {
+          "notification_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `notificationId`."
+          },
+          "source": {
+            "type": "string",
+            "example": ""
+          },
+          "level": {
+            "type": "string",
+            "example": ""
+          },
+          "href": {
+            "type": "string"
+          },
+          "notificationId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `notificationId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "notification_id"
+                ]
+              },
+              {
+                "required": [
+                  "notificationId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::PushBroadcastResult",
+        "required": [
+          "sent"
+        ],
+        "properties": {
+          "sent": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_push_status",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_push_status (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::PushConfigStatus",
+        "required": [
+          "fcmConfigured",
+          "apnsConfigured"
+        ],
+        "properties": {
+          "fcmConfigured": {
+            "type": "boolean"
+          },
+          "apnsConfigured": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_server_status",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_server_status (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::commands::CompanionServerStatus",
+        "required": [
+          "running",
+          "bindMode",
+          "boundPort"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "bindMode": {
+            "type": "string",
+            "enum": [
+              "loopback",
+              "lan",
+              "none"
+            ]
+          },
+          "boundPort": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_signaling_configure",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_signaling_configure (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "patch"
+        ],
+        "properties": {
+          "patch": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_signaling_devices_status",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_signaling_devices_status (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "x-cognia-wire-source": "companion_api::signaling::SignalingHub::devices_status",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "companion_api::signaling::DeviceTierEntry",
+          "required": [
+            "deviceId",
+            "rendezvousId",
+            "tier",
+            "updatedAtMs"
+          ],
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "rendezvousId": {
+              "type": "string"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "offline",
+                "awaiting",
+                "negotiating",
+                "relayed",
+                "connected",
+                "failed"
+              ]
+            },
+            "lastError": {
+              "type": "string"
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_signaling_reconnect_device",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "companion_signaling_reconnect_device (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rendezvous_id": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `rendezvousId`."
+          },
+          "rendezvousId": {
+            "type": "string",
+            "example": "",
+            "description": "Also accepted as `rendezvousId`."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "rendezvous_id"
+                ]
+              },
+              {
+                "required": [
+                  "rendezvousId"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "companion_signaling_status",
+      "category": "system",
+      "resource": "companion",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "host.admin",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "companion_signaling_status (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "companion_api::signaling::SignalingStatus",
+        "required": [
+          "enabled",
+          "signalingUrl",
+          "registeredDevices"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "signalingUrl": {
+            "type": "string"
+          },
+          "registeredDevices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false
@@ -12569,6 +13462,85 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "execution_run_control",
+      "category": "tasks",
+      "resource": "execution",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "execution_run_control (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "action",
+          "idempotencyKey",
+          "expectedRevision"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "pause",
+              "resume",
+              "stop",
+              "retry",
+              "approve",
+              "deny",
+              "steer",
+              "open_details"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer"
+          },
+          "interruptId": {
+            "type": "string"
+          },
+          "reviewDecision": {
+            "type": "object",
+            "description": "Typed SquadReviewDecision. Its `kind` must match the pending interrupt. Validated by the control gate."
+          },
+          "steerMessage": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string",
+            "deprecated": true,
+            "description": "Ignored. The host stamps the authenticated caller: the device is the actor the receipt names and the operator the gate authorizes."
+          },
+          "deviceName": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "execution"
       },
       "outputTyped": true
     },
@@ -47527,5 +48499,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "adbacd05b3132be86aaf5bd4a73174774cb6ac89e64fc1c7b4297aec7b0428a7"
+  "catalogHash": "79bc0931a430147d888fcf52354a0d6cb0aad4a5262741d0708a3d3db0377721"
 }

@@ -19,6 +19,7 @@ import { resetKeysForSection } from "@/lib/settings/section-keys"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
 import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
+import { CONNECTIVITY_PANEL_PARAM, panelForLegacySection } from "./connectivity/nav-config"
 
 const SectionLoading = () => {
   const t = useTranslations("settings")
@@ -207,12 +208,8 @@ const AutomationSection = dynamic(
   () => import("./automation/automation-section").then((m) => m.AutomationSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
-const CompanionSection = dynamic(
-  () => import("./companion/companion-section").then((m) => m.CompanionSection),
-  { ssr: false, loading: () => <SectionLoading /> }
-)
-const RemoteHostsSection = dynamic(
-  () => import("./remote-hosts/remote-hosts-section").then((m) => m.RemoteHostsSection),
+const ConnectivitySection = dynamic(
+  () => import("./connectivity/connectivity-section").then((m) => m.ConnectivitySection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const CcswitchSection = dynamic(
@@ -301,7 +298,15 @@ const DEPRECATED_REDIRECT: Record<string, SettingsSectionId> = {
   "api-key": "ai-connections",
   providers: "ai-connections",
   profile: "account",
+  // ADR-0170: the companion server and the remote-host registry are two
+  // panels of one Connectivity section now. The panel is picked in the
+  // redirect effect below from the section that was asked for.
+  companion: "connectivity",
+  "remote-hosts": "connectivity",
 }
+
+/** The retired Remote hosts section's tab param, still honoured by the redirect. */
+const LEGACY_REMOTE_HOSTS_TAB_PARAM = "remoteHostsTab"
 
 /** Default landing section when the URL has no (valid) `?section=`. */
 const DEFAULT_SECTION: SettingsSectionId = "ai-connections"
@@ -330,6 +335,7 @@ const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
   // detail pane fighting over 1024px.
   "gateway",
   "external-bridge",
+  "connectivity",
   // Same conversion, same reason. Left out of this set they still *rendered* —
   // `h-full` collapsed to content height inside the ScrollArea, so the rail and
   // the pane grew unbounded and the whole page scrolled instead of the pane.
@@ -403,8 +409,15 @@ function SettingsShellInner({ actions }: Props) {
     if (!redirectTarget) return
     const next = new URLSearchParams(searchParams.toString())
     next.set("section", redirectTarget)
+    if (requested === "companion" || requested === "remote-hosts") {
+      next.set(
+        CONNECTIVITY_PANEL_PARAM,
+        panelForLegacySection(requested, next.get(LEGACY_REMOTE_HOSTS_TAB_PARAM))
+      )
+      next.delete(LEGACY_REMOTE_HOSTS_TAB_PARAM)
+    }
     router.replace(`/settings?${next.toString()}`, { scroll: false })
-  }, [redirectTarget, router, searchParams])
+  }, [redirectTarget, requested, router, searchParams])
 
   const handleSectionSelect = (section: SettingsSectionId) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -666,10 +679,8 @@ function SectionContent({
       return <SandboxSection />
     case "security":
       return <SecuritySection />
-    case "companion":
-      return <CompanionSection />
-    case "remote-hosts":
-      return <RemoteHostsSection />
+    case "connectivity":
+      return <ConnectivitySection />
     case "network":
       return <NetworkSection />
     case "logs":

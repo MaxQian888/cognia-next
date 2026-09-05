@@ -12,7 +12,7 @@
 
 import { useEffect, useRef } from "react"
 
-import { getDevicePlatform } from "@/components/mobile/pair/pair-helpers"
+import { getDevicePlatform } from "@/components/connectivity/pair/pair-helpers"
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { maybeAutoUploadSubscription } from "@/lib/subscription/sync/subscription-sync"

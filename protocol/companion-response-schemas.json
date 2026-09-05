@@ -3539,6 +3539,251 @@
     "NullResult": {
       "type": "null"
     },
+    "IceServerSpec": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::signaling::IceServerSpec",
+      "required": ["urls"],
+      "properties": {
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "username": {
+          "type": "string"
+        },
+        "credential": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignalingStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::signaling::SignalingStatus",
+      "required": ["enabled", "signalingUrl", "registeredDevices"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "signalingUrl": {
+          "type": "string"
+        },
+        "registeredDevices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignalingDeviceTierEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::signaling::DeviceTierEntry",
+      "required": ["deviceId", "rendezvousId", "tier", "updatedAtMs"],
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "rendezvousId": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["offline", "awaiting", "negotiating", "relayed", "connected", "failed"]
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignalingDevicesStatus": {
+      "type": "array",
+      "x-cognia-wire-source": "companion_api::signaling::SignalingHub::devices_status",
+      "items": {
+        "$ref": "#/$defs/SignalingDeviceTierEntry"
+      }
+    },
+    "BrowserAccessSummary": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::commands::BrowserAccessSummary",
+      "required": [
+        "enabled",
+        "allowedOrigins",
+        "port",
+        "boundPort",
+        "suggestedOrigins",
+        "browserBaseUrl",
+        "primaryOrigin"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "port": {
+          "type": "integer"
+        },
+        "boundPort": {
+          "type": ["integer", "null"]
+        },
+        "suggestedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "browserBaseUrl": {
+          "type": ["string", "null"]
+        },
+        "primaryOrigin": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PushConfigStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::commands::PushConfigStatus",
+      "required": ["fcmConfigured", "apnsConfigured"],
+      "properties": {
+        "fcmConfigured": {
+          "type": "boolean"
+        },
+        "apnsConfigured": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PushBroadcastResult": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::commands::PushBroadcastResult",
+      "required": ["sent"],
+      "properties": {
+        "sent": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SignalingRoomDescriptor": {
+      "type": "object",
+      "x-cognia-wire-source": "cognia_signaling_core::proto::RoomDescriptor",
+      "required": ["v", "roomId", "roomNonce", "desktopSigningKey", "mobileSigningKey", "notAfter"],
+      "properties": {
+        "v": {
+          "type": "integer"
+        },
+        "roomId": {
+          "type": "string"
+        },
+        "roomNonce": {
+          "type": "string"
+        },
+        "desktopSigningKey": {
+          "type": "string"
+        },
+        "mobileSigningKey": {
+          "type": "string"
+        },
+        "notAfter": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PairingRoomIssue": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::signaling::pairing::PairingRoomIssue",
+      "description": "ADR-0170 relay pairing room. The mobile private key is a one-shot P-256 JWK worth exactly what the invitation next to it is worth.",
+      "required": ["url", "room", "mobilePrivateKeyJwk"],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "room": {
+          "$ref": "#/$defs/SignalingRoomDescriptor"
+        },
+        "mobilePrivateKeyJwk": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "OwnerInvitationIssue": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::commands::OwnerInvitationIssue",
+      "required": [
+        "invitation",
+        "expiresAtMs",
+        "baseUrl",
+        "fingerprint",
+        "appVersion",
+        "hostId",
+        "tenantId"
+      ],
+      "properties": {
+        "invitation": {
+          "type": "string"
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "baseUrl": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "appVersion": {
+          "type": "string"
+        },
+        "hostId": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        },
+        "relay": {
+          "$ref": "#/$defs/PairingRoomIssue"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CompanionServerStatus": {
+      "type": "object",
+      "x-cognia-wire-source": "companion_api::commands::CompanionServerStatus",
+      "required": ["running", "bindMode", "boundPort"],
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "bindMode": {
+          "type": "string",
+          "enum": ["loopback", "lan", "none"]
+        },
+        "boundPort": {
+          "type": ["integer", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
     "NullableString": {
       "type": ["string", "null"]
     },
@@ -6308,6 +6553,48 @@
     }
   },
   "commands": {
+    "companion_signaling_status": {
+      "$ref": "#/$defs/SignalingStatus"
+    },
+    "companion_signaling_configure": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_signaling_devices_status": {
+      "$ref": "#/$defs/SignalingDevicesStatus"
+    },
+    "companion_signaling_reconnect_device": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_browser_access_get": {
+      "$ref": "#/$defs/BrowserAccessSummary"
+    },
+    "companion_browser_access_set": {
+      "$ref": "#/$defs/BrowserAccessSummary"
+    },
+    "companion_push_status": {
+      "$ref": "#/$defs/PushConfigStatus"
+    },
+    "companion_push_configure_fcm": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_push_configure_apns": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_push_clear_fcm": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_push_clear_apns": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "companion_push_notification": {
+      "$ref": "#/$defs/PushBroadcastResult"
+    },
+    "companion_create_owner_invitation": {
+      "$ref": "#/$defs/OwnerInvitationIssue"
+    },
+    "companion_server_status": {
+      "$ref": "#/$defs/CompanionServerStatus"
+    },
     "adapter_update_policy": {
       "$ref": "#/$defs/LegacyResult"
     },

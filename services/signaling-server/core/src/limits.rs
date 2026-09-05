@@ -15,6 +15,66 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::proto::RelayLane;
+
+/// Signal-lane budget: SDP / ICE / `hello`. One offer, a handful of ICE
+/// candidates, a few pings — never trips this in normal operation.
+pub const SIGNAL_RATE_CAPACITY: u32 = 20;
+pub const SIGNAL_RATE_REFILL_PER_SEC: u32 = 10;
+/// Soft per-frame cap on the signal lane. SDP/ICE envelopes sit well under.
+pub const SIGNAL_MAX_FRAME_BYTES: usize = 8 * 1024;
+
+/// Data-lane budget: application frames relayed in place of a DataChannel.
+/// Sized for the peers' own framing — a 1 MiB logical message is 32 chunks
+/// of 32 KiB, a 10 MiB media resource is 512 chunks of 20 KiB — so one
+/// burst fits the bucket and sustained traffic settles at the refill rate.
+pub const DATA_RATE_CAPACITY: u32 = 256;
+pub const DATA_RATE_REFILL_PER_SEC: u32 = 64;
+/// Per-frame cap on the data lane. A 32 KiB text chunk grows to ~45 KiB
+/// once base64'd twice (AES-GCM ciphertext inside a JSON envelope inside a
+/// JSON frame); a 20 KiB binary chunk to ~40 KiB. This is also the hard
+/// `max_message_size` on the WS upgrade, so nothing larger ever parses.
+pub const DATA_MAX_FRAME_BYTES: usize = 64 * 1024;
+
+/// The soft per-frame cap for a lane, in bytes.
+pub fn max_frame_bytes(lane: RelayLane) -> usize {
+    match lane {
+        RelayLane::Signal => SIGNAL_MAX_FRAME_BYTES,
+        RelayLane::Data => DATA_MAX_FRAME_BYTES,
+    }
+}
+
+/// One bucket per lane. A data burst cannot starve the handshake and a
+/// chatty handshake cannot eat the data budget.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaneBuckets {
+    signal: TokenBucket,
+    data: TokenBucket,
+}
+
+impl LaneBuckets {
+    pub fn new() -> Self {
+        Self {
+            signal: TokenBucket::new(SIGNAL_RATE_CAPACITY, SIGNAL_RATE_REFILL_PER_SEC),
+            data: TokenBucket::new(DATA_RATE_CAPACITY, DATA_RATE_REFILL_PER_SEC),
+        }
+    }
+
+    /// Try to consume one token from `lane`'s bucket at wall-clock `now_ms`.
+    pub fn try_take(&mut self, lane: RelayLane, now_ms: f64) -> bool {
+        match lane {
+            RelayLane::Signal => self.signal.try_take(now_ms),
+            RelayLane::Data => self.data.try_take(now_ms),
+        }
+    }
+}
+
+impl Default for LaneBuckets {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenBucket {
     capacity: f64,
@@ -90,6 +150,51 @@ mod tests {
         assert!(b.try_take(1_000_000.0));
         assert!(b.try_take(1_000_000.0));
         assert!(!b.try_take(1_000_000.0), "never exceeds capacity");
+    }
+
+    #[test]
+    fn lanes_draw_from_separate_buckets() {
+        let mut lanes = LaneBuckets::new();
+        // Drain the signal lane completely...
+        for _ in 0..SIGNAL_RATE_CAPACITY {
+            assert!(lanes.try_take(RelayLane::Signal, 0.0));
+        }
+        assert!(!lanes.try_take(RelayLane::Signal, 0.0));
+        // ...and the data lane is untouched, with its own (wider) capacity.
+        for _ in 0..DATA_RATE_CAPACITY {
+            assert!(lanes.try_take(RelayLane::Data, 0.0));
+        }
+        assert!(!lanes.try_take(RelayLane::Data, 0.0));
+    }
+
+    #[test]
+    fn data_lane_admits_a_full_media_burst() {
+        // 10 MiB at 20 KiB per chunk is 512 frames; with the 64/s refill a
+        // burst of that size clears in well under the peers' 15 s chunk
+        // timeout instead of tripping `rate_limited` half-way through.
+        let mut lanes = LaneBuckets::new();
+        let mut accepted = 0;
+        for i in 0..512 {
+            // ~8 s of wall clock for the whole burst.
+            if lanes.try_take(RelayLane::Data, i as f64 * 16.0) {
+                accepted += 1;
+            }
+        }
+        assert_eq!(accepted, 512);
+    }
+
+    #[test]
+    fn frame_caps_follow_the_lane() {
+        assert_eq!(max_frame_bytes(RelayLane::Signal), 8 * 1024);
+        assert_eq!(max_frame_bytes(RelayLane::Data), 64 * 1024);
+    }
+
+    #[test]
+    fn lane_buckets_round_trip_through_serde() {
+        let lanes = LaneBuckets::new();
+        let json = serde_json::to_string(&lanes).unwrap();
+        let mut restored: LaneBuckets = serde_json::from_str(&json).unwrap();
+        assert!(restored.try_take(RelayLane::Data, 0.0));
     }
 
     #[test]

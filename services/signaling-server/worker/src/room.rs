@@ -16,21 +16,19 @@
 //! server uses, so the two deployments cannot diverge.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use cognia_signaling_core::limits::TokenBucket;
+use cognia_signaling_core::limits::{max_frame_bytes, LaneBuckets, TokenBucket};
 use cognia_signaling_core::policy::{
     rendezvous_id_matches_upgrade_room, ROOM_MISMATCH_CODE, ROOM_MISMATCH_MESSAGE,
 };
-use cognia_signaling_core::proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame};
+use cognia_signaling_core::proto::{ClientFrame, PeerRole, PeerSnapshot, RelayLane, ServerFrame};
 use cognia_signaling_core::protocol::verify_subscribe_proof;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
-/// Per-connection rate limit — matches the axum server (`ws.rs`).
+/// Legacy single-bucket limit, kept only so an attachment serialized before
+/// the per-lane buckets existed still deserializes across hibernation.
 const RATE_CAPACITY: u32 = 20;
 const RATE_REFILL_PER_SEC: u32 = 10;
-/// Soft per-frame cap; oversized frames get a graceful error and the socket
-/// stays open. SDP/ICE envelopes sit well under this.
-const MAX_FRAME_BYTES: usize = 8 * 1024;
 /// Fallback caps when the corresponding `wrangler.toml` `[vars]` are unset.
 const DEFAULT_MAX_CONN_PER_IP: usize = 4;
 const DEFAULT_AE_SAMPLE_N: u32 = 10;
@@ -59,7 +57,12 @@ struct Attachment {
     joined_at_ms: i64,
     #[serde(default)]
     last_activity_ms: i64,
+    /// Pre-lane bucket. Unused once `lanes` exists; retained for attachment
+    /// compatibility (a DO can hibernate across a deploy).
     bucket: TokenBucket,
+    /// Per-lane budgets (signal vs data) — see `cognia_signaling_core::limits`.
+    #[serde(default)]
+    lanes: LaneBuckets,
     /// Source IP (`cf-connecting-ip`) captured at accept time, used for the
     /// per-room per-IP connection cap. `None` when the header was absent.
     #[serde(default)]
@@ -89,6 +92,7 @@ impl Attachment {
             joined_at_ms: now_ms as i64,
             last_activity_ms: now_ms as i64,
             bucket: TokenBucket::new(RATE_CAPACITY, RATE_REFILL_PER_SEC),
+            lanes: LaneBuckets::new(),
             ip,
             sample_n: 0,
         }
@@ -192,16 +196,36 @@ impl DurableObject for RoomDurableObject {
         attach.last_activity_ms = now as i64;
         self.state.storage().set_alarm(LEASE_SCAN_MS).await?;
 
-        if text.len() > MAX_FRAME_BYTES {
-            console_log!("signaling: frame_too_large len={}", text.len());
+        // Parse first: the lane is a clear-text field and decides both the
+        // frame cap and the bucket (mirrors the axum server's `ws.rs`). A
+        // frame that fails to parse is charged to the signal lane.
+        let parsed: std::result::Result<ClientFrame, _> = serde_json::from_str(&text);
+        let lane = match &parsed {
+            Ok(ClientFrame::Relay { lane, .. }) => *lane,
+            _ => RelayLane::Signal,
+        };
+        if text.len() > max_frame_bytes(lane) {
+            console_log!(
+                "signaling: frame_too_large len={} lane={}",
+                text.len(),
+                lane.as_str()
+            );
             self.record_hot(&mut attach, "frame_too_large", None, 0.0);
             ws.serialize_attachment(&attach)?;
-            send_error(&ws, "frame_too_large", "frame exceeds 8 KiB");
+            send_error(
+                &ws,
+                "frame_too_large",
+                &format!(
+                    "frame exceeds {} KiB on the {} lane",
+                    max_frame_bytes(lane) / 1024,
+                    lane.as_str()
+                ),
+            );
             return Ok(());
         }
 
-        if !attach.bucket.try_take(now) {
-            console_log!("signaling: rate_limited");
+        if !attach.lanes.try_take(lane, now) {
+            console_log!("signaling: rate_limited lane={}", lane.as_str());
             self.record_hot(&mut attach, "rate_limited", None, 0.0);
             let _ = ws.serialize_attachment(&attach);
             send_error(&ws, "rate_limited", "too many frames");
@@ -209,7 +233,7 @@ impl DurableObject for RoomDurableObject {
             return Ok(());
         }
 
-        let frame: ClientFrame = match serde_json::from_str(&text) {
+        let frame: ClientFrame = match parsed {
             Ok(frame) => frame,
             Err(_) => {
                 self.record_hot(&mut attach, "malformed_frame", None, 0.0);
@@ -350,6 +374,7 @@ impl DurableObject for RoomDurableObject {
             ClientFrame::Relay {
                 rendezvous_id,
                 payload,
+                lane,
             } => {
                 if !rendezvous_id_matches_upgrade_room(
                     &attach.upgrade_rendezvous_id,
@@ -391,12 +416,24 @@ impl DurableObject for RoomDurableObject {
                 // passive observer who knows the rid (matches axum, where
                 // unsubscribed sockets are simply not in the room registry).
                 let others = self.subscribed_others(&ws, &rendezvous_id)?;
+                // `relay` keeps its historical meaning (every lane); the data
+                // lane also lands in `relay_data` with the egress byte count in
+                // `double2`, so `SUM(double1 * double2)` over that event is the
+                // relayed-bytes figure the cost dashboard wants.
                 self.record_hot(
                     &mut attach,
                     "relay",
                     Some(from_role.as_str()),
                     others.len() as f64,
                 );
+                if lane == RelayLane::Data {
+                    self.record_hot(
+                        &mut attach,
+                        "relay_data",
+                        Some(from_role.as_str()),
+                        (payload.len() * others.len()) as f64,
+                    );
+                }
                 ws.serialize_attachment(&attach)?;
                 for other in others {
                     send_frame(
@@ -406,6 +443,7 @@ impl DurableObject for RoomDurableObject {
                             from_role,
                             from_session_id: from_session_id.clone(),
                             payload: payload.clone(),
+                            lane,
                         },
                     );
                 }

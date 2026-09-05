@@ -9416,6 +9416,15 @@
         "capabilityCount": "{count, plural, =0 {未发布能力} other {# 项操作}}",
         "cloudHost": "云端 Host",
         "desktopHost": "桌面 Host",
+        "eventPlane": "事件",
+        "eventPlaneDegradedHint": "请求能应答但没有事件到达。在别处做的更改要等事件流重连后才会出现。",
+        "eventPlaneState": {
+          "connecting": "连接中",
+          "degraded": "降级",
+          "disconnected": "已断开",
+          "ready": "实时",
+          "replaying": "追赶中"
+        },
         "hostLink": "Host 链路",
         "lastConnected": "最近成功连接",
         "lastError": "最近连接错误",
@@ -9441,6 +9450,7 @@
         "thisDesktop": "当前桌面",
         "tier": {
           "offline": "离线",
+          "relay": "中继",
           "rtc-direct": "RTC 直连",
           "rtc-relay": "RTC 中继",
           "unknown": "协商中",
@@ -12504,17 +12514,76 @@
       "opencode": "OpenCode"
     },
     "island": {
-      "empty": "暂无活动 Agent",
-      "legend": {
-        "detached": "{count} 个已断开监控",
-        "done": "{count} 个已结束",
-        "idle": "{count} 个空闲",
-        "needsYou": "{count} 个待处理",
-        "working": "{count} 个工作中"
+      "actionError": {
+        "callFailed": "操作未生效，请重试。",
+        "emptyInput": "请先输入内容。",
+        "interrupt_identity_mismatch": "该进程已不是目标代理，未发送任何信号。",
+        "interrupt_not_running": "该会话已不可达。",
+        "interrupt_unsupported": "当前平台不支持中断。",
+        "noRoute": "该任务没有可打开的页面。",
+        "notPermitted": "该任务不支持此操作。",
+        "requestChanged": "请求已变化，请重试。",
+        "staleRevision": "操作前任务已发生变化，请重试。",
+        "timeout": "应用未响应，请重试。",
+        "unknown": "无法完成该操作。",
+        "unknownRow": "该任务已不在列表中。"
       },
-      "summary": "{count} 个 Agent",
-      "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
-      "toggle": "展开/收起 Agent 列表"
+      "announceActive": "{count, plural, =0 {暂无进行中的任务} other {# 个进行中的任务}}",
+      "announceWaiting": "{count} 个任务，{waiting} 个等待你处理",
+      "decideInMain": "请在主窗口处理",
+      "detail": {
+        "hide": "隐藏详情",
+        "loading": "正在加载详情…",
+        "show": "显示详情"
+      },
+      "detailError": {
+        "notPermitted": "灵动岛的详情展示已关闭。",
+        "staleRevision": "任务已变化，请重新打开详情。",
+        "unavailable": "暂无可用详情。",
+        "unknownRow": "该任务已不在列表中。"
+      },
+      "dismiss": "清除",
+      "empty": "暂无进行中的任务",
+      "focusTerminal": "聚焦终端",
+      "interrupt": "中断当前回合",
+      "legend": {
+        "blocked": "{count} 个待处理",
+        "done": "{count} 个已结束",
+        "failed": "{count} 个失败",
+        "idle": "{count} 个空闲",
+        "stale": "{count} 个已失效",
+        "working": "{count} 个执行中"
+      },
+      "listLabel": "进行中的任务与待处理事项",
+      "more": "+{count}",
+      "openOwner": {
+        "chat": "打开所属对话",
+        "external": "打开所属会话",
+        "run": "打开运行控制台",
+        "team": "打开团队工作区"
+      },
+      "openTranscript": "在文件管理器中显示记录",
+      "source": {
+        "chat": "对话",
+        "external": "外部代理",
+        "run": "运行",
+        "team": "团队"
+      },
+      "state": {
+        "awaitingApproval": "等待你处理",
+        "awaitingInput": "等待你的回答",
+        "awaitingPermission": "等待你的授权",
+        "blocked": "等待你处理",
+        "done": "已结束",
+        "failed": "已失败",
+        "idle": "空闲",
+        "stale": "已不再等待",
+        "working": "执行中…"
+      },
+      "summary": "{count} 个任务",
+      "summaryWaiting": "{count} 个任务 · {waiting} 个待处理",
+      "toggle": "展开或收起任务列表",
+      "waitingFor": "已等待 {duration}"
     },
     "permission": {
       "allow": "允许",
@@ -17269,11 +17338,13 @@
             "connected": "DataChannel 已打开，手机直连本桌面。",
             "failed": "上一次会话以错误结束，客户端任务在下一次尝试前进入退避。",
             "negotiating": "移动端已加入；正在交换 SDP 与 ICE 候选。",
-            "offline": "信令客户端空闲——通常处于重连尝试之间。"
+            "offline": "信令客户端空闲——通常处于重连尝试之间。",
+            "relayed": "正通过 Cognia 中继服务；RPC 与事件经汇合点转发，同时在后台协商直连 DataChannel。"
           },
           "failed": "失败",
           "negotiating": "协商中",
-          "offline": "离线"
+          "offline": "离线",
+          "relayed": "中继中"
         },
         "enableHelp": "开启后，移动端在配对完成后会通过 WebRTC 直接连接到本桌面；只有在 WebRTC 无法打通时才会回退到 LAN 或 Cloudflared 隧道。",
         "enableLabel": "启用 WebRTC 通道",
@@ -17351,6 +17422,7 @@
       "syncLabel": "同步进度",
       "tier": {
         "offline": "离线",
+        "relay": "中继",
         "rtc-direct": "RTC 直连",
         "rtc-relay": "RTC 中继",
         "ws-lan": "WS 局域网",
@@ -17358,6 +17430,7 @@
       },
       "tierHint": {
         "offline": "未连接到桌面端。",
+        "relay": "经 Cognia 中继转发，端到端加密。仍在尝试建立直连。",
         "rtc-direct": "对等 DataChannel——延迟最低。",
         "rtc-relay": "经由 TURN 中继的对等连接，仍是端到端加密。",
         "ws-lan": "通过局域网 HTTPS+WS 回退。",
@@ -17443,6 +17516,7 @@
       },
       "tiers": {
         "offline": "离线",
+        "relay": "中继",
         "rtc-direct": "RTC 直连",
         "rtc-relay": "RTC 中继",
         "ws-lan": "WS 局域网",
@@ -18930,6 +19004,8 @@
     "transportTier": {
       "offline": "离线",
       "offlineDescription": "两条传输都不可达。外发请求会本地排队并自动重试。",
+      "relay": "中继",
+      "relayDescription": "数据经 Cognia 中继转发，端到端加密；后台仍在协商直连 DataChannel。",
       "rtcDirect": "WebRTC（直连）",
       "rtcDirectDescription": "手机与桌面之间的直连 DataChannel，延迟最低。",
       "rtcRelay": "WebRTC（TURN 中继）",
@@ -32375,6 +32451,142 @@
         "welcomePlaceholder": "你好！有什么可以帮你的吗？"
       }
     },
+    "connectivity": {
+      "description": "这台设备与主机如何互相触达：本机服务、中继与隧道、配对、远程主机、推送与同步。",
+      "nav": {
+        "groups": {
+          "deliveryGroup": "投递",
+          "devicesGroup": "设备",
+          "hostGroup": "本机",
+          "statusGroup": "状态"
+        },
+        "items": {
+          "cloud-relay": {
+            "description": "中继、点对点升级、隧道、登录与协作服务器。",
+            "label": "云与中继"
+          },
+          "local-host": {
+            "description": "伴侣服务、绑定方式、TLS、发现与浏览器访问。",
+            "label": "本机主机"
+          },
+          "overview": {
+            "description": "这个壳是什么、连着谁、走哪条链路。",
+            "label": "总览"
+          },
+          "pairing": {
+            "description": "邀请、浏览器登记，以及已兑换邀请的设备。",
+            "label": "配对"
+          },
+          "push": {
+            "description": "APNs 与 FCM 凭据，以及测试通知。",
+            "label": "推送"
+          },
+          "remote-hosts": {
+            "description": "这台设备驱动的主机，以及添加新主机。",
+            "label": "远程主机"
+          },
+          "sync": {
+            "description": "这台设备与其主机之间按表的镜像状态。",
+            "label": "同步"
+          }
+        },
+        "mobileTrigger": "主题",
+        "title": "连接主题"
+      },
+      "overview": {
+        "activeHost": "当前主机",
+        "activeHostNone": "没有正在驱动的主机。",
+        "activeHostSelf": "这台机器。",
+        "degradedHint": "请求仍能应答，但没有事件到达。在别处做的更改要等事件流重连后才会出现。",
+        "devicePlanes": "{count, plural, =0 {没有已配对设备。} =1 {1 台已配对设备。} other {# 台已配对设备。}}",
+        "eventPlaneDescription": "除请求应答之外，事件是否能到达对端。",
+        "eventPlaneTitle": "事件面",
+        "goDevices": "设备控制台",
+        "goPairing": "配对设备",
+        "goRelay": "中继与隧道",
+        "hostMode": "这个壳",
+        "hostModeValue": {
+          "companion": "驱动一台主机",
+          "host": "本身是主机",
+          "standalone": "独立运行"
+        },
+        "link": "主机链路",
+        "linkValue": {
+          "connected": "已连接",
+          "local": "本机",
+          "offline": "离线",
+          "reconnecting": "重连中",
+          "unauthenticated": "需要登录"
+        },
+        "plane": {
+          "connecting": "连接中",
+          "degraded": "降级",
+          "disconnected": "已断开",
+          "ready": "就绪",
+          "replaying": "追赶中"
+        },
+        "profile": {
+          "cloud-companion": "已配对主机的浏览器",
+          "desktop": "桌面应用",
+          "headless": "无头服务器",
+          "mobile-companion": "已配对主机的手机",
+          "web-standalone": "未配对任何主机的浏览器"
+        },
+        "runtimeDescription": "从这里发起的工作在哪运行、走哪条链路。",
+        "runtimeTitle": "运行时",
+        "shortcutsTitle": "前往",
+        "tier": "传输层",
+        "tierNotApplicable": "不适用：这个壳在本地运行工作。"
+      },
+      "pairing": {
+        "reachDirect": "同一网络",
+        "reachDirectHint": "这个邀请没有中继房间：设备必须直接访问上面的地址。到「云与中继」打开中继即可从任何地方配对。",
+        "reachRelay": "任意网络",
+        "reachRelayHint": "这个邀请携带中继房间：设备可以从任何网络兑换，并且会先尝试直连地址。"
+      },
+      "push": {
+        "testDescription": "通过已配置的提供方，向当前套接字已关闭的每台已配对设备发送一条仅含元数据的推送。",
+        "testFailed": "测试推送失败：{message}",
+        "testNeedsCredentials": "请先在上方配置 APNs 或 FCM。",
+        "testResult": "{count, plural, =0 {上次测试没有触达任何设备。} =1 {上次测试触达了 1 台设备。} other {上次测试触达了 # 台设备。}}",
+        "testSend": "发送测试",
+        "testSending": "发送中",
+        "testSent": "{count, plural, =0 {没有发给任何设备：所有已配对设备都在线或没有推送令牌。} =1 {已发给 1 台离线设备。} other {已发给 # 台离线设备。}}",
+        "testTitle": "测试通知"
+      },
+      "reach": {
+        "needs-desktop-shell": "这个控制需要桌面应用本身。当前连接的是无头主机，而隧道进程或 mDNS 套接字只存在于桌面端。",
+        "no-host": "这个浏览器没有连接任何主机，这里没有可配置的内容。",
+        "not-owner": "只有主机的所有者设备可以更改主机的可达方式。"
+      },
+      "reachNext": {
+        "needs-desktop-shell": "在主机所在机器上使用桌面应用，或改用中继暴露它。",
+        "no-host": "在「远程主机」主题中与主机配对，或打开桌面应用。",
+        "not-owner": "请所有者授予这台设备主机管理权限，或改用所有者设备。"
+      },
+      "remoteHosts": {
+        "active": "活动",
+        "addDescription": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+        "addTitle": "添加主机",
+        "count": "{count, plural, =0 {无} =1 {1 台主机} other {# 台主机}}",
+        "drive": "驱动",
+        "empty": "还没有登记任何主机。在下方用主机的邀请添加一台。",
+        "registryDescription": "这台设备可以驱动的主机。同一时间只有一台处于活动状态。",
+        "registryTitle": "已登记的主机",
+        "removeAria": "移除 {label}",
+        "renameAria": "重命名 {label}",
+        "renameSave": "保存名称",
+        "state": {
+          "connecting": "连接中",
+          "degraded": "降级",
+          "disconnected": "已断开",
+          "ready": "就绪",
+          "revoked": "已吊销",
+          "versionMismatch": "版本不匹配"
+        }
+      },
+      "title": "连接"
+    },
     "conversation": {
       "autoTitle": {
         "description": "首次回复后用模型为对话命名。",
@@ -33385,6 +33597,7 @@
       "chatTemplates": "保存下来的、带参数的消息 —— 从 / 菜单插入后填空即可。",
       "companion": "移动端伴侣服务器 — 绑定模式（仅本机 / 局域网）、扫码配对、已配对设备列表与吊销。",
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
+      "connectivity": "这台设备与主机如何互相触达：本机服务、中继与隧道、配对、远程主机、推送与同步。",
       "conversation": "自动标题与对话时间线缩略图",
       "data": "导出、导入或清空本地 IndexedDB 数据。",
       "desktop": "Tauri 专属的窗口、自启与托盘行为。",
@@ -34135,6 +34348,15 @@
       },
       "island": {
         "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+        "detailVisibility": {
+          "desc": "灵动岛可以接收多少任务详情。提示词、路径、命令、计划和完整错误文本永远不会随常规列表下发。",
+          "label": "灵动岛详情",
+          "options": {
+            "click-to-reveal": "点击后显示",
+            "hover": "悬停即显示",
+            "summary-only": "仅显示摘要"
+          }
+        },
         "diagnostics": {
           "copied": "灵动岛诊断信息已复制到剪贴板。",
           "copy": "复制",
@@ -37005,6 +37227,7 @@
       "chatTemplates": "会话模板",
       "companion": "移动端伴侣",
       "connections": "平台连接",
+      "connectivity": "连接",
       "conversation": "会话",
       "data": "数据",
       "desktop": "桌面",

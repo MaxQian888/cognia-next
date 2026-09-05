@@ -51,7 +51,8 @@ import {
 import type { OperationAvailability } from "@/lib/runtime/operation-availability"
 import { resolveRuntimeRecovery } from "@/lib/runtime/recovery-resolver"
 import { transport } from "@/lib/tauri"
-import type { TransportTier } from "@/lib/tauri/transport-companion"
+import type { CompanionPlaneHealth, TransportTier } from "@/lib/tauri/transport-companion"
+import type { EventPlaneState } from "@/lib/companion/device-presence-registry"
 import { useUIStore } from "@/stores/ui/ui-store"
 
 type ConnState = "online" | "offline" | "reconnecting"
@@ -71,6 +72,7 @@ export function StatusBarConnectivity() {
   const connection = useConnectionState()
   const [open, setOpen] = useState(false)
   const [tier, setTier] = useState<TransportTier | null>(null)
+  const [planeHealth, setPlaneHealth] = useState<CompanionPlaneHealth | null>(null)
   const [loadedHost, setLoadedHost] = useState<LoadedHostRecord | null>(null)
   // Three runtimes, not two. `target === null` means this shell IS the
   // execution host (Tauri/headless). A `standalone` target is the opposite: a
@@ -139,9 +141,38 @@ export function StatusBarConnectivity() {
     if (!open || !remoteTarget) return
     const candidate = transport as unknown as {
       onTierChange?: (handler: (next: TransportTier) => void) => () => void
+      getPlaneHealth?: () => CompanionPlaneHealth
+      onPlaneHealthChange?: (handler: (next: CompanionPlaneHealth) => void) => () => void
     }
-    return candidate.onTierChange?.(setTier)
+    const stopTier = candidate.onTierChange?.(setTier)
+    // The current answer arrives through the same subscription path as later
+    // changes: the callback reads it once on the next tick rather than the
+    // effect body writing state synchronously.
+    const stopHealth = candidate.onPlaneHealthChange?.(setPlaneHealth)
+    const prime = window.setTimeout(() => setPlaneHealth(candidate.getPlaneHealth?.() ?? null), 0)
+    return () => {
+      window.clearTimeout(prime)
+      stopTier?.()
+      stopHealth?.()
+    }
   }, [open, remoteTarget, runtimeSnapshot.target?.id])
+
+  // The companion's own event plane in the Host's vocabulary (ADR-0170 batch
+  // 4): `degraded` is the case a green link hides, where every request answers
+  // and no event arrives, so changes made elsewhere never show up here.
+  const eventPlane: EventPlaneState | null = !remoteTarget
+    ? null
+    : planeHealth === null
+      ? null
+      : planeHealth.events === "ready"
+        ? "ready"
+        : planeHealth.events === "replaying"
+          ? "replaying"
+          : planeHealth.events === "connecting"
+            ? "connecting"
+            : planeHealth.rpc === "ready"
+              ? "degraded"
+              : "disconnected"
 
   useEffect(() => {
     if (!open || !remoteTarget || !activeHostId) {
@@ -169,7 +200,7 @@ export function StatusBarConnectivity() {
       return
     }
     if (recovery.kind === "local-settings") {
-      requestOpenSettings("companion")
+      requestOpenSettings("connectivity")
       setOpen(false)
     }
   }
@@ -283,6 +314,18 @@ export function StatusBarConnectivity() {
                 label={t("connectionCenter.transport")}
                 value={t(`connectionCenter.tier.${tier ?? "unknown"}`)}
               />
+              {eventPlane ? (
+                <ConnectionRow
+                  icon={ActivityIcon}
+                  label={t("connectionCenter.eventPlane")}
+                  value={t(`connectionCenter.eventPlaneState.${eventPlane}`)}
+                  title={
+                    eventPlane === "degraded"
+                      ? t("connectionCenter.eventPlaneDegradedHint")
+                      : undefined
+                  }
+                />
+              ) : null}
               {hostRecord ? (
                 <ConnectionRow
                   icon={LinkIcon}
@@ -401,7 +444,7 @@ export function StatusBarConnectivity() {
               size="sm"
               className="flex-1"
               onClick={() => {
-                requestOpenSettings("companion")
+                requestOpenSettings("connectivity")
                 setOpen(false)
               }}
             >

@@ -34,7 +34,7 @@ use super::{
 /// tenant id. It now comes from the host binding, and falls back to the
 /// unclaimed bucket before anyone has unlocked — the same tenant
 /// [`super::api::registration_authority`] enrols into, so the two stay paired.
-fn paired_tenant_id() -> String {
+pub(crate) fn paired_tenant_id() -> String {
     host_identity::current_tenant_or_unbound()
 }
 
@@ -1072,6 +1072,12 @@ pub struct OwnerInvitationIssue {
     pub app_version: String,
     pub host_id: String,
     pub tenant_id: String,
+    /// ADR-0170: the one-shot relay room a device may pair through when it
+    /// cannot reach `base_url` directly. Absent when this Host is not sitting
+    /// in a rendezvous (WebRTC tier off, or the companion server is down),
+    /// in which case the invitation is a plain `cgnp3`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay: Option<super::signaling::pairing::PairingRoomIssue>,
 }
 
 /// Renderer-facing view of the browser-access configuration.
@@ -1100,7 +1106,16 @@ fn browser_access_summary(
     state: &State<'_, CompanionServerState>,
     config: browser_access::BrowserAccessConfig,
 ) -> BrowserAccessSummary {
-    let bound_port = state.browser_port();
+    browser_access_summary_from(config, state.browser_port())
+}
+
+/// The summary from a config plus whatever port the listener is bound to.
+/// Shared with the host-admin RPC arm (ADR-0170), which has no
+/// `CompanionServerState` on a headless Host.
+pub(crate) fn browser_access_summary_from(
+    config: browser_access::BrowserAccessConfig,
+    bound_port: Option<u16>,
+) -> BrowserAccessSummary {
     BrowserAccessSummary {
         browser_base_url: bound_port.map(|port| format!("http://127.0.0.1:{port}")),
         primary_origin: config.primary_origin().map(str::to_string),
@@ -1326,8 +1341,6 @@ pub async fn companion_create_owner_invitation(
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<OwnerInvitationIssue, String> {
-    const INVITATION_TTL_SECS: i64 = 5 * 60;
-
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
     let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
         (info.public_url, true)
@@ -1345,6 +1358,28 @@ pub async fn companion_create_owner_invitation(
     } else {
         ensure_tls_fingerprint(&app_handle).unwrap_or_default()
     };
+    let signing_secret = secret::load_or_generate().map_err(|error| error.to_string())?;
+    issue_owner_invitation(
+        base_url,
+        fingerprint,
+        app_handle.package_info().version.to_string(),
+        super::healthz::derive_server_id(&signing_secret),
+        "local-trust-root",
+    )
+}
+
+/// Mint a one-shot Owner invitation for this Host and, when the Host sits
+/// in a rendezvous, the pairing room it can be redeemed through (ADR-0170).
+/// One implementation behind the desktop command, the host-admin RPC arm,
+/// and the headless `pair` subcommand.
+pub(crate) fn issue_owner_invitation(
+    base_url: String,
+    fingerprint: String,
+    app_version: String,
+    host_id: String,
+    trust_root: &str,
+) -> Result<OwnerInvitationIssue, String> {
+    const INVITATION_TTL_SECS: i64 = 5 * 60;
     let now = unix_time_secs();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
@@ -1353,18 +1388,24 @@ pub async fn companion_create_owner_invitation(
     // that holds no invitation.
     let tenant_id = paired_tenant_id();
     let invitation = security
-        .create_owner_invitation(&tenant_id, "local-trust-root", now, INVITATION_TTL_SECS)
+        .create_owner_invitation(&tenant_id, trust_root, now, INVITATION_TTL_SECS)
         .map_err(|error| error.to_string())?;
-    let signing_secret = secret::load_or_generate().map_err(|error| error.to_string())?;
+    let expires_at_ms = now.saturating_add(INVITATION_TTL_SECS) * 1_000;
+    // Open the pairing room the invitation points at. `None` is not an
+    // error: it means "no relay for this invitation", exactly the QR every
+    // Host issued before the relay existed.
+    let relay =
+        super::signaling::installed_hub().and_then(|hub| hub.open_pairing_room(expires_at_ms));
 
     Ok(OwnerInvitationIssue {
         invitation,
-        expires_at_ms: now.saturating_add(INVITATION_TTL_SECS) * 1_000,
+        expires_at_ms,
         base_url,
         fingerprint,
-        app_version: app_handle.package_info().version.to_string(),
-        host_id: super::healthz::derive_server_id(&signing_secret),
+        app_version,
+        host_id,
         tenant_id,
+        relay,
     })
 }
 
@@ -1886,8 +1927,26 @@ pub async fn companion_push_notification(
     level: String,
     href: Option<String>,
 ) -> Result<PushBroadcastResult, String> {
-    let payload =
-        notification_center_push_payload(&notification_id, &source, &level, href.as_deref())?;
+    broadcast_notification_push(
+        &state.push_tokens,
+        &notification_id,
+        &source,
+        &level,
+        href.as_deref(),
+    )
+    .await
+}
+
+/// Fan one notification-center item out to every offline device over the
+/// configured push providers. Shared with the host-admin RPC arm (ADR-0170).
+pub(crate) async fn broadcast_notification_push(
+    push_tokens: &super::push::PushTokenRegistry,
+    notification_id: &str,
+    source: &str,
+    level: &str,
+    href: Option<&str>,
+) -> Result<PushBroadcastResult, String> {
+    let payload = notification_center_push_payload(notification_id, source, level, href)?;
     let dispatchers = super::push_dispatchers();
     let mut sent = 0;
     for provider in [
@@ -1895,8 +1954,7 @@ pub async fn companion_push_notification(
         super::push::PushProvider::Apns,
     ] {
         if let Some(dispatcher) = dispatchers.for_provider(provider) {
-            sent += state
-                .push_tokens
+            sent += push_tokens
                 .broadcast_to_offline(provider, &payload, dispatcher.as_ref())
                 .await;
         }

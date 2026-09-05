@@ -41,22 +41,14 @@ export const ATTACH_LEASE_RENEW_INTERVAL_MS = 30_000
 export const RECENTLY_ACTIVE_WINDOW_MS = 5 * 60_000
 
 /**
- * Health of a device's canonical-event stream, which is a different question
- * from whether the device is reachable.
+ * Where a device stands on the event plane.
  *
- * - `disconnected` — no stream.
- * - `connecting` — socket opened, no replay boundary yet.
- * - `replaying` — draining backlog; the device's view is behind the Host's.
- * - `ready` — caught up and live. The only state that permits control.
- * - `degraded` — connected but lossy (gaps, lag, repeated resyncs).
- *
- * `degraded` is **deliberately dormant**: nothing produces it. The Host's only
- * lossy-stream signal is `resync_required`, and that is a *refusal* — the
- * socket handler answers it and returns without ever opening a lease, so the
- * device lands in `disconnected`, not in a degraded lease. It stays in the
- * vocabulary because the detail view's status ladder ranks it, and because a
- * future gap detector on the client would report exactly this. Pinned by
- * `nothing derives a degraded event plane` so its absence stays deliberate.
+ * `degraded` has a producer since ADR-0170 batch 4: a device that lost every
+ * event stream, kept making authenticated requests afterwards, and has been
+ * without a stream for longer than one lease renewal interval. That is the
+ * "RPC answers, events do not" shape a user experiences as changes made
+ * elsewhere never appearing, and it is distinct from `disconnected`, where the
+ * device is simply gone. Pinned by `derives a degraded event plane`.
  */
 export type EventPlaneState = "disconnected" | "connecting" | "replaying" | "ready" | "degraded"
 
@@ -126,6 +118,11 @@ interface DeviceRecord {
   attention: DeviceAttention
   /** leaseId → stream. Authoritative copy of what Rust reported last. */
   streams: Map<string, EventStreamConnection>
+  /**
+   * When the last stream disappeared, or null while one is open (or none has
+   * ever been). The clock `derivePlane` reads `degraded` against.
+   */
+  streamsLostAt: number | null
 }
 
 const devices = new Map<string, DeviceRecord>()
@@ -140,6 +137,7 @@ function record(deviceId: string): DeviceRecord {
       lastSeenAt: 0,
       attention: "unknown",
       streams: new Map(),
+      streamsLostAt: null,
     }
     devices.set(deviceId, existing)
   }
@@ -155,14 +153,26 @@ function record(deviceId: string): DeviceRecord {
  * delivering. Best state wins, because a device with any caught-up stream can
  * hear everything.
  */
-function derivePlane(entry: DeviceRecord): EventPlaneState {
+function derivePlane(entry: DeviceRecord, at: number): EventPlaneState {
   let best: EventPlaneState = "disconnected"
   for (const stream of entry.streams.values()) {
     if (stream.state === "ready") return "ready"
     if (stream.state === "replaying") best = "replaying"
     else if (best === "disconnected") best = "connecting"
   }
+  if (best === "disconnected" && isDegraded(entry, at)) return "degraded"
   return best
+}
+
+/**
+ * No stream, but the device is still talking: it made an authenticated request
+ * after its last stream closed, and the stream has now been gone for longer
+ * than one renewal interval, which is past what a reconnect blip looks like.
+ */
+function isDegraded(entry: DeviceRecord, at: number): boolean {
+  if (entry.streamsLostAt === null) return false
+  if (entry.lastSeenAt <= entry.streamsLostAt) return false
+  return at - entry.streamsLostAt > ATTACH_LEASE_RENEW_INTERVAL_MS
 }
 
 /**
@@ -199,7 +209,10 @@ export function syncEventStreams(input: {
   at: number
 }): void {
   const entry = record(input.deviceId)
+  const hadStreams = entry.streams.size > 0
   entry.streams = new Map(input.streams.map((stream) => [stream.leaseId, { ...stream }]))
+  if (entry.streams.size > 0) entry.streamsLostAt = null
+  else if (hadStreams) entry.streamsLostAt = input.at
   entry.lastSeenAt = Math.max(entry.lastSeenAt, input.at)
 }
 
@@ -230,9 +243,9 @@ export function deviceEventStreams(deviceId: string): EventStreamConnection[] {
 }
 
 /** The device's derived event-plane state. */
-export function eventPlaneState(deviceId: string): EventPlaneState {
+export function eventPlaneState(deviceId: string, at: number = Date.now()): EventPlaneState {
   const entry = devices.get(deviceId)
-  return entry ? derivePlane(entry) : "disconnected"
+  return entry ? derivePlane(entry, at) : "disconnected"
 }
 
 export function setDeviceAttention(deviceId: string, attention: DeviceAttention, at: number): void {
@@ -241,13 +254,13 @@ export function setDeviceAttention(deviceId: string, attention: DeviceAttention,
   entry.lastSeenAt = Math.max(entry.lastSeenAt, at)
 }
 
-export function devicePresence(deviceId: string): DevicePresence | null {
+export function devicePresence(deviceId: string, at: number = Date.now()): DevicePresence | null {
   const entry = devices.get(deviceId)
   if (!entry) return null
   return {
     deviceId: entry.deviceId,
     lastSeenAt: entry.lastSeenAt,
-    eventPlane: derivePlane(entry),
+    eventPlane: derivePlane(entry, at),
     attention: entry.attention,
     streams: Array.from(entry.streams.values()).sort((a, b) => a.openedAt - b.openedAt),
   }
@@ -452,7 +465,7 @@ export function notifiableControllers(sessionId: string, at: number): string[] {
     if (lease.mode !== "control") continue
     const entry = devices.get(lease.deviceId)
     const inBand =
-      entry !== undefined && derivePlane(entry) === "ready" && entry.attention === "foreground"
+      entry !== undefined && derivePlane(entry, at) === "ready" && entry.attention === "foreground"
     if (inBand) continue
     targets.push(lease.deviceId)
   }

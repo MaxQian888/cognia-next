@@ -4,9 +4,8 @@
  * Add a remote host from the fleet console itself.
  *
  * Until now the console's "Add host" action pushed
- * `/settings?section=remote-hosts`, and that section is `profiles: ["desktop"]`
- * (`settings-nav-config.ts`), so on web and mobile the button landed the user
- * on a settings empty state. The registry, the credential vault and
+ * `/settings?section=remote-hosts`, and that section was `profiles: ["desktop"]`,
+ * so on web and mobile the button landed the user on a settings empty state. The registry, the credential vault and
  * `CompanionTransport` all work off the desktop. Only the entry point did not.
  *
  * `ResponsiveDetailSheet` is the shared Sheet/Drawer switch, so this is a
@@ -16,7 +15,7 @@
 
 import { useTranslations } from "next-intl"
 
-import { AddHostForm } from "@/components/settings/remote-hosts/add-host-form"
+import { AddHostForm } from "@/components/connectivity/pair/add-host-form"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import type { RemoteHost } from "@/stores/remote-host/remote-host-store"
 

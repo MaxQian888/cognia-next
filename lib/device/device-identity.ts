@@ -11,7 +11,7 @@
 // it (see `BackupManifestV3.device`).
 
 import { isTauri } from "@/lib/tauri"
-import { getDevicePlatform } from "@/components/mobile/pair/pair-helpers"
+import { getDevicePlatform } from "@/components/connectivity/pair/pair-helpers"
 
 const WEB_DEVICE_ID_STORAGE = "cognia-device-id-v1"
 const DESKTOP_STORE_FILE = "cognia-device.json"

@@ -147,7 +147,7 @@ function isCompanionTransport(value: unknown): value is CompanionTransport {
     "getConnectionState",
     "reconnectWs",
     "isOnConnectedLan",
-    "enableWebRtcTier",
+    "enableWanTier",
     "disableWebRtcTier",
   ].every((method) => typeof record[method] === "function")
 }
@@ -472,11 +472,10 @@ export async function applySettings(
   providerServers: RTCIceServer[] = [],
   isCurrent: () => boolean = () => true
 ): Promise<void> {
-  const enabled = settings.webrtcEnabled ?? true
-  if (!enabled) {
-    tx.disableWebRtcTier()
-    return
-  }
+  // ADR-0170: the WAN tier is always on once paired. `webrtcEnabled` now
+  // governs only the peer-to-peer upgrade; with it off the tier serves over
+  // the relay alone and never touches `RTCPeerConnection`.
+  const p2p = settings.webrtcEnabled ?? true
   const targetConfig = loadCompanionConfig()
   if (!targetConfig) {
     // The controller can mount before the async credential-book hydration
@@ -502,8 +501,9 @@ export async function applySettings(
   // Static STUN/TURN first, then any provider-provisioned ephemeral relays
   // (ADR-0021). The ICE agent tries them all; provider servers are additive.
   const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn, ...providerServers]
-  await tx.enableWebRtcTier({
+  await tx.enableWanTier({
     signalingUrl,
     rtcConfiguration: { iceServers },
+    p2p,
   })
 }

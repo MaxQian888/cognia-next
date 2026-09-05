@@ -1,0 +1,136 @@
+{
+  "title": "Connectivity",
+  "description": "How this device and a Host reach each other: the local server, the relay and tunnel, pairing, remote hosts, push, and sync.",
+  "nav": {
+    "title": "Connectivity topics",
+    "mobileTrigger": "Topics",
+    "groups": {
+      "statusGroup": "Status",
+      "hostGroup": "This host",
+      "devicesGroup": "Devices",
+      "deliveryGroup": "Delivery"
+    },
+    "items": {
+      "overview": {
+        "label": "Overview",
+        "description": "What this shell is, what it is linked to, and how."
+      },
+      "local-host": {
+        "label": "Local host",
+        "description": "The companion server, its binding, TLS, discovery, and browser access."
+      },
+      "cloud-relay": {
+        "label": "Cloud & relay",
+        "description": "The relay, peer-to-peer upgrade, tunnel, sign-in, and collaboration server."
+      },
+      "pairing": {
+        "label": "Pairing",
+        "description": "Invitations, browser enrollment, and the devices that redeemed them."
+      },
+      "remote-hosts": {
+        "label": "Remote hosts",
+        "description": "The Hosts this device drives, and adding one."
+      },
+      "push": {
+        "label": "Push",
+        "description": "APNs and FCM credentials, and a test notification."
+      },
+      "sync": {
+        "label": "Sync",
+        "description": "Per-table mirror state between this device and its Host."
+      }
+    }
+  },
+  "reach": {
+    "no-host": "This browser is not connected to a Host, so there is nothing to configure here.",
+    "needs-desktop-shell": "This control needs the desktop app itself. The connected Host is headless, and a tunnel process or an mDNS socket only exists on a desktop.",
+    "not-owner": "Only the Host's owner device may change how the Host is reachable."
+  },
+  "reachNext": {
+    "no-host": "Pair with a Host from the Remote hosts topic, or open the desktop app.",
+    "needs-desktop-shell": "Use the desktop app on the Host machine, or expose it with the relay instead.",
+    "not-owner": "Ask the owner to grant this device host administration, or use the owner device."
+  },
+  "overview": {
+    "runtimeTitle": "Runtime",
+    "runtimeDescription": "Where work runs from here, and over which link.",
+    "hostMode": "This shell",
+    "hostModeValue": {
+      "host": "Is a Host",
+      "companion": "Drives a Host",
+      "standalone": "Standalone"
+    },
+    "profile": {
+      "desktop": "Desktop app",
+      "headless": "Headless server",
+      "mobile-companion": "Phone paired to a Host",
+      "cloud-companion": "Browser paired to a Host",
+      "web-standalone": "Browser with nothing paired"
+    },
+    "link": "Host link",
+    "linkValue": {
+      "local": "Local",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting",
+      "offline": "Offline",
+      "unauthenticated": "Needs sign-in"
+    },
+    "tier": "Transport",
+    "tierNotApplicable": "Not applicable: this shell runs work locally.",
+    "activeHost": "Active host",
+    "activeHostSelf": "This machine.",
+    "activeHostNone": "No host is being driven.",
+    "eventPlaneTitle": "Event plane",
+    "eventPlaneDescription": "Whether events reach the other side, beyond request and reply.",
+    "plane": {
+      "ready": "Ready",
+      "replaying": "Catching up",
+      "connecting": "Connecting",
+      "degraded": "Degraded",
+      "disconnected": "Disconnected"
+    },
+    "devicePlanes": "{count, plural, =0 {No paired devices.} =1 {One paired device.} other {# paired devices.}}",
+    "degradedHint": "Requests still answer, but no events are arriving. Changes made elsewhere will not appear until the event stream reconnects.",
+    "shortcutsTitle": "Go to",
+    "goPairing": "Pair a device",
+    "goRelay": "Relay and tunnel",
+    "goDevices": "Device console"
+  },
+  "pairing": {
+    "reachRelay": "Anywhere",
+    "reachDirect": "Same network",
+    "reachRelayHint": "This invitation carries a relay room: the device may redeem it from any network, and the direct address is tried first.",
+    "reachDirectHint": "This invitation has no relay room: the device must reach the address above directly. Turn the relay on under Cloud & relay to pair from anywhere."
+  },
+  "remoteHosts": {
+    "registryTitle": "Registered hosts",
+    "registryDescription": "Hosts this device can drive. One is active at a time.",
+    "count": "{count, plural, =0 {none} =1 {1 host} other {# hosts}}",
+    "empty": "No hosts are registered yet. Add one below with an invitation from the Host.",
+    "addTitle": "Add a host",
+    "addDescription": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+    "renameAria": "Rename {label}",
+    "renameSave": "Save name",
+    "active": "Active",
+    "state": {
+      "disconnected": "Disconnected",
+      "connecting": "Connecting",
+      "ready": "Ready",
+      "degraded": "Degraded",
+      "revoked": "Revoked",
+      "versionMismatch": "Version mismatch"
+    },
+    "drive": "Drive",
+    "removeAria": "Remove {label}"
+  },
+  "push": {
+    "testTitle": "Test notification",
+    "testDescription": "Sends a metadata-only push through the configured providers to every paired device whose socket is closed right now.",
+    "testSend": "Send test",
+    "testSending": "Sending",
+    "testSent": "{count, plural, =0 {Sent to no devices: every paired device is online or has no push token.} =1 {Sent to one offline device.} other {Sent to # offline devices.}}",
+    "testFailed": "Test push failed: {message}",
+    "testNeedsCredentials": "Configure APNs or FCM above first.",
+    "testResult": "{count, plural, =0 {Last test reached no devices.} =1 {Last test reached one device.} other {Last test reached # devices.}}"
+  }
+}

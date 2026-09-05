@@ -102,7 +102,7 @@
     "components/mobile/pair-onboarding-client.tsx": {
       "bareAccountId": 13
     },
-    "components/mobile/pair/paired-step.tsx": {
+    "components/connectivity/pair/paired-step.tsx": {
       "bareAccountId": 6
     },
     "components/onboarding/express-sign-in.tsx": {

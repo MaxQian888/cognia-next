@@ -22,7 +22,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { isTauri, transport } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
@@ -125,45 +125,39 @@ export function ChannelMatrixCard(deps: ChannelMatrixDeps = {}) {
   const summary = summarizeChannels(rows)
 
   return (
-    <Card data-testid="channel-matrix-card">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-            <CardDescription className="text-xs">{t("description")}</CardDescription>
-          </div>
-          <Badge
-            variant={
-              summary === "reachable"
-                ? "default"
-                : summary === "blocked"
-                  ? "destructive"
-                  : "outline"
-            }
-            data-testid="channel-matrix-summary"
-          >
-            {t(`summary.${summary}`)}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="space-y-1.5">
-          {rows.map((row) => (
-            <ChannelRowView key={row.id} row={row} />
-          ))}
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onProbe}
-          disabled={!desktop || probing}
-          data-testid="channel-matrix-probe"
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      badge={
+        <Badge
+          variant={
+            summary === "reachable" ? "default" : summary === "blocked" ? "destructive" : "outline"
+          }
+          data-testid="channel-matrix-summary"
         >
-          {probing ? t("probing") : t("probeButton")}
-        </Button>
-        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
-      </CardContent>
-    </Card>
+          {t(`summary.${summary}`)}
+        </Badge>
+      }
+      testid="channel-matrix-card"
+      settingId="companion-channels"
+      contentClassName="space-y-3"
+    >
+      <div className="space-y-1.5">
+        {rows.map((row) => (
+          <ChannelRowView key={row.id} row={row} />
+        ))}
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onProbe}
+        disabled={!desktop || probing}
+        data-testid="channel-matrix-probe"
+      >
+        {probing ? t("probing") : t("probeButton")}
+      </Button>
+      {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
+    </SettingsBlock>
   )
 }
 

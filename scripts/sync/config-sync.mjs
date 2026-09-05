@@ -43,7 +43,7 @@ export const CONFIGS = [
     },
     mirrors: [
       {
-        path: "components/settings/companion/companion-section.tsx",
+        path: "components/settings/connectivity/blocks/companion-server-commands.ts",
         re: /const DEFAULT_PORT = (\d+)/,
       },
       {

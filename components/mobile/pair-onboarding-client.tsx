@@ -69,14 +69,14 @@ import {
 } from "@/lib/connectivity/recent-servers"
 import { readPairLinkPayload, stripPairLinkPayload } from "@/lib/qr/pair-link"
 
-import { DiscoverStep } from "./pair/discover-step"
-import { HeadlessInvitationHelp } from "./pair/headless-invitation-help"
-import { HostProbeStatus } from "./pair/host-probe-status"
-import { PairShell } from "./pair/pair-shell"
-import { PairStep, type PairActivity } from "./pair/pair-step"
-import { PairedStep } from "./pair/paired-step"
-import { type PairStep as PairStepName } from "./pair/pair-stepper"
-import type { PairHostState, PairSceneState } from "./pair/pair-scene"
+import { DiscoverStep } from "@/components/connectivity/pair/discover-step"
+import { HeadlessInvitationHelp } from "@/components/connectivity/pair/headless-invitation-help"
+import { HostProbeStatus } from "@/components/connectivity/pair/host-probe-status"
+import { PairShell } from "@/components/connectivity/pair/pair-shell"
+import { PairStep, type PairActivity } from "@/components/connectivity/pair/pair-step"
+import { PairedStep } from "@/components/connectivity/pair/paired-step"
+import { type PairStep as PairStepName } from "@/components/connectivity/pair/pair-stepper"
+import type { PairHostState, PairSceneState } from "@/components/connectivity/pair/pair-scene"
 
 type PhaseLoading = { kind: "loading" }
 type PhaseUnpaired = { kind: "unpaired" }

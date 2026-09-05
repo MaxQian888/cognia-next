@@ -29,7 +29,7 @@ const mockSwitchHost = jest.fn().mockResolvedValue(undefined)
 const mockRemoveHost = jest.fn().mockResolvedValue(undefined)
 const mockListHosts = jest.fn().mockResolvedValue([])
 
-jest.mock("@/components/mobile/pair/pair-api", () => ({
+jest.mock("@/components/connectivity/pair/pair-api", () => ({
   registerPairPayload: (...args: unknown[]) => mockRegisterPairPayload(...args),
 }))
 

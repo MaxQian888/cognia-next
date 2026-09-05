@@ -78,7 +78,8 @@
     "rtc-direct": "RTC 直连",
     "rtc-relay": "RTC 中继",
     "ws-lan": "WS 局域网",
-    "ws-tunnel": "WS 隧道"
+    "ws-tunnel": "WS 隧道",
+    "relay": "中继"
   },
   "toasts": {
     "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",

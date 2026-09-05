@@ -17,7 +17,7 @@ import {
   SquareCodeIcon,
   InfoIcon,
   ServerCogIcon,
-  ServerIcon,
+  RadioTowerIcon,
   GlobeIcon,
   Volume2Icon,
   ScrollTextIcon,
@@ -38,7 +38,6 @@ import {
   TerminalSquareIcon,
   LinkIcon,
   WorkflowIcon,
-  SmartphoneIcon,
   MousePointerClickIcon,
   TargetIcon,
   PawPrintIcon,
@@ -115,8 +114,7 @@ export type SettingsSectionId =
   | "webhooks"
   | "gateway"
   | "external-bridge"
-  | "companion"
-  | "remote-hosts"
+  | "connectivity"
   | "network"
   | "logs"
   | "diagnostics"
@@ -684,30 +682,16 @@ export const SETTINGS_NAV: NavItem[] = [
     requires: ["uia-automation"],
   },
   {
-    id: "companion",
-    labelKey: "companion",
-    descriptionKey: "companion",
+    id: "connectivity",
+    labelKey: "connectivity",
+    descriptionKey: "connectivity",
     group: "system",
-    icon: SmartphoneIcon,
-    // Administers THIS device's companion server (mDNS, tunnel, TLS
-    // fingerprint, push credentials) — a local-shell surface. Remote hosts are
-    // administered from Remote hosts / Connections instead.
-    profiles: ["desktop"],
-  },
-  {
-    id: "remote-hosts",
-    labelKey: "remoteHosts",
-    descriptionKey: "remoteHosts",
-    group: "system",
-    icon: ServerIcon,
-    // The registry of remote hosts that may drive the app (ADR-0082 R0).
-    //
-    // No longer desktop-pinned. The store, the credential vault and
-    // `CompanionTransport` all work on a phone and in a browser, and pinning
-    // the section meant `/devices`' own "Add host" action delivered a settings
-    // empty state on two of three shells. mDNS is the only genuinely
-    // desktop-only part, and that gate now sits on the discovery panel inside
-    // `add-host-form.tsx` rather than on the whole surface.
+    icon: RadioTowerIcon,
+    // ADR-0170: one surface for the local companion server, the relay and
+    // tunnel, pairing, and the remote-host registry. Not desktop-pinned: a
+    // browser on a headless Host configures it over the owner-authenticated
+    // host-admin plane, and the controls that genuinely need the desktop
+    // process (tunnel, mDNS) say so in place instead of hiding the section.
   },
   {
     id: "network",
@@ -1566,7 +1550,14 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "界面自动化",
     "无障碍",
   ],
-  companion: [
+  connectivity: [
+    "connectivity",
+    "relay",
+    "signaling",
+    "tunnel",
+    "连接",
+    "中继",
+    "隧道",
     "mobile",
     "phone",
     "qr",
@@ -1580,8 +1571,6 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "配对",
     "扫码",
     "移动端",
-  ],
-  "remote-hosts": [
     "remote",
     "remote host",
     "remote development",
@@ -1590,11 +1579,9 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "dev box",
     "cognia-server",
     "terminal",
-    "pair",
     "远程",
     "远程主机",
     "远程开发",
-    "配对",
   ],
   network: [
     "network",

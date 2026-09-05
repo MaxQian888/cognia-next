@@ -4,7 +4,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::protocol::{derive_room_id, subscribe_proof_bytes};
 use cognia_signaling_server::{
-    proto::{ClientFrame, PeerRole, RoomDescriptor, ServerFrame, SubscribeProof},
+    proto::{ClientFrame, PeerRole, RelayLane, RoomDescriptor, ServerFrame, SubscribeProof},
     serve_for_test,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -144,6 +144,7 @@ async fn two_peers_relay_via_room() {
         ClientFrame::Relay {
             rendezvous_id: room.room_id.clone(),
             payload: "opaque-base64==".into(),
+            lane: RelayLane::Signal,
         },
     )
     .await;
@@ -176,6 +177,7 @@ async fn relay_to_unsubscribed_room_errors() {
         ClientFrame::Relay {
             rendezvous_id: "ghost".into(),
             payload: "x".into(),
+            lane: RelayLane::Signal,
         },
     )
     .await;
@@ -332,6 +334,7 @@ async fn one_socket_can_join_multiple_self_certifying_rooms() {
         ClientFrame::Relay {
             rendezvous_id: rooms[1].room_id.clone(),
             payload: "p".into(),
+            lane: RelayLane::Signal,
         },
     )
     .await;
@@ -374,6 +377,7 @@ async fn upgrade_rid_rejects_mismatched_frame_room() {
         ClientFrame::Relay {
             rendezvous_id: other_room.room_id,
             payload: "leak".into(),
+            lane: RelayLane::Signal,
         },
     )
     .await;

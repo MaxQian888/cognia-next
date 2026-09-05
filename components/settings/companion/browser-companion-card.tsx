@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl"
 import { encodeBrowserEnrollmentPayload } from "@cognia/companion-client"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { clearBrowserSubmissions, summarizeBrowserSubmissions } from "@/lib/db/browser-submissions"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { transport } from "@/lib/tauri"
@@ -166,18 +166,17 @@ export function BrowserCompanionCard({
     // build does not have the feature", which is a different answer from
     // "open the desktop app".
     return (
-      <Card data-testid="browser-companion-card" data-reach={shellReach.block ?? "unavailable"}>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <PuzzleIcon className="size-4" aria-hidden="true" />
-            {t("title")}
-          </CardTitle>
-          <CardDescription>{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="text-xs text-muted-foreground">
-          <p data-testid="browser-companion-desktop-only">{t("desktopOnly")}</p>
-        </CardContent>
-      </Card>
+      <SettingsBlock
+        icon={<PuzzleIcon />}
+        title={t("title")}
+        description={t("description")}
+        testid="browser-companion-card"
+        settingId="companion-browser-companion"
+        attributes={{ "data-reach": shellReach.block ?? "unavailable" }}
+        contentClassName="text-xs text-muted-foreground"
+      >
+        <p data-testid="browser-companion-desktop-only">{t("desktopOnly")}</p>
+      </SettingsBlock>
     )
   }
 
@@ -206,120 +205,118 @@ export function BrowserCompanionCard({
   }
 
   return (
-    <Card data-testid="browser-companion-card">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <PuzzleIcon className="size-4" aria-hidden="true" />
-          {t("title")}
-        </CardTitle>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        {/* Rendered as a disabled control with the reason beside it, never
+    <SettingsBlock
+      icon={<PuzzleIcon />}
+      title={t("title")}
+      description={t("description")}
+      testid="browser-companion-card"
+      settingId="companion-browser-companion"
+      contentClassName="space-y-4 text-sm"
+    >
+      {/* Rendered as a disabled control with the reason beside it, never
             hidden: a missing button reads as "this build does not have the
             feature", which is a different answer from "one switch away". */}
-        {listening === false ? (
-          <Alert data-testid="browser-companion-needs-listener">
-            <AlertDescription>{t("requiresListener")}</AlertDescription>
-          </Alert>
+      {listening === false ? (
+        <Alert data-testid="browser-companion-needs-listener">
+          <AlertDescription>{t("requiresListener")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={issue ? "outline" : "default"}
+          disabled={busy || listening === false}
+          onClick={() => void generate()}
+        >
+          {busy ? t("generating") : issue ? t("regenerate") : t("generate")}
+        </Button>
+        {issue && !expired ? (
+          <span className="text-xs text-muted-foreground" data-testid="browser-companion-expiry">
+            {t("expiresIn", { minutes: minutesLeft })}
+          </span>
         ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={issue ? "outline" : "default"}
-            disabled={busy || listening === false}
-            onClick={() => void generate()}
-          >
-            {busy ? t("generating") : issue ? t("regenerate") : t("generate")}
-          </Button>
-          {issue && !expired ? (
-            <span className="text-xs text-muted-foreground" data-testid="browser-companion-expiry">
-              {t("expiresIn", { minutes: minutesLeft })}
-            </span>
-          ) : null}
-          {expired ? (
-            <span className="text-xs text-destructive" data-testid="browser-companion-expired">
-              {t("expired")}
-            </span>
-          ) : null}
-        </div>
-
-        {code && !expired ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">{t("codeLabel")}</p>
-            <div className="flex items-start gap-2">
-              <code
-                className="min-w-0 flex-1 break-all rounded-control bg-muted px-2 py-1.5 font-mono text-[11px]"
-                data-testid="browser-companion-code"
-              >
-                {code}
-              </code>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="shrink-0"
-                onClick={() => void onCopy()}
-              >
-                <CopyIcon className="size-3.5" aria-hidden="true" />
-                {copied ? t("copied") : t("copy")}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">{t("singleUse")}</p>
-            <p className="text-xs text-muted-foreground">{t("originHint")}</p>
-          </div>
+        {expired ? (
+          <span className="text-xs text-destructive" data-testid="browser-companion-expired">
+            {t("expired")}
+          </span>
         ) : null}
+      </div>
 
-        {error ? (
-          <p className="text-xs text-destructive" data-testid="browser-companion-error">
-            {error}
-          </p>
-        ) : null}
-
-        {/* Rendered whenever the history is readable, including at zero. A
-            control that appeared only once something had been recorded would
-            make "nothing has been sent from a browser" and "this Host does not
-            keep a record" look identical. */}
-        {history ? (
-          <div className="space-y-1 border-t pt-3" data-testid="browser-companion-history">
-            <p className="flex items-center gap-1.5 text-xs font-medium">
-              <HistoryIcon className="size-3.5" aria-hidden="true" />
-              {t("historyTitle")}
-            </p>
-            <p
-              className="text-xs text-muted-foreground"
-              data-testid="browser-companion-history-count"
+      {code && !expired ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">{t("codeLabel")}</p>
+          <div className="flex items-start gap-2">
+            <code
+              className="min-w-0 flex-1 break-all rounded-control bg-muted px-2 py-1.5 font-mono text-[11px]"
+              data-testid="browser-companion-code"
             >
-              {t("historyCount", { count: history.total })}
-            </p>
-            <p className="text-xs text-muted-foreground">{t("historyHint")}</p>
+              {code}
+            </code>
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              disabled={clearing || history.total === 0}
-              onClick={() => void clearAll()}
-              data-testid="browser-companion-clear-history"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => void onCopy()}
             >
-              {clearing ? t("historyClearing") : cleared ? t("historyCleared") : t("historyClear")}
+              <CopyIcon className="size-3.5" aria-hidden="true" />
+              {copied ? t("copied") : t("copy")}
             </Button>
           </div>
-        ) : null}
+          <p className="text-xs text-muted-foreground">{t("singleUse")}</p>
+          <p className="text-xs text-muted-foreground">{t("originHint")}</p>
+        </div>
+      ) : null}
 
-        <div className="space-y-1 border-t pt-3">
+      {error ? (
+        <p className="text-xs text-destructive" data-testid="browser-companion-error">
+          {error}
+        </p>
+      ) : null}
+
+      {/* Rendered whenever the history is readable, including at zero. A
+            control that appeared only once something had been recorded would
+            make "nothing has been sent from a browser" and "this Host does not
+            keep a record" look identical. */}
+      {history ? (
+        <div className="space-y-1 border-t pt-3" data-testid="browser-companion-history">
           <p className="flex items-center gap-1.5 text-xs font-medium">
-            <MonitorSmartphoneIcon className="size-3.5" aria-hidden="true" />
-            {t("pairedTitle")}
+            <HistoryIcon className="size-3.5" aria-hidden="true" />
+            {t("historyTitle")}
           </p>
-          <p className="text-xs text-muted-foreground">{t("pairedHint")}</p>
-          <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
-            <a href="/devices">{t("openDevices")}</a>
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="browser-companion-history-count"
+          >
+            {t("historyCount", { count: history.total })}
+          </p>
+          <p className="text-xs text-muted-foreground">{t("historyHint")}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={clearing || history.total === 0}
+            onClick={() => void clearAll()}
+            data-testid="browser-companion-clear-history"
+          >
+            {clearing ? t("historyClearing") : cleared ? t("historyCleared") : t("historyClear")}
           </Button>
         </div>
-      </CardContent>
-    </Card>
+      ) : null}
+
+      <div className="space-y-1 border-t pt-3">
+        <p className="flex items-center gap-1.5 text-xs font-medium">
+          <MonitorSmartphoneIcon className="size-3.5" aria-hidden="true" />
+          {t("pairedTitle")}
+        </p>
+        <p className="text-xs text-muted-foreground">{t("pairedHint")}</p>
+        <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-xs">
+          <a href="/devices">{t("openDevices")}</a>
+        </Button>
+      </div>
+    </SettingsBlock>
   )
 }

@@ -34,7 +34,7 @@ import { toast } from "sonner"
 import { CircleIcon, GlobeIcon, RefreshCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -116,7 +116,7 @@ interface SignalingStatusSnapshot {
 }
 
 /** Mirror of `DeviceTier` in `src-tauri/src/companion_api/signaling/mod.rs`. */
-export type DeviceTier = "offline" | "awaiting" | "negotiating" | "connected" | "failed"
+export type DeviceTier = "offline" | "awaiting" | "negotiating" | "relayed" | "connected" | "failed"
 
 /** Mirror of `DeviceTierEntry` (camelCase via serde). */
 export interface DeviceTierEntry {
@@ -330,183 +330,179 @@ export function WebRtcCard() {
   const showPollBanner = pollFailureCount >= POLL_FAILURE_BANNER_THRESHOLD
 
   return (
-    <Card data-testid="webrtc-card">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
-          <span className="flex items-center gap-2">
-            <GlobeIcon className="h-4 w-4" />
-            {t("title")}
-          </span>
-          <Switch
-            checked={form.enabled}
-            onCheckedChange={(v) => setForm((prev) => ({ ...prev, enabled: v }))}
-            aria-label={t("enableLabel")}
-            data-testid="webrtc-enable-toggle"
-          />
-        </CardTitle>
-        <CardDescription className="text-xs">{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <p className="text-xs text-muted-foreground">{t("enableHelp")}</p>
+    <SettingsBlock
+      icon={<GlobeIcon />}
+      title={t("title")}
+      description={t("description")}
+      action={
+        <Switch
+          checked={form.enabled}
+          onCheckedChange={(v) => setForm((prev) => ({ ...prev, enabled: v }))}
+          aria-label={t("enableLabel")}
+          data-testid="webrtc-enable-toggle"
+        />
+      }
+      testid="webrtc-card"
+      settingId="companion-webrtc"
+      contentClassName="space-y-3 text-sm"
+    >
+      <p className="text-xs text-muted-foreground">{t("enableHelp")}</p>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="webrtc-signaling-url" className="text-xs font-medium">
-            {t("signalingUrlLabel")}
-          </Label>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="webrtc-signaling-url" className="text-xs font-medium">
+          {t("signalingUrlLabel")}
+        </Label>
+        <Input
+          id="webrtc-signaling-url"
+          value={form.signalingUrl}
+          onChange={(e) => setForm((prev) => ({ ...prev, signalingUrl: e.target.value }))}
+          placeholder={t("signalingUrlPlaceholder")}
+          disabled={busy}
+          className="font-mono text-xs"
+        />
+        <p className="text-[10px] text-muted-foreground">{t("signalingUrlHelp")}</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="webrtc-ice-servers" className="text-xs font-medium">
+          {t("iceServersLabel")}
+        </Label>
+        <Textarea
+          id="webrtc-ice-servers"
+          value={form.iceServersText}
+          onChange={(e) => setForm((prev) => ({ ...prev, iceServersText: e.target.value }))}
+          disabled={busy}
+          className="min-h-16 font-mono text-xs"
+        />
+        <p className="text-[10px] text-muted-foreground">{t("iceServersHelp")}</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="webrtc-turn-servers" className="text-xs font-medium">
+          {t("turnServersLabel")}
+        </Label>
+        <Textarea
+          id="webrtc-turn-servers"
+          value={form.turnServersText}
+          onChange={(e) => setForm((prev) => ({ ...prev, turnServersText: e.target.value }))}
+          disabled={busy}
+          className="min-h-16 font-mono text-xs"
+          placeholder={t("turnServersPlaceholder")}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("turnServersHelp")}</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 rounded border border-dashed p-2">
+        <Label htmlFor="webrtc-turn-provider" className="text-xs font-medium">
+          {t("turnProviderLabel")}
+        </Label>
+        <NativeSelect
+          id="webrtc-turn-provider"
+          value={form.turnProviderKind}
+          onChange={(e) =>
+            setForm((prev) => ({
+              ...prev,
+              turnProviderKind: e.target.value as TurnProviderKind,
+            }))
+          }
+          disabled={busy}
+          className="text-xs"
+          wrapperClassName="w-full"
+          data-testid="webrtc-turn-provider-kind"
+        >
+          <NativeSelectOption value="none">{t("turnProviderNone")}</NativeSelectOption>
+          <NativeSelectOption value="cloudflare-calls">
+            {t("turnProviderCloudflare")}
+          </NativeSelectOption>
+          <NativeSelectOption value="twilio">{t("turnProviderTwilio")}</NativeSelectOption>
+        </NativeSelect>
+        <p className="text-[10px] text-muted-foreground">{t("turnProviderHelp")}</p>
+
+        {form.turnProviderKind === "cloudflare-calls" ? (
           <Input
-            id="webrtc-signaling-url"
-            value={form.signalingUrl}
-            onChange={(e) => setForm((prev) => ({ ...prev, signalingUrl: e.target.value }))}
-            placeholder={t("signalingUrlPlaceholder")}
+            aria-label={t("turnProviderKeyIdLabel")}
+            value={form.turnProviderKeyId}
+            onChange={(e) => setForm((prev) => ({ ...prev, turnProviderKeyId: e.target.value }))}
+            placeholder={t("turnProviderKeyIdLabel")}
             disabled={busy}
             className="font-mono text-xs"
+            data-testid="webrtc-turn-cf-keyid"
           />
-          <p className="text-[10px] text-muted-foreground">{t("signalingUrlHelp")}</p>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="webrtc-ice-servers" className="text-xs font-medium">
-            {t("iceServersLabel")}
-          </Label>
-          <Textarea
-            id="webrtc-ice-servers"
-            value={form.iceServersText}
-            onChange={(e) => setForm((prev) => ({ ...prev, iceServersText: e.target.value }))}
+        ) : null}
+        {form.turnProviderKind === "twilio" ? (
+          <Input
+            aria-label={t("turnProviderSidLabel")}
+            value={form.turnProviderSid}
+            onChange={(e) => setForm((prev) => ({ ...prev, turnProviderSid: e.target.value }))}
+            placeholder={t("turnProviderSidLabel")}
             disabled={busy}
-            className="min-h-16 font-mono text-xs"
+            className="font-mono text-xs"
+            data-testid="webrtc-turn-twilio-sid"
           />
-          <p className="text-[10px] text-muted-foreground">{t("iceServersHelp")}</p>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="webrtc-turn-servers" className="text-xs font-medium">
-            {t("turnServersLabel")}
-          </Label>
-          <Textarea
-            id="webrtc-turn-servers"
-            value={form.turnServersText}
-            onChange={(e) => setForm((prev) => ({ ...prev, turnServersText: e.target.value }))}
-            disabled={busy}
-            className="min-h-16 font-mono text-xs"
-            placeholder={t("turnServersPlaceholder")}
-          />
-          <p className="text-[10px] text-muted-foreground">{t("turnServersHelp")}</p>
-        </div>
-
-        <div className="flex flex-col gap-1.5 rounded border border-dashed p-2">
-          <Label htmlFor="webrtc-turn-provider" className="text-xs font-medium">
-            {t("turnProviderLabel")}
-          </Label>
-          <NativeSelect
-            id="webrtc-turn-provider"
-            value={form.turnProviderKind}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                turnProviderKind: e.target.value as TurnProviderKind,
-              }))
-            }
-            disabled={busy}
-            className="text-xs"
-            wrapperClassName="w-full"
-            data-testid="webrtc-turn-provider-kind"
-          >
-            <NativeSelectOption value="none">{t("turnProviderNone")}</NativeSelectOption>
-            <NativeSelectOption value="cloudflare-calls">
-              {t("turnProviderCloudflare")}
-            </NativeSelectOption>
-            <NativeSelectOption value="twilio">{t("turnProviderTwilio")}</NativeSelectOption>
-          </NativeSelect>
-          <p className="text-[10px] text-muted-foreground">{t("turnProviderHelp")}</p>
-
-          {form.turnProviderKind === "cloudflare-calls" ? (
+        ) : null}
+        {form.turnProviderKind !== "none" ? (
+          <>
             <Input
-              aria-label={t("turnProviderKeyIdLabel")}
-              value={form.turnProviderKeyId}
-              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderKeyId: e.target.value }))}
-              placeholder={t("turnProviderKeyIdLabel")}
-              disabled={busy}
-              className="font-mono text-xs"
-              data-testid="webrtc-turn-cf-keyid"
-            />
-          ) : null}
-          {form.turnProviderKind === "twilio" ? (
-            <Input
-              aria-label={t("turnProviderSidLabel")}
-              value={form.turnProviderSid}
-              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderSid: e.target.value }))}
-              placeholder={t("turnProviderSidLabel")}
-              disabled={busy}
-              className="font-mono text-xs"
-              data-testid="webrtc-turn-twilio-sid"
-            />
-          ) : null}
-          {form.turnProviderKind !== "none" ? (
-            <>
-              <Input
-                type="password"
-                aria-label={
-                  form.turnProviderKind === "twilio"
+              type="password"
+              aria-label={
+                form.turnProviderKind === "twilio"
+                  ? t("turnProviderAuthTokenLabel")
+                  : t("turnProviderTokenLabel")
+              }
+              value={form.turnProviderToken}
+              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderToken: e.target.value }))}
+              placeholder={
+                form.turnProviderSecretRef
+                  ? t("turnProviderTokenStored")
+                  : form.turnProviderKind === "twilio"
                     ? t("turnProviderAuthTokenLabel")
                     : t("turnProviderTokenLabel")
-                }
-                value={form.turnProviderToken}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, turnProviderToken: e.target.value }))
-                }
-                placeholder={
-                  form.turnProviderSecretRef
-                    ? t("turnProviderTokenStored")
-                    : form.turnProviderKind === "twilio"
-                      ? t("turnProviderAuthTokenLabel")
-                      : t("turnProviderTokenLabel")
-                }
-                disabled={busy}
-                className="font-mono text-xs"
-                data-testid="webrtc-turn-token"
-              />
-              <Input
-                aria-label={t("turnProviderTtlLabel")}
-                value={form.turnProviderTtl}
-                onChange={(e) => setForm((prev) => ({ ...prev, turnProviderTtl: e.target.value }))}
-                placeholder={t("turnProviderTtlLabel")}
-                disabled={busy}
-                inputMode="numeric"
-                className="font-mono text-xs"
-                data-testid="webrtc-turn-ttl"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onTestProvider}
-                disabled={busy}
-                data-testid="webrtc-turn-test"
-              >
-                {t("turnTestButton")}
-              </Button>
-            </>
-          ) : null}
-        </div>
-
-        <Button size="sm" onClick={onSave} disabled={busy} data-testid="webrtc-save">
-          {busy ? t("savingButton") : t("saveButton")}
-        </Button>
-
-        {showPollBanner ? (
-          <div
-            className="flex flex-col gap-0.5 rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-            data-testid="webrtc-poll-error"
-            role="alert"
-          >
-            <span className="font-medium">
-              {t("pollFailed", { reason: pollFailureMessage ?? "" })}
-            </span>
-          </div>
+              }
+              disabled={busy}
+              className="font-mono text-xs"
+              data-testid="webrtc-turn-token"
+            />
+            <Input
+              aria-label={t("turnProviderTtlLabel")}
+              value={form.turnProviderTtl}
+              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderTtl: e.target.value }))}
+              placeholder={t("turnProviderTtlLabel")}
+              disabled={busy}
+              inputMode="numeric"
+              className="font-mono text-xs"
+              data-testid="webrtc-turn-ttl"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onTestProvider}
+              disabled={busy}
+              data-testid="webrtc-turn-test"
+            >
+              {t("turnTestButton")}
+            </Button>
+          </>
         ) : null}
+      </div>
 
-        {status ? <StatusBlock status={status} devices={devices} /> : null}
-      </CardContent>
-    </Card>
+      <Button size="sm" onClick={onSave} disabled={busy} data-testid="webrtc-save">
+        {busy ? t("savingButton") : t("saveButton")}
+      </Button>
+
+      {showPollBanner ? (
+        <div
+          className="flex flex-col gap-0.5 rounded border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          data-testid="webrtc-poll-error"
+          role="alert"
+        >
+          <span className="font-medium">
+            {t("pollFailed", { reason: pollFailureMessage ?? "" })}
+          </span>
+        </div>
+      ) : null}
+
+      {status ? <StatusBlock status={status} devices={devices} /> : null}
+    </SettingsBlock>
   )
 }
 
@@ -639,6 +635,7 @@ interface TierDotProps {
 export function TierDot({ tier, className }: TierDotProps): React.JSX.Element {
   const palette: Record<DeviceTier, string> = {
     connected: "fill-emerald-500 text-emerald-500",
+    relayed: "fill-amber-500 text-amber-500",
     negotiating: "fill-amber-500 text-amber-500",
     awaiting: "fill-sky-500 text-sky-500",
     failed: "fill-destructive text-destructive",

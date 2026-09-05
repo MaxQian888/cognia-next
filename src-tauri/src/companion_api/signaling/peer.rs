@@ -301,6 +301,16 @@ impl PeerSession {
         self.pc.add_ice_candidate(candidate).await
     }
 
+    /// Whether the agent data channel is currently `open`. The carrier asks
+    /// this before announcing a binary resource so it can size the chunks
+    /// for the path the bytes will actually take.
+    pub async fn channel_open(&self) -> bool {
+        let Some(channel) = self.dc.read().await.clone() else {
+            return false;
+        };
+        matches!(channel.ready_state().await, Ok(RTCDataChannelState::Open))
+    }
+
     /// Send a JSON envelope to the mobile peer over the data channel. The
     /// dispatcher uses this to deliver RPC responses and event frames.
     ///

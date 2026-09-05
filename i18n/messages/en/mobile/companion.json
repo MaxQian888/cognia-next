@@ -381,11 +381,13 @@
         "connected": "DataChannel is open. The phone reaches the desktop directly.",
         "failed": "Last session ended in error. The client task is backing off before its next attempt.",
         "negotiating": "Mobile peer joined; exchanging SDP and ICE candidates.",
-        "offline": "Signaling client is idle — usually between reconnect attempts."
+        "offline": "Signaling client is idle — usually between reconnect attempts.",
+        "relayed": "Serving over the Cognia relay. RPC and events flow through the rendezvous while a direct DataChannel is negotiated in the background."
       },
       "failed": "Failed",
       "negotiating": "Negotiating",
-      "offline": "Offline"
+      "offline": "Offline",
+      "relayed": "Relayed"
     },
     "enableHelp": "When on, the mobile app reaches this desktop directly via WebRTC after pairing — falling back to LAN or the cloudflared tunnel only when WebRTC can't open.",
     "enableLabel": "Enable WebRTC tier",

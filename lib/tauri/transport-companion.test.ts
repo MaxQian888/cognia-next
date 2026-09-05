@@ -2278,6 +2278,7 @@ interface FakeRtcOpts {
 function makeFakeRtc(opts: FakeRtcOpts = {}) {
   return {
     getState: () => "open" as const,
+    getCarrier: () => "datachannel" as const,
     call: jest.fn(async () => "RTC_RESULT"),
     readBinary: jest.fn(async () => ({
       bytes: Uint8Array.from([4, 5, 6]),

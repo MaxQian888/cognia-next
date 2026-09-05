@@ -1,0 +1,136 @@
+{
+  "title": "连接",
+  "description": "这台设备与主机如何互相触达：本机服务、中继与隧道、配对、远程主机、推送与同步。",
+  "nav": {
+    "title": "连接主题",
+    "mobileTrigger": "主题",
+    "groups": {
+      "statusGroup": "状态",
+      "hostGroup": "本机",
+      "devicesGroup": "设备",
+      "deliveryGroup": "投递"
+    },
+    "items": {
+      "overview": {
+        "label": "总览",
+        "description": "这个壳是什么、连着谁、走哪条链路。"
+      },
+      "local-host": {
+        "label": "本机主机",
+        "description": "伴侣服务、绑定方式、TLS、发现与浏览器访问。"
+      },
+      "cloud-relay": {
+        "label": "云与中继",
+        "description": "中继、点对点升级、隧道、登录与协作服务器。"
+      },
+      "pairing": {
+        "label": "配对",
+        "description": "邀请、浏览器登记，以及已兑换邀请的设备。"
+      },
+      "remote-hosts": {
+        "label": "远程主机",
+        "description": "这台设备驱动的主机，以及添加新主机。"
+      },
+      "push": {
+        "label": "推送",
+        "description": "APNs 与 FCM 凭据，以及测试通知。"
+      },
+      "sync": {
+        "label": "同步",
+        "description": "这台设备与其主机之间按表的镜像状态。"
+      }
+    }
+  },
+  "reach": {
+    "no-host": "这个浏览器没有连接任何主机，这里没有可配置的内容。",
+    "needs-desktop-shell": "这个控制需要桌面应用本身。当前连接的是无头主机，而隧道进程或 mDNS 套接字只存在于桌面端。",
+    "not-owner": "只有主机的所有者设备可以更改主机的可达方式。"
+  },
+  "reachNext": {
+    "no-host": "在「远程主机」主题中与主机配对，或打开桌面应用。",
+    "needs-desktop-shell": "在主机所在机器上使用桌面应用，或改用中继暴露它。",
+    "not-owner": "请所有者授予这台设备主机管理权限，或改用所有者设备。"
+  },
+  "overview": {
+    "runtimeTitle": "运行时",
+    "runtimeDescription": "从这里发起的工作在哪运行、走哪条链路。",
+    "hostMode": "这个壳",
+    "hostModeValue": {
+      "host": "本身是主机",
+      "companion": "驱动一台主机",
+      "standalone": "独立运行"
+    },
+    "profile": {
+      "desktop": "桌面应用",
+      "headless": "无头服务器",
+      "mobile-companion": "已配对主机的手机",
+      "cloud-companion": "已配对主机的浏览器",
+      "web-standalone": "未配对任何主机的浏览器"
+    },
+    "link": "主机链路",
+    "linkValue": {
+      "local": "本机",
+      "connected": "已连接",
+      "reconnecting": "重连中",
+      "offline": "离线",
+      "unauthenticated": "需要登录"
+    },
+    "tier": "传输层",
+    "tierNotApplicable": "不适用：这个壳在本地运行工作。",
+    "activeHost": "当前主机",
+    "activeHostSelf": "这台机器。",
+    "activeHostNone": "没有正在驱动的主机。",
+    "eventPlaneTitle": "事件面",
+    "eventPlaneDescription": "除请求应答之外，事件是否能到达对端。",
+    "plane": {
+      "ready": "就绪",
+      "replaying": "追赶中",
+      "connecting": "连接中",
+      "degraded": "降级",
+      "disconnected": "已断开"
+    },
+    "devicePlanes": "{count, plural, =0 {没有已配对设备。} =1 {1 台已配对设备。} other {# 台已配对设备。}}",
+    "degradedHint": "请求仍能应答，但没有事件到达。在别处做的更改要等事件流重连后才会出现。",
+    "shortcutsTitle": "前往",
+    "goPairing": "配对设备",
+    "goRelay": "中继与隧道",
+    "goDevices": "设备控制台"
+  },
+  "pairing": {
+    "reachRelay": "任意网络",
+    "reachDirect": "同一网络",
+    "reachRelayHint": "这个邀请携带中继房间：设备可以从任何网络兑换，并且会先尝试直连地址。",
+    "reachDirectHint": "这个邀请没有中继房间：设备必须直接访问上面的地址。到「云与中继」打开中继即可从任何地方配对。"
+  },
+  "remoteHosts": {
+    "registryTitle": "已登记的主机",
+    "registryDescription": "这台设备可以驱动的主机。同一时间只有一台处于活动状态。",
+    "count": "{count, plural, =0 {无} =1 {1 台主机} other {# 台主机}}",
+    "empty": "还没有登记任何主机。在下方用主机的邀请添加一台。",
+    "addTitle": "添加主机",
+    "addDescription": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
+    "renameAria": "重命名 {label}",
+    "renameSave": "保存名称",
+    "active": "活动",
+    "state": {
+      "disconnected": "已断开",
+      "connecting": "连接中",
+      "ready": "就绪",
+      "degraded": "降级",
+      "revoked": "已吊销",
+      "versionMismatch": "版本不匹配"
+    },
+    "drive": "驱动",
+    "removeAria": "移除 {label}"
+  },
+  "push": {
+    "testTitle": "测试通知",
+    "testDescription": "通过已配置的提供方，向当前套接字已关闭的每台已配对设备发送一条仅含元数据的推送。",
+    "testSend": "发送测试",
+    "testSending": "发送中",
+    "testSent": "{count, plural, =0 {没有发给任何设备：所有已配对设备都在线或没有推送令牌。} =1 {已发给 1 台离线设备。} other {已发给 # 台离线设备。}}",
+    "testFailed": "测试推送失败：{message}",
+    "testNeedsCredentials": "请先在上方配置 APNs 或 FCM。",
+    "testResult": "{count, plural, =0 {上次测试没有触达任何设备。} =1 {上次测试触达了 1 台设备。} other {上次测试触达了 # 台设备。}}"
+  }
+}

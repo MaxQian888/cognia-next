@@ -298,13 +298,15 @@ export async function registerCompanionWorker(
 export async function fetchCompanionAuthConfig(
   baseUrl: string,
   serverFingerprint: string | undefined,
-  fetcher: AuthFetcher = pinnedFetch
+  fetcher: AuthFetcher = pinnedFetch,
+  options: { signal?: AbortSignal } = {}
 ): Promise<CompanionAuthConfig> {
   const body = await expectJson(
     fetcher(`${trimSlash(baseUrl)}/api/auth/config`, {
       method: "GET",
       headers: { Accept: "application/json" },
       serverFingerprint,
+      ...(options.signal ? { signal: options.signal } : {}),
     })
   )
   if (

@@ -23,7 +23,7 @@ import { useTranslations } from "next-intl"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
@@ -96,75 +96,75 @@ export function CollaborationCard() {
   }, [])
 
   return (
-    <Card data-testid="collaboration-card">
-      <CardHeader className="pb-2 pt-3">
-        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">{t("help")}</p>
+    <SettingsBlock
+      title={t("title")}
+      testid="collaboration-card"
+      settingId="companion-collaboration"
+      contentClassName="space-y-3"
+    >
+      <p className="text-xs text-muted-foreground">{t("help")}</p>
 
-        <div className="space-y-1.5">
-          <Label className="text-xs" htmlFor="collab-base-url">
-            {t("urlLabel")}
-          </Label>
-          <Input
-            id="collab-base-url"
-            value={baseUrl}
-            placeholder={t("urlPlaceholder")}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            data-testid="collaboration-url"
-          />
-        </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs" htmlFor="collab-base-url">
+          {t("urlLabel")}
+        </Label>
+        <Input
+          id="collab-base-url"
+          value={baseUrl}
+          placeholder={t("urlPlaceholder")}
+          onChange={(event) => setBaseUrl(event.target.value)}
+          data-testid="collaboration-url"
+        />
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" onClick={save} data-testid="collaboration-save">
-            {baseUrl.trim() ? t("save") : t("clear")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!saved || busy}
-            onClick={() => void test()}
-            data-testid="collaboration-test"
-          >
-            {t("test")}
-          </Button>
-          {/*
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" onClick={save} data-testid="collaboration-save">
+          {baseUrl.trim() ? t("save") : t("clear")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!saved || busy}
+          onClick={() => void test()}
+          data-testid="collaboration-test"
+        >
+          {t("test")}
+        </Button>
+        {/*
             The switch and the surface it drives were unreachable from each
             other: this card is the only place a collaboration server is
             configured, and `/workspace` is the only place the roster and the
             shared activity it pulls are visible.
           */}
-          <Button asChild type="button" size="sm" variant="ghost">
-            <Link href="/workspace" data-testid="collaboration-open-workspace">
-              {t("openWorkspace")}
-            </Link>
-          </Button>
-        </div>
+        <Button asChild type="button" size="sm" variant="ghost">
+          <Link href="/workspace" data-testid="collaboration-open-workspace">
+            {t("openWorkspace")}
+          </Link>
+        </Button>
+      </div>
 
-        {status?.status === "refreshed" ? (
-          <p
-            className="text-xs text-emerald-600 dark:text-emerald-400"
-            data-testid="collaboration-ok"
-          >
-            {t("refreshed", { issues: status.issues, workspaces: status.workspaces })}
-          </p>
-        ) : null}
-        {status?.status === "skipped" ? (
-          // Not an error: no server, nobody signed in, or a personal account
-          // with no org are all ordinary states, and calling them failures
-          // sends people looking for a problem that is not there.
-          <p className="text-xs text-muted-foreground" data-testid="collaboration-skipped">
-            {t(`skipped.${status.reason}`)}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="text-xs text-destructive" role="status" data-testid="collaboration-error">
-            {t("failed", { reason: error })}
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
+      {status?.status === "refreshed" ? (
+        <p
+          className="text-xs text-emerald-600 dark:text-emerald-400"
+          data-testid="collaboration-ok"
+        >
+          {t("refreshed", { issues: status.issues, workspaces: status.workspaces })}
+        </p>
+      ) : null}
+      {status?.status === "skipped" ? (
+        // Not an error: no server, nobody signed in, or a personal account
+        // with no org are all ordinary states, and calling them failures
+        // sends people looking for a problem that is not there.
+        <p className="text-xs text-muted-foreground" data-testid="collaboration-skipped">
+          {t(`skipped.${status.reason}`)}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="text-xs text-destructive" role="status" data-testid="collaboration-error">
+          {t("failed", { reason: error })}
+        </p>
+      ) : null}
+    </SettingsBlock>
   )
 }

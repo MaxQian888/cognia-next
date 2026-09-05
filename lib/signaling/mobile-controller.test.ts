@@ -67,6 +67,7 @@ class FakeTransport {
   readonly enableCalls: Array<{
     signalingUrl: string
     rtcConfiguration?: RTCConfiguration
+    p2p?: boolean
   }> = []
   disableCount = 0
   reconnectWsCount = 0
@@ -80,15 +81,24 @@ class FakeTransport {
   /** Listeners registered by the controller's endpoint-refresh subscription. */
   readonly connectionStateHandlers = new Set<(state: string) => void>()
   detachConnectionStateCount = 0
-  async enableWebRtcTier(opts: {
+  async enableWanTier(opts: {
     signalingUrl: string
     rtcConfiguration?: RTCConfiguration
+    p2p?: boolean
   }): Promise<void> {
     this.enableCalls.push({
       signalingUrl: opts.signalingUrl,
       rtcConfiguration: opts.rtcConfiguration,
+      p2p: opts.p2p,
     })
     if (this.enableError) throw this.enableError
+  }
+  /** Pre-relay name; production forwards it to `enableWanTier`. */
+  async enableWebRtcTier(opts: {
+    signalingUrl: string
+    rtcConfiguration?: RTCConfiguration
+  }): Promise<void> {
+    return this.enableWanTier(opts)
   }
   disableWebRtcTier(): void {
     this.disableCount++
@@ -202,11 +212,14 @@ describe("applySettings", () => {
     ])
   })
 
-  it("disables the tier when webrtcEnabled is false", async () => {
+  it("keeps the WAN tier on with P2P off when webrtcEnabled is false (ADR-0170)", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: false }))
-    expect(tx.disableCount).toBe(1)
-    expect(tx.enableCalls).toEqual([])
+    // The relay is the WAN floor; the toggle only withholds the ICE upgrade.
+    expect(tx.disableCount).toBe(0)
+    expect(tx.enableCalls).toHaveLength(1)
+    expect(tx.enableCalls[0].p2p).toBe(false)
   })
 
   it("treats undefined webrtcEnabled as opt-in default", async () => {
@@ -271,7 +284,7 @@ describe("installCompanionSignalingController — transport readiness", () => {
     "getConnectionState",
     "reconnectWs",
     "isOnConnectedLan",
-    "enableWebRtcTier",
+    "enableWanTier",
     "disableWebRtcTier",
   ])("treats a transport missing %s as not drivable", (missing) => {
     const partial = new FakeTransport() as unknown as Record<string, unknown>

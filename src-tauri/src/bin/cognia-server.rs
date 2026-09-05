@@ -1214,6 +1214,18 @@ async fn run_pair(
     );
     log::info!("tls fingerprint: {}", tls.fingerprint_sha256);
 
+    // ADR-0170: a running `serve` can open a relay pairing room that this
+    // process cannot (the room's signaling client must live where the server
+    // does). Ask it first over the loopback service plane and print its cgnp4
+    // verbatim; only fall back to the standalone cgnp3 below when nothing is
+    // listening.
+    if let Some(encoded) = pair_through_running_server(base_url).await {
+        println!("\nPair invitation for device \"{device_name}\" (with relay):\n");
+        println!("    {encoded}\n");
+        println!("Scan / paste the cgnp4|… string into the app's pair screen. It works from any network.");
+        return Ok(());
+    }
+
     const INVITATION_TTL_SECS: i64 = 5 * 60;
     let now = chrono::Utc::now().timestamp();
     let expires_at_ms = now.saturating_add(INVITATION_TTL_SECS) * 1_000;
@@ -1250,7 +1262,94 @@ async fn run_pair(
     println!("    {encoded}\n");
     println!("Expires at: {expires_at_ms} (epoch milliseconds)\n");
     println!("Scan / paste the cgnp3|… string into the mobile app's pair screen.");
+    println!("(No running `serve` answered on loopback, so this invitation has no relay room: the device must reach {base_url} directly.)");
     Ok(())
+}
+
+/// Ask a running `cognia-server serve` on this machine for an invitation
+/// through `companion_create_owner_invitation` on the loopback service plane
+/// (ADR-0170). `None` when nothing answers, which is the standalone case.
+async fn pair_through_running_server(advertised_base_url: &str) -> Option<String> {
+    let port = std::env::var("COGNIA_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(app_lib::companion_api::server::DEFAULT_PORT);
+    let signing_secret = match secret::load_or_generate() {
+        Ok(secret) => secret,
+        Err(error) => {
+            log::warn!("no service signing secret ({error}); issuing a standalone invitation");
+            return None;
+        }
+    };
+    let tenant = app_lib::companion_api::host_identity::current_tenant_or_unbound();
+    let token = match app_lib::companion_api::jwt::issue_service_jwt(&signing_secret, &tenant) {
+        Ok((token, _)) => token,
+        Err(error) => {
+            log::warn!("could not mint a service token ({error}); issuing a standalone invitation");
+            return None;
+        }
+    };
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .no_proxy()
+        .build()
+        .ok()?;
+    let url = format!("https://127.0.0.1:{port}/internal/_rpc/companion_create_owner_invitation");
+    let response = match client
+        .post(&url)
+        .bearer_auth(token)
+        .header("Idempotency-Key", uuid::Uuid::new_v4().to_string())
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            log::warn!(
+                "no running server on 127.0.0.1:{port} ({error}); issuing a standalone invitation \
+                 that only works on the same network"
+            );
+            return None;
+        }
+    };
+    if !response.status().is_success() {
+        log::warn!(
+            "running server refused the invitation request ({}); issuing a standalone one",
+            response.status()
+        );
+        return None;
+    }
+    let body: serde_json::Value = match response.json().await {
+        Ok(body) => body,
+        Err(error) => {
+            log::warn!("running server answered with an unreadable body ({error}); issuing a standalone one");
+            return None;
+        }
+    };
+    let issue = body.get("result").cloned().unwrap_or(body);
+    let mut payload = serde_json::json!({
+        "base": issue.get("baseUrl").and_then(|v| v.as_str()).unwrap_or(advertised_base_url),
+        "host": issue.get("hostId")?,
+        "tenant": issue.get("tenantId")?,
+        "exp": issue.get("expiresAtMs")?,
+        "ver": issue.get("appVersion")?,
+        "fp": issue.get("fingerprint").cloned().unwrap_or(serde_json::Value::String(String::new())),
+        "mode": "owner-invitation",
+        "invitation": issue.get("invitation")?,
+    });
+    let version = match issue.get("relay") {
+        Some(relay) if !relay.is_null() => {
+            payload["relay"] = relay.clone();
+            4
+        }
+        _ => 3,
+    };
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    Some(format!(
+        "cgnp{version}|{}",
+        URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes())
+    ))
 }
 
 // Each argument is an independently named field in the cgnp3 invitation wire contract.
@@ -1350,7 +1449,30 @@ async fn run_serve(
             }
             Some((browser_port, policy))
         }
-        None => None,
+        // ADR-0170: without the flag, honour the saved browser-access config
+        // that `companion_browser_access_set` writes over the host-admin
+        // plane, so a decision taken from the Connectivity settings survives
+        // a restart exactly as it does on the desktop.
+        None => {
+            let saved = app_lib::companion_api::browser_access::load(Some(&store_data_dir()));
+            if saved.enabled && !saved.allowed_origins.is_empty() {
+                let policy = app_lib::companion_api::web_origin::WebOriginPolicy::from_env_and_config(
+                    &saved,
+                )
+                .allowing_private_network();
+                if policy.allows_any_origin() {
+                    log::info!(
+                        "browser listener enabled from the saved browser-access config (port {})",
+                        saved.port
+                    );
+                    Some((saved.port, policy))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
     };
 
     // Install the headless AppStore — the DEGRADED data plane, serving only
@@ -1451,6 +1573,13 @@ async fn run_serve(
     });
     spawn_headless_push_triggers(Arc::clone(&shared));
     let signaling_hub = SignalingHub::new();
+    // ADR-0170: a relay/signaling patch saved over the host-admin plane is
+    // reapplied before the hub binds, so the first client task already dials
+    // the configured rendezvous with the configured ICE servers.
+    if let Some(patch) = app_lib::companion_api::signaling_config::load(Some(&data_dir)) {
+        log::info!("signaling config restored from disk ({})", patch.signaling_url);
+        signaling_hub.apply_patch(patch);
+    }
     signaling::install_hub(Some(&signaling_hub));
     signaling_hub.bind(Arc::clone(&shared));
     signaling::refresh_installed_hub()
@@ -1618,6 +1747,7 @@ async fn run_serve(
     // probes can confirm the right server (matches the test+production
     // path used by CompanionServerState::start in mod.rs).
     set_advertised_port(handle.bound_port);
+    app_lib::companion_api::set_bind_loopback_only(bind_loopback);
     let public_url = resolve_advertise_url(advertise_url, handle.bound_port);
     let bind_host = if bind_loopback {
         "127.0.0.1"
@@ -1651,6 +1781,7 @@ async fn run_serve(
                         "browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
                         handle.bound_port
                     );
+                    app_lib::companion_api::set_browser_advertised_port(handle.bound_port);
                     // The listener alone is not browser access: `browser_context_submit`
                     // / `_cancel` are gated on this switch before dispatch, and the
                     // desktop flips it in `CompanionServerState::start`. Without it a

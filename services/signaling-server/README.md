@@ -97,8 +97,12 @@ verification does not depend on JSON property order.
 
 ## Operational notes
 
-- Per-connection rate limit: 20-frame token bucket, refills at 10 frames/sec.
-  Exceeding triggers `error{code:"rate_limited"}` followed by a disconnect.
+- Per-connection rate limit, per lane (ADR-0170). A `relay` frame names its
+  lane: `signal` (the default, SDP/ICE/hello) keeps the 20-frame token bucket
+  refilling at 10 frames/sec; `data` (application frames: RPC, events, binary
+  chunks) has its own 256-frame bucket refilling at 64 frames/sec. Exceeding
+  either triggers `error{code:"rate_limited"}` followed by a disconnect. The
+  constants live in `core/src/limits.rs` and are shared with the Worker.
 - Per-source-IP connection cap: `SIGNALING_MAX_CONN_PER_IP`, default `50`.
   By default the raw TCP peer address is used. Set
   `SIGNALING_TRUST_PROXY_HEADERS=1` only behind a trusted proxy that overwrites
@@ -111,7 +115,8 @@ verification does not depend on JSON property order.
   Blank/unset permits same-origin browsers only; missing `Origin` remains
   allowed for native desktop clients. Cross-origin entries must be exact
   HTTPS origins; wildcard, plaintext, credential, and path values fail startup.
-- Frame size cap: 8 KiB per WS frame, enforced in `ws::handle_socket`
+- Frame size cap, per lane: 8 KiB for the `signal` lane and 64 KiB for the
+  `data` lane, enforced in `ws::handle_socket` after the frame is parsed
   (oversized frames get a graceful `error{code:"frame_too_large"}`), backed by
   a hard 64 KiB `max_message_size` on the upgrade as a memory bound.
   `tower_http`'s `RequestBodyLimitLayer` only caps the pre-upgrade handshake.
@@ -129,5 +134,6 @@ verification does not depend on JSON property order.
   Object binding.
 - `GET /metrics` exposes `signaling_frames_in_total`,
   `signaling_frames_relayed_total`, `signaling_frames_rejected_total{reason}`,
+  `signaling_relay_frames_total{lane}`, `signaling_relay_bytes_total{lane}`,
   `signaling_rooms_active`, `signaling_peers_active`, and
   `signaling_uptime_seconds`.

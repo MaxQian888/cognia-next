@@ -654,10 +654,20 @@
         "rtc-relay": "RTC 中继",
         "unknown": "协商中",
         "ws-lan": "WebSocket · 局域网",
-        "ws-tunnel": "WebSocket · 隧道"
+        "ws-tunnel": "WebSocket · 隧道",
+        "relay": "中继"
       },
       "title": "运行连接",
-      "transport": "传输通道"
+      "transport": "传输通道",
+      "eventPlane": "事件",
+      "eventPlaneState": {
+        "ready": "实时",
+        "replaying": "追赶中",
+        "connecting": "连接中",
+        "degraded": "降级",
+        "disconnected": "已断开"
+      },
+      "eventPlaneDegradedHint": "请求能应答但没有事件到达。在别处做的更改要等事件流重连后才会出现。"
     },
     "error": "错误",
     "idle": "空闲",

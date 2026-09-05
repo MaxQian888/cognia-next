@@ -44,6 +44,7 @@ mod data_sync;
 mod diagnostics;
 mod filesystem;
 mod gateway_plane;
+mod host_admin;
 mod host_state;
 mod native_tools;
 mod plugins;
@@ -464,6 +465,23 @@ const KNOWN_COMMANDS: &[&str] = &[
     "external_bridge_relay_disable",
     "host_admin_lease_issue",
     "host_admin_lease_revoke",
+    // ADR-0170 — the Host's own connectivity configuration, owner-only
+    // (`capability: host.admin`). The same functions the desktop settings
+    // call through Tauri, so a browser reaches a headless Host identically.
+    "companion_signaling_status",
+    "companion_signaling_configure",
+    "companion_signaling_devices_status",
+    "companion_signaling_reconnect_device",
+    "companion_browser_access_get",
+    "companion_browser_access_set",
+    "companion_push_status",
+    "companion_push_configure_fcm",
+    "companion_push_configure_apns",
+    "companion_push_clear_fcm",
+    "companion_push_clear_apns",
+    "companion_push_notification",
+    "companion_create_owner_invitation",
+    "companion_server_status",
     // ADR-0153 — the approver side of the lease. Neither is step-up gated: a
     // lease is what they grant, so requiring one to reach them is a loop.
     "host_consent_pending",
@@ -1525,6 +1543,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // ADR-0153 — approver-side read; must never be served from the 60 s
     // idempotency cache, or an answered request keeps re-appearing.
     "host_consent_pending",
+    // ADR-0170 host-admin reads: pure snapshots of the host's own connectivity state.
+    "companion_signaling_status",
+    "companion_signaling_devices_status",
+    "companion_browser_access_get",
+    "companion_push_status",
+    "companion_server_status",
 ];
 
 // ---------------------------------------------------------------------------
@@ -3399,6 +3423,10 @@ pub(super) async fn dispatch(
     if gateway_plane::COMMANDS.contains(&name) {
         return gateway_plane::dispatch(name, args, state, host, device_id, account_id, scope)
             .await;
+    }
+
+    if host_admin::COMMANDS.contains(&name) {
+        return host_admin::dispatch(name, args, state, host, device_id, account_id, scope).await;
     }
 
     if source_control::COMMANDS.contains(&name) {

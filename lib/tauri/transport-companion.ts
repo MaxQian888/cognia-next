@@ -310,6 +310,12 @@ export type TransportTier =
   | "ws-lan"
   /** HTTPS+WS open, host is on the public internet (tunnel / forwarded). */
   | "ws-tunnel"
+  /**
+   * Frames travel through the Cognia relay's data lane (ADR-0170): the
+   * rendezvous forwards encrypted DataChannel frames because no DataChannel
+   * and no HTTPS route is open. The zero-configuration WAN floor.
+   */
+  | "relay"
   /** Neither transport is connected. */
   | "offline"
 
@@ -454,6 +460,12 @@ export class CompanionTransport implements Transport {
 
   /** Per-channel subscriber sets. */
   private channelHandlers: Map<string, Set<Handler>> = new Map()
+  /**
+   * Detach functions for every handler currently mirrored onto the WAN tier
+   * (ADR-0170). Keyed by the handler so a `subscribe()` that happened before
+   * the tier opened is attached when it does, and detached with the tier.
+   */
+  private rtcMirrored: Map<Handler, () => void> = new Map()
   /** Channels the host refused on the last subscribe frame (diagnostics). */
   private lastRejectedChannels: string[] = []
   /** Last `subscribe_error` message from the host, if any (diagnostics). */
@@ -588,9 +600,9 @@ export class CompanionTransport implements Transport {
       })
     }
 
-    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
+    if (this.preferRtc()) {
       try {
-        return await this.rtc.readBinary(resource)
+        return await this.rtc!.readBinary(resource)
       } catch (error) {
         const code =
           error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : ""
@@ -681,10 +693,10 @@ export class CompanionTransport implements Transport {
     // before the channel hard-failed, the fallback request carrying the same
     // key lets the server dedupe instead of double-executing the command.
     const idempotencyKey = isReadOnly ? undefined : (options?.idempotencyKey ?? crypto.randomUUID())
-    if (this.rtc && this.rtc.getState() === "open" && !this.isOnConnectedLan()) {
+    if (this.preferRtc()) {
       try {
         const params = args ?? {}
-        return await this.rtc.call<T>(name, params, { idempotencyKey })
+        return await this.rtc!.call<T>(name, params, { idempotencyKey })
       } catch (err) {
         // Hard-fail on the data channel → fall back to HTTPS. The data
         // channel teardown is handled by its own state listener; we just
@@ -791,15 +803,7 @@ export class CompanionTransport implements Transport {
     // WebRTC tier wins for ordering when both deliver the same
     // `(event, seq)` because the dispatcher only forwards once per
     // `EventBus` frame.
-    const config = this.config()
-    let rtcUnsub: (() => void) | null = null
-    if (
-      this.rtc &&
-      this.rtc.getState() === "open" &&
-      (!this.isOnConnectedLan() || (config !== null && requiresNativePinnedWebSocket(config)))
-    ) {
-      rtcUnsub = this.rtc.subscribe(event, handler as Handler)
-    }
+    this.mirrorHandlerOnRtc(event, handler as Handler)
 
     // Open WS if not already open.
     if (this.ws === null && !this.wsDestroyed) {
@@ -811,7 +815,11 @@ export class CompanionTransport implements Transport {
       if (unsubscribed) return
       unsubscribed = true
 
-      if (rtcUnsub) rtcUnsub()
+      const mirrored = this.rtcMirrored.get(handler as Handler)
+      if (mirrored) {
+        mirrored()
+        this.rtcMirrored.delete(handler as Handler)
+      }
 
       const set = this.channelHandlers.get(event)
       if (set) {
@@ -934,6 +942,24 @@ export class CompanionTransport implements Transport {
       configOverride?: CompanionConfig
     }
   ): Promise<void> {
+    return this.enableWanTier(options)
+  }
+
+  /**
+   * ADR-0170: open the WAN tier: the relay data lane through the signaling
+   * rendezvous, with a peer-to-peer DataChannel negotiated on top of it when
+   * `p2p` is not `false`. `enableWebRtcTier` is the pre-relay name and
+   * forwards here unchanged.
+   */
+  public async enableWanTier(
+    options: Omit<
+      TransportRtcOptions,
+      "rendezvousId" | "signalingRoomDescriptor" | "signalingPrivateKey" | "deviceId"
+    > & {
+      /** Override the storage-loaded config (test injection). */
+      configOverride?: CompanionConfig
+    }
+  ): Promise<void> {
     // Retain the options for `reconnectRtc()`'s re-establish path even when
     // this particular call short-circuits — the tier may already be open, but
     // a future failure still needs the config to rebuild.
@@ -963,6 +989,8 @@ export class CompanionTransport implements Transport {
       deviceId: config.deviceId,
       rtcConfiguration: options.rtcConfiguration,
       negotiationTimeoutMs: options.negotiationTimeoutMs,
+      p2p: options.p2p,
+      relayHandshakeTimeoutMs: options.relayHandshakeTimeoutMs,
       peerConnectionFactory: options.peerConnectionFactory,
       signalingClientFactory: options.signalingClientFactory,
     })
@@ -972,6 +1000,7 @@ export class CompanionTransport implements Transport {
       if (state === "closed" || state === "failed") {
         // Drop our reference so call() / subscribe() stop routing through it.
         if (this.rtc === rtc) {
+          this.unmirrorAllHandlers()
           this.rtc = null
           if (this.rtcDetach) {
             this.rtcDetach()
@@ -989,6 +1018,7 @@ export class CompanionTransport implements Transport {
       try {
         await rtc.connect()
         this.rtc = rtc
+        this.mirrorAllHandlersOnRtc()
         // Promote to rtc-* — recomputeTier will inspect candidate stats.
         void this.recomputeTier()
       } catch (err) {
@@ -1071,6 +1101,7 @@ export class CompanionTransport implements Transport {
       this.rtcDetach()
       this.rtcDetach = null
     }
+    this.unmirrorAllHandlers()
     if (this.rtc) {
       try {
         this.rtc.close()
@@ -1137,6 +1168,58 @@ export class CompanionTransport implements Transport {
   }
 
   /**
+   * Mirror one subscriber onto the WAN tier when it is open and preferred
+   * (ADR-0021 LAN-first, ADR-0170 relay). Idempotent per handler. Both paths
+   * stay active otherwise; the tier wins for ordering when both deliver the
+   * same `(event, seq)` because the dispatcher only forwards once per
+   * `EventBus` frame.
+   */
+  private mirrorHandlerOnRtc(event: string, handler: Handler): void {
+    if (this.rtcMirrored.has(handler)) return
+    const rtc = this.rtc
+    if (!rtc || rtc.getState() !== "open") return
+    const config = this.config()
+    if (this.isOnConnectedLan() && !(config !== null && requiresNativePinnedWebSocket(config))) {
+      return
+    }
+    this.rtcMirrored.set(handler, rtc.subscribe(event, handler))
+  }
+
+  /**
+   * Attach every current subscriber to a tier that just opened. Before the
+   * relay, a subscription made while the tier was still negotiating was
+   * never mirrored, which on a WAN-only session meant no events at all.
+   */
+  private mirrorAllHandlersOnRtc(): void {
+    for (const [event, handlers] of this.channelHandlers) {
+      for (const handler of handlers) this.mirrorHandlerOnRtc(event, handler)
+    }
+  }
+
+  private unmirrorAllHandlers(): void {
+    for (const detach of this.rtcMirrored.values()) detach()
+    this.rtcMirrored.clear()
+  }
+
+  /**
+   * Whether an RPC should go through `TransportRtc` right now. The ranking
+   * (ADR-0021, ADR-0170): a connected LAN socket beats everything; an open
+   * DataChannel beats a tunnel (no third-party hop); a live HTTPS route
+   * (tunnel or cached address) beats the relay; the relay beats nothing but
+   * offline. So the relay carrier is used only when the WebSocket plane is
+   * not connected.
+   */
+  private preferRtc(): boolean {
+    const rtc = this.rtc
+    if (!rtc || rtc.getState() !== "open") return false
+    if (this.isOnConnectedLan()) return false
+    const carrier = rtc.getCarrier()
+    if (carrier === "datachannel") return true
+    if (carrier === "relay") return this.connectionState !== "connected"
+    return false
+  }
+
+  /**
    * ADR-0021 — true when a live HTTPS+WS connection is open against a
    * LAN/loopback host. This is the LAN-first gate: when on a connected
    * LAN the mobile prefers the direct WS path and the WebRTC tier is
@@ -1199,15 +1282,19 @@ export class CompanionTransport implements Transport {
     // ADR-0021 LAN-first: a connected LAN WS outranks an open WebRTC peer.
     // Evaluated before the rtc branch so a stale/torn-down-pending peer
     // can't mask the preferred `ws-lan` tier.
+    const rtcOpen = this.rtc && this.rtc.getState() === "open"
+    const carrier = rtcOpen ? this.rtc!.getCarrier() : null
     if (this.isOnConnectedLan()) {
       next = "ws-lan"
-    } else if (this.rtc && this.rtc.getState() === "open") {
-      const kind = await this.rtc.getSelectedCandidateKind().catch(() => "unknown" as const)
+    } else if (rtcOpen && carrier === "datachannel") {
+      const kind = await this.rtc!.getSelectedCandidateKind().catch(() => "unknown" as const)
       this.rtcCandidateKind = kind
       next = kind === "relay" ? "rtc-relay" : "rtc-direct"
     } else if (this.connectionState === "connected") {
       const config = this.config()
       next = config ? classifyWsHost(config.baseUrl) : "offline"
+    } else if (rtcOpen && carrier === "relay") {
+      next = "relay"
     } else {
       next = "offline"
     }

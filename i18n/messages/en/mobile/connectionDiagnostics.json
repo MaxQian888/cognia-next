@@ -11,14 +11,16 @@
     "rtc-direct": "RTC direct",
     "rtc-relay": "RTC relay",
     "ws-lan": "WS LAN",
-    "ws-tunnel": "WS tunnel"
+    "ws-tunnel": "WS tunnel",
+    "relay": "Relay"
   },
   "tierHint": {
     "offline": "Not connected to the desktop.",
     "rtc-direct": "Peer-to-peer DataChannel — lowest latency.",
     "rtc-relay": "Peer connection via TURN relay — still encrypted end-to-end.",
     "ws-lan": "Fallback over LAN HTTPS+WS.",
-    "ws-tunnel": "Fallback via Cloudflared tunnel."
+    "ws-tunnel": "Fallback via Cloudflared tunnel.",
+    "relay": "Through the Cognia relay, end-to-end encrypted. A direct peer connection is still being tried."
   },
   "tierLabel": "WebRTC tier",
   "title": "Connection diagnostics"

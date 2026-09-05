@@ -1,4 +1,5 @@
 import {
+  ATTACH_LEASE_RENEW_INTERVAL_MS,
   ATTACH_LEASE_TTL_MS,
   RECENTLY_ACTIVE_WINDOW_MS,
   __resetDevicePresenceForTests,
@@ -138,17 +139,34 @@ describe("event streams", () => {
   })
 
   /**
-   * `degraded` is in the vocabulary but has no producer — the Host's only
-   * lossy-stream signal (`resync_required`) refuses the connection instead of
-   * opening a degraded one. This pins that absence so it stays a decision.
+   * `degraded` is the one state not read off a stream: no stream at all, but
+   * the device kept making authenticated requests after losing it, for longer
+   * than a renewal interval. A reconnect blip stays `disconnected`.
    */
-  it("nothing derives a degraded event plane", () => {
+  it("derives a degraded event plane from RPC outliving the streams", () => {
     for (const state of ["connecting", "replaying", "ready"] as const) {
       syncEventStreams({ deviceId: "d1", streams: [stream("a", state)], at: T0 })
-      expect(eventPlaneState("d1")).not.toBe("degraded")
+      expect(eventPlaneState("d1", T0)).not.toBe("degraded")
     }
     syncEventStreams({ deviceId: "d1", streams: [], at: T0 })
-    expect(eventPlaneState("d1")).toBe("disconnected")
+    expect(eventPlaneState("d1", T0)).toBe("disconnected")
+    // Still talking, but within the renewal window: a blip, not degradation.
+    noteDeviceSeen("d1", T0 + 1_000)
+    expect(eventPlaneState("d1", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS)).toBe("disconnected")
+    // Past the window with the RPC side still alive: degraded.
+    expect(eventPlaneState("d1", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS + 1)).toBe("degraded")
+    expect(devicePresence("d1", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS + 1)?.eventPlane).toBe(
+      "degraded"
+    )
+    // A stream coming back clears it.
+    connectReady("d1", "b", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS + 2)
+    expect(eventPlaneState("d1", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS + 3)).toBe("ready")
+  })
+
+  it("stays disconnected when the device went silent along with its streams", () => {
+    connectReady("d1")
+    syncEventStreams({ deviceId: "d1", streams: [], at: T0 })
+    expect(eventPlaneState("d1", T0 + ATTACH_LEASE_RENEW_INTERVAL_MS * 4)).toBe("disconnected")
   })
 })
 

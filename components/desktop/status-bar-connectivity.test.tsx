@@ -142,7 +142,7 @@ describe("StatusBarConnectivity", () => {
     expect(mockRequestOpenSettings).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole("button", { name: "connectionCenter.actions.settings" }))
-    expect(mockRequestOpenSettings).toHaveBeenCalledWith("companion")
+    expect(mockRequestOpenSettings).toHaveBeenCalledWith("connectivity")
   })
 
   it("shows remote Host, network, and transport details for paired Web", () => {

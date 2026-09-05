@@ -54,7 +54,7 @@
     "components/mobile/chat/message-action-sheet.tsx",
     "components/mobile/home/mobile-active-runs-card.tsx",
     "components/mobile/offline-banner.tsx",
-    "components/mobile/pair/pair-step.tsx",
+    "components/connectivity/pair/pair-step.tsx",
     "components/mobile/workflow/editor/mobile-workflow-copilot-sheet.tsx",
     "components/pet/console/radar-panel.tsx",
     "components/plugins/_shared/install-button.tsx",

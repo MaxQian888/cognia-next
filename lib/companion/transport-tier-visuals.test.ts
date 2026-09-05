@@ -6,7 +6,14 @@ import {
   transportTierTone,
 } from "./transport-tier-visuals"
 
-const TIERS: TransportTier[] = ["rtc-direct", "rtc-relay", "ws-lan", "ws-tunnel", "offline"]
+const TIERS: TransportTier[] = [
+  "rtc-direct",
+  "rtc-relay",
+  "ws-lan",
+  "ws-tunnel",
+  "relay",
+  "offline",
+]
 
 describe("transport tier visuals", () => {
   it("covers every tier with all three shapes", () => {

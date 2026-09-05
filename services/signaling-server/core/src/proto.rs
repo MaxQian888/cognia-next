@@ -91,6 +91,35 @@ impl PeerRole {
     }
 }
 
+/// Which budget a `Relay` frame draws from. The rendezvous never decrypts a
+/// payload, so the sender declares the lane in the clear and the server
+/// enforces per-lane size + rate limits and reports per-lane metrics.
+///
+/// - `Signal` (the default, and what every pre-lane peer implicitly sends):
+///   the SDP / ICE / `hello` handshake. Small, rare, tightly rate-limited.
+/// - `Data`: application frames carried *through* the rendezvous when no
+///   DataChannel is open — the same bytes `lib/tauri/datachannel-framing.ts`
+///   would have put on the DataChannel. Wider bucket, larger frame cap.
+///
+/// A lane is a budget label, not a trust boundary: a peer that mislabels a
+/// frame only changes which bucket it drains.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RelayLane {
+    #[default]
+    Signal,
+    Data,
+}
+
+impl RelayLane {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RelayLane::Signal => "signal",
+            RelayLane::Data => "data",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Client → server frames
 // ---------------------------------------------------------------------------
@@ -120,6 +149,10 @@ pub enum ClientFrame {
         /// hard `max_message_size` on the WS upgrade — `tower-http`'s body
         /// limit only bounds the pre-upgrade handshake, not WS frames.
         payload: String,
+        /// Budget lane. Absent on the wire from pre-lane peers, which is
+        /// exactly [`RelayLane::Signal`].
+        #[serde(default, skip_serializing_if = "relay_lane_is_signal")]
+        lane: RelayLane,
     },
     /// Application-level keepalive. Server replies with [`ServerFrame::Pong`].
     /// WebSocket frame pings still apply but are handled by `axum::extract::ws`
@@ -167,12 +200,21 @@ pub enum ServerFrame {
         from_role: PeerRole,
         from_session_id: String,
         payload: String,
+        /// The lane the sender declared; forwarded verbatim so a receiver can
+        /// route a `data` frame to its DataChannel reassembler without
+        /// decrypting first.
+        #[serde(default, skip_serializing_if = "relay_lane_is_signal")]
+        lane: RelayLane,
     },
     /// Reply to a `Ping`.
     Pong,
     /// Recoverable protocol error. The connection is **not** closed on the
     /// server side — the client can retry.
     Error { code: String, message: String },
+}
+
+fn relay_lane_is_signal(lane: &RelayLane) -> bool {
+    *lane == RelayLane::Signal
 }
 
 /// Snapshot of a peer already in a room, returned alongside `Subscribed`.
@@ -196,6 +238,11 @@ pub enum EnvelopeKind {
     RtcIce,
     #[serde(rename = "rtc:close")]
     RtcClose,
+    /// One application frame relayed through the rendezvous instead of a
+    /// DataChannel. The decrypted body is `{ "text": <frame> }` for the JSON /
+    /// chunk frames of `datachannel_framing`, or `{ "b64": <base64> }` for a
+    /// raw binary-resource chunk. Always sent on [`RelayLane::Data`].
+    Data,
 }
 
 // ---------------------------------------------------------------------------
@@ -251,14 +298,77 @@ mod tests {
         let frame = ClientFrame::Relay {
             rendezvous_id: "r1".into(),
             payload: "AAAA".into(),
+            lane: RelayLane::Signal,
         };
         let json = serde_json::to_string(&frame).unwrap();
         assert!(json.contains("\"kind\":\"relay\""));
+        // The signal lane is the wire default and stays invisible so pre-lane
+        // servers and peers keep parsing today's frames unchanged.
+        assert!(!json.contains("\"lane\""));
         let decoded: ClientFrame = serde_json::from_str(&json).unwrap();
         match decoded {
-            ClientFrame::Relay { payload, .. } => assert_eq!(payload, "AAAA"),
+            ClientFrame::Relay { payload, lane, .. } => {
+                assert_eq!(payload, "AAAA");
+                assert_eq!(lane, RelayLane::Signal);
+            }
             _ => panic!("unexpected variant"),
         }
+    }
+
+    #[test]
+    fn relay_frame_without_lane_field_reads_as_signal() {
+        // What every peer shipped before the data lane existed sends.
+        let decoded: ClientFrame =
+            serde_json::from_str(r#"{"kind":"relay","rendezvousId":"r1","payload":"x"}"#)
+                .unwrap();
+        match decoded {
+            ClientFrame::Relay { lane, .. } => assert_eq!(lane, RelayLane::Signal),
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn data_lane_round_trips_on_both_directions() {
+        let frame = ClientFrame::Relay {
+            rendezvous_id: "r1".into(),
+            payload: "AAAA".into(),
+            lane: RelayLane::Data,
+        };
+        let json = serde_json::to_string(&frame).unwrap();
+        assert!(json.contains("\"lane\":\"data\""));
+        let decoded: ClientFrame = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            decoded,
+            ClientFrame::Relay {
+                lane: RelayLane::Data,
+                ..
+            }
+        ));
+        let server = ServerFrame::Relay {
+            rendezvous_id: "r1".into(),
+            from_role: PeerRole::Mobile,
+            from_session_id: "s".into(),
+            payload: "AAAA".into(),
+            lane: RelayLane::Data,
+        };
+        let json = serde_json::to_string(&server).unwrap();
+        assert!(json.contains("\"lane\":\"data\""));
+        let decoded: ServerFrame = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            decoded,
+            ServerFrame::Relay {
+                lane: RelayLane::Data,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn data_envelope_kind_is_plain_data() {
+        let json = serde_json::to_string(&EnvelopeKind::Data).unwrap();
+        assert_eq!(json, "\"data\"");
+        let decoded: EnvelopeKind = serde_json::from_str("\"data\"").unwrap();
+        assert_eq!(decoded, EnvelopeKind::Data);
     }
 
     #[test]

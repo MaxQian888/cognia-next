@@ -271,8 +271,20 @@ describe("AccessSection — writing access off the desktop", () => {
     }
   })
 
-  it("disables pause and revoke, which write the same way", () => {
+  /**
+   * Pause and revoke are the exception (ADR-0170 batch 4): every Host mounts
+   * owner routes for them, so a paired companion reaches them over HTTP. Only
+   * a standalone browser has nowhere to send the change.
+   */
+  it("keeps pause and revoke live for a paired companion", () => {
     hostProfile = "mobile-companion"
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("paired-device-pause-d1")).toBeEnabled()
+    expect(screen.getByTestId("paired-device-revoke-d1")).toBeEnabled()
+  })
+
+  it("disables pause and revoke for a browser with no Host", () => {
+    hostProfile = "web-standalone"
     render(<AccessSection row={row()} actions={actions()} />)
     expect(screen.getByTestId("paired-device-pause-d1")).toBeDisabled()
     expect(screen.getByTestId("paired-device-revoke-d1")).toBeDisabled()

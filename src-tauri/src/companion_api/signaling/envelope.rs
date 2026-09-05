@@ -141,6 +141,24 @@ impl SignalingIdentity {
                 .as_bytes(),
         )
     }
+
+    /// The whole key as a JWK (`kty`/`crv`/`d`/`x`/`y`), the one shape
+    /// WebCrypto imports without DER glue. Handed out only for a one-shot
+    /// pairing room (ADR-0170). A device's own identity never leaves its
+    /// process.
+    pub fn to_jwk(&self) -> serde_json::Value {
+        let point = self.signing_key.verifying_key().to_sec1_point(false);
+        let bytes = point.as_bytes();
+        // Uncompressed SEC1: 0x04 || x (32) || y (32).
+        let (x, y) = (&bytes[1..33], &bytes[33..65]);
+        serde_json::json!({
+            "kty": "EC",
+            "crv": "P-256",
+            "d": URL_SAFE_NO_PAD.encode(self.private_bytes()),
+            "x": URL_SAFE_NO_PAD.encode(x),
+            "y": URL_SAFE_NO_PAD.encode(y),
+        })
+    }
 }
 
 pub struct EphemeralKey {

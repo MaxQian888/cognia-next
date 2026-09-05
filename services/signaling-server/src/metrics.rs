@@ -14,6 +14,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use cognia_signaling_core::proto::RelayLane;
+
 use crate::room::RoomRegistryStats;
 
 /// Process-wide metric counters. Cloneable via `Arc<Metrics>` in
@@ -22,6 +24,14 @@ use crate::room::RoomRegistryStats;
 pub struct Metrics {
     pub frames_in_total: AtomicU64,
     pub frames_relayed_total: AtomicU64,
+    /// Per-lane delivery counts and payload bytes (egress, summed over the
+    /// fan-out). Global rather than per-room on purpose: a room id is a
+    /// per-device secret and unbounded in cardinality, so it is not a
+    /// Prometheus label. Per-room accounting is a log line, not a series.
+    pub relay_frames_signal: AtomicU64,
+    pub relay_frames_data: AtomicU64,
+    pub relay_bytes_signal: AtomicU64,
+    pub relay_bytes_data: AtomicU64,
     pub frames_rejected_replay: AtomicU64,
     pub frames_rejected_auth: AtomicU64,
     pub frames_rejected_malformed: AtomicU64,
@@ -42,6 +52,10 @@ impl Metrics {
         Self {
             frames_in_total: AtomicU64::new(0),
             frames_relayed_total: AtomicU64::new(0),
+            relay_frames_signal: AtomicU64::new(0),
+            relay_frames_data: AtomicU64::new(0),
+            relay_bytes_signal: AtomicU64::new(0),
+            relay_bytes_data: AtomicU64::new(0),
             frames_rejected_replay: AtomicU64::new(0),
             frames_rejected_auth: AtomicU64::new(0),
             frames_rejected_malformed: AtomicU64::new(0),
@@ -65,6 +79,17 @@ impl Metrics {
         // copy so the Grafana panel reflects egress, not ingress.
         self.frames_relayed_total
             .fetch_add(fanout, Ordering::Relaxed);
+    }
+
+    /// One relayed frame on `lane`, with the bytes actually put on the wire
+    /// towards other peers (`payload.len() × fan-out`).
+    pub fn lane_relayed(&self, lane: RelayLane, egress_bytes: u64) {
+        let (frames, bytes) = match lane {
+            RelayLane::Signal => (&self.relay_frames_signal, &self.relay_bytes_signal),
+            RelayLane::Data => (&self.relay_frames_data, &self.relay_bytes_data),
+        };
+        frames.fetch_add(1, Ordering::Relaxed);
+        bytes.fetch_add(egress_bytes, Ordering::Relaxed);
     }
 
     pub fn frame_rejected(&self, reason: RejectReason) {
@@ -116,6 +141,30 @@ impl Metrics {
         out.push_str(&format!(
             "signaling_frames_relayed_total {}\n",
             frames_relayed
+        ));
+        out.push_str(
+            "# HELP signaling_relay_frames_total Relay frames accepted, partitioned by lane.\n",
+        );
+        out.push_str("# TYPE signaling_relay_frames_total counter\n");
+        out.push_str(&format!(
+            "signaling_relay_frames_total{{lane=\"signal\"}} {}\n",
+            self.relay_frames_signal.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "signaling_relay_frames_total{{lane=\"data\"}} {}\n",
+            self.relay_frames_data.load(Ordering::Relaxed)
+        ));
+        out.push_str(
+            "# HELP signaling_relay_bytes_total Relay payload bytes delivered to peers, partitioned by lane.\n",
+        );
+        out.push_str("# TYPE signaling_relay_bytes_total counter\n");
+        out.push_str(&format!(
+            "signaling_relay_bytes_total{{lane=\"signal\"}} {}\n",
+            self.relay_bytes_signal.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "signaling_relay_bytes_total{{lane=\"data\"}} {}\n",
+            self.relay_bytes_data.load(Ordering::Relaxed)
         ));
         out.push_str(
             "# HELP signaling_frames_rejected_total Frames rejected, partitioned by reason.\n",
@@ -270,10 +319,23 @@ mod tests {
         // One HELP + TYPE per metric. Cheap check by counting line starts.
         let help_lines = s.matches("# HELP ").count();
         let type_lines = s.matches("# TYPE ").count();
-        // frames_in, frames_relayed, frames_rejected, rooms_active,
-        // peers_active, uptime_seconds.
-        assert_eq!(help_lines, 6, "6 distinct metric families");
-        assert_eq!(type_lines, 6);
+        // frames_in, frames_relayed, relay_frames, relay_bytes,
+        // frames_rejected, rooms_active, peers_active, uptime_seconds.
+        assert_eq!(help_lines, 8, "8 distinct metric families");
+        assert_eq!(type_lines, 8);
+    }
+
+    #[test]
+    fn lane_counters_partition_frames_and_bytes() {
+        let m = Metrics::new();
+        m.lane_relayed(RelayLane::Signal, 100);
+        m.lane_relayed(RelayLane::Data, 40_000);
+        m.lane_relayed(RelayLane::Data, 2);
+        let s = m.render_prometheus(stats(0, 0));
+        assert!(s.contains("signaling_relay_frames_total{lane=\"signal\"} 1\n"));
+        assert!(s.contains("signaling_relay_frames_total{lane=\"data\"} 2\n"));
+        assert!(s.contains("signaling_relay_bytes_total{lane=\"signal\"} 100\n"));
+        assert!(s.contains("signaling_relay_bytes_total{lane=\"data\"} 40002\n"));
     }
 
     #[test]

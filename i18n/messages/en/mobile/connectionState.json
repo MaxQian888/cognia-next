@@ -78,7 +78,8 @@
     "rtc-direct": "RTC direct",
     "rtc-relay": "RTC relay",
     "ws-lan": "WS LAN",
-    "ws-tunnel": "WS tunnel"
+    "ws-tunnel": "WS tunnel",
+    "relay": "Relay"
   },
   "toasts": {
     "noTier": "No WebRTC tier active — using HTTPS+WS.",

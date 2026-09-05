@@ -12,7 +12,7 @@ jest.mock("@/lib/webdav/auto-upload", () => ({
 }))
 
 let platformValue = "web"
-jest.mock("@/components/mobile/pair/pair-helpers", () => ({
+jest.mock("@/components/connectivity/pair/pair-helpers", () => ({
   getDevicePlatform: () => platformValue,
 }))
 

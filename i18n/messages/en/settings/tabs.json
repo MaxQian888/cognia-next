@@ -65,5 +65,6 @@
   "usageCost": "Usage & cost",
   "webhooks": "Webhooks",
   "workflows": "Workflows",
-  "workspaceTrust": "Workspace Trust"
+  "workspaceTrust": "Workspace Trust",
+  "connectivity": "Connectivity"
 }

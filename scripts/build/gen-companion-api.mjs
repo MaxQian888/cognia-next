@@ -39,6 +39,7 @@ const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/sftp_service.rs",
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
+  "src-tauri/src/companion_api/rpc/host_admin.rs",
 ]
 /**
  * Every file that registers a route on the companion listener.
@@ -550,7 +551,7 @@ const HOST_CATEGORIES = [
     title: "Tasks and workspaces",
     description: "Task lifecycle, resources, patches, runs, and workspace settlement.",
     skill: "cognia-host-tasks",
-    pattern: /^task_/,
+    pattern: /^(task_|execution_)/,
   },
   {
     id: "automation",

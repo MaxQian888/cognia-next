@@ -40,6 +40,21 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+/** What shell this is off Tauri, and the HTTP lifecycle leg a companion uses. */
+const companion = { profile: "web-standalone" as string }
+const lifecycleHttp: { action: string; deviceId: string }[] = []
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () => companion.profile,
+}))
+jest.mock("@/lib/devices/lifecycle-http", () => ({
+  applyDeviceLifecycleOverHttp: async (action: string, deviceId: string) => {
+    lifecycleHttp.push({ action, deviceId })
+    if (shell.refuse) throw new Error(shell.refuse)
+    return { deviceId, changed: true }
+  },
+}))
+
 jest.mock("@/hooks/use-biometric-guard", () => ({
   useBiometricGuard: () => async (prompt: unknown, action: () => Promise<void>) => {
     guardCalls.push(prompt)
@@ -73,6 +88,8 @@ beforeEach(() => {
   guardResult = { kind: "allowed" }
   shell.isTauri = true
   shell.refuse = null
+  companion.profile = "web-standalone"
+  lifecycleHttp.length = 0
   jest.clearAllMocks()
 })
 
@@ -321,5 +338,39 @@ describe("the host is written before the mirror", () => {
     await a.toggleRemoteControl("d1", "Phone", true)
     order.unshift(...hostCalls.map(() => "host"))
     expect(order).toEqual(["host", "mirror"])
+  })
+})
+
+/**
+ * The three lifecycle changes have owner routes on every Host (ADR-0170 batch
+ * 4), so a paired companion sends them over HTTP instead of giving up.
+ */
+describe("a paired companion changes lifecycle over the Host's owner routes", () => {
+  it.each([
+    ["pause", "suspend", (a: DeviceGrantActions) => a.pause("d1", "Phone"), "pausePairedDevice"],
+    ["resume", "resume", (a: DeviceGrantActions) => a.resume("d1", "Phone"), "resumePairedDevice"],
+    ["revoke", "revoke", (a: DeviceGrantActions) => a.revoke("d1", "Phone"), "revokePairedDevice"],
+  ] as const)(
+    "%s goes over HTTP and then updates the mirror",
+    async (_name, action, run, write) => {
+      shell.isTauri = false
+      companion.profile = "cloud-companion"
+      const { actions: a } = actions()
+      await run(a)
+      expect(lifecycleHttp).toEqual([{ action, deviceId: "d1" }])
+      expect(hostCalls).toEqual([])
+      expect(db[write]).toHaveBeenCalledWith("d1")
+      expect(toast.success).toHaveBeenCalled()
+    }
+  )
+
+  it("a refusal from the Host leaves the mirror untouched", async () => {
+    shell.isTauri = false
+    companion.profile = "cloud-companion"
+    shell.refuse = "not the owner"
+    const { actions: a } = actions()
+    await a.pause("d1", "Phone")
+    expect(db.pausePairedDevice).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
   })
 })

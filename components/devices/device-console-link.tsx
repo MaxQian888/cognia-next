@@ -16,8 +16,8 @@ import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { ArrowRightIcon } from "lucide-react"
 
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export interface DeviceConsoleLinkProps {
   /** Which list this card replaced. */
@@ -32,23 +32,21 @@ export function DeviceConsoleLink({ surface, count, deviceRef }: DeviceConsoleLi
   const href = deviceRef ? `/devices?device=${encodeURIComponent(deviceRef)}` : "/devices"
 
   return (
-    <Card data-testid={`device-console-link-${surface}`}>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">
-          {surface === "paired" ? t("pairedTitle") : t("hostsTitle")}
-        </CardTitle>
-        <CardDescription className="text-xs">
-          {surface === "paired" ? t("pairedBody", { count }) : t("hostsBody", { count })}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <SettingsBlock
+      title={surface === "paired" ? t("pairedTitle") : t("hostsTitle")}
+      description={surface === "paired" ? t("pairedBody", { count }) : t("hostsBody", { count })}
+      testid={`device-console-link-${surface}`}
+      action={
         <Button asChild size="sm" variant="outline">
           <Link href={href}>
             {t("open")}
             <ArrowRightIcon className="size-3.5" />
           </Link>
         </Button>
-      </CardContent>
-    </Card>
+      }
+      contentClassName="hidden"
+    >
+      {null}
+    </SettingsBlock>
   )
 }

@@ -9416,6 +9416,15 @@
         "capabilityCount": "{count, plural, =0 {None advertised} one {# operation} other {# operations}}",
         "cloudHost": "Cloud Host",
         "desktopHost": "Desktop Host",
+        "eventPlane": "Events",
+        "eventPlaneDegradedHint": "Requests answer but no events arrive. Changes made elsewhere will not appear until the event stream reconnects.",
+        "eventPlaneState": {
+          "connecting": "Connecting",
+          "degraded": "Degraded",
+          "disconnected": "Disconnected",
+          "ready": "Live",
+          "replaying": "Catching up"
+        },
         "hostLink": "Host link",
         "lastConnected": "Last connected",
         "lastError": "Latest connection error",
@@ -9441,6 +9450,7 @@
         "thisDesktop": "This desktop",
         "tier": {
           "offline": "Offline",
+          "relay": "Relay",
           "rtc-direct": "RTC direct",
           "rtc-relay": "RTC relay",
           "unknown": "Negotiating",
@@ -12504,17 +12514,76 @@
       "opencode": "OpenCode"
     },
     "island": {
-      "empty": "No active agents",
+      "actionError": {
+        "callFailed": "That did not go through. Try again.",
+        "emptyInput": "Type something first.",
+        "interrupt_identity_mismatch": "That process is no longer the agent, so nothing was sent.",
+        "interrupt_not_running": "That session is no longer reachable.",
+        "interrupt_unsupported": "Interrupting isn't supported on this platform.",
+        "noRoute": "There is no page to open for this task.",
+        "notPermitted": "That is not available for this task.",
+        "requestChanged": "The request changed. Try again.",
+        "staleRevision": "This task changed before the action ran. Try again.",
+        "timeout": "No response from the app. Try again.",
+        "unknown": "Could not complete that.",
+        "unknownRow": "This task is no longer listed."
+      },
+      "announceActive": "{count, plural, =0 {No active tasks} one {# active task} other {# active tasks}}",
+      "announceWaiting": "{count, plural, one {# task} other {# tasks}}, {waiting} waiting for you",
+      "decideInMain": "Decide in the main window",
+      "detail": {
+        "hide": "Hide details",
+        "loading": "Loading details…",
+        "show": "Show details"
+      },
+      "detailError": {
+        "notPermitted": "Details are turned off for the island.",
+        "staleRevision": "This task changed. Reopen the details.",
+        "unavailable": "No details available.",
+        "unknownRow": "This task is no longer listed."
+      },
+      "dismiss": "Dismiss",
+      "empty": "No active tasks",
+      "focusTerminal": "Focus terminal",
+      "interrupt": "Interrupt this turn",
       "legend": {
-        "detached": "{count} detached",
+        "blocked": "{count} waiting",
         "done": "{count} done",
+        "failed": "{count} failed",
         "idle": "{count} idle",
-        "needsYou": "{count} waiting",
+        "stale": "{count} stale",
         "working": "{count} working"
       },
-      "summary": "{count, plural, one {# agent} other {# agents}}",
-      "summaryWaiting": "{count, plural, one {# agent} other {# agents}} · {waiting} waiting",
-      "toggle": "Toggle agent list"
+      "listLabel": "Active tasks and pending items",
+      "more": "+{count}",
+      "openOwner": {
+        "chat": "Open the chat that owns this",
+        "external": "Open the owning session",
+        "run": "Open the run cockpit",
+        "team": "Open the team workspace"
+      },
+      "openTranscript": "Reveal transcript",
+      "source": {
+        "chat": "Chat",
+        "external": "Agent",
+        "run": "Run",
+        "team": "Team"
+      },
+      "state": {
+        "awaitingApproval": "Waiting for you",
+        "awaitingInput": "Waiting for your answer",
+        "awaitingPermission": "Waiting for your approval",
+        "blocked": "Waiting for you",
+        "done": "Finished",
+        "failed": "Failed",
+        "idle": "Idle",
+        "stale": "No longer waiting",
+        "working": "Working…"
+      },
+      "summary": "{count, plural, one {# task} other {# tasks}}",
+      "summaryWaiting": "{count, plural, one {# task} other {# tasks}} · {waiting} waiting",
+      "toggle": "Toggle task list",
+      "waitingFor": "waiting {duration}"
     },
     "permission": {
       "allow": "Allow",
@@ -17269,11 +17338,13 @@
             "connected": "DataChannel is open. The phone reaches the desktop directly.",
             "failed": "Last session ended in error. The client task is backing off before its next attempt.",
             "negotiating": "Mobile peer joined; exchanging SDP and ICE candidates.",
-            "offline": "Signaling client is idle — usually between reconnect attempts."
+            "offline": "Signaling client is idle — usually between reconnect attempts.",
+            "relayed": "Serving over the Cognia relay. RPC and events flow through the rendezvous while a direct DataChannel is negotiated in the background."
           },
           "failed": "Failed",
           "negotiating": "Negotiating",
-          "offline": "Offline"
+          "offline": "Offline",
+          "relayed": "Relayed"
         },
         "enableHelp": "When on, the mobile app reaches this desktop directly via WebRTC after pairing — falling back to LAN or the cloudflared tunnel only when WebRTC can't open.",
         "enableLabel": "Enable WebRTC tier",
@@ -17351,6 +17422,7 @@
       "syncLabel": "Sync progress",
       "tier": {
         "offline": "Offline",
+        "relay": "Relay",
         "rtc-direct": "RTC direct",
         "rtc-relay": "RTC relay",
         "ws-lan": "WS LAN",
@@ -17358,6 +17430,7 @@
       },
       "tierHint": {
         "offline": "Not connected to the desktop.",
+        "relay": "Through the Cognia relay, end-to-end encrypted. A direct peer connection is still being tried.",
         "rtc-direct": "Peer-to-peer DataChannel — lowest latency.",
         "rtc-relay": "Peer connection via TURN relay — still encrypted end-to-end.",
         "ws-lan": "Fallback over LAN HTTPS+WS.",
@@ -17443,6 +17516,7 @@
       },
       "tiers": {
         "offline": "offline",
+        "relay": "Relay",
         "rtc-direct": "RTC direct",
         "rtc-relay": "RTC relay",
         "ws-lan": "WS LAN",
@@ -18930,6 +19004,8 @@
     "transportTier": {
       "offline": "Offline",
       "offlineDescription": "Neither transport is reachable. Outgoing calls queue locally and retry.",
+      "relay": "Relay",
+      "relayDescription": "Frames travel through the Cognia relay, end-to-end encrypted. A direct DataChannel is still being negotiated in the background.",
       "rtcDirect": "WebRTC (direct)",
       "rtcDirectDescription": "Direct DataChannel between this phone and the desktop. Lowest latency.",
       "rtcRelay": "WebRTC (TURN relay)",
@@ -32375,6 +32451,142 @@
         "welcomePlaceholder": "Hi! How can I help you today?"
       }
     },
+    "connectivity": {
+      "description": "How this device and a Host reach each other: the local server, the relay and tunnel, pairing, remote hosts, push, and sync.",
+      "nav": {
+        "groups": {
+          "deliveryGroup": "Delivery",
+          "devicesGroup": "Devices",
+          "hostGroup": "This host",
+          "statusGroup": "Status"
+        },
+        "items": {
+          "cloud-relay": {
+            "description": "The relay, peer-to-peer upgrade, tunnel, sign-in, and collaboration server.",
+            "label": "Cloud & relay"
+          },
+          "local-host": {
+            "description": "The companion server, its binding, TLS, discovery, and browser access.",
+            "label": "Local host"
+          },
+          "overview": {
+            "description": "What this shell is, what it is linked to, and how.",
+            "label": "Overview"
+          },
+          "pairing": {
+            "description": "Invitations, browser enrollment, and the devices that redeemed them.",
+            "label": "Pairing"
+          },
+          "push": {
+            "description": "APNs and FCM credentials, and a test notification.",
+            "label": "Push"
+          },
+          "remote-hosts": {
+            "description": "The Hosts this device drives, and adding one.",
+            "label": "Remote hosts"
+          },
+          "sync": {
+            "description": "Per-table mirror state between this device and its Host.",
+            "label": "Sync"
+          }
+        },
+        "mobileTrigger": "Topics",
+        "title": "Connectivity topics"
+      },
+      "overview": {
+        "activeHost": "Active host",
+        "activeHostNone": "No host is being driven.",
+        "activeHostSelf": "This machine.",
+        "degradedHint": "Requests still answer, but no events are arriving. Changes made elsewhere will not appear until the event stream reconnects.",
+        "devicePlanes": "{count, plural, =0 {No paired devices.} =1 {One paired device.} other {# paired devices.}}",
+        "eventPlaneDescription": "Whether events reach the other side, beyond request and reply.",
+        "eventPlaneTitle": "Event plane",
+        "goDevices": "Device console",
+        "goPairing": "Pair a device",
+        "goRelay": "Relay and tunnel",
+        "hostMode": "This shell",
+        "hostModeValue": {
+          "companion": "Drives a Host",
+          "host": "Is a Host",
+          "standalone": "Standalone"
+        },
+        "link": "Host link",
+        "linkValue": {
+          "connected": "Connected",
+          "local": "Local",
+          "offline": "Offline",
+          "reconnecting": "Reconnecting",
+          "unauthenticated": "Needs sign-in"
+        },
+        "plane": {
+          "connecting": "Connecting",
+          "degraded": "Degraded",
+          "disconnected": "Disconnected",
+          "ready": "Ready",
+          "replaying": "Catching up"
+        },
+        "profile": {
+          "cloud-companion": "Browser paired to a Host",
+          "desktop": "Desktop app",
+          "headless": "Headless server",
+          "mobile-companion": "Phone paired to a Host",
+          "web-standalone": "Browser with nothing paired"
+        },
+        "runtimeDescription": "Where work runs from here, and over which link.",
+        "runtimeTitle": "Runtime",
+        "shortcutsTitle": "Go to",
+        "tier": "Transport",
+        "tierNotApplicable": "Not applicable: this shell runs work locally."
+      },
+      "pairing": {
+        "reachDirect": "Same network",
+        "reachDirectHint": "This invitation has no relay room: the device must reach the address above directly. Turn the relay on under Cloud & relay to pair from anywhere.",
+        "reachRelay": "Anywhere",
+        "reachRelayHint": "This invitation carries a relay room: the device may redeem it from any network, and the direct address is tried first."
+      },
+      "push": {
+        "testDescription": "Sends a metadata-only push through the configured providers to every paired device whose socket is closed right now.",
+        "testFailed": "Test push failed: {message}",
+        "testNeedsCredentials": "Configure APNs or FCM above first.",
+        "testResult": "{count, plural, =0 {Last test reached no devices.} =1 {Last test reached one device.} other {Last test reached # devices.}}",
+        "testSend": "Send test",
+        "testSending": "Sending",
+        "testSent": "{count, plural, =0 {Sent to no devices: every paired device is online or has no push token.} =1 {Sent to one offline device.} other {Sent to # offline devices.}}",
+        "testTitle": "Test notification"
+      },
+      "reach": {
+        "needs-desktop-shell": "This control needs the desktop app itself. The connected Host is headless, and a tunnel process or an mDNS socket only exists on a desktop.",
+        "no-host": "This browser is not connected to a Host, so there is nothing to configure here.",
+        "not-owner": "Only the Host's owner device may change how the Host is reachable."
+      },
+      "reachNext": {
+        "needs-desktop-shell": "Use the desktop app on the Host machine, or expose it with the relay instead.",
+        "no-host": "Pair with a Host from the Remote hosts topic, or open the desktop app.",
+        "not-owner": "Ask the owner to grant this device host administration, or use the owner device."
+      },
+      "remoteHosts": {
+        "active": "Active",
+        "addDescription": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
+        "addTitle": "Add a host",
+        "count": "{count, plural, =0 {none} =1 {1 host} other {# hosts}}",
+        "drive": "Drive",
+        "empty": "No hosts are registered yet. Add one below with an invitation from the Host.",
+        "registryDescription": "Hosts this device can drive. One is active at a time.",
+        "registryTitle": "Registered hosts",
+        "removeAria": "Remove {label}",
+        "renameAria": "Rename {label}",
+        "renameSave": "Save name",
+        "state": {
+          "connecting": "Connecting",
+          "degraded": "Degraded",
+          "disconnected": "Disconnected",
+          "ready": "Ready",
+          "revoked": "Revoked",
+          "versionMismatch": "Version mismatch"
+        }
+      },
+      "title": "Connectivity"
+    },
     "conversation": {
       "autoTitle": {
         "description": "After the first reply, name the chat with a model.",
@@ -33385,6 +33597,7 @@
       "chatTemplates": "Saved messages with parameters — insert them from the / menu and fill in the blanks.",
       "companion": "Mobile companion server — bind mode (loopback / LAN), QR pairing, paired devices, and revocation.",
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
+      "connectivity": "How this device and a Host reach each other: local server, relay and tunnel, pairing, remote hosts, push, and sync.",
       "conversation": "Auto titles and the conversation timeline minimap",
       "data": "Export, import or wipe local IndexedDB data.",
       "desktop": "Tauri-only window, autostart and tray behavior.",
@@ -34135,6 +34348,15 @@
       },
       "island": {
         "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+        "detailVisibility": {
+          "desc": "How much of a task's detail the island may receive. Prompts, paths, commands, plans and full error text never travel with the regular list.",
+          "label": "Detail in the island",
+          "options": {
+            "click-to-reveal": "Click to reveal",
+            "hover": "Show on hover",
+            "summary-only": "Summary only"
+          }
+        },
         "diagnostics": {
           "copied": "Island diagnostics copied to the clipboard.",
           "copy": "Copy",
@@ -37005,6 +37227,7 @@
       "chatTemplates": "Chat templates",
       "companion": "Mobile companion",
       "connections": "Connections",
+      "connectivity": "Connectivity",
       "conversation": "Conversation",
       "data": "Data",
       "desktop": "Desktop",

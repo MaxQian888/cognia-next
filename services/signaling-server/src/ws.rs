@@ -37,28 +37,23 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ip_limits::{extract_client_ip, AcquireOutcome, Acquired},
-    limits::TokenBucket,
+    limits::{max_frame_bytes, LaneBuckets, DATA_MAX_FRAME_BYTES},
     metrics::RejectReason,
-    proto::{ClientFrame, PeerRole, PeerSnapshot, ServerFrame},
+    proto::{ClientFrame, PeerRole, PeerSnapshot, RelayLane, ServerFrame},
     room::{PeerHandle, PEER_OUTBOUND_BUFFER},
     AppState,
 };
 
-/// Frames per second a single peer may send before getting rate-limited.
-const RATE_REFILL_PER_SEC: u32 = 10;
-const RATE_CAPACITY: u32 = 20;
-
-/// Soft per-frame cap. Frames above this get a graceful `frame_too_large`
-/// error and the connection stays open — SDP/ICE envelopes sit well under
-/// this. `RequestBodyLimitLayer` only bounds the *pre-upgrade* HTTP body, so
-/// this is where the documented 8 KiB cap is actually enforced on WS frames.
-const MAX_FRAME_BYTES: usize = 8 * 1024;
-
-/// Hard memory backstop handed to tungstenite via the WS upgrade. Sized 8×
-/// above the soft cap so the graceful path above fires for ordinary overages
-/// while still bounding a single message far below tungstenite's MiB default.
-/// A frame above this is closed by the protocol layer (stream error → break).
-const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+/// Hard memory backstop handed to tungstenite via the WS upgrade. Equal to
+/// the data lane's soft cap, so the graceful `frame_too_large` path fires
+/// for ordinary overages on the signal lane (8 KiB) while a single message
+/// is still bounded far below tungstenite's MiB default. A frame above this
+/// is closed by the protocol layer (stream error → break). The per-lane soft
+/// caps and rate budgets live in `cognia_signaling_core::limits`, shared
+/// with the Cloudflare Worker so the two deployments cannot diverge.
+/// `RequestBodyLimitLayer` only bounds the *pre-upgrade* HTTP body, so the
+/// lane caps below are where the documented limits are actually enforced.
+const MAX_WS_MESSAGE_BYTES: usize = DATA_MAX_FRAME_BYTES;
 
 /// How long the server waits between idle keepalive pings sent down the WS
 /// frame layer. WebSocket pings are separate from `ClientFrame::Ping` —
@@ -139,7 +134,7 @@ async fn handle_socket(
     let peer_id = state.registry.next_peer_id();
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<ServerFrame>(PEER_OUTBOUND_BUFFER);
-    let mut bucket = TokenBucket::new(RATE_CAPACITY, RATE_REFILL_PER_SEC);
+    let mut buckets = LaneBuckets::new();
     let mut subscribed_rooms: Vec<(String, PeerRole, String)> = Vec::new();
     let challenge_issued_at = now_ms();
     let challenge_expires_at =
@@ -203,18 +198,34 @@ async fn handle_socket(
         };
         match msg {
             Message::Text(text) => {
-                if text.len() > MAX_FRAME_BYTES {
+                // The lane decides both the frame cap and the bucket, and the
+                // lane is a clear-text field on the frame — so parse first
+                // (the WS upgrade already bounds a message at the data cap)
+                // and then apply the lane's own limits. A frame that fails to
+                // parse is charged to the signal lane, which is what every
+                // pre-lane peer sends anyway.
+                let parsed: Result<ClientFrame, _> = serde_json::from_str(&text);
+                let lane = match &parsed {
+                    Ok(ClientFrame::Relay { lane, .. }) => *lane,
+                    _ => RelayLane::Signal,
+                };
+                if text.len() > max_frame_bytes(lane) {
                     warn!(
                         target: "signaling",
                         peer_id,
                         len = text.len(),
+                        lane = lane.as_str(),
                         "frame exceeds soft cap"
                     );
                     state.metrics.frame_rejected(RejectReason::TooLarge);
                     let _ = tx
                         .send(ServerFrame::Error {
                             code: "frame_too_large".into(),
-                            message: "frame exceeds 8 KiB".into(),
+                            message: format!(
+                                "frame exceeds {} KiB on the {} lane",
+                                max_frame_bytes(lane) / 1024,
+                                lane.as_str()
+                            ),
                         })
                         .await;
                     continue;
@@ -223,8 +234,8 @@ async fn handle_socket(
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs_f64() * 1000.0)
                     .unwrap_or(0.0);
-                if !bucket.try_take(now_ms) {
-                    warn!(target: "signaling", peer_id, "rate limited");
+                if !buckets.try_take(lane, now_ms) {
+                    warn!(target: "signaling", peer_id, lane = lane.as_str(), "rate limited");
                     state.metrics.frame_rejected(RejectReason::Rate);
                     let _ = tx
                         .send(ServerFrame::Error {
@@ -243,7 +254,7 @@ async fn handle_socket(
                     ) {}
                     break;
                 }
-                let frame: ClientFrame = match serde_json::from_str(&text) {
+                let frame: ClientFrame = match parsed {
                     Ok(f) => f,
                     Err(e) => {
                         state.metrics.frame_rejected(RejectReason::Malformed);
@@ -458,6 +469,7 @@ async fn handle_frame(
         ClientFrame::Relay {
             rendezvous_id,
             payload,
+            lane,
         } => {
             if let Some(upgrade_room) = admission.upgrade_rendezvous_id {
                 if !rendezvous_id_matches_upgrade_room(upgrade_room, &rendezvous_id) {
@@ -484,6 +496,7 @@ async fn handle_frame(
                 return;
             };
             let fanout = others.len() as u64;
+            let payload_bytes = payload.len() as u64;
             for (target_peer_id, sender) in others {
                 if sender
                     .try_send(ServerFrame::Relay {
@@ -491,6 +504,7 @@ async fn handle_frame(
                         from_role: sender_role,
                         from_session_id: sender_session_id.clone(),
                         payload: payload.clone(),
+                        lane,
                     })
                     .is_err()
                 {
@@ -506,6 +520,7 @@ async fn handle_frame(
                 }
             }
             state.metrics.frame_relayed(fanout);
+            state.metrics.lane_relayed(lane, payload_bytes.saturating_mul(fanout));
         }
         ClientFrame::Ping => {
             let _ = tx.send(ServerFrame::Pong).await;
@@ -539,6 +554,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cognia_signaling_core::proto::RelayLane;
     use crate::{
         ip_limits::IpLimits,
         metrics::Metrics,
@@ -917,6 +933,7 @@ mod tests {
             ClientFrame::Relay {
                 rendezvous_id: rid,
                 payload: "AAAA".into(),
+                lane: RelayLane::Signal,
             },
             &tx,
             &mut rooms,
@@ -951,6 +968,7 @@ mod tests {
             ClientFrame::Relay {
                 rendezvous_id: "r".into(),
                 payload: "x".into(),
+                lane: RelayLane::Signal,
             },
             &tx,
             &mut rooms,

@@ -68,3 +68,56 @@ describe("pair payload v3", () => {
     })
   })
 })
+
+describe("pair payload v4 (relay, ADR-0170)", () => {
+  const relay = {
+    url: "wss://signaling.example/signaling",
+    room: {
+      v: 2 as const,
+      roomId: "room-id",
+      roomNonce: "nonce",
+      desktopSigningKey: "desktop-key",
+      mobileSigningKey: "mobile-key",
+      notAfter: Date.now() + 60_000,
+    },
+    mobilePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "d", x: "x", y: "y" },
+  }
+
+  it("emits cgnp4 only when a relay is present and round-trips it", () => {
+    const encoded = encodePairPayload({ ...payload, relay })
+    expect(encoded.startsWith("cgnp4|")).toBe(true)
+    expect(decodePairPayload(encoded)).toEqual({ kind: "ok", payload: { ...payload, relay } })
+    // Without a relay the wire stays cgnp3 so pre-relay phones keep reading it.
+    expect(encodePairPayload(payload).startsWith("cgnp3|")).toBe(true)
+  })
+
+  it("still decodes cgnp3 and never invents a relay for it", () => {
+    const decoded = decodePairPayload(encodePairPayload(payload))
+    expect(decoded.kind).toBe("ok")
+    expect(decoded.kind === "ok" && decoded.payload.relay).toBeUndefined()
+  })
+
+  it("rejects a relay whose key or room is malformed", () => {
+    const encodeRaw = (value: Record<string, unknown>) =>
+      `cgnp4|${Buffer.from(JSON.stringify(value)).toString("base64url")}`
+    const common = {
+      base: payload.baseUrl,
+      host: payload.hostId,
+      tenant: payload.tenantId,
+      exp: payload.expiresAt,
+      ver: payload.serverVersion,
+      fp: payload.fingerprint,
+      mode: "owner-invitation",
+      invitation: payload.invitation,
+    }
+    expect(
+      decodePairPayload(
+        encodeRaw({ ...common, relay: { ...relay, mobilePrivateKeyJwk: { kty: "RSA" } } })
+      )
+    ).toEqual({ kind: "invalid", message: "invalid relay key" })
+    expect(decodePairPayload(encodeRaw({ ...common, relay: { url: "wss://x" } }))).toEqual({
+      kind: "invalid",
+      message: "invalid relay room",
+    })
+  })
+})

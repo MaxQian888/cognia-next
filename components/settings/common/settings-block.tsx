@@ -101,6 +101,11 @@ export interface SettingsBlockProps extends BlockHeaderProps {
    * jump silently degrades to a section-level scroll.
    */
   settingId?: string
+  /**
+   * Extra `data-*` attributes for the root, for a block whose tests or styles
+   * key off a reach or state marker (`data-reach`, `data-state`).
+   */
+  attributes?: Record<`data-${string}`, string | undefined>
 }
 
 /**
@@ -120,6 +125,7 @@ export function SettingsBlock({
   defaultOpen = true,
   testid,
   settingId,
+  attributes,
 }: SettingsBlockProps) {
   const [open, setOpen] = useState(defaultOpen)
   const header = <BlockHeader icon={icon} title={title} description={description} badge={badge} />
@@ -131,6 +137,7 @@ export function SettingsBlock({
         className={cn("min-w-0", className)}
         data-testid={testid}
         data-setting-id={settingId}
+        {...attributes}
       >
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
           {header}
@@ -148,6 +155,7 @@ export function SettingsBlock({
         data-testid={testid}
         data-setting-id={settingId}
         data-open={open}
+        {...attributes}
       >
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
           <CollapsibleTrigger

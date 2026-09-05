@@ -20,7 +20,7 @@ import { useTranslations } from "next-intl"
 import { CircleIcon, LoaderIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import {
   Table,
   TableBody,
@@ -140,25 +140,23 @@ export function SyncStatusCard() {
   const anyError = rows.some((r) => r.lastError !== null)
 
   return (
-    <Card data-testid="sync-status-card">
-      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            {t("title")}
-            {anyError ? (
-              <span className="flex items-center gap-1 text-[10px] uppercase text-amber-500">
-                <CircleIcon className="h-2 w-2 fill-current" />
-                {t("statusErrors")}
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-500">
-                <CircleIcon className="h-2 w-2 fill-current" />
-                {t("statusHealthy")}
-              </span>
-            )}
-          </CardTitle>
-          <CardDescription className="text-xs">{t("description")}</CardDescription>
-        </div>
+    <SettingsBlock
+      title={t("title")}
+      description={t("description")}
+      badge={
+        anyError ? (
+          <span className="flex items-center gap-1 text-[10px] uppercase text-amber-500">
+            <CircleIcon className="h-2 w-2 fill-current" />
+            {t("statusErrors")}
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-[10px] uppercase text-emerald-500">
+            <CircleIcon className="h-2 w-2 fill-current" />
+            {t("statusHealthy")}
+          </span>
+        )
+      }
+      action={
         <Button
           size="sm"
           variant="outline"
@@ -173,64 +171,65 @@ export function SyncStatusCard() {
           )}
           {t("syncAll")}
         </Button>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="whitespace-nowrap">{t("colTable")}</TableHead>
-                <TableHead className="whitespace-nowrap">{t("colLastSync")}</TableHead>
-                <TableHead className="whitespace-nowrap">{t("colCursor")}</TableHead>
-                <TableHead className="w-[100px] whitespace-nowrap text-right">
-                  {t("colActions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => {
-                const rowBusy = isBusy(row.table)
-                return (
-                  <TableRow key={row.table} data-testid={`sync-status-row-${row.table}`}>
-                    <TableCell className="font-mono text-xs">
-                      {t(`tableLabels.${row.table}`)}
-                      {row.lastError && (
-                        <p
-                          className="mt-0.5 text-[10px] text-destructive break-all"
-                          data-testid={`sync-status-row-${row.table}-error`}
-                        >
-                          {row.lastError}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {row.lastSyncAt ? formatRelative(row.lastSyncAt) : t("never")}
-                    </TableCell>
-                    <TableCell className="font-mono text-[10px] text-muted-foreground">
-                      {row.since === 0 ? "—" : `#${row.since}`}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onSyncOne(row.table)}
-                        disabled={rowBusy || busy === "all"}
-                        aria-label={t("syncNowAria", { table: t(`tableLabels.${row.table}`) })}
+      }
+      testid="sync-status-card"
+      settingId="companion-sync"
+    >
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="whitespace-nowrap">{t("colTable")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("colLastSync")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("colCursor")}</TableHead>
+              <TableHead className="w-[100px] whitespace-nowrap text-right">
+                {t("colActions")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const rowBusy = isBusy(row.table)
+              return (
+                <TableRow key={row.table} data-testid={`sync-status-row-${row.table}`}>
+                  <TableCell className="font-mono text-xs">
+                    {t(`tableLabels.${row.table}`)}
+                    {row.lastError && (
+                      <p
+                        className="mt-0.5 text-[10px] text-destructive break-all"
+                        data-testid={`sync-status-row-${row.table}-error`}
                       >
-                        {rowBusy ? (
-                          <LoaderIcon className={cn("h-3.5 w-3.5 animate-spin")} />
-                        ) : (
-                          <RefreshCwIcon className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+                        {row.lastError}
+                      </p>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {row.lastSyncAt ? formatRelative(row.lastSyncAt) : t("never")}
+                  </TableCell>
+                  <TableCell className="font-mono text-[10px] text-muted-foreground">
+                    {row.since === 0 ? "—" : `#${row.since}`}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onSyncOne(row.table)}
+                      disabled={rowBusy || busy === "all"}
+                      aria-label={t("syncNowAria", { table: t(`tableLabels.${row.table}`) })}
+                    >
+                      {rowBusy ? (
+                        <LoaderIcon className={cn("h-3.5 w-3.5 animate-spin")} />
+                      ) : (
+                        <RefreshCwIcon className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </SettingsBlock>
   )
 }

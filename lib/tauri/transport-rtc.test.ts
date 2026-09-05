@@ -711,7 +711,7 @@ describe("TransportRtc", () => {
     const offerIdx = sig.sent.findIndex((m) => m.kind === "rtc:offer")
     expect(helloIdx).toBeGreaterThanOrEqual(0)
     expect(offerIdx).toBeGreaterThan(helloIdx)
-    expect(sig.sent[helloIdx].body).toEqual({ deviceId: "dev-1" })
+    expect(sig.sent[helloIdx].body).toEqual({ deviceId: "dev-1", relay: true })
     rtc.close()
   })
 
@@ -1274,6 +1274,139 @@ describe("TransportRtc", () => {
       expect(rtc.getState()).toBe("open")
       expect(pcs[1].offerOptions.some((o) => o?.iceRestart === true)).toBe(true)
       rtc.close()
+    })
+  })
+  describe("relay data lane (ADR-0170)", () => {
+    const hostHello = (relay = true) => envelope("hello", { deviceId: "host", relay }, 1)
+
+    it("opens over the relay the moment the Host acknowledges, before any DataChannel", async () => {
+      const { rtc, sig, pcs } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      // hello went out first and carries the relay opt-in.
+      expect(sig.sent[0]).toEqual({ kind: "hello", body: { deviceId: "dev-1", relay: true } })
+      // ICE is in flight (P2P on by default) but nothing is open yet.
+      expect(pcs).toHaveLength(1)
+      expect(rtc.getState()).toBe("negotiating")
+      expect(rtc.getCarrier()).toBeNull()
+
+      sig.emitEnvelope(hostHello())
+      await connect
+      expect(rtc.getState()).toBe("open")
+      expect(rtc.getCarrier()).toBe("relay")
+      // The event cursor handshake went over the relay as a data envelope.
+      const resume = sig.sent.find(
+        (m) =>
+          m.kind === "data" && String((m.body as { text?: string }).text).includes("event-resume")
+      )
+      expect(resume).toBeDefined()
+      rtc.close()
+    })
+
+    it("carries an RPC as data envelopes and resolves from a relayed response", async () => {
+      const { rtc, sig } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      sig.emitEnvelope(hostHello())
+      await connect
+
+      const call = rtc.call("sessions_list", { limit: 1 })
+      await new Promise((r) => setTimeout(r, 5))
+      const rpcFrame = sig.sent.find(
+        (m) =>
+          m.kind === "data" && String((m.body as { text?: string }).text).includes("sessions_list")
+      )
+      expect(rpcFrame).toBeDefined()
+      const sent = JSON.parse((rpcFrame!.body as { text: string }).text) as { id: string }
+      sig.emitEnvelope(
+        envelope("data", { text: JSON.stringify({ id: sent.id, ok: true, result: [1] }) }, 2)
+      )
+      await expect(call).resolves.toEqual([1])
+      rtc.close()
+    })
+
+    it("delivers relayed events and acks them on the same carrier", async () => {
+      const { rtc, sig } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      sig.emitEnvelope(hostHello())
+      await connect
+      const received: unknown[] = []
+      rtc.subscribe("claude://session-event", (payload) => received.push(payload))
+      sig.emitEnvelope(
+        envelope(
+          "data",
+          {
+            text: JSON.stringify({
+              kind: "event",
+              event: "claude://session-event",
+              seq: 7,
+              payload: { hello: "relay" },
+            }),
+          },
+          2
+        )
+      )
+      expect(received).toEqual([{ hello: "relay" }])
+      const ack = sig.sent.find(
+        (m) => m.kind === "data" && String((m.body as { text?: string }).text).includes("event-ack")
+      )
+      expect(ack).toBeDefined()
+      rtc.close()
+    })
+
+    it("promotes to the DataChannel when ICE completes and falls back when it drops", async () => {
+      const { rtc, sig, pcs } = makeRtc({ reconnectBackoffMs: [5] } as never)
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      sig.emitEnvelope(hostHello())
+      await connect
+      expect(rtc.getCarrier()).toBe("relay")
+
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "v=0\r\nmock-answer" } as RtcAnswerBody, 2))
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[0].channels[0].open()
+      expect(rtc.getState()).toBe("open")
+      expect(rtc.getCarrier()).toBe("datachannel")
+
+      // The DataChannel dies mid-session: still open, back on the relay, and a
+      // fresh P2P attempt is scheduled instead of a full reconnect.
+      pcs[0].channels[0].close()
+      expect(rtc.getState()).toBe("open")
+      expect(rtc.getCarrier()).toBe("relay")
+      await new Promise((r) => setTimeout(r, 20))
+      expect(pcs.length).toBeGreaterThan(1)
+      rtc.close()
+    })
+
+    it("a Host that never acknowledges the relay behaves exactly as before", async () => {
+      const { rtc, sig, pcs } = makeRtc()
+      const connect = rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      expect(rtc.getState()).toBe("negotiating")
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "v=0\r\nmock-answer" } as RtcAnswerBody, 2))
+      await new Promise((r) => setTimeout(r, 5))
+      pcs[0].channels[0].open()
+      await connect
+      expect(rtc.getCarrier()).toBe("datachannel")
+      rtc.close()
+    })
+
+    it("with P2P off, never builds a peer connection and fails if the Host stays silent", async () => {
+      const silent = makeRtc({ p2p: false, relayHandshakeTimeoutMs: 10 } as never)
+      const failed = silent.rtc.connect()
+      await new Promise((r) => setTimeout(r, 30))
+      await expect(failed).rejects.toThrow(/relay data lane/)
+      expect(silent.pcs).toHaveLength(0)
+
+      const served = makeRtc({ p2p: false } as never)
+      const connect = served.rtc.connect()
+      await new Promise((r) => setTimeout(r, 5))
+      served.sig.emitEnvelope(hostHello())
+      await connect
+      expect(served.rtc.getCarrier()).toBe("relay")
+      expect(served.pcs).toHaveLength(0)
+      served.rtc.close()
     })
   })
 })

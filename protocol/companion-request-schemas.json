@@ -2508,13 +2508,186 @@
       },
       "additionalProperties": false
     },
+    "companion_browser_access_get": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_browser_access_set": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "allowed_origins"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "example": false
+        },
+        "allowed_origins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "example": [],
+          "description": "Also accepted as `allowedOrigins`."
+        },
+        "port": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "companion_can_control": {
       "type": "object",
       "description": "Empty body."
     },
+    "companion_create_owner_invitation": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "companion_endpoints": {
       "type": "object",
       "description": "Empty body."
+    },
+    "companion_push_clear_apns": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_push_clear_fcm": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_push_configure_apns": {
+      "type": "object",
+      "required": [
+        "key_id",
+        "team_id",
+        "bundle_id",
+        "private_key_pem",
+        "production"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `keyId`."
+        },
+        "team_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `teamId`."
+        },
+        "bundle_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `bundleId`."
+        },
+        "private_key_pem": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `privateKeyPem`."
+        },
+        "production": {
+          "type": "boolean",
+          "example": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_push_configure_fcm": {
+      "type": "object",
+      "required": [
+        "service_account_json"
+      ],
+      "properties": {
+        "service_account_json": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `serviceAccountJson`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_push_notification": {
+      "type": "object",
+      "required": [
+        "notification_id",
+        "source",
+        "level"
+      ],
+      "properties": {
+        "notification_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `notificationId`."
+        },
+        "source": {
+          "type": "string",
+          "example": ""
+        },
+        "level": {
+          "type": "string",
+          "example": ""
+        },
+        "href": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_push_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_server_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_signaling_configure": {
+      "type": "object",
+      "required": [
+        "patch"
+      ],
+      "properties": {
+        "patch": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_signaling_devices_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "companion_signaling_reconnect_device": {
+      "type": "object",
+      "required": [
+        "rendezvous_id"
+      ],
+      "properties": {
+        "rendezvous_id": {
+          "type": "string",
+          "example": "",
+          "description": "Also accepted as `rendezvousId`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "companion_signaling_status": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
     },
     "connector_approve_draft": {
       "type": "object",

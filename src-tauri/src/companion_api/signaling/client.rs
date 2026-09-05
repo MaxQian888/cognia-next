@@ -4,7 +4,14 @@
 //! - the outbound WSS connection to the public signaling rendezvous,
 //! - the `PeerSession` (created on receipt of `rtc:offer`),
 //! - the dispatcher that bridges the resulting DataChannel to
-//!   `companion_api::remote_execution` + `EventBus`.
+//!   `companion_api::remote_execution` + `EventBus`,
+//! - and, since ADR-0170, the **relay data lane**: a peer whose `hello`
+//!   announces `relay: true` gets its dispatcher the moment it is
+//!   authenticated, writing through a [`DataCarrier`] that uses the
+//!   DataChannel when one is open and otherwise hands each frame back to
+//!   this task to be sealed into a `data` envelope. A phone behind a
+//!   symmetric NAT, or a browser that never completes ICE, therefore has
+//!   full RPC + event service from the first round trip.
 //!
 //! Reconnect policy mirrors the Discord-gateway pattern used elsewhere
 //! in the codebase (`lib/connectors/adapters/discord/gateway-client.ts`):
@@ -23,8 +30,8 @@ use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::{
     proto::{
-        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RoomDescriptor, ServerFrame,
-        SignalingEnvelope, SubscribeProof,
+        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RelayLane, RoomDescriptor,
+        ServerFrame, SignalingEnvelope, SubscribeProof,
     },
     protocol::{validate_room_descriptor, verify_subscribe_proof},
 };
@@ -37,6 +44,7 @@ use tokio_tungstenite::{
 };
 use webrtc::peer_connection::{RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionState};
 
+use super::carrier::{DataCarrier, RelayFrame, RELAY_OUTBOUND_QUEUE};
 use super::dispatch::spawn as spawn_dispatcher;
 use super::envelope::{
     build_envelope, build_subscribe_proof, now_ms, verify_and_decrypt_envelope, EnvelopeError,
@@ -140,6 +148,10 @@ pub struct ClientConfig {
     /// Handle the task uses to push its current [`DeviceTier`] into the
     /// hub's shared snapshot.
     pub tier_writer: TierWriter,
+    /// Present for a one-shot pairing room (ADR-0170): the peer has no
+    /// identity yet, so the only thing this session answers is `pair.http`
+    /// over the relay data lane. No dispatcher, no DataChannel.
+    pub pairing: Option<Arc<super::pairing::PairingRoom>>,
 }
 
 /// Spawn a signaling client task. The returned watch-sender allows the
@@ -171,6 +183,158 @@ impl ClientHandle {
         let _ = self.cancel_tx.send(true);
         let _ = self.join.await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher lifetime
+// ---------------------------------------------------------------------------
+
+/// The dispatcher task plus the carrier it writes to.
+///
+/// Dropping the guard (the session loop unwound: cancel, socket error, peer
+/// left) closes the relay half of the carrier at once. Whether the task
+/// itself is aborted depends on what is left for it to write to: a live
+/// DataChannel outlives the signaling socket by design (DTLS does not need
+/// the rendezvous once ICE is done), so a peer that still holds one keeps
+/// its dispatcher, and only a relay-only peer loses it. Without that check a
+/// relay-only dispatcher would sit forever forwarding events into a closed
+/// queue, one warning per frame.
+struct DispatcherGuard {
+    carrier: Arc<DataCarrier>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl DispatcherGuard {
+    fn new(carrier: Arc<DataCarrier>, task: tokio::task::JoinHandle<()>) -> Self {
+        Self {
+            carrier,
+            task: Some(task),
+        }
+    }
+
+    /// Stop the task unconditionally (the peer is gone for good).
+    fn abort(mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for DispatcherGuard {
+    fn drop(&mut self) {
+        self.carrier.set_relay_open(false);
+        let Some(task) = self.task.take() else { return };
+        let carrier = Arc::clone(&self.carrier);
+        tokio::spawn(async move {
+            if !carrier.is_open().await {
+                task.abort();
+            }
+        });
+    }
+}
+
+/// Everything the session loop keeps per authenticated mobile peer. Bundled
+/// so the `select!` arms and `handle_relay` share one name for one thing.
+#[derive(Default)]
+struct PeerState {
+    peer_session: Option<Arc<PeerSession>>,
+    peer_ice_rx: Option<mpsc::Receiver<RTCIceCandidateInit>>,
+    peer_state_rx: Option<mpsc::Receiver<RTCPeerConnectionState>>,
+    dispatcher: Option<DispatcherGuard>,
+    /// Present once the peer announced `relay: true` in its `hello`. The
+    /// carrier is shared with the dispatcher; the two channels are this
+    /// task's ends of the relay path (frames out to be sealed, decrypted
+    /// bytes in to the dispatcher's reassembler).
+    carrier: Option<Arc<DataCarrier>>,
+    relay_out_rx: Option<mpsc::Receiver<RelayFrame>>,
+    relay_data_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pending_remote_ice: PendingRemoteIce,
+}
+
+impl PeerState {
+    fn relay_active(&self) -> bool {
+        self.carrier.as_ref().is_some_and(|c| c.relay_open())
+    }
+
+    /// Drop the WebRTC half only. In relay mode the dispatcher lives on and
+    /// the carrier falls back to the data lane; without a relay this is a
+    /// full teardown.
+    async fn drop_peer(&mut self, device_id: &str) {
+        self.peer_ice_rx = None;
+        self.peer_state_rx = None;
+        self.pending_remote_ice.clear();
+        if let Some(carrier) = self.carrier.as_ref().filter(|c| c.relay_open()) {
+            carrier.detach_peer().await;
+            if let Some(peer) = self.peer_session.take() {
+                peer.close().await;
+            }
+            log::info!(
+                "signaling::client[{device_id}]: DataChannel gone, continuing over the relay"
+            );
+        } else {
+            self.teardown_all(device_id).await;
+        }
+    }
+
+    /// The peer is gone: stop the dispatcher, close the peer, forget the
+    /// relay path, and release every per-device lease that assumed presence.
+    async fn teardown_all(&mut self, device_id: &str) {
+        crate::companion_api::admin_lease::revoke_device(device_id);
+        crate::companion_api::host_consent::forget_device(device_id);
+        self.peer_ice_rx = None;
+        self.peer_state_rx = None;
+        self.pending_remote_ice.clear();
+        if let Some(carrier) = self.carrier.take() {
+            carrier.set_relay_open(false);
+            carrier.detach_peer().await;
+        }
+        self.relay_out_rx = None;
+        self.relay_data_tx = None;
+        if let Some(guard) = self.dispatcher.take() {
+            guard.abort();
+        }
+        if let Some(peer) = self.peer_session.take() {
+            peer.close().await;
+        }
+    }
+}
+
+/// Decrypted body of a `data` envelope: one physical frame for the
+/// DataChannel reassembler, carried as text or base64 binary.
+#[derive(Debug, serde::Deserialize)]
+struct DataBody {
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    b64: Option<String>,
+}
+
+impl DataBody {
+    fn into_bytes(self) -> Result<Vec<u8>, SessionError> {
+        if let Some(text) = self.text {
+            return Ok(text.into_bytes());
+        }
+        if let Some(b64) = self.b64 {
+            return URL_SAFE_NO_PAD
+                .decode(b64.as_bytes())
+                .map_err(|e| SessionError::Protocol(format!("data envelope base64: {e}")));
+        }
+        Err(SessionError::Protocol(
+            "data envelope carried neither text nor b64".into(),
+        ))
+    }
+}
+
+fn relay_frame_body(frame: RelayFrame) -> Value {
+    match frame {
+        RelayFrame::Text(bytes) => json!({ "text": String::from_utf8_lossy(&bytes) }),
+        RelayFrame::Binary(bytes) => json!({ "b64": URL_SAFE_NO_PAD.encode(bytes) }),
+    }
+}
+
+/// Whether a peer's `hello` opted into the relay data lane.
+fn hello_wants_relay(body: &Value) -> bool {
+    body.get("relay").and_then(Value::as_bool).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -657,15 +821,9 @@ async fn run_one_session(
     // sends through here. Bounded so a runaway producer can't OOM us.
     let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
 
-    // Per-peer channels — recreated each time a fresh PeerSession is built
-    // (i.e., each new offer). We hold the Options so we can drop them when
-    // the peer dies and create fresh channels for the next offer.
-    let mut peer_session: Option<Arc<PeerSession>> = None;
-    let mut peer_ice_rx: Option<mpsc::Receiver<RTCIceCandidateInit>> = None;
-    let mut peer_state_rx: Option<mpsc::Receiver<RTCPeerConnectionState>> = None;
-    let mut peer_data_rx: Option<mpsc::Receiver<Vec<u8>>> = None;
-    let mut dispatcher: Option<tokio::task::JoinHandle<()>> = None;
-    let mut pending_remote_ice = PendingRemoteIce::default();
+    // Per-peer state: recreated each time a fresh PeerSession is built
+    // (i.e., each new offer) and, in relay mode, from the peer's `hello`.
+    let mut ps = PeerState::default();
 
     // Outbound envelope sequence counter (sender = "desktop").
     let mut next_seq: u64 = 1;
@@ -677,19 +835,35 @@ async fn run_one_session(
     loop {
         // Helpers for `select!` — extract receivers that may be `None` and
         // gate the branch on `Option::is_some()` via `if let`.
-        let ice_branch = peer_ice_rx.as_mut();
-        let state_branch = peer_state_rx.as_mut();
+        let ice_branch = ps.peer_ice_rx.as_mut();
+        let state_branch = ps.peer_state_rx.as_mut();
+        let relay_branch = ps.relay_out_rx.as_mut();
 
         tokio::select! {
             biased;
 
             () = wait_for_cancel(&mut cancel_rx) => {
-                teardown(
-                    &config.device_id,
-                    peer_session.take(),
-                    dispatcher.take(),
-                ).await;
+                ps.teardown_all(&config.device_id).await;
                 return Err(SessionError::Cancelled);
+            }
+
+            // ADR-0170: a frame the dispatcher could not put on a DataChannel.
+            // Seal it into a `data` envelope on the relay's data lane.
+            Some(frame) = async {
+                match relay_branch {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let body = relay_frame_body(frame);
+                let env = crypto.build_outbound(
+                    &config.rendezvous_id,
+                    next_seq,
+                    EnvelopeKind::Data,
+                    &body,
+                )?;
+                next_seq += 1;
+                push_relay(&out_tx, &config.rendezvous_id, &env, RelayLane::Data).await?;
             }
 
             Some(out) = out_rx.recv() => {
@@ -741,7 +915,7 @@ async fn run_one_session(
                     &body,
                 )?;
                 next_seq += 1;
-                push_relay(&out_tx, &config.rendezvous_id, &env).await?;
+                push_relay(&out_tx, &config.rendezvous_id, &env, RelayLane::Signal).await?;
             }
 
             Some(s) = async {
@@ -759,19 +933,16 @@ async fn run_one_session(
                             "signaling::client[{}]: peer state {s:?} — tearing down",
                             config.device_id
                         );
-                        teardown(
-                            &config.device_id,
-                            peer_session.take(),
-                            dispatcher.take(),
-                        )
-                        .await;
-                        peer_ice_rx = None;
-                        peer_state_rx = None;
-                        peer_data_rx = None;
-                        pending_remote_ice.clear();
+                        let relayed = ps.relay_active();
+                        ps.drop_peer(&config.device_id).await;
                         // Mobile peer dropped; we're still subscribed and
-                        // awaiting a fresh offer.
-                        config.tier_writer.set(DeviceTier::Awaiting);
+                        // either serving it over the relay or awaiting a
+                        // fresh offer.
+                        config.tier_writer.set(if relayed {
+                            DeviceTier::Relayed
+                        } else {
+                            DeviceTier::Awaiting
+                        });
                     }
                     _ => {
                         // `New`/`Connecting`/`Disconnected` — keep the
@@ -829,16 +1000,7 @@ async fn run_one_session(
                                             current.proof.session_id != peer.proof.session_id
                                         });
                                     if replacing_live_session {
-                                        teardown(
-                                            &config.device_id,
-                                            peer_session.take(),
-                                            dispatcher.take(),
-                                        )
-                                        .await;
-                                        peer_ice_rx = None;
-                                        peer_state_rx = None;
-                                        peer_data_rx = None;
-                                        pending_remote_ice.clear();
+                                        ps.teardown_all(&config.device_id).await;
                                     }
                                     crypto.accept_peer(&config.room_descriptor, &peer)?;
                                     config.tier_writer.set(DeviceTier::Negotiating);
@@ -862,16 +1024,7 @@ async fn run_one_session(
                                 crypto.peer = None;
                                 crypto.replay = StrictReplayWindow::default();
                                 // Mobile dropped — tear down our peer too.
-                                teardown(
-                                    &config.device_id,
-                                    peer_session.take(),
-                                    dispatcher.take(),
-                                )
-                                .await;
-                                peer_ice_rx = None;
-                                peer_state_rx = None;
-                                peer_data_rx = None;
-                                pending_remote_ice.clear();
+                                ps.teardown_all(&config.device_id).await;
                                 if role == PeerRole::Mobile {
                                     config.tier_writer.set(DeviceTier::Awaiting);
                                 }
@@ -891,12 +1044,7 @@ async fn run_one_session(
                                     &out_tx,
                                     &mut next_seq,
                                     &mut crypto,
-                                    &mut peer_session,
-                                    &mut peer_ice_rx,
-                                    &mut peer_state_rx,
-                                    &mut peer_data_rx,
-                                    &mut dispatcher,
-                                    &mut pending_remote_ice,
+                                    &mut ps,
                                 )
                                 .await?;
                             }
@@ -939,12 +1087,14 @@ async fn push_relay(
     out_tx: &mpsc::Sender<String>,
     rendezvous_id: &str,
     envelope: &SignalingEnvelope,
+    lane: RelayLane,
 ) -> Result<(), SessionError> {
     let payload =
         serde_json::to_string(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
     let frame = ClientFrame::Relay {
         rendezvous_id: rendezvous_id.to_string(),
         payload,
+        lane,
     };
     let text = serde_json::to_string(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
     out_tx
@@ -981,8 +1131,9 @@ fn fresh_id() -> String {
 }
 
 /// Decrypt the inbound relay payload, verify signature + replay, and dispatch by
-/// envelope kind. May create a new `PeerSession` (on first `rtc:offer`) or
-/// tear down an existing one (on `rtc:close`).
+/// envelope kind. May create a new `PeerSession` (on first `rtc:offer`), open
+/// the relay data lane (on a `hello` that asks for it), or tear down an
+/// existing peer (on `rtc:close`).
 #[allow(clippy::too_many_arguments)]
 async fn handle_relay(
     from_role: PeerRole,
@@ -993,12 +1144,7 @@ async fn handle_relay(
     out_tx: &mpsc::Sender<String>,
     next_seq: &mut u64,
     crypto: &mut SessionCrypto,
-    peer_session: &mut Option<Arc<PeerSession>>,
-    peer_ice_rx: &mut Option<mpsc::Receiver<RTCIceCandidateInit>>,
-    peer_state_rx: &mut Option<mpsc::Receiver<RTCPeerConnectionState>>,
-    peer_data_rx: &mut Option<mpsc::Receiver<Vec<u8>>>,
-    dispatcher: &mut Option<tokio::task::JoinHandle<()>>,
-    pending_remote_ice: &mut PendingRemoteIce,
+    ps: &mut PeerState,
 ) -> Result<(), SessionError> {
     let envelope: SignalingEnvelope = serde_json::from_str(payload)
         .map_err(|e| SessionError::Protocol(format!("relay envelope json: {e}")))?;
@@ -1048,6 +1194,20 @@ async fn handle_relay(
         return Ok(());
     }
 
+    if let Some(room) = config.pairing.as_ref() {
+        return handle_pairing_envelope(
+            room,
+            envelope.kind,
+            body,
+            config,
+            state,
+            out_tx,
+            next_seq,
+            crypto,
+        )
+        .await;
+    }
+
     match envelope.kind {
         EnvelopeKind::Hello => {
             log::debug!(
@@ -1055,6 +1215,41 @@ async fn handle_relay(
                 config.device_id,
                 from_role.as_str()
             );
+            if hello_wants_relay(&body) {
+                open_relay_lane(config, state, ps);
+                // Answer so the peer knows the lane is live on this end. A
+                // Host built before the lane never replies, and the peer
+                // then waits for the DataChannel exactly as before.
+                let reply = crypto.build_outbound(
+                    &config.rendezvous_id,
+                    *next_seq,
+                    EnvelopeKind::Hello,
+                    &json!({ "deviceId": "host", "relay": true }),
+                )?;
+                *next_seq += 1;
+                push_relay(out_tx, &config.rendezvous_id, &reply, RelayLane::Signal).await?;
+                if ps.peer_session.is_none() {
+                    config.tier_writer.set(DeviceTier::Relayed);
+                }
+            }
+        }
+        EnvelopeKind::Data => {
+            let Some(data_tx) = ps.relay_data_tx.as_ref() else {
+                log::warn!(
+                    "signaling::client[{}]: data envelope before the relay lane was opened",
+                    config.device_id
+                );
+                return Ok(());
+            };
+            let bytes = serde_json::from_value::<DataBody>(body)
+                .map_err(|e| SessionError::Protocol(format!("data envelope: {e}")))?
+                .into_bytes()?;
+            if data_tx.send(bytes).await.is_err() {
+                log::warn!(
+                    "signaling::client[{}]: dispatcher is gone; dropping relayed frame",
+                    config.device_id
+                );
+            }
         }
         EnvelopeKind::RtcOffer => {
             let sdp = body
@@ -1066,7 +1261,7 @@ async fn handle_relay(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
 
-            if should_reuse_peer_for_offer(ice_restart, peer_session.is_some()) {
+            if should_reuse_peer_for_offer(ice_restart, ps.peer_session.is_some()) {
                 // True ICE restart: renegotiate on the EXISTING peer so DTLS,
                 // the data channel, and the dispatcher all survive — only ICE
                 // re-gathers. `accept_offer` (set_remote_description +
@@ -1075,7 +1270,8 @@ async fn handle_relay(
                 // peer's existing event handler keeps relaying new ICE
                 // candidates. Mirrors the mobile `attemptIceRestart` path in
                 // `lib/tauri/transport-rtc.ts`.
-                let existing = peer_session
+                let existing = ps
+                    .peer_session
                     .as_ref()
                     .expect("peer_session is_some checked above");
                 let answer_sdp = existing
@@ -1089,13 +1285,23 @@ async fn handle_relay(
                     &json!({ "sdp": answer_sdp }),
                 )?;
                 *next_seq += 1;
-                push_relay(out_tx, &config.rendezvous_id, &answer).await?;
+                push_relay(out_tx, &config.rendezvous_id, &answer, RelayLane::Signal).await?;
             } else {
                 // First offer (or a non-restart re-offer): build a fresh peer.
-                // A prior peer/dispatcher, if any, is torn down below.
+                // A prior peer, if any, is dropped below.
                 let (ice_tx, ice_rx) = mpsc::channel(ICE_QUEUE_CAPACITY);
-                let (data_tx, data_rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
                 let (state_tx, state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
+                // In relay mode the DataChannel feeds the dispatcher that the
+                // `hello` already spawned, through the same inbound queue the
+                // relay lane uses. Otherwise a fresh queue + dispatcher pair
+                // is created for this peer, exactly as before the relay.
+                let (data_tx, fresh_data_rx) = match ps.relay_data_tx.clone() {
+                    Some(tx) => (tx, None),
+                    None => {
+                        let (tx, rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+                        (tx, Some(rx))
+                    }
+                };
                 let callbacks = PeerCallbacks {
                     outbound_ice: ice_tx,
                     inbound_data: data_tx,
@@ -1125,7 +1331,7 @@ async fn handle_relay(
                     .accept_offer(sdp.to_string())
                     .await
                     .map_err(|e| SessionError::Protocol(format!("accept_offer: {e}")))?;
-                for candidate in pending_remote_ice.drain() {
+                for candidate in ps.pending_remote_ice.drain() {
                     if let Err(e) = new_peer.add_remote_ice(candidate).await {
                         log::warn!(
                             "signaling::client[{}]: queued addRemoteIce failed: {e}",
@@ -1140,30 +1346,42 @@ async fn handle_relay(
                     &json!({ "sdp": answer_sdp }),
                 )?;
                 *next_seq += 1;
-                push_relay(out_tx, &config.rendezvous_id, &answer).await?;
+                push_relay(out_tx, &config.rendezvous_id, &answer, RelayLane::Signal).await?;
 
-                // Tear down any previous dispatcher / channels.
-                if let Some(h) = dispatcher.take() {
-                    h.abort();
+                // Retire the previous peer (the dispatcher survives in relay
+                // mode and is replaced otherwise).
+                if let Some(old) = ps.peer_session.take() {
+                    old.close().await;
                 }
-                *peer_session = Some(Arc::clone(&new_peer));
-                *peer_ice_rx = Some(ice_rx);
-                *peer_state_rx = Some(state_rx);
-                *peer_data_rx = Some(data_rx);
+                ps.peer_ice_rx = Some(ice_rx);
+                ps.peer_state_rx = Some(state_rx);
 
-                // Spawn the dispatcher — it owns the data_rx side until the
-                // DataChannel actually opens (waited on inside the dispatcher).
-                // Wrapping in tokio::spawn means the rest of the session loop
-                // continues to drive ICE / outbound while the DC is still
-                // negotiating.
-                let data_rx_take = peer_data_rx.take().expect("data rx just set");
-                let handle = spawn_dispatcher(
-                    Arc::clone(&new_peer),
-                    data_rx_take,
-                    state.clone(),
-                    config.device_id.clone(),
-                );
-                *dispatcher = Some(handle);
+                match (ps.carrier.clone(), fresh_data_rx) {
+                    (Some(carrier), None) => {
+                        // Relay mode: the running dispatcher now has a
+                        // DataChannel to prefer.
+                        carrier.attach_peer(Arc::clone(&new_peer)).await;
+                    }
+                    (_, Some(data_rx)) => {
+                        // DataChannel-only peer: dispatcher per peer, as before.
+                        // Wrapping in tokio::spawn means the rest of the
+                        // session loop continues to drive ICE / outbound while
+                        // the DC is still negotiating.
+                        let carrier = DataCarrier::datachannel_only(Arc::clone(&new_peer));
+                        let handle = spawn_dispatcher(
+                            Arc::clone(&carrier),
+                            data_rx,
+                            state.clone(),
+                            config.device_id.clone(),
+                        );
+                        if let Some(old) = ps.dispatcher.take() {
+                            old.abort();
+                        }
+                        ps.dispatcher = Some(DispatcherGuard::new(carrier, handle));
+                    }
+                    (None, None) => unreachable!("relay_data_tx implies a carrier"),
+                }
+                ps.peer_session = Some(new_peer);
             }
         }
         EnvelopeKind::RtcAnswer => {
@@ -1182,7 +1400,7 @@ async fn handle_relay(
                 .ok_or_else(|| SessionError::Protocol("rtc:ice missing candidate".into()))?;
             let init: RTCIceCandidateInit = serde_json::from_value(candidate)
                 .map_err(|e| SessionError::Protocol(format!("ice candidate: {e}")))?;
-            if let Some(peer) = peer_session.as_ref() {
+            if let Some(peer) = ps.peer_session.as_ref() {
                 if let Err(e) = peer.add_remote_ice(init).await {
                     log::warn!(
                         "signaling::client[{}]: addRemoteIce failed: {e}",
@@ -1190,7 +1408,7 @@ async fn handle_relay(
                     );
                 }
             } else {
-                pending_remote_ice.push(init)?;
+                ps.pending_remote_ice.push(init)?;
             }
         }
         EnvelopeKind::RtcClose => {
@@ -1198,32 +1416,166 @@ async fn handle_relay(
                 "signaling::client[{}]: peer requested rtc:close",
                 config.device_id
             );
-            teardown(&config.device_id, peer_session.take(), dispatcher.take()).await;
-            *peer_ice_rx = None;
-            *peer_state_rx = None;
-            *peer_data_rx = None;
-            pending_remote_ice.clear();
-            // Mobile cleanly closed its half — we're back to waiting for
-            // the next offer.
-            config.tier_writer.set(DeviceTier::Awaiting);
+            let relayed = ps.relay_active();
+            ps.drop_peer(&config.device_id).await;
+            // Mobile cleanly closed its WebRTC half. Over a relay it is still
+            // here; otherwise we're back to waiting for the next offer.
+            config.tier_writer.set(if relayed {
+                DeviceTier::Relayed
+            } else {
+                DeviceTier::Awaiting
+            });
         }
     }
     Ok(())
 }
 
-async fn teardown(
-    device_id: &str,
-    peer: Option<Arc<PeerSession>>,
-    dispatcher: Option<tokio::task::JoinHandle<()>>,
-) {
-    crate::companion_api::admin_lease::revoke_device(device_id);
-    crate::companion_api::host_consent::forget_device(device_id);
-    if let Some(d) = dispatcher {
-        d.abort();
+/// A pairing room's whole protocol: answer `hello` so the peer opens its
+/// relay lane, then serve `pair.http` requests through the Host's router.
+/// Everything else (offers, ICE, arbitrary RPC) is ignored: nothing here has
+/// a device identity to act on.
+#[allow(clippy::too_many_arguments)]
+async fn handle_pairing_envelope(
+    room: &super::pairing::PairingRoom,
+    kind: EnvelopeKind,
+    body: Value,
+    config: &ClientConfig,
+    state: &SharedState,
+    out_tx: &mpsc::Sender<String>,
+    next_seq: &mut u64,
+    crypto: &mut SessionCrypto,
+) -> Result<(), SessionError> {
+    use super::dispatch::{ErrorBody, InboundRpc, OutboundFrame, ResponseFrame};
+    use super::pairing::{self, PairHttpRequest, PAIR_HTTP_METHOD};
+
+    match kind {
+        EnvelopeKind::Hello => {
+            if !hello_wants_relay(&body) {
+                return Ok(());
+            }
+            let reply = crypto.build_outbound(
+                &config.rendezvous_id,
+                *next_seq,
+                EnvelopeKind::Hello,
+                &json!({ "deviceId": "host", "relay": true }),
+            )?;
+            *next_seq += 1;
+            push_relay(out_tx, &config.rendezvous_id, &reply, RelayLane::Signal).await
+        }
+        EnvelopeKind::Data => {
+            let bytes = serde_json::from_value::<DataBody>(body)
+                .map_err(|e| SessionError::Protocol(format!("data envelope: {e}")))?
+                .into_bytes()?;
+            // Pairing requests are small, so a frame is a whole message. A
+            // chunked one is refused rather than reassembled: there is no
+            // legitimate multi-frame pairing request.
+            let Ok(rpc) = serde_json::from_slice::<InboundRpc>(&bytes) else {
+                log::debug!(
+                    "signaling::client[{}]: ignoring non-RPC frame in a pairing room",
+                    config.device_id
+                );
+                return Ok(());
+            };
+            let response = if rpc.method != PAIR_HTTP_METHOD {
+                ResponseFrame {
+                    id: rpc.id,
+                    ok: false,
+                    result: None,
+                    error: Some(ErrorBody {
+                        code: "pair_method_only".into(),
+                        message: "a pairing room only answers pair.http".into(),
+                    }),
+                }
+            } else {
+                match serde_json::from_value::<PairHttpRequest>(rpc.params) {
+                    Err(error) => ResponseFrame {
+                        id: rpc.id,
+                        ok: false,
+                        result: None,
+                        error: Some(ErrorBody {
+                            code: "pair_invalid_request".into(),
+                            message: error.to_string(),
+                        }),
+                    },
+                    Ok(request) => match pairing::admit(&request, room.expires_at_ms, now_ms()) {
+                        Err(refusal) => ResponseFrame {
+                            id: rpc.id,
+                            ok: false,
+                            result: None,
+                            error: Some(ErrorBody {
+                                code: refusal.code().into(),
+                                message: "pairing request refused".into(),
+                            }),
+                        },
+                        Ok(()) => match pairing::answer(room, state, request, "127.0.0.1").await {
+                            Ok(answer) => ResponseFrame {
+                                id: rpc.id,
+                                ok: true,
+                                result: Some(serde_json::to_value(answer).unwrap_or(Value::Null)),
+                                error: None,
+                            },
+                            Err(error) => ResponseFrame {
+                                id: rpc.id,
+                                ok: false,
+                                result: None,
+                                error: Some(ErrorBody {
+                                    code: "pair_router_failed".into(),
+                                    message: error,
+                                }),
+                            },
+                        },
+                    },
+                }
+            };
+            let frame = OutboundFrame::Response(response);
+            let bytes = serde_json::to_vec(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let frames = super::datachannel_framing::encode_message(&bytes, &message_id)
+                .map_err(|e| SessionError::Protocol(e.to_string()))?;
+            for frame in frames {
+                let env = crypto.build_outbound(
+                    &config.rendezvous_id,
+                    *next_seq,
+                    EnvelopeKind::Data,
+                    &relay_frame_body(RelayFrame::Text(frame)),
+                )?;
+                *next_seq += 1;
+                push_relay(out_tx, &config.rendezvous_id, &env, RelayLane::Data).await?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
-    if let Some(p) = peer {
-        p.close().await;
+}
+
+/// Open the relay data lane for the authenticated peer: one carrier, one
+/// dispatcher, and this task's two ends of the relay path. Idempotent for a
+/// peer that says `hello` twice (a signaling reconnect re-sends it).
+fn open_relay_lane(config: &ClientConfig, state: &SharedState, ps: &mut PeerState) {
+    if let Some(carrier) = ps.carrier.as_ref() {
+        carrier.set_relay_open(true);
+        return;
     }
+    let (relay_tx, relay_rx) = mpsc::channel(RELAY_OUTBOUND_QUEUE);
+    let (data_tx, data_rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+    let carrier = DataCarrier::with_relay(relay_tx);
+    let handle = spawn_dispatcher(
+        Arc::clone(&carrier),
+        data_rx,
+        state.clone(),
+        config.device_id.clone(),
+    );
+    if let Some(old) = ps.dispatcher.take() {
+        old.abort();
+    }
+    ps.dispatcher = Some(DispatcherGuard::new(Arc::clone(&carrier), handle));
+    ps.carrier = Some(carrier);
+    ps.relay_out_rx = Some(relay_rx);
+    ps.relay_data_tx = Some(data_tx);
+    log::info!(
+        "signaling::client[{}]: relay data lane open",
+        config.device_id
+    );
 }
 
 #[cfg(test)]
@@ -1335,7 +1687,8 @@ mod tests {
         )
         .is_ok());
 
-        teardown("rtc-teardown-device", None, None).await;
+        let mut ps = PeerState::default();
+        ps.teardown_all("rtc-teardown-device").await;
 
         assert!(crate::companion_api::admin_lease::validate(
             "rtc-teardown-device",
@@ -1343,6 +1696,50 @@ mod tests {
             Some(&lease.token),
         )
         .is_err());
+    }
+
+    #[test]
+    fn hello_relay_flag_is_read_from_the_body() {
+        assert!(hello_wants_relay(&json!({ "deviceId": "d", "relay": true })));
+        assert!(!hello_wants_relay(&json!({ "deviceId": "d" })));
+        assert!(!hello_wants_relay(&json!({ "deviceId": "d", "relay": "yes" })));
+    }
+
+    #[test]
+    fn data_body_round_trips_text_and_binary_frames() {
+        let text = relay_frame_body(RelayFrame::Text(b"{\"id\":1}".to_vec()));
+        let bytes = serde_json::from_value::<DataBody>(text)
+            .unwrap()
+            .into_bytes()
+            .unwrap();
+        assert_eq!(bytes, b"{\"id\":1}");
+        let binary = relay_frame_body(RelayFrame::Binary(vec![0, 255, 7]));
+        let bytes = serde_json::from_value::<DataBody>(binary)
+            .unwrap()
+            .into_bytes()
+            .unwrap();
+        assert_eq!(bytes, vec![0, 255, 7]);
+        let empty = serde_json::from_value::<DataBody>(json!({})).unwrap();
+        assert!(empty.into_bytes().is_err());
+    }
+
+    #[tokio::test]
+    async fn dropping_the_peer_in_relay_mode_keeps_the_dispatcher() {
+        let (relay_tx, _relay_rx) = mpsc::channel(RELAY_OUTBOUND_QUEUE);
+        let carrier = DataCarrier::with_relay(relay_tx);
+        let task = tokio::spawn(std::future::pending::<()>());
+        let mut ps = PeerState {
+            carrier: Some(Arc::clone(&carrier)),
+            dispatcher: Some(DispatcherGuard::new(Arc::clone(&carrier), task)),
+            ..PeerState::default()
+        };
+        assert!(ps.relay_active());
+        ps.drop_peer("relay-device").await;
+        assert!(ps.dispatcher.is_some(), "relay keeps serving without ICE");
+        assert!(carrier.relay_open());
+        ps.teardown_all("relay-device").await;
+        assert!(ps.dispatcher.is_none());
+        assert!(!carrier.relay_open());
     }
 
     #[test]
@@ -1465,6 +1862,7 @@ mod tests {
         room_descriptor.room_id = derive_room_id(&room_descriptor);
         let rendezvous_id = room_descriptor.room_id.clone();
         ClientConfig {
+            pairing: None,
             signaling_url: url.to_string(),
             rendezvous_id: rendezvous_id.clone(),
             room_descriptor,

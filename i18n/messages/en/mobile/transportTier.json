@@ -8,5 +8,7 @@
   "wsLan": "LAN (HTTPS)",
   "wsLanDescription": "Same network as the desktop. No tunnel hop.",
   "wsTunnel": "Tunnel (HTTPS)",
-  "wsTunnelDescription": "Public cloudflared tunnel to the desktop. Adds one hop."
+  "wsTunnelDescription": "Public cloudflared tunnel to the desktop. Adds one hop.",
+  "relay": "Relay",
+  "relayDescription": "Frames travel through the Cognia relay, end-to-end encrypted. A direct DataChannel is still being negotiated in the background."
 }

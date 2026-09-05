@@ -25,6 +25,7 @@ import {
   SIGNALING_BACKOFF_MS,
   SIGNALING_PING_INTERVAL_MS,
   SIGNALING_PROTOCOL_VERSION,
+  relayLaneFor,
   type ClientFrame,
   type Envelope,
   type EnvelopeKind,
@@ -38,6 +39,13 @@ const SUBSCRIBE_DEADLINE_MS = 5_000
 const PONG_DEADLINE_MS = 10_000
 const HEALTHY_RESET_MS = 60_000
 const OUTBOUND_QUEUE_CAPACITY = 64
+/**
+ * Data-lane frames queue deeper: one 1 MiB logical message is 32 chunks and
+ * the RPC caller awaits each `send`, so the ceiling is a backstop against a
+ * runaway producer, not a per-message budget. Matches the Host's
+ * `RELAY_OUTBOUND_QUEUE`.
+ */
+const DATA_OUTBOUND_QUEUE_CAPACITY = 1024
 
 export type SignalingState =
   "idle" | "connecting" | "subscribed" | "awaiting-peer" | "reconnecting" | "rejected" | "closed"
@@ -177,7 +185,9 @@ export class SignalingClient {
     ) {
       throw new Error("signaling: authenticated peer is not connected")
     }
-    if (session.pending >= OUTBOUND_QUEUE_CAPACITY) {
+    const capacity =
+      relayLaneFor(kind) === "data" ? DATA_OUTBOUND_QUEUE_CAPACITY : OUTBOUND_QUEUE_CAPACITY
+    if (session.pending >= capacity) {
       this.failSocket("outbound_queue_overflow")
       throw new Error("signaling: outbound signaling queue is full")
     }
@@ -201,10 +211,14 @@ export class SignalingClient {
       if (this.destroyed || this.ws !== socket || socket.readyState !== WebSocket.OPEN) {
         throw new Error("signaling: connection changed before send")
       }
+      const lane = relayLaneFor(kind)
       const frame: ClientFrame = {
         kind: "relay",
         rendezvousId: this.opts.descriptor.roomId,
         payload: JSON.stringify(envelope),
+        // The signal lane is the wire default; omit it so a pre-lane
+        // rendezvous sees exactly the frame it always did.
+        ...(lane === "data" ? { lane } : {}),
       }
       socket.send(JSON.stringify(frame))
     })

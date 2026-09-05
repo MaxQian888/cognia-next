@@ -715,7 +715,7 @@ export function ExposeTestGlobals(): null {
         },
         request: companionRequest,
         async pair(pairPayload) {
-          const { registerPairPayload } = await import("@/components/mobile/pair/pair-api")
+          const { registerPairPayload } = await import("@/components/connectivity/pair/pair-api")
           const result = await registerPairPayload(pairPayload)
           if (result.kind !== "ok") throw new Error(result.message)
           await saveCompanionConfig(result.config)

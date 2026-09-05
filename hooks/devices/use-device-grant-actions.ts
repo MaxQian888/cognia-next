@@ -38,6 +38,11 @@ import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useRemoteTerminalGrantToggle } from "@/hooks/companion/use-remote-terminal-grant"
 import { isTauri, transport } from "@/lib/tauri"
+import {
+  applyDeviceLifecycleOverHttp,
+  type DeviceLifecycleAction,
+} from "@/lib/devices/lifecycle-http"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 
 /**
  * Raised when the enforcement side cannot be reached from this shell.
@@ -67,6 +72,30 @@ export class DeviceGrantHostUnreachableError extends Error {
 async function hostCall(command: string, args: Record<string, unknown>): Promise<void> {
   if (!isTauri()) throw new DeviceGrantHostUnreachableError(command)
   await transport.call<void>(command, args)
+}
+
+/**
+ * The three lifecycle changes are the ones a shell that is NOT the Host can
+ * still make: every Host mounts owner routes for them (ADR-0170 batch 4, see
+ * `lib/devices/lifecycle-http.ts`). On the desktop they stay on Tauri IPC. Off
+ * it, a paired companion sends the owner-authenticated request and a
+ * standalone browser is told there is no Host, which is the same refusal the
+ * grant toggles above give.
+ */
+async function lifecycleCall(
+  action: DeviceLifecycleAction,
+  command: string,
+  deviceId: string
+): Promise<void> {
+  if (isTauri()) {
+    await transport.call<void>(command, { deviceId })
+    return
+  }
+  const profile = detectHostProfile()
+  if (profile !== "mobile-companion" && profile !== "cloud-companion") {
+    throw new DeviceGrantHostUnreachableError(command)
+  }
+  await applyDeviceLifecycleOverHttp(action, deviceId)
 }
 
 export interface DeviceGrantActions {
@@ -302,7 +331,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tPause("description"),
         },
         async () => {
-          await hostCall("companion_suspend_device", { deviceId })
+          await lifecycleCall("suspend", "companion_suspend_device", deviceId)
           await pausePairedDevice(deviceId)
         }
       )
@@ -334,7 +363,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tResume("description"),
         },
         async () => {
-          await hostCall("companion_resume_device", { deviceId })
+          await lifecycleCall("resume", "companion_resume_device", deviceId)
           await resumePairedDevice(deviceId)
         }
       )
@@ -352,7 +381,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   const revoke = useCallback(
     async (deviceId: string, label: string) => {
       const doRevoke = async () => {
-        await hostCall("companion_revoke_device", { deviceId })
+        await lifecycleCall("revoke", "companion_revoke_device", deviceId)
         await revokePairedDevice(deviceId)
       }
       if (!requireBiometricForRevoke) {

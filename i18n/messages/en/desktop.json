@@ -654,10 +654,20 @@
         "rtc-relay": "RTC relay",
         "unknown": "Negotiating",
         "ws-lan": "WebSocket · LAN",
-        "ws-tunnel": "WebSocket · tunnel"
+        "ws-tunnel": "WebSocket · tunnel",
+        "relay": "Relay"
       },
       "title": "Runtime connection",
-      "transport": "Transport"
+      "transport": "Transport",
+      "eventPlane": "Events",
+      "eventPlaneState": {
+        "ready": "Live",
+        "replaying": "Catching up",
+        "connecting": "Connecting",
+        "degraded": "Degraded",
+        "disconnected": "Disconnected"
+      },
+      "eventPlaneDegradedHint": "Requests answer but no events arrive. Changes made elsewhere will not appear until the event stream reconnects."
     },
     "error": "Error",
     "idle": "Idle",

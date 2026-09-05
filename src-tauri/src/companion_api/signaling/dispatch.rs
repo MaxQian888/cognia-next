@@ -1,7 +1,12 @@
 //! DataChannel ↔ `remote_execution` + `EventBus` bridge. ADR-0021.
 //!
-//! Once a `PeerSession`'s data channel is open, this module's task owns
-//! the bidirectional message pump:
+//! The pump writes to a [`DataCarrier`], never to a `PeerSession` directly:
+//! the carrier picks the open DataChannel when there is one and the relay's
+//! data lane otherwise (ADR-0170), so this module is carrier-blind and the
+//! two paths cannot drift.
+//!
+//! Once a peer is present, this module's task owns the bidirectional message
+//! pump:
 //!
 //! - **Inbound** (mobile → desktop): JSON envelope `{ id, method, params }`
 //!   gets routed through the canonical `companion_api::remote_execution`
@@ -28,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::peer::PeerSession;
+use super::carrier::DataCarrier;
 use crate::companion_api::{
     event_batcher::{chunk_replay, EventBatcher},
     event_bus::EventFrame,
@@ -172,16 +177,16 @@ enum EventControl {
 /// dropping or aborting; consumers should keep it around for the lifetime
 /// of the data channel.
 pub fn spawn(
-    peer: Arc<PeerSession>,
+    carrier: Arc<DataCarrier>,
     inbound_data: mpsc::Receiver<Vec<u8>>,
     state: SharedState,
     device_id: String,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(peer, inbound_data, state, device_id))
+    tokio::spawn(run(carrier, inbound_data, state, device_id))
 }
 
 async fn run(
-    peer: Arc<PeerSession>,
+    peer: Arc<DataCarrier>,
     mut inbound_data: mpsc::Receiver<Vec<u8>>,
     state: SharedState,
     device_id: String,
@@ -449,7 +454,7 @@ fn protocol_version_reject(version: u8, request_id: &str) -> Option<OutboundFram
 }
 
 async fn handle_inbound(
-    peer: &PeerSession,
+    peer: &DataCarrier,
     bytes: Vec<u8>,
     state: &SharedState,
     _host: Option<&crate::companion_api::dispatch_host::DispatchHost>,
@@ -547,7 +552,7 @@ async fn handle_inbound(
 const MAX_BINARY_RESOURCE_BYTES: usize = 10 * 1024 * 1024;
 
 async fn send_binary_resource_error(
-    peer: &PeerSession,
+    peer: &DataCarrier,
     request_id: String,
     code: &str,
 ) -> Result<(), String> {
@@ -566,7 +571,7 @@ async fn send_binary_resource_error(
 }
 
 async fn handle_binary_resource(
-    peer: &PeerSession,
+    peer: &DataCarrier,
     request: InboundBinaryResource,
     state: &SharedState,
     device_id: &str,
@@ -626,12 +631,14 @@ async fn handle_binary_resource(
     if media.bytes.len() > MAX_BINARY_RESOURCE_BYTES {
         return send_binary_resource_error(peer, request.id, "binary_resource_too_large").await;
     }
+    // Chunk size follows the path the bytes will take: 32 KiB on a
+    // DataChannel, 20 KiB through the relay (see `carrier.rs`). The peer
+    // only checks that the announced count matches the chunk headers.
     let total_chunks = media
         .bytes
         .len()
         .max(1)
-        .div_ceil(super::datachannel_framing::BINARY_RESOURCE_CHUNK_BYTES)
-        as u32;
+        .div_ceil(peer.binary_chunk_bytes().await) as u32;
     let start = BinaryResourceStart {
         kind: "binary-resource-start",
         id: &request.id,
@@ -682,7 +689,7 @@ async fn batch_window(deadline: Option<tokio::time::Instant>) {
 }
 
 async fn send_outbound(
-    peer: &PeerSession,
+    peer: &DataCarrier,
     frame: &OutboundFrame,
 ) -> Result<(), super::peer::PeerSendError> {
     let bytes =

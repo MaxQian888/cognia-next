@@ -381,11 +381,13 @@
         "connected": "DataChannel 已打开，手机直连本桌面。",
         "failed": "上一次会话以错误结束，客户端任务在下一次尝试前进入退避。",
         "negotiating": "移动端已加入；正在交换 SDP 与 ICE 候选。",
-        "offline": "信令客户端空闲——通常处于重连尝试之间。"
+        "offline": "信令客户端空闲——通常处于重连尝试之间。",
+        "relayed": "正通过 Cognia 中继服务；RPC 与事件经汇合点转发，同时在后台协商直连 DataChannel。"
       },
       "failed": "失败",
       "negotiating": "协商中",
-      "offline": "离线"
+      "offline": "离线",
+      "relayed": "中继中"
     },
     "enableHelp": "开启后，移动端在配对完成后会通过 WebRTC 直接连接到本桌面；只有在 WebRTC 无法打通时才会回退到 LAN 或 Cloudflared 隧道。",
     "enableLabel": "启用 WebRTC 通道",

@@ -16,6 +16,9 @@ Use the canonical replacements:
 
 - **Host and device control:** [Companion API](../companion-api), with its
   authenticated command manifest, device grants, and headless dispatch.
+- **Reaching a Host from anywhere:** the relay data lane and relay pairing in
+  [ADR-0170](../../adr/0170-cognia-relay-and-connectivity-center), configured
+  from **Settings → Connectivity** (`?section=connectivity`) on every shell.
 - **MCP ingress and governance:** [External Bridge](../external-bridge) and
   [ADR-0110](../../adr/0110-mcp-control-plane-governance).
 - **Outbound event delivery:** `lib/webhooks/`, `stores/webhooks/`, and
@@ -27,5 +30,6 @@ routes, and settings instructions are not current implementation guidance.
 <Cards>
   <Card title="Companion API" href="../companion-api" description="Canonical authenticated host and device control plane." />
   <Card title="External Bridge" href="../external-bridge" description="Canonical inbound MCP surface." />
+  <Card title="ADR-0170" href="../../adr/0170-cognia-relay-and-connectivity-center" description="Relay transport, relay pairing, host-admin plane, one Connectivity section." />
   <Card title="ADR-0005 (historical)" href="../../adr/0005-remote-control" description="Superseded design record." />
 </Cards>

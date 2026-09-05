@@ -61,6 +61,7 @@ pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
 pub mod reachability_config;
+pub mod signaling_config;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
@@ -211,6 +212,40 @@ pub fn set_advertised_port(port: u16) {
 
 pub fn advertised_port() -> u16 {
     ADVERTISED_PORT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Whether the companion listener is bound to loopback only. Process-global
+/// like [`ADVERTISED_PORT`]: the headless binary decides this from a CLI flag
+/// and the host-admin `companion_server_status` arm reports it (ADR-0170).
+/// The desktop keeps its own answer in `CompanionServerState::bind_mode`.
+static BIND_LOOPBACK_ONLY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_bind_loopback_only(loopback_only: bool) {
+    BIND_LOOPBACK_ONLY.store(loopback_only, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn bind_loopback_only() -> bool {
+    BIND_LOOPBACK_ONLY.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Port the plaintext browser listener is bound to, or 0 when it is not.
+/// Set by whichever binary binds it (the desktop's `CompanionServerState`,
+/// the headless `serve`), read by the host-admin `companion_browser_access_get`
+/// arm so a browser talking to a headless Host sees "configured" and "bound"
+/// as two facts, exactly as the desktop card does.
+static BROWSER_ADVERTISED_PORT: std::sync::atomic::AtomicU16 =
+    std::sync::atomic::AtomicU16::new(0);
+
+pub fn set_browser_advertised_port(port: u16) {
+    BROWSER_ADVERTISED_PORT.store(port, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn browser_advertised_port() -> Option<u16> {
+    match BROWSER_ADVERTISED_PORT.load(std::sync::atomic::Ordering::SeqCst) {
+        0 => None,
+        port => Some(port),
+    }
 }
 
 /// Idempotently install the process-level rustls `CryptoProvider`.

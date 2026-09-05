@@ -16,10 +16,19 @@ export const SIGNALING_PROTOCOL_VERSION = 2 as const
 // Server-visible envelope frames
 // ---------------------------------------------------------------------------
 
+/**
+ * Which budget a `relay` frame draws from (ADR-0170). Declared in the clear so
+ * the rendezvous can rate-limit and meter without decrypting: `signal` is the
+ * SDP/ICE/`hello` handshake (the default, and what every pre-lane peer sends),
+ * `data` is application frames carried through the rendezvous in place of a
+ * DataChannel. Mirror of `RelayLane` in `services/signaling-server/core`.
+ */
+export type RelayLane = "signal" | "data"
+
 export type ClientFrame =
   | { kind: "subscribe"; descriptor: RoomDescriptor; proof: SubscribeProof }
   | { kind: "unsubscribe"; rendezvousId: string }
-  | { kind: "relay"; rendezvousId: string; payload: string }
+  | { kind: "relay"; rendezvousId: string; payload: string; lane?: RelayLane }
   | { kind: "ping" }
 
 export interface PeerSnapshot {
@@ -38,6 +47,7 @@ export type ServerFrame =
       fromRole: PeerRole
       fromSessionId: string
       payload: string
+      lane?: RelayLane
     }
   | { kind: "pong" }
   | { kind: "error"; code: string; message: string }
@@ -46,7 +56,17 @@ export type ServerFrame =
 // Application envelope (opaque to the signaling server)
 // ---------------------------------------------------------------------------
 
-export type EnvelopeKind = "hello" | "rtc:offer" | "rtc:answer" | "rtc:ice" | "rtc:close"
+/**
+ * `data` (ADR-0170) carries one DataChannel frame through the rendezvous when
+ * no DataChannel is open: the body is a {@link DataBody}. Always sent on the
+ * `data` lane; everything else rides the `signal` lane.
+ */
+export type EnvelopeKind = "hello" | "rtc:offer" | "rtc:answer" | "rtc:ice" | "rtc:close" | "data"
+
+/** The lane an envelope kind travels on. */
+export function relayLaneFor(kind: EnvelopeKind): RelayLane {
+  return kind === "data" ? "data" : "signal"
+}
 
 export interface Envelope {
   ver: typeof SIGNALING_PROTOCOL_VERSION
@@ -91,6 +111,23 @@ export interface HelloBody {
    * used in `RTCPeerConnection`.
    */
   iceServers?: RTCIceServer[]
+  /**
+   * ADR-0170: the sender can carry application frames over the rendezvous
+   * (`data` envelopes) and is ready to do so now. A Host that agrees answers
+   * with its own `hello` carrying the flag; one built before the relay never
+   * answers, and the peer then waits for the DataChannel exactly as before.
+   */
+  relay?: boolean
+}
+
+/**
+ * Body of a `data` envelope: exactly one physical DataChannel frame, either a
+ * text frame (JSON RPC / event / chunk frame from `datachannel-framing`) or a
+ * binary-resource chunk carried as base64url.
+ */
+export interface DataBody {
+  text?: string
+  b64?: string
 }
 
 export interface RtcOfferBody {

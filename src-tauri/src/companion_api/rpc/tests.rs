@@ -3369,6 +3369,7 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("../../sftp_service.rs"),
         include_str!("plugins.rs"),
         include_str!("diagnostics.rs"),
+        include_str!("host_admin.rs"),
     ]
     .join("\n");
 
@@ -4610,6 +4611,7 @@ fn command_families_cover_known_non_browser_commands_once() {
         super::sftp::COMMANDS,
         super::plugins::COMMANDS,
         super::diagnostics::COMMANDS,
+        super::host_admin::COMMANDS,
     ];
     let routed: Vec<_> = families.into_iter().flatten().copied().collect();
     let unique: std::collections::HashSet<_> = routed.iter().copied().collect();

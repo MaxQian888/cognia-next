@@ -13,13 +13,19 @@
 //!
 //! - [`envelope`] — ECDSA/ECDH/AES-GCM signaling protocol.
 //! - [`peer`] — `webrtc-rs` `RTCPeerConnection` wrapper.
+//! - [`carrier`] — where the dispatcher's frames go: the DataChannel when
+//!   one is open, else the relay's data lane (ADR-0170).
 //! - [`dispatch`] — DataChannel ↔ `remote_execution` + `EventBus` bridge.
 //! - [`client`] — long-lived WSS client (one task per paired device).
+//! - [`pairing`] — one-shot rooms that let a device pair over the relay
+//!   before it has an identity (ADR-0170, `cgnp4`).
 
+pub mod carrier;
 pub mod client;
 pub mod datachannel_framing;
 pub mod dispatch;
 pub mod envelope;
+pub mod pairing;
 pub mod peer;
 pub mod registration_store;
 
@@ -42,6 +48,14 @@ static INSTALLED_HUB: once_cell::sync::Lazy<
 
 pub fn install_hub(hub: Option<&Arc<SignalingHub>>) {
     *INSTALLED_HUB.write() = hub.map(Arc::downgrade);
+}
+
+/// The process-wide hub, if one is installed and still alive.
+pub fn installed_hub() -> Option<Arc<SignalingHub>> {
+    INSTALLED_HUB
+        .read()
+        .as_ref()
+        .and_then(std::sync::Weak::upgrade)
 }
 
 /// The signaling endpoint this Host has actually joined, if a hub is installed.
@@ -161,6 +175,10 @@ pub struct SignalingHub {
     /// `rendezvous_id`; tracks the most recent successful call so a flood
     /// of XSS-driven reconnect invocations gets cheaply rejected.
     reconnect_throttle: Mutex<HashMap<String, Instant>>,
+    /// One-shot pairing rooms (ADR-0170), keyed by room id. Each entry is
+    /// cancelled when its invitation expires. `configure` does not touch
+    /// them (an invitation in flight must survive a settings write).
+    pairing_rooms: Mutex<HashMap<String, ClientHandle>>,
 }
 
 struct HubInner {
@@ -200,7 +218,78 @@ impl SignalingHub {
             }),
             tiers: Arc::new(Mutex::new(HashMap::new())),
             reconnect_throttle: Mutex::new(HashMap::new()),
+            pairing_rooms: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Open a one-shot pairing room for an invitation that expires at
+    /// `expires_at_ms` (ADR-0170). Returns what the invitation must carry, or
+    /// `None` when this Host cannot sit in a rendezvous right now (the hub is
+    /// disabled or not yet bound to a running companion server), in which
+    /// case the invitation is issued without a relay exactly as before.
+    pub fn open_pairing_room(&self, expires_at_ms: i64) -> Option<pairing::PairingRoomIssue> {
+        let (binding, enabled, signaling_url) = {
+            let inner = self.inner.lock();
+            (
+                inner.bound.clone(),
+                inner.enabled,
+                inner.signaling_url.clone(),
+            )
+        };
+        if !enabled {
+            return None;
+        }
+        let binding = binding?;
+        let now = now_ms();
+        if expires_at_ms <= now {
+            return None;
+        }
+        let (issue, host_identity) =
+            pairing::mint_pairing_room(&signaling_url, now, expires_at_ms - now);
+        let room_id = issue.room.room_id.clone();
+        let device_id = format!("pairing:{room_id}");
+        let config = ClientConfig {
+            signaling_url,
+            rendezvous_id: room_id.clone(),
+            room_descriptor: issue.room.clone(),
+            signaling_key_ref: String::new(),
+            signing_private_key: base64::Engine::encode(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                host_identity.private_bytes(),
+            ),
+            device_id: device_id.clone(),
+            ice_servers: Vec::new(),
+            tier_writer: TierWriter::detached(&room_id, &device_id),
+            pairing: Some(pairing::PairingRoom::new(expires_at_ms)),
+        };
+        let handle = spawn_client(config, binding.state);
+        self.pairing_rooms.lock().insert(room_id.clone(), handle);
+        // Expire with the invitation. The task is cheap to keep until then and
+        // a redeemed invitation cannot be redeemed twice, so there is nothing
+        // to gain from closing earlier.
+        let hub = INSTALLED_HUB.read().as_ref().cloned();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis((expires_at_ms - now).max(0) as u64)).await;
+            if let Some(hub) = hub.and_then(|weak| weak.upgrade()) {
+                hub.close_pairing_room(&room_id);
+            }
+        });
+        Some(issue)
+    }
+
+    /// Cancel a pairing room's signaling client. Idempotent.
+    pub fn close_pairing_room(&self, room_id: &str) {
+        let handle = self.pairing_rooms.lock().remove(room_id);
+        if let Some(handle) = handle {
+            tokio::spawn(async move {
+                handle.shutdown().await;
+            });
+        }
+    }
+
+    /// Room ids of the pairing rooms currently open. Diagnostic only.
+    pub fn open_pairing_room_ids(&self) -> Vec<String> {
+        self.pairing_rooms.lock().keys().cloned().collect()
     }
 
     /// Wire the hub to the live companion state. Called once at server start;
@@ -237,6 +326,26 @@ impl SignalingHub {
     /// `String` clone, on a handler that already does far more work.
     pub fn signaling_url(&self) -> String {
         self.inner.lock().signaling_url.clone()
+    }
+
+    /// Diagnostic snapshot: the master switch, the rendezvous, and the rooms
+    /// with a live client. One implementation behind the Tauri command and
+    /// the host-admin RPC arm (ADR-0170).
+    pub fn status(&self) -> SignalingStatus {
+        let inner = self.inner.lock();
+        SignalingStatus {
+            enabled: inner.enabled,
+            signaling_url: inner.signaling_url.clone(),
+            registered_devices: inner.clients.keys().cloned().collect(),
+        }
+    }
+
+    /// Apply a renderer / host-admin patch. Returns whether anything changed.
+    pub fn apply_patch(&self, patch: SignalingConfigPatch) -> bool {
+        let mut servers: Vec<RTCIceServer> =
+            patch.ice_servers.into_iter().map(Into::into).collect();
+        servers.extend(patch.turn_servers.into_iter().map(Into::into));
+        self.configure(patch.enabled, patch.signaling_url, servers)
     }
 
     /// Renderer push: replace the configured signaling URL + ICE/TURN
@@ -390,6 +499,7 @@ impl SignalingHub {
             device_id,
             ice_servers,
             tier_writer,
+            pairing: None,
         };
         let handle = spawn_client(config, binding.state.clone());
         let mut inner = self.inner.lock();
@@ -425,6 +535,7 @@ impl SignalingHub {
             device_id: registration.device_id,
             ice_servers,
             tier_writer,
+            pairing: None,
         };
         let handle = spawn_client(config, binding.state);
         let mut inner = self.inner.lock();
@@ -600,6 +711,7 @@ impl Default for SignalingHub {
             }),
             tiers: Arc::new(Mutex::new(HashMap::new())),
             reconnect_throttle: Mutex::new(HashMap::new()),
+            pairing_rooms: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -623,7 +735,7 @@ pub struct DeviceRegistration {
 /// Configuration patch the renderer pushes via
 /// `companion_signaling_configure` (called whenever the user edits the
 /// WebRTC card in settings).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalingConfigPatch {
     pub enabled: bool,
@@ -633,7 +745,7 @@ pub struct SignalingConfigPatch {
     pub turn_servers: Vec<IceServerSpec>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IceServerSpec {
     /// One or more `stun:` / `turn:` / `turns:` URLs.
@@ -676,6 +788,11 @@ pub enum DeviceTier {
     Awaiting,
     /// Mobile peer has joined; SDP/ICE exchange in flight.
     Negotiating,
+    /// The peer is served over the relay's data lane (ADR-0170): RPC and
+    /// events flow, but through the rendezvous rather than a DataChannel.
+    /// ICE may still be negotiating in the background; a DataChannel that
+    /// opens promotes the device to [`Self::Connected`].
+    Relayed,
     /// DataChannel is open — round-trip RPC available.
     Connected,
     /// Last session ended in error; client task is in its reconnect
@@ -715,6 +832,16 @@ impl std::fmt::Debug for TierWriter {
 }
 
 impl TierWriter {
+    /// A writer backed by its own private map: for tasks whose lifecycle
+    /// must not show up in the devices snapshot (pairing rooms).
+    pub fn detached(rendezvous_id: &str, device_id: &str) -> Self {
+        Self {
+            map: Arc::new(Mutex::new(HashMap::new())),
+            rendezvous_id: rendezvous_id.to_string(),
+            device_id: device_id.to_string(),
+        }
+    }
+
     pub fn set(&self, tier: DeviceTier) {
         self.set_inner(tier, None);
     }
@@ -756,8 +883,7 @@ pub mod commands {
     use std::sync::Arc;
 
     use super::{
-        DeviceRegistration, DeviceTierEntry, RTCIceServer, SignalingConfigPatch, SignalingHub,
-        SignalingStatus,
+        DeviceRegistration, DeviceTierEntry, SignalingConfigPatch, SignalingHub, SignalingStatus,
     };
 
     /// Replace the currently-tracked set of paired devices. Idempotent —
@@ -784,13 +910,10 @@ pub mod commands {
         hub: tauri::State<'_, Arc<SignalingHub>>,
         patch: SignalingConfigPatch,
     ) -> Result<(), String> {
-        let mut servers: Vec<RTCIceServer> =
-            patch.ice_servers.into_iter().map(Into::into).collect();
-        servers.extend(patch.turn_servers.into_iter().map(Into::into));
         // The bool says whether anything was actually restarted; the renderer
         // has no use for it (it dedupes on its own side too), so it is dropped
         // here rather than widening the command's response shape.
-        hub.configure(patch.enabled, patch.signaling_url, servers);
+        hub.apply_patch(patch);
         Ok(())
     }
 
@@ -800,12 +923,7 @@ pub mod commands {
     pub fn companion_signaling_status(
         hub: tauri::State<'_, Arc<SignalingHub>>,
     ) -> Result<SignalingStatus, String> {
-        let inner = hub.inner.lock();
-        Ok(SignalingStatus {
-            enabled: inner.enabled,
-            signaling_url: inner.signaling_url.clone(),
-            registered_devices: inner.clients.keys().cloned().collect(),
-        })
+        Ok(hub.status())
     }
 
     /// Per-device tier snapshot — drives the device list rendered by the

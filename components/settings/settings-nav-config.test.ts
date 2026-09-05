@@ -257,16 +257,15 @@ describe("settings-nav-config", () => {
         "workspace-trust",
         "discover",
         "security",
-        // The remote-host registry is client-side: the store, the credential
-        // vault and `CompanionTransport` all work here. It was pinned to the
-        // desktop, which made `/devices`' own "Add host" action land on a
-        // settings empty state on every other shell.
-        "remote-hosts",
+        // ADR-0170: the Connectivity center is not desktop-pinned. The remote-host
+        // registry is client-side and the Host controls ride the owner-authed
+        // host-admin plane, so a companion configures its Host from here.
+        "connectivity",
       ] as const) {
         expect(reachable.has(id)).toBe(true)
       }
       // Recorded physical boundaries and local-shell surfaces stay desktop-only.
-      for (const id of ["automation", "desktop", "companion", "sidebar"] as const) {
+      for (const id of ["automation", "desktop", "sidebar"] as const) {
         expect(reachable.has(id)).toBe(false)
       }
       // Transitional pins: renderer path still bypasses the transport seam.
@@ -287,7 +286,7 @@ describe("settings-nav-config", () => {
         "security",
         // A browser with nothing paired has exactly one way to stop being
         // standalone, and this is it.
-        "remote-hosts",
+        "connectivity",
       ] as const) {
         expect(reachable.has(id)).toBe(true)
       }

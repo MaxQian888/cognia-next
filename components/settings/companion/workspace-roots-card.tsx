@@ -5,7 +5,7 @@ import { FolderTreeIcon, RefreshCwIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Surface } from "@/components/surface/surface"
 import { listWorkspaceRoots } from "@/lib/files/workspace-fs"
 import type { WorkspaceRoot } from "@/lib/files/types"
@@ -44,58 +44,52 @@ export function WorkspaceRootsCard() {
   }, [refresh])
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <CardTitle className="flex items-center gap-2">
-              <FolderTreeIcon className="size-4 shrink-0" />
-              {t("title")}
-            </CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("refresh")}
-            disabled={loading}
-            onClick={() => void refresh()}
-          >
-            <RefreshCwIcon className="size-4" />
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {failed ? (
-          <p className="text-sm text-destructive">{t("loadError")}</p>
-        ) : roots === null ? (
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
-        ) : roots.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("empty")}</p>
-        ) : (
-          <ul className="space-y-2" aria-label={t("title")}>
-            {roots.map((root) => (
-              <Surface asChild key={root.path} layer="raised">
-                <li className="rounded-md border px-3 py-2">
-                  <p className="font-mono text-xs break-all">{root.path}</p>
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    {root.source === "headless-workspaces-dir"
-                      ? t("sourceHeadless")
-                      : t("sourceDesktop")}
-                  </p>
-                  <p className="pt-0.5 text-xs text-muted-foreground">
-                    {root.source === "headless-workspaces-dir"
-                      ? t("hintHeadless")
-                      : t("hintDesktop")}
-                  </p>
-                </li>
-              </Surface>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+    <SettingsBlock
+      icon={<FolderTreeIcon />}
+      title={t("title")}
+      description={t("description")}
+      action={
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("refresh")}
+          disabled={loading}
+          onClick={() => void refresh()}
+        >
+          <RefreshCwIcon className="size-4" />
+        </Button>
+      }
+      testid="workspace-roots-card"
+      settingId="companion-workspace-roots"
+      contentClassName="space-y-3"
+    >
+      {failed ? (
+        <p className="text-sm text-destructive">{t("loadError")}</p>
+      ) : roots === null ? (
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
+      ) : roots.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+      ) : (
+        <ul className="space-y-2" aria-label={t("title")}>
+          {roots.map((root) => (
+            <Surface asChild key={root.path} layer="raised">
+              <li className="rounded-md border px-3 py-2">
+                <p className="font-mono text-xs break-all">{root.path}</p>
+                <p className="pt-1 text-xs text-muted-foreground">
+                  {root.source === "headless-workspaces-dir"
+                    ? t("sourceHeadless")
+                    : t("sourceDesktop")}
+                </p>
+                <p className="pt-0.5 text-xs text-muted-foreground">
+                  {root.source === "headless-workspaces-dir" ? t("hintHeadless") : t("hintDesktop")}
+                </p>
+              </li>
+            </Surface>
+          ))}
+        </ul>
+      )}
+    </SettingsBlock>
   )
 }
 

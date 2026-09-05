@@ -6,7 +6,7 @@ import { render, screen } from "@testing-library/react"
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
-jest.mock("@/components/settings/remote-hosts/add-host-form", () => ({
+jest.mock("@/components/connectivity/pair/add-host-form", () => ({
   AddHostForm: (props: { initialBaseUrl?: string }) => (
     <div data-testid="add-host-form" data-seeded={props.initialBaseUrl ?? ""} />
   ),

@@ -11,14 +11,16 @@
     "rtc-direct": "RTC 直连",
     "rtc-relay": "RTC 中继",
     "ws-lan": "WS 局域网",
-    "ws-tunnel": "WS 隧道"
+    "ws-tunnel": "WS 隧道",
+    "relay": "中继"
   },
   "tierHint": {
     "offline": "未连接到桌面端。",
     "rtc-direct": "对等 DataChannel——延迟最低。",
     "rtc-relay": "经由 TURN 中继的对等连接，仍是端到端加密。",
     "ws-lan": "通过局域网 HTTPS+WS 回退。",
-    "ws-tunnel": "通过 Cloudflared 隧道回退。"
+    "ws-tunnel": "通过 Cloudflared 隧道回退。",
+    "relay": "经 Cognia 中继转发，端到端加密。仍在尝试建立直连。"
   },
   "tierLabel": "WebRTC 链路",
   "title": "连接诊断"

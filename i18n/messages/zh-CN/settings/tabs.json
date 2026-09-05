@@ -65,5 +65,6 @@
   "usageCost": "用量与成本",
   "webhooks": "Webhooks",
   "workflows": "工作流",
-  "workspaceTrust": "工作区信任"
+  "workspaceTrust": "工作区信任",
+  "connectivity": "连接"
 }
