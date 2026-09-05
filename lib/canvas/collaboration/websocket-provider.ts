@@ -265,6 +265,7 @@ export class CanvasWebSocketProvider {
     if (!this.sessionId || message.participantId === this.participantId) return
 
     const operation = this.deserializeOperation(message.data)
+    if (!operation) return
     this.crdtStore.applyRemoteUpdate(this.sessionId, operation)
 
     this.emitEvent({
@@ -316,12 +317,23 @@ export class CanvasWebSocketProvider {
     }
   }
 
+  /**
+   * A peer's state snapshot, merged into the session we are already in.
+   *
+   * This used to call `deserializeState`, which `JSON.parse`d the frame and
+   * installed whatever session and document it described, with no validation.
+   * Any frame typed `"sync"` could therefore replace the session, its
+   * participants and its permissions. A snapshot is opaque bytes now, and it
+   * can only merge into the document of the session this provider is already
+   * connected to.
+   */
   private handleSync(message: WebSocketMessage): void {
-    const syncData = message.data as { action: string; state?: string }
+    const syncData = message.data as { action?: unknown; state?: unknown }
 
-    if (syncData.action === "response" && syncData.state && this.sessionId) {
-      this.crdtStore.deserializeState(syncData.state)
+    if (syncData.action !== "response" || typeof syncData.state !== "string" || !this.sessionId) {
+      return
     }
+    this.crdtStore.applySnapshot(this.sessionId, syncData.state)
   }
 
   private handleDisconnect(): void {
@@ -380,28 +392,31 @@ export class CanvasWebSocketProvider {
     }
   }
 
+  /**
+   * An operation is already JSON-safe: its payload is base64 of a Yjs update.
+   * The old pair existed to hoist a `Map` vector clock across the wire, and
+   * `deserializeOperation` cast the frame with no checks, so a negative or
+   * enormous `position` reached `String.prototype.slice` unvalidated.
+   */
   private serializeOperation(operation: CRDTOperation): unknown {
-    return {
-      ...operation,
-      vectorClock: Array.from(operation.vectorClock.entries()),
-    }
+    return operation
   }
 
-  private deserializeOperation(data: unknown): CRDTOperation {
-    const raw = data as {
-      id: string
-      type: "insert" | "delete"
-      position: number
-      text?: string
-      length?: number
-      origin: string
-      timestamp: number
-      vectorClock: [string, number][]
-    }
-
+  /**
+   * `null` for a frame that is not shaped like an operation. Nothing here
+   * trusts the sender: an unparseable update is refused by `Y.applyUpdate`
+   * downstream, but a frame missing the fields entirely is dropped here rather
+   * than reaching it as `undefined`.
+   */
+  private deserializeOperation(data: unknown): CRDTOperation | null {
+    if (!data || typeof data !== "object") return null
+    const raw = data as Partial<CRDTOperation>
+    if (typeof raw.update !== "string" || typeof raw.origin !== "string") return null
     return {
-      ...raw,
-      vectorClock: new Map(raw.vectorClock),
+      id: typeof raw.id === "string" ? raw.id : `op-${Date.now()}`,
+      update: raw.update,
+      origin: raw.origin,
+      timestamp: typeof raw.timestamp === "number" ? raw.timestamp : Date.now(),
     }
   }
 }

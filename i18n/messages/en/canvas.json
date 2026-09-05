@@ -197,14 +197,17 @@
   "input": "Input",
   "join": {
     "documentLabel": "Document",
-    "error": "Couldn't join",
+    "error": "Couldn't open it",
+    "failure": {
+      "expired": "This link is from an older version and no longer works. Ask whoever shared it for a new one.",
+      "malformed": "This link is not a valid Canvas share link.",
+      "missing": "This link does not name a document.",
+      "not-found": "This document is not on this device yet."
+    },
     "home": "Back home",
-    "invalid": "The share link is invalid or expired.",
-    "joining": "Joining…",
-    "missingPayload": "No session payload was provided.",
-    "openCanvas": "Open Canvas",
-    "sessionLabel": "Session id",
-    "success": "Joined"
+    "joining": "Opening…",
+    "openCanvas": "Open in Canvas",
+    "success": "Ready"
   },
   "joinExisting": "Join existing session",
   "keybindingConflicts": "Keybinding conflicts detected",

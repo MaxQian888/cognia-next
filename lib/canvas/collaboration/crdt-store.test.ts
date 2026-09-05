@@ -30,7 +30,7 @@ const createParticipant = (id: string, name: string, isOnline = true): Participa
 })
 
 const createContentUpdate = (
-  type: "insert" | "delete",
+  type: ContentUpdate["type"],
   position: number,
   text?: string,
   length?: number
@@ -160,8 +160,7 @@ describe("CanvasCRDTStore", () => {
         createContentUpdate("insert", 5, " World")
       )
 
-      expect(operation).toBeDefined()
-      expect(operation.type).toBe("insert")
+      expect(operation.update).toBeTruthy()
       expect(store.getDocumentContent(session.id)).toBe("Hello World")
     })
 
@@ -173,14 +172,20 @@ describe("CanvasCRDTStore", () => {
       expect(store.getDocumentContent(session.id)).toBe("Hello")
     })
 
-    it("should increment version", () => {
-      const session = store.createSession("doc1", "content")
+    it("honours a replace instead of silently inserting", () => {
+      // The old `createOperation` mapped anything that was not a delete onto an
+      // insert, so a replace added the new text and left the old text in place.
+      const session = store.createSession("doc1", "Hello World")
 
-      store.applyLocalUpdate(session.id, createContentUpdate("insert", 0, "new "))
+      store.applyLocalUpdate(session.id, createContentUpdate("replace", 6, "There", 5))
 
-      // Version should be incremented
-      const content = store.getDocumentContent(session.id)
-      expect(content).toBe("new content")
+      expect(store.getDocumentContent(session.id)).toBe("Hello There")
+    })
+
+    it("clamps a position past the end of the document", () => {
+      const session = store.createSession("doc1", "abc")
+      store.applyLocalUpdate(session.id, createContentUpdate("insert", 999, "!"))
+      expect(store.getDocumentContent(session.id)).toBe("abc!")
     })
 
     it("should throw error for non-existent session", () => {
@@ -191,54 +196,113 @@ describe("CanvasCRDTStore", () => {
   })
 
   describe("applyRemoteUpdate", () => {
-    it("should apply remote insert operation", () => {
+    /**
+     * A second peer joined to `local`, the way a real joiner starts: with an
+     * empty document, seeded from the opener's snapshot. Two peers that each
+     * typed the same text independently do NOT share item identities, so their
+     * updates cannot line up, and that is a property of any real CRDT rather
+     * than a defect.
+     */
+    function joinedPeer(local: { id: string; documentId: string }) {
+      const peer = new CanvasCRDTStore()
+      peer.setLocalParticipantId("peer")
+      const session = peer.createSession(local.documentId, "")
+      peer.applySnapshot(session.id, store.encodeSnapshot(local.id)!)
+      return { peer, session }
+    }
+
+    it("merges a peer's insert", () => {
       const session = store.createSession("doc1", "Hello")
+      const { peer, session: peerSession } = joinedPeer(session)
 
-      const operation: CRDTOperation = {
-        id: "op-1",
-        type: "insert",
-        position: 5,
-        text: " World",
-        origin: "remote-user",
-        timestamp: Date.now(),
-        vectorClock: new Map(),
-      }
-
+      const operation = peer.applyLocalUpdate(
+        peerSession.id,
+        createContentUpdate("insert", 5, " World")
+      )
       store.applyRemoteUpdate(session.id, operation)
 
       expect(store.getDocumentContent(session.id)).toBe("Hello World")
     })
 
-    it("should apply remote delete operation", () => {
+    it("merges a peer's delete", () => {
       const session = store.createSession("doc1", "Hello World")
+      const { peer, session: peerSession } = joinedPeer(session)
 
-      const operation: CRDTOperation = {
-        id: "op-1",
-        type: "delete",
-        position: 5,
-        length: 6,
-        origin: "remote-user",
-        timestamp: Date.now(),
-        vectorClock: new Map(),
-      }
-
+      const operation = peer.applyLocalUpdate(
+        peerSession.id,
+        createContentUpdate("delete", 5, undefined, 6)
+      )
       store.applyRemoteUpdate(session.id, operation)
 
       expect(store.getDocumentContent(session.id)).toBe("Hello")
     })
 
-    it("should handle non-existent session gracefully", () => {
-      const operation: CRDTOperation = {
-        id: "op-1",
-        type: "insert",
-        position: 0,
-        text: "test",
-        origin: "remote-user",
-        timestamp: Date.now(),
-        vectorClock: new Map(),
-      }
+    it("converges when both sides insert at the same position", () => {
+      // The whole point. The old implementation spliced each peer's raw index
+      // into the receiver's already-mutated string, so both documents ended up
+      // different and nothing detected it.
+      const local = store.createSession("doc1", "0123456789")
+      const { peer, session: remote } = joinedPeer(local)
 
-      expect(() => store.applyRemoteUpdate("non-existent", operation)).not.toThrow()
+      const mine = store.applyLocalUpdate(local.id, createContentUpdate("insert", 5, "AAA"))
+      const theirs = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 5, "BBB"))
+
+      store.applyRemoteUpdate(local.id, theirs)
+      peer.applyRemoteUpdate(remote.id, mine)
+
+      expect(store.getDocumentContent(local.id)).toBe(peer.getDocumentContent(remote.id))
+    })
+
+    it("converges when an update arrives out of order", () => {
+      // The old causal gate DROPPED an operation it judged too far ahead, with
+      // no buffer and no retry, so the two sides never converged again.
+      const local = store.createSession("doc1", "start")
+      const { peer, session: remote } = joinedPeer(local)
+
+      const first = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 5, "-one"))
+      const second = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 9, "-two"))
+
+      // Delivered backwards.
+      store.applyRemoteUpdate(local.id, second)
+      store.applyRemoteUpdate(local.id, first)
+
+      expect(store.getDocumentContent(local.id)).toBe(peer.getDocumentContent(remote.id))
+    })
+
+    it("applying the same update twice changes nothing", () => {
+      const local = store.createSession("doc1", "abc")
+      const { peer, session: remote } = joinedPeer(local)
+
+      const operation = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 3, "!"))
+      store.applyRemoteUpdate(local.id, operation)
+      store.applyRemoteUpdate(local.id, operation)
+
+      expect(store.getDocumentContent(local.id)).toBe(peer.getDocumentContent(remote.id))
+    })
+
+    it("ignores a malformed payload instead of tearing down the session", () => {
+      const session = store.createSession("doc1", "abc")
+
+      expect(() =>
+        store.applyRemoteUpdate(session.id, {
+          id: "bad",
+          update: "not-base64-yjs!!!",
+          origin: "attacker",
+          timestamp: Date.now(),
+        })
+      ).not.toThrow()
+      expect(store.getDocumentContent(session.id)).toBe("abc")
+    })
+
+    it("should handle non-existent session gracefully", () => {
+      expect(() =>
+        store.applyRemoteUpdate("non-existent", {
+          id: "op-1",
+          update: "",
+          origin: "remote-user",
+          timestamp: Date.now(),
+        })
+      ).not.toThrow()
     })
   })
 
@@ -345,43 +409,47 @@ describe("CanvasCRDTStore", () => {
     })
   })
 
-  describe("serializeState", () => {
-    it("should serialize session state to JSON", () => {
+  describe("snapshots", () => {
+    it("encodes a document as opaque state, not as a session object", () => {
+      // `serializeState` used to emit `{ session, document }` with the whole
+      // operation log, and that JSON went into the share link.
       const session = store.createSession("doc1", "content")
-      const serialized = store.serializeState(session.id)
+      const snapshot = store.encodeSnapshot(session.id)
 
-      expect(serialized).toBeTruthy()
-      expect(typeof serialized).toBe("string")
-
-      const parsed = JSON.parse(serialized!)
-      expect(parsed.session).toBeDefined()
-      expect(parsed.document).toBeDefined()
+      expect(typeof snapshot).toBe("string")
+      expect(snapshot).not.toContain("participants")
+      expect(snapshot).not.toContain(session.id)
     })
 
-    it("should return null for non-existent session", () => {
-      expect(store.serializeState("non-existent")).toBeNull()
-    })
-  })
-
-  describe("deserializeState", () => {
-    it("should restore session from serialized state", () => {
-      const original = store.createSession("doc1", "original content")
-      const serialized = store.serializeState(original.id)
-
-      store.closeSession(original.id)
-
-      const restoredId = store.deserializeState(serialized!)
-
-      expect(restoredId).toBeTruthy()
-      expect(store.getDocumentContent(restoredId!)).toBe("original content")
+    it("returns null for a session it does not have", () => {
+      expect(store.encodeSnapshot("non-existent")).toBeNull()
     })
 
-    it("should return null for invalid JSON", () => {
-      expect(store.deserializeState("invalid json")).toBeNull()
+    it("merges a snapshot into a session it is already in", () => {
+      const local = store.createSession("doc1", "")
+      const peer = new CanvasCRDTStore()
+      peer.setLocalParticipantId("peer")
+      const remote = peer.createSession("doc1", "from the peer")
+
+      expect(store.applySnapshot(local.id, peer.encodeSnapshot(remote.id)!)).toBe(true)
+      expect(store.getDocumentContent(local.id)).toBe("from the peer")
     })
 
-    it("should return null for empty input", () => {
-      expect(store.deserializeState("")).toBeNull()
+    it("cannot install a session, only merge into one that exists", () => {
+      // `deserializeState` would `JSON.parse` a frame and write whatever
+      // session, participants and permissions it described. Any inbound frame
+      // typed "sync" could therefore replace the session.
+      const peer = new CanvasCRDTStore()
+      const remote = peer.createSession("doc1", "x")
+
+      expect(store.applySnapshot(remote.id, peer.encodeSnapshot(remote.id)!)).toBe(false)
+      expect(store.getSession(remote.id)).toBeUndefined()
+    })
+
+    it("refuses a payload that is not a Yjs update", () => {
+      const session = store.createSession("doc1", "keep me")
+      expect(store.applySnapshot(session.id, "}{ not base64")).toBe(false)
+      expect(store.getDocumentContent(session.id)).toBe("keep me")
     })
   })
 
@@ -402,9 +470,20 @@ describe("CanvasCRDTStore", () => {
       expect(typeof crdtStore.getSession).toBe("function")
       expect(typeof crdtStore.subscribe).toBe("function")
       expect(typeof crdtStore.closeSession).toBe("function")
-      expect(typeof crdtStore.serializeState).toBe("function")
-      expect(typeof crdtStore.deserializeState).toBe("function")
+      expect(typeof crdtStore.encodeSnapshot).toBe("function")
+      expect(typeof crdtStore.applySnapshot).toBe("function")
+      expect(typeof crdtStore.adoptSession).toBe("function")
+      expect(typeof crdtStore.getYText).toBe("function")
       expect(typeof crdtStore.restoreRecentSessions).toBe("function")
+    })
+
+    it("no longer exposes a JSON state sink", () => {
+      // `deserializeState` parsed attacker-supplied JSON and installed the
+      // session, participants and permissions it described. It was reachable
+      // from a share link and from any inbound frame typed "sync".
+      const legacy = crdtStore as unknown as Record<string, unknown>
+      expect(legacy.deserializeState).toBeUndefined()
+      expect(legacy.serializeState).toBeUndefined()
     })
   })
 })
@@ -503,26 +582,27 @@ describe("CanvasCRDTStore Dexie persistence", () => {
     await flushMicrotasks()
   })
 
-  it("applyRemoteUpdate exercises the vector-clock conflict branches", () => {
-    // Touches canApplyOperation: skip-self branch + value > localValue + 1 reject.
-    const session = store.createSession("doc1", "abc")
-    const ahead: CRDTOperation = {
-      id: "op-ahead",
-      type: "insert",
-      position: 0,
-      text: "X",
-      origin: "remote-1",
-      timestamp: Date.now(),
-      // Vector clock claims remote-1 is way ahead (jumps past our local clock).
-      vectorClock: new Map([
-        ["remote-1", 1],
-        ["other", 5], // localValue is 0; 5 > 0+1 should reject
-      ]),
-    }
-    const before = store.getDocumentContent(session.id)
-    store.applyRemoteUpdate(session.id, ahead)
-    // Operation rejected — content unchanged.
-    expect(store.getDocumentContent(session.id)).toBe(before)
+  it("holds an update it cannot place yet, instead of dropping it", () => {
+    // The old causal gate REFUSED anything it judged too far ahead and had no
+    // buffer, so a reordered delivery was lost and the two sides never
+    // converged again. Yjs keeps it pending until the state it depends on
+    // arrives, and then applies both.
+    const local = store.createSession("doc1", "abc")
+    const peer = new CanvasCRDTStore()
+    peer.setLocalParticipantId("peer")
+    const remote = peer.createSession("doc1", "")
+    peer.applySnapshot(remote.id, store.encodeSnapshot(local.id)!)
+
+    const first = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 3, "-one"))
+    const second = peer.applyLocalUpdate(remote.id, createContentUpdate("insert", 7, "-two"))
+
+    // The dependent update arrives first and cannot be placed yet.
+    store.applyRemoteUpdate(local.id, second)
+    expect(store.getDocumentContent(local.id)).toBe("abc")
+
+    // Its predecessor lands, and both take effect.
+    store.applyRemoteUpdate(local.id, first)
+    expect(store.getDocumentContent(local.id)).toBe(peer.getDocumentContent(remote.id))
   })
 
   it("persistSessionClose catch handler logs without throwing", async () => {

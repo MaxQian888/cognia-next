@@ -6,6 +6,7 @@
 
 import { useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
+import { buildCanvasSharePath } from "@/lib/canvas/collaboration/share-link"
 import { Users, Share2, Check, Link2, UserPlus, Wifi, WifiOff, Circle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -59,7 +60,7 @@ export function CollaborationPanel({
   const sessionApi = useCollaborativeSession({
     participantName: t("anonymousParticipant"),
   })
-  const { session, participants, connectionState, connect, disconnect, shareSession, joinSession } =
+  const { session, participants, connectionState, connect, disconnect, shareTarget, joinSession } =
     collaboration || sessionApi
   const effectiveSessionId = collaborationState?.sessionId || session?.id || null
   const effectiveParticipants = collaborationState?.participants?.length
@@ -117,23 +118,33 @@ export function CollaborationPanel({
     setOpen(false)
   }, [onContinueLocally])
 
+  /**
+   * Copy a link that names the document, and nothing else.
+   *
+   * It used to serialise the whole session into the URL: the session id, the
+   * owner, the participant list, the permission flags, the document content
+   * and its operation log. Permissions in a link are permissions the recipient
+   * can edit. It was also raw JSON in a parameter the join page `atob`ed, so
+   * no link this app produced ever decoded.
+   */
   const handleCopyShareLink = useCallback(async () => {
-    const state = shareSession()
-    if (!state) {
+    const target = shareTarget()
+    if (!target) {
       setCopyError(t("shareLinkUnavailable"))
       return
     }
 
     try {
-      const shareUrl = `${window.location.origin}/canvas/join?session=${encodeURIComponent(state)}`
-      await navigator.clipboard.writeText(shareUrl)
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${buildCanvasSharePath(target)}`
+      )
       setCopyError(null)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
       setCopyError(t("copyLinkFailed"))
     }
-  }, [shareSession, t])
+  }, [shareTarget, t])
 
   const handleJoinSession = useCallback(async () => {
     if (joinSessionId.trim()) {

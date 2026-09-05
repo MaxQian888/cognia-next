@@ -4,7 +4,10 @@
 import { act, renderHook } from "@testing-library/react"
 
 const executeMock = jest.fn()
-const availabilityMock = jest.fn(() => ({ available: true, reason: null }))
+const availabilityMock = jest.fn(
+  (..._args: unknown[]) =>
+    ({ available: true, reason: null }) as { available: boolean; reason: string | null }
+)
 jest.mock("@/lib/native/code-execution-strategy", () => ({
   executeCodeWithSandboxPriority: (args: unknown) => executeMock(args),
   codeExecutionAvailability: (...args: unknown[]) => availabilityMock(...args),

@@ -197,14 +197,17 @@
   "input": "输入",
   "join": {
     "documentLabel": "文档",
-    "error": "无法加入",
+    "error": "无法打开",
+    "failure": {
+      "expired": "这是旧版本生成的链接，已不可用。请向分享者重新索取。",
+      "malformed": "这不是有效的 Canvas 分享链接。",
+      "missing": "该链接没有指明文档。",
+      "not-found": "本设备上还没有这份文档。"
+    },
     "home": "返回首页",
-    "invalid": "分享链接无效或已过期。",
-    "joining": "加入中…",
-    "missingPayload": "未提供会话负载。",
-    "openCanvas": "打开画布",
-    "sessionLabel": "会话 ID",
-    "success": "已加入"
+    "joining": "正在打开…",
+    "openCanvas": "在 Canvas 中打开",
+    "success": "已就绪"
   },
   "joinExisting": "加入已有会话",
   "keybindingConflicts": "检测到快捷键冲突",

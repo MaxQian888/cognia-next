@@ -4990,14 +4990,17 @@
     "input": "输入",
     "join": {
       "documentLabel": "文档",
-      "error": "无法加入",
+      "error": "无法打开",
+      "failure": {
+        "expired": "这是旧版本生成的链接，已不可用。请向分享者重新索取。",
+        "malformed": "这不是有效的 Canvas 分享链接。",
+        "missing": "该链接没有指明文档。",
+        "not-found": "本设备上还没有这份文档。"
+      },
       "home": "返回首页",
-      "invalid": "分享链接无效或已过期。",
-      "joining": "加入中…",
-      "missingPayload": "未提供会话负载。",
-      "openCanvas": "打开画布",
-      "sessionLabel": "会话 ID",
-      "success": "已加入"
+      "joining": "正在打开…",
+      "openCanvas": "在 Canvas 中打开",
+      "success": "已就绪"
     },
     "joinExisting": "加入已有会话",
     "keybindingConflicts": "检测到快捷键冲突",
@@ -6593,18 +6596,18 @@
     },
     "imageWorkbench": {
       "adjust": {
-        "exposure": "曝光",
+        "blur": "模糊",
         "brightness": "亮度",
         "contrast": "对比度",
+        "exposure": "曝光",
         "gamma": "伽马",
+        "hue": "色相",
+        "reset": "重置调整",
+        "saturation": "饱和度",
+        "sharpen": "锐化",
         "temperature": "色温",
         "tint": "色调",
-        "saturation": "饱和度",
-        "vibrance": "自然饱和度",
-        "hue": "色相",
-        "blur": "模糊",
-        "sharpen": "锐化",
-        "reset": "重置调整"
+        "vibrance": "自然饱和度"
       },
       "ai": {
         "billingNotice": "每次执行都会向所选服务商发起一次计费请求。",
@@ -6634,15 +6637,15 @@
         "retry": "重试",
         "running": "生成中",
         "unavailable": {
-          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。",
           "needs-auth": "图像编辑服务商还缺少 API Key。",
-          "needs-config": "图像编辑服务商还缺少模型或 Base URL。"
+          "needs-config": "图像编辑服务商还缺少模型或 Base URL。",
+          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。"
         }
       },
       "blocked": {
         "cors": "该图片托管在其他站点，无法读取像素，因此可以查看和下载但无法编辑。",
-        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。",
-        "decode": "无法解码这张图片以进行编辑。"
+        "decode": "无法解码这张图片以进行编辑。",
+        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。"
       },
       "close": "关闭",
       "compare": "与原图对比",
@@ -6653,11 +6656,11 @@
         "apply": "应用裁剪",
         "aspect": {
           "free": "自由",
-          "square": "1:1",
+          "landscape16x9": "16:9",
           "landscape4x3": "4:3",
           "portrait3x4": "3:4",
-          "landscape16x9": "16:9",
-          "portrait9x16": "9:16"
+          "portrait9x16": "9:16",
+          "square": "1:1"
         },
         "clear": "清除",
         "sizeReadout": "{width} x {height}",
@@ -6665,10 +6668,10 @@
       },
       "dialogDescription": "查看、编辑并管理这张图片的版本，原图始终保留。",
       "discard": {
-        "title": "放弃编辑",
         "body": "现在关闭将丢弃尚未保存的编辑。",
+        "cancel": "继续编辑",
         "confirm": "放弃",
-        "cancel": "继续编辑"
+        "title": "放弃编辑"
       },
       "download": "下载",
       "downloadAs": "下载为 {format}",
@@ -6698,9 +6701,9 @@
         "blockedReadOnly": "该会话为只读，无法在此保存版本。",
         "blockedStreaming": "该回合仍在生成，生成结束后即可保存。",
         "error": {
+          "lineage-missing": "这张图片已不属于这条消息。",
           "locked": "该会话正在迁移到另一台设备并被锁定，无法保存版本。",
           "message-missing": "这条消息已不在当前会话中。",
-          "lineage-missing": "这张图片已不属于这条消息。",
           "too-large": "编辑后的图片过大，无法保存。可以先裁剪或缩小尺寸。",
           "unknown": "版本保存失败。"
         },
@@ -6709,18 +6712,18 @@
       },
       "selectionOverlayAria": "已选区域",
       "tools": {
-        "view": "查看",
-        "transform": "裁剪",
         "adjust": "调整",
-        "ai": "AI"
+        "ai": "AI",
+        "transform": "裁剪",
+        "view": "查看"
       },
       "toolsLabel": "编辑工具",
       "transform": {
-        "title": "旋转与翻转",
+        "flipHorizontal": "水平翻转",
+        "flipVertical": "垂直翻转",
         "rotateLeft": "向左旋转",
         "rotateRight": "向右旋转",
-        "flipHorizontal": "水平翻转",
-        "flipVertical": "垂直翻转"
+        "title": "旋转与翻转"
       },
       "undo": "撤销",
       "untitled": "图片",

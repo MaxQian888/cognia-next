@@ -19,6 +19,8 @@ import {
   type WebSocketProviderConfig,
 } from "@/lib/canvas/collaboration/websocket-provider"
 import { loggers } from "@cognia/logging"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import type { CanvasShareTarget } from "@/lib/canvas/collaboration/share-link"
 
 const log = loggers.app
 
@@ -58,9 +60,10 @@ export interface UseCollaborativeSessionReturn {
   updateCursor: (cursor: CursorPosition) => void
   updateSelection: (selection: LineRange | null) => void
   getContent: () => string | null
-  shareSession: () => string | null
+  /** Identifiers for a share link, or `null` when the document cannot be shared. */
+  shareTarget: () => CanvasShareTarget | null
   joinSession: (sessionId: string) => Promise<void>
-  importSharedSession: (serialized: string) => Promise<string | null>
+  openDocumentSession: (documentId: string, content: string) => Promise<string | null>
 }
 
 export interface CollaborativeSessionConfig {
@@ -77,8 +80,8 @@ export interface CollaborativeSessionConfig {
    * `connect`/`joinSession` never open a socket and Canvas collaboration is
    * local-only. That is the intended fail-closed state — a transport must not
    * open without a grant — but it means the remote half is unreachable rather
-   * than merely unused. Purely local operations (`shareSession`,
-   * `importSharedSession`) deliberately do NOT consult this field.
+   * than merely unused. Purely local operations (`shareTarget`,
+   * `openDocumentSession`) deliberately do NOT consult this field.
    */
   remoteAuthorization?: WebSocketProviderConfig["authorization"]
   onStateChange?: (state: CanvasCollaborationRuntimeState) => void
@@ -91,6 +94,23 @@ const DEFAULT_CONFIG: CollaborativeSessionConfig = {
   participantColor: "#3b82f6",
   autoReconnect: true,
   reconnectAttempts: 5,
+}
+
+/**
+ * The organisation a share link is addressed to.
+ *
+ * A recipient is checked against org AND workspace membership, so the org has
+ * to be in the link. There is no synchronous accessor for the active
+ * organisation today, and inventing a store for one would be a second source
+ * of truth next to `lib/collab/`, so an install with no organisation addresses
+ * its own implicit one. The collaboration server's Canvas routes are what will
+ * replace this with the caller's real org, and they will also be the thing
+ * that can reject a mismatch.
+ */
+export const PERSONAL_SHARE_ORG_ID = "personal"
+
+function resolveShareOrgId(): string {
+  return PERSONAL_SHARE_ORG_ID
 }
 
 export function useCollaborativeSession(
@@ -340,19 +360,36 @@ export function useCollaborativeSession(
   }, [])
 
   /**
-   * Serialize this session's CRDT state. Purely LOCAL — it reads the in-memory
-   * store and reaches no transport, so requiring a connected remote provider
-   * only meant that every caller without one (today: all of them — nothing in
-   * the app mints `remoteAuthorization`, so `providerRef` is never populated)
-   * got `null` and the Canvas "copy share link" action reported
-   * `shareLinkUnavailable` on every click.
+   * What a share link is allowed to name: the document, and the workspace and
+   * organisation it belongs to.
    *
-   * The transport gate that DOES belong to `remoteAuthorization` stays on
-   * `connect`/`joinSession`, which are the calls that open a socket.
+   * This replaced `shareSession`, which serialised the session, its owner, its
+   * participants, its permission flags, the document content and the whole
+   * operation log into the URL. Permissions in a link are permissions the
+   * recipient can edit, and the payload landed in an unvalidated `JSON.parse`
+   * that installed whatever session it described.
+   *
+   * Purely local, and it opens no transport, so it is not gated on a remote
+   * grant. The gate that belongs to `remoteAuthorization` stays on
+   * `connect` / `joinSession`, which are the calls that open a socket.
    */
-  const shareSession = useCallback((): string | null => {
-    if (!sessionIdRef.current) return null
-    return storeRef.current.serializeState(sessionIdRef.current)
+  const shareTarget = useCallback((): CanvasShareTarget | null => {
+    const sessionId = sessionIdRef.current
+    if (!sessionId) return null
+    const current = storeRef.current.getSession(sessionId)
+    if (!current) return null
+
+    const document = useArtifactStore.getState().getCanvasDocumentForWorkspace(current.documentId)
+    // A document with no workspace cannot be addressed by a link: the
+    // recipient's membership is checked against the workspace, and there would
+    // be nothing to check.
+    if (!document?.projectId) return null
+
+    return {
+      orgId: resolveShareOrgId(),
+      workspaceId: document.projectId,
+      documentId: document.id,
+    }
   }, [])
 
   const joinSession = useCallback(
@@ -412,45 +449,46 @@ export function useCollaborativeSession(
     ]
   )
 
-  const importSharedSession = useCallback(
-    async (serialized: string): Promise<string | null> => {
-      // Deserializing a share payload into the local CRDT store opens no
-      // transport, so it does not require a remote grant — demanding one made
-      // this return `null` unconditionally for every caller in the app. When a
-      // grant IS present it still pins the payload to the document it was
-      // minted for, so an authorized session cannot be pointed at another one.
+  /**
+   * Open a session for a document this client has already authorised and
+   * loaded.
+   *
+   * This replaced `importSharedSession(serialized)`, which took a JSON string
+   * off a share link and let it define the session, its participants and its
+   * permissions. Nothing about a session comes off the wire now: the caller
+   * says which document, having already checked it may open it, and the
+   * session is minted locally around the content it read.
+   */
+  const openDocumentSession = useCallback(
+    async (documentId: string, content: string): Promise<string | null> => {
+      const store = storeRef.current
       const authorization =
         remoteAuthorization && remoteAuthorization.expiresAt > Date.now()
           ? remoteAuthorization
           : null
-      const store = storeRef.current
-      const sessionId = store.deserializeState(serialized)
-      if (!sessionId) {
-        return null
-      }
+      // When a grant IS present it still pins the session to the document it
+      // was minted for, so an authorised session cannot be pointed at another.
+      if (authorization && authorization.resourceId !== documentId) return null
 
-      const existingSession = store.getSession(sessionId)
-      if (!existingSession) {
-        return null
-      }
-      if (authorization && existingSession.documentId !== authorization.resourceId) {
-        store.closeSession(sessionId)
-        return null
-      }
+      const created = store.createSession(documentId, content)
+      const participant = createLocalParticipant()
+      store.setLocalParticipantId(participant.id)
+      store.joinSession(created.id, participant)
+      setLocalParticipant(participant)
 
-      sessionIdRef.current = sessionId
-      setSession(existingSession)
-      setParticipants(existingSession.participants)
+      sessionIdRef.current = created.id
+      setSession(created)
+      setParticipants([...created.participants])
       setRemoteCursors([])
 
-      const latestContent = store.getDocumentContent(sessionId)
+      const latestContent = store.getDocumentContent(created.id)
       if (latestContent !== null) {
         onRemoteContentChange?.(latestContent)
       }
 
-      return sessionId
+      return created.id
     },
-    [onRemoteContentChange, remoteAuthorization]
+    [createLocalParticipant, onRemoteContentChange, remoteAuthorization]
   )
 
   useEffect(() => {
@@ -473,7 +511,10 @@ export function useCollaborativeSession(
       localParticipant,
       lastEventAt: new Date(),
       lastSyncedAt: connectionState === "connected" ? new Date() : undefined,
-      sharePayload: session ? storeRef.current.serializeState(session.id) : null,
+      // The document's state, not the session. `serializeState` used to put
+      // the session, its participants and its permissions in here, and this
+      // field is published to whoever renders the collaboration state.
+      sharePayload: session ? storeRef.current.encodeSnapshot(session.id) : null,
       shareUrl: session?.shareLink ?? null,
       recoveryReason: connectionState === "error" ? "Transport error" : undefined,
     })
@@ -499,9 +540,9 @@ export function useCollaborativeSession(
     updateCursor,
     updateSelection,
     getContent,
-    shareSession,
+    shareTarget,
     joinSession,
-    importSharedSession,
+    openDocumentSession,
   }
 }
 

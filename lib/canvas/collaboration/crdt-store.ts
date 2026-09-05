@@ -1,8 +1,37 @@
 /**
- * CRDT Store - Conflict-free Replicated Data Type for collaborative editing
- * Uses a simplified CRDT implementation for real-time document synchronization
+ * The shared document behind Canvas collaboration.
+ *
+ * The public shape (`createSession` / `joinSession` / `applyLocalUpdate` /
+ * `applyRemoteUpdate` / `subscribe` / …) is unchanged, because
+ * `use-collaborative-session.ts`, `CollaborationPanel` and the websocket
+ * provider are written against it. What changed is what is underneath.
+ *
+ * It used to be positional, with no transform of any kind. An operation was an
+ * absolute character index plus text, and `applyOperation` spliced it into the
+ * receiver's already-mutated string. Two people inserting at index 10 both
+ * applied at raw index 10, neither index rebased against the other, and the
+ * documents silently diverged while `version` incremented on both sides. The
+ * only conflict machinery was a causal gate that DROPPED anything it could not
+ * order, with no buffer and no retry, so a late operation was lost forever.
+ *
+ * Yjs is that machinery. Positions are resolved against the document's own
+ * structure rather than an index into a string, updates commute, and a late
+ * update merges when it arrives instead of being discarded. The update payload
+ * on the wire is Yjs's binary encoding, base64 for a JSON transport.
+ *
+ * Two things are deliberately gone with the old implementation:
+ *
+ * - `deserializeState(json)` parsed attacker-supplied JSON and pushed the
+ *   result straight into the session and document maps with no validation at
+ *   all. It was reachable from a share link and from any inbound frame typed
+ *   `"sync"`. State is applied through `applyRemoteUpdate` now, which hands
+ *   bytes to Yjs and cannot install a session.
+ * - The unbounded `operations` log, which grew per keystroke and was shipped
+ *   whole inside every share link.
  */
 
+import * as Y from "yjs"
+import { fromBase64, toBase64 } from "lib0/buffer"
 import type {
   CollaborativeSession,
   Participant,
@@ -12,6 +41,9 @@ import type {
 } from "@/types/canvas/collaboration"
 import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
 import { loggers } from "@cognia/logging"
+
+/** The one key every Canvas document's text lives under inside its `Y.Doc`. */
+export const CANVAS_TEXT_KEY = "content"
 
 function persistSessionMetadata(label: string, session: CollaborativeSession): void {
   canvasSessionsDb.upsertSession(session).catch((err) => {
@@ -31,23 +63,35 @@ function persistSessionClose(sessionId: string): void {
   })
 }
 
+/**
+ * A document and the Yjs state that backs it.
+ *
+ * `content` is a projection kept in step with the `Y.Text`, so every reader
+ * that only wants the string (the editor, the store bridge, the preview) does
+ * not have to know Yjs exists.
+ */
 export interface CRDTDocument {
   id: string
   content: string
+  /** Monotonic per local application, for change detection only. */
   version: number
-  vectorClock: Map<string, number>
-  operations: CRDTOperation[]
+  doc: Y.Doc
+  text: Y.Text
 }
 
+/**
+ * One Yjs update, ready for a JSON transport.
+ *
+ * The old shape carried `position` / `length` / a vector clock, which is what
+ * made it impossible to apply safely. A Yjs update is opaque: the receiver
+ * hands it to `Y.applyUpdate` and the merge is the library's problem.
+ */
 export interface CRDTOperation {
   id: string
-  type: "insert" | "delete"
-  position: number
-  text?: string
-  length?: number
+  /** Base64 of the Yjs binary update. */
+  update: string
   origin: string
   timestamp: number
-  vectorClock: Map<string, number>
 }
 
 export interface CRDTState {
@@ -66,22 +110,52 @@ export class CanvasCRDTStore {
     this.localParticipantId = id
   }
 
+  private localId(): string {
+    return this.localParticipantId || "local"
+  }
+
+  /** The `Y.Doc` for a session's document, for an editor binding to attach to. */
+  getYDoc(sessionId: string): Y.Doc | null {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return this.documents.get(session.documentId)?.doc ?? null
+  }
+
+  /** The shared text for a session's document, for an editor binding. */
+  getYText(sessionId: string): Y.Text | null {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return this.documents.get(session.documentId)?.text ?? null
+  }
+
+  private ensureDocument(documentId: string, content: string): CRDTDocument {
+    const existing = this.documents.get(documentId)
+    if (existing) return existing
+
+    const doc = new Y.Doc()
+    const text = doc.getText(CANVAS_TEXT_KEY)
+    if (content.length > 0) text.insert(0, content)
+
+    const record: CRDTDocument = { id: documentId, content: text.toString(), version: 0, doc, text }
+    // One observer keeps the string projection true for every local and remote
+    // change, so no caller has to remember to re-read it.
+    text.observe(() => {
+      record.content = text.toString()
+      record.version += 1
+    })
+    this.documents.set(documentId, record)
+    return record
+  }
+
   createSession(documentId: string, content: string): CollaborativeSession {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-    const doc: CRDTDocument = {
-      id: documentId,
-      content,
-      version: 0,
-      vectorClock: new Map(),
-      operations: [],
-    }
-    this.documents.set(documentId, doc)
+    this.ensureDocument(documentId, content)
 
     const session: CollaborativeSession = {
       id: sessionId,
       documentId,
-      ownerId: this.localParticipantId || "unknown",
+      ownerId: this.localId(),
       participants: [],
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -141,19 +215,45 @@ export class CanvasCRDTStore {
     })
   }
 
+  /**
+   * Apply a local edit and produce the update to broadcast.
+   *
+   * `replace` is honoured rather than silently degraded. The old
+   * `createOperation` mapped anything that was not a delete onto an insert, so
+   * a replace inserted the new text and never removed the old.
+   */
   applyLocalUpdate(sessionId: string, update: ContentUpdate): CRDTOperation {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
 
-    const doc = this.documents.get(session.documentId)
-    if (!doc) throw new Error(`Document ${session.documentId} not found`)
+    const record = this.documents.get(session.documentId)
+    if (!record) throw new Error(`Document ${session.documentId} not found`)
 
-    const operation = this.createOperation(doc, update)
-    this.applyOperation(doc, operation)
+    const before = Y.encodeStateVector(record.doc)
+    // One transaction, so a replace reaches every peer as a single update
+    // rather than as a delete they might interleave with.
+    record.doc.transact(() => {
+      const length = record.text.length
+      const position = Math.max(0, Math.min(update.position, length))
+      if (update.type === "delete" || update.type === "replace") {
+        const removable = Math.max(0, Math.min(update.length ?? 0, length - position))
+        if (removable > 0) record.text.delete(position, removable)
+      }
+      if (update.type !== "delete" && update.text) {
+        record.text.insert(position, update.text)
+      }
+    }, this.localId())
+
+    const operation: CRDTOperation = {
+      id: `op-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      update: toBase64(Y.encodeStateAsUpdate(record.doc, before)),
+      origin: this.localId(),
+      timestamp: Date.now(),
+    }
 
     this.notifyListeners(sessionId, {
       type: "content",
-      participantId: this.localParticipantId || "unknown",
+      participantId: this.localId(),
       timestamp: new Date(),
       data: operation,
     })
@@ -161,69 +261,71 @@ export class CanvasCRDTStore {
     return operation
   }
 
+  /**
+   * Merge a peer's update.
+   *
+   * Nothing is dropped. The old causal gate refused any operation it judged
+   * "too far ahead" and had no buffer to hold it, so a reordered delivery was
+   * lost permanently and the two documents never converged again. Yjs merges
+   * out-of-order updates by construction.
+   *
+   * A malformed payload is reported and ignored rather than thrown, because it
+   * arrives from the network and one bad frame must not tear down the session.
+   */
   applyRemoteUpdate(sessionId: string, operation: CRDTOperation): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
-    const doc = this.documents.get(session.documentId)
-    if (!doc) return
+    const record = this.documents.get(session.documentId)
+    if (!record) return
 
-    if (this.canApplyOperation(doc, operation)) {
-      this.applyOperation(doc, operation)
-      this.notifyListeners(sessionId, {
-        type: "content",
-        participantId: operation.origin,
-        timestamp: new Date(),
-        data: operation,
+    try {
+      Y.applyUpdate(record.doc, fromBase64(operation.update), operation.origin)
+    } catch (err) {
+      loggers.canvas.warn("crdt remote update rejected", {
+        sessionId,
+        origin: operation.origin,
+        error: String(err),
       })
+      return
     }
+
+    this.notifyListeners(sessionId, {
+      type: "content",
+      participantId: operation.origin,
+      timestamp: new Date(),
+      data: operation,
+    })
   }
 
-  private createOperation(doc: CRDTDocument, update: ContentUpdate): CRDTOperation {
-    const vectorClock = new Map(doc.vectorClock)
-    const localId = this.localParticipantId || "local"
-    vectorClock.set(localId, (vectorClock.get(localId) || 0) + 1)
-
-    return {
-      id: `op-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      type: update.type === "delete" ? "delete" : "insert",
-      position: update.position,
-      text: update.text,
-      length: update.length,
-      origin: localId,
-      timestamp: Date.now(),
-      vectorClock,
-    }
+  /**
+   * Everything this peer knows about a document, as one update.
+   *
+   * What a joining client is sent, and what replaces the old `serializeState`:
+   * a state snapshot rather than a session object plus an operation log, so
+   * receiving it cannot install a session or a participant list.
+   */
+  encodeSnapshot(sessionId: string): string | null {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const record = this.documents.get(session.documentId)
+    if (!record) return null
+    return toBase64(Y.encodeStateAsUpdate(record.doc))
   }
 
-  private applyOperation(doc: CRDTDocument, operation: CRDTOperation): void {
-    if (operation.type === "insert" && operation.text) {
-      doc.content =
-        doc.content.slice(0, operation.position) +
-        operation.text +
-        doc.content.slice(operation.position)
-    } else if (operation.type === "delete" && operation.length) {
-      doc.content =
-        doc.content.slice(0, operation.position) +
-        doc.content.slice(operation.position + operation.length)
+  /** Merge a snapshot from a peer into an existing session's document. */
+  applySnapshot(sessionId: string, snapshot: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    const record = this.documents.get(session.documentId)
+    if (!record) return false
+    try {
+      Y.applyUpdate(record.doc, fromBase64(snapshot), "remote-snapshot")
+      return true
+    } catch (err) {
+      loggers.canvas.warn("crdt snapshot rejected", { sessionId, error: String(err) })
+      return false
     }
-
-    doc.version++
-    doc.operations.push(operation)
-
-    for (const [key, value] of operation.vectorClock) {
-      const current = doc.vectorClock.get(key) || 0
-      doc.vectorClock.set(key, Math.max(current, value))
-    }
-  }
-
-  private canApplyOperation(doc: CRDTDocument, operation: CRDTOperation): boolean {
-    for (const [key, value] of operation.vectorClock) {
-      if (key === operation.origin) continue
-      const localValue = doc.vectorClock.get(key) || 0
-      if (value > localValue + 1) return false
-    }
-    return true
   }
 
   updateCursor(sessionId: string, participantId: string, cursor: CursorPosition): void {
@@ -247,11 +349,21 @@ export class CanvasCRDTStore {
     if (!session) return null
 
     const doc = this.documents.get(session.documentId)
-    return doc?.content || null
+    return doc?.content ?? null
   }
 
   getSession(sessionId: string): CollaborativeSession | undefined {
     return this.sessions.get(sessionId)
+  }
+
+  /**
+   * Adopt a session the caller has already authorised, with the content it
+   * loaded. Idempotent, so re-joining does not reset a document that is
+   * already open and possibly ahead of what the caller read.
+   */
+  adoptSession(session: CollaborativeSession, content: string): void {
+    this.ensureDocument(session.documentId, content)
+    if (!this.sessions.has(session.id)) this.sessions.set(session.id, session)
   }
 
   subscribe(sessionId: string, callback: (update: CollaborationUpdate) => void): () => void {
@@ -279,6 +391,9 @@ export class CanvasCRDTStore {
     if (session) {
       session.isActive = false
       this.sessions.delete(sessionId)
+      // Destroying the doc releases its observers. Leaving it would keep the
+      // whole history alive for the life of the tab.
+      this.documents.get(session.documentId)?.doc.destroy()
       this.documents.delete(session.documentId)
       this.listeners.delete(sessionId)
       persistSessionClose(sessionId)
@@ -286,9 +401,9 @@ export class CanvasCRDTStore {
   }
 
   /**
-   * Pull the most-recent persisted sessions back into memory. Used on app
-   * startup so the UI can list previous collab sessions; does NOT
-   * re-establish the WebSocket transport — that's the hook layer's job.
+   * Pull the most-recent persisted sessions back into memory, so the UI can
+   * list previous collab sessions on startup. It does NOT reopen the WebSocket
+   * transport, which is the hook layer's job.
    */
   async restoreRecentSessions(limit = 20): Promise<CollaborativeSession[]> {
     try {
@@ -304,45 +419,6 @@ export class CanvasCRDTStore {
         error: String(err),
       })
       return []
-    }
-  }
-
-  serializeState(sessionId: string): string | null {
-    const session = this.sessions.get(sessionId)
-    if (!session) return null
-
-    const doc = this.documents.get(session.documentId)
-    if (!doc) return null
-
-    return JSON.stringify({
-      session,
-      document: {
-        ...doc,
-        vectorClock: Array.from(doc.vectorClock.entries()),
-      },
-    })
-  }
-
-  deserializeState(data: string): string | null {
-    try {
-      const parsed = JSON.parse(data)
-      const { session, document } = parsed
-
-      const doc: CRDTDocument = {
-        ...document,
-        vectorClock: new Map(document.vectorClock),
-      }
-
-      this.documents.set(doc.id, doc)
-      this.sessions.set(session.id, session)
-
-      return session.id
-    } catch (err) {
-      loggers.canvas.error("crdt deserialize failed", {
-        error: String(err),
-        preview: data.slice(0, 200),
-      })
-      return null
     }
   }
 }

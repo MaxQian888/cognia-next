@@ -156,12 +156,9 @@ describe("broadcast helpers buffer when disconnected", () => {
     // Pre-broadcast before connect — should buffer.
     const op: CRDTOperation = {
       id: "op-1",
-      type: "insert",
-      position: 0,
-      text: "x",
+      update: "AQE=",
       origin: "p-self",
       timestamp: 1,
-      vectorClock: new Map([["p-self", 1]]),
     }
     p.broadcastOperation(op)
     p.broadcastCursor({ participantId: "p-self", line: 0, column: 0 } as unknown as never)
@@ -187,12 +184,9 @@ describe("broadcast helpers buffer when disconnected", () => {
     lastMockSocket!.send.mockClear()
     const op: CRDTOperation = {
       id: "op-1",
-      type: "insert",
-      position: 0,
-      text: "x",
+      update: "AQE=",
       origin: "p-self",
       timestamp: 1,
-      vectorClock: new Map([["p-self", 1]]),
     }
     p.broadcastOperation(op)
     p.broadcastCursor({ participantId: "p-self", line: 0, column: 0 } as unknown as never)
@@ -271,20 +265,33 @@ describe("incoming message handling", () => {
         type: "operation",
         sessionId: "s1",
         participantId: "p-other",
-        data: {
-          id: "op-1",
-          type: "insert",
-          position: 0,
-          text: "x",
-          origin: "p-other",
-          timestamp: 1,
-          vectorClock: [["p-other", 1]],
-        },
+        // A Yjs update is opaque bytes, base64 for this transport. The old
+        // shape carried `position` / `length` / a vector clock, which is what
+        // made an unvalidated frame reach `String.prototype.slice`.
+        data: { id: "op-1", update: "AQE=", origin: "p-other", timestamp: 1 },
         timestamp: 1,
       }),
     })
     expect(apply).toHaveBeenCalled()
     expect(onUpdate).toHaveBeenCalled()
+  })
+
+  it("drops an operation frame that is not shaped like one", async () => {
+    const { p, crdt } = await connectFresh()
+    const onUpdate = jest.fn()
+    p.on("content-updated", onUpdate)
+    const apply = jest.spyOn(crdt, "applyRemoteUpdate").mockImplementation(() => {})
+    lastMockSocket!.onmessage?.({
+      data: JSON.stringify({
+        type: "operation",
+        sessionId: "s1",
+        participantId: "p-other",
+        data: { nonsense: true },
+        timestamp: 1,
+      }),
+    })
+    expect(apply).not.toHaveBeenCalled()
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 
   it("ignores remote operations from self", async () => {
@@ -342,19 +349,37 @@ describe("incoming message handling", () => {
     expect(onLeft).toHaveBeenCalled()
   })
 
-  it("handles sync responses by deserializing CRDT state", async () => {
+  it("merges a sync snapshot into the session it is already in", async () => {
     const { crdt } = await connectFresh()
-    const deserialize = jest.spyOn(crdt, "deserializeState").mockImplementation(() => null)
+    const apply = jest.spyOn(crdt, "applySnapshot").mockImplementation(() => true)
     lastMockSocket!.onmessage?.({
       data: JSON.stringify({
         type: "sync",
         sessionId: "s1",
         participantId: "p-other",
-        data: { action: "response", state: "{}" },
+        data: { action: "response", state: "AQE=" },
         timestamp: 1,
       }),
     })
-    expect(deserialize).toHaveBeenCalled()
+    // Bound to THIS provider's session, so a frame cannot name another one.
+    expect(apply).toHaveBeenCalledWith("s1", "AQE=")
+  })
+
+  it("ignores a sync frame whose state is not a string", async () => {
+    // `deserializeState` used to `JSON.parse` whatever arrived and install the
+    // session, participants and permissions it described.
+    const { crdt } = await connectFresh()
+    const apply = jest.spyOn(crdt, "applySnapshot").mockImplementation(() => true)
+    lastMockSocket!.onmessage?.({
+      data: JSON.stringify({
+        type: "sync",
+        sessionId: "s1",
+        participantId: "p-other",
+        data: { action: "response", state: { session: { id: "hijacked" } } },
+        timestamp: 1,
+      }),
+    })
+    expect(apply).not.toHaveBeenCalled()
   })
 
   it("emits 'error' when the message body is invalid JSON", async () => {

@@ -14,10 +14,26 @@ const mockCloseSession = jest.fn()
 const mockApplyLocalUpdate = jest.fn()
 const mockUpdateCursor = jest.fn()
 const mockGetDocumentContent = jest.fn()
-const mockSerializeState = jest.fn()
+const mockEncodeSnapshot = jest.fn()
+const mockApplySnapshot = jest.fn()
 const mockGetSession = jest.fn()
 const mockSetLocalParticipantId = jest.fn()
-const mockDeserializeState = jest.fn()
+
+/**
+ * `shareTarget` asks the artifact store which workspace owns the document,
+ * because a link is addressed to a workspace the recipient must be a member of.
+ */
+const artifactDocument: { current: { id: string; projectId?: string } | null } = {
+  current: { id: "doc-456", projectId: "ws-1" },
+}
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: {
+    getState: () => ({
+      getCanvasDocumentForWorkspace: (id: string) =>
+        artifactDocument.current?.id === id ? artifactDocument.current : null,
+    }),
+  },
+}))
 
 jest.mock("@/lib/canvas/collaboration/crdt-store", () => ({
   CanvasCRDTStore: jest.fn(),
@@ -29,10 +45,10 @@ jest.mock("@/lib/canvas/collaboration/crdt-store", () => ({
     applyLocalUpdate: (...args: unknown[]) => mockApplyLocalUpdate(...args),
     updateCursor: (...args: unknown[]) => mockUpdateCursor(...args),
     getDocumentContent: (...args: unknown[]) => mockGetDocumentContent(...args),
-    serializeState: (...args: unknown[]) => mockSerializeState(...args),
+    encodeSnapshot: (...args: unknown[]) => mockEncodeSnapshot(...args),
+    applySnapshot: (...args: unknown[]) => mockApplySnapshot(...args),
     getSession: (...args: unknown[]) => mockGetSession(...args),
     setLocalParticipantId: (...args: unknown[]) => mockSetLocalParticipantId(...args),
-    deserializeState: (...args: unknown[]) => mockDeserializeState(...args),
   },
 }))
 
@@ -95,11 +111,11 @@ describe("useCollaborativeSession", () => {
     mockCreateSession.mockReturnValue(mockSession)
     mockApplyLocalUpdate.mockReturnValue({ id: "op-1", type: "insert" })
     mockGetDocumentContent.mockReturnValue("document content")
-    mockSerializeState.mockReturnValue("serialized-state")
+    mockEncodeSnapshot.mockReturnValue("AQE=")
     mockGetSession.mockReturnValue(mockSession)
-    mockDeserializeState.mockReturnValue("session-123")
     mockProviderConnect.mockResolvedValue(undefined)
     mockGetConnectionState.mockReturnValue("connected")
+    artifactDocument.current = { id: "doc-456", projectId: "ws-1" }
   })
 
   describe("initialization", () => {
@@ -366,99 +382,76 @@ describe("useCollaborativeSession", () => {
     })
   })
 
-  describe("shareSession", () => {
-    it("should serialize and return session state", async () => {
-      mockSerializeState.mockReturnValue("serialized-session-data")
-      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
-
-      await act(async () => {
-        await result.current.connect("doc-456", "content")
+  describe("shareTarget", () => {
+    it("names the document, the workspace and the org, and nothing else", () => {
+      // The old `shareSession` serialised the session, its owner, its
+      // participants, its permission flags, the content and the operation log
+      // into the URL. Permissions in a link are permissions the recipient can
+      // edit.
+      const { result } = renderHook(() => useCollaborativeSession())
+      act(() => {
+        void result.current.connect("doc-1", "content")
       })
 
-      const serialized = result.current.shareSession()
-
-      expect(mockSerializeState).toHaveBeenCalledWith("session-123")
-      expect(serialized).toBe("serialized-session-data")
+      const target = result.current.shareTarget()
+      expect(target).toEqual({
+        orgId: "personal",
+        workspaceId: "ws-1",
+        documentId: "doc-456",
+      })
     })
 
-    it("should return null when no session", () => {
+    it("returns null when there is no session", () => {
       const { result } = renderHook(() => useCollaborativeSession())
+      expect(result.current.shareTarget()).toBeNull()
+    })
 
-      const serialized = result.current.shareSession()
-
-      expect(serialized).toBeNull()
+    it("refuses to address a document that belongs to no workspace", () => {
+      // A recipient is checked against workspace membership, so a document
+      // with no workspace has nothing to check.
+      artifactDocument.current = { id: "doc-456", projectId: undefined }
+      const { result } = renderHook(() => useCollaborativeSession())
+      act(() => {
+        void result.current.connect("doc-1", "content")
+      })
+      expect(result.current.shareTarget()).toBeNull()
     })
   })
 
-  describe("joinSession", () => {
-    it("should join existing session", async () => {
-      const existingSession = {
-        ...mockSession,
-        participants: [mockParticipant],
-      }
-      mockGetSession.mockReturnValue(existingSession)
-
+  describe("openDocumentSession", () => {
+    it("mints a local session around content the caller already authorised", async () => {
+      // `importSharedSession` took a JSON string off a link and let it define
+      // the session, its participants and its permissions.
       const { result } = renderHook(() => useCollaborativeSession())
 
+      let sessionId: string | null = null
       await act(async () => {
-        await result.current.joinSession("session-123")
+        sessionId = await result.current.openDocumentSession("doc-1", "hello")
       })
 
-      expect(mockGetSession).toHaveBeenCalledWith("session-123")
-      expect(mockJoinSession).toHaveBeenCalled()
-      expect(result.current.session).toEqual(existingSession)
+      expect(sessionId).toBe("session-123")
+      expect(mockCreateSession).toHaveBeenCalledWith("doc-1", "hello")
+      expect(result.current.session).toEqual(mockSession)
     })
 
-    it("should not join non-existent session", async () => {
-      mockGetSession.mockReturnValue(null)
-
-      const { result } = renderHook(() => useCollaborativeSession())
-
-      await act(async () => {
-        await result.current.joinSession("non-existent")
-      })
-
-      expect(result.current.session).toBeNull()
-      expect(mockJoinSession).not.toHaveBeenCalled()
-    })
-
-    it("should connect to websocket when joining with url", async () => {
-      const existingSession = {
-        ...mockSession,
-        participants: [mockParticipant],
-      }
-      mockGetSession.mockReturnValue(existingSession)
-
+    it("refuses a document the grant was not minted for", async () => {
       const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
+        useCollaborativeSession({
+          remoteAuthorization: {
+            token: "t",
+            subjectId: "s",
+            resourceId: "doc-other",
+            expiresAt: Date.now() + 60_000,
+          },
+        })
       )
 
+      let sessionId: string | null = "unset"
       await act(async () => {
-        await result.current.joinSession("session-123")
+        sessionId = await result.current.openDocumentSession("doc-1", "hello")
       })
 
-      expect(mockProviderConnect).toHaveBeenCalled()
-      expect(mockRequestSync).toHaveBeenCalled()
-    })
-  })
-
-  describe("importSharedSession", () => {
-    it("should deserialize shared state and surface remote content", async () => {
-      const onRemoteContentChange = jest.fn()
-      mockGetDocumentContent.mockReturnValue("# shared content")
-
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ remoteAuthorization, onRemoteContentChange })
-      )
-
-      let importedSessionId: string | null = null
-      await act(async () => {
-        importedSessionId = await result.current.importSharedSession("serialized-state")
-      })
-
-      expect(mockDeserializeState).toHaveBeenCalledWith("serialized-state")
-      expect(importedSessionId).toBe("session-123")
-      expect(onRemoteContentChange).toHaveBeenCalledWith("# shared content")
+      expect(sessionId).toBeNull()
     })
   })
 

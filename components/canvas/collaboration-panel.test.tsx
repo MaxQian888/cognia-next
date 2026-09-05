@@ -47,7 +47,7 @@ jest.mock("next-intl", () => ({
 // Mock useCollaborativeSession hook
 const mockConnect = jest.fn()
 const mockDisconnect = jest.fn()
-const mockShareSession = jest.fn()
+const mockShareTarget = jest.fn()
 const mockJoinSession = jest.fn()
 
 jest.mock("@/hooks/canvas", () => ({
@@ -58,7 +58,7 @@ jest.mock("@/hooks/canvas", () => ({
     isConnected: false,
     connect: mockConnect,
     disconnect: mockDisconnect,
-    shareSession: mockShareSession,
+    shareTarget: mockShareTarget,
     joinSession: mockJoinSession,
   }),
 }))
@@ -146,7 +146,7 @@ describe("CollaborationPanel with active session", () => {
   it("should handle session state changes", () => {
     expect(mockConnect).toBeDefined()
     expect(mockDisconnect).toBeDefined()
-    expect(mockShareSession).toBeDefined()
+    expect(mockShareTarget).toBeDefined()
     expect(mockJoinSession).toBeDefined()
   })
 })
@@ -173,7 +173,7 @@ describe("CollaborationPanel fallback messaging", () => {
       isConnected: true,
       connect: mockConnect,
       disconnect: mockDisconnect,
-      shareSession: () => null,
+      shareTarget: () => null,
       joinSession: mockJoinSession,
     })
 
@@ -212,7 +212,7 @@ describe("CollaborationPanel connection states", () => {
       isConnected: false,
       connect: mockConnect,
       disconnect: mockDisconnect,
-      shareSession: mockShareSession,
+      shareTarget: mockShareTarget,
       joinSession: mockJoinSession,
     })
 
@@ -235,7 +235,7 @@ describe("CollaborationPanel connection states", () => {
       isConnected: false,
       connect: mockConnect,
       disconnect: mockDisconnect,
-      shareSession: mockShareSession,
+      shareTarget: mockShareTarget,
       joinSession: mockJoinSession,
     })
 
@@ -258,7 +258,7 @@ describe("CollaborationPanel connection states", () => {
       isConnected: false,
       connect: mockConnect,
       disconnect: mockDisconnect,
-      shareSession: mockShareSession,
+      shareTarget: mockShareTarget,
       joinSession: mockJoinSession,
     })
 
@@ -295,9 +295,9 @@ describe("CollaborationPanel recovery actions", () => {
             updateCursor: jest.fn(),
             updateSelection: jest.fn(),
             getContent: jest.fn(),
-            shareSession: mockShareSession,
+            shareTarget: mockShareTarget,
             joinSession: mockJoinSession,
-            importSharedSession: jest.fn(),
+            openDocumentSession: jest.fn(),
           } as never
         }
         collaborationState={{
