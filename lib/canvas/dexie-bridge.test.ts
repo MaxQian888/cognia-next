@@ -86,9 +86,12 @@ function makeFakeStore<T>(initial: T) {
   }
 }
 
+// `pendingReviews` is optional here so the suites written before the mirror
+// carried proposals keep setting only the half they are about.
 const artifactStore = makeFakeStore<{
   canvasDocuments: Record<string, Record<string, unknown>>
-}>({ canvasDocuments: {} })
+  pendingReviews?: Record<string, Record<string, unknown>>
+}>({ canvasDocuments: {}, pendingReviews: {} })
 
 const commentStore = makeFakeStore<{ comments: Record<string, unknown[]> }>({
   comments: {},
@@ -141,7 +144,7 @@ beforeEach(() => {
     const fn = _args[_args.length - 1] as () => Promise<void>
     await fn()
   })
-  artifactStore._resetTo({ canvasDocuments: {} })
+  artifactStore._resetTo({ canvasDocuments: {}, pendingReviews: {} })
   commentStore._resetTo({ comments: {} })
   artifactStore._clearSubscribers()
   commentStore._clearSubscribers()
@@ -406,7 +409,7 @@ describe("startCanvasDexieBridge", () => {
   })
 
   it("flushes a pending mirror when the bridge is disposed", async () => {
-    artifactStore._resetTo({ canvasDocuments: {} })
+    artifactStore._resetTo({ canvasDocuments: {}, pendingReviews: {} })
     const { startCanvasDexieBridge } = await import("./dexie-bridge")
     const dispose = startCanvasDexieBridge()
     await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
@@ -717,6 +720,130 @@ describe("startCanvasDexieBridge", () => {
     await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
 
     expect(canvasDocumentsTable.records.map((r) => r.id)).toEqual(["survivor"])
+    dispose()
+  })
+})
+
+describe("the open proposal rides with its document", () => {
+  function seedDoc(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "doc-r",
+      sessionId: "s",
+      title: "Doc",
+      content: "one\ntwo",
+      language: "md",
+      type: "doc",
+      createdAt: new Date(1000),
+      updatedAt: new Date(2000),
+      ...overrides,
+    }
+  }
+
+  const proposal = {
+    id: "rev-1",
+    requestId: "req-1",
+    actionType: "improve",
+    originalContent: "one\ntwo",
+    proposedContent: "one\nTWO",
+    baseContentHash: "abc.7",
+    createdAt: new Date(3000),
+    status: "pending",
+    items: [],
+  }
+
+  it("writes the proposal onto the document row", async () => {
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    artifactStore.setState({
+      canvasDocuments: { "doc-r": seedDoc() },
+      pendingReviews: { "doc-r": proposal },
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const row = canvasDocumentsTable.records.find((r) => r.id === "doc-r")
+    expect((row?.pendingReview as { id: string } | undefined)?.id).toBe("rev-1")
+    dispose()
+  })
+
+  it("writes a review change even though the document did not move", async () => {
+    // Accepting a hunk changes only `pendingReviews`, so an identity check on
+    // the document alone would skip the write and lose the review on reload.
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const doc = seedDoc()
+    artifactStore.setState({
+      canvasDocuments: { "doc-r": doc },
+      pendingReviews: { "doc-r": proposal },
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    artifactStore.setState({
+      // Same document object identity, different proposal.
+      canvasDocuments: { "doc-r": doc },
+      pendingReviews: { "doc-r": { ...proposal, status: "partial" } },
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const row = canvasDocumentsTable.records.find((r) => r.id === "doc-r")
+    expect((row?.pendingReview as { status: string } | undefined)?.status).toBe("partial")
+    dispose()
+  })
+
+  it("restores a stored proposal into pendingReviews on hydration", async () => {
+    canvasDocumentsTable.records.push({
+      id: "doc-h",
+      sessionId: "s",
+      title: "T",
+      content: "one\ntwo",
+      language: "md",
+      type: "doc",
+      createdAt: 1000,
+      updatedAt: 1500,
+      pendingReview: { ...proposal, createdAt: 3000 },
+    })
+
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const restored = artifactStore.getState().pendingReviews?.["doc-h"]
+    expect(restored).toBeDefined()
+    // IndexedDB hands the date back as a number.
+    expect(restored?.createdAt).toBeInstanceOf(Date)
+    dispose()
+  })
+
+  it("omits the field entirely for a document with no proposal", async () => {
+    const { startCanvasDexieBridge } = await import("./dexie-bridge")
+    const dispose = startCanvasDexieBridge()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    artifactStore.setState({
+      canvasDocuments: { "doc-n": seedDoc({ id: "doc-n" }) },
+      pendingReviews: {},
+    })
+    await new Promise((r) => setTimeout(r, DOCUMENT_SYNC_WAIT_MS))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const row = canvasDocumentsTable.records.find((r) => r.id === "doc-n")
+    expect(row).toBeDefined()
+    expect("pendingReview" in (row ?? {})).toBe(false)
     dispose()
   })
 })

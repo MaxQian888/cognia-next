@@ -11,6 +11,7 @@ import type {
   ArtifactLanguage,
   ArtifactWorkspaceReturnContext,
   CanvasAIWorkbenchState,
+  CanvasPendingReview,
   CanvasEditorContext,
   CanvasSuggestion,
 } from "@/types/artifact/artifact"
@@ -48,6 +49,18 @@ export interface CanvasDocumentRow {
    * leaves behind.
    */
   aiWorkbench?: CanvasAIWorkbenchState
+  /**
+   * The open AI proposal for this document, if any.
+   *
+   * Deliberately NOT persisted before: a proposal that survived a reload could
+   * be applied against content it was never diffed from, because staleness was
+   * an `isStale` flag `updateCanvasDocument` had to remember to set. It is
+   * derived from `baseContentHash` now, so a restored proposal is correctly
+   * recognised as stale and offers rerun or discard rather than corrupting the
+   * document. Losing a half-reviewed proposal on every reload was the worse
+   * failure of the two.
+   */
+  pendingReview?: CanvasPendingReview
 }
 
 export interface CanvasVersionRow {

@@ -1,13 +1,22 @@
 /**
- * Canvas/Artifact review engine — pure, dependency-free diff → hunk → apply.
+ * Canvas/Artifact review engine: diff, hunk, apply.
  *
  * Extracted from `canvas-actions.ts` so consumers that only need the review
  * math (e.g. the artifact store, which is persisted and widely imported) don't
  * pull in the `ai` SDK + provider-core that `canvas-actions` loads at module
  * top. `canvas-actions` re-exports these for backward compatibility.
+ *
+ * The diff itself is `lib/artifacts/diff.ts:computeDiff`, an LCS diff that the
+ * review UI was ALREADY using to render. This module used to carry a second,
+ * hand-written diff with a five-line lookahead, so the hunks the user accepted
+ * were computed by one algorithm and the diff they read was drawn by another.
+ * On a block move the two disagree about which lines changed, and the accepted
+ * hunk is applied at line numbers the reader never saw.
  */
 
 import { nanoid } from "nanoid"
+import { computeDiff } from "@/lib/artifacts/diff"
+import { hashCanvasContent } from "@/lib/canvas/content-hash"
 import type {
   CanvasPendingReview,
   CanvasReviewDiffLine,
@@ -25,101 +34,20 @@ export interface CanvasReviewBuildInput {
 }
 
 /**
- * Generate a simple line-by-line diff preview between original and modified
- * content, with a small look-ahead so a single changed line in the middle of a
- * block reads as a replace rather than a full block swap.
+ * The line diff a review is built from, in the review's own line-number shape.
+ *
+ * A thin translation of `computeDiff` rather than a second implementation:
+ * `DiffLine` (artifacts) names its fields `oldLineNum`/`newLineNum`, while
+ * `CanvasReviewDiffLine` names them `lineNumber`/`newLineNumber`. Keeping the
+ * two shapes is cheap; keeping two diff algorithms was not.
  */
 export function generateDiffPreview(original: string, modified: string): DiffLine[] {
-  const originalLines = original.split("\n")
-  const modifiedLines = modified.split("\n")
-  const diff: DiffLine[] = []
-
-  const maxLen = Math.max(originalLines.length, modifiedLines.length)
-  let origIdx = 0
-  let modIdx = 0
-
-  while (origIdx < originalLines.length || modIdx < modifiedLines.length) {
-    if (origIdx >= originalLines.length) {
-      diff.push({
-        type: "added",
-        content: modifiedLines[modIdx],
-        newLineNumber: modIdx + 1,
-      })
-      modIdx++
-    } else if (modIdx >= modifiedLines.length) {
-      diff.push({
-        type: "removed",
-        content: originalLines[origIdx],
-        lineNumber: origIdx + 1,
-      })
-      origIdx++
-    } else if (originalLines[origIdx] === modifiedLines[modIdx]) {
-      diff.push({
-        type: "unchanged",
-        content: originalLines[origIdx],
-        lineNumber: origIdx + 1,
-        newLineNumber: modIdx + 1,
-      })
-      origIdx++
-      modIdx++
-    } else {
-      const lookAhead = Math.min(5, maxLen - Math.max(origIdx, modIdx))
-      let foundOrigMatch = -1
-      let foundModMatch = -1
-
-      for (let i = 1; i <= lookAhead; i++) {
-        if (
-          modIdx + i < modifiedLines.length &&
-          originalLines[origIdx] === modifiedLines[modIdx + i]
-        ) {
-          foundModMatch = modIdx + i
-          break
-        }
-        if (
-          origIdx + i < originalLines.length &&
-          originalLines[origIdx + i] === modifiedLines[modIdx]
-        ) {
-          foundOrigMatch = origIdx + i
-          break
-        }
-      }
-
-      if (foundModMatch >= 0) {
-        while (modIdx < foundModMatch) {
-          diff.push({
-            type: "added",
-            content: modifiedLines[modIdx],
-            newLineNumber: modIdx + 1,
-          })
-          modIdx++
-        }
-      } else if (foundOrigMatch >= 0) {
-        while (origIdx < foundOrigMatch) {
-          diff.push({
-            type: "removed",
-            content: originalLines[origIdx],
-            lineNumber: origIdx + 1,
-          })
-          origIdx++
-        }
-      } else {
-        diff.push({
-          type: "removed",
-          content: originalLines[origIdx],
-          lineNumber: origIdx + 1,
-        })
-        diff.push({
-          type: "added",
-          content: modifiedLines[modIdx],
-          newLineNumber: modIdx + 1,
-        })
-        origIdx++
-        modIdx++
-      }
-    }
-  }
-
-  return diff
+  return computeDiff(original, modified).map((line) => ({
+    type: line.type,
+    content: line.content,
+    ...(line.oldLineNum !== undefined ? { lineNumber: line.oldLineNum } : {}),
+    ...(line.newLineNum !== undefined ? { newLineNumber: line.newLineNum } : {}),
+  }))
 }
 
 /**
@@ -190,10 +118,32 @@ export function buildCanvasReview(input: CanvasReviewBuildInput): CanvasPendingR
     actionType: input.actionType,
     originalContent: input.originalContent,
     proposedContent: input.proposedContent,
+    baseContentHash: hashCanvasContent(input.originalContent),
     createdAt: new Date(),
     status: "pending",
     items,
   }
+}
+
+/**
+ * Whether a proposal still describes the document in front of the user.
+ *
+ * Derived, not remembered. `isStale` was a flag `updateCanvasDocument` had to
+ * remember to set, so a proposal that survived a reload, or a buffer changed by
+ * a path that did not go through that action, could be applied against content
+ * it was never diffed from. Applying accepted hunks by line number onto moved
+ * content corrupts the document silently.
+ *
+ * A proposal written before the hash existed falls back to comparing the
+ * baseline text, which is what the flag was approximating.
+ */
+export function isCanvasReviewStale(
+  review: Pick<CanvasPendingReview, "originalContent" | "baseContentHash" | "isStale">,
+  currentContent: string
+): boolean {
+  if (review.isStale === true) return true
+  if (review.baseContentHash) return review.baseContentHash !== hashCanvasContent(currentContent)
+  return review.originalContent !== currentContent
 }
 
 /**

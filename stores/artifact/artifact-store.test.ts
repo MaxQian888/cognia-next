@@ -906,6 +906,74 @@ describe("canvas documents", () => {
   })
 })
 
+describe("applyCanvasReview refuses a stale proposal", () => {
+  function seedWithProposal() {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Doc",
+      content: "one\ntwo\nthree",
+      language: "markdown",
+      type: "text",
+    })
+    const review = useArtifactStore
+      .getState()
+      .proposeCanvasReview(id, "one\nTWO\nthree", { actionType: "improve" })!
+    useArtifactStore.getState().setReviewItemStatus(id, review.items[0].id, "accepted")
+    return { id, review }
+  }
+
+  it("applies against the baseline it was diffed from", () => {
+    const { id } = seedWithProposal()
+    useArtifactStore.getState().applyCanvasReview(id, "applied")
+    expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("one\nTWO\nthree")
+    expect(useArtifactStore.getState().pendingReviews[id]).toBeUndefined()
+  })
+
+  it("refuses when the buffer moved, even with no isStale flag set", () => {
+    // Accepted hunks are applied BY LINE NUMBER, so applying one against moved
+    // content corrupts the document with no error. The flag only gets set by
+    // `updateCanvasDocument`, and a proposal can outlive that write.
+    const { id } = seedWithProposal()
+    useArtifactStore.setState((state) => ({
+      canvasDocuments: {
+        ...state.canvasDocuments,
+        [id]: { ...state.canvasDocuments[id], content: "zero\none\ntwo\nthree" },
+      },
+      pendingReviews: {
+        ...state.pendingReviews,
+        [id]: { ...state.pendingReviews[id], isStale: false },
+      },
+    }))
+
+    useArtifactStore.getState().applyCanvasReview(id, "applied")
+
+    expect(useArtifactStore.getState().canvasDocuments[id].content).toBe("zero\none\ntwo\nthree")
+  })
+
+  it("marks the refused proposal stale so the panel can offer rerun or discard", () => {
+    const { id } = seedWithProposal()
+    useArtifactStore.setState((state) => ({
+      canvasDocuments: {
+        ...state.canvasDocuments,
+        [id]: { ...state.canvasDocuments[id], content: "moved" },
+      },
+      pendingReviews: {
+        ...state.pendingReviews,
+        [id]: { ...state.pendingReviews[id], isStale: false },
+      },
+    }))
+
+    useArtifactStore.getState().applyCanvasReview(id)
+
+    // A button that silently does nothing is worse than one that explains.
+    expect(useArtifactStore.getState().pendingReviews[id]?.isStale).toBe(true)
+  })
+
+  it("stamps the baseline hash on the proposal", () => {
+    const { review } = seedWithProposal()
+    expect(review.baseContentHash).toBeTruthy()
+  })
+})
+
 describe("canvas AI workbench state", () => {
   function seed() {
     return useArtifactStore.getState().createCanvasDocument({

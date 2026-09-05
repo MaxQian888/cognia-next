@@ -29,6 +29,7 @@ import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
 import {
   buildCanvasReview,
   applyAcceptedCanvasReviewItems,
+  isCanvasReviewStale,
 } from "@/lib/ai/generation/canvas-review"
 
 /**
@@ -1665,10 +1666,23 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         const doc = state.canvasDocuments[documentId]
         if (!review || !doc) return
 
-        // A stale proposal's baseline no longer matches the live buffer; the
-        // review surface forces re-diff / discard before reaching here.
-        if (review.isStale) {
+        // A stale proposal's baseline no longer matches the live buffer, and
+        // accepted hunks are applied BY LINE NUMBER, so applying one would
+        // corrupt the document silently. Derived from the baseline hash rather
+        // than read off `isStale`, because that flag is only set by
+        // `updateCanvasDocument` and a proposal can outlive the write that
+        // would have set it.
+        if (isCanvasReviewStale(review, doc.content)) {
           loggers.store.warn("canvas.review.apply-skipped-stale", { documentId })
+          set((s) => {
+            const open = s.pendingReviews[documentId]
+            if (!open || open.isStale) return s
+            // Surface it, so the review panel offers rerun or discard instead
+            // of a button that silently does nothing.
+            return {
+              pendingReviews: { ...s.pendingReviews, [documentId]: { ...open, isStale: true } },
+            }
+          })
           return
         }
 

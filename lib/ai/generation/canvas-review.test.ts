@@ -1,5 +1,7 @@
+import { computeDiff } from "@/lib/artifacts/diff"
 import {
   generateDiffPreview,
+  isCanvasReviewStale,
   buildCanvasReview,
   applyAcceptedCanvasReviewItems,
 } from "./canvas-review"
@@ -20,7 +22,7 @@ describe("generateDiffPreview", () => {
     expect(diff.find((d) => d.type === "removed")?.content).toBe("c")
   })
 
-  it("recognises mid-stream additions via lookahead", () => {
+  it("recognises mid-stream additions", () => {
     // a, b, c (orig) vs a, X, b, c (modified): X is an add, b/c stay unchanged
     const diff = generateDiffPreview("a\nb\nc", "a\nX\nb\nc")
     const added = diff.filter((d) => d.type === "added")
@@ -28,14 +30,14 @@ describe("generateDiffPreview", () => {
     expect(added[0].content).toBe("X")
   })
 
-  it("recognises mid-stream removals via lookahead", () => {
+  it("recognises mid-stream removals", () => {
     const diff = generateDiffPreview("a\nX\nb\nc", "a\nb\nc")
     const removed = diff.filter((d) => d.type === "removed")
     expect(removed).toHaveLength(1)
     expect(removed[0].content).toBe("X")
   })
 
-  it("handles a replacement (no lookahead match) as remove+add", () => {
+  it("handles a replacement as remove plus add", () => {
     const diff = generateDiffPreview("a\nold\nb", "a\nnew\nb")
     expect(diff.some((d) => d.type === "removed" && d.content === "old")).toBe(true)
     expect(diff.some((d) => d.type === "added" && d.content === "new")).toBe(true)
@@ -125,5 +127,87 @@ describe("buildCanvasReview / applyAcceptedCanvasReviewItems", () => {
       } as never,
     ])
     expect(out.split("\n")).toEqual(["a", "c"])
+  })
+})
+
+describe("one diff, not two", () => {
+  // `CanvasReviewView` renders `computeDiff` while the hunks came from a second,
+  // hand-written diff with a five-line lookahead. On a block move the two
+  // disagreed about which lines changed, so an accepted hunk was applied at
+  // line numbers the reader never saw.
+  it("builds hunks from the same engine the review UI renders", () => {
+    const original = ["a", "b", "c", "d", "e", "f", "g", "h"].join("\n")
+    const modified = ["e", "f", "g", "h", "a", "b", "c", "d"].join("\n")
+
+    const shown = computeDiff(original, modified)
+    const used = generateDiffPreview(original, modified)
+
+    expect(used.map((line) => `${line.type}:${line.content}`)).toEqual(
+      shown.map((line) => `${line.type}:${line.content}`)
+    )
+  })
+
+  it("carries the review's own line-number field names", () => {
+    const lines = generateDiffPreview("a\nb", "a\nB")
+    const changed = lines.filter((line) => line.type !== "unchanged")
+    expect(
+      changed.every((line) => line.lineNumber !== undefined || line.newLineNumber !== undefined)
+    ).toBe(true)
+  })
+
+  it("round-trips: accepting every hunk reproduces the proposal", () => {
+    // The property that matters. If the hunk math and the diff ever diverge
+    // again, this is what catches it.
+    const original = ["one", "two", "three", "four", "five"].join("\n")
+    const proposed = ["one", "TWO", "three", "four and a half", "five", "six"].join("\n")
+
+    const review = buildCanvasReview({
+      requestId: "r1",
+      actionType: "improve",
+      originalContent: original,
+      proposedContent: proposed,
+    })
+    const accepted = review.items.map((item) => ({ ...item, status: "accepted" as const }))
+
+    expect(applyAcceptedCanvasReviewItems(original, accepted)).toBe(proposed)
+  })
+})
+
+describe("isCanvasReviewStale", () => {
+  function review(original: string) {
+    return buildCanvasReview({
+      requestId: "r1",
+      actionType: "improve",
+      originalContent: original,
+      proposedContent: `${original}\nextra`,
+    })
+  }
+
+  it("stamps the baseline it was diffed from", () => {
+    expect(review("a\nb").baseContentHash).toBeTruthy()
+  })
+
+  it("is fresh against the content it was built from", () => {
+    const built = review("a\nb")
+    expect(isCanvasReviewStale(built, "a\nb")).toBe(false)
+  })
+
+  it("is stale once the buffer moves, with no flag having been set", () => {
+    // This is the case the `isStale` flag missed: a proposal that outlives the
+    // write that would have set it, or arrives from a path that does not.
+    const built = review("a\nb")
+    expect(built.isStale).toBeUndefined()
+    expect(isCanvasReviewStale(built, "a\nB")).toBe(true)
+  })
+
+  it("honours an explicitly flagged proposal even when the content matches", () => {
+    const built = { ...review("a\nb"), isStale: true }
+    expect(isCanvasReviewStale(built, "a\nb")).toBe(true)
+  })
+
+  it("falls back to the baseline text for a proposal written before the hash", () => {
+    const built = { ...review("a\nb"), baseContentHash: undefined }
+    expect(isCanvasReviewStale(built, "a\nb")).toBe(false)
+    expect(isCanvasReviewStale(built, "changed")).toBe(true)
   })
 })

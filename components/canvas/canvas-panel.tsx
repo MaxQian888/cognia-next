@@ -594,7 +594,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
         return
       }
       if (selectionText && editor && sel && !opts.proposalFirst) {
-        // Selection-scoped edits stay inline (fast path).
+        // A selection-scoped edit applies directly, because the user can see
+        // exactly what it replaced. Two things make that safe rather than
+        // merely fast: a version is snapshotted first, so the pre-edit text is
+        // recoverable from history after a reload, and the write goes through
+        // `executeEdits` (not a store write), so it joins Monaco's own undo
+        // stack and Ctrl+Z takes it back in one step.
+        saveVersion(activeDoc.id, t("versionBeforeAiEdit"))
         editor.executeEdits("canvas-action", [{ range: sel, text: result, forceMoveMarkers: true }])
         settleHistory({ status: "completed" })
       } else {
@@ -627,7 +633,9 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       appendActionHistory,
       proposeCanvasReview,
       flushCommit,
+      saveVersion,
       suggestions,
+      t,
       updateActionHistoryEntry,
     ]
   )

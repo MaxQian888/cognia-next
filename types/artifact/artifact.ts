@@ -447,6 +447,15 @@ export interface CanvasPendingReview {
   actionType: CanvasWorkbenchActionType
   originalContent: string
   proposedContent: string
+  /**
+   * Fingerprint of the content this proposal was diffed from
+   * (`lib/canvas/content-hash.ts`). Staleness is derived from it rather than
+   * remembered in `isStale`, so a proposal that survived a reload, or a buffer
+   * changed by a path that never set the flag, cannot be applied against
+   * content it was never diffed from. Absent on proposals written before it
+   * existed, which fall back to comparing `originalContent`.
+   */
+  baseContentHash?: string
   createdAt: Date
   status: CanvasReviewStatus
   items: CanvasReviewItem[]

@@ -5149,6 +5149,7 @@
     "unpin": "取消置顶",
     "unresolve": "重新打开",
     "untitledDefault": "未命名",
+    "versionBeforeAiEdit": "AI 编辑前",
     "versionComparison": "版本对比",
     "versionHistory": "版本历史",
     "versionPreview": "版本预览",
@@ -6590,120 +6591,120 @@
       "toggle": "展开/折叠 Hook 详情"
     },
     "imageWorkbench": {
-      "dialogDescription": "查看、编辑并管理这张图片的版本，原图始终保留。",
-      "previewAlt": "编辑后的图片预览",
-      "compareOriginalAlt": "原图",
-      "compareBadge": "原图",
-      "selectionOverlayAria": "已选区域",
-      "toolsLabel": "编辑工具",
-      "close": "关闭",
-      "previous": "上一张图片",
-      "next": "下一张图片",
-      "zoomIn": "放大",
-      "zoomOut": "缩小",
-      "compare": "与原图对比",
-      "compareHint": "按住查看原图",
-      "undo": "撤销",
-      "redo": "重做",
-      "resetAll": "放弃全部编辑",
-      "download": "下载",
-      "viewHint": "{width} x {height} 像素",
-      "viewHintLoading": "正在加载图片",
-      "tools": {
-        "view": "查看",
-        "transform": "裁剪",
-        "adjust": "调整",
-        "ai": "AI"
-      },
-      "crop": {
-        "title": "裁剪",
-        "apply": "应用裁剪",
-        "clear": "清除",
-        "aspect": {
-          "free": "自由",
-          "square": "1:1",
-          "landscape4x3": "4:3",
-          "portrait3x4": "3:4",
-          "landscape16x9": "16:9",
-          "portrait9x16": "9:16"
-        }
-      },
-      "resize": {
-        "title": "尺寸",
-        "width": "宽度",
-        "height": "高度",
-        "lockAspect": "锁定比例",
-        "apply": "应用尺寸"
-      },
-      "transform": {
-        "title": "旋转与翻转",
-        "rotateLeft": "向左旋转",
-        "rotateRight": "向右旋转",
-        "flipHorizontal": "水平翻转",
-        "flipVertical": "垂直翻转"
-      },
       "adjust": {
-        "exposure": "曝光",
+        "blur": "模糊",
         "brightness": "亮度",
         "contrast": "对比度",
+        "exposure": "曝光",
         "gamma": "伽马",
+        "hue": "色相",
+        "reset": "重置调整",
+        "saturation": "饱和度",
+        "sharpen": "锐化",
         "temperature": "色温",
         "tint": "色调",
-        "saturation": "饱和度",
-        "vibrance": "自然饱和度",
-        "hue": "色相",
-        "blur": "模糊",
-        "sharpen": "锐化",
-        "reset": "重置调整"
+        "vibrance": "自然饱和度"
       },
       "ai": {
-        "provider": "服务商",
-        "modelLine": "模型：{model}",
-        "regionMode": "编辑选定区域",
-        "maskUnsupported": "{provider} 不支持区域编辑，整图 Prompt 编辑仍可使用。",
+        "billingNotice": "每次执行都会向所选服务商发起一次计费请求。",
         "brushAdd": "增加选择",
-        "brushSubtract": "减少选择",
-        "brushSize": "画笔大小",
         "brushHardness": "画笔硬度",
+        "brushSize": "画笔大小",
+        "brushSubtract": "减少选择",
+        "cancel": "取消",
         "clearSelection": "清空选择",
+        "generate": "生成",
+        "maskUnsupported": "{provider} 不支持区域编辑，整图 Prompt 编辑仍可使用。",
+        "modelLine": "模型：{model}",
         "promptLabel": "Prompt",
         "promptPlaceholder": "描述你想要的修改",
-        "billingNotice": "每次执行都会向所选服务商发起一次计费请求。",
-        "generate": "生成",
-        "running": "生成中",
-        "retry": "重试",
-        "cancel": "取消",
+        "provider": "服务商",
+        "regionMode": "编辑选定区域",
         "removeBackground": "去除背景",
+        "retry": "重试",
+        "running": "生成中",
         "unavailable": {
-          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。",
           "needs-auth": "图像编辑服务商还缺少 API Key。",
-          "needs-config": "图像编辑服务商还缺少模型或 Base URL。"
+          "needs-config": "图像编辑服务商还缺少模型或 Base URL。",
+          "no-provider": "尚未配置可用于图像编辑的服务商，请先在设置中添加。"
         }
       },
+      "blocked": {
+        "cors": "该图片托管在其他站点，无法读取像素，因此可以查看和下载但无法编辑。",
+        "decode": "无法解码这张图片以进行编辑。",
+        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。"
+      },
+      "close": "关闭",
+      "compare": "与原图对比",
+      "compareBadge": "原图",
+      "compareHint": "按住查看原图",
+      "compareOriginalAlt": "原图",
+      "crop": {
+        "apply": "应用裁剪",
+        "aspect": {
+          "free": "自由",
+          "landscape16x9": "16:9",
+          "landscape4x3": "4:3",
+          "portrait3x4": "3:4",
+          "portrait9x16": "9:16",
+          "square": "1:1"
+        },
+        "clear": "清除",
+        "title": "裁剪"
+      },
+      "dialogDescription": "查看、编辑并管理这张图片的版本，原图始终保留。",
+      "discard": {
+        "body": "现在关闭将丢弃尚未保存的编辑。",
+        "cancel": "继续编辑",
+        "confirm": "放弃",
+        "title": "放弃编辑"
+      },
+      "download": "下载",
+      "next": "下一张图片",
+      "previewAlt": "编辑后的图片预览",
+      "previous": "上一张图片",
       "rail": {
         "label": "图片版本",
         "original": "原图",
         "originalAria": "原图",
-        "versionAria": "版本：{operations}",
-        "unsaved": "未保存"
+        "unsaved": "未保存",
+        "versionAria": "版本：{operations}"
+      },
+      "redo": "重做",
+      "resetAll": "放弃全部编辑",
+      "resize": {
+        "apply": "应用尺寸",
+        "height": "高度",
+        "lockAspect": "锁定比例",
+        "title": "尺寸",
+        "width": "宽度"
       },
       "save": {
-        "save": "保存为版本",
-        "saving": "保存中",
+        "blockedReadOnly": "该会话为只读，无法在此保存版本。",
         "blockedStreaming": "该回合仍在生成，生成结束后即可保存。",
-        "blockedReadOnly": "该会话为只读，无法在此保存版本。"
+        "save": "保存为版本",
+        "saving": "保存中"
       },
-      "discard": {
-        "title": "放弃编辑",
-        "body": "现在关闭将丢弃尚未保存的编辑。",
-        "confirm": "放弃",
-        "cancel": "继续编辑"
+      "selectionOverlayAria": "已选区域",
+      "tools": {
+        "adjust": "调整",
+        "ai": "AI",
+        "transform": "裁剪",
+        "view": "查看"
       },
-      "blocked": {
-        "cors": "该图片托管在其他站点，无法读取像素，因此可以查看和下载但无法编辑。",
-        "unsupported": "当前设备无法在浏览器中处理图片，编辑功能不可用。",
-        "decode": "无法解码这张图片以进行编辑。"
-      }
+      "toolsLabel": "编辑工具",
+      "transform": {
+        "flipHorizontal": "水平翻转",
+        "flipVertical": "垂直翻转",
+        "rotateLeft": "向左旋转",
+        "rotateRight": "向右旋转",
+        "title": "旋转与翻转"
+      },
+      "undo": "撤销",
+      "viewHint": "{width} x {height} 像素",
+      "viewHintLoading": "正在加载图片",
+      "zoomIn": "放大",
+      "zoomOut": "缩小"
     },
     "imported": {
       "canonicalState": "已保留 {count} 项任务、计划、历史或 Agent 事件",

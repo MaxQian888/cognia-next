@@ -42,7 +42,11 @@
  * cascade the delete when its document goes away.
  */
 
-import type { CanvasDocument, CanvasDocumentVersion } from "@/types/artifact/artifact"
+import type {
+  CanvasDocument,
+  CanvasDocumentVersion,
+  CanvasPendingReview,
+} from "@/types/artifact/artifact"
 import type { CanvasComment } from "@/types/canvas/collaboration"
 import { rehydrateCanvasDocument, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
@@ -62,6 +66,12 @@ const DOCUMENT_SYNC_DEBOUNCE_MS = 500
 let started = false
 let flushDocumentSync: (() => void) | null = null
 let mirroredDocs: Record<string, CanvasDocument> = {}
+/**
+ * The proposal last written per document. A review lives in a different store
+ * map from the document, so its change does not alter the document's object
+ * identity and the identity bail below would skip the write.
+ */
+let mirroredReviews: Record<string, CanvasPendingReview | undefined> = {}
 let mirroredVersionIds = new Set<string>()
 let mirroredCommentIds = new Set<string>()
 /** Which database {@link mirroredDocs} describes — see rule 1 in the header. */
@@ -74,6 +84,7 @@ export function __resetCanvasDexieBridgeForTesting(): void {
   mirroredDocs = {}
   mirroredVersionIds = new Set()
   mirroredCommentIds = new Set()
+  mirroredReviews = {}
   mirroredDbName = null
 }
 
@@ -82,7 +93,7 @@ function dateMs(d: Date | string | undefined): number {
   return d instanceof Date ? d.getTime() : new Date(d).getTime()
 }
 
-function docToRow(doc: CanvasDocument): CanvasDocumentRow {
+function docToRow(doc: CanvasDocument, pendingReview?: CanvasPendingReview): CanvasDocumentRow {
   return {
     id: doc.id,
     sessionId: doc.sessionId,
@@ -105,6 +116,7 @@ function docToRow(doc: CanvasDocument): CanvasDocumentRow {
     returnContext: doc.returnContext,
     authoringOrigin: doc.authoringOrigin,
     aiWorkbench: doc.aiWorkbench,
+    ...(pendingReview ? { pendingReview } : {}),
   }
 }
 
@@ -135,7 +147,10 @@ function commentToRow(c: CanvasComment): CanvasCommentRow {
  * preserves the full snapshot history. Bulk writes happen inside one
  * Dexie transaction so a partial failure rolls back.
  */
-async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): Promise<void> {
+async function syncDocumentsAndVersions(
+  next: Record<string, CanvasDocument>,
+  reviews: Record<string, CanvasPendingReview> = {}
+): Promise<void> {
   const db = getDb()
   // Rule 1 — see the module header. The mirror describes one database; a
   // different one means the account changed under us and the provider is about
@@ -155,8 +170,11 @@ async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): P
   // object on every mutation, so identity is a sound "did this change" test.
   const docUpserts: CanvasDocumentRow[] = []
   for (const id of nextIds) {
-    if (mirroredDocs[id] === next[id]) continue
-    docUpserts.push(docToRow(next[id]))
+    // Two identities to compare, not one: the document and its open proposal.
+    // Accepting a hunk changes only the review, and a review that never
+    // reached the row would be lost on reload with the document intact.
+    if (mirroredDocs[id] === next[id] && mirroredReviews[id] === reviews[id]) continue
+    docUpserts.push(docToRow(next[id], reviews[id]))
   }
 
   // Reconcile versions: collect every (documentId, version) pair from
@@ -210,6 +228,7 @@ async function syncDocumentsAndVersions(next: Record<string, CanvasDocument>): P
   )
 
   mirroredVersionIds = seenVersionIds
+  mirroredReviews = { ...reviews }
 }
 
 /**
@@ -278,6 +297,7 @@ async function hydrateFromDexie(): Promise<void> {
   }
 
   const docPatch: Record<string, CanvasDocument> = {}
+  const reviewPatch: Record<string, CanvasPendingReview> = {}
   for (const row of docRows) {
     if (memoryDocs[row.id]) continue // memory wins
     docPatch[row.id] = rehydrateCanvasDocument({
@@ -301,10 +321,22 @@ async function hydrateFromDexie(): Promise<void> {
         (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
       ),
     } as CanvasDocument)
+    if (row.pendingReview) {
+      // The proposal goes back into `pendingReviews`, which is where the review
+      // UI, the tools and the workflow nodes all read it from. Its dates come
+      // back as strings from IndexedDB.
+      reviewPatch[row.id] = {
+        ...row.pendingReview,
+        createdAt: new Date(row.pendingReview.createdAt),
+      }
+    }
   }
-  if (Object.keys(docPatch).length > 0) {
+  if (Object.keys(docPatch).length > 0 || Object.keys(reviewPatch).length > 0) {
     useArtifactStore.setState((state) => ({
       canvasDocuments: { ...docPatch, ...state.canvasDocuments },
+      // Memory wins, same rule as documents: a proposal made this session is
+      // newer than one read off disk.
+      pendingReviews: { ...reviewPatch, ...state.pendingReviews },
     }))
   }
 
@@ -364,7 +396,7 @@ export function startCanvasDexieBridge(): () => void {
       // Documents hydration did NOT seed — the ones that exist only in memory,
       // which on the first boot after persist v7 means the ones still coming
       // out of the old localStorage blob — reach Dexie here.
-      void syncDocumentsAndVersions(initialDocs)
+      void syncDocumentsAndVersions(initialDocs, useArtifactStore.getState().pendingReviews ?? {})
         .then(() => {
           mirroredDocs = { ...initialDocs }
         })
@@ -383,15 +415,18 @@ export function startCanvasDexieBridge(): () => void {
       // including the ones that only touch artifacts. Bail on identity before
       // doing any work, and coalesce a typing burst into one transaction.
       let lastSeenDocs = initialDocs
+      let lastSeenReviews = useArtifactStore.getState().pendingReviews ?? {}
       let pendingSync: ReturnType<typeof setTimeout> | null = null
       let queuedDocs: Record<string, CanvasDocument> | null = null
+      let queuedReviews: Record<string, CanvasPendingReview> = lastSeenReviews
 
       const runSync = () => {
         pendingSync = null
         const docs = queuedDocs
+        const reviews = queuedReviews
         queuedDocs = null
         if (!docs) return
-        void syncDocumentsAndVersions(docs)
+        void syncDocumentsAndVersions(docs, reviews)
           .then(() => {
             mirroredDocs = { ...docs }
           })
@@ -409,9 +444,12 @@ export function startCanvasDexieBridge(): () => void {
 
       unsubDocs = useArtifactStore.subscribe((state) => {
         const docs = state.canvasDocuments
-        if (docs === lastSeenDocs) return
+        const reviews = state.pendingReviews ?? {}
+        if (docs === lastSeenDocs && reviews === lastSeenReviews) return
         lastSeenDocs = docs
+        lastSeenReviews = reviews
         queuedDocs = docs
+        queuedReviews = reviews
         if (pendingSync !== null) clearTimeout(pendingSync)
         pendingSync = setTimeout(runSync, DOCUMENT_SYNC_DEBOUNCE_MS)
       })
