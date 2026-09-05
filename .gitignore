@@ -28,6 +28,8 @@ junit.xml
 
 # next.js
 /.next/
+# SWC plugin cache written by next build/dev.
+/.swc/
 /out/
 /web/.next/
 /web/out/
@@ -54,6 +56,7 @@ __pycache__/
 # these are what `uv run` and pytest drop while the gate executes)
 .venv/
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
 
 # debug
@@ -71,6 +74,11 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+# Hand-written scoped-typecheck configs (`tsc -p tsconfig.scope-foo.json`).
+# Root-anchored: a workspace's own tsconfig.<name>.json is still committed.
+/tsconfig.scope*.json
+/tsconfig.scoped*.json
+/tsconfig.*.tmp.json
 next-env.d.ts
 
 #Windsurf
