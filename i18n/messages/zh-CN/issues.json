@@ -336,7 +336,20 @@
     "done": "{count, plural, =0 {已是最新} other {已更新 # 条 issue}}",
     "failed": "{repos} 同步失败",
     "noCredential": "没有可用的 GitHub 凭据。请用 GitHub CLI 登录，或连接一个账号。",
-    "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。"
+    "noRepos": "本工作区没有任何项目绑定了 GitHub 仓库。",
+    "upToDate": "已是最新",
+    "noBindings": "本工作区没有绑定任何外部资源。",
+    "failedBindings": "以下绑定同步失败：{names}",
+    "parts": {
+      "imported": "导入 {count}",
+      "updated": "更新 {count}",
+      "pushed": "推送 {count}",
+      "conflicts": "冲突 {count}",
+      "queued": "待审批 {count}",
+      "linked": "关联 {count}",
+      "written": "镜像 {count}"
+    },
+    "joiner": "，"
   },
   "writeback": {
     "section": "GitHub 操作",
@@ -597,5 +610,53 @@
   "activitySide": {
     "local": "本地",
     "remote": "远端"
+  },
+  "import": {
+    "title": "导入议题",
+    "description": "粘贴或拖入 CSV、JSON 导出或 Markdown 任务清单。同一文件里已导入过的行会被跳过。",
+    "drop": "把 .csv、.json 或 .md 文件拖到这里",
+    "browse": "选择文件",
+    "pasteLabel": "或粘贴内容",
+    "pastePlaceholder": "title,status,priority\\n修复登录,todo,high",
+    "format": "格式",
+    "formatAuto": "自动识别（{format}）",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON",
+      "markdown": "Markdown 任务清单"
+    },
+    "defaultStatus": "未指定状态的行使用",
+    "defaultStatusKeep": "Backlog（默认）",
+    "preview": "解析出 {count} 个议题{skipped, plural, =0 {} other {，跳过 # 行无标题}}",
+    "more": "还有 {count} 个",
+    "submit": "导入 {count} 个议题",
+    "done": "新建 {created} 个{skipped, plural, =0 {} other {，# 个已导入过}}",
+    "failed": "新建 {created} 个，失败 {failed} 个：{reason}",
+    "trigger": "导入"
+  },
+  "syncConflicts": {
+    "title": "{count} 个同步冲突",
+    "description": "上次同步后两边都改了同一字段，已保留较新的一方。如果保留错了，把另一个值放回去。",
+    "via": "来自 {provider}",
+    "kept": {
+      "local": "保留了本地",
+      "remote": "保留了远端"
+    },
+    "localValue": "本地值",
+    "remoteValue": "远端值",
+    "keepLocal": "保留本地",
+    "keepRemote": "保留远端",
+    "failed": "无法解决：{reason}",
+    "field": {
+      "title": "标题",
+      "description": "描述",
+      "status": "状态",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "labels": "标签",
+      "dueDate": "截止日期",
+      "estimate": "估点",
+      "cycle": "迭代"
+    }
   }
 }

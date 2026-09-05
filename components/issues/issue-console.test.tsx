@@ -168,6 +168,23 @@ jest.mock("@/lib/issues/sources/registry", () => ({
 const mockRunSync = jest.fn().mockResolvedValue({ repoCount: 0, results: [], failures: [] })
 jest.mock("@/lib/issues/sync-runner", () => ({
   runWorkspaceGithubSync: (...a: unknown[]) => mockRunSync(...a),
+  isMissingGithubCredential: () => false,
+}))
+const mockRunIssueSync = jest.fn(async (..._a: unknown[]) => ({
+  bindingCount: 0,
+  mirror: { repoCount: 0, results: [], failures: [] },
+  outcomes: [],
+  failures: [],
+}))
+jest.mock("@/lib/issues/sync/runner", () => ({
+  runWorkspaceIssueSync: (...a: unknown[]) => mockRunIssueSync(...a),
+}))
+jest.mock("./sync-conflicts-panel", () => ({
+  SyncConflictsPanel: () => <div data-testid="sync-conflicts-panel-stub" />,
+}))
+jest.mock("./import/import-issues-dialog", () => ({
+  ImportIssuesDialog: (props: { open: boolean }) =>
+    props.open ? <div data-testid="import-issues-dialog-stub" /> : null,
 }))
 
 const toastCalls: Array<[string, unknown]> = []

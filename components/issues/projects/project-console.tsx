@@ -46,7 +46,9 @@ import {
 } from "@/lib/db/issue-projects"
 import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
 import { computeProgressFromIssues } from "@/lib/issues/project-progress"
-import { isMissingGithubCredential, runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
+import { isSyncedResource } from "@/lib/issues/sync/bindings"
+import { summarizeSync, syncSummaryMessage } from "@/lib/issues/sync/describe"
+import { runWorkspaceIssueSync } from "@/lib/issues/sync/runner"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { IssueProject } from "@/types/issues"
 import { ProjectResourceDialog } from "../project-resource-dialog"
@@ -121,6 +123,11 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
     [projects]
   )
   const resourceTarget = (projects ?? []).find((project) => project.id === resourceForId)
+  /** Anything the mirror or the sync engine refreshes: repos, tasklists, Bitables. */
+  const hasSyncedBinding = useMemo(
+    () => (projects ?? []).some((project) => project.resources.some(isSyncedResource)),
+    [projects]
+  )
 
   /**
    * Manual refresh. `full` bypasses the watermark, because the reason a user
@@ -131,23 +138,9 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
     if (!workspaceId) return
     setSyncing(true)
     try {
-      const result = await runWorkspaceGithubSync({ projectId: workspaceId, full: true })
-      if (result.repoCount === 0) {
-        toast.info(t("sync.noRepos"))
-      } else if (result.failures.length === 0) {
-        const written = result.results.reduce((sum, repo) => sum + repo.written, 0)
-        toast.success(t("sync.done", { count: written }))
-      } else if (result.failures.every((failure) => isMissingGithubCredential(failure.error))) {
-        // Worth its own message: "sync failed" would send the user looking for
-        // a network problem that isn't there.
-        toast.error(t("sync.noCredential"))
-      } else {
-        toast.error(
-          t("sync.failed", {
-            repos: result.failures.map((failure) => failure.repoFullName).join(", "),
-          })
-        )
-      }
+      const result = await runWorkspaceIssueSync({ projectId: workspaceId, full: true })
+      const { level, message } = syncSummaryMessage(summarizeSync(result), t)
+      toast[level](message)
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -168,8 +161,8 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
     const resource = project?.resources[index]
     if (!resource) return
     await removeIssueProjectResource(projectId, resource)
-    // Unbinding the last repo is what retires the background refresh.
-    if (resource.kind === "github-repo") await syncGithubIssueSchedule()
+    // Unbinding the last synced resource is what retires the background refresh.
+    if (isSyncedResource(resource)) await syncGithubIssueSchedule()
   }
 
   async function confirmDelete() {
@@ -209,7 +202,7 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
               label: syncing ? t("sync.running") : t("sync.now"),
               icon: RefreshCwIcon,
               onSelect: () => void syncNow(),
-              disabled: !workspaceId || syncing || boundRepos.size === 0,
+              disabled: !workspaceId || syncing || !hasSyncedBinding,
               testId: "project-sync-now",
             },
           ]}

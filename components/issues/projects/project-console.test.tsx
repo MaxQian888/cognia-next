@@ -80,8 +80,10 @@ jest.mock("@/lib/issues/github-sync-schedule", () => ({
 }))
 const mockRunSync = jest.fn()
 jest.mock("@/lib/issues/sync-runner", () => ({
-  runWorkspaceGithubSync: (...a: unknown[]) => mockRunSync(...a),
   isMissingGithubCredential: () => false,
+}))
+jest.mock("@/lib/issues/sync/runner", () => ({
+  runWorkspaceIssueSync: (...a: unknown[]) => mockRunSync(...a),
 }))
 
 const toastCalls: Array<[string, unknown]> = []
@@ -306,8 +308,9 @@ describe("ProjectConsole", () => {
         project({ resources: [{ kind: "github-repo", repoFullName: "o/r", addedAt: 0 }] }),
       ]
       mockRunSync.mockResolvedValue({
-        repoCount: 1,
-        results: [{ written: 4 }],
+        bindingCount: 1,
+        mirror: { repoCount: 1, results: [{ written: 4 }], failures: [] },
+        outcomes: [],
         failures: [],
       })
       render(<ProjectConsole />)
@@ -316,7 +319,7 @@ describe("ProjectConsole", () => {
         sync.onSelect()
       })
       await waitFor(() => expect(mockRunSync).toHaveBeenCalledWith({ projectId: "w1", full: true }))
-      expect(toastCalls).toContainEqual(["success", "sync.done:4"])
+      expect(toastCalls).toContainEqual(["success", "sync.parts.written:4"])
     })
   })
 })

@@ -14411,6 +14411,29 @@
     "freshness": {
       "stale": "Shared data is stale"
     },
+    "import": {
+      "browse": "Choose file",
+      "defaultStatus": "Status for rows without one",
+      "defaultStatusKeep": "Backlog (default)",
+      "description": "Paste or drop a CSV, a JSON export or a Markdown task list. Rows already imported from the same file are skipped.",
+      "done": "{created, plural, =0 {Nothing new} one {# issue created} other {# issues created}}{skipped, plural, =0 {} one {, # already imported} other {, # already imported}}",
+      "drop": "Drop a .csv, .json or .md file here",
+      "failed": "{created} created, {failed} failed: {reason}",
+      "format": "Format",
+      "formatAuto": "Detect ({format})",
+      "formats": {
+        "csv": "CSV",
+        "json": "JSON",
+        "markdown": "Markdown task list"
+      },
+      "more": "and {count} more",
+      "pasteLabel": "Or paste the content",
+      "pastePlaceholder": "title,status,priority\\nFix login,todo,high",
+      "preview": "{count, plural, =0 {Nothing to import} one {# issue parsed} other {# issues parsed}}{skipped, plural, =0 {} one {, # row without a title skipped} other {, # rows without a title skipped}}",
+      "submit": "{count, plural, =0 {Import} one {Import # issue} other {Import # issues}}",
+      "title": "Import issues",
+      "trigger": "Import"
+    },
     "labels": {
       "add": "Add label",
       "addButton": "Add label",
@@ -14729,10 +14752,48 @@
     "sync": {
       "done": "{count, plural, =0 {Already up to date} one {# issue updated} other {# issues updated}}",
       "failed": "Sync failed for {repos}",
+      "failedBindings": "Sync failed for {names}",
+      "joiner": ", ",
+      "noBindings": "Nothing is bound to a project in this workspace.",
       "noCredential": "No GitHub credential available. Sign in with the GitHub CLI or connect an account.",
       "noRepos": "No GitHub repository is bound to a project in this workspace.",
       "now": "Sync now",
-      "running": "Syncing…"
+      "parts": {
+        "conflicts": "{count, plural, one {# conflict} other {# conflicts}}",
+        "imported": "{count, plural, one {# imported} other {# imported}}",
+        "linked": "{count, plural, one {# link added} other {# links added}}",
+        "pushed": "{count, plural, one {# pushed} other {# pushed}}",
+        "queued": "{count, plural, one {# awaiting approval} other {# awaiting approval}}",
+        "updated": "{count, plural, one {# updated} other {# updated}}",
+        "written": "{count, plural, one {# mirrored} other {# mirrored}}"
+      },
+      "running": "Syncing…",
+      "upToDate": "Everything is up to date"
+    },
+    "syncConflicts": {
+      "description": "Both sides changed the same field since the last sync. The newer side was kept. Put the other value back if that was the wrong call.",
+      "failed": "Could not resolve: {reason}",
+      "field": {
+        "assignee": "Assignee",
+        "cycle": "Cycle",
+        "description": "Description",
+        "dueDate": "Due date",
+        "estimate": "Estimate",
+        "labels": "Labels",
+        "priority": "Priority",
+        "status": "Status",
+        "title": "Title"
+      },
+      "keepLocal": "Keep local",
+      "keepRemote": "Keep remote",
+      "kept": {
+        "local": "local kept",
+        "remote": "remote kept"
+      },
+      "localValue": "Local value",
+      "remoteValue": "Remote value",
+      "title": "{count, plural, one {# sync conflict} other {# sync conflicts}}",
+      "via": "via {provider}"
     },
     "title": "Issues",
     "toolbar": {

@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { CircleDotIcon, PanelLeftIcon } from "lucide-react"
+import { CircleDotIcon, PanelLeftIcon, RefreshCwIcon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
@@ -67,6 +67,9 @@ import {
 } from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
+import { isSyncedResource } from "@/lib/issues/sync/bindings"
+import { summarizeSync, syncSummaryMessage } from "@/lib/issues/sync/describe"
+import { runWorkspaceIssueSync } from "@/lib/issues/sync/runner"
 import { setSoleFilterValue, toggleFilterValue } from "@/lib/issues/filter-chips"
 import {
   applyIssueSort,
@@ -94,6 +97,8 @@ import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
 import { CollabConflictsPanel } from "./collab-conflicts-panel"
+import { SyncConflictsPanel } from "./sync-conflicts-panel"
+import { ImportIssuesDialog } from "./import/import-issues-dialog"
 import { CollabRefreshStaleBadge } from "./collab-refresh-stale-badge"
 
 /** Stable empty reference, so the no-workspace path cannot churn memos. */
@@ -394,6 +399,39 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
   const [deleteTargets, setDeleteTargets] = useState<readonly UnifiedIssueItem[]>([])
   const [manageLabelsOpen, setManageLabelsOpen] = useState(false)
   const [manageCyclesOpen, setManageCyclesOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  /** Any container bound to something the sync engine or the mirror refreshes. */
+  const hasSyncedBinding = useMemo(
+    () => (projects ?? []).some((project) => project.resources.some(isSyncedResource)),
+    [projects]
+  )
+  /** Local issue id to its printed identifier, for the conflicts panel. */
+  const identifiersById = useMemo(
+    () => new Map((localRows ?? []).map((row) => [row.id, row.identifier])),
+    [localRows]
+  )
+
+  /**
+   * One button for every binding: the GitHub mirror, imported repositories,
+   * Lark tasklists and Bitables. Bypasses the watermark, because the reason a
+   * user reaches for it is almost always a suspicion that the incremental
+   * path missed something.
+   */
+  async function syncNow() {
+    if (!projectId) return
+    setSyncing(true)
+    try {
+      const result = await runWorkspaceIssueSync({ projectId, full: true })
+      const { level, message } = syncSummaryMessage(summarizeSync(result), t)
+      toast[level](message)
+      setFederatedTick((tick) => tick + 1)
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createStatus, setCreateStatus] = useState<IssueStatus>("backlog")
@@ -592,6 +630,24 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
             disabled: !projectId,
             testId: "issue-create-trigger",
           }}
+          secondaryActions={[
+            {
+              id: "import",
+              label: t("import.trigger"),
+              icon: UploadIcon,
+              onSelect: () => setImportOpen(true),
+              disabled: !projectId || (projects ?? []).length === 0,
+              testId: "issue-import-trigger",
+            },
+            {
+              id: "sync",
+              label: syncing ? t("sync.running") : t("sync.now"),
+              icon: RefreshCwIcon,
+              onSelect: () => void syncNow(),
+              disabled: !projectId || syncing || !hasSyncedBinding,
+              testId: "issue-sync-now",
+            },
+          ]}
         />
       }
       leftPane={
@@ -760,6 +816,11 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
       ) : null}
 
       <CollabConflictsPanel />
+      <SyncConflictsPanel
+        projectId={projectId}
+        identifiersById={identifiersById}
+        onOpenIssue={(id) => setSelectedId(`local:${id}`)}
+      />
 
       <DeleteIssueDialog
         open={deleteTargets.length > 0}
@@ -776,6 +837,17 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           selection.clear()
         }}
       />
+
+      {projectId ? (
+        <ImportIssuesDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          projectId={projectId}
+          projects={projects ?? []}
+          cycles={cycles ?? []}
+          initialProjectId={prefs.filter.issueProjectIds[0]}
+        />
+      ) : null}
 
       {projectId ? (
         <CreateIssueDialog
