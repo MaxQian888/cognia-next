@@ -12,10 +12,18 @@
 //     in kernel context that a syscall filter never sees); srt blocks it
 //     explicitly.
 //
-// The filter is applied via a `Command::pre_exec` hook on the `bwrap`
-// process, so the rules are inherited across `bwrap`'s namespace setup and
-// into the sandboxed command. bwrap itself needs none of the blocked
-// syscalls, so filtering them does not break sandbox setup.
+// The filter is handed to bwrap on a file descriptor (`--seccomp FD`) and
+// bwrap installs it on the sandboxed process immediately before exec'ing it.
+//
+// It must NOT be installed on the bwrap process itself. bwrap's own setup
+// calls `mount` (`MS_SLAVE` on `/`, then every bind), `unshare` and
+// `pivot_root`, all of which this filter denies with EPERM, so a filter
+// applied before `execve(bwrap)` aborts the sandbox before it exists. That
+// was the shipped behaviour until this comment was written: every Linux
+// sandbox call returned `exit_code: 1` with empty stdout and
+// `bwrap: Failed to make / slave: Operation not permitted` on stderr, while
+// the cheap health probe still reported the backend as available. Verified on
+// Ubuntu 24.04 / aarch64 against the real binary.
 //
 // Defense-in-depth, not the boundary: if filter construction fails, the
 // backend proceeds with namespaces only and records a warning rather than
@@ -24,6 +32,7 @@
 #![cfg(target_os = "linux")]
 
 use std::convert::TryInto;
+use std::os::fd::{FromRawFd, RawFd};
 
 use seccompiler::{BpfProgram, SeccompAction, SeccompFilter};
 
@@ -121,18 +130,69 @@ pub fn build_filter() -> Result<BpfProgram, String> {
         .map_err(|e| format!("failed to compile seccomp BPF: {e:?}"))
 }
 
-/// Install the filter on `cmd` via a `pre_exec` hook. Best-effort: a failure
-/// to apply in the child returns the error from `pre_exec` (which aborts the
-/// spawn) only for genuine syscall failures; construction failures are
-/// handled by the caller, which logs and proceeds namespace-only.
-pub fn attach(cmd: &mut tokio::process::Command, bpf: BpfProgram) {
-    // SAFETY: the closure runs in the forked child before exec. `apply_filter`
-    // performs `prctl(PR_SET_NO_NEW_PRIVS)` + the `seccomp` syscall and does
-    // not allocate or take locks — safe for a post-fork / pre-exec context.
+/// The descriptor number the compiled program is handed to `bwrap` on.
+///
+/// Any number clear of the three stdio descriptors works. `dup2` onto it in
+/// the pre-exec hook also clears `FD_CLOEXEC`, which is what lets the program
+/// survive `execve` into bwrap.
+pub const SECCOMP_FD: RawFd = 10;
+
+/// The compiled program as the raw `struct sock_filter[]` bytes `bwrap
+/// --seccomp` reads back, the same layout `seccomp_export_bpf` writes.
+pub fn program_bytes(bpf: &BpfProgram) -> Vec<u8> {
+    if bpf.is_empty() {
+        return Vec::new();
+    }
+    // SAFETY: `sock_filter` is a `#[repr(C)]` POD (u16, u8, u8, u32) with no
+    // padding and no pointers, so its in-memory representation IS the wire
+    // format. The slice borrowed here lives as long as `bpf`.
+    let raw = unsafe {
+        std::slice::from_raw_parts(bpf.as_ptr() as *const u8, std::mem::size_of_val(&bpf[..]))
+    };
+    raw.to_vec()
+}
+
+/// Park the compiled program on an anonymous in-memory file, positioned at
+/// byte 0 and WITHOUT `FD_CLOEXEC`, ready to be handed to bwrap.
+///
+/// The returned `File` owns the descriptor: keep it alive until after the
+/// child has been spawned, or the program vanishes before bwrap reads it.
+pub fn park_program(bpf: &BpfProgram) -> std::io::Result<std::fs::File> {
+    use std::io::{Seek, SeekFrom, Write};
+
+    let bytes = program_bytes(bpf);
+    if bytes.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "refusing to park an empty seccomp program",
+        ));
+    }
+    // SAFETY: a nul-terminated literal name and flags 0. Flags deliberately
+    // omit `MFD_CLOEXEC`: the descriptor has to survive the exec into bwrap.
+    let raw = unsafe { libc::memfd_create(c"cognia-sandbox-seccomp".as_ptr(), 0) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `memfd_create` just returned a fresh descriptor that nothing
+    // else owns, so taking ownership of it here is sound.
+    let mut file = unsafe { std::fs::File::from_raw_fd(raw) };
+    file.write_all(&bytes)?;
+    file.seek(SeekFrom::Start(0))?;
+    Ok(file)
+}
+
+/// Move the parked program onto [`SECCOMP_FD`] in the child, so the number
+/// passed to `bwrap --seccomp` resolves there after exec.
+pub fn attach_program_fd(cmd: &mut tokio::process::Command, source: RawFd) {
+    // SAFETY: the closure runs in the forked child before exec and calls only
+    // `dup2`, which is async-signal-safe. It allocates nothing and takes no
+    // locks, which is the requirement for a post-fork / pre-exec context.
     unsafe {
         cmd.pre_exec(move || {
-            seccompiler::apply_filter(&bpf)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))
+            if source != SECCOMP_FD && libc::dup2(source, SECCOMP_FD) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
         });
     }
 }
@@ -181,6 +241,36 @@ mod tests {
         ] {
             assert!(BLOCKED_SYSCALLS.contains(&s), "{s} should be blocked");
         }
+    }
+
+    #[test]
+    fn program_bytes_are_eight_per_instruction() {
+        let bpf = build_filter().expect("filter builds on a supported arch");
+        // `struct sock_filter` is exactly 8 bytes wide. bwrap divides the fd's
+        // length by that to get the instruction count, so a mismatch here
+        // means bwrap would read a truncated or over-long program.
+        assert_eq!(program_bytes(&bpf).len(), bpf.len() * 8);
+    }
+
+    #[test]
+    fn parked_program_is_readable_from_byte_zero_and_survives_exec() {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+
+        let bpf = build_filter().expect("filter builds on a supported arch");
+        let mut file = park_program(&bpf).expect("memfd is available");
+
+        let mut read_back = Vec::new();
+        file.read_to_end(&mut read_back).expect("readable");
+        assert_eq!(read_back, program_bytes(&bpf));
+
+        // bwrap reads the program AFTER exec, so the descriptor must not be
+        // close-on-exec. Parking it with `FD_CLOEXEC` set would leave bwrap
+        // reading a closed fd and refusing to start.
+        // SAFETY: `F_GETFD` only reads the descriptor's flags.
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+        assert!(flags >= 0, "F_GETFD failed");
+        assert_eq!(flags & libc::FD_CLOEXEC, 0);
     }
 
     #[test]
