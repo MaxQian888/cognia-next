@@ -294,3 +294,154 @@ Consequences worth knowing:
   `artifact-shell-entry.ts` left the committed bundle stale while the build
   reported "already fresh". The capture handler was written, tested and
   silently not shipped until that was fixed.
+
+## Amendment (2026-09-05), completing Canvas on the existing architecture
+
+Seven changes, all in place. No V2, no parallel Canvas, no second store, no
+replacement route. What follows is what each one found, because in most cases
+the surface already existed and the finding was that nothing was behind it.
+
+### A document belongs to one workspace
+
+Every Canvas *list* read the raw `canvasDocuments` map. Switching workspace left
+the previous workspace's documents in the rail, and `canvas_read` /
+`canvas_update` scoped by `sessionId` only, so a model or plugin running in one
+workspace could read and rewrite a document owned by another.
+
+`getCanvasDocumentsForWorkspace` and `getCanvasDocumentForWorkspace` are the two
+scoped reads every surface shares. The by-id one answers `null` for "not yours"
+as well as "not there", so the difference cannot enumerate another workspace.
+Documents with no `projectId` are grandfathered, matching
+`applyArtifactWorkspaceFilters`, because the v86 backfill stamps them on the
+next boot.
+
+### Closing is not deleting
+
+Canvas had no "open vs all" state, so the tab strip's X called
+`deleteCanvasDocument`: closing a tab destroyed the document, its versions and
+its comments, with no prompt and no undo.
+
+`useCanvasLayoutStore.openDocIds` is that state. It is a per-user layout
+preference rather than a property of the document, because two people sharing a
+document do not share a tab strip. Deleting keeps its meaning, gains a prompt
+that says what goes with the document, and releases the pin, the tab and the
+comment threads. Owners outside the artifact store let go through
+`lib/canvas/document-disposal.ts`, a registry in the shape of
+`registerProjectBucketPurger`, so a persisted and near-universally imported
+store does not drag the comment store's localStorage migration into every
+consumer.
+
+### One AI path
+
+There were two. `useCanvasActions` built its own prompt and gated it with
+`hasNoLeakingPii`. `lib/plugin/api/canvas-api.ts` called `executeCanvasAction`,
+which built a *different* prompt (attachments, per-action temperature) and gated
+nothing. A plugin got richer prompts and no redaction check.
+
+Both call `runCanvasAction` / `streamCanvasAction`, with the gate inside rather
+than at each call site. Three actions were also unobservable: `review` and
+`explain` returned text into a `useState` in the editor pane that nothing
+rendered, and `run` asked a model to *imagine* executing the code next to a
+panel that actually runs it. `review` produces anchored suggestions, `explain`
+renders in the AI panel, `run` delegates to the execution panel.
+
+`CanvasAIWorkbenchState` had six fields and no writer at all. Every field now
+has a control and a writer, minus `pendingReview`, which was a second copy of
+`pendingReviews[documentId]` and is deleted rather than kept in sync.
+Suggestions come back through `generateObject` against a zod schema, replacing
+an `indexOf("{")`-to-`lastIndexOf("}")` slice followed by hand-written `typeof`
+filters that silently dropped what they did not recognise.
+
+### The hunks you accept are the hunks you read
+
+The review UI rendered `computeDiff`, an LCS diff. The hunks came from a second,
+hand-written diff with a five-line lookahead. On a block move the two disagree
+about which lines changed, so an accepted hunk was applied at line numbers the
+reader never saw. There is one diff now, and a round-trip test that fails if
+they diverge again.
+
+Staleness was an `isStale` flag `updateCanvasDocument` had to remember to set.
+It is derived from a content fingerprint (`lib/canvas/content-hash.ts`), which
+matters because accepted hunks are applied BY LINE NUMBER: a proposal applied
+against moved content corrupts the document with no error. That fingerprint is
+also what makes persisting a proposal safe, so an open review survives a reload
+instead of being discarded to guarantee it could not be stale.
+
+### A new document can be a real document
+
+Every entry point ran the same unlabelled call: an empty Markdown document
+titled "Untitled". A subsystem for editing documents could not open one from a
+file. The dialog asks for a name, a language, a starter body, or a file.
+
+Import reuses `@cognia/document`, the parser chat attachments and the knowledge
+base already go through, and answers the two Canvas-specific questions it does
+not: which editor language this becomes, and what was lost getting here. Text
+and code arrive byte for byte. A PDF or Office file becomes editable Markdown
+and says so before anything is created.
+
+Starters are deliberately neither the unified template platform (ADR-0100),
+which is for installable, shareable, parameterised templates, nor the editor
+snippet registry, which would leave `${1:name}` tab stops in the buffer.
+
+### Stop stops the interpreter
+
+Cancelling a Python run aborted an `AbortController` the Rust side never saw.
+The UI detached and the child kept running to its 30s timeout. A run carries an
+id, `canvas_cancel_python` kills it, and the in-flight call returns the output
+the program produced before it died.
+
+The registry holds a **cancel signal, not the child**: `wait_with_output`
+consumes the handle, so parking the child would mean taking it back out to wait
+on it, and a cancel arriving during the wait would find nothing. Pipes are
+drained on their own tasks, so a program writing more than the pipe buffer
+cannot deadlock the run that cancellation exists for.
+
+Settings, Canvas, Execution had seven controls and no reader. Three are read
+now. Four were **removed rather than disabled**: `autoExecute`,
+`preserveVariables`, `sandboxMode` and `pythonRuntime`. The last two read as
+security and capability controls and did nothing at all, while confinement
+actually lives in `AppSettings.canvasCodeSandboxEnabled` (Settings, Sandbox).
+Whether a language can run is asked before the click, from the host.
+
+### A real CRDT, and a link that carries only ids
+
+The old CRDT was positional with **no transform**. An operation was an absolute
+character index spliced into the receiver's already-mutated string, so two
+people inserting at index 10 both applied at raw index 10 and the documents
+diverged while `version` incremented on both sides. Its only conflict machinery
+was a causal gate that DROPPED what it could not order, with no buffer and no
+retry, so a reordered delivery was lost permanently.
+
+**Yjs is a new dependency, and the only one taken.** There is no CRDT in this
+repo to reuse in JS or in Rust, and hand-writing one is how the implementation
+above happened. Everything else was reused: the LCS diff from
+`lib/artifacts/diff.ts`, `@cognia/document` for import, and CodeMirror 6 for the
+editor rather than adding a second editor framework.
+
+`deserializeState` is gone. It parsed attacker-supplied JSON and installed
+whatever session, participants and permissions it described, reachable from a
+share link and from any inbound frame typed `"sync"`. State arrives as opaque
+bytes and can only merge into a session the client is already in.
+
+The share link carried the session, its owner, its participants, its permission
+flags, the content and the whole operation log, plus a `?server=` URL the join
+page wrote into persisted settings with `enabled: true` and no validation of
+scheme or host. It carries three identifiers now. The two halves also disagreed
+about encoding, so no link this app ever produced decoded, and the page reported
+success without joining anything.
+
+### What is deliberately still open
+
+- **The collaboration server has no Canvas routes.** `cognia-collab-server`
+  exposes exactly one WebSocket route, `…/chat-sessions/{id}/stream` behind
+  `COLLAB_SHARED_CHAT_ENABLED`, with a one-time ticket and RLS. Canvas points at
+  `ws://localhost:8080/canvas` with subprotocol `cognia.canvas.v1`, which no
+  route serves, and nothing in the app mints `remoteAuthorization`, so the
+  transport is unreachable and fails closed. Multi-user Canvas needs that server
+  work. The client is now correct when it arrives.
+- **Rich Markdown editing** is not shipped. The plan named Milkdown. The reuse
+  path is CodeMirror 6 decorations over `@codemirror/lang-markdown`, which is
+  already a dependency and, unlike a ProseMirror round-trip, cannot lose an
+  unsupported construct because the buffer never stops being Markdown.
+- **The collaboration settings block (8 fields) is still inert**, because what
+  would read it is the transport above.
