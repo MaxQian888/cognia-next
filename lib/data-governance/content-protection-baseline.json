@@ -148,6 +148,7 @@
   "integrationEvents": "metadata-only",
   "integrationSubscriptions": "metadata-only",
   "issueCounters": "metadata-only",
+  "issueCycles": "encrypted-content",
   "issueEvents": "encrypted-content",
   "issueProjects": "metadata-only",
   "issueRuns": "encrypted-content",

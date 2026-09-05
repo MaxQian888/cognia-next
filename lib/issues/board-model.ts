@@ -46,6 +46,11 @@ export interface IssueBoardFilter {
   sources: readonly IssueSourceKind[]
   /** Keep issues in one of these delivery containers (empty = all). */
   issueProjectIds: readonly string[]
+  /**
+   * Keep issues planned into one of these cycles (empty = all). Optional on
+   * the type because view overrides persisted before v223 carry no such key.
+   */
+  cycleIds?: readonly string[]
 }
 
 export const EMPTY_ISSUE_FILTER: IssueBoardFilter = Object.freeze({
@@ -55,6 +60,7 @@ export const EMPTY_ISSUE_FILTER: IssueBoardFilter = Object.freeze({
   assignees: [],
   sources: [],
   issueProjectIds: [],
+  cycleIds: [],
 })
 
 export function isIssueFilterActive(filter: IssueBoardFilter): boolean {
@@ -64,7 +70,8 @@ export function isIssueFilterActive(filter: IssueBoardFilter): boolean {
     filter.priorities.length > 0 ||
     filter.assignees.length > 0 ||
     filter.sources.length > 0 ||
-    filter.issueProjectIds.length > 0
+    filter.issueProjectIds.length > 0 ||
+    (filter.cycleIds?.length ?? 0) > 0
   )
 }
 
@@ -77,6 +84,7 @@ export function countActiveIssueFilters(filter: IssueBoardFilter): number {
   if (filter.assignees.length > 0) count += 1
   if (filter.sources.length > 0) count += 1
   if (filter.issueProjectIds.length > 0) count += 1
+  if ((filter.cycleIds?.length ?? 0) > 0) count += 1
   return count
 }
 
@@ -111,6 +119,8 @@ export function applyIssueFilter(
       const key = actorKey(item.assignee)
       if (!key || !filter.assignees.includes(key)) return false
     }
+    const cycleIds = filter.cycleIds ?? []
+    if (cycleIds.length > 0 && (!item.cycleId || !cycleIds.includes(item.cycleId))) return false
     return true
   })
 }

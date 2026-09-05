@@ -88,7 +88,8 @@
       "assignee": "Assignee",
       "source": "Source",
       "project": "Project",
-      "query": "Search"
+      "query": "Search",
+      "cycle": "Cycle"
     },
     "removeFilter": "Remove filter {facet}: {value}",
     "density": {
@@ -138,7 +139,18 @@
     "run_failed": "an agent run failed",
     "artifact_linked": "linked an artifact",
     "github_linked": "linked a GitHub issue",
-    "github_write_back": "pushed a change to GitHub"
+    "github_write_back": "pushed a change to GitHub",
+    "parent_changed": "changed the parent issue",
+    "blocker_added": "added a blocking issue",
+    "blocker_removed": "removed a blocking issue",
+    "due_date_changed": "changed the due date",
+    "estimate_changed": "changed the estimate",
+    "cycle_changed": "moved this to another cycle",
+    "external_linked": "linked an external record",
+    "external_unlinked": "removed an external link",
+    "synced_in": "applied a change from {provider}",
+    "sync_conflict": "kept the {winner} value of {field} after a sync conflict",
+    "sync_conflict_resolved": "resolved a sync conflict"
   },
   "create": {
     "trigger": "New issue",
@@ -155,7 +167,8 @@
     "destinationLabel": "Save to",
     "destinationLocal": "This device (default)",
     "destinationShared": "Shared workspace",
-    "sharedUnavailable": "This shared workspace is not ready for new issues."
+    "sharedUnavailable": "This shared workspace is not ready for new issues.",
+    "subIssueOf": "Sub-issue of {identifier}"
   },
   "conflicts": {
     "title": "{count, plural, one {Shared edit needs review} other {# shared edits need review}}",
@@ -364,7 +377,8 @@
       "no-github-account": "Connect a GitHub account in Settings → Connections first.",
       "run-active": "A run is already active for this issue.",
       "issue-finished": "Finished issues cannot be run.",
-      "adapter-missing": "That execution engine is not available."
+      "adapter-missing": "That execution engine is not available.",
+      "blocked": "Blocked by {detail}. Finish those issues first."
     },
     "status": {
       "queued": "Queued",
@@ -427,7 +441,10 @@
     "openProject": "Open {name} in the projects console",
     "show": "Show the sidebar",
     "hide": "Hide the sidebar",
-    "trackerNav": "Tracker sections"
+    "trackerNav": "Tracker sections",
+    "cycles": "Cycles",
+    "noCycles": "No cycles yet",
+    "manageCycles": "Manage cycles"
   },
   "list": {
     "select": "Select {identifier}",
@@ -457,5 +474,82 @@
     "cancel": "Keep",
     "confirm": "Delete",
     "working": "Deleting…"
+  },
+  "planning": {
+    "section": "Planning",
+    "cycle": "Cycle",
+    "noCycle": "No cycle",
+    "dueDate": "Due",
+    "noDueDate": "No due date",
+    "clearDueDate": "Clear due date",
+    "estimate": "Estimate",
+    "noEstimate": "No estimate",
+    "estimatePlaceholder": "pts",
+    "points": "{count, plural, one {# pt} other {# pts}}",
+    "parent": "Parent",
+    "noParent": "Top-level issue",
+    "clearParent": "Remove parent",
+    "pickParent": "Choose a parent issue",
+    "subIssues": "Sub-issues",
+    "noSubIssues": "No sub-issues",
+    "addSubIssue": "Add sub-issue",
+    "blockedBy": "Blocked by",
+    "noBlockers": "Nothing blocks this",
+    "addBlocker": "Add a blocking issue",
+    "removeBlocker": "Remove blocker",
+    "blocks": "Blocks",
+    "links": "Links",
+    "unlink": "Remove link",
+    "blocked": "Blocked",
+    "blockedByList": "Blocked by {list}",
+    "subIssuesTitle": "{done} of {total} sub-issues done",
+    "due": {
+      "overdue": "Overdue",
+      "today": "Due today",
+      "soon": "Due soon"
+    },
+    "searchPlaceholder": "Search issues…",
+    "noMatch": "No issue matches",
+    "provider": {
+      "github": "GitHub",
+      "github-pr": "Pull request",
+      "lark-task": "Lark task",
+      "lark-bitable": "Lark Bitable",
+      "import_csv": "CSV import",
+      "import_json": "JSON import",
+      "import_markdown": "Markdown import",
+      "other": "External"
+    }
+  },
+  "cycles": {
+    "manageTitle": "Cycles and milestones",
+    "name": "Name",
+    "namePlaceholder": "Sprint 12, v2.0…",
+    "kind": "Kind",
+    "kindLabel": {
+      "cycle": "Cycle",
+      "milestone": "Milestone"
+    },
+    "create": "Create",
+    "empty": "No cycles yet. Create one to plan issues into it.",
+    "status": "Status",
+    "statusLabel": {
+      "planned": "Planned",
+      "active": "Active",
+      "completed": "Completed"
+    },
+    "scope": "Scope",
+    "scopeWorkspace": "Whole workspace",
+    "delete": "Delete {name}",
+    "deleteConfirm": "Delete ({count, plural, =0 {no issues} one {# issue unplanned} other {# issues unplanned}})",
+    "cancel": "Cancel",
+    "startsAt": "Starts",
+    "endsAt": "Ends",
+    "progress": "{done}/{total} done · {pointsDone}/{points} pts",
+    "progressBar": "Cycle progress"
+  },
+  "activitySide": {
+    "local": "local",
+    "remote": "remote"
   }
 }

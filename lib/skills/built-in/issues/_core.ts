@@ -182,5 +182,11 @@ export function summariseIssue(issue: Issue) {
     createdAt: issue.createdAt,
     updatedAt: issue.updatedAt,
     ...(issue.githubRef ? { github: issue.githubRef } : {}),
+    ...(issue.parentId ? { parentId: issue.parentId } : {}),
+    ...(issue.blockedBy?.length ? { blockedBy: issue.blockedBy } : {}),
+    ...(issue.dueDate !== undefined ? { dueDate: issue.dueDate } : {}),
+    ...(issue.estimate !== undefined ? { estimate: issue.estimate } : {}),
+    ...(issue.cycleId ? { cycleId: issue.cycleId } : {}),
+    ...(issue.externalRefs?.length ? { externalRefs: issue.externalRefs } : {}),
   }
 }

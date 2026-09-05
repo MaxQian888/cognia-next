@@ -14243,13 +14243,21 @@
     "activity": {
       "artifact_linked": "linked an artifact",
       "assigned": "assigned this to {to}",
+      "blocker_added": "added a blocking issue",
+      "blocker_removed": "removed a blocking issue",
       "commented": "commented",
       "created": "created this issue",
+      "cycle_changed": "moved this to another cycle",
       "description_changed": "edited the description",
+      "due_date_changed": "changed the due date",
+      "estimate_changed": "changed the estimate",
+      "external_linked": "linked an external record",
+      "external_unlinked": "removed an external link",
       "github_linked": "linked a GitHub issue",
       "github_write_back": "pushed a change to GitHub",
       "label_added": "added a label",
       "label_removed": "removed a label",
+      "parent_changed": "changed the parent issue",
       "priority_changed": "changed priority from {from} to {to}",
       "project_changed": "moved this to another project",
       "reassigned": "reassigned this from {from} to {to}",
@@ -14257,8 +14265,15 @@
       "run_started": "started an agent run",
       "run_succeeded": "finished an agent run",
       "status_changed": "moved this from {from} to {to}",
+      "sync_conflict": "kept the {winner} value of {field} after a sync conflict",
+      "sync_conflict_resolved": "resolved a sync conflict",
+      "synced_in": "applied a change from {provider}",
       "title_changed": "renamed this issue",
       "unassigned": "removed the assignee"
+    },
+    "activitySide": {
+      "local": "local",
+      "remote": "remote"
     },
     "actor": {
       "agent": "Agent",
@@ -14328,11 +14343,39 @@
       "pickExistingProject": "← Pick an existing project",
       "projectLabel": "Project",
       "sharedUnavailable": "This shared workspace is not ready for new issues.",
+      "subIssueOf": "Sub-issue of {identifier}",
       "submit": "Create issue",
       "title": "New issue",
       "titleLabel": "Title",
       "titlePlaceholder": "Issue title",
       "trigger": "New issue"
+    },
+    "cycles": {
+      "cancel": "Cancel",
+      "create": "Create",
+      "delete": "Delete {name}",
+      "deleteConfirm": "Delete ({count, plural, =0 {no issues} one {# issue unplanned} other {# issues unplanned}})",
+      "empty": "No cycles yet. Create one to plan issues into it.",
+      "endsAt": "Ends",
+      "kind": "Kind",
+      "kindLabel": {
+        "cycle": "Cycle",
+        "milestone": "Milestone"
+      },
+      "manageTitle": "Cycles and milestones",
+      "name": "Name",
+      "namePlaceholder": "Sprint 12, v2.0…",
+      "progress": "{done}/{total} done · {pointsDone}/{points} pts",
+      "progressBar": "Cycle progress",
+      "scope": "Scope",
+      "scopeWorkspace": "Whole workspace",
+      "startsAt": "Starts",
+      "status": "Status",
+      "statusLabel": {
+        "active": "Active",
+        "completed": "Completed",
+        "planned": "Planned"
+      }
     },
     "delete": {
       "bodyMany": "Their activity trails and run histories go with them. This cannot be undone.",
@@ -14438,6 +14481,52 @@
         "title": "{identifier} moved to {to}"
       }
     },
+    "planning": {
+      "addBlocker": "Add a blocking issue",
+      "addSubIssue": "Add sub-issue",
+      "blocked": "Blocked",
+      "blockedBy": "Blocked by",
+      "blockedByList": "Blocked by {list}",
+      "blocks": "Blocks",
+      "clearDueDate": "Clear due date",
+      "clearParent": "Remove parent",
+      "cycle": "Cycle",
+      "due": {
+        "overdue": "Overdue",
+        "soon": "Due soon",
+        "today": "Due today"
+      },
+      "dueDate": "Due",
+      "estimate": "Estimate",
+      "estimatePlaceholder": "pts",
+      "links": "Links",
+      "noBlockers": "Nothing blocks this",
+      "noCycle": "No cycle",
+      "noDueDate": "No due date",
+      "noEstimate": "No estimate",
+      "noMatch": "No issue matches",
+      "noParent": "Top-level issue",
+      "noSubIssues": "No sub-issues",
+      "parent": "Parent",
+      "pickParent": "Choose a parent issue",
+      "points": "{count, plural, one {# pt} other {# pts}}",
+      "provider": {
+        "github": "GitHub",
+        "github-pr": "Pull request",
+        "import_csv": "CSV import",
+        "import_json": "JSON import",
+        "import_markdown": "Markdown import",
+        "lark-bitable": "Lark Bitable",
+        "lark-task": "Lark task",
+        "other": "External"
+      },
+      "removeBlocker": "Remove blocker",
+      "searchPlaceholder": "Search issues…",
+      "section": "Planning",
+      "subIssues": "Sub-issues",
+      "subIssuesTitle": "{done} of {total} sub-issues done",
+      "unlink": "Remove link"
+    },
     "priority": {
       "high": "High",
       "low": "Low",
@@ -14499,11 +14588,14 @@
       "title": "Projects"
     },
     "rail": {
+      "cycles": "Cycles",
       "hide": "Hide the sidebar",
       "label": "Issue navigation",
       "labels": "Labels",
+      "manageCycles": "Manage cycles",
       "manageLabels": "Manage labels",
       "manageProjects": "Open the projects console",
+      "noCycles": "No cycles yet",
       "noLabels": "No labels yet",
       "noProjects": "No projects yet",
       "openProject": "Open {name} in the projects console",
@@ -14541,6 +14633,7 @@
         "adapter-missing": "That execution engine is not available.",
         "assignee-kind-mismatch": "Assign this issue to a matching agent or squad first.",
         "assignee-not-found": "The assignee no longer exists.",
+        "blocked": "Blocked by {detail}. Finish those issues first.",
         "desktop-only": "Available on the desktop app only.",
         "issue-finished": "Finished issues cannot be run.",
         "no-github-account": "Connect a GitHub account in Settings → Connections first.",
@@ -14608,6 +14701,7 @@
       "display": "Display",
       "facet": {
         "assignee": "Assignee",
+        "cycle": "Cycle",
         "labels": "Labels",
         "priority": "Priority",
         "project": "Project",

@@ -65,6 +65,7 @@ import {
   syncProjects,
   syncIssues,
   syncIssueProjects,
+  syncIssueCycles,
   syncIssueEvents,
   syncIssueRuns,
   syncLabels,
@@ -211,6 +212,7 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // keyed by an issue that has not arrived is a row with nothing to attach to.
   { table: "issueEvents", stage: "background", run: syncIssueEvents },
   { table: "issueRuns", stage: "background", run: syncIssueRuns },
+  { table: "issueCycles", stage: "background", run: syncIssueCycles },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // After the adapters they hang off: a contact, a binding or a deployment
@@ -311,6 +313,7 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // because the cascade from a deleted issue has to reach here too.
   issueEvents: syncDomain("tombstone", "confidential", "opaque"),
   issueRuns: syncDomain("tombstone"),
+  issueCycles: syncDomain("tombstone"),
   plugins: syncDomain("tombstone"),
   adapterInstances: syncDomain("tombstone"),
   settings: syncDomain("tombstone", "internal"),

@@ -195,6 +195,7 @@ export const CORE_TABLE_NAMES = [
   "integrationEvents",
   "integrationSubscriptions",
   "issueCounters",
+  "issueCycles",
   "issueEvents",
   "issueProjects",
   "issueRuns",
@@ -544,6 +545,7 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // reports a terminal state.
   "issueEvents",
   "issueRuns",
+  "issueCycles",
   // The Inbox sidebar's host-only quintet. Every one of these is read by a
   // surface the thin client already mounts (health badge, contact drawer,
   // callback inspector, override form, delegation chips) and none had a
@@ -603,6 +605,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "labels",
   "issueEvents",
   "issueRuns",
+  "issueCycles",
   "connectorHeartbeats",
   "platformIdentities",
   "connectorCallbackBindings",
@@ -884,6 +887,7 @@ const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "hostDispatchQueue",
   "issueEvents",
   "issueRuns",
+  "issueCycles",
   "issues",
   "matrixPendingEncryptedEvents",
   "workInputBatches",

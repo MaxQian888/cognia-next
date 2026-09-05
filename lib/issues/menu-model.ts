@@ -16,12 +16,12 @@ import { actorKey } from "./board-model"
 import { canApplyBulkAction, type IssueBulkAction } from "./bulk-actions"
 import type { AssigneeOption } from "@/components/issues/assignee-picker"
 import { ISSUE_PRIORITIES, ISSUE_STATUSES } from "@/types/issues"
-import type { IssueProject } from "@/types/issues"
+import type { IssueCycle, IssueProject } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 
 /** A menu section's identity, also its i18n key suffix and test-id stem. */
-export type IssueMenuSectionId = "status" | "priority" | "assignee" | "labels" | "project"
+export type IssueMenuSectionId = "status" | "priority" | "assignee" | "labels" | "project" | "cycle"
 
 export interface IssueMenuEntry {
   /** Stable within its section; used for the React key and the test id. */
@@ -44,6 +44,8 @@ export interface IssueMenuInput {
   labels: readonly LabelRow[]
   projects: readonly IssueProject[]
   assigneeOptions: readonly AssigneeOption[]
+  /** Cycles and milestones of the workspace. Omitted means no cycle section. */
+  cycles?: readonly IssueCycle[]
 }
 
 function entry(
@@ -70,6 +72,7 @@ export function buildIssueMenuSections({
   labels,
   projects,
   assigneeOptions,
+  cycles = [],
 }: IssueMenuInput): IssueMenuSection[] {
   const currentAssignee = actorKey(item.assignee)
 
@@ -133,6 +136,31 @@ export function buildIssueMenuSections({
           item.issueProjectId === project.id
         )
       ),
+    },
+    {
+      id: "cycle",
+      // Only cycles the row may join: workspace-wide ones, and those bound to
+      // the row's own container. A milestone of another repository is not an
+      // option a menu should offer and then have the write refuse.
+      entries:
+        cycles.length === 0
+          ? []
+          : [
+              entry("none", { kind: "cycle", cycleId: null }, item, running, !item.cycleId),
+              ...cycles
+                .filter(
+                  (cycle) => !cycle.issueProjectId || cycle.issueProjectId === item.issueProjectId
+                )
+                .map((cycle) =>
+                  entry(
+                    cycle.id,
+                    { kind: "cycle", cycleId: cycle.id },
+                    item,
+                    running,
+                    item.cycleId === cycle.id
+                  )
+                ),
+            ],
     },
   ]
 

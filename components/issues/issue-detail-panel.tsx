@@ -47,6 +47,7 @@ import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
 import { buildIssueMenuSections, canDeleteIssue } from "@/lib/issues/menu-model"
 import { cancelIssueRun } from "@/lib/issues/run/registry"
 import {
+  type IssueCycle,
   isActiveIssueRunStatus,
   type IssueActor,
   type IssueProject,
@@ -65,6 +66,7 @@ import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeb
 import { LinkGithubIssueDialog } from "./link-github-issue-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
+import { IssuePlanningSection } from "./planning/issue-planning-section"
 import { MentionBacklinksPanel } from "@/components/chat/mention-backlinks-chip"
 import { entityBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 
@@ -76,6 +78,14 @@ export interface IssueDetailPanelProps {
   labels?: readonly LabelRow[]
   projects?: readonly IssueProject[]
   assigneeOptions?: readonly AssigneeOption[]
+  /** Cycles of the workspace, for the planning section's cycle menu. */
+  cycles?: readonly IssueCycle[]
+  /** Every item on the board, for parent, blocker and sub-issue lookups. */
+  items?: readonly UnifiedIssueItem[]
+  /** Select another issue (a parent, a blocker, a child) in the console. */
+  onOpenIssue?: (unifiedId: string) => void
+  /** Open the create dialog with this issue as the parent. */
+  onCreateSubIssue?: () => void
   /** A run is in flight, which locks the status menu. */
   running?: boolean
   /**
@@ -102,6 +112,10 @@ export function IssueDetailPanel({
   labels: writableLabels = [],
   projects = [],
   assigneeOptions = [],
+  cycles = [],
+  items = [],
+  onOpenIssue,
+  onCreateSubIssue,
   running = false,
   githubRepos = [],
   onAction,
@@ -175,13 +189,15 @@ export function IssueDetailPanel({
         labels: writableLabels,
         projects,
         assigneeOptions,
+        cycles,
       }),
-    [item, running, writableLabels, projects, assigneeOptions]
+    [item, running, writableLabels, projects, assigneeOptions, cycles]
   )
   const presentation = useMenuEntryPresentation({
     labels: writableLabels,
     projects,
     assigneeOptions,
+    cycles,
   })
   const sectionsById = useMemo(
     () => new Map(sections.map((section) => [section.id, section])),
@@ -360,6 +376,17 @@ export function IssueDetailPanel({
             </span>
           </PropertyRow>
         </section>
+
+        <IssuePlanningSection
+          item={item}
+          items={items}
+          cycles={cycles}
+          cycleSection={sectionsById.get("cycle")}
+          presentation={presentation}
+          onAction={onAction}
+          onOpenIssue={onOpenIssue}
+          onCreateSubIssue={onCreateSubIssue}
+        />
 
         {item.description || onAction ? (
           <>

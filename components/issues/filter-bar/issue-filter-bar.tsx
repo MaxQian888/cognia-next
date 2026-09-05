@@ -81,6 +81,7 @@ export interface IssueFilterBarProps {
   onResetView?: () => void
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
+  cycleNamesById?: ReadonlyMap<string, string>
   /** Focus target for the `/` shortcut. */
   searchRef?: React.Ref<HTMLInputElement>
 }
@@ -100,6 +101,7 @@ export function IssueFilterBar({
   onResetView,
   labelsById,
   projectNamesById,
+  cycleNamesById,
   searchRef,
 }: IssueFilterBarProps) {
   const t = useTranslations("issues.toolbar")
@@ -337,6 +339,7 @@ export function IssueFilterBar({
         chips={chips}
         labelsById={labelsById}
         projectNamesById={projectNamesById}
+        cycleNamesById={cycleNamesById}
         assigneeLabels={assigneeLabels}
         onRemove={(chip) => onFilterChange(removeFilterChip(filter, chip))}
         onClearAll={() => onFilterChange(CLEARED_ISSUE_FILTER)}

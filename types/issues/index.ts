@@ -1,5 +1,5 @@
 /**
- * Issue tracker domain types (Dexie v170 / v171 / v174 — ADR-0132).
+ * Issue tracker domain types (Dexie v170 / v171 / v174 / v223 — ADR-0132).
  *
  * ─── NAMING INVARIANT — read before touching anything here ───────────────
  * This repo overloads "project" and "workspace" badly (17 distinct meanings
@@ -195,6 +195,97 @@ export interface IssueGithubRef {
   htmlUrl: string
 }
 
+/**
+ * A link from a local issue (or cycle) to a record in another system.
+ *
+ * `githubRef` predates this and stays as the denormalised GitHub entry: the
+ * github-loop adapter, the write-back dialog and the detail panel read it, and
+ * `linkIssueToGithub` writes both. Everything newer (Lark tasks, Bitable rows,
+ * pull requests, file imports, plugin providers) lives only here.
+ *
+ * `provider` is an open string on purpose. The built-ins are listed in
+ * `ISSUE_EXTERNAL_PROVIDERS`; a plugin sync provider uses its own id.
+ */
+export interface IssueExternalRef {
+  provider: string
+  /** Provider-native id: `owner/repo#12`, a task guid, a record id, a row hash. */
+  externalId: string
+  url?: string
+  label?: string
+  /** Last time the sync engine reconciled this ref, in either direction. */
+  syncedAt?: number
+  /** The remote `updated_at` observed at that reconciliation. */
+  remoteUpdatedAt?: number
+  /** Provider-private cursor data (etag, revision, section). */
+  meta?: Record<string, string | number>
+}
+
+export const ISSUE_EXTERNAL_PROVIDERS = [
+  "github",
+  "github-pr",
+  "lark-task",
+  "lark-bitable",
+  "import:csv",
+  "import:json",
+  "import:markdown",
+] as const
+
+/** The lookup key an `externalRefs` entry is indexed under (`*externalKeys`). */
+export function externalKeyOf(ref: Pick<IssueExternalRef, "provider" | "externalId">): string {
+  return `${ref.provider}:${ref.externalId}`
+}
+
+/**
+ * The `by` actor the sync engine writes with. A fourth `IssueActorKind` would
+ * ripple through the assignee picker, the collab narrowing and every IM card
+ * mapper for no gain, so the engine is an agent whose id carries a `sync:`
+ * prefix and this is the one place that prefix is known.
+ */
+export const SYNC_ACTOR_ID_PREFIX = "sync:"
+
+export function syncActorFor(provider: string, label?: string): IssueActor {
+  return { kind: "agent", id: `${SYNC_ACTOR_ID_PREFIX}${provider}`, ...(label ? { label } : {}) }
+}
+
+export function isSyncActor(actor: IssueActor | undefined | null): boolean {
+  return actor?.kind === "agent" && (actor.id?.startsWith(SYNC_ACTOR_ID_PREFIX) ?? false)
+}
+
+export const ISSUE_CYCLE_KINDS = ["cycle", "milestone"] as const
+
+export type IssueCycleKind = (typeof ISSUE_CYCLE_KINDS)[number]
+
+export const ISSUE_CYCLE_STATUSES = ["planned", "active", "completed"] as const
+
+export type IssueCycleStatus = (typeof ISSUE_CYCLE_STATUSES)[number]
+
+/**
+ * A time box (`cycle`) or a target (`milestone`) issues are planned into.
+ * One table for both: a GitHub milestone, a Projects v2 iteration and a Lark
+ * tasklist section all land here, and the board groups by either the same way.
+ *
+ * `issueProjectId` is optional: a cycle may span every container of the
+ * workspace (a team sprint) or belong to one (a repository milestone).
+ */
+export interface IssueCycle {
+  id: string
+  /** Owning workspace id. */
+  projectId: string
+  issueProjectId?: string
+  kind: IssueCycleKind
+  name: string
+  description?: string
+  status: IssueCycleStatus
+  /** Unix epoch ms. */
+  startsAt?: number
+  endsAt?: number
+  externalRefs: IssueExternalRef[]
+  /** `externalKeyOf(ref)` per entry, multiEntry-indexed. Written by the CRUD only. */
+  externalKeys: string[]
+  createdAt: number
+  updatedAt: number
+}
+
 /** The work item. Local rows are the only writable source of truth. */
 export interface Issue {
   id: string
@@ -230,6 +321,26 @@ export interface Issue {
   githubRef?: IssueGithubRef
   /** Set when the issue was filed from an IM conversation. */
   origin?: IssueOrigin
+  /** Parent issue id. Children render as sub-issues on the parent. */
+  parentId?: string
+  /**
+   * Issue ids that must finish before this one should start. `blocks` is
+   * derived. Optional on the type, like `externalRefs` and `externalKeys`,
+   * because rows written before v223 and rows arriving over companion sync
+   * from an older host carry none of the three. The CRUD always writes them
+   * and `issueRelations()` in `lib/issues/relations.ts` reads them as `[]`.
+   */
+  blockedBy?: string[]
+  /** Unix epoch ms, date precision. */
+  dueDate?: number
+  /** Effort in points. The unit is a display preference, never converted. */
+  estimate?: number
+  /** `IssueCycle.id` this issue is planned into. */
+  cycleId?: string
+  /** Links into other systems. `externalKeys` mirrors these for indexing. */
+  externalRefs?: IssueExternalRef[]
+  /** `externalKeyOf(ref)` for each entry of `externalRefs`. MultiEntry-indexed. */
+  externalKeys?: string[]
   createdAt: number
   updatedAt: number
   startedAt?: number
@@ -257,6 +368,17 @@ export type IssueEventKind =
   | "artifact_linked"
   | "github_linked"
   | "github_write_back"
+  | "parent_changed"
+  | "blocker_added"
+  | "blocker_removed"
+  | "due_date_changed"
+  | "estimate_changed"
+  | "cycle_changed"
+  | "external_linked"
+  | "external_unlinked"
+  | "synced_in"
+  | "sync_conflict"
+  | "sync_conflict_resolved"
 
 /**
  * Per-kind payload. Discriminated on `kind` so the activity timeline renders
@@ -286,6 +408,52 @@ export type IssueEventPayload =
       ref: IssueGithubRef
       by: IssueActor
     }
+  | { kind: "parent_changed"; from?: string; to?: string; by: IssueActor }
+  | { kind: "blocker_added"; blockerId: string; by: IssueActor }
+  | { kind: "blocker_removed"; blockerId: string; by: IssueActor }
+  | { kind: "due_date_changed"; from?: number; to?: number; by: IssueActor }
+  | { kind: "estimate_changed"; from?: number; to?: number; by: IssueActor }
+  | { kind: "cycle_changed"; from?: string; to?: string; by: IssueActor }
+  | { kind: "external_linked"; ref: IssueExternalRef; by: IssueActor }
+  | { kind: "external_unlinked"; ref: IssueExternalRef; by: IssueActor }
+  /** A remote change was applied to a local field by the sync engine. */
+  | { kind: "synced_in"; provider: string; field: IssueSyncField; by: IssueActor }
+  /**
+   * Both sides changed `field` since the last reconciliation. `winner` names
+   * the side whose value now stands. `loserValue` is kept verbatim so a person
+   * can put it back from the conflicts panel.
+   */
+  | {
+      kind: "sync_conflict"
+      provider: string
+      field: IssueSyncField
+      winner: "local" | "remote"
+      localValue: unknown
+      remoteValue: unknown
+      by: IssueActor
+    }
+  /** Answers one `sync_conflict` (by its event id). */
+  | {
+      kind: "sync_conflict_resolved"
+      conflictEventId: string
+      kept: "local" | "remote"
+      by: IssueActor
+    }
+
+/** The fields the sync engine reconciles. Keyed so an event can name one. */
+export const ISSUE_SYNC_FIELDS = [
+  "title",
+  "description",
+  "status",
+  "priority",
+  "assignee",
+  "labels",
+  "dueDate",
+  "estimate",
+  "cycle",
+] as const
+
+export type IssueSyncField = (typeof ISSUE_SYNC_FIELDS)[number]
 
 /**
  * One entry in an issue's activity trail. Append-only; cascade-deleted with

@@ -1,4 +1,13 @@
 jest.mock("@/lib/db/issues", () => ({
+  addIssueBlocker: jest.fn(async () => undefined),
+  addIssueComment: jest.fn(async () => undefined),
+  linkIssueExternal: jest.fn(async () => undefined),
+  removeIssueBlocker: jest.fn(async () => undefined),
+  setIssueCycle: jest.fn(async () => undefined),
+  setIssueDueDate: jest.fn(async () => undefined),
+  setIssueEstimate: jest.fn(async () => undefined),
+  setIssueParent: jest.fn(async () => undefined),
+  unlinkIssueExternal: jest.fn(async () => undefined),
   addIssueLabel: jest.fn(async () => undefined),
   deleteIssue: jest.fn(async () => undefined),
   moveIssue: jest.fn(async () => null),
@@ -9,6 +18,15 @@ jest.mock("@/lib/db/issues", () => ({
 }))
 
 import {
+  addIssueBlocker,
+  addIssueComment,
+  linkIssueExternal,
+  removeIssueBlocker,
+  setIssueCycle,
+  setIssueDueDate,
+  setIssueEstimate,
+  setIssueParent,
+  unlinkIssueExternal,
   addIssueLabel,
   deleteIssue,
   moveIssue,
@@ -164,6 +182,45 @@ describe("applyIssueBulkAction", () => {
 
     await applyIssueBulkAction([item()], { kind: "description", to: "Because" }, BY)
     expect(updateIssue).toHaveBeenCalledWith("s9", { description: "Because" }, BY)
+  })
+
+  it("routes the v223 planning and relation actions to their writers", async () => {
+    await applyIssueBulkAction([item({ sourceId: "p1" })], { kind: "cycle", cycleId: "c1" }, BY)
+    expect(setIssueCycle).toHaveBeenCalledWith("p1", "c1", BY)
+    await applyIssueBulkAction([item({ sourceId: "p2" })], { kind: "dueDate", to: 5 }, BY)
+    expect(setIssueDueDate).toHaveBeenCalledWith("p2", 5, BY)
+    await applyIssueBulkAction([item({ sourceId: "p3" })], { kind: "estimate", to: null }, BY)
+    expect(setIssueEstimate).toHaveBeenCalledWith("p3", null, BY)
+    await applyIssueBulkAction([item({ sourceId: "p4" })], { kind: "parent", parentId: "x" }, BY)
+    expect(setIssueParent).toHaveBeenCalledWith("p4", "x", BY)
+    await applyIssueBulkAction(
+      [item({ sourceId: "p5" })],
+      { kind: "addBlocker", blockerId: "b" },
+      BY
+    )
+    expect(addIssueBlocker).toHaveBeenCalledWith("p5", "b", BY)
+    await applyIssueBulkAction(
+      [item({ sourceId: "p6" })],
+      { kind: "removeBlocker", blockerId: "b" },
+      BY
+    )
+    expect(removeIssueBlocker).toHaveBeenCalledWith("p6", "b", BY)
+    const ref = { provider: "lark-task", externalId: "g" }
+    await applyIssueBulkAction([item({ sourceId: "p7" })], { kind: "linkExternal", ref }, BY)
+    expect(linkIssueExternal).toHaveBeenCalledWith("p7", ref, BY)
+    await applyIssueBulkAction([item({ sourceId: "p8" })], { kind: "unlinkExternal", ref }, BY)
+    expect(unlinkIssueExternal).toHaveBeenCalledWith("p8", ref, BY)
+    await applyIssueBulkAction([item({ sourceId: "p9" })], { kind: "comment", body: "hi" }, BY)
+    expect(addIssueComment).toHaveBeenCalledWith("p9", "hi", BY)
+  })
+
+  it("gates the planning actions on canEdit and comment on canComment", () => {
+    const readOnly = item({ capabilities: { ...FULL_ISSUE_CAPABILITIES, canEdit: false } })
+    expect(canApplyBulkAction(readOnly, { kind: "cycle", cycleId: null }, false).ok).toBe(false)
+    expect(canApplyBulkAction(readOnly, { kind: "parent", parentId: null }, false).ok).toBe(false)
+    expect(canApplyBulkAction(readOnly, { kind: "comment", body: "x" }, false).ok).toBe(true)
+    const mute = item({ capabilities: { ...FULL_ISSUE_CAPABILITIES, canComment: false } })
+    expect(canApplyBulkAction(mute, { kind: "comment", body: "x" }, false).ok).toBe(false)
   })
 
   it("refuses a title or description edit on a federated row", async () => {

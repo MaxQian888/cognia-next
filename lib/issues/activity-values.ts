@@ -14,6 +14,10 @@ export interface IssueActivityPayload {
   kind: string
   from?: unknown
   to?: unknown
+  /** Sync events (v223) name the remote side and the field they touched. */
+  provider?: unknown
+  field?: unknown
+  winner?: unknown
 }
 
 /** Translate function shape both shells already have from `useTranslations`. */
@@ -48,5 +52,14 @@ export function activityValues(
     }
     return ""
   }
-  return { from: localize(payload?.from), to: localize(payload?.to) }
+  const values: Record<string, string> = {
+    from: localize(payload?.from),
+    to: localize(payload?.to),
+  }
+  // Sync events (v223) carry three more named slots. Added only when present,
+  // so every older event still resolves to exactly the two the tests pin.
+  if (typeof payload?.provider === "string") values.provider = payload.provider
+  if (typeof payload?.field === "string") values.field = payload.field
+  if (typeof payload?.winner === "string") values.winner = t(`activitySide.${payload.winner}`)
+  return values
 }

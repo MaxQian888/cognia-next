@@ -51,6 +51,8 @@ export type IssueRunRefusalReason =
   | "run-active"
   /** The issue is done / canceled; runs only start on open issues. */
   | "issue-finished"
+  /** An open blocker stands in the way (spec 2026-09-06 D5). `detail` lists them. */
+  | "blocked"
   /** No adapter is registered under the requested id. */
   | "adapter-missing"
 

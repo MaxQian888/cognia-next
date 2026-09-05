@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { countApplicableItems, type IssueBulkAction } from "@/lib/issues/bulk-actions"
 import { ISSUE_PRIORITIES, ISSUE_STATUSES } from "@/types/issues"
-import type { IssueProject } from "@/types/issues"
+import type { IssueCycle, IssueProject } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { defaultLabelColor, type LabelRow } from "@/types/labels"
 import type { AssigneeOption } from "../assignee-picker"
@@ -39,6 +39,7 @@ export interface IssueBulkToolbarProps {
   labels: readonly LabelRow[]
   projects: readonly IssueProject[]
   assigneeOptions: readonly AssigneeOption[]
+  cycles?: readonly IssueCycle[]
   onAction: (action: IssueBulkAction) => void
   onRequestDelete: () => void
   /** Ticks every row currently on screen; a second call clears. */
@@ -54,6 +55,7 @@ export function IssueBulkToolbar({
   labels,
   projects,
   assigneeOptions,
+  cycles = [],
   onAction,
   onRequestDelete,
   onToggleAll,
@@ -237,6 +239,35 @@ export function IssueBulkToolbar({
               >
                 <span aria-hidden>{project.icon ?? "📁"}</span>
                 <span className="truncate">{project.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+
+      {cycles.length > 0 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" data-testid="issue-bulk-cycle">
+              {t("planning.cycle")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuItem
+              disabled={applicable({ kind: "cycle", cycleId: null }) === 0}
+              onSelect={() => onAction({ kind: "cycle", cycleId: null })}
+              data-testid="issue-bulk-cycle-none"
+            >
+              <span className="truncate italic">{t("planning.noCycle")}</span>
+            </DropdownMenuItem>
+            {cycles.map((cycle) => (
+              <DropdownMenuItem
+                key={cycle.id}
+                disabled={applicable({ kind: "cycle", cycleId: cycle.id }) === 0}
+                onSelect={() => onAction({ kind: "cycle", cycleId: cycle.id })}
+                data-testid={`issue-bulk-cycle-${cycle.id}`}
+              >
+                <span className="truncate">{cycle.name}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

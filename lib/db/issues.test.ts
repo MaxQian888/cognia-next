@@ -8,8 +8,19 @@ import { createDbTestFixture } from "./test-fixture"
 import { createIssueProject } from "./issue-projects"
 import { listIssueComments, listIssueEvents } from "./issue-events"
 import {
+  addIssueBlocker,
   addIssueComment,
   addIssueLabel,
+  getIssueByExternalKey,
+  linkIssueExternal,
+  mapIssuesByExternalProvider,
+  removeIssueBlocker,
+  setIssueCycle,
+  setIssueDueDate,
+  setIssueEstimate,
+  setIssueParent,
+  touchIssueExternalRef,
+  unlinkIssueExternal,
   applyRuntimeIssueStatus,
   createIssue,
   deleteIssue,
@@ -444,6 +455,176 @@ describe("applyRuntimeIssueStatus", () => {
     await applyRuntimeIssueStatus(reviewing.id, "todo", AGENT)
     row = (await getIssue(reviewing.id))!
     expect(row.status).toBe("in_review")
+  })
+})
+
+describe("relations (v223)", () => {
+  it("creates with the three relation arrays present and empty", async () => {
+    const issue = await make()
+    expect(issue.blockedBy).toEqual([])
+    expect(issue.externalRefs).toEqual([])
+    expect(issue.externalKeys).toEqual([])
+  })
+
+  it("sets, moves and clears the parent with one event each", async () => {
+    const parent = await make({ title: "parent" })
+    const other = await make({ title: "other" })
+    const child = await make({ title: "child" })
+    await setIssueParent(child.id, parent.id, HUMAN)
+    await setIssueParent(child.id, parent.id, HUMAN) // no-op
+    await setIssueParent(child.id, other.id, HUMAN)
+    await setIssueParent(child.id, null, HUMAN)
+    expect((await getIssue(child.id))!.parentId).toBeUndefined()
+    const events = await listIssueEvents({ issueId: child.id })
+    const parents = events.filter((e) => e.kind === "parent_changed").map((e) => e.payload)
+    expect(parents).toEqual([
+      { kind: "parent_changed", to: parent.id, by: HUMAN },
+      { kind: "parent_changed", from: parent.id, to: other.id, by: HUMAN },
+      { kind: "parent_changed", from: other.id, by: HUMAN },
+    ])
+  })
+
+  it("refuses a parent loop, itself, an unknown issue and another workspace", async () => {
+    const a = await make()
+    const b = await make()
+    await setIssueParent(b.id, a.id, HUMAN)
+    await expect(setIssueParent(a.id, b.id, HUMAN)).rejects.toThrow(/ancestor/)
+    await expect(setIssueParent(a.id, a.id, HUMAN)).rejects.toThrow(/own parent/)
+    await expect(setIssueParent(a.id, "ghost", HUMAN)).rejects.toThrow(/Unknown issue/)
+    const otherProject = await createIssueProject({ projectId: "w2", name: "Venus", key: "VEN" })
+    const elsewhere = await createIssue({
+      projectId: "w2",
+      issueProjectId: otherProject.id,
+      title: "far",
+      createdBy: HUMAN,
+    })
+    await expect(setIssueParent(a.id, elsewhere.id, HUMAN)).rejects.toThrow(/same workspace/)
+  })
+
+  it("adds and removes blockers idempotently, and lists them by index", async () => {
+    const blocker = await make()
+    const target = await make()
+    await addIssueBlocker(target.id, blocker.id, HUMAN)
+    await addIssueBlocker(target.id, blocker.id, HUMAN)
+    expect((await getIssue(target.id))!.blockedBy).toEqual([blocker.id])
+    expect(
+      (await getDb().issues.where("blockedBy").equals(blocker.id).primaryKeys()).map(String)
+    ).toEqual([target.id])
+    await expect(addIssueBlocker(target.id, target.id, HUMAN)).rejects.toThrow(/itself/)
+    await removeIssueBlocker(target.id, blocker.id, HUMAN)
+    await removeIssueBlocker(target.id, blocker.id, HUMAN)
+    expect((await getIssue(target.id))!.blockedBy).toEqual([])
+    expect((await kindsOf(target.id)).slice(1)).toEqual(["blocker_added", "blocker_removed"])
+  })
+
+  it("deleting an issue detaches its children and drops it from every blockedBy", async () => {
+    const parent = await make()
+    const child = await make()
+    const blocked = await make()
+    await setIssueParent(child.id, parent.id, HUMAN)
+    await addIssueBlocker(blocked.id, parent.id, HUMAN)
+    await deleteIssue(parent.id)
+    expect((await getIssue(child.id))!.parentId).toBeUndefined()
+    expect((await getIssue(blocked.id))!.blockedBy).toEqual([])
+  })
+
+  it("sets and clears due date and estimate with from/to on the trail", async () => {
+    const issue = await make()
+    await setIssueDueDate(issue.id, 1000, HUMAN)
+    await setIssueDueDate(issue.id, 1000, HUMAN)
+    await setIssueDueDate(issue.id, null, HUMAN)
+    await setIssueEstimate(issue.id, 3, HUMAN)
+    await setIssueEstimate(issue.id, 0, HUMAN)
+    await setIssueEstimate(issue.id, null, HUMAN)
+    await expect(setIssueEstimate(issue.id, -1, HUMAN)).rejects.toThrow(/non-negative/)
+    const row = (await getIssue(issue.id))!
+    expect(row.dueDate).toBeUndefined()
+    expect(row.estimate).toBeUndefined()
+    expect((await kindsOf(issue.id)).slice(1)).toEqual([
+      "due_date_changed",
+      "due_date_changed",
+      "estimate_changed",
+      "estimate_changed",
+      "estimate_changed",
+    ])
+  })
+
+  it("plans into a cycle of the same workspace only", async () => {
+    const { createIssueCycle } = await import("./issue-cycles")
+    const cycle = await createIssueCycle({ projectId: "w1", kind: "cycle", name: "S1" })
+    const foreign = await createIssueCycle({ projectId: "w2", kind: "cycle", name: "S2" })
+    const issue = await make()
+    await setIssueCycle(issue.id, cycle.id, HUMAN)
+    expect((await getIssue(issue.id))!.cycleId).toBe(cycle.id)
+    await expect(setIssueCycle(issue.id, foreign.id, HUMAN)).rejects.toThrow(/same workspace/)
+    await expect(setIssueCycle(issue.id, "ghost", HUMAN)).rejects.toThrow(/Unknown cycle/)
+    await setIssueCycle(issue.id, null, HUMAN)
+    expect((await getIssue(issue.id))!.cycleId).toBeUndefined()
+  })
+})
+
+describe("external refs (v223)", () => {
+  it("links, dedupes on provider:externalId, and finds by key", async () => {
+    const issue = await make()
+    await linkIssueExternal(issue.id, { provider: "lark-task", externalId: "g1", url: "u" }, HUMAN)
+    await linkIssueExternal(
+      issue.id,
+      { provider: "lark-task", externalId: "g1", syncedAt: 5 },
+      HUMAN
+    )
+    const row = (await getIssue(issue.id))!
+    expect(row.externalRefs).toEqual([{ provider: "lark-task", externalId: "g1", syncedAt: 5 }])
+    expect(row.externalKeys).toEqual(["lark-task:g1"])
+    expect((await getIssueByExternalKey("lark-task", "g1"))!.id).toBe(issue.id)
+    expect((await kindsOf(issue.id)).filter((k) => k === "external_linked")).toHaveLength(1)
+    const byProvider = await mapIssuesByExternalProvider("lark-task", "w1")
+    expect([...byProvider.keys()]).toEqual(["g1"])
+    expect((await mapIssuesByExternalProvider("lark-task", "w9")).size).toBe(0)
+  })
+
+  it("keeps githubRef as the denormalised github entry, both ways", async () => {
+    const issue = await make({ githubRef: { repoFullName: "o/r", number: 7, htmlUrl: "h" } })
+    expect(issue.externalKeys).toEqual(["github:o/r#7"])
+    await linkIssueToGithub(issue.id, { repoFullName: "o/r", number: 8, htmlUrl: "h8" }, HUMAN)
+    let row = (await getIssue(issue.id))!
+    expect(row.externalKeys).toEqual(["github:o/r#8"])
+    expect(row.githubRef?.number).toBe(8)
+    await unlinkIssueExternal(issue.id, { provider: "github", externalId: "o/r#8" }, HUMAN)
+    row = (await getIssue(issue.id))!
+    expect(row.githubRef).toBeUndefined()
+    expect(row.externalRefs).toEqual([])
+    expect((await kindsOf(issue.id)).at(-1)).toBe("external_unlinked")
+  })
+
+  it("touches sync bookkeeping without an event or an updatedAt bump", async () => {
+    const issue = await make()
+    await linkIssueExternal(issue.id, { provider: "github", externalId: "o/r#1" }, HUMAN)
+    const before = (await getIssue(issue.id))!
+    await touchIssueExternalRef(
+      issue.id,
+      { provider: "github", externalId: "o/r#1" },
+      {
+        syncedAt: 99,
+        remoteUpdatedAt: 98,
+        meta: { etag: "abc" },
+      }
+    )
+    const after = (await getIssue(issue.id))!
+    expect(after.updatedAt).toBe(before.updatedAt)
+    expect(after.externalRefs?.[0]).toMatchObject({
+      syncedAt: 99,
+      remoteUpdatedAt: 98,
+      meta: { etag: "abc" },
+    })
+    expect((await kindsOf(issue.id)).filter((k) => k === "external_linked")).toHaveLength(1)
+  })
+
+  it("lists by parent and by cycle through their indexes", async () => {
+    const parent = await make()
+    const child = await make()
+    await setIssueParent(child.id, parent.id, HUMAN)
+    expect((await listIssues({ parentId: parent.id })).map((row) => row.id)).toEqual([child.id])
+    expect(await listIssues({ cycleId: "none" })).toEqual([])
   })
 })
 

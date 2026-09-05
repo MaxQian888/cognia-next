@@ -58,6 +58,12 @@ export function toUnifiedIssue(issue: Issue): UnifiedIssueItem {
       deepLinkHref: issueHref(issue.id),
     },
     capabilities: FULL_ISSUE_CAPABILITIES,
+    ...(issue.parentId ? { parentId: issue.parentId } : {}),
+    ...(issue.blockedBy?.length ? { blockedBy: issue.blockedBy } : {}),
+    ...(issue.dueDate !== undefined ? { dueDate: issue.dueDate } : {}),
+    ...(issue.estimate !== undefined ? { estimate: issue.estimate } : {}),
+    ...(issue.cycleId ? { cycleId: issue.cycleId } : {}),
+    ...(issue.externalRefs?.length ? { externalRefs: issue.externalRefs } : {}),
   }
 }
 

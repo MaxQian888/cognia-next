@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/context-menu"
 import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
 import { buildIssueMenuSections, canDeleteIssue } from "@/lib/issues/menu-model"
-import type { IssueProject } from "@/types/issues"
+import type { IssueCycle, IssueProject } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import type { AssigneeOption } from "./assignee-picker"
@@ -51,6 +51,7 @@ export interface IssueContextMenuProps {
   labels: readonly LabelRow[]
   projects: readonly IssueProject[]
   assigneeOptions: readonly AssigneeOption[]
+  cycles?: readonly IssueCycle[]
   onAction: (action: IssueBulkAction) => void
   onOpen?: () => void
   /** Opens the confirmation dialog; deletion never happens from the menu itself. */
@@ -64,6 +65,7 @@ export function IssueContextMenu({
   labels,
   projects,
   assigneeOptions,
+  cycles,
   onAction,
   onOpen,
   onRequestDelete,
@@ -72,10 +74,10 @@ export function IssueContextMenu({
   const t = useTranslations("issues")
 
   const sections = useMemo(
-    () => buildIssueMenuSections({ item, running, labels, projects, assigneeOptions }),
-    [item, running, labels, projects, assigneeOptions]
+    () => buildIssueMenuSections({ item, running, labels, projects, assigneeOptions, cycles }),
+    [item, running, labels, projects, assigneeOptions, cycles]
   )
-  const presentation = useMenuEntryPresentation({ labels, projects, assigneeOptions })
+  const presentation = useMenuEntryPresentation({ labels, projects, assigneeOptions, cycles })
 
   return (
     <ContextMenu>

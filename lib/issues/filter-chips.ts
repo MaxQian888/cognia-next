@@ -48,6 +48,7 @@ export function collectActiveFilterChips(filter: IssueBoardFilter): IssueFilterC
   for (const assignee of filter.assignees) chips.push(chip("assignees", assignee))
   for (const source of filter.sources) chips.push(chip("sources", source))
   for (const projectId of filter.issueProjectIds) chips.push(chip("issueProjectIds", projectId))
+  for (const cycleId of filter.cycleIds ?? []) chips.push(chip("cycleIds", cycleId))
   return chips
 }
 
@@ -75,16 +76,21 @@ export function removeFilterChip(
         ...filter,
         issueProjectIds: filter.issueProjectIds.filter((v) => v !== chipToRemove.value),
       }
+    case "cycleIds":
+      return {
+        ...filter,
+        cycleIds: (filter.cycleIds ?? []).filter((v) => v !== chipToRemove.value),
+      }
   }
 }
 
 /** Toggle one value of a multi-select facet. Used by the rail and the menu alike. */
 export function toggleFilterValue(
   filter: IssueBoardFilter,
-  facet: "labelIds" | "priorities" | "assignees" | "sources" | "issueProjectIds",
+  facet: "labelIds" | "priorities" | "assignees" | "sources" | "issueProjectIds" | "cycleIds",
   value: string
 ): IssueBoardFilter {
-  const current = filter[facet] as readonly string[]
+  const current = (filter[facet] ?? []) as readonly string[]
   const next = current.includes(value)
     ? current.filter((candidate) => candidate !== value)
     : [...current, value]

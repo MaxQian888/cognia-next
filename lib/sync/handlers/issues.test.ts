@@ -10,6 +10,7 @@ import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 import {
   reviveProject,
   syncIssueEvents,
+  syncIssueCycles,
   syncIssueRuns,
   syncIssues,
   syncLabels,
@@ -166,5 +167,30 @@ describe("syncIssueRuns", () => {
     )
     expect(out.ok).toBe(true)
     expect(await getDb().issueRuns.get("r1")).toMatchObject({ issueId: "a", status: "succeeded" })
+  })
+})
+
+describe("syncIssueCycles", () => {
+  it("mirrors cycles so the phone can name the grouping header", async () => {
+    const out = await syncIssueCycles(
+      makeTransport([
+        {
+          id: "c1",
+          projectId: "ws1",
+          kind: "cycle",
+          name: "Sprint 1",
+          status: "active",
+          externalRefs: [],
+          externalKeys: [],
+          createdAt: 1,
+          updatedAt: 9,
+        },
+      ]),
+      { since: 0 }
+    )
+    expect(out.ok).toBe(true)
+    expect(await getDb().issueCycles.get("c1")).toMatchObject({ name: "Sprint 1", kind: "cycle" })
+    await syncIssueCycles(makeTransport([], ["c1"]), { since: 0 })
+    expect(await getDb().issueCycles.get("c1")).toBeUndefined()
   })
 })

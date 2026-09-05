@@ -27,15 +27,19 @@ import type { KeyboardEvent } from "react"
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
 import { actorKey } from "@/lib/issues/board-model"
+import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
 import type { SquadRunRef } from "@/lib/issues/run/running"
 import { cn } from "@/lib/utils"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
 import { SquadRunChip } from "./squad-run-chip"
+import { PlanningBadges } from "../planning/planning-badges"
 
 export interface IssueCardVisualProps {
   item: UnifiedIssueItem
+  /** Blocked, sub-issue progress, due state. Absent hint prints nothing. */
+  hint?: IssuePlanningHint
   /** Resolved label rows for `item.labelIds`; unresolved ids are simply absent. */
   labels?: readonly LabelRow[]
   /** Display name for `item.issueProjectId`, when the caller can resolve it. */
@@ -59,6 +63,7 @@ export interface IssueCardVisualProps {
  */
 export function IssueCardVisual({
   item,
+  hint,
   labels,
   projectName,
   selected,
@@ -119,6 +124,8 @@ export function IssueCardVisual({
 
       <h3 className="line-clamp-2 text-sm font-semibold leading-snug">{item.title}</h3>
 
+      <PlanningBadges item={item} hint={hint} />
+
       {labels && labels.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {labels.map((label) => (
@@ -150,6 +157,7 @@ export function IssueCardVisual({
 
 export interface IssueCardProps {
   item: UnifiedIssueItem
+  hint?: IssuePlanningHint
   labels?: readonly LabelRow[]
   projectName?: string
   selected?: boolean
@@ -160,6 +168,7 @@ export interface IssueCardProps {
 
 export function IssueCard({
   item,
+  hint,
   labels,
   projectName,
   selected,
@@ -204,6 +213,7 @@ export function IssueCard({
     >
       <IssueCardVisual
         item={item}
+        hint={hint}
         labels={labels}
         projectName={projectName}
         selected={selected}

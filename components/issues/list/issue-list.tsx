@@ -24,6 +24,7 @@ import type { IssueListDensity } from "@/lib/issues/views"
 import type { IssuePriority, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
+import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
 import { IssueRow } from "./issue-row"
 
 export interface IssueListProps {
@@ -33,6 +34,7 @@ export interface IssueListProps {
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
   runningIds?: ReadonlySet<string>
+  planningHints?: ReadonlyMap<string, IssuePlanningHint>
   /**
    * `actorKey` → display name, for the assignee grouping's headings. Without
    * it a group headed by an agent or a squad shows the raw Character id.
@@ -60,6 +62,7 @@ export function IssueList({
   labelsById,
   projectNamesById,
   runningIds,
+  planningHints,
   assigneeLabels,
   selectedId,
   onSelect,
@@ -148,6 +151,7 @@ export function IssueList({
                   checked={checkedIds?.has(item.unifiedId) ?? false}
                   cursored={cursorId === item.unifiedId}
                   running={runningIds?.has(item.unifiedId)}
+                  hint={planningHints?.get(item.unifiedId)}
                   selectable={Boolean(onToggleCheck)}
                   onOpen={() => onSelect?.(item.unifiedId)}
                   onToggleCheck={(modifiers) => onToggleCheck?.(item.unifiedId, modifiers)}

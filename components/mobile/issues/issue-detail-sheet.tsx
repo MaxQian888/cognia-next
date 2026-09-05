@@ -32,12 +32,18 @@ import { activityValues } from "@/lib/issues/activity-values"
 import type { IssueEvent, IssueRun } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
+import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
 
 export interface IssueDetailSheetProps {
   item: UnifiedIssueItem | null
   onOpenChange: (open: boolean) => void
   labelsById: ReadonlyMap<string, LabelRow>
   projectNamesById: ReadonlyMap<string, string>
+  /** Cycle names, for the planning row. Absent prints the raw id. */
+  cycleNamesById?: ReadonlyMap<string, string>
+  /** Every local item, so parent and blockers print identifiers, not ids. */
+  items?: readonly UnifiedIssueItem[]
+  hint?: IssuePlanningHint
 }
 
 export function IssueDetailSheet({
@@ -45,6 +51,9 @@ export function IssueDetailSheet({
   onOpenChange,
   labelsById,
   projectNamesById,
+  cycleNamesById,
+  items = [],
+  hint,
 }: IssueDetailSheetProps) {
   const t = useTranslations("issues")
 
@@ -71,6 +80,11 @@ export function IssueDetailSheet({
   const labels = (item?.labelIds ?? [])
     .map((id) => labelsById.get(id))
     .filter((label): label is LabelRow => Boolean(label))
+  const identifierOf = (localId: string) =>
+    items.find((candidate) => candidate.kind === "local" && candidate.sourceId === localId)
+      ?.identifier ?? localId
+  const parentIdentifier = item?.parentId ? identifierOf(item.parentId) : undefined
+  const blockerIdentifiers = (item?.blockedBy ?? []).map(identifierOf)
 
   return (
     <Sheet open={item !== null} onOpenChange={onOpenChange}>
@@ -123,6 +137,73 @@ export function IssueDetailSheet({
                       <LabelChip key={label.id} label={label} className="h-5 text-[10px]" />
                     ))}
                   </span>
+                </Row>
+              ) : null}
+              {item.cycleId ? (
+                <Row label={t("planning.cycle")}>
+                  <span data-testid="issues-mobile-detail-cycle">
+                    {cycleNamesById?.get(item.cycleId) ?? item.cycleId}
+                  </span>
+                </Row>
+              ) : null}
+              {item.dueDate !== undefined ? (
+                <Row label={t("planning.dueDate")}>
+                  <span data-testid="issues-mobile-detail-due">
+                    {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+                      item.dueDate
+                    )}
+                  </span>
+                </Row>
+              ) : null}
+              {item.estimate !== undefined ? (
+                <Row label={t("planning.estimate")}>
+                  <span data-testid="issues-mobile-detail-estimate">
+                    {t("planning.points", { count: item.estimate })}
+                  </span>
+                </Row>
+              ) : null}
+              {parentIdentifier ? (
+                <Row label={t("planning.parent")}>
+                  <span className="font-mono text-xs" data-testid="issues-mobile-detail-parent">
+                    {parentIdentifier}
+                  </span>
+                </Row>
+              ) : null}
+              {blockerIdentifiers.length > 0 ? (
+                <Row label={t("planning.blockedBy")}>
+                  <span className="flex flex-wrap gap-1" data-testid="issues-mobile-detail-blockers">
+                    {blockerIdentifiers.map((identifier) => (
+                      <Badge
+                        key={identifier}
+                        variant={hint?.blocked ? "destructive" : "outline"}
+                        className="h-5 px-1.5 font-mono text-[10px] font-normal"
+                      >
+                        {identifier}
+                      </Badge>
+                    ))}
+                  </span>
+                </Row>
+              ) : null}
+              {(item.externalRefs ?? []).length > 0 ? (
+                <Row label={t("planning.links")}>
+                  <ul className="flex flex-col gap-1" data-testid="issues-mobile-detail-links">
+                    {(item.externalRefs ?? []).map((ref) => (
+                      <li key={`${ref.provider}:${ref.externalId}`} className="truncate text-xs">
+                        {ref.url ? (
+                          <a
+                            href={ref.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="text-primary underline-offset-4 hover:underline"
+                          >
+                            {ref.label ?? ref.externalId}
+                          </a>
+                        ) : (
+                          (ref.label ?? ref.externalId)
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </Row>
               ) : null}
 

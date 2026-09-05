@@ -38884,6 +38884,7 @@
               "labels",
               "issueEvents",
               "issueRuns",
+              "issueCycles",
               "connectorHeartbeats",
               "platformIdentities",
               "connectorCallbackBindings",
@@ -48499,5 +48500,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "79bc0931a430147d888fcf52354a0d6cb0aad4a5262741d0708a3d3db0377721"
+  "catalogHash": "d6adc413f732179af9e5a640fa2029dba02a68f13abc1fc8f450911709b8a2c3"
 }

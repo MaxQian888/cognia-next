@@ -70669,6 +70669,7 @@ paths:
                     - labels
                     - issueEvents
                     - issueRuns
+                    - issueCycles
                     - connectorHeartbeats
                     - platformIdentities
                     - connectorCallbackBindings

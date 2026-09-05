@@ -26,7 +26,7 @@
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { Project } from "@/types"
-import type { Issue, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
+import type { Issue, IssueCycle, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
 
 import type { SyncCursor, SyncOutcome } from "../types"
@@ -124,6 +124,19 @@ export function syncIssueEvents(transport: Transport, cursor: SyncCursor): Promi
 export function syncIssueRuns(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
   return runSyncHandler<IssueRun>(
     { table: "issueRuns", getTable: () => getDb().issueRuns as never },
+    transport,
+    cursor
+  )
+}
+
+/**
+ * Pull cycles and milestones. The board and the rail group by `cycleId`, and
+ * a phone with the issues but not the cycles would print raw ids in the
+ * grouping header the way it once printed raw label ids.
+ */
+export function syncIssueCycles(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
+  return runSyncHandler<IssueCycle>(
+    { table: "issueCycles", getTable: () => getDb().issueCycles as never },
     transport,
     cursor
   )

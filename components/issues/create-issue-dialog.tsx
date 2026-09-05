@@ -58,6 +58,10 @@ export interface CreateIssueDialogProps {
   projects: readonly IssueProject[]
   /** Column the user clicked "+" on. */
   status?: IssueStatus
+  /** Create as a sub-issue of this local issue (v223). */
+  parent?: { id: string; identifier: string; issueProjectId: string }
+  /** Plan the new issue into this cycle (v223). */
+  cycleId?: string
   onCreated?: (issueId: string) => void
 }
 
@@ -67,6 +71,8 @@ export function CreateIssueDialog({
   projectId,
   projects,
   status = "backlog",
+  parent,
+  cycleId,
   onCreated,
 }: CreateIssueDialogProps) {
   const t = useTranslations("issues")
@@ -108,8 +114,11 @@ export function CreateIssueDialog({
     void getCollabWorkspace(projectId).then((workspace) => setSharedOrgId(workspace?.orgId ?? null))
   }, [open, projectId])
 
-  /** Falls back to the first container until the user picks another. */
-  const selectedProjectId = issueProjectId || (projects[0]?.id ?? "")
+  /**
+   * Falls back to the parent's container, then the first one, until the user
+   * picks another: a sub-issue almost always lives beside its parent.
+   */
+  const selectedProjectId = issueProjectId || parent?.issueProjectId || (projects[0]?.id ?? "")
 
   /**
    * Name + key validation is shared with the projects console's own create
@@ -172,6 +181,8 @@ export function CreateIssueDialog({
         ...(assignee ? { assignee } : {}),
         status,
         createdBy: { kind: "human" },
+        ...(parent ? { parentId: parent.id } : {}),
+        ...(cycleId ? { cycleId } : {}),
       })
 
       setTitle("")
@@ -193,6 +204,11 @@ export function CreateIssueDialog({
         <DialogHeader>
           <DialogTitle>{t("create.title")}</DialogTitle>
           {needsProject ? <DialogDescription>{t("create.noProject")}</DialogDescription> : null}
+          {parent ? (
+            <DialogDescription data-testid="create-issue-parent">
+              {t("create.subIssueOf", { identifier: parent.identifier })}
+            </DialogDescription>
+          ) : null}
         </DialogHeader>
 
         <div className="flex flex-col gap-4">

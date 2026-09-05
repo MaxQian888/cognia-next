@@ -26,6 +26,8 @@ import type { IssueListDensity } from "@/lib/issues/views"
 import { cn } from "@/lib/utils"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
+import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
+import { PlanningBadges } from "../planning/planning-badges"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
 
 /** How many label chips fit before the rest collapse into a "+N". */
@@ -42,6 +44,7 @@ export interface IssueRowProps {
   /** The keyboard cursor is on this row. */
   cursored: boolean
   running?: boolean
+  hint?: IssuePlanningHint
   /** Bulk selection is available at all (false for a federated-only list). */
   selectable?: boolean
   onOpen: () => void
@@ -59,6 +62,7 @@ export function IssueRow({
   checked,
   cursored,
   running,
+  hint,
   selectable = true,
   onOpen,
   onToggleCheck,
@@ -145,6 +149,7 @@ export function IssueRow({
             {t("list.moreLabels", { count: hiddenLabelCount })}
           </Badge>
         ) : null}
+        <PlanningBadges item={item} hint={hint} />
       </span>
 
       <span

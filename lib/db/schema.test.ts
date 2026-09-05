@@ -918,7 +918,17 @@ describe("getDb", () => {
         "[assigneeKind+assigneeId]",
         "[issueProjectId+status]",
         "labelIds",
+        // v223: hierarchy, planning and the external-ref lookup.
+        "parentId",
+        "cycleId",
+        "dueDate",
+        "blockedBy",
+        "externalKeys",
       ])
+    )
+    expect(db.issues.schema.indexes.find((index) => index.name === "blockedBy")?.multi).toBe(true)
+    expect(db.issues.schema.indexes.find((index) => index.name === "externalKeys")?.multi).toBe(
+      true
     )
     // Printed identifiers are shared into commits and chat; a duplicate would
     // make `MERC-2` ambiguous, so uniqueness is enforced by the index.
@@ -1451,6 +1461,29 @@ describe("getDb", () => {
     // joinable to its span tree.
     const byRun = await db.sessionUsage.where("runId").equals("run-1").toArray()
     expect(byRun.map((r) => r.messageId)).toEqual(["m-frozen"])
+  })
+
+  it("v223 opens the cycles table with the indexes the rail and the sync engine query", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(223)
+    expect(db.issueCycles.schema.primKey.name).toBe("id")
+    expect(db.issueCycles.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "issueProjectId",
+        "kind",
+        "status",
+        "startsAt",
+        "endsAt",
+        "updatedAt",
+        "externalKeys",
+      ])
+    )
+    expect(
+      db.issueCycles.schema.indexes.find((index) => index.name === "externalKeys")?.multi
+    ).toBe(true)
   })
 
   it("v174 opens the issue runs table with the indexes the run bridge queries", async () => {

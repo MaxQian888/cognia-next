@@ -14243,13 +14243,21 @@
     "activity": {
       "artifact_linked": "关联了一个产物",
       "assigned": "将其指派给 {to}",
+      "blocker_added": "添加了阻塞议题",
+      "blocker_removed": "移除了阻塞议题",
       "commented": "发表了评论",
       "created": "创建了这个议题",
+      "cycle_changed": "移到了另一个迭代",
       "description_changed": "编辑了描述",
+      "due_date_changed": "更改了截止日期",
+      "estimate_changed": "更改了估点",
+      "external_linked": "关联了外部记录",
+      "external_unlinked": "移除了外部关联",
       "github_linked": "关联了一个 GitHub 议题",
       "github_write_back": "向 GitHub 推送了一次变更",
       "label_added": "添加了标签",
       "label_removed": "移除了标签",
+      "parent_changed": "更改了父议题",
       "priority_changed": "将优先级从「{from}」改为「{to}」",
       "project_changed": "将其移动到了另一个项目",
       "reassigned": "将负责人从 {from} 改为 {to}",
@@ -14257,8 +14265,15 @@
       "run_started": "启动了一次 Agent 运行",
       "run_succeeded": "完成了一次 Agent 运行",
       "status_changed": "将状态从「{from}」改为「{to}」",
+      "sync_conflict": "同步冲突后保留了 {field} 的{winner}值",
+      "sync_conflict_resolved": "解决了一次同步冲突",
+      "synced_in": "应用了来自 {provider} 的更改",
       "title_changed": "重命名了这个议题",
       "unassigned": "移除了负责人"
+    },
+    "activitySide": {
+      "local": "本地",
+      "remote": "远端"
     },
     "actor": {
       "agent": "Agent",
@@ -14328,11 +14343,39 @@
       "pickExistingProject": "← 选择已有项目",
       "projectLabel": "项目",
       "sharedUnavailable": "该共享工作区暂时无法新建议题。",
+      "subIssueOf": "{identifier} 的子议题",
       "submit": "创建议题",
       "title": "新建议题",
       "titleLabel": "标题",
       "titlePlaceholder": "议题标题",
       "trigger": "新建议题"
+    },
+    "cycles": {
+      "cancel": "取消",
+      "create": "创建",
+      "delete": "删除 {name}",
+      "deleteConfirm": "删除（{count} 个议题将移出迭代）",
+      "empty": "还没有迭代。创建一个以便把议题排进去。",
+      "endsAt": "结束",
+      "kind": "类型",
+      "kindLabel": {
+        "cycle": "迭代",
+        "milestone": "里程碑"
+      },
+      "manageTitle": "迭代与里程碑",
+      "name": "名称",
+      "namePlaceholder": "Sprint 12、v2.0…",
+      "progress": "完成 {done}/{total} · {pointsDone}/{points} 点",
+      "progressBar": "迭代进度",
+      "scope": "范围",
+      "scopeWorkspace": "整个工作区",
+      "startsAt": "开始",
+      "status": "状态",
+      "statusLabel": {
+        "active": "进行中",
+        "completed": "已完成",
+        "planned": "计划中"
+      }
     },
     "delete": {
       "bodyMany": "它们的活动记录与运行历史都会一并删除，且无法恢复。",
@@ -14438,6 +14481,52 @@
         "title": "{identifier} 已移至 {to}"
       }
     },
+    "planning": {
+      "addBlocker": "添加阻塞议题",
+      "addSubIssue": "新建子议题",
+      "blocked": "已阻塞",
+      "blockedBy": "被阻塞于",
+      "blockedByList": "被 {list} 阻塞",
+      "blocks": "阻塞了",
+      "clearDueDate": "清除截止日期",
+      "clearParent": "移除父议题",
+      "cycle": "迭代",
+      "due": {
+        "overdue": "已逾期",
+        "soon": "即将到期",
+        "today": "今天到期"
+      },
+      "dueDate": "截止",
+      "estimate": "估点",
+      "estimatePlaceholder": "点",
+      "links": "关联",
+      "noBlockers": "没有阻塞项",
+      "noCycle": "未排入迭代",
+      "noDueDate": "无截止日期",
+      "noEstimate": "未估点",
+      "noMatch": "没有匹配的议题",
+      "noParent": "顶级议题",
+      "noSubIssues": "没有子议题",
+      "parent": "父议题",
+      "pickParent": "选择父议题",
+      "points": "{count} 点",
+      "provider": {
+        "github": "GitHub",
+        "github-pr": "拉取请求",
+        "import_csv": "CSV 导入",
+        "import_json": "JSON 导入",
+        "import_markdown": "Markdown 导入",
+        "lark-bitable": "飞书多维表格",
+        "lark-task": "飞书任务",
+        "other": "外部系统"
+      },
+      "removeBlocker": "移除阻塞项",
+      "searchPlaceholder": "搜索议题…",
+      "section": "规划",
+      "subIssues": "子议题",
+      "subIssuesTitle": "{total} 个子议题已完成 {done} 个",
+      "unlink": "移除关联"
+    },
     "priority": {
       "high": "高",
       "low": "低",
@@ -14499,11 +14588,14 @@
       "title": "项目"
     },
     "rail": {
+      "cycles": "迭代",
       "hide": "隐藏侧栏",
       "label": "议题导航",
       "labels": "标签",
+      "manageCycles": "管理迭代",
       "manageLabels": "管理标签",
       "manageProjects": "打开项目控制台",
+      "noCycles": "还没有迭代",
       "noLabels": "还没有标签",
       "noProjects": "还没有项目",
       "openProject": "在项目控制台中打开 {name}",
@@ -14541,6 +14633,7 @@
         "adapter-missing": "该执行引擎不可用。",
         "assignee-kind-mismatch": "请先把议题指派给对应类型的 Agent 或小队。",
         "assignee-not-found": "受让人已不存在。",
+        "blocked": "被 {detail} 阻塞，请先完成这些议题。",
         "desktop-only": "仅桌面端可用。",
         "issue-finished": "已结束的议题不能运行。",
         "no-github-account": "请先在 设置 → 连接 中接入 GitHub 账号。",
@@ -14608,6 +14701,7 @@
       "display": "显示",
       "facet": {
         "assignee": "负责人",
+        "cycle": "迭代",
         "labels": "标签",
         "priority": "优先级",
         "project": "项目",

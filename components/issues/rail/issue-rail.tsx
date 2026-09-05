@@ -15,7 +15,7 @@
  * one click is how a user loses the board they were reading.
  */
 
-import { ArrowUpRightIcon, SettingsIcon } from "lucide-react"
+import { ArrowUpRightIcon, FlagIcon, RotateCwIcon, SettingsIcon } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -23,7 +23,8 @@ import { useTranslations } from "next-intl"
 import { Progress } from "@/components/ui/progress"
 import type { IssueProjectProgress } from "@/lib/issues/project-progress"
 import { BUILTIN_ISSUE_VIEWS } from "@/lib/issues/views"
-import type { IssueProject } from "@/types/issues"
+import type { CycleProgress } from "@/lib/issues/relations"
+import type { IssueCycle, IssueProject } from "@/types/issues"
 import { defaultLabelColor, type LabelRow } from "@/types/labels"
 import { IssueRailRow } from "./issue-rail-row"
 import { IssueRailSection } from "./issue-rail-section"
@@ -46,6 +47,13 @@ export interface IssueRailProps {
   activeLabelIds: readonly string[]
   onToggleLabel: (labelId: string) => void
   onManageLabels?: () => void
+
+  /** Cycles and milestones of the workspace, in `compareIssueCycles` order. */
+  cycles?: readonly IssueCycle[]
+  cycleProgress?: ReadonlyMap<string, CycleProgress>
+  activeCycleIds?: readonly string[]
+  onToggleCycle?: (cycleId: string) => void
+  onManageCycles?: () => void
 }
 
 export function IssueRail({
@@ -61,11 +69,17 @@ export function IssueRail({
   activeLabelIds,
   onToggleLabel,
   onManageLabels,
+  cycles = [],
+  cycleProgress,
+  activeCycleIds = [],
+  onToggleCycle,
+  onManageCycles,
 }: IssueRailProps) {
   const t = useTranslations("issues")
   const [openSections, setOpenSections] = useState({
     views: true,
     projects: true,
+    cycles: true,
     labels: true,
   })
 
@@ -148,6 +162,55 @@ export function IssueRail({
                 </Link>
               }
               testId={`issue-rail-project-${project.id}`}
+            />
+          )
+        })}
+      </IssueRailSection>
+
+      <IssueRailSection
+        id="cycles"
+        title={t("rail.cycles")}
+        open={openSections.cycles}
+        onOpenChange={setOpen("cycles")}
+        emptyText={t("rail.noCycles")}
+        isEmpty={cycles.length === 0}
+        action={
+          onManageCycles
+            ? {
+                label: t("rail.manageCycles"),
+                icon: <SettingsIcon className="size-3.5" />,
+                onSelect: onManageCycles,
+                testId: "issue-rail-manage-cycles",
+              }
+            : undefined
+        }
+      >
+        {cycles.map((cycle) => {
+          const tally = cycleProgress?.get(cycle.id)
+          return (
+            <IssueRailRow
+              key={cycle.id}
+              active={activeCycleIds.includes(cycle.id)}
+              onSelect={() => onToggleCycle?.(cycle.id)}
+              icon={
+                cycle.kind === "milestone" ? (
+                  <FlagIcon aria-hidden className="size-3.5 shrink-0" />
+                ) : (
+                  <RotateCwIcon aria-hidden className="size-3.5 shrink-0" />
+                )
+              }
+              label={cycle.name}
+              count={tally?.total}
+              detail={
+                tally && tally.total > 0 ? (
+                  <Progress
+                    value={(tally.done / tally.total) * 100}
+                    className="h-1"
+                    aria-label={t("cycles.progressBar")}
+                  />
+                ) : undefined
+              }
+              testId={`issue-rail-cycle-${cycle.id}`}
             />
           )
         })}

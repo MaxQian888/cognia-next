@@ -19,17 +19,26 @@
  */
 
 import {
+  addIssueBlocker,
+  addIssueComment,
   addIssueLabel,
   deleteIssue,
+  linkIssueExternal,
   moveIssue,
   moveIssueToProject,
+  removeIssueBlocker,
   removeIssueLabel,
   setIssueAssignee,
+  setIssueCycle,
+  setIssueDueDate,
+  setIssueEstimate,
+  setIssueParent,
+  unlinkIssueExternal,
   updateIssue,
 } from "@/lib/db/issues"
 import { canMoveIssue, type IssueMoveDenial } from "./state-machine"
-import type { IssueActor, IssuePriority, IssueStatus } from "@/types/issues"
-import type { UnifiedIssueItem } from "@/types/issues/unified"
+import type { IssueActor, IssueExternalRef, IssuePriority, IssueStatus } from "@/types/issues"
+import type { IssueSourceMutation, UnifiedIssueItem } from "@/types/issues/unified"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
 import { getIssueSourceRegistry } from "./sources/registry"
 
@@ -50,6 +59,18 @@ export type IssueBulkAction =
   | { kind: "addLabel"; labelId: string }
   | { kind: "removeLabel"; labelId: string }
   | { kind: "project"; issueProjectId: string }
+  /** Planning fields (v223). `null` clears. */
+  | { kind: "cycle"; cycleId: string | null }
+  | { kind: "dueDate"; to: number | null }
+  | { kind: "estimate"; to: number | null }
+  /** Relations (v223). Single-item by nature, so absent from `menu-model`. */
+  | { kind: "parent"; parentId: string | null }
+  | { kind: "addBlocker"; blockerId: string }
+  | { kind: "removeBlocker"; blockerId: string }
+  | { kind: "linkExternal"; ref: IssueExternalRef }
+  | { kind: "unlinkExternal"; ref: Pick<IssueExternalRef, "provider" | "externalId"> }
+  /** Append a comment. Single-item by nature, like `title`. */
+  | { kind: "comment"; body: string }
   | { kind: "delete" }
 
 export interface IssueBulkOutcome {
@@ -76,14 +97,47 @@ function requiredCapability(action: IssueBulkAction): keyof UnifiedIssueItem["ca
     case "priority":
     case "title":
     case "description":
+    case "cycle":
+    case "dueDate":
+    case "estimate":
+    case "parent":
+    case "addBlocker":
+    case "removeBlocker":
+    case "linkExternal":
+    case "unlinkExternal":
       return "canEdit"
     case "addLabel":
     case "removeLabel":
       return "canManageLabels"
     case "project":
       return "canMoveProject"
+    case "comment":
+      return "canComment"
     case "delete":
       return "canDelete"
+  }
+}
+
+/**
+ * The subset a federated source's `mutate` understands. Anything else on a
+ * federated row is a refusal, which `applyIssueBulkAction` counts as failed
+ * rather than pretending the source took it.
+ */
+function toSourceMutation(action: IssueBulkAction): IssueSourceMutation | null {
+  switch (action.kind) {
+    case "status":
+    case "title":
+    case "description":
+    case "priority":
+    case "assignee":
+    case "addLabel":
+    case "removeLabel":
+    case "project":
+    case "comment":
+    case "delete":
+      return action
+    default:
+      return null
   }
 }
 
@@ -152,6 +206,33 @@ async function applyOne(sourceId: string, action: IssueBulkAction, by: IssueActo
     case "project":
       await moveIssueToProject(sourceId, action.issueProjectId, by)
       return
+    case "cycle":
+      await setIssueCycle(sourceId, action.cycleId, by)
+      return
+    case "dueDate":
+      await setIssueDueDate(sourceId, action.to, by)
+      return
+    case "estimate":
+      await setIssueEstimate(sourceId, action.to, by)
+      return
+    case "parent":
+      await setIssueParent(sourceId, action.parentId, by)
+      return
+    case "addBlocker":
+      await addIssueBlocker(sourceId, action.blockerId, by)
+      return
+    case "removeBlocker":
+      await removeIssueBlocker(sourceId, action.blockerId, by)
+      return
+    case "linkExternal":
+      await linkIssueExternal(sourceId, action.ref, by)
+      return
+    case "unlinkExternal":
+      await unlinkIssueExternal(sourceId, action.ref, by)
+      return
+    case "comment":
+      await addIssueComment(sourceId, action.body, by)
+      return
     case "delete":
       await deleteIssue(sourceId)
       return
@@ -195,8 +276,9 @@ export async function applyIssueBulkAction(
         await applyOne(parsed.sourceId, action, by)
       } else {
         const source = getIssueSourceRegistry().getSource(parsed.kind)
-        if (!source?.mutate) throw new Error("issue source is read-only")
-        await source.mutate(parsed.sourceId, action, by)
+        const mutation = toSourceMutation(action)
+        if (!source?.mutate || !mutation) throw new Error("issue source is read-only")
+        await source.mutate(parsed.sourceId, mutation, by)
       }
       applied += 1
     } catch {

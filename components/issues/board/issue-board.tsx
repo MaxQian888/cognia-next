@@ -28,6 +28,7 @@ import {
   type IssueDropAction,
 } from "@/lib/issues/board-model"
 import { allowedIssueMoveTargets } from "@/lib/issues/state-machine"
+import type { IssuePlanningHint } from "@/lib/issues/planning-hints"
 import type { SquadRunRef } from "@/lib/issues/run/running"
 import { resolveColumnCollapsed } from "@/lib/issues/views"
 import type { IssueStatus } from "@/types/issues"
@@ -50,6 +51,8 @@ export interface IssueBoardProps {
   runningIds?: ReadonlySet<string>
   /** `unifiedId` to the Squad run that owns it, for the card's squad chip. */
   squadRuns?: ReadonlyMap<string, SquadRunRef>
+  /** `unifiedId` to its planning hint (blocked, sub-issues, due). */
+  planningHints?: ReadonlyMap<string, IssuePlanningHint>
   /** Per-column collapse overrides. Absent means "collapse iff empty". */
   columnCollapse?: Readonly<Partial<Record<IssueStatus, boolean>>>
   onToggleColumnCollapsed?: (status: IssueStatus, itemCount: number) => void
@@ -70,6 +73,7 @@ export function IssueBoard({
   projectNamesById,
   runningIds,
   squadRuns,
+  planningHints,
   columnCollapse,
   onToggleColumnCollapsed,
   selectedId,
@@ -172,6 +176,7 @@ export function IssueBoard({
       renderCard={(item) => (
         <IssueCard
           item={item}
+          hint={planningHints?.get(item.unifiedId)}
           labels={labelsOf(item)}
           projectName={projectNameOf(item)}
           selected={selectedId === item.unifiedId}
@@ -184,6 +189,7 @@ export function IssueBoard({
         <div className="w-66" data-testid="issue-drag-overlay">
           <IssueCardVisual
             item={item}
+            hint={planningHints?.get(item.unifiedId)}
             labels={labelsOf(item)}
             projectName={projectNameOf(item)}
             running={isRunning(item.unifiedId)}

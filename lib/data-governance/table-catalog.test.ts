@@ -46,7 +46,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(350)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(351)
     db.close()
   })
 
@@ -82,8 +82,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 43 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(43)
+  it("maps all 44 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(44)
     // Saved chat templates. The mobile composer's `/` menu reads the local
     // Dexie, so before this the phone offered nothing there.
     expect(COMPANION_SYNC_TABLES.has("chatTemplates")).toBe(true)
@@ -264,6 +264,9 @@ describe("DataTableCatalog", () => {
       cleanupPolicy: "protected",
     })
     expect(COMPANION_SYNC_TABLES.has("issueRuns")).toBe(true)
+    // v223: the board groups by `cycleId`, so the cycle rows must reach the
+    // phone or the grouping header prints a raw id.
+    expect(COMPANION_SYNC_TABLES.has("issueCycles")).toBe(true)
     // The trail crosses too, so the phone renders one merged activity and
     // comment timeline rather than a detail sheet that stops at the fields.
     expect(COMPANION_SYNC_TABLES.has("issueEvents")).toBe(true)

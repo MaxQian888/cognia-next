@@ -19,12 +19,15 @@ import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { listIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
+import { listIssueCycles } from "@/lib/db/issue-cycles"
+import { buildPlanningHints } from "@/lib/issues/planning-hints"
+import { PlanningBadges } from "@/components/issues/planning/planning-badges"
 import { listLabels } from "@/lib/db/labels"
 import { buildIssueGroups } from "@/lib/issues/board-model"
 import { toUnifiedIssue } from "@/lib/issues/sources/local-source"
 import { useProjectStore } from "@/stores/project/project-store"
 import { IssueDetailSheet } from "./issue-detail-sheet"
-import type { IssueStatus } from "@/types/issues"
+import type { IssueCycle, IssueStatus } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
 import { cn } from "@/lib/utils"
 
@@ -59,6 +62,12 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
     initial: [] as LabelRow[],
     table: "labels",
   }).data
+  const cycles = useDexieFirstQuery({
+    query: () => (projectId ? listIssueCycles({ projectId }) : Promise.resolve([])),
+    deps: [projectId],
+    initial: [] as IssueCycle[],
+    table: "issueCycles",
+  }).data
 
   const labelsById = useMemo(
     () => new Map((labels ?? []).map((label) => [label.id, label])),
@@ -69,10 +78,20 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
     [projects]
   )
 
-  const groups = useMemo(
-    () => buildIssueGroups((rows ?? []).map(toUnifiedIssue), "status"),
-    [rows]
+  const cycleNamesById = useMemo(
+    () => new Map((cycles ?? []).map((cycle) => [cycle.id, cycle.name])),
+    [cycles]
   )
+  const cyclesById = useMemo(
+    () => new Map((cycles ?? []).map((cycle) => [cycle.id, cycle])),
+    [cycles]
+  )
+  const unified = useMemo(() => (rows ?? []).map(toUnifiedIssue), [rows])
+  const planningHints = useMemo(
+    () => buildPlanningHints(unified, cyclesById),
+    [unified, cyclesById]
+  )
+  const groups = useMemo(() => buildIssueGroups(unified, "status"), [unified])
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)
 
   /**
@@ -153,6 +172,7 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
                     </div>
                     <p className="text-sm font-medium leading-snug">{item.title}</p>
                     <div className="flex flex-wrap items-center gap-1">
+                      <PlanningBadges item={item} hint={planningHints.get(item.unifiedId)} />
                       {item.issueProjectId && projectNamesById.get(item.issueProjectId) ? (
                         <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
                           {projectNamesById.get(item.issueProjectId)}
@@ -181,6 +201,9 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
         }}
         labelsById={labelsById}
         projectNamesById={projectNamesById}
+        cycleNamesById={cycleNamesById}
+        items={unified}
+        hint={openItem ? planningHints.get(openItem.unifiedId) : undefined}
       />
     </div>
   )

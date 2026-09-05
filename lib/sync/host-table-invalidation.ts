@@ -102,6 +102,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   labels: "labels",
   issueEvents: "issueEvents",
   issueRuns: "issueRuns",
+  issueCycles: "issueCycles",
   connectorHeartbeats: "connectorHeartbeats",
   platformIdentities: "platformIdentities",
   connectorCallbackBindings: "connectorCallbackBindings",

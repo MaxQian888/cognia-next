@@ -1,8 +1,8 @@
 {
-  "latestVersion": 222,
-  "schemaSha256": "8a3cb1ff16cfed0e36bb3bd4f241eb1ae0f3266cf035471d3d200c2c1a68228c",
-  "staticTableCount": 350,
-  "companionSyncTableCount": 43,
+  "latestVersion": 223,
+  "schemaSha256": "9c71cfb696d60e3cb7db034f05006328d1d6942301be28c6830638374831913c",
+  "staticTableCount": 351,
+  "companionSyncTableCount": 44,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -20,6 +20,7 @@
     "executionRunBindings",
     "executionRuns",
     "goals",
+    "issueCycles",
     "issueEvents",
     "issueProjects",
     "issueRuns",

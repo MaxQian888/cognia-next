@@ -20,8 +20,9 @@
  */
 
 import type { IssueActor, IssueRun, IssueRunKind } from "@/types/issues"
-import { getIssue } from "@/lib/db/issues"
+import { getIssue, listIssues } from "@/lib/db/issues"
 import { applyRuntimeIssueStatus } from "@/lib/db/issues"
+import { openBlockers } from "@/lib/issues/relations"
 import { getIssueProject } from "@/lib/db/issue-projects"
 import {
   getIssueRun,
@@ -169,6 +170,21 @@ async function trackerVerdict(target: IssueRunTarget): Promise<IssueRunVerdict> 
     return { ok: false, reason: "issue-finished" }
   }
   if (await hasActiveIssueRun(issue.id)) return { ok: false, reason: "run-active" }
+  // A human may still drag a blocked issue anywhere (the tracker does not
+  // argue), but dispatching an agent onto work that waits on other work is
+  // wasted effort, so the engines refuse it and say which issues stand in
+  // the way.
+  if (issue.blockedBy?.length) {
+    const rows = await listIssues({ projectId: issue.projectId })
+    const blockers = openBlockers(issue, new Map(rows.map((row) => [row.id, row])))
+    if (blockers.length > 0) {
+      return {
+        ok: false,
+        reason: "blocked",
+        detail: blockers.map((blocker) => blocker.identifier).join(", "),
+      }
+    }
+  }
   return { ok: true }
 }
 

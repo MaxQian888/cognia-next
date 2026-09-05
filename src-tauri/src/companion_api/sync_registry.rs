@@ -161,6 +161,11 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "issueCycles".to_string(),
+            description: "Cycles and milestones the board plans issues into (edited in place, cursored on updatedAt)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
             name: "plugins".to_string(),
             description: "Installed plugins (toggle from mobile via plugin_set_enabled)".to_string(),
             has_tombstones: false,

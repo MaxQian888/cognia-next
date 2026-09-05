@@ -155,6 +155,25 @@ describe("loadIssueRunTarget / listIssueRunOptions", () => {
       reason: "run-active",
     })
   })
+
+  it("refuses a blocked issue and names the open blockers, not the finished ones", async () => {
+    const registry = new IssueRunRegistry()
+    registry.register(fakeAdapter())
+    const { addIssueBlocker, moveIssue } = await import("@/lib/db/issues")
+    const open = await makeIssue()
+    const finished = await makeIssue()
+    await moveIssue({ id: finished.id, to: "done", by: HUMAN })
+    const target = await makeIssue()
+    await addIssueBlocker(target.id, open.id, HUMAN)
+    await addIssueBlocker(target.id, finished.id, HUMAN)
+    expect((await listIssueRunOptions(target.id, registry))[0].verdict).toEqual({
+      ok: false,
+      reason: "blocked",
+      detail: open.identifier,
+    })
+    await moveIssue({ id: open.id, to: "done", by: HUMAN })
+    expect((await listIssueRunOptions(target.id, registry))[0].verdict).toEqual({ ok: true })
+  })
 })
 
 describe("startIssueRun", () => {

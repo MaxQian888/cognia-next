@@ -41,6 +41,9 @@ import { useIssueSelection } from "@/hooks/issues/use-issue-selection"
 import { useIssueShortcuts } from "@/hooks/issues/use-issue-shortcuts"
 import { listIssues, moveIssue, reorderIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
+import { listIssueCycles } from "@/lib/db/issue-cycles"
+import { buildPlanningHints } from "@/lib/issues/planning-hints"
+import { cycleProgress } from "@/lib/issues/relations"
 import { listLabels } from "@/lib/db/labels"
 import {
   actorKey,
@@ -76,7 +79,7 @@ import {
 } from "@/lib/issues/views"
 import { useIssueViewStore } from "@/stores/issues/issue-view-store"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { IssueActor, IssueStatus } from "@/types/issues"
+import type { IssueCycle, IssueActor, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { makeUnifiedIssueId, parseUnifiedIssueId } from "@/types/issues/unified"
 import { DeleteIssueDialog } from "./delete-issue-dialog"
@@ -86,6 +89,7 @@ import { IssueFilterBar } from "./filter-bar/issue-filter-bar"
 import { IssueBulkToolbar } from "./list/issue-bulk-toolbar"
 import { IssueList } from "./list/issue-list"
 import { ManageLabelsDialog } from "./rail/manage-labels-dialog"
+import { ManageCyclesDialog } from "./rail/manage-cycles-dialog"
 import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
@@ -172,6 +176,11 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
     []
   )
   const labels = useClientLiveQuery(() => listLabels("issue"), [], [])
+  const cycles = useClientLiveQuery(
+    () => (projectId ? listIssueCycles({ projectId }) : Promise.resolve([])),
+    [projectId],
+    [] as IssueCycle[]
+  )
 
   const [federated, setFederated] = useState<UnifiedIssueItem[]>([])
   const [sourceErrors, setSourceErrors] = useState(0)
@@ -263,6 +272,14 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
     () => new Map((projects ?? []).map((project) => [project.id, project.name])),
     [projects]
   )
+  const cyclesById = useMemo(
+    () => new Map((cycles ?? []).map((cycle) => [cycle.id, cycle])),
+    [cycles]
+  )
+  const cycleNamesById = useMemo(
+    () => new Map((cycles ?? []).map((cycle) => [cycle.id, cycle.name])),
+    [cycles]
+  )
 
   const scoped = useMemo(
     () => applyViewScope(visibleFederated, view.scope, viewer),
@@ -328,6 +345,18 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
       ),
     [projects, localRows]
   )
+  /** Blocked, sub-issue progress and due state, once per board pass. */
+  const planningHints = useMemo(
+    () => buildPlanningHints(visibleFederated, cyclesById),
+    [visibleFederated, cyclesById]
+  )
+  const cycleTallies = useMemo(
+    () =>
+      new Map(
+        (cycles ?? []).map((cycle) => [cycle.id, cycleProgress(cycle.id, localRows ?? [])] as const)
+      ),
+    [cycles, localRows]
+  )
 
   const selected = sorted.find((item) => item.unifiedId === selectedId)
   /**
@@ -364,12 +393,28 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
   )
   const [deleteTargets, setDeleteTargets] = useState<readonly UnifiedIssueItem[]>([])
   const [manageLabelsOpen, setManageLabelsOpen] = useState(false)
+  const [manageCyclesOpen, setManageCyclesOpen] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createStatus, setCreateStatus] = useState<IssueStatus>("backlog")
+  /** Set when "Add sub-issue" opened the dialog; cleared when it closes. */
+  const [createParent, setCreateParent] = useState<
+    { id: string; identifier: string; issueProjectId: string } | undefined
+  >(undefined)
 
   const openCreate = useCallback((status: IssueStatus = "backlog") => {
+    setCreateParent(undefined)
     setCreateStatus(status)
+    setCreateOpen(true)
+  }, [])
+  const openCreateSubIssue = useCallback((parent: UnifiedIssueItem) => {
+    if (parent.kind !== "local" || !parent.issueProjectId) return
+    setCreateParent({
+      id: parent.sourceId,
+      identifier: parent.identifier,
+      issueProjectId: parent.issueProjectId,
+    })
+    setCreateStatus("backlog")
     setCreateOpen(true)
   }, [])
 
@@ -440,6 +485,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         labels={writableLabels}
         projects={projects ?? []}
         assigneeOptions={assigneeOptions}
+        cycles={cycles ?? []}
         onAction={(action) => void runBulk([item], action)}
         onOpen={() => setSelectedId(item.unifiedId)}
         onRequestDelete={() => setDeleteTargets([item])}
@@ -447,7 +493,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         {children}
       </IssueContextMenu>
     ),
-    [runningUnifiedIds, writableLabels, projects, assigneeOptions, runBulk]
+    [runningUnifiedIds, writableLabels, projects, assigneeOptions, cycles, runBulk]
   )
 
   /**
@@ -571,6 +617,13 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
                     updateFilter(toggleFilterValue(prefs.filter, "labelIds", id))
                   }
                   onManageLabels={() => setManageLabelsOpen(true)}
+                  cycles={cycles ?? []}
+                  cycleProgress={cycleTallies}
+                  activeCycleIds={prefs.filter.cycleIds ?? []}
+                  onToggleCycle={(id) =>
+                    updateFilter(toggleFilterValue(prefs.filter, "cycleIds", id))
+                  }
+                  onManageCycles={() => setManageCyclesOpen(true)}
                 />
               ),
             }
@@ -597,6 +650,10 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
                   labels={writableLabels}
                   projects={projects ?? []}
                   assigneeOptions={assigneeOptions}
+                  cycles={cycles ?? []}
+                  items={visibleFederated}
+                  onOpenIssue={setSelectedId}
+                  onCreateSubIssue={() => openCreateSubIssue(selected)}
                   running={runningUnifiedIds.has(selected.unifiedId)}
                   githubRepos={selectedGithubRepos}
                   onAction={(action) => void runBulk([selected], action)}
@@ -625,6 +682,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         onResetView={() => resetView(viewId)}
         labelsById={labelsById}
         projectNamesById={projectNamesById}
+        cycleNamesById={cycleNamesById}
         searchRef={searchRef}
       />
 
@@ -634,6 +692,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         labels={writableLabels}
         projects={projects ?? []}
         assigneeOptions={assigneeOptions}
+        cycles={cycles ?? []}
         onAction={(action) => void runBulk(checkedItems, action)}
         onRequestDelete={() => setDeleteTargets(checkedItems)}
         onToggleAll={selection.toggleAll}
@@ -648,6 +707,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           projectNamesById={projectNamesById}
           runningIds={runningUnifiedIds}
           squadRuns={squadRunsByUnifiedId}
+          planningHints={planningHints}
           columnCollapse={prefs.columnCollapse}
           onToggleColumnCollapsed={(status, count) => toggleColumnCollapsed(viewId, status, count)}
           selectedId={selectedId}
@@ -664,6 +724,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           labelsById={labelsById}
           projectNamesById={projectNamesById}
           runningIds={runningUnifiedIds}
+          planningHints={planningHints}
           assigneeLabels={assigneeLabels}
           selectedId={selectedId}
           onSelect={(id) => {
@@ -687,6 +748,17 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         labels={writableLabels}
       />
 
+      {projectId ? (
+        <ManageCyclesDialog
+          open={manageCyclesOpen}
+          onOpenChange={setManageCyclesOpen}
+          projectId={projectId}
+          cycles={cycles ?? []}
+          projects={projects ?? []}
+          progress={cycleTallies}
+        />
+      ) : null}
+
       <CollabConflictsPanel />
 
       <DeleteIssueDialog
@@ -708,10 +780,14 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
       {projectId ? (
         <CreateIssueDialog
           open={createOpen}
-          onOpenChange={setCreateOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open)
+            if (!open) setCreateParent(undefined)
+          }}
           projectId={projectId}
           projects={projects ?? []}
           status={createStatus}
+          parent={createParent}
           onCreated={(issueId) => setSelectedId(`local:${issueId}`)}
         />
       ) : null}

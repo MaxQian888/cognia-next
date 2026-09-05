@@ -27,6 +27,7 @@ import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
 import { deleteIssueRunsForIssues } from "./issue-runs"
+import { deleteIssueCyclesForWorkspace } from "./issue-cycles"
 import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newIssueProjectId(): string {
@@ -227,6 +228,7 @@ export async function deleteIssueProject(id: string): Promise<void> {
       db.issues,
       db.issueEvents,
       db.issueRuns,
+      db.issueCycles,
       db.issueCounters,
       db.syncTombstones,
     ],
@@ -235,6 +237,13 @@ export async function deleteIssueProject(id: string): Promise<void> {
       const issueIds = issues.map((issue) => issue.id)
       const eventIds = await deleteIssueEventsForIssues(issueIds)
       const runIds = await deleteIssueRunsForIssues(issueIds)
+      // Cycles bound to this container go with it. Workspace-wide cycles (no
+      // `issueProjectId`) stay: a team sprint outlives any one repository.
+      const cycleIds = (await db.issueCycles
+        .where("issueProjectId")
+        .equals(id)
+        .primaryKeys()) as string[]
+      if (cycleIds.length > 0) await db.issueCycles.bulkDelete(cycleIds)
       await db.issues.bulkDelete(issueIds)
       await deleteIssueCounter(id)
       await db.issueProjects.delete(id)
@@ -247,6 +256,7 @@ export async function deleteIssueProject(id: string): Promise<void> {
       await recordTombstones("issues", issueIds, at)
       await recordTombstones("issueEvents", eventIds, at)
       await recordTombstones("issueRuns", runIds, at)
+      await recordTombstones("issueCycles", cycleIds, at)
     }
   )
 }
@@ -272,6 +282,7 @@ export async function deleteIssueDataForWorkspace(projectId: string): Promise<st
       db.issues,
       db.issueEvents,
       db.issueRuns,
+      db.issueCycles,
       db.issueCounters,
       db.syncTombstones,
     ],
@@ -282,10 +293,12 @@ export async function deleteIssueDataForWorkspace(projectId: string): Promise<st
       // already orphaned still carries this `projectId` and must go too.
       const issues = await db.issues.where("projectId").equals(projectId).toArray()
       const issueIds = issues.map((issue) => issue.id)
-      if (containerIds.length === 0 && issueIds.length === 0) return []
+      const hasCycles = (await db.issueCycles.where("projectId").equals(projectId).count()) > 0
+      if (containerIds.length === 0 && issueIds.length === 0 && !hasCycles) return []
 
       const eventIds = await deleteIssueEventsForIssues(issueIds)
       const runIds = await deleteIssueRunsForIssues(issueIds)
+      const cycleIds = await deleteIssueCyclesForWorkspace(projectId)
       await db.issues.bulkDelete(issueIds)
       for (const containerId of containerIds) await deleteIssueCounter(containerId)
       await db.issueProjects.bulkDelete(containerIds)
@@ -295,6 +308,7 @@ export async function deleteIssueDataForWorkspace(projectId: string): Promise<st
       await recordTombstones("issues", issueIds, at)
       await recordTombstones("issueEvents", eventIds, at)
       await recordTombstones("issueRuns", runIds, at)
+      await recordTombstones("issueCycles", cycleIds, at)
       return containerIds
     }
   )

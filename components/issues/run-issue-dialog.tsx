@@ -176,7 +176,7 @@ export function RunIssueDialog({
       onOpenChange(false)
     } catch (cause) {
       if (cause instanceof IssueRunRefusedError) {
-        setError(t(`run.refusal.${cause.reason}`))
+        setError(t(`run.refusal.${cause.reason}`, { detail: cause.detail ?? "" }))
       } else {
         setError(cause instanceof Error ? cause.message : String(cause))
       }
@@ -229,7 +229,7 @@ export function RunIssueDialog({
                     <span className="text-xs text-muted-foreground">
                       {verdict.ok
                         ? t(`run.adapter.${adapter.id}.description`)
-                        : t(`run.refusal.${verdict.reason}`)}
+                        : t(`run.refusal.${verdict.reason}`, { detail: verdict.detail ?? "" })}
                     </span>
                   </button>
                 )

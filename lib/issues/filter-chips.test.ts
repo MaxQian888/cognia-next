@@ -58,6 +58,20 @@ describe("collectActiveFilterChips", () => {
   })
 })
 
+describe("cycle facet (v223)", () => {
+  it("emits, removes and toggles cycle chips, tolerating a filter persisted without the key", () => {
+    const legacy = { ...EMPTY_ISSUE_FILTER } as Record<string, unknown>
+    delete legacy.cycleIds
+    const filter = legacy as unknown as typeof EMPTY_ISSUE_FILTER
+    expect(collectActiveFilterChips(filter)).toEqual([])
+    const withCycle = toggleFilterValue(filter, "cycleIds", "c1")
+    expect(withCycle.cycleIds).toEqual(["c1"])
+    const chips = collectActiveFilterChips(withCycle)
+    expect(chips).toEqual([{ facet: "cycleIds", value: "c1", key: "cycleIds:c1" }])
+    expect(removeFilterChip(withCycle, chips[0]).cycleIds).toEqual([])
+  })
+})
+
 describe("removeFilterChip", () => {
   it("clears the whole query facet", () => {
     const filter = { ...EMPTY_ISSUE_FILTER, query: "auth" }

@@ -15,7 +15,7 @@ import { useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
 import type { IssueMenuEntry, IssueMenuSectionId } from "@/lib/issues/menu-model"
-import type { IssuePriority, IssueProject, IssueStatus } from "@/types/issues"
+import type { IssueCycle, IssuePriority, IssueProject, IssueStatus } from "@/types/issues"
 import { defaultLabelColor, type LabelRow } from "@/types/labels"
 import type { AssigneeOption } from "../assignee-picker"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
@@ -27,12 +27,14 @@ const ISSUE_MENU_SECTION_LABEL_KEY: Record<IssueMenuSectionId, string> = {
   assignee: "detail.assignee",
   labels: "detail.labels",
   project: "detail.project",
+  cycle: "planning.cycle",
 }
 
 export interface MenuEntryPresentationInput {
   labels: readonly LabelRow[]
   projects: readonly IssueProject[]
   assigneeOptions: readonly AssigneeOption[]
+  cycles?: readonly IssueCycle[]
 }
 
 export interface MenuEntryPresentation {
@@ -45,6 +47,7 @@ export function useMenuEntryPresentation({
   labels,
   projects,
   assigneeOptions,
+  cycles = [],
 }: MenuEntryPresentationInput): MenuEntryPresentation {
   const t = useTranslations("issues")
 
@@ -57,6 +60,7 @@ export function useMenuEntryPresentation({
     () => new Map(assigneeOptions.map((option) => [option.key, option])),
     [assigneeOptions]
   )
+  const cyclesById = useMemo(() => new Map(cycles.map((cycle) => [cycle.id, cycle])), [cycles])
 
   return {
     sectionLabel: (section) => t(ISSUE_MENU_SECTION_LABEL_KEY[section]),
@@ -77,6 +81,10 @@ export function useMenuEntryPresentation({
           return labelsById.get(entry.id)?.name ?? entry.id
         case "project":
           return projectsById.get(entry.id)?.name ?? entry.id
+        case "cycle":
+          return entry.id === "none"
+            ? t("planning.noCycle")
+            : (cyclesById.get(entry.id)?.name ?? entry.id)
       }
     },
 
@@ -101,6 +109,7 @@ export function useMenuEntryPresentation({
           return project ? <span aria-hidden>{project.icon ?? "📁"}</span> : null
         }
         case "assignee":
+        case "cycle":
           return null
       }
     },

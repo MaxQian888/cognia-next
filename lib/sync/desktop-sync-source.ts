@@ -201,6 +201,8 @@ export async function readDexieDelta(
       return readIssueEventsDelta(since)
     case "issueRuns":
       return readIssueRunsDelta(since)
+    case "issueCycles":
+      return readIssueCyclesDelta(since)
     case "goals":
       return readGoalsDelta(since)
     case "plans":
@@ -548,6 +550,12 @@ async function readIssueEventsDelta(since: number): Promise<SyncDelta<unknown>> 
 async function readIssueRunsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().issueRuns.where("updatedAt").above(since).toArray()
   return finalizeDelta("issueRuns", rows as UpdatedAtRow[], since)
+}
+
+/** Cycles and milestones are edited in place, so `updatedAt` is the cursor. */
+async function readIssueCyclesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().issueCycles.where("updatedAt").above(since).toArray()
+  return finalizeDelta("issueCycles", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

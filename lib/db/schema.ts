@@ -144,7 +144,14 @@ import type {
   CannedResponseRow,
 } from "./crm-types"
 import type { LabelRow } from "@/types/labels"
-import type { Issue, IssueCounter, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
+import type {
+  Issue,
+  IssueCounter,
+  IssueCycle,
+  IssueEvent,
+  IssueProject,
+  IssueRun,
+} from "@/types/issues"
 import type { CollabIssueMirrorRow } from "./collab-issue-mirror-types"
 import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
 import type { CollabPlanMirrorRow } from "./collab-plan-mirror-types"
@@ -395,7 +402,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 222
+export const CURRENT_SCHEMA_VERSION = 223
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -801,8 +808,10 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   workInputBatches: "&id, &submissionId, digest, expiresAt",
   executionContextBundles: "&id, &submissionId, projectId, digest, expiresAt",
   issues:
-    "&id, projectId, issueProjectId, status, statusCategory, assigneeKind, assigneeId, [assigneeKind+assigneeId], [issueProjectId+status], &identifier, updatedAt, createdAt, *labelIds",
+    "&id, projectId, issueProjectId, status, statusCategory, assigneeKind, assigneeId, [assigneeKind+assigneeId], [issueProjectId+status], &identifier, updatedAt, createdAt, *labelIds, parentId, cycleId, dueDate, *blockedBy, *externalKeys",
   issueProjects: "&id, projectId, &key, status, updatedAt",
+  issueCycles:
+    "&id, projectId, issueProjectId, kind, status, startsAt, endsAt, updatedAt, *externalKeys",
   issueEvents: "&id, issueId, [issueId+ts], kind, ts",
   issueCounters: "&scopeId",
   labels: "&id, scope, [scope+name], name, builtin, sortOrder, updatedAt",
@@ -1567,6 +1576,10 @@ export class CogniaDB extends Dexie {
   issueProjects!: Table<IssueProject, string>
   issueEvents!: Table<IssueEvent, string>
   issueCounters!: Table<IssueCounter, string>
+  // v223 — Cycles and milestones (one table, `kind`-discriminated). Planned
+  // into by `Issue.cycleId`; populated by hand, by GitHub milestones/Projects
+  // v2 iterations, and by Lark tasklist sections. See `lib/db/issue-cycles.ts`.
+  issueCycles!: Table<IssueCycle, string>
   // v170 — Shared coloured-label catalogue, scope-discriminated. Supersedes
   // `conversationLabels` (ids preserved by the v170 upgrade, so existing
   // `labelIds[]` references keep resolving). See `lib/db/labels.ts`.

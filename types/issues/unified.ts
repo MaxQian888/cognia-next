@@ -25,7 +25,13 @@
  * failing at write time.
  */
 
-import type { IssueActor, IssuePriority, IssueStatus, IssueStatusCategory } from "@/types/issues"
+import type {
+  IssueActor,
+  IssueExternalRef,
+  IssuePriority,
+  IssueStatus,
+  IssueStatusCategory,
+} from "@/types/issues"
 
 /** Single exhaustive runtime/type authority for every federated source. */
 export const ISSUE_SOURCE_KINDS = ["local", "github", "agent-team", "agent-task", "collab"] as const
@@ -131,6 +137,13 @@ export interface UnifiedIssueItem {
   updatedAt: number
   origin: UnifiedIssueOrigin
   capabilities: UnifiedIssueCapabilities
+  /** v223 planning and relation fields. Only the local source fills them. */
+  parentId?: string
+  blockedBy?: readonly string[]
+  dueDate?: number
+  estimate?: number
+  cycleId?: string
+  externalRefs?: readonly IssueExternalRef[]
 }
 
 /** What the board asks each source for. */

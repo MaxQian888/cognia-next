@@ -27,6 +27,7 @@ export interface ActiveFilterChipsProps {
   chips: readonly IssueFilterChip[]
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
+  cycleNamesById?: ReadonlyMap<string, string>
   /** `actorKey` → display name, built from the items actually on the board. */
   assigneeLabels?: ReadonlyMap<string, string>
   onRemove: (chip: IssueFilterChip) => void
@@ -37,6 +38,7 @@ export function ActiveFilterChips({
   chips,
   labelsById,
   projectNamesById,
+  cycleNamesById,
   assigneeLabels,
   onRemove,
   onClearAll,
@@ -73,6 +75,11 @@ export function ActiveFilterChips({
         return {
           facet: t("toolbar.facet.project"),
           value: projectNamesById?.get(chip.value) ?? chip.value,
+        }
+      case "cycleIds":
+        return {
+          facet: t("toolbar.facet.cycle"),
+          value: cycleNamesById?.get(chip.value) ?? chip.value,
         }
     }
   }
