@@ -51,6 +51,16 @@ describe("EvalDashboard", () => {
     expect(screen.getByText("datasets.select")).toBeInTheDocument()
   })
 
+  it("does not restate the page title its host header already renders", () => {
+    // Both mounts (EvalWorkspace / EvalLabWorkspace) put this pane under a
+    // FeaturePageHeader built from the same two keys. Rendering them again
+    // printed the name twice and put a second <h1> in the document.
+    render(<EvalDashboard />)
+    expect(screen.queryByText("title")).not.toBeInTheDocument()
+    expect(screen.queryByText("subtitle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
+  })
+
   it("creates a dataset via the form", async () => {
     render(<EvalDashboard />)
     fireEvent.click(screen.getByText("datasets.new"))

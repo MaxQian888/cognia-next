@@ -1,8 +1,18 @@
 "use client"
 
 /**
- * Datasets pane — master-detail mirroring the Skills page: a 320px bordered
- * list pane (search + dataset rows + create form) and an inline detail pane.
+ * Datasets pane — master-detail laid out the way the Skills page actually
+ * does it: one full-bleed surface split by a hairline, not two rounded cards
+ * floating inside a page that already has a frame. The old shape nested three
+ * borders deep (page → list card → create-form card) and the pane was the
+ * only thing keeping the two halves apart, so the split read as decoration
+ * rather than structure.
+ *
+ * It also renders no title of its own. Both mounts (`EvalWorkspace` and
+ * `EvalLabWorkspace`) sit under a `FeaturePageHeader` carrying the very same
+ * `eval.title` / `eval.subtitle`, so the page printed its name twice and
+ * shipped two `<h1>`s.
+ *
  * Below `md` the panes are exclusive: list first, tapping a dataset swaps to
  * the detail with a back affordance. Selection is DERIVED (no
  * set-state-in-effect): an explicit click wins, else the first filtered row.
@@ -10,7 +20,8 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, ClipboardCheckIcon, PlusIcon } from "lucide-react"
+import { ArrowLeftIcon, PlusIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -70,35 +81,37 @@ export function EvalDashboard() {
   const showDetail = !isMobile || mobileDetailOpen
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-3 sm:gap-4 sm:p-4">
-      <header className="flex items-center gap-2">
-        {isMobile && mobileDetailOpen && (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* The only thing the old header still earned: a way back out of the
+          detail on a phone. It names the row it returns from, so the back
+          arrow is not the sole thing on an otherwise blank bar. */}
+      {isMobile && mobileDetailOpen && (
+        <div className="flex min-h-9 shrink-0 items-center gap-1 border-b px-1.5">
           <Button
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             aria-label={t("datasets.back")}
             onClick={() => setMobileDetailOpen(false)}
           >
             <ArrowLeftIcon className="size-4" />
           </Button>
-        )}
-        <ClipboardCheckIcon className="size-5" />
-        <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold">{t("title")}</h1>
-          <p className="text-muted-foreground truncate text-sm">{t("subtitle")}</p>
+          <span className="min-w-0 truncate text-sm font-medium">
+            {selectedDataset?.name ?? t("datasets.select")}
+          </span>
         </div>
-      </header>
+      )}
 
       <div
-        className="grid min-h-0 flex-1 gap-3 sm:gap-4"
+        className={cn("grid min-h-0 flex-1", !isMobile && "divide-x")}
         // Driven by the SAME source as showList/showDetail. A Tailwind `md:`
         // rule disagrees with `useIsMobile()` on a native tablet shell, which
-        // left half the screen blank.
-        style={{ gridTemplateColumns: isMobile ? "1fr" : "320px 1fr" }}
+        // left half the screen blank — and that applies to the divider too,
+        // hence the conditional class rather than `md:divide-x`.
+        style={{ gridTemplateColumns: isMobile ? "1fr" : "320px minmax(0,1fr)" }}
       >
         {showList && (
-          <div className="flex min-h-0 flex-col gap-2 overflow-hidden rounded-lg border p-2">
-            <div className="flex items-center justify-between gap-2">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-2">
               <Input
                 aria-label={t("datasets.searchPlaceholder")}
                 placeholder={t("datasets.searchPlaceholder")}
@@ -114,7 +127,7 @@ export function EvalDashboard() {
 
             {creating && (
               <div
-                className="flex flex-col gap-2 rounded-md border p-2"
+                className="flex shrink-0 flex-col gap-2 border-b bg-muted/30 px-3 py-3"
                 data-testid="new-dataset-form"
               >
                 <Input
@@ -141,9 +154,9 @@ export function EvalDashboard() {
             )}
 
             {filtered.length === 0 && !creating ? (
-              <p className="text-muted-foreground p-2 text-sm">{t("datasets.empty")}</p>
+              <p className="text-muted-foreground px-3 py-3 text-sm">{t("datasets.empty")}</p>
             ) : (
-              <ul className="flex min-h-0 flex-col gap-1 overflow-y-auto">
+              <ul className="flex min-h-0 flex-col gap-0.5 overflow-y-auto p-2">
                 {filtered.map((ds) => (
                   <li key={ds.id}>
                     <button
@@ -166,7 +179,7 @@ export function EvalDashboard() {
         )}
 
         {showDetail && (
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border p-3">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3 sm:p-4">
             {selectedDataset ? (
               <DatasetDetail
                 dataset={selectedDataset}
