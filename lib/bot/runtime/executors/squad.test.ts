@@ -111,6 +111,23 @@ describe("createSquadBotExecutor", () => {
     )
   })
 
+  it("launches under the run id, so a re-entry rejoins instead of forking", async () => {
+    const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
+    await createSquadBotExecutor({ start })(ctx())
+
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_1" }))
+  })
+
+  it("reports a replay as a duplicate rather than a fresh start", async () => {
+    const start = jest.fn(async () => ({ started: true, runId: "sq_1", duplicate: true }))
+    const result = await createSquadBotExecutor({ start })(ctx())
+
+    expect(result).toEqual({
+      summary: expect.stringContaining("already running"),
+      output: { squadRunId: "sq_1", duplicate: true },
+    })
+  })
+
   it("fails when the Squad did not start", async () => {
     const start = jest.fn().mockResolvedValue({ started: false, reason: "squad_not_found" })
     await expect(createSquadBotExecutor({ start })(ctx())).rejects.toThrow(/squad_not_found/)

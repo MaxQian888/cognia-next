@@ -148,6 +148,26 @@ describe("drainBotDeliveries", () => {
     expect(handler).toHaveBeenCalledTimes(2)
   })
 
+  it("recovers an abandoned attempt instead of re-running it in the same pass", async () => {
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await claimBotDelivery("bdl_1", "runner-a", NOW)
+    await markBotDeliveryRunning("bdl_1", "run_bot_bdl_1", NOW)
+
+    const later = NOW + 5 * 60_000
+    const attempts = await drainBotDeliveries({ owner: "runner-b", now: () => later })
+
+    expect(attempts).toEqual([
+      { deliveryId: "bdl_1", outcome: { status: "skipped", reason: "recovered" } },
+    ])
+    // The point of the backoff: the row comes back on a later pass, not this one.
+    expect(handler).not.toHaveBeenCalled()
+    const row = await getDb().botEventDeliveries.get("bdl_1")
+    expect(row?.status).toBe("pending")
+    expect(row?.attempts).toBe(1)
+  })
+
   it("bounds one pass, so one Bot cannot starve the others", async () => {
     await seedInstallation()
     for (let i = 0; i < 4; i++) {

@@ -26,6 +26,15 @@ export interface SquadStartInput {
   goal: string
   origin: string
   triggeredFrom: WorkflowTriggeredFrom
+  /**
+   * The run id to launch under.
+   *
+   * Supplied, never minted. `startSquadRun` is idempotent per `runId`, so a Bot
+   * that omits it gets a fresh id on every re-entry and the primitive answers
+   * `already_running` against the run the previous attempt started. A Bot run is
+   * re-entered from the top by design, so that is not an edge case.
+   */
+  runId?: string
   characterId?: string
   planApprovalDelegate?: (request: {
     planText: string
@@ -39,6 +48,8 @@ export interface SquadExecutorDeps {
     started: boolean
     runId?: string
     reason?: string
+    /** True when `runId` was already launched and this call was a replay. */
+    duplicate?: boolean
   }>
 }
 
@@ -79,6 +90,9 @@ export function createSquadBotExecutor(deps: SquadExecutorDeps = {}): BotExecuto
       squadId,
       goal: squadObjective(ctx),
       origin: "bot",
+      // Derived from the delivery, so a re-entry lands on the run the previous
+      // attempt started instead of forking a second one.
+      runId: ctx.runId,
       triggeredFrom: botTriggeredFrom(ctx),
       ...(ctx.definition.character ? { characterId: ctx.definition.character } : {}),
       planApprovalDelegate: async (request) => {
@@ -97,7 +111,12 @@ export function createSquadBotExecutor(deps: SquadExecutorDeps = {}): BotExecuto
     if (!result.started) {
       throw new Error(`Squad ${squadId} did not start (${result.reason ?? "unknown"})`)
     }
-    return { summary: `Squad ${squadId} started`, output: { squadRunId: result.runId } }
+    return {
+      summary: result.duplicate
+        ? `Squad ${squadId} already running for this delivery`
+        : `Squad ${squadId} started`,
+      output: { squadRunId: result.runId, ...(result.duplicate ? { duplicate: true } : {}) },
+    }
   }
 }
 

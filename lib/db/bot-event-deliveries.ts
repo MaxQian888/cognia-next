@@ -32,6 +32,68 @@ export function isTerminalBotDelivery(status: BotDeliveryStatus): boolean {
 }
 
 /**
+ * What a recovered attempt records as its failure.
+ *
+ * Deliberately worded to miss every pattern in `NON_RETRYABLE_PATTERNS`, so an
+ * interrupted attempt backs off and retries rather than dead-lettering on the
+ * first crash.
+ */
+export const BOT_DELIVERY_INTERRUPTED_ERROR = "bot run interrupted: the host stopped mid-attempt"
+
+/**
+ * Was this row mid-attempt when whatever was running it disappeared?
+ *
+ * `leased` and `running` are the same answer. They differ only in which half of
+ * the attempt the runner had reached, and neither half survives the process
+ * that was executing it. Treating `running` as a state only its own runner can
+ * leave is what used to strand a delivery forever: nothing listed it, nothing
+ * pruned it, and `countActiveBotDeliveriesForKey` counted it as live, so its
+ * concurrency key was retired along with it.
+ */
+function isMidAttempt(status: BotDeliveryStatus): boolean {
+  return status === "leased" || status === "running"
+}
+
+function isAbandonedAttempt(row: BotEventDeliveryRow, now: number): boolean {
+  if (!isMidAttempt(row.status)) return false
+  return (row.leaseExpiresAt ?? 0) <= now
+}
+
+/**
+ * The row an abandoned attempt becomes: one attempt spent, backed off, and
+ * dead-lettered once the budget is gone.
+ *
+ * The charge is the whole point. Without it a delivery that kills whatever runs
+ * it is re-claimed forever, because the attempt it was supposed to spend is
+ * never recorded and the lease expiry alone makes it due again.
+ */
+function chargeAbandonedAttempt(
+  row: BotEventDeliveryRow,
+  now: number,
+  random?: () => number
+): BotEventDeliveryRow {
+  const decision = decideNextAttempt({
+    attempts: row.attempts,
+    error: new Error(BOT_DELIVERY_INTERRUPTED_ERROR),
+    nowMs: now,
+    random,
+  })
+  const deadlettered = decision.status === "deadlettered"
+  const next: BotEventDeliveryRow = {
+    ...row,
+    status: deadlettered ? "deadletter" : "pending",
+    attempts: decision.attempts,
+    nextAttemptAt: decision.nextAttemptAt,
+    lastError: decision.lastError,
+    updatedAt: now,
+    ...(deadlettered ? { settledAt: now } : {}),
+  }
+  delete next.leaseOwner
+  delete next.leaseExpiresAt
+  return next
+}
+
+/**
  * The arrival-dedup key for one delivery.
  *
  * Scoped to the installation, not the event: the same event legitimately fans
@@ -101,9 +163,9 @@ export async function enqueueBotDelivery(
 /**
  * Deliveries whose next attempt is due, oldest first.
  *
- * A `leased` row whose lease has expired is due again: the runner that held it
- * is gone, and leaving the delivery leased forever is the difference between a
- * crash costing one retry and costing the event.
+ * An abandoned attempt is due again whichever status it stopped in: the runner
+ * that held it is gone, and leaving the delivery there forever is the
+ * difference between a crash costing one retry and costing the event.
  */
 export async function listDueBotDeliveries(
   limit = 20,
@@ -113,8 +175,7 @@ export async function listDueBotDeliveries(
   return rows
     .filter((row) => {
       if (row.status === "pending") return row.nextAttemptAt <= now
-      if (row.status === "leased") return (row.leaseExpiresAt ?? 0) <= now
-      return false
+      return isAbandonedAttempt(row, now)
     })
     .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.receivedAt - b.receivedAt)
     .slice(0, limit)
@@ -137,8 +198,13 @@ export async function claimBotDelivery(
     const row = await db.botEventDeliveries.get(id)
     if (!row) return undefined
     if (isTerminalBotDelivery(row.status)) return undefined
+    // `running` counts here too. A live lease is a live lease whichever half of
+    // the attempt its holder had reached, and letting a second runner take a
+    // row somebody is executing is the same double-run the lease exists to stop.
     const heldByOther =
-      row.status === "leased" && row.leaseOwner !== owner && (row.leaseExpiresAt ?? 0) > now
+      (row.status === "leased" || row.status === "running") &&
+      row.leaseOwner !== owner &&
+      (row.leaseExpiresAt ?? 0) > now
     if (heldByOther) return undefined
 
     const claimed: BotEventDeliveryRow = {
@@ -282,6 +348,64 @@ export async function replayBotDelivery(
   return next
 }
 
+/** What became of a delivery whose attempt was abandoned. */
+export type BotDeliveryRecovery = "recovered" | "deadlettered"
+
+/**
+ * Charge one attempt to a delivery whose runner disappeared, and put it back in
+ * the queue (or dead-letter it once the budget is gone).
+ *
+ * Called before the claim rather than inside it so the runner can report why it
+ * skipped this pass. The row comes back on the next drain, after its backoff,
+ * which is what stops a delivery that kills its host from being re-claimed in a
+ * tight loop.
+ */
+export async function recoverAbandonedBotDelivery(
+  id: string,
+  now = Date.now(),
+  random?: () => number
+): Promise<BotDeliveryRecovery | null> {
+  const db = getDb()
+  return db.transaction("rw", db.botEventDeliveries, async () => {
+    const row = await db.botEventDeliveries.get(id)
+    if (!row || !isAbandonedAttempt(row, now)) return null
+    const next = chargeAbandonedAttempt(row, now, random)
+    await db.botEventDeliveries.put(next)
+    return next.status === "deadletter" ? "deadlettered" : "recovered"
+  })
+}
+
+/**
+ * Reclaim, at boot, the rows this host was executing when it stopped.
+ *
+ * Owner-scoped on purpose. The connector plane can reclaim every `running` row
+ * because it owns its adapters outright; the Bot queue may be drained by more
+ * than one host, so a blanket sweep would yank a delivery out from under a peer
+ * that is still working on it. What a restarting host *does* know is that its
+ * own owner string cannot belong to a live attempt: that process is this one,
+ * and it has just started. So its rows are recovered immediately instead of
+ * waiting out a lease nobody is holding.
+ */
+export async function recoverStaleBotDeliveries(input: {
+  owner: string
+  now?: number
+  random?: () => number
+}): Promise<number> {
+  const db = getDb()
+  const now = input.now ?? Date.now()
+  return db.transaction("rw", db.botEventDeliveries, async () => {
+    const rows = await db.botEventDeliveries.toArray()
+    const mine = rows.filter(
+      (row) =>
+        row.leaseOwner === input.owner && (row.status === "leased" || row.status === "running")
+    )
+    for (const row of mine) {
+      await db.botEventDeliveries.put(chargeAbandonedAttempt(row, now, input.random))
+    }
+    return mine.length
+  })
+}
+
 /** In-flight deliveries sharing a concurrency key, for serialisation. */
 export async function countActiveBotDeliveriesForKey(
   concurrencyKey: string,
@@ -291,10 +415,11 @@ export async function countActiveBotDeliveriesForKey(
     .botEventDeliveries.where("concurrencyKey")
     .equals(concurrencyKey)
     .toArray()
-  return rows.filter(
-    (row) =>
-      row.status === "running" || (row.status === "leased" && (row.leaseExpiresAt ?? 0) > now)
-  ).length
+  // Both mid-attempt statuses need a LIVE lease to count. Counting `running`
+  // unconditionally is what used to retire a concurrency key permanently: one
+  // crash left a row nothing could clear, and every later delivery on that key
+  // was skipped as serialised forever after.
+  return rows.filter((row) => !isAbandonedAttempt(row, now) && isMidAttempt(row.status)).length
 }
 
 export async function listBotDeliveries(query: {
@@ -320,12 +445,29 @@ export async function findBotDeliveryByCorrelation(
   return getDb().botEventDeliveries.where("correlation").equals(correlation).first()
 }
 
-/** Drop settled rows past the retention window. Returns the number removed. */
+/**
+ * Drop settled rows past the retention window, and retire anything that has
+ * been unsettled for longer than one. Returns the number of rows removed.
+ *
+ * The second half is the backstop. Recovery already returns an abandoned
+ * attempt to the queue, so a row should not be able to sit unsettled for two
+ * weeks; if one does, its installation is gone or its trigger no longer exists,
+ * and leaving it is how a queue accumulates work nobody will ever do. It is
+ * dismissed rather than deleted so the reason survives to the next sweep.
+ */
 export async function pruneSettledBotDeliveries(now = Date.now()): Promise<number> {
   const db = getDb()
   const cutoff = now - BOT_DELIVERY_RETENTION_MS
-  const stale = await db.botEventDeliveries.toArray()
-  const ids = stale
+  const rows = await db.botEventDeliveries.toArray()
+
+  const expired = rows.filter(
+    (row) => !isTerminalBotDelivery(row.status) && row.receivedAt <= cutoff
+  )
+  for (const row of expired) {
+    await dismissBotDelivery(row.id, "unsettled past the retention window", now)
+  }
+
+  const ids = rows
     .filter((row) => row.settledAt !== undefined && row.settledAt <= cutoff)
     .map((row) => row.id)
   if (ids.length === 0) return 0

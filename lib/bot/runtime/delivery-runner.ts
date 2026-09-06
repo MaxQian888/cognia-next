@@ -18,6 +18,7 @@ import {
   dismissBotDelivery,
   listDueBotDeliveries,
   pruneSettledBotDeliveries,
+  recoverAbandonedBotDelivery,
   renewBotDeliveryLease,
 } from "@/lib/db/bot-event-deliveries"
 import { getBotInstallation } from "@/lib/db/bot-installations"
@@ -55,6 +56,12 @@ export interface BotDeliveryAttempt {
 export type BotSkipReason =
   /** Another runner holds a live lease. */
   | "leased_elsewhere"
+  /**
+   * The previous attempt was abandoned by a host that stopped. It has been
+   * charged one attempt and returned to the queue, and comes back after its
+   * backoff rather than being re-run in the same pass.
+   */
+  | "recovered"
   /** The installation is gone, disabled, or its plugin is not loaded. */
   | "not_runnable"
   /** Another delivery with the same concurrency key is in flight. */
@@ -85,6 +92,12 @@ async function attemptDelivery(
   options: BotDeliveryRunnerOptions,
   now: () => number
 ): Promise<BotRunOutcome | { status: "skipped"; reason: BotSkipReason }> {
+  // Recovery runs BEFORE the claim, for the same reason serialisation does: the
+  // claim rewrites the row, so afterwards nothing can tell an attempt that was
+  // abandoned from one that is simply starting.
+  const recovery = await recoverAbandonedBotDelivery(delivery.id, now())
+  if (recovery) return { status: "skipped", reason: "recovered" }
+
   // Serialisation is checked BEFORE the claim. Claiming first would make this
   // delivery look in-flight to its own sibling check.
   if (delivery.concurrencyKey) {

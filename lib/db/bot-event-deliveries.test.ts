@@ -20,6 +20,8 @@ import {
   listDueBotDeliveries,
   markBotDeliveryRunning,
   pruneSettledBotDeliveries,
+  recoverAbandonedBotDelivery,
+  recoverStaleBotDeliveries,
   renewBotDeliveryLease,
   replayBotDelivery,
 } from "./bot-event-deliveries"
@@ -262,5 +264,115 @@ describe("botEventDeliveries", () => {
     expect(await pruneSettledBotDeliveries(NOW + 1)).toBe(0)
     expect(await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)).toBe(1)
     expect((await getDb().botEventDeliveries.toArray()).map((r) => r.id)).toEqual(["del_2"])
+  })
+})
+
+/**
+ * A host that stops mid-attempt used to leave the delivery `running` forever:
+ * nothing listed it, nothing pruned it, and it counted against its own
+ * concurrency key, so that key was retired along with it.
+ */
+describe("botEventDeliveries recovery after a host stops mid-attempt", () => {
+  const AFTER_LEASE = NOW + BOT_DELIVERY_LEASE_MS + 1
+
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botEventDeliveries.clear()
+  }, 15_000)
+
+  async function abandonedRunningDelivery(concurrencyKey?: string) {
+    await enqueueBotDelivery({
+      envelope: envelope(),
+      now: NOW,
+      ...(concurrencyKey ? { concurrencyKey } : {}),
+    })
+    await claimBotDelivery("del_1", "runner-a", NOW)
+    await markBotDeliveryRunning("del_1", "run_bot_del_1", NOW)
+  }
+
+  it("makes a running delivery due again once its lease expires", async () => {
+    await abandonedRunningDelivery()
+
+    expect(await listDueBotDeliveries(10, NOW)).toEqual([])
+    expect((await listDueBotDeliveries(10, AFTER_LEASE)).map((r) => r.id)).toEqual(["del_1"])
+  })
+
+  it("frees the concurrency key a crashed running delivery held", async () => {
+    await abandonedRunningDelivery("repo#1")
+
+    expect(await countActiveBotDeliveriesForKey("repo#1", NOW)).toBe(1)
+    expect(await countActiveBotDeliveriesForKey("repo#1", AFTER_LEASE)).toBe(0)
+  })
+
+  it("charges one attempt and backs the delivery off rather than re-running it", async () => {
+    await abandonedRunningDelivery()
+
+    expect(await recoverAbandonedBotDelivery("del_1", AFTER_LEASE, () => 0)).toBe("recovered")
+
+    const row = await getDb().botEventDeliveries.get("del_1")
+    expect(row?.status).toBe("pending")
+    expect(row?.attempts).toBe(1)
+    expect(row?.nextAttemptAt).toBeGreaterThan(AFTER_LEASE)
+    expect(row?.lastError).toContain("interrupted")
+    expect("leaseOwner" in (row ?? {})).toBe(false)
+  })
+
+  it("leaves a delivery that is not abandoned alone", async () => {
+    await abandonedRunningDelivery()
+    expect(await recoverAbandonedBotDelivery("del_1", NOW)).toBeNull()
+    expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("running")
+  })
+
+  it("dead-letters a delivery that keeps killing whatever runs it", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+
+    let outcome: string | null = null
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const at = NOW + (attempt + 1) * (BOT_DELIVERY_LEASE_MS + 1)
+      await claimBotDelivery("del_1", "runner-a", at)
+      await markBotDeliveryRunning("del_1", "run_bot_del_1", at)
+      outcome = await recoverAbandonedBotDelivery("del_1", at + BOT_DELIVERY_LEASE_MS + 1, () => 0)
+      if (outcome === "deadlettered") break
+    }
+
+    expect(outcome).toBe("deadlettered")
+    const row = await getDb().botEventDeliveries.get("del_1")
+    expect(row?.status).toBe("deadletter")
+    expect(row?.settledAt).toBeDefined()
+  })
+
+  it("refuses a claim while another owner's lease on a running row is alive", async () => {
+    await abandonedRunningDelivery()
+    expect(await claimBotDelivery("del_1", "runner-b", NOW)).toBeUndefined()
+    expect(await claimBotDelivery("del_1", "runner-b", AFTER_LEASE)).toBeDefined()
+  })
+
+  it("reclaims only this host's own rows at boot, before their leases expire", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "evt_2", deliveryId: "del_2" }),
+      now: NOW,
+    })
+    await claimBotDelivery("del_1", "desktop:acct", NOW)
+    await markBotDeliveryRunning("del_1", "run_bot_del_1", NOW)
+    await claimBotDelivery("del_2", "brain:acct", NOW)
+
+    expect(
+      await recoverStaleBotDeliveries({ owner: "desktop:acct", now: NOW, random: () => 0 })
+    ).toBe(1)
+
+    expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("pending")
+    // A peer is still working on its own row; a blanket sweep would yank it.
+    expect((await getDb().botEventDeliveries.get("del_2"))?.status).toBe("leased")
+  })
+
+  it("retires a delivery left unsettled for longer than the retention window", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+
+    await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)
+
+    const row = await getDb().botEventDeliveries.get("del_1")
+    expect(row?.status).toBe("dismissed")
+    expect(row?.lastError).toContain("retention")
   })
 })
