@@ -62,6 +62,23 @@ describe("startNewSession", () => {
     })
   })
 
+  it("leaves the user where they are when the caller has nobody to move", async () => {
+    // A workflow step at 3am, or a run on the cloud brain where there is no UI
+    // at all. The row and its announcement still happen, so a conversation a
+    // machine started is the same kind of object as one a person started.
+    useChatStore.getState().clear()
+    useUIStore.setState({ pendingConversationReveal: null })
+
+    const session = await startNewSession({ activate: false })
+
+    await expect(getSession(session.id)).resolves.toMatchObject({ id: session.id })
+    expect(useChatStore.getState().activeSessionId).not.toBe(session.id)
+    expect(useUIStore.getState().pendingConversationReveal).toBeNull()
+    expect(emitMock).toHaveBeenCalledWith(SystemEvents.SESSION_CREATED, {
+      sessionId: session.id,
+    })
+  })
+
   it("asks the conversation list to reveal the new row", async () => {
     // The list's narrowing state is persisted (archived view, a search, a quick
     // filter), so a new conversation can be created, selected and invisible.

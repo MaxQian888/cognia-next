@@ -53,6 +53,19 @@ export interface NewSessionInput extends SessionSeed {
   executionLocation?: SessionExecutionLocation
   /** Requested isolation base. Ignored for Local execution. */
   executionBase?: SessionWorkspaceBaseSpec
+  /**
+   * Move the UI to the new conversation. Default `true`, which is every entry
+   * point below: a person clicked "new chat" or accepted a handoff, and a
+   * conversation they do not land in is one they will not notice.
+   *
+   * `false` exists for the callers where no person clicked anything. A
+   * workflow step that mints a conversation at 3am, or on the cloud brain
+   * where there is no UI at all, must not pull the user out of whatever they
+   * are reading. The row, its workspace binding, its execution context and the
+   * `session.created` announcement are all still written, so the conversation
+   * is the same kind of object either way. Only the focus move is skipped.
+   */
+  activate?: boolean
 }
 
 /**
@@ -63,7 +76,9 @@ export interface NewSessionInput extends SessionSeed {
  * Beyond writing the Dexie row it owns the side effects a session is useless
  * without: workspace linking (else the session is invisible in the scoped
  * list), activation, revealing the row in the conversation list, and the
- * plugin-bus announcement.
+ * plugin-bus announcement. Activation and the reveal are the only two a
+ * caller may decline, through `activate: false`, and only because a caller
+ * with no person behind it has nobody to move.
  *
  * Passing no input is the deliberate "quick start" path: `createSession`
  * auto-applies the default preset when no character/team/model/prompt/dir is
@@ -207,13 +222,18 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     updateProject(ownerProjectId, { defaultExecutionLocation: executionLocation })
   }
 
-  useChatStore.getState().setActiveSession(session.id)
-  // Fourth side effect: the conversation list has to *show* it. Activation puts
-  // the conversation in the pane, but the sidebar keeps its own narrowing —
-  // the Archived view, a search still in the field, a quick filter from
-  // yesterday — and any of those leaves the new row off screen. The list undoes
-  // only what is actually hiding it (`use-conversation-reveal.ts`).
-  useUIStore.getState().requestConversationReveal(session.id)
+  if (partial?.activate ?? true) {
+    useChatStore.getState().setActiveSession(session.id)
+    // Fourth side effect: the conversation list has to *show* it. Activation
+    // puts the conversation in the pane, but the sidebar keeps its own
+    // narrowing — the Archived view, a search still in the field, a quick
+    // filter from yesterday — and any of those leaves the new row off screen.
+    // The list undoes only what is actually hiding it
+    // (`use-conversation-reveal.ts`).
+    useUIStore.getState().requestConversationReveal(session.id)
+  }
+  // Announced unconditionally. A plugin listening for a new conversation wants
+  // to hear about every one, including the ones a machine started.
   emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: session.id })
 
   return session

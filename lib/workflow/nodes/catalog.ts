@@ -864,6 +864,153 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Conversations ─────────────────────────────────────────────────────────
+  "action.session.create": {
+    label: "Start conversation",
+    description:
+      "Start a conversation, optionally with a first message. Does not move the user's UI, so a scheduled run does not pull them out of what they are reading.",
+    iconName: "MessagesSquare",
+    keywords: ["session", "conversation", "chat", "new", "start", "create"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", format: "expression", title: "Title" },
+        characterId: { type: "string", format: "expression", title: "Character id" },
+        projectId: {
+          type: "string",
+          format: "expression",
+          title: "Workspace id",
+          description: "Defaults to the workspace this run belongs to.",
+        },
+        workingDir: { type: "string", format: "expression", title: "Working directory" },
+        seedUserMessage: {
+          type: "string",
+          format: "expression",
+          title: "First message",
+        },
+        activate: {
+          type: "boolean",
+          title: "Switch the user to it",
+          description: "Off by default. Only meaningful when a person is at the app.",
+          default: false,
+        },
+      },
+    },
+  },
+  "action.session.get": {
+    label: "Get conversation",
+    description: "Read one conversation, optionally with its most recent messages.",
+    iconName: "MessageSquare",
+    keywords: ["session", "conversation", "chat", "get", "read", "transcript"],
+    paramsSchema: {
+      type: "object",
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", format: "expression", title: "Conversation id" },
+        messageLimit: {
+          type: "integer",
+          title: "Recent messages",
+          minimum: 0,
+          maximum: 500,
+          default: 0,
+        },
+      },
+    },
+  },
+  "action.session.list": {
+    label: "List conversations",
+    description:
+      "List conversations in a workspace. Embedded and imported inner transcripts stay out, the same as everywhere else they are enumerated.",
+    iconName: "List",
+    keywords: ["session", "conversation", "chat", "list", "find"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          format: "expression",
+          title: "Workspace id",
+          description: "Defaults to the workspace this run belongs to.",
+        },
+        characterId: { type: "string", format: "expression", title: "Only this character" },
+        folderId: { type: "string", format: "expression", title: "Only this folder" },
+        pinnedOnly: { type: "boolean", title: "Pinned only", default: false },
+        includeArchived: { type: "boolean", title: "Include archived", default: false },
+        limit: { type: "integer", title: "Limit", minimum: 1, maximum: 200, default: 20 },
+      },
+    },
+  },
+  "action.session.appendMessage": {
+    label: "Append message",
+    description:
+      "Append one message to a conversation's transcript. A user-role message does not start a turn on its own.",
+    iconName: "MessageSquarePlus",
+    keywords: ["session", "conversation", "chat", "message", "append", "post", "write"],
+    paramsSchema: {
+      type: "object",
+      required: ["sessionId", "text"],
+      properties: {
+        sessionId: { type: "string", format: "expression", title: "Conversation id" },
+        text: { type: "string", format: "expression", title: "Text" },
+        role: { type: "string", title: "Role", enum: ["user", "assistant"], default: "user" },
+      },
+    },
+  },
+  "action.session.update": {
+    label: "Update conversation",
+    description: "Rename, pin or file a conversation. Renaming turns auto-titling off for good.",
+    iconName: "Pencil",
+    keywords: ["session", "conversation", "chat", "rename", "pin", "folder", "update"],
+    paramsSchema: {
+      type: "object",
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", format: "expression", title: "Conversation id" },
+        title: { type: "string", format: "expression", title: "New title" },
+        pinned: { type: "boolean", title: "Pinned" },
+        folderId: {
+          type: "string",
+          format: "expression",
+          title: "Folder id",
+          description: "Empty moves it back to the root.",
+        },
+      },
+    },
+  },
+  "action.session.archive": {
+    label: "Archive conversation",
+    description:
+      "Archive or unarchive a conversation. This family has no delete: removing something a person saved is their call, not a graph's.",
+    iconName: "Archive",
+    keywords: ["session", "conversation", "chat", "archive", "unarchive", "hide"],
+    paramsSchema: {
+      type: "object",
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", format: "expression", title: "Conversation id" },
+        archived: { type: "boolean", title: "Archived", default: true },
+      },
+    },
+  },
+  "action.session.export": {
+    label: "Export conversation",
+    description: "Render a conversation's transcript as markdown or JSON.",
+    iconName: "Download",
+    keywords: ["session", "conversation", "chat", "export", "markdown", "json", "transcript"],
+    paramsSchema: {
+      type: "object",
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", format: "expression", title: "Conversation id" },
+        format: {
+          type: "string",
+          title: "Format",
+          enum: ["markdown", "json"],
+          default: "markdown",
+        },
+      },
+    },
+  },
   // ── Notification centre (ADR-0042) ────────────────────────────────────────
   "action.notify.send": {
     label: "Send notification",

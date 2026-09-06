@@ -49015,6 +49015,36 @@
             "label": "List upcoming scheduled tasks"
           }
         },
+        "session": {
+          "appendMessage": {
+            "description": "Append one message to a conversation's transcript. A user-role message does not start a turn on its own.",
+            "label": "Append message"
+          },
+          "archive": {
+            "description": "Archive or unarchive a conversation. This family has no delete: removing something a person saved is their call, not a graph's.",
+            "label": "Archive conversation"
+          },
+          "create": {
+            "description": "Start a conversation, optionally with a first message. Does not move the user's UI, so a scheduled run does not pull them out of what they are reading.",
+            "label": "Start conversation"
+          },
+          "export": {
+            "description": "Render a conversation's transcript as markdown or JSON.",
+            "label": "Export conversation"
+          },
+          "get": {
+            "description": "Read one conversation, optionally with its most recent messages.",
+            "label": "Get conversation"
+          },
+          "list": {
+            "description": "List conversations in a workspace. Embedded and imported inner transcripts stay out, the same as everywhere else they are enumerated.",
+            "label": "List conversations"
+          },
+          "update": {
+            "description": "Rename, pin or file a conversation. Renaming turns auto-titling off for good.",
+            "label": "Update conversation"
+          }
+        },
         "site": {
           "build": {
             "description": "Build a Cognia Site into a new immutable version.",

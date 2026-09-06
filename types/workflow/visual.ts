@@ -174,6 +174,19 @@ export type WorkflowNodeKind =
   | "action.approval.request"
   // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
   | "action.humanInput.request"
+  // Conversations. `create` goes through `startSeededSession` (which wraps
+  // `startNewSession`) rather than `createSession`, so a conversation a
+  // workflow started is the same kind of object as one a person started, and
+  // reaches a companion through the sync that already carries every other one.
+  // No `delete`: an unattended graph removing a conversation someone saved is
+  // a consent problem, and `archive` is the reversible one.
+  | "action.session.create"
+  | "action.session.get"
+  | "action.session.list"
+  | "action.session.appendMessage"
+  | "action.session.update"
+  | "action.session.archive"
+  | "action.session.export"
   // Notification centre (ADR-0042). Distinct from `action.mobile.notify` (a
   // proxy addressed at one paired device) and from the approval / human-input
   // notifications (blocking gates carrying registered commands): these write a
@@ -464,6 +477,13 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.approval.request",
   "action.humanInput.request",
+  "action.session.create",
+  "action.session.get",
+  "action.session.list",
+  "action.session.appendMessage",
+  "action.session.update",
+  "action.session.archive",
+  "action.session.export",
   "action.notify.send",
   "action.notify.list",
   "action.notify.resolve",

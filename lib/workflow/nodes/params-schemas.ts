@@ -2166,6 +2166,46 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Conversations. No `delete` schema because there is no delete node.
+  "action.session.create": z.object({
+    title: optionalString,
+    characterId: optionalString,
+    projectId: optionalString,
+    workingDir: optionalString,
+    seedUserMessage: optionalString,
+    activate: z.boolean().optional(),
+  }),
+  "action.session.get": z.object({
+    sessionId: requiredString("required"),
+    messageLimit: numberRange(0, 500).int().optional(),
+  }),
+  "action.session.list": z.object({
+    projectId: optionalString,
+    characterId: optionalString,
+    folderId: optionalString,
+    pinnedOnly: z.boolean().optional(),
+    includeArchived: z.boolean().optional(),
+    limit: numberRange(1, 200).int().optional(),
+  }),
+  "action.session.appendMessage": z.object({
+    sessionId: requiredString("required"),
+    text: requiredString("required"),
+    role: z.enum(["user", "assistant"]).optional(),
+  }),
+  "action.session.update": z.object({
+    sessionId: requiredString("required"),
+    title: optionalString,
+    pinned: z.boolean().optional(),
+    folderId: optionalString,
+  }),
+  "action.session.archive": z.object({
+    sessionId: requiredString("required"),
+    archived: z.boolean().optional(),
+  }),
+  "action.session.export": z.object({
+    sessionId: requiredString("required"),
+    format: z.enum(["markdown", "json"]).optional(),
+  }),
   // Notification centre. `source` is not authorable on send: every row these
   // nodes write is a workflow notification, and `actions` is refused outright
   // because an authored command that nothing registered renders a dead button.

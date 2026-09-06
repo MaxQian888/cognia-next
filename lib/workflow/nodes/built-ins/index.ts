@@ -59,6 +59,9 @@ import "../sites"
 // most recurrent defect; `executor-coverage.test.ts` fails without this line.
 import "../artifacts"
 import "../issues"
+// Conversation nodes. A registry nobody registers into is this repo's most
+// recurrent defect; `executor-coverage.test.ts` fails without this line.
+import "../sessions"
 // Notification-centre nodes. A registry nobody registers into is this repo's
 // most recurrent defect; `executor-coverage.test.ts` fails without this line.
 import "../notifications"

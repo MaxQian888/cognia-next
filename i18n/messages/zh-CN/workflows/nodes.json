@@ -484,6 +484,36 @@
         "label": "列出即将到来的计划任务"
       }
     },
+    "session": {
+      "appendMessage": {
+        "description": "向会话记录追加一条消息。user 角色的消息本身不会启动一轮对话。",
+        "label": "追加消息"
+      },
+      "archive": {
+        "description": "归档或取消归档一个会话。这一族没有删除节点：删掉别人存下的东西该由人来决定，不是图。",
+        "label": "归档会话"
+      },
+      "create": {
+        "description": "新建一个会话，可带首条消息。不会切换用户界面，所以定时运行不会把人从正在看的内容里拽走。",
+        "label": "新建会话"
+      },
+      "export": {
+        "description": "把会话记录渲染成 Markdown 或 JSON。",
+        "label": "导出会话"
+      },
+      "get": {
+        "description": "读取一个会话，可选带上最近若干条消息。",
+        "label": "读取会话"
+      },
+      "list": {
+        "description": "列出某个工作区里的会话。内嵌会话与导入的子代理内部记录不在其中，与其他枚举场景一致。",
+        "label": "列出会话"
+      },
+      "update": {
+        "description": "重命名、置顶或归档到文件夹。重命名会永久关闭自动标题。",
+        "label": "更新会话"
+      }
+    },
     "site": {
       "build": {
         "description": "把 Cognia 站点构建成一个新的不可变版本。",

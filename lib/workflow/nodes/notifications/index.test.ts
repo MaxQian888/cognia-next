@@ -3,9 +3,12 @@
  */
 import "fake-indexeddb/auto"
 
-const notifyMock = jest.fn(async () => "n1")
+// Typed with its parameter rather than `(...a: unknown[])`: a zero-arg
+// `jest.fn` infers an empty tuple, and both the spread and every
+// `mock.calls[0][0]` read below then fail to compile (TS2556 / TS2493).
+const notifyMock = jest.fn(async (_input: unknown): Promise<string> => "n1")
 jest.mock("@/lib/notifications/runtime", () => ({
-  notify: (...a: unknown[]) => notifyMock(...a),
+  notify: (input: unknown) => notifyMock(input),
 }))
 
 import { getNotification, putNotification } from "@/lib/db/notifications"
