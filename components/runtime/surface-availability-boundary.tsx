@@ -60,7 +60,13 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
         : AlertTriangleIcon
 
   return (
-    <main className="flex min-h-[60vh] items-center justify-center p-6">
+    // `flex-1` + `w-full` because this lands in whatever slot the platform
+    // shell hands the route, and that slot is a flex ROW. Without them the
+    // `<main>` sized to its own `max-w-lg` content and sat against the left
+    // edge of an otherwise empty page, vertically centred by the row's own
+    // stretch: /performance on a browser target read as a rendering failure
+    // rather than as an explanation.
+    <main className="flex min-h-[60vh] w-full min-w-0 flex-1 items-center justify-center p-6">
       <Empty
         aria-labelledby="surface-unavailable-title"
         className="w-full max-w-lg rounded-none border-x-0 border-y py-8"

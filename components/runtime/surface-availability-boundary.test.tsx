@@ -39,6 +39,20 @@ it("returns an explanatory recovery page for a host-only standalone deep link", 
   expect(screen.getByRole("link", { name: "pairHost" })).toHaveAttribute("href", "/pair")
 })
 
+it("lets the recovery page claim the whole content slot", () => {
+  // The shell hands routes a flex-row slot. A `<main>` that neither grows nor
+  // spans it shrinks to its own max-width and hugs the left edge, which is how
+  // /performance ended up showing a narrow column against an empty page.
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>browser implementation</div>
+    </SurfaceAvailabilityBoundary>
+  )
+
+  const main = screen.getByRole("main")
+  expect(main).toHaveClass("flex-1", "w-full")
+})
+
 it("keeps the standalone plugin library fully available without a read-only banner", () => {
   pathname = "/plugins"
 
