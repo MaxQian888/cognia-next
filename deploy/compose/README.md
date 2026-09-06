@@ -31,6 +31,10 @@ SHARE_UPLOAD_SECRET=... node ../../scripts/smoke/compose-smoke.mjs   # tier-1 sm
 | `docker compose --profile logto up`                                                                          | + Logto IdP (3001/3002, pg, redis)   | — (see LOGTO.md) |
 | `docker compose -f docker-compose.yml -f docker-compose.t2.yml --profile server --profile remote-browser up` | + isolated default workspace runtime | `remote-browser` |
 
+`pnpm audit:deploy-suite` (part of `check:all`) keeps this suite coherent:
+Dockerfile bases against the Rust/Node/pnpm pins, every default image against
+what `images.yml` publishes, and the multi-instance invariants below.
+
 For the `server` profile, `.env` additionally needs `COGNIA_MASTER_KEY`
 (`openssl rand -hex 32`) — there is no OS keyring inside a container, so the
 headless secret store (ADR-0059 W5) takes its master key from the environment.
@@ -46,6 +50,58 @@ or leave it empty for `/api/auth/config` to derive the same-origin URL from the
 Caddy forwarded host and scheme. Caddy routes `/signaling` to the signaling
 service while keeping the remaining API and WebSocket paths on
 `cognia-server`.
+
+## Multiple instances on one host
+
+Every instance is one directory with its own `.env`, and **`COGNIA_INSTANCE`**
+is the single knob that keeps instances apart. It names the compose project
+(so volumes, networks and container names get their own prefix), the T2
+`<instance>_workspaces` volume, and the runner ownership label the server
+stamps on the agent containers it creates (`COGNIA_DEPLOYMENT_ID`). Host
+ports are all overridable; container ports never change, so the Caddyfile,
+healthchecks and the smoke script stay as they are.
+
+```bash
+# second instance, published beside the first
+mkdir -p ~/cognia-beta && cp deploy/compose/.env.example ~/cognia-beta/.env
+# edit ~/cognia-beta/.env:
+#   COGNIA_INSTANCE=beta
+#   COGNIA_SERVER_PORT=27891  SIGNALING_PORT=7893  SHARE_PORT=8788
+#   COGNIA_HTTP_PORT=8080     COGNIA_HTTPS_PORT=8443
+#   COGNIA_PUBLIC_URL=https://beta.example        # what paired devices follow
+#   COGNIA_DOMAIN=beta.example                    # tls profile
+cd deploy/compose
+docker compose --env-file ~/cognia-beta/.env --profile server up -d --wait
+```
+
+Rules that follow from how the pieces are scoped:
+
+- **Do not rely on `docker compose -p <name>` alone.** It renames the
+  project but not the T2 workspaces volume or the ownership label, so two
+  instances would share agent workspaces and reap each other's runners.
+  `COGNIA_INSTANCE` is what both derive from. `.env` is read from the
+  directory the compose file lives in, so pass `--env-file` for any instance
+  that is not the default one.
+- **`COGNIA_BIND_ADDRESS=127.0.0.1`** keeps a secondary instance off the
+  public interface when your own proxy fronts it.
+- **Shared Docker daemon (T2).** Every runner container carries
+  `cognia.deployment=<COGNIA_INSTANCE>`. The boot-time orphan sweep removes
+  only containers with the same value, so instance A restarting never
+  touches instance B's live agents. Containers created by a build that
+  predates the label are left alone and logged at debug level; remove them by
+  hand once (`docker ps -a --filter label=cognia.owner=cognia-external-agent`).
+- **One live server per data volume.** `cognia-server serve` takes an
+  exclusive advisory lock on `<data>/.cognia/headless-active.lock` and refuses
+  to start while another process holds it. `docker compose up --scale
+cognia-server=2` therefore fails the second replica on purpose: the brain
+  owns the data (ADR-0059 D3), and two brains on one volume would diverge.
+  Scale by adding instances (each with its own volume and `COGNIA_INSTANCE`),
+  not replicas. The same rule holds on Kubernetes, see `deploy/k8s/README.md`.
+- **Signaling and share are per instance** in this suite. To share one
+  signaling service between instances, point the secondary instance's
+  `COGNIA_SIGNALING_URL` / `COGNIA_PUBLIC_SIGNALING_URL` at the primary's and
+  leave its own `signaling` service unpublished (`SIGNALING_PORT` on a
+  loopback bind address).
 
 ## Smoke test
 
@@ -105,6 +161,10 @@ What it adds:
 - **Runner image** — `COGNIA_RUNNER_IMAGE` (default
   `ghcr.io/maxqian888/cognia-runner:latest`). Pulled automatically on the
   first spawn if absent; pre-pull to avoid first-spawn latency.
+- **Ownership label** — every runner carries
+  `cognia.deployment=${COGNIA_INSTANCE}` (`COGNIA_DEPLOYMENT_ID` on the
+  server). The orphan sweep at boot only removes runners with the same
+  value, which is what lets two instances share one daemon.
 
 Optional per-runner knobs (read by `container_backend.rs`, all env on the
 `cognia-server` service): `COGNIA_RUNNER_SECCOMP` (profile JSON path),

@@ -7,10 +7,14 @@ ENV NODE_ENV=production \
     COGNIA_BROWSER_OVERLAY_PATH=/opt/cognia-runtime/src/overlay.injected.js \
     COGNIA_WORKSPACE_RUNTIME_PORT=27910
 
+# The Playwright base ships its own Node. Install the repository's pinned pnpm
+# (`packageManager` in package.json) explicitly instead of relying on the
+# base's Corepack, whose bundled signing keys have lagged the registry before.
+ARG PNPM_VERSION=11.18.0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
     && rm -rf /var/lib/apt/lists/* \
-    && corepack enable
+    && npm install --global "pnpm@${PNPM_VERSION}"
 
 WORKDIR /opt/cognia-runtime
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json /opt/cognia-runtime-root/

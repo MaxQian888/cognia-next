@@ -1,13 +1,61 @@
-FROM node:22-alpine AS web-build
-WORKDIR /app
-RUN corepack enable
-COPY . .
-RUN pnpm install --frozen-lockfile
+# syntax=docker/dockerfile:1.12
+## cognia-web — same-origin Web front door (ADR-0059 F2).
+##
+## Stage 1 builds the Next.js static export (`pnpm build`, output "export")
+## with the SAME Node major and the SAME pinned pnpm the repository requires
+## (`engines.node` / `packageManager` in package.json) — the brain-builder
+## stage of Dockerfile.cognia-server uses the identical recipe. Stage 2 is
+## Caddy serving `out/` and reverse-proxying the canonical API/WS/signaling
+## paths (see Caddyfile).
+##
+## Build (repo root is the context; .dockerignore keeps node_modules/out/target
+## off the daemon):
+##   docker build -f deploy/compose/Dockerfile.web -t cognia-web .
+## CI: published as ghcr.io/<owner>/cognia-web by the `cognia-web` matrix
+## entry in images.yml.
+
+FROM node:26-bookworm AS web-build
+ARG COREPACK_VERSION=0.35.0
+ARG PNPM_VERSION=11.18.0
+ARG NPM_CONFIG_REGISTRY
+# Build-time public configuration baked into the static export.
+#   NEXT_PUBLIC_E2E / NEXT_PUBLIC_ACCOUNT_GATE — the CI web-headless lane.
+#   NEXT_PUBLIC_COGNIA_LARK_API_BASE — ONLY for a split-origin deployment where
+#   the companion API is not served from this same origin (README § Lark).
 ARG NEXT_PUBLIC_E2E
 ARG NEXT_PUBLIC_ACCOUNT_GATE
-ENV NEXT_PUBLIC_E2E=${NEXT_PUBLIC_E2E}
-ENV NEXT_PUBLIC_ACCOUNT_GATE=${NEXT_PUBLIC_ACCOUNT_GATE}
-RUN pnpm build
+ARG NEXT_PUBLIC_COGNIA_LARK_API_BASE
+ENV HUSKY=0 \
+    CI=1 \
+    NEXT_PUBLIC_E2E=${NEXT_PUBLIC_E2E} \
+    NEXT_PUBLIC_ACCOUNT_GATE=${NEXT_PUBLIC_ACCOUNT_GATE} \
+    NEXT_PUBLIC_COGNIA_LARK_API_BASE=${NEXT_PUBLIC_COGNIA_LARK_API_BASE}
+# Node 25+ no longer bundles Corepack. Pin both explicitly so the image keeps
+# using the repository's pinned pnpm even when the Node base moves.
+RUN npm install --global "corepack@${COREPACK_VERSION}" "pnpm@${PNPM_VERSION}"
+WORKDIR /app
+# Workspace manifests first so the store-heavy install layer survives source
+# edits. `pnpm install --frozen-lockfile` needs every workspace member's
+# package.json present (packages/* are small first-party TS libs; docs/ and
+# mobile/ only need their manifest here).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+COPY patches ./patches
+RUN if [ -n "${NPM_CONFIG_REGISTRY}" ]; then \
+      registry="${NPM_CONFIG_REGISTRY%/}"; \
+      sed -i "s#https://registry.npmjs.org/#${registry}/#g" pnpm-lock.yaml; \
+      pnpm config set registry "${registry}"; \
+    fi
+RUN --mount=type=cache,id=cognia-pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --fetch-retries=5 --fetch-timeout=300000 --network-concurrency=16
+# Sources last. `prebuild` runs the full asset pipeline (bundled plugins,
+# Monaco/OCR assets, sidecar bundles) before `next build`; nothing in it needs
+# a .git directory, so the ignored VCS tree is not a problem.
+COPY . .
+RUN NODE_OPTIONS=--max-old-space-size=8192 pnpm build
 
 FROM caddy:2.10
 COPY deploy/compose/Caddyfile /etc/caddy/Caddyfile

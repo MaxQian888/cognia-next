@@ -2,7 +2,10 @@
 
 FROM registry.k8s.io/kubectl:v1.34.1 AS kubectl
 
-FROM rust:1.89-bookworm AS builder
+# Tracks the `rust-toolchain.toml` pin: the build runs `--locked` against the
+# shared root Cargo.lock, whose floor is the workspace channel, not this
+# crate's own `rust-version`.
+FROM rust:1.95-bookworm AS builder
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release -p cognia-deploy-agent

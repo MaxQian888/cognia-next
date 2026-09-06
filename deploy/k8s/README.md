@@ -55,6 +55,20 @@ COGNIA_SMOKE_EXEC="kubectl -n cognia-kind exec -i cognia-server-0 --" \
   `logtoAudience` (+ optional `logtoRequiredScopes`, `logtoJwksTtlSecs`).
   Both issuer AND audience must be set to turn OIDC on. Seed flow and the
   issuer-consistency footgun: `deploy/compose/LOGTO.md`.
+- **One live server per tenant, never two replicas**: the StatefulSet is
+  pinned to `replicas: 1` and must stay there. `cognia-server serve` takes an
+  exclusive advisory lock on `<data>/.cognia/headless-active.lock`, so a
+  second pod against the same PVC refuses to start (and an RWO PVC would
+  not attach to it anyway). The brain owns the data (ADR-0059 D3); scale by
+  stamping more tenants (one namespace + one PVC each), not by raising
+  `replicas`. The rolling update terminates the old pod before the new one
+  starts, which is the only order the lock permits.
+- **Runner pods and shared namespaces**: every runner pod carries
+  `cognia.deployment=<id>` and the boot-time orphan sweep only deletes pods
+  with the same value. The id defaults to one persisted under the tenant's
+  data PVC; set `COGNIA_DEPLOYMENT_ID` (label-safe, ≤63 chars) when you want
+  a readable one. One tenant per namespace already isolates the sweep; the
+  label is what keeps it correct if two servers ever share a namespace.
 - **Master key**: each tenant needs a `cognia-secrets` Secret with
   `COGNIA_MASTER_KEY` (64 hex). Rotation: `kubectl exec ... -- cognia-server
 rotate-master-key --new-key ...`, then update the Secret.

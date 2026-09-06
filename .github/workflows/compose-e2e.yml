@@ -238,13 +238,14 @@ jobs:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
         run: docker compose --profile server --profile tls --profile web-headless-e2e up -d --wait
 
-      - uses: pnpm/action-setup@v5
-        with:
-          version: 10.28.2
+      # No explicit pnpm version: action-setup@v6 reads the root
+      # `packageManager` pin, so this lane installs with the same pnpm the
+      # lockfile was written by. Node tracks `engines.node` (>= 26).
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.x
+          node-version: 26.x
           cache: pnpm
 
       - name: Install Web Headless E2E dependencies

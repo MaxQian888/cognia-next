@@ -18,7 +18,15 @@
 # and provider keys for the server profile; LOGTO_DB_PASSWORD for the logto
 # profile) before starting. See LOGTO.md for the one-time Logto seed steps
 # (API resource + apps) and the COGNIA_LOGTO_* wiring.
-name: cognia
+#
+# Several instances on one host: every instance is one directory with its own
+# .env, and COGNIA_INSTANCE is the single knob that keeps them apart. It names
+# the compose project (so volumes, networks and container names get their own
+# prefix), the T2 workspaces volume, and the runner ownership label the server
+# stamps on its agent containers (COGNIA_DEPLOYMENT_ID). Host ports are all
+# overridable so a second instance can publish beside the first. See
+# README.md § "Multiple instances on one host".
+name: ${COGNIA_INSTANCE:-cognia}
 
 services:
   signaling:
@@ -29,7 +37,7 @@ services:
       PORT: "7892"
       SIGNALING_ALLOWED_ORIGINS: ${SIGNALING_ALLOWED_ORIGINS:-}
     ports:
-      - "7892:7892"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${SIGNALING_PORT:-7892}:7892"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:7892/healthz"]
       interval: 30s
@@ -51,7 +59,7 @@ services:
     volumes:
       - share_data:/data
     ports:
-      - "8787:8787"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${SHARE_PORT:-8787}:8787"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8787/healthz"]
       interval: 30s
@@ -105,7 +113,7 @@ services:
       COLLAB_LOGTO_OWNER_ROLE: ${COLLAB_LOGTO_OWNER_ROLE:-owner}
       COLLAB_LOGTO_MEMBER_ROLE: ${COLLAB_LOGTO_MEMBER_ROLE:-member}
     ports:
-      - "8080:8080"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${COLLAB_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -159,7 +167,12 @@ services:
       # missing, so an empty default is safe.
       COGNIA_MASTER_KEY: ${COGNIA_MASTER_KEY:-}
       # Public URL stamped into the pair payload; overridden by Caddy domain in the tls profile.
-      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:27890}
+      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:${COGNIA_SERVER_PORT:-27890}}
+      # Runner ownership scope (see the header note). Every agent container
+      # this server creates carries it, and the boot-time orphan sweep only
+      # removes containers with the same value, so two instances sharing one
+      # Docker daemon never reap each other's live agents.
+      COGNIA_DEPLOYMENT_ID: ${COGNIA_INSTANCE:-cognia}
       # Provider creds for the sidecar chat turn (optional — smoke SKIPs the chat step without them).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Admit the smoke's stub ACP agent through SpawnPolicy (R11). Leave unset in production.
@@ -207,7 +220,7 @@ services:
       # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go
       # through Caddy. 27890 tracks the companion DEFAULT_PORT — 7890 is the
       # Clash mixed-port default and fails to bind on hosts running a proxy.
-      - "27890:27890"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${COGNIA_SERVER_PORT:-27890}:27890"
     security_opt:
       # Tuned profile lets bwrap (ADR-0028 sandbox) create user namespaces in a
       # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
@@ -218,6 +231,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    # The brain flushes its durability journal and the sidecar finishes the
+    # in-flight turn on SIGTERM. Compose's 10 s default cut both short.
+    stop_grace_period: 120s
     restart: unless-stopped
 
   caddy:
@@ -238,9 +254,9 @@ services:
       COGNIA_DOMAIN: ${COGNIA_DOMAIN:-localhost}
       ACME_EMAIL: ${ACME_EMAIL:-}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${COGNIA_HTTP_PORT:-80}:80"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${COGNIA_HTTPS_PORT:-443}:443"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${COGNIA_HTTPS_PORT:-443}:443/udp"
     volumes:
       - cognia_data:/cognia-data:ro
       - caddy_data:/data
@@ -254,7 +270,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prom_data:/prometheus
     ports:
-      - "9090:9090"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${PROMETHEUS_PORT:-9090}:9090"
     restart: unless-stopped
 
   # ── Logto IdP (ADR-0059 multi-user OIDC) ─────────────────────────────────
@@ -312,8 +328,8 @@ services:
       ENDPOINT: ${LOGTO_ENDPOINT:-http://localhost:3001}
       ADMIN_ENDPOINT: ${LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
     ports:
-      - "3001:3001"
-      - "3002:3002"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${LOGTO_PORT:-3001}:3001"
+      - "${COGNIA_BIND_ADDRESS:-0.0.0.0}:${LOGTO_ADMIN_PORT:-3002}:3002"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3001/api/status"]
       interval: 30s

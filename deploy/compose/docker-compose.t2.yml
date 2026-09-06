@@ -47,7 +47,7 @@ services:
       # a host path — the /workspaces path only exists inside this container,
       # so a host bind would hand every runner an empty directory.
       COGNIA_WORKSPACES_DIR: /workspaces
-      COGNIA_WORKSPACES_VOLUME: cognia_workspaces
+      COGNIA_WORKSPACES_VOLUME: ${COGNIA_INSTANCE:-cognia}_workspaces
       # ADR-0085 hard gate. Both this server flag and each user's local
       # experiment toggle must be true before `browser` is advertised.
       COGNIA_REMOTE_BROWSER_ENABLED: ${COGNIA_REMOTE_BROWSER_ENABLED:-false}
@@ -67,7 +67,11 @@ services:
       dockerfile: services/workspace-runtime/Dockerfile
     environment:
       COGNIA_WORKSPACE_ID: default
-      COGNIA_WORKSPACE_RUNTIME_SECRET: ${COGNIA_WORKSPACE_RUNTIME_SECRET:?set a 32+ character runtime secret}
+      # No `:?` here: compose interpolates the whole file before it filters
+      # profiles, so a required marker made the documented T2 command fail
+      # even with the remote-browser profile off. The runtime itself refuses
+      # to start on a secret shorter than 32 characters (src/main.mjs).
+      COGNIA_WORKSPACE_RUNTIME_SECRET: ${COGNIA_WORKSPACE_RUNTIME_SECRET:-}
     volumes:
       - cognia_workspace_default:/workspace
       - cognia_browser_profiles_default:/profiles
@@ -94,9 +98,12 @@ services:
 
 volumes:
   cognia_workspaces:
-    # Fixed name so COGNIA_WORKSPACES_VOLUME above matches regardless of the
-    # compose project name (`name: cognia` would otherwise prefix it).
-    name: cognia_workspaces
+    # Explicit name so COGNIA_WORKSPACES_VOLUME above matches it byte for byte
+    # (compose would otherwise prefix the key with the project name). Both
+    # derive from COGNIA_INSTANCE, so a second instance on the same daemon
+    # gets its own workspaces volume instead of sharing this one. Using
+    # `docker compose -p` alone does NOT rename it: set COGNIA_INSTANCE.
+    name: ${COGNIA_INSTANCE:-cognia}_workspaces
   cognia_workspace_default:
   cognia_browser_profiles_default:
   cognia_runtime_secrets:

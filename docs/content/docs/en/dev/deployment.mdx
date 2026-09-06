@@ -292,14 +292,22 @@ The cloud footprint — `signaling` (WebRTC rendezvous, 7892), `share` (public s
 ```
 ghcr.io/maxqian888/cognia-signaling
 ghcr.io/maxqian888/cognia-share
-ghcr.io/maxqian888/cognia-server        # -slim / -full variants
-ghcr.io/maxqian888/cognia-runner        # T2 per-agent runner image
+ghcr.io/maxqian888/cognia-server            # -slim / -full variants
+ghcr.io/maxqian888/cognia-runner            # T2 per-agent runner image
+ghcr.io/maxqian888/cognia-web               # static export + Caddy front door (tls profile)
+ghcr.io/maxqian888/cognia-workspace-runtime # ADR-0085 shared browser runtime
+ghcr.io/maxqian888/cognia-collab            # ADR-0149 collaboration plane
+ghcr.io/maxqian888/cognia-diagnostics       # ADR-0135 diagnostic service
+ghcr.io/maxqian888/cognia-ops-controller    # ADR-0059 ops controller
+ghcr.io/maxqian888/cognia-deploy-agent      # ADR-0059 deploy agent
 ```
 
 - **Compose suite** — `deploy/compose/` with profiles for the phase ladder (`server`, `tls` Caddy/ACME front door, `observability` Prometheus, `logto` self-hosted OIDC IdP) and a T2 override that moves external agents into per-agent runner containers. Start at [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md).
 - **Unified sign-in** — Logto brokers GitHub and Feishu as social connectors, and the collaboration server claims an empty deployment with a one-time bootstrap credential and mirrors memberships into Logto through an M2M app. Steps, the callback modes and credential rotation are in `deploy/compose/LOGTO.md` (ADR-0149).
 - **Kubernetes** — `deploy/k8s/` kustomize tree, one tenant = one namespace; see `deploy/k8s/README.md` for the kind smoke and production notes (gVisor runtime class, mandatory `publicUrl`, per-tenant Logto wiring).
 - **Smoke** — `scripts/smoke/compose-smoke.mjs` drives a running stack in tiers (`services` / `server` / `tls`); `compose-e2e.yml` runs it in CI on every PR touching the suite.
+- **Multiple instances** — one directory + one `.env` per instance; `COGNIA_INSTANCE` names the compose project, the T2 workspaces volume and the runner ownership label, and every host port is overridable. One live `cognia-server` per data volume: `serve` holds an exclusive lock on the volume, so scale by adding instances (or k8s tenants), never replicas. Details in the compose README.
+- **Coherence gate** — `pnpm audit:deploy-suite` pins Dockerfile bases to the Rust/Node/pnpm pins, every compose default image to what `images.yml` publishes, and the multi-instance invariants above.
 - Full architecture and the isolation/topology ladder: [ADR-0059](../adr/0059-cloud-deployment-headless-brain).
 
 The headless host uses two deliberately different signaling URLs.
@@ -333,7 +341,7 @@ One browser account can retain multiple encrypted Companion targets, but only on
 | `ci.yml`               | push/PR on `master`/`develop`                   | Orchestrates `quality.yml` + `test.yml` (lint, typecheck, Jest shards, coverage gate, E2E)           |
 | `build-tauri.yml`      | `workflow_call` / manual                        | Desktop build matrix; updater signing via `TAURI_SIGNING_*` secrets                                  |
 | `release.yml`          | tag `v*`                                        | Calls `build-tauri.yml` with inherited secrets → draft release + signed `latest.json`                |
-| `images.yml`           | tag `v*` / manual / PR on container inputs      | Builds+publishes the four GHCR images; PRs get a `cargo check` compile gate for `cognia-server`      |
+| `images.yml`           | tag `v*` / manual / PR on container inputs      | Builds+publishes the GHCR images above; PRs get a `cargo check` compile gate for `cognia-server`     |
 | `deploy.yml`           | **manual dispatch** / `workflow_call` only      | Gated by GitHub Environments + `DEPLOY_ENABLED`: Workers (`wrangler`), Fly axum twins, docs Pages    |
 | `compose-e2e.yml`      | PR on `deploy/compose/**`, services, smoke      | Boots the compose suite in CI and runs the tiered smoke                                              |
 | `signaling-server.yml` | push `master`/`dev` + PR on the service         | Service CI: clippy + tests + coverage + worker-build parity                                          |

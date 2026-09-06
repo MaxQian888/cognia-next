@@ -5,6 +5,9 @@ metadata:
   name: cognia-server
 spec:
   serviceName: cognia-server
+  # Exactly one. The brain owns the data volume (ADR-0059 D3) and `serve`
+  # holds an exclusive lock on it, so a second replica would refuse to boot.
+  # Scale by stamping more tenants (deploy/k8s/tenant-template), not here.
   replicas: 1
   selector:
     matchLabels:

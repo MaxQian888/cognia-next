@@ -293,14 +293,22 @@ Fumadocs 用 Orama 在浏览器内做全文搜索。索引在构建期由 MDX �
 ```
 ghcr.io/maxqian888/cognia-signaling
 ghcr.io/maxqian888/cognia-share
-ghcr.io/maxqian888/cognia-server        # -slim / -full 两个变体
-ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜像
+ghcr.io/maxqian888/cognia-server            # -slim / -full 两个变体
+ghcr.io/maxqian888/cognia-runner            # T2 每 agent 一容器的 runner 镜像
+ghcr.io/maxqian888/cognia-web               # 静态导出 + Caddy 前门（tls profile）
+ghcr.io/maxqian888/cognia-workspace-runtime # ADR-0085 共享浏览器运行时
+ghcr.io/maxqian888/cognia-collab            # ADR-0149 协作面
+ghcr.io/maxqian888/cognia-diagnostics       # ADR-0135 诊断服务
+ghcr.io/maxqian888/cognia-ops-controller    # ADR-0059 运维控制器
+ghcr.io/maxqian888/cognia-deploy-agent      # ADR-0059 部署 agent
 ```
 
 - **Compose 套件** —— `deploy/compose/`，用 profile 承载阶段阶梯（`server`、`tls` Caddy/ACME 前门、`observability` Prometheus、`logto` 自托管 OIDC IdP），另有把外部 agent 拆到独立 runner 容器的 T2 override。入口见 [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md)。
 - **统一登录** —— Logto 以社交连接器承接 GitHub 与飞书，协作服务器用一次性 bootstrap 凭据认领空部署，并通过 M2M 应用把成员关系镜像到 Logto。步骤、回调模式与凭据轮换见 `deploy/compose/LOGTO.md`（ADR-0149）。
 - **Kubernetes** —— `deploy/k8s/` kustomize 树，1 租户 = 1 namespace；kind 冒烟与生产注意事项（gVisor RuntimeClass、必填 `publicUrl`、按租户接 Logto）见 `deploy/k8s/README.md`。
 - **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
+- **多实例** —— 一个实例一个目录 + 一份 `.env`；`COGNIA_INSTANCE` 同时决定 compose 项目名、T2 工作区卷名和 runner 归属标签，所有宿主机端口都可覆盖。每个数据卷只允许一个活着的 `cognia-server`：`serve` 对卷持有排他锁，所以扩容靠加实例（或 k8s 租户），不能加副本。细节见 compose README。
+- **一致性门禁** —— `pnpm audit:deploy-suite` 把 Dockerfile 基础镜像钉在 Rust/Node/pnpm 的 pin 上，把 compose 默认镜像钉在 `images.yml` 实际发布的集合上，并守住上面的多实例不变量。
 - 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。
 
 headless host 明确区分两个信令 URL。`COGNIA_SIGNALING_URL` 是宿主内部的会合端点（Compose 与 Kubernetes 均为 `ws://signaling:7892/signaling`）；`COGNIA_PUBLIC_SIGNALING_URL` 是从部署公开 URL 推导出的客户端可见端点（`https` 转为 `wss`，路径固定为 `/signaling`）。Caddy 与 Kubernetes Ingress 将该公开路径路由到 `signaling:7892` Service，其余应用路径仍由 `cognia-server` 处理。
@@ -328,7 +336,7 @@ Web Origin 必须按完整 HTTPS Origin（`scheme://host[:port]`）精确授权�
 | `ci.yml`               | `master`/`develop` 的 push/PR            | 编排 `quality.yml` + `test.yml`（lint、typecheck、Jest 分片、覆盖率门禁、E2E）   |
 | `build-tauri.yml`      | `workflow_call` / 手动                   | 桌面构建矩阵；updater 签名走 `TAURI_SIGNING_*` secrets                           |
 | `release.yml`          | `v*` tag                                 | 继承 secrets 调用 `build-tauri.yml` → draft release + 签名 `latest.json`         |
-| `images.yml`           | `v*` tag / 手动 / 容器输入相关 PR        | 构建并发布四个 GHCR 镜像；PR 上对 `cognia-server` 跑 `cargo check` 编译门禁      |
+| `images.yml`           | `v*` tag / 手动 / 容器输入相关 PR        | 构建并发布上面列出的 GHCR 镜像；PR 上对 `cognia-server` 跑 `cargo check` 编译门禁      |
 | `deploy.yml`           | **仅手动 dispatch** / `workflow_call`    | GitHub Environments + `DEPLOY_ENABLED` 双门禁：Workers（wrangler）、Fly、docs Pages |
 | `compose-e2e.yml`      | `deploy/compose/**`、services、smoke 的 PR | 在 CI 里拉起 compose 套件并跑分层冒烟                                            |
 | `signaling-server.yml` | `master`/`dev` push + 服务相关 PR        | 服务 CI：clippy + 测试 + 覆盖率 + worker-build 校验                              |

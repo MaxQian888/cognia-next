@@ -1,6 +1,9 @@
 # Production override for any Linux VM or bare-metal host.
 # Usage: docker compose -f docker-compose.yml -f compose.production.yaml --profile server up -d --wait
-# Every *_IMAGE value is validated by scripts/validate-deployment-target.mjs and must use @sha256:.
+# Every *_IMAGE value must be pinned by @sha256: digest. The Ops Controller's
+# production certification (lib/server-ops/deployment-target.ts,
+# `productionCertificationIssues`) refuses a target whose images are not, and
+# the `:?` markers below refuse to start without one.
 services:
   signaling:
     image: ${SIGNALING_IMAGE:?set a digest-pinned SIGNALING_IMAGE}
@@ -35,6 +38,10 @@ services:
   cognia-server:
     image: ${COGNIA_SERVER_IMAGE:?set a digest-pinned COGNIA_SERVER_IMAGE}
     environment:
+      # The base file falls back to https://127.0.0.1:<port>, which is only
+      # reachable from the host itself. A paired device follows this URL, so
+      # production has to say what the public front door is.
+      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:?set COGNIA_PUBLIC_URL to the public https origin}
       COGNIA_MASTER_KEY: ""
       COGNIA_MASTER_KEY_FILE: /run/cognia-secrets/master-key
       COGNIA_MASTER_KEY_DIR: /run/cognia-secrets/master-keys

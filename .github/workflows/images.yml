@@ -9,6 +9,7 @@ name: Images
 #   ghcr.io/<owner>/cognia-diagnostics    services/diagnostic-server
 #   ghcr.io/<owner>/cognia-collab         Dockerfile.collab-server
 #   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
+#   ghcr.io/<owner>/cognia-web           deploy/compose/Dockerfile.web (static export + Caddy)
 #   ghcr.io/<owner>/cognia-deploy-agent  Dockerfile.deploy-agent
 #   ghcr.io/<owner>/cognia-ops-controller Dockerfile.ops-controller
 #
@@ -46,6 +47,10 @@ on:
       - "services/signaling-server/Dockerfile"
       - "services/share-server/Dockerfile"
       - "services/workspace-runtime/**"
+      # The web image is the static export + Caddyfile; the compose `tls`
+      # profile and the production override both pull it from GHCR.
+      - "deploy/compose/Dockerfile.web"
+      - "deploy/compose/Caddyfile"
       # The whole crate, not just its Dockerfile: the build context is the
       # service directory, so a source or migration change is an image change.
       - "services/diagnostic-server/**"
@@ -128,6 +133,12 @@ jobs:
           - name: cognia-ops-controller
             context: .
             file: Dockerfile.ops-controller
+          # Same-origin Web front door: Next.js static export served by Caddy.
+          # Root context so the export sees the whole workspace; .dockerignore
+          # keeps node_modules/out/target off the daemon.
+          - name: cognia-web
+            context: .
+            file: deploy/compose/Dockerfile.web
     steps:
       - uses: actions/checkout@v6
 
