@@ -61,6 +61,19 @@ describe("IntegrationsHub", () => {
     expect(screen.getByText("Audit")).toBeInTheDocument()
   })
 
+  it("gives the page one h1 and each management section a real h2", () => {
+    // The four sections used to be `<Card>`s whose titles were spans wearing
+    // `role="heading"`, and the page title was a hand-rolled <h1> in the
+    // scroll body rather than the shared header band. The outline is what a
+    // screen reader navigates by, so it is pinned here.
+    render(<IntegrationsHub />)
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
+    const sections = screen
+      .getAllByRole("heading", { level: 2 })
+      .map((node) => node.textContent?.trim())
+    expect(sections).toEqual(["Accounts", "Subscriptions", "Approvals and jobs", "Audit"])
+  })
+
   it("guides authentication configuration instead of asking for raw provider IDs", () => {
     render(<IntegrationsHub />)
     fireEvent.change(screen.getByLabelText("Integration"), {

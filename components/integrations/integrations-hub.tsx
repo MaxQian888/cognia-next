@@ -6,7 +6,10 @@ import { useTranslations } from "next-intl"
 import { ActivityIcon, PlugZapIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -338,560 +341,584 @@ export function IntegrationsHub() {
     : []
 
   return (
-    // Responsive padding and gap rather than a fixed `p-6 gap-6`. The grids
-    // below already collapse to one column under `md`, so this page did not
-    // need a phone body, only room: 24px of padding on each side of a 375px
-    // screen is 13% of the viewport spent on margin.
-    <main
-      className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-3 sm:gap-6 sm:p-6"
+    // The page identity is the shared header band every other feature route
+    // wears, not a hand-rolled `<h1>` in the scroll body. Two of the three
+    // notices under it used to be bare paragraphs sized to their own text,
+    // which put a dashed box the width of one sentence next to a full-width
+    // heading.
+    <div
+      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
       data-bg-target="chat"
     >
-      <header className="space-y-2">
-        <div className="flex items-center gap-2">
-          <PlugZapIcon className="size-5" />
-          <h1 className="text-xl font-semibold">{t("title")}</h1>
-        </div>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-        {!platformSupported && (
-          <p className="rounded border border-dashed p-3 text-sm">{t("unsupportedWeb")}</p>
-        )}
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </header>
+      <FeaturePageHeader icon={<PlugZapIcon />} title={t("title")} description={t("description")} />
 
-      <section className="grid gap-3 md:grid-cols-3" aria-label={t("installed")}>
-        {entries.map(({ pluginId, definition }) => (
-          <Card key={`${pluginId}:${definition.id}`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base" role="heading" aria-level={2}>
-                {definition.label}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs text-muted-foreground">
-              <p>{definition.description}</p>
-              <div className="flex flex-wrap gap-1">
-                {definition.authStrategies.map((strategy, index) => (
-                  <Badge key={strategy.id} variant={index === 0 ? "default" : "outline"}>
-                    {strategy.label}
-                  </Badge>
-                ))}
-                {definition.actions.map((action) => (
-                  <Badge key={action.id} variant={action.risk === "read" ? "outline" : "secondary"}>
-                    {action.id} · {t(`risk.${action.risk}`)}
-                  </Badge>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {entries.length === 0 && (
-          <Card className="p-4 text-sm text-muted-foreground">{t("emptyPlugins")}</Card>
-        )}
-      </section>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Responsive padding and gap rather than a fixed `p-6 gap-6`. The grids
+            below already collapse to one column under `md`, so this page did not
+            need a phone body, only room: 24px of padding on each side of a 375px
+            screen is 13% of the viewport spent on margin. */}
+        <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-3 sm:gap-6 sm:p-6">
+          {!platformSupported && (
+            <Alert>
+              <AlertDescription>{t("unsupportedWeb")}</AlertDescription>
+            </Alert>
+          )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base" role="heading" aria-level={2}>
-              {t("accounts.title")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form className="grid gap-3" onSubmit={addAccount}>
-              <Label htmlFor="integration-definition">{t("accounts.integration")}</Label>
-              <select
-                id="integration-definition"
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={selectedKey}
-                onChange={(event) => {
-                  setSelectedKey(event.target.value)
-                  setAuthStrategyId("")
-                  setAuthConfiguration({})
-                }}
-              >
-                <option value="">{t("accounts.selectIntegration")}</option>
-                {entries.map(({ pluginId, definition }) => (
-                  <option
-                    key={`${pluginId}:${definition.id}`}
-                    value={`${pluginId}:${definition.id}`}
-                  >
+          <section className="grid gap-3 md:grid-cols-3" aria-label={t("installed")}>
+            {entries.map(({ pluginId, definition }) => (
+              <Card key={`${pluginId}:${definition.id}`}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base" role="heading" aria-level={3}>
                     {definition.label}
-                  </option>
-                ))}
-              </select>
-              <Input
-                aria-label={t("accounts.label")}
-                placeholder={t("accounts.label")}
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-              />
-              <Label>{t("accounts.authStrategy")}</Label>
-              <div className="grid gap-2">
-                {(selected?.definition.authStrategies ?? []).map((strategy, index) => (
-                  <Button
-                    key={strategy.id}
-                    type="button"
-                    variant={authStrategyId === strategy.id ? "default" : "outline"}
-                    className="justify-between"
-                    onClick={() => {
-                      setAuthStrategyId(strategy.id)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs text-muted-foreground">
+                  <p>{definition.description}</p>
+                  <div className="flex flex-wrap gap-1">
+                    {definition.authStrategies.map((strategy, index) => (
+                      <Badge key={strategy.id} variant={index === 0 ? "default" : "outline"}>
+                        {strategy.label}
+                      </Badge>
+                    ))}
+                    {definition.actions.map((action) => (
+                      <Badge
+                        key={action.id}
+                        variant={action.risk === "read" ? "outline" : "secondary"}
+                      >
+                        {action.id} · {t(`risk.${action.risk}`)}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {entries.length === 0 && (
+              // Spans the grid. As a plain grid child it was a box one third of
+              // the page wide holding a single sentence, which read as a card that
+              // had failed to load rather than as "nothing installed".
+              <p className="rounded-panel border border-dashed p-4 text-sm text-muted-foreground md:col-span-3">
+                {t("emptyPlugins")}
+              </p>
+            )}
+          </section>
+
+          {/* Four sibling `<Card>`s stacked down a page is four frames arguing for
+          the same attention. The blocks below say the same thing with type and
+          one hairline, and the two forms that used to sit side by side now get
+          the full column: the right-hand one was a select and a button in a
+          half-page box. */}
+          <SettingsStack>
+            <SettingsBlock title={t("accounts.title")} headingLevel={2}>
+              <div className="space-y-4">
+                <form className="grid gap-3" onSubmit={addAccount}>
+                  <Label htmlFor="integration-definition">{t("accounts.integration")}</Label>
+                  <select
+                    id="integration-definition"
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
+                    value={selectedKey}
+                    onChange={(event) => {
+                      setSelectedKey(event.target.value)
+                      setAuthStrategyId("")
                       setAuthConfiguration({})
                     }}
                   >
-                    <span>{strategy.label}</span>
-                    <span className="text-xs">
-                      {index === 0 ? t("accounts.recommended") : t("accounts.advanced")}
-                    </span>
-                  </Button>
-                ))}
-              </div>
-              {Object.entries(configProperties)
-                .filter(
-                  ([key]) =>
-                    !(selectedStrategy?.providerId === "github-app" && key === "installationId")
-                )
-                .map(([key, schema]) => {
-                  const translation =
-                    CONFIG_FIELD_TRANSLATIONS[key as keyof typeof CONFIG_FIELD_TRANSLATIONS]
-                  const fieldLabel = translation
-                    ? t(translation)
-                    : typeof schema.title === "string"
-                      ? schema.title
-                      : key
-                  return (
-                    <div key={key} className="grid gap-1">
-                      <Label htmlFor={`auth-${key}`}>{fieldLabel}</Label>
-                      <Input
-                        id={`auth-${key}`}
-                        type={
-                          schema.format === "secret"
-                            ? "password"
-                            : schema.type === "integer"
-                              ? "number"
-                              : "text"
-                        }
-                        required={requiredConfigFields.includes(key)}
-                        value={authConfiguration[key] ?? ""}
-                        onChange={(event) =>
+                    <option value="">{t("accounts.selectIntegration")}</option>
+                    {entries.map(({ pluginId, definition }) => (
+                      <option
+                        key={`${pluginId}:${definition.id}`}
+                        value={`${pluginId}:${definition.id}`}
+                      >
+                        {definition.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Input
+                    aria-label={t("accounts.label")}
+                    placeholder={t("accounts.label")}
+                    value={label}
+                    onChange={(event) => setLabel(event.target.value)}
+                  />
+                  <Label>{t("accounts.authStrategy")}</Label>
+                  <div className="grid gap-2">
+                    {(selected?.definition.authStrategies ?? []).map((strategy, index) => (
+                      <Button
+                        key={strategy.id}
+                        type="button"
+                        variant={authStrategyId === strategy.id ? "default" : "outline"}
+                        className="justify-between"
+                        onClick={() => {
+                          setAuthStrategyId(strategy.id)
+                          setAuthConfiguration({})
+                        }}
+                      >
+                        <span>{strategy.label}</span>
+                        <span className="text-xs">
+                          {index === 0 ? t("accounts.recommended") : t("accounts.advanced")}
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                  {Object.entries(configProperties)
+                    .filter(
+                      ([key]) =>
+                        !(selectedStrategy?.providerId === "github-app" && key === "installationId")
+                    )
+                    .map(([key, schema]) => {
+                      const translation =
+                        CONFIG_FIELD_TRANSLATIONS[key as keyof typeof CONFIG_FIELD_TRANSLATIONS]
+                      const fieldLabel = translation
+                        ? t(translation)
+                        : typeof schema.title === "string"
+                          ? schema.title
+                          : key
+                      return (
+                        <div key={key} className="grid gap-1">
+                          <Label htmlFor={`auth-${key}`}>{fieldLabel}</Label>
+                          <Input
+                            id={`auth-${key}`}
+                            type={
+                              schema.format === "secret"
+                                ? "password"
+                                : schema.type === "integer"
+                                  ? "number"
+                                  : "text"
+                            }
+                            required={requiredConfigFields.includes(key)}
+                            value={authConfiguration[key] ?? ""}
+                            onChange={(event) =>
+                              setAuthConfiguration((current) => ({
+                                ...current,
+                                [key]: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      )
+                    })}
+                  {selectedStrategy?.providerId === "github-app" && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy || !authConfiguration.appId || !authConfiguration.privateKey}
+                        onClick={discoverInstallations}
+                      >
+                        {t("accounts.discoverInstallations")}
+                      </Button>
+                      <select
+                        aria-label={t("accounts.installation")}
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        value={authConfiguration.installationId ?? ""}
+                        onChange={(event) => {
+                          const installation = installationOptions.find(
+                            (candidate) => candidate.id === event.target.value
+                          )
                           setAuthConfiguration((current) => ({
                             ...current,
-                            [key]: event.target.value,
+                            installationId: event.target.value,
+                            accountLabel: installation?.label ?? current.accountLabel,
                           }))
-                        }
+                        }}
+                      >
+                        <option value="">{t("accounts.selectInstallation")}</option>
+                        {installationOptions.map((installation) => (
+                          <option key={installation.id} value={installation.id}>
+                            {installation.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                  {selectedStrategy?.type === "app" && (
+                    <Label className="flex items-start gap-2 font-normal">
+                      <Checkbox
+                        checked={dedicatedAppConfirmed}
+                        onCheckedChange={(checked) => setDedicatedAppConfirmed(checked === true)}
                       />
-                    </div>
-                  )
-                })}
-              {selectedStrategy?.providerId === "github-app" && (
-                <>
+                      <span>{t("accounts.dedicatedAppConfirmation")}</span>
+                    </Label>
+                  )}
+                  {/* A grid child stretches. At full column width a disabled
+                      submit is a 1100px slab of muted fill, which outweighs
+                      every field above it. */}
                   <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy || !authConfiguration.appId || !authConfiguration.privateKey}
-                    onClick={discoverInstallations}
+                    type="submit"
+                    className="justify-self-start"
+                    disabled={busy || !platformSupported}
                   >
-                    {t("accounts.discoverInstallations")}
+                    {t("accounts.validateAndAdd")}
                   </Button>
+                </form>
+
+                <div className="space-y-2">
+                  {accounts.map((account) => {
+                    const missing = (account.status?.requiredPermissions ?? []).filter(
+                      (permission) =>
+                        !(account.status?.grantedPermissions ?? []).includes(permission)
+                    )
+                    const githubStatusTranslation =
+                      account.pluginId === "github-delivery" && account.status?.code
+                        ? GITHUB_STATUS_TRANSLATIONS[
+                            account.status.code as keyof typeof GITHUB_STATUS_TRANSLATIONS
+                          ]
+                        : undefined
+                    return (
+                      <div key={account.id} className="space-y-2 rounded border p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium">{account.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {account.integrationId} · {t(`health.${account.health}`)}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              aria-label={t("accounts.checkHealth")}
+                              onClick={() =>
+                                checkIntegrationAccountHealth(account.pluginId, account.id)
+                              }
+                            >
+                              <RefreshCwIcon className="size-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                updateIntegrationAccount(account.pluginId, account.id, {
+                                  enabled: !account.enabled,
+                                })
+                              }
+                            >
+                              {account.enabled ? t("disable") : t("enable")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => deleteIntegrationAccount(account.pluginId, account.id)}
+                            >
+                              {t("remove")}
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid gap-1 text-xs text-muted-foreground">
+                          {ingressUrls[account.id] && (
+                            <p>
+                              {t("accounts.webhookUrl")}: {ingressUrls[account.id]}
+                            </p>
+                          )}
+                          <p>
+                            {t("accounts.webhookVerification")}:{" "}
+                            {account.ingressEndpoint
+                              ? t("accounts.configured")
+                              : t("accounts.notConfigured")}
+                          </p>
+                          {account.status?.lastSyncAt && (
+                            <p>
+                              {t("accounts.lastSync")}:{" "}
+                              {new Date(account.status.lastSyncAt).toLocaleString()}
+                            </p>
+                          )}
+                          {account.status?.rateLimit?.resetAt && (
+                            <p>
+                              {t("accounts.rateLimitReset")}:{" "}
+                              {new Date(account.status.rateLimit.resetAt).toLocaleString()}
+                            </p>
+                          )}
+                          {missing.length > 0 && (
+                            <p className="text-destructive">
+                              {t("accounts.missingPermissions")}: {missing.join(", ")}
+                            </p>
+                          )}
+                          {githubStatusTranslation ? (
+                            <p>{t(githubStatusTranslation)}</p>
+                          ) : account.pluginId !== "github-delivery" && account.status?.message ? (
+                            <p>{account.status.message}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </SettingsBlock>
+
+            <SettingsBlock title={t("subscriptions.title")} headingLevel={2}>
+              <div className="space-y-4">
+                <form className="grid gap-3" onSubmit={addSubscription}>
                   <select
-                    aria-label={t("accounts.installation")}
+                    aria-label={t("subscriptions.account")}
                     className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={authConfiguration.installationId ?? ""}
+                    value={subscriptionAccountId}
                     onChange={(event) => {
-                      const installation = installationOptions.find(
-                        (candidate) => candidate.id === event.target.value
-                      )
-                      setAuthConfiguration((current) => ({
-                        ...current,
-                        installationId: event.target.value,
-                        accountLabel: installation?.label ?? current.accountLabel,
-                      }))
+                      setSubscriptionAccountId(event.target.value)
+                      setResources([])
+                      setResourceId("")
+                      setSelectedEvents([])
                     }}
                   >
-                    <option value="">{t("accounts.selectInstallation")}</option>
-                    {installationOptions.map((installation) => (
-                      <option key={installation.id} value={installation.id}>
-                        {installation.label}
+                    <option value="">{t("subscriptions.selectAccount")}</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.label}
                       </option>
                     ))}
                   </select>
-                </>
-              )}
-              {selectedStrategy?.type === "app" && (
-                <Label className="flex items-start gap-2 font-normal">
-                  <Checkbox
-                    checked={dedicatedAppConfirmed}
-                    onCheckedChange={(checked) => setDedicatedAppConfirmed(checked === true)}
-                  />
-                  <span>{t("accounts.dedicatedAppConfirmation")}</span>
-                </Label>
-              )}
-              <Button type="submit" disabled={busy || !platformSupported}>
-                {t("accounts.validateAndAdd")}
-              </Button>
-            </form>
-
-            <div className="space-y-2">
-              {accounts.map((account) => {
-                const missing = (account.status?.requiredPermissions ?? []).filter(
-                  (permission) => !(account.status?.grantedPermissions ?? []).includes(permission)
-                )
-                const githubStatusTranslation =
-                  account.pluginId === "github-delivery" && account.status?.code
-                    ? GITHUB_STATUS_TRANSLATIONS[
-                        account.status.code as keyof typeof GITHUB_STATUS_TRANSLATIONS
-                      ]
-                    : undefined
-                return (
-                  <div key={account.id} className="space-y-2 rounded border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">{account.label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {account.integrationId} · {t(`health.${account.health}`)}
-                        </p>
-                      </div>
+                  {resourceKind && (
+                    <>
                       <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={t("accounts.checkHealth")}
-                          onClick={() =>
-                            checkIntegrationAccountHealth(account.pluginId, account.id)
-                          }
-                        >
-                          <RefreshCwIcon className="size-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            updateIntegrationAccount(account.pluginId, account.id, {
-                              enabled: !account.enabled,
-                            })
-                          }
-                        >
-                          {account.enabled ? t("disable") : t("enable")}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => deleteIntegrationAccount(account.pluginId, account.id)}
-                        >
-                          {t("remove")}
+                        <Input
+                          aria-label={t("subscriptions.searchResources")}
+                          placeholder={t("subscriptions.searchResources")}
+                          value={resourceSearch}
+                          onChange={(event) => setResourceSearch(event.target.value)}
+                        />
+                        <Button type="button" variant="outline" onClick={() => loadResources()}>
+                          {t("subscriptions.discover")}
                         </Button>
                       </div>
-                    </div>
-                    <div className="grid gap-1 text-xs text-muted-foreground">
-                      {ingressUrls[account.id] && (
-                        <p>
-                          {t("accounts.webhookUrl")}: {ingressUrls[account.id]}
-                        </p>
-                      )}
-                      <p>
-                        {t("accounts.webhookVerification")}:{" "}
-                        {account.ingressEndpoint
-                          ? t("accounts.configured")
-                          : t("accounts.notConfigured")}
-                      </p>
-                      {account.status?.lastSyncAt && (
-                        <p>
-                          {t("accounts.lastSync")}:{" "}
-                          {new Date(account.status.lastSyncAt).toLocaleString()}
-                        </p>
-                      )}
-                      {account.status?.rateLimit?.resetAt && (
-                        <p>
-                          {t("accounts.rateLimitReset")}:{" "}
-                          {new Date(account.status.rateLimit.resetAt).toLocaleString()}
-                        </p>
-                      )}
-                      {missing.length > 0 && (
-                        <p className="text-destructive">
-                          {t("accounts.missingPermissions")}: {missing.join(", ")}
-                        </p>
-                      )}
-                      {githubStatusTranslation ? (
-                        <p>{t(githubStatusTranslation)}</p>
-                      ) : account.pluginId !== "github-delivery" && account.status?.message ? (
-                        <p>{account.status.message}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base" role="heading" aria-level={2}>
-              {t("subscriptions.title")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form className="grid gap-3" onSubmit={addSubscription}>
-              <select
-                aria-label={t("subscriptions.account")}
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                value={subscriptionAccountId}
-                onChange={(event) => {
-                  setSubscriptionAccountId(event.target.value)
-                  setResources([])
-                  setResourceId("")
-                  setSelectedEvents([])
-                }}
-              >
-                <option value="">{t("subscriptions.selectAccount")}</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.label}
-                  </option>
-                ))}
-              </select>
-              {resourceKind && (
-                <>
-                  <div className="flex gap-2">
-                    <Input
-                      aria-label={t("subscriptions.searchResources")}
-                      placeholder={t("subscriptions.searchResources")}
-                      value={resourceSearch}
-                      onChange={(event) => setResourceSearch(event.target.value)}
-                    />
-                    <Button type="button" variant="outline" onClick={() => loadResources()}>
-                      {t("subscriptions.discover")}
-                    </Button>
-                  </div>
-                  <select
-                    aria-label={t("subscriptions.repository")}
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
-                    value={resourceId}
-                    onChange={(event) => setResourceId(event.target.value)}
-                  >
-                    <option value="">{t("subscriptions.allResources")}</option>
-                    {resources.map((resource) => (
-                      <option key={resource.id} value={resource.id}>
-                        {resource.name}
-                      </option>
-                    ))}
-                  </select>
-                  {resourceCursor && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => loadResources(resourceCursor)}
-                    >
-                      {t("subscriptions.loadMore")}
-                    </Button>
-                  )}
-                </>
-              )}
-              <fieldset className="grid gap-2">
-                <legend className="text-sm font-medium">{t("subscriptions.events")}</legend>
-                {(subscriptionEntry?.definition.eventTypes ?? []).map((eventType) => {
-                  const translation =
-                    subscriptionEntry?.pluginId === "github-delivery"
-                      ? GITHUB_EVENT_TRANSLATIONS[
-                          eventType.id as keyof typeof GITHUB_EVENT_TRANSLATIONS
-                        ]
-                      : undefined
-                  return (
-                    <Label key={eventType.id} className="flex items-center gap-2 font-normal">
-                      <Checkbox
-                        checked={selectedEvents.includes(eventType.id)}
-                        onCheckedChange={(checked) =>
-                          setSelectedEvents((current) =>
-                            checked === true
-                              ? [...new Set([...current, eventType.id])]
-                              : current.filter((id) => id !== eventType.id)
-                          )
-                        }
-                      />
-                      <span>{translation ? t(translation) : eventType.label}</span>
-                    </Label>
-                  )
-                })}
-              </fieldset>
-              {(subscriptionEntry?.definition.inboxProjections?.length ?? 0) > 0 && (
-                <>
-                  <Label className="flex items-center gap-2 font-normal">
-                    <Checkbox
-                      checked={inboxEnabled}
-                      onCheckedChange={(checked) => setInboxEnabled(checked === true)}
-                    />
-                    <span>{t("subscriptions.deliverToInbox")}</span>
-                  </Label>
-                  {inboxEnabled && (
-                    <select
-                      aria-label={t("subscriptions.projection")}
-                      className="h-9 rounded-md border bg-background px-3 text-sm"
-                      value={projectionId}
-                      onChange={(event) => setProjectionId(event.target.value)}
-                    >
-                      <option value="">{t("subscriptions.selectProjection")}</option>
-                      {subscriptionEntry?.definition.inboxProjections?.map((projection) => {
-                        const translation =
-                          subscriptionEntry.pluginId === "github-delivery"
-                            ? GITHUB_PROJECTION_TRANSLATIONS[
-                                projection.id as keyof typeof GITHUB_PROJECTION_TRANSLATIONS
-                              ]
-                            : undefined
-                        return (
-                          <option key={projection.id} value={projection.id}>
-                            {translation ? t(translation) : projection.label}
+                      <select
+                        aria-label={t("subscriptions.repository")}
+                        className="h-9 rounded-md border bg-background px-3 text-sm"
+                        value={resourceId}
+                        onChange={(event) => setResourceId(event.target.value)}
+                      >
+                        <option value="">{t("subscriptions.allResources")}</option>
+                        {resources.map((resource) => (
+                          <option key={resource.id} value={resource.id}>
+                            {resource.name}
                           </option>
-                        )
-                      })}
-                    </select>
+                        ))}
+                      </select>
+                      {resourceCursor && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => loadResources(resourceCursor)}
+                        >
+                          {t("subscriptions.loadMore")}
+                        </Button>
+                      )}
+                    </>
                   )}
-                </>
-              )}
-              {subscriptionEntry?.definition.ingress && (
-                <Input
-                  type="password"
-                  aria-label={t("subscriptions.ingressSecret")}
-                  placeholder={t("subscriptions.ingressSecret")}
-                  value={ingressSecret}
-                  onChange={(event) => setIngressSecret(event.target.value)}
-                />
-              )}
-              <Button type="submit" disabled={busy || !platformSupported}>
-                {t("subscriptions.add")}
-              </Button>
-            </form>
-            {subscriptions
-              .filter(
-                (subscription) =>
-                  !subscriptionAccountId || subscription.accountId === subscriptionAccountId
-              )
-              .map((subscription) => (
-                <div
-                  key={subscription.id}
-                  className="flex items-center justify-between rounded border p-3"
-                >
-                  <div className="text-xs">
-                    <p className="font-medium">{subscription.eventTypes.join(", ")}</p>
-                    <p className="text-muted-foreground">
-                      {subscription.resourceId || t("subscriptions.allResources")}
+                  <fieldset className="grid gap-2">
+                    <legend className="text-sm font-medium">{t("subscriptions.events")}</legend>
+                    {(subscriptionEntry?.definition.eventTypes ?? []).map((eventType) => {
+                      const translation =
+                        subscriptionEntry?.pluginId === "github-delivery"
+                          ? GITHUB_EVENT_TRANSLATIONS[
+                              eventType.id as keyof typeof GITHUB_EVENT_TRANSLATIONS
+                            ]
+                          : undefined
+                      return (
+                        <Label key={eventType.id} className="flex items-center gap-2 font-normal">
+                          <Checkbox
+                            checked={selectedEvents.includes(eventType.id)}
+                            onCheckedChange={(checked) =>
+                              setSelectedEvents((current) =>
+                                checked === true
+                                  ? [...new Set([...current, eventType.id])]
+                                  : current.filter((id) => id !== eventType.id)
+                              )
+                            }
+                          />
+                          <span>{translation ? t(translation) : eventType.label}</span>
+                        </Label>
+                      )
+                    })}
+                  </fieldset>
+                  {(subscriptionEntry?.definition.inboxProjections?.length ?? 0) > 0 && (
+                    <>
+                      <Label className="flex items-center gap-2 font-normal">
+                        <Checkbox
+                          checked={inboxEnabled}
+                          onCheckedChange={(checked) => setInboxEnabled(checked === true)}
+                        />
+                        <span>{t("subscriptions.deliverToInbox")}</span>
+                      </Label>
+                      {inboxEnabled && (
+                        <select
+                          aria-label={t("subscriptions.projection")}
+                          className="h-9 rounded-md border bg-background px-3 text-sm"
+                          value={projectionId}
+                          onChange={(event) => setProjectionId(event.target.value)}
+                        >
+                          <option value="">{t("subscriptions.selectProjection")}</option>
+                          {subscriptionEntry?.definition.inboxProjections?.map((projection) => {
+                            const translation =
+                              subscriptionEntry.pluginId === "github-delivery"
+                                ? GITHUB_PROJECTION_TRANSLATIONS[
+                                    projection.id as keyof typeof GITHUB_PROJECTION_TRANSLATIONS
+                                  ]
+                                : undefined
+                            return (
+                              <option key={projection.id} value={projection.id}>
+                                {translation ? t(translation) : projection.label}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      )}
+                    </>
+                  )}
+                  {subscriptionEntry?.definition.ingress && (
+                    <Input
+                      type="password"
+                      aria-label={t("subscriptions.ingressSecret")}
+                      placeholder={t("subscriptions.ingressSecret")}
+                      value={ingressSecret}
+                      onChange={(event) => setIngressSecret(event.target.value)}
+                    />
+                  )}
+                  <Button
+                    type="submit"
+                    className="justify-self-start"
+                    disabled={busy || !platformSupported}
+                  >
+                    {t("subscriptions.add")}
+                  </Button>
+                </form>
+                {subscriptions
+                  .filter(
+                    (subscription) =>
+                      !subscriptionAccountId || subscription.accountId === subscriptionAccountId
+                  )
+                  .map((subscription) => (
+                    <div
+                      key={subscription.id}
+                      className="flex items-center justify-between rounded border p-3"
+                    >
+                      <div className="text-xs">
+                        <p className="font-medium">{subscription.eventTypes.join(", ")}</p>
+                        <p className="text-muted-foreground">
+                          {subscription.resourceId || t("subscriptions.allResources")}
+                        </p>
+                        {subscription.disabledByProvider && (
+                          <p className="text-destructive">
+                            {t("subscriptions.disabledByProvider")}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          deleteIntegrationSubscription(subscription.pluginId, subscription.id)
+                        }
+                      >
+                        {t("remove")}
+                      </Button>
+                    </div>
+                  ))}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">{t("subscriptions.failedDeliveries")}</p>
+                  {deadletters.map((delivery) => (
+                    <div
+                      key={`${delivery.routeId}:${delivery.deliveryId}`}
+                      className="flex items-center justify-between text-xs"
+                    >
+                      <span>
+                        {delivery.deliveryId} · {delivery.attempts}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          if (!subscriptionAccount) return
+                          await requeueIntegrationIngressDeadletter(
+                            subscriptionAccount.pluginId,
+                            subscriptionAccount.id,
+                            delivery.routeId,
+                            delivery.deliveryId
+                          )
+                          setDeadletters(
+                            await listIntegrationIngressDeadletters(
+                              subscriptionAccount.pluginId,
+                              subscriptionAccount.id
+                            )
+                          )
+                        }}
+                      >
+                        {t("subscriptions.requeue")}
+                      </Button>
+                    </div>
+                  ))}
+                  {deadletters.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("subscriptions.noFailedDeliveries")}
                     </p>
-                    {subscription.disabledByProvider && (
-                      <p className="text-destructive">{t("subscriptions.disabledByProvider")}</p>
+                  )}
+                </div>
+              </div>
+            </SettingsBlock>
+
+            <SettingsBlock
+              icon={<ShieldCheckIcon />}
+              title={t("approvals.title")}
+              headingLevel={2}
+              contentClassName="space-y-2"
+            >
+              {jobs.map((job) => (
+                <div key={job.id} className="flex items-center justify-between rounded border p-3">
+                  <div className="text-xs">
+                    <p className="font-medium">{job.actionId}</p>
+                    <p className="text-muted-foreground">
+                      {t(`status.${job.status}`)} · {t(`risk.${job.risk}`)}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {job.status === "awaiting_approval" && (
+                      <Button size="sm" onClick={() => approveIntegrationActionJob(job.id)}>
+                        {t("approvals.approve")}
+                      </Button>
+                    )}
+                    {!["succeeded", "failed", "deadlettered", "cancelled"].includes(job.status) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => cancelIntegrationActionJob(job.id)}
+                      >
+                        {t("approvals.cancel")}
+                      </Button>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      deleteIntegrationSubscription(subscription.pluginId, subscription.id)
-                    }
-                  >
-                    {t("remove")}
-                  </Button>
                 </div>
               ))}
-            <div className="space-y-2">
-              <p className="text-sm font-medium">{t("subscriptions.failedDeliveries")}</p>
-              {deadletters.map((delivery) => (
-                <div
-                  key={`${delivery.routeId}:${delivery.deliveryId}`}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <span>
-                    {delivery.deliveryId} · {delivery.attempts}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={async () => {
-                      if (!subscriptionAccount) return
-                      await requeueIntegrationIngressDeadletter(
-                        subscriptionAccount.pluginId,
-                        subscriptionAccount.id,
-                        delivery.routeId,
-                        delivery.deliveryId
-                      )
-                      setDeadletters(
-                        await listIntegrationIngressDeadletters(
-                          subscriptionAccount.pluginId,
-                          subscriptionAccount.id
-                        )
-                      )
-                    }}
-                  >
-                    {t("subscriptions.requeue")}
-                  </Button>
-                </div>
-              ))}
-              {deadletters.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {t("subscriptions.noFailedDeliveries")}
-                </p>
+              {jobs.length === 0 && (
+                <p className="text-sm text-muted-foreground">{t("approvals.empty")}</p>
               )}
-            </div>
-          </CardContent>
-        </Card>
+            </SettingsBlock>
+
+            <SettingsBlock
+              icon={<ActivityIcon />}
+              title={t("audit.title")}
+              headingLevel={2}
+              contentClassName="space-y-2"
+            >
+              {audit.slice(0, 100).map((entry) => (
+                <div
+                  key={entry.id}
+                  className="grid grid-cols-[1fr_auto] gap-3 border-b py-2 text-xs"
+                >
+                  <span>{entry.kind}</span>
+                  <span className="text-muted-foreground">
+                    {entry.outcome} · {new Date(entry.createdAt).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+              {audit.length === 0 && (
+                <p className="text-sm text-muted-foreground">{t("audit.empty")}</p>
+              )}
+            </SettingsBlock>
+          </SettingsStack>
+        </main>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base" role="heading" aria-level={2}>
-            <ShieldCheckIcon className="size-4" />
-            {t("approvals.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {jobs.map((job) => (
-            <div key={job.id} className="flex items-center justify-between rounded border p-3">
-              <div className="text-xs">
-                <p className="font-medium">{job.actionId}</p>
-                <p className="text-muted-foreground">
-                  {t(`status.${job.status}`)} · {t(`risk.${job.risk}`)}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {job.status === "awaiting_approval" && (
-                  <Button size="sm" onClick={() => approveIntegrationActionJob(job.id)}>
-                    {t("approvals.approve")}
-                  </Button>
-                )}
-                {!["succeeded", "failed", "deadlettered", "cancelled"].includes(job.status) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => cancelIntegrationActionJob(job.id)}
-                  >
-                    {t("approvals.cancel")}
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-          {jobs.length === 0 && (
-            <p className="text-sm text-muted-foreground">{t("approvals.empty")}</p>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base" role="heading" aria-level={2}>
-            <ActivityIcon className="size-4" />
-            {t("audit.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {audit.slice(0, 100).map((entry) => (
-            <div key={entry.id} className="grid grid-cols-[1fr_auto] gap-3 border-b py-2 text-xs">
-              <span>{entry.kind}</span>
-              <span className="text-muted-foreground">
-                {entry.outcome} · {new Date(entry.createdAt).toLocaleString()}
-              </span>
-            </div>
-          ))}
-          {audit.length === 0 && (
-            <p className="text-sm text-muted-foreground">{t("audit.empty")}</p>
-          )}
-        </CardContent>
-      </Card>
-    </main>
+    </div>
   )
 }
