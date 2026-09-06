@@ -21,7 +21,7 @@
  * workflow-only, so it labels rather than decides).
  */
 
-import type { TemplateDefinitionEnvelope } from "./contracts"
+import type { TemplateDefinitionEnvelope, TemplateTrust } from "./contracts"
 
 /** The shelves the library is grouped into, in the order they are offered. */
 export const TEMPLATE_SCOPE_TIERS = [
@@ -55,6 +55,26 @@ export function templateScopeTier(
       // `user`, `file` and `legacy` are all "something in my own library".
       return "mine"
   }
+}
+
+/**
+ * Whether a trust badge would only repeat what the scope badge already said.
+ *
+ * The two answer different questions, which is why both exist: the scope is
+ * which shelf a template sits on, the trust is how much of its provenance was
+ * proved. They collide on exactly one row. `templateScopeTier` derives
+ * `builtin` from `provenance.source === "built-in"`, and a built-in's trust is
+ * `built-in` too, so those rows rendered "Built-in" and then "Built in" side by
+ * side and a reader saw one word stuttered rather than two facts.
+ *
+ * A built-in carrying any other trust value is genuinely worth saying, so this
+ * only suppresses the exact restatement.
+ */
+export function trustRestatesScope(
+  trust: TemplateTrust | undefined,
+  tier: TemplateScopeTier
+): boolean {
+  return tier === "builtin" && trust === "built-in"
 }
 
 export interface TemplateVisibilityInput {

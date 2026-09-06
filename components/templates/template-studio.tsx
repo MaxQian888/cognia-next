@@ -26,7 +26,11 @@ import {
   useTemplateRouteState,
   type TemplateTab,
 } from "@/hooks/templates/use-template-route-state"
-import { TEMPLATE_SCOPE_TIERS, type TemplateScopeTier } from "@/lib/templates/scope"
+import {
+  TEMPLATE_SCOPE_TIERS,
+  trustRestatesScope,
+  type TemplateScopeTier,
+} from "@/lib/templates/scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   TemplateDefinitionEnvelope,
@@ -1017,9 +1021,18 @@ export function TemplateStudio() {
                               {t(`scopes.${tierOf(definition)}`)}
                             </Badge>
                             <Badge variant="secondary">{t(`status.${definition.status}`)}</Badge>
-                            <Badge variant="secondary">
-                              {t(`trust.${definition.provenance.trust}`)}
-                            </Badge>
+                            {/* Dropped when it would only restate the scope
+                                badge beside it: a built-in is trusted because
+                                it is a built-in, so the row read "Built-in
+                                Published Built in". */}
+                            {trustRestatesScope(
+                              definition.provenance.trust,
+                              tierOf(definition)
+                            ) ? null : (
+                              <Badge variant="secondary">
+                                {t(`trust.${definition.provenance.trust}`)}
+                              </Badge>
+                            )}
                           </div>
                         </CardContent>
                       </Card>

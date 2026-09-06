@@ -39,6 +39,7 @@ import { TemplateBindingField } from "@/components/templates/template-binding-fi
 import { TemplateOriginCard } from "@/components/templates/template-origin-card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { trustRestatesScope } from "@/lib/templates/scope"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Surface } from "@/components/surface/surface"
@@ -227,7 +228,14 @@ export function TemplatesMobileBody() {
               tier={t(`scopes.${tierOf(definition)}`)}
               domainLabel={t(`domains.${definition.domain}`)}
               statusLabel={t(`status.${definition.status}`)}
-              trustLabel={t(`trust.${definition.provenance.trust}`)}
+              // Dropped when it would only restate the scope badge: a built-in
+              // is trusted because it is a built-in, so the row read
+              // "Built-in  Published  Built in".
+              trustLabel={
+                trustRestatesScope(definition.provenance.trust, tierOf(definition))
+                  ? undefined
+                  : t(`trust.${definition.provenance.trust}`)
+              }
               fallbackDescription={t("empty.noDescription")}
               onOpen={() => route.setDefinitionId(definition.id)}
             />
@@ -364,7 +372,7 @@ function TemplateCard({
   tier: string
   domainLabel: string
   statusLabel: string
-  trustLabel: string
+  trustLabel?: string
   fallbackDescription: string
   onOpen: () => void
 }) {
@@ -391,7 +399,7 @@ function TemplateCard({
         <span className="flex flex-wrap items-center gap-1">
           <Badge variant="outline">{tier}</Badge>
           <Badge variant="secondary">{statusLabel}</Badge>
-          <Badge variant="secondary">{trustLabel}</Badge>
+          {trustLabel ? <Badge variant="secondary">{trustLabel}</Badge> : null}
           {definition.version ? (
             <span className="font-mono text-[11px] text-muted-foreground">
               v{definition.version}

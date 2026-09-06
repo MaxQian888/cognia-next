@@ -1,4 +1,9 @@
-import { TEMPLATE_SCOPE_TIERS, isTemplateVisibleInWorkspace, templateScopeTier } from "./scope"
+import {
+  TEMPLATE_SCOPE_TIERS,
+  isTemplateVisibleInWorkspace,
+  templateScopeTier,
+  trustRestatesScope,
+} from "./scope"
 import type { TemplateDefinitionEnvelope } from "./contracts"
 
 function definition(source: string): TemplateDefinitionEnvelope {
@@ -76,5 +81,26 @@ describe("isTemplateVisibleInWorkspace", () => {
         hiddenHere: true,
       })
     ).toBe(true)
+  })
+})
+
+describe("trustRestatesScope", () => {
+  it("suppresses the trust badge that only repeats a built-in scope", () => {
+    // The two labels are "Built-in" and "Built in", so the row read as one
+    // word stuttered rather than two facts.
+    expect(trustRestatesScope("built-in", "builtin")).toBe(true)
+  })
+
+  it("keeps a built-in that claims some other trust", () => {
+    expect(trustRestatesScope("verified-publisher", "builtin")).toBe(false)
+    expect(trustRestatesScope(undefined, "builtin")).toBe(false)
+  })
+
+  it("keeps built-in trust on every other shelf, where it is news", () => {
+    // A workspace fork of a built-in still carries built-in trust, and there
+    // the scope badge says "This workspace", so the two do not collide.
+    for (const tier of TEMPLATE_SCOPE_TIERS.filter((candidate) => candidate !== "builtin")) {
+      expect(trustRestatesScope("built-in", tier)).toBe(false)
+    }
   })
 })
