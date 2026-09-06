@@ -16,6 +16,7 @@
 
 pub mod backup;
 pub mod brain;
+pub mod deployment_id;
 pub mod gateway_host;
 pub mod tenant_lease;
 

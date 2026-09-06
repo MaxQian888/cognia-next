@@ -67,6 +67,16 @@ pub const RUNNER_CPUS_ENV: &str = "COGNIA_RUNNER_CPUS";
 pub const RUNNER_PIDS_ENV: &str = "COGNIA_RUNNER_PIDS";
 /// Docker network mode for runners (default `bridge`).
 pub const RUNNER_NETWORK_ENV: &str = "COGNIA_RUNNER_NETWORK";
+/// Stable identity of THIS deployment (one server plus one data volume) on
+/// the shared daemon. Optional: `cognia-server` derives a persisted default
+/// from its data directory, so the variable only matters when an operator
+/// wants a readable name (the compose suite passes `${COGNIA_INSTANCE}`).
+///
+/// Why it exists: several deployments can share one Docker daemon or one
+/// Kubernetes namespace. Ownership alone (`cognia.owner`) says "a Cognia made
+/// this". It cannot say WHICH, so an orphan sweep at boot used to remove the
+/// live runners of every other deployment on the same daemon.
+pub const DEPLOYMENT_ID_ENV: &str = "COGNIA_DEPLOYMENT_ID";
 
 /// Where the agent's workspace lands inside the runner.
 pub const WORKSPACE_TARGET: &str = "/workspace";
@@ -82,12 +92,44 @@ pub struct ContainerBackendConfig {
     pub nano_cpus: i64,
     pub pids_limit: i64,
     pub network_mode: String,
+    /// Stamped as [`DEPLOYMENT_LABEL`] on every runner. The orphan sweep only
+    /// ever removes containers carrying this exact value.
+    pub deployment_id: String,
+}
+
+/// Validate a deployment id for use as a container or pod label value: 1 to
+/// 63 characters from `[A-Za-z0-9_.-]`. Kubernetes label values are the
+/// tighter of the two targets, and a value the pod path would have to
+/// sanitize could collide with another deployment's after sanitizing.
+pub fn validate_deployment_id(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 63 {
+        return Err("deployment id must contain 1 to 63 characters".into());
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+    {
+        return Err(format!(
+            "deployment id {value:?} may only contain letters, digits, '_', '.' and '-'"
+        ));
+    }
+    Ok(value.to_string())
 }
 
 impl ContainerBackendConfig {
     /// Resolve from the environment. Fails loudly on a missing image or an
     /// unreadable seccomp profile — a silently-degraded T2 boot is the bug.
-    pub fn from_env() -> Result<Self, String> {
+    ///
+    /// `default_deployment_id` is what the caller derived for this data
+    /// volume. [`DEPLOYMENT_ID_ENV`] overrides it when set.
+    pub fn from_env(default_deployment_id: &str) -> Result<Self, String> {
+        let deployment_id = match std::env::var(DEPLOYMENT_ID_ENV) {
+            Ok(value) if !value.trim().is_empty() => validate_deployment_id(&value)
+                .map_err(|error| format!("invalid {DEPLOYMENT_ID_ENV}: {error}"))?,
+            _ => validate_deployment_id(default_deployment_id)
+                .map_err(|error| format!("invalid default deployment id: {error}"))?,
+        };
         let image = std::env::var(RUNNER_IMAGE_ENV)
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -127,6 +169,7 @@ impl ContainerBackendConfig {
             nano_cpus: (cpus * 1_000_000_000f64) as i64,
             pids_limit: pids,
             network_mode,
+            deployment_id,
         })
     }
 }
@@ -170,6 +213,12 @@ pub const AGENT_ID_LABEL: &str = "cognia.agent-id";
 /// Label carrying the id of the PROCESS that created the container, so a
 /// restart can tell its own live containers from the previous run's orphans.
 pub const INSTANCE_LABEL: &str = "cognia.instance";
+
+/// Label carrying the deployment (server + data volume) the container
+/// belongs to. Unlike [`INSTANCE_LABEL`] it survives a restart, so it is what
+/// separates "my previous run's orphan" from "another deployment's live
+/// runner" on a shared daemon or namespace.
+pub const DEPLOYMENT_LABEL: &str = "cognia.deployment";
 
 /// Label carrying the label schema version, so a future change can recognise
 /// and migrate containers created by an older build.
@@ -270,6 +319,12 @@ impl OwnedContainer {
     pub fn instance(&self) -> Option<&str> {
         self.labels.get(INSTANCE_LABEL).map(String::as_str)
     }
+
+    /// The deployment that created it, if it said. Containers from builds
+    /// before the label existed answer `None` and are never reaped.
+    pub fn deployment(&self) -> Option<&str> {
+        self.labels.get(DEPLOYMENT_LABEL).map(String::as_str)
+    }
 }
 
 /// A per-process instance id: the pid plus the process start time is enough
@@ -284,11 +339,16 @@ pub fn default_instance_id() -> String {
 }
 
 /// Labels for a container this process is about to create.
-pub fn ownership_labels(agent_id: &str, instance_id: &str) -> BTreeMap<String, String> {
+pub fn ownership_labels(
+    agent_id: &str,
+    instance_id: &str,
+    deployment_id: &str,
+) -> BTreeMap<String, String> {
     BTreeMap::from([
         (OWNER_LABEL.to_string(), OWNER_VALUE.to_string()),
         (AGENT_ID_LABEL.to_string(), agent_id.to_string()),
         (INSTANCE_LABEL.to_string(), instance_id.to_string()),
+        (DEPLOYMENT_LABEL.to_string(), deployment_id.to_string()),
         (SCHEMA_LABEL.to_string(), SCHEMA_VERSION.to_string()),
     ])
 }
@@ -384,7 +444,11 @@ impl ContainerBackend {
     /// containers from the daemon at all, so a crash leaked every one of
     /// them silently.
     ///
-    /// Returns the ids reaped. Containers from THIS process are left alone.
+    /// Returns the ids reaped. Containers from THIS process are left alone,
+    /// and so is everything outside THIS deployment: another server sharing
+    /// the daemon owns its runners just as legitimately, and a container
+    /// with no deployment label predates the label. Its owner is unknown, so
+    /// it is left for the operator rather than guessed at.
     pub async fn reap_orphans(&self) -> Result<Vec<String>, String> {
         let owned = self.api.list_owned().await?;
         let mut reaped = Vec::new();
@@ -393,6 +457,15 @@ impl ContainerBackend {
                 continue;
             }
             if !is_owned(&container.labels) {
+                continue;
+            }
+            if container.deployment() != Some(self.config.deployment_id.as_str()) {
+                log::debug!(
+                    "orphan sweep: leaving container {} alone (deployment {:?}, ours is {:?})",
+                    container.id,
+                    container.deployment(),
+                    self.config.deployment_id
+                );
                 continue;
             }
             match self.api.remove(&container.id).await {
@@ -522,7 +595,7 @@ impl ExecBackend for ContainerBackend {
             nano_cpus: self.config.nano_cpus,
             pids_limit: self.config.pids_limit,
             network_mode: self.config.network_mode.clone(),
-            labels: ownership_labels(&id, &self.instance_id),
+            labels: ownership_labels(&id, &self.instance_id, &self.config.deployment_id),
         };
 
         let running = match self.api.run(spec.clone()).await {
@@ -720,12 +793,18 @@ impl ExecBackend for ContainerBackend {
 /// `kubernetes` requires `k8s-exec` + in-cluster config — a T2/T3 deployment
 /// that cannot spawn runners must fail at boot, not degrade into running dev
 /// agents inside the server container.
-pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
+///
+/// `default_deployment_id` scopes the orphan sweep and every runner label to
+/// the calling deployment (see [`DEPLOYMENT_ID_ENV`]); the local-process
+/// backend has no daemon to share and ignores it.
+pub fn exec_backend_from_env(default_deployment_id: &str) -> Result<Arc<dyn ExecBackend>, String> {
+    // Only the container flavors consume it. A desktop build compiles neither.
+    let _ = default_deployment_id;
     let legacy: Arc<dyn ExecBackend> = match std::env::var(EXEC_BACKEND_ENV).ok().as_deref() {
         Some("container") => {
             #[cfg(feature = "container-exec")]
             {
-                let config = ContainerBackendConfig::from_env()?;
+                let config = ContainerBackendConfig::from_env(default_deployment_id)?;
                 let api = bollard_api::BollardContainerApi::connect()?;
                 Ok::<Arc<dyn ExecBackend>, String>(ContainerBackend::new(api, config))
             }
@@ -739,7 +818,7 @@ pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
         Some("kubernetes") => {
             #[cfg(feature = "k8s-exec")]
             {
-                let config = ContainerBackendConfig::from_env()?;
+                let config = ContainerBackendConfig::from_env(default_deployment_id)?;
                 if config.workspaces_volume.is_none() {
                     return Err(format!(
                         "{WORKSPACES_VOLUME_ENV} must name the workspaces PVC in kubernetes exec mode"
@@ -1237,6 +1316,7 @@ mod tests {
             nano_cpus: 2_000_000_000,
             pids_limit: 512,
             network_mode: "bridge".into(),
+            deployment_id: "deployment-A".into(),
         }
     }
 
@@ -1363,11 +1443,11 @@ mod tests {
         let api = FakeContainerApi::new();
         api.labels_by_container.lock().insert(
             "mine".to_string(),
-            ownership_labels("agent-live", "instance-A"),
+            ownership_labels("agent-live", "instance-A", "deployment-A"),
         );
         api.labels_by_container.lock().insert(
             "orphan".to_string(),
-            ownership_labels("agent-dead", "instance-PREVIOUS"),
+            ownership_labels("agent-dead", "instance-PREVIOUS", "deployment-A"),
         );
         api.labels_by_container
             .lock()
@@ -1385,6 +1465,73 @@ mod tests {
         assert_eq!(removed, vec!["orphan".to_string()]);
     }
 
+    // Two cognia-server deployments sharing one daemon (two compose
+    // instances on a host, or two tenants whose socket proxies reach the
+    // same dockerd) each see the other's runners as "owned by a process that
+    // is not me". Before the deployment label, that was enough to reap them:
+    // booting instance B removed every live agent of instance A.
+    #[tokio::test]
+    async fn reaping_never_touches_another_deployments_live_runners() {
+        let api = FakeContainerApi::new();
+        api.labels_by_container.lock().insert(
+            "other-deployment-live".to_string(),
+            ownership_labels("agent-live", "instance-B", "deployment-B"),
+        );
+        api.labels_by_container.lock().insert(
+            "own-orphan".to_string(),
+            ownership_labels("agent-dead", "instance-PREVIOUS", "deployment-A"),
+        );
+
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+        let reaped = backend.reap_orphans().await.expect("reap");
+
+        assert_eq!(reaped, vec!["own-orphan".to_string()]);
+        assert!(api
+            .labels_by_container
+            .lock()
+            .contains_key("other-deployment-live"));
+    }
+
+    // A container created by a build that predates the deployment label has
+    // no way to say whose it is. Guessing "mine" is the exact failure above,
+    // so it is left alone and remains visible to the operator.
+    #[tokio::test]
+    async fn reaping_leaves_containers_without_a_deployment_label_alone() {
+        let api = FakeContainerApi::new();
+        let mut legacy = ownership_labels("agent-dead", "instance-PREVIOUS", "deployment-A");
+        legacy.remove(DEPLOYMENT_LABEL);
+        api.labels_by_container
+            .lock()
+            .insert("legacy".to_string(), legacy);
+
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+
+        assert!(backend.reap_orphans().await.expect("reap").is_empty());
+        assert!(api.removes.lock().is_empty());
+    }
+
+    #[test]
+    fn deployment_ids_are_label_safe_or_refused() {
+        assert_eq!(
+            validate_deployment_id("  cognia-prod.1_a  ").unwrap(),
+            "cognia-prod.1_a"
+        );
+        assert!(validate_deployment_id("").is_err());
+        assert!(validate_deployment_id("   ").is_err());
+        assert!(validate_deployment_id("has space").is_err());
+        assert!(validate_deployment_id("slash/y").is_err());
+        assert!(validate_deployment_id(&"x".repeat(64)).is_err());
+        assert!(validate_deployment_id(&"x".repeat(63)).is_ok());
+    }
+
     #[tokio::test]
     async fn reaping_finds_nothing_on_a_clean_daemon() {
         let api = FakeContainerApi::new();
@@ -1395,7 +1542,7 @@ mod tests {
 
     #[test]
     fn ownership_is_decided_by_the_owner_label_alone() {
-        assert!(is_owned(&ownership_labels("a", "b")));
+        assert!(is_owned(&ownership_labels("a", "b", "c")));
         assert!(!is_owned(&foreign_labels()));
         assert!(!is_owned(&BTreeMap::new()));
     }
@@ -1739,11 +1886,11 @@ mod tests {
         let _guard = env_lock().await;
         std::env::remove_var(RUNNER_IMAGE_ENV);
         std::env::remove_var(WORKSPACES_DIR_ENV);
-        assert!(ContainerBackendConfig::from_env()
+        assert!(ContainerBackendConfig::from_env("deployment-test")
             .unwrap_err()
             .contains(RUNNER_IMAGE_ENV));
         std::env::set_var(RUNNER_IMAGE_ENV, "img");
-        assert!(ContainerBackendConfig::from_env()
+        assert!(ContainerBackendConfig::from_env("deployment-test")
             .unwrap_err()
             .contains(WORKSPACES_DIR_ENV));
         std::env::set_var(WORKSPACES_DIR_ENV, "/workspaces");
@@ -1752,16 +1899,34 @@ mod tests {
         std::env::set_var(RUNNER_CPUS_ENV, "1.5");
         std::env::set_var(RUNNER_PIDS_ENV, "128");
         std::env::remove_var(RUNNER_SECCOMP_ENV);
-        let config = ContainerBackendConfig::from_env().expect("config");
+        let config = ContainerBackendConfig::from_env("deployment-test").expect("config");
         assert_eq!(config.image, "img");
         assert_eq!(config.workspaces_volume.as_deref(), Some("vol"));
         assert_eq!(config.memory_bytes, 1024 * 1024 * 1024);
         assert_eq!(config.nano_cpus, 1_500_000_000);
         assert_eq!(config.pids_limit, 128);
         assert_eq!(config.network_mode, "bridge");
+        assert_eq!(config.deployment_id, "deployment-test");
+        // The operator's explicit deployment id wins over the derived default,
+        // and a malformed one is a boot error rather than a mangled label.
+        std::env::set_var(DEPLOYMENT_ID_ENV, " tenant-b ");
+        assert_eq!(
+            ContainerBackendConfig::from_env("deployment-test")
+                .expect("config")
+                .deployment_id,
+            "tenant-b"
+        );
+        std::env::set_var(DEPLOYMENT_ID_ENV, "tenant b");
+        assert!(ContainerBackendConfig::from_env("deployment-test")
+            .unwrap_err()
+            .contains(DEPLOYMENT_ID_ENV));
+        std::env::remove_var(DEPLOYMENT_ID_ENV);
+        assert!(ContainerBackendConfig::from_env("")
+            .unwrap_err()
+            .contains("default deployment id"));
         // Unreadable seccomp path fails loudly.
         std::env::set_var(RUNNER_SECCOMP_ENV, "definitely-missing-profile.json");
-        assert!(ContainerBackendConfig::from_env()
+        assert!(ContainerBackendConfig::from_env("deployment-test")
             .unwrap_err()
             .contains(RUNNER_SECCOMP_ENV));
         std::env::remove_var(RUNNER_SECCOMP_ENV);
@@ -1778,16 +1943,20 @@ mod tests {
         let _guard = env_lock().await;
         std::env::remove_var(EXEC_BACKEND_ENV);
         assert_eq!(
-            exec_backend_from_env().expect("default").kind(),
+            exec_backend_from_env("deployment-test")
+                .expect("default")
+                .kind(),
             "local-process"
         );
         std::env::set_var(EXEC_BACKEND_ENV, "local-process");
         assert_eq!(
-            exec_backend_from_env().expect("local").kind(),
+            exec_backend_from_env("deployment-test")
+                .expect("local")
+                .kind(),
             "local-process"
         );
         std::env::set_var(EXEC_BACKEND_ENV, "warp-drive");
-        match exec_backend_from_env() {
+        match exec_backend_from_env("deployment-test") {
             Err(err) => assert!(err.contains("warp-drive"), "{err}"),
             Ok(_) => panic!("unknown backend value must be rejected"),
         }
@@ -1796,11 +1965,11 @@ mod tests {
         // error (no image env set here) — either way container mode never
         // silently degrades to local processes.
         std::env::remove_var(RUNNER_IMAGE_ENV);
-        assert!(exec_backend_from_env().is_err());
+        assert!(exec_backend_from_env("deployment-test").is_err());
         // Same contract for the kubernetes flavor (feature `k8s-exec` /
         // missing config): loud failure, no silent local-process fallback.
         std::env::set_var(EXEC_BACKEND_ENV, "kubernetes");
-        assert!(exec_backend_from_env().is_err());
+        assert!(exec_backend_from_env("deployment-test").is_err());
         std::env::remove_var(EXEC_BACKEND_ENV);
     }
 }
@@ -1829,6 +1998,7 @@ mod docker_integration {
             nano_cpus: 1_000_000_000,
             pids_limit: 64,
             network_mode: "none".into(),
+            deployment_id: "docker-integration-test".into(),
         };
         let api = bollard_api::BollardContainerApi::connect().expect("docker");
         let backend = ContainerBackend::new(api, config);

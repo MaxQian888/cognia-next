@@ -1615,7 +1615,13 @@ async fn run_serve(
     // COGNIA_EXEC_BACKEND=container routes external agents into per-workspace
     // runner containers. A misconfigured container mode is fatal — degrading
     // to in-container local processes would silently void the T2 isolation.
-    let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
+    // The deployment id scopes runner ownership to THIS server + data volume.
+    // Several deployments can share one daemon or namespace, and without it
+    // the orphan sweep below would remove their live runners too.
+    let deployment_id = app_lib::headless::deployment_id::resolve(&data_dir)
+        .map_err(|e| format!("deployment id: {e}"))?;
+    log::info!("deployment id: {deployment_id}");
+    let exec = exec_backend_from_env(&deployment_id).map_err(|e| format!("exec backend: {e}"))?;
     log::info!("exec backend: {}", exec.kind());
     // Reap what a previous run left behind. A container outlives the process
     // that started it, so a crash used to leak one per agent with no way to

@@ -513,13 +513,13 @@ pub mod kube_api {
 
         #[test]
         fn pod_labels_preserve_ownership_metadata() {
-            let labels = ownership_labels("agent-1", "instance-previous");
+            let labels = ownership_labels("agent-1", "instance-previous", "deployment-a");
             assert_eq!(pod_labels(&pod(Some("runner-1"), labels.clone())), labels);
         }
 
         #[test]
         fn owned_container_requires_name_and_owner_label() {
-            let labels = ownership_labels("agent-1", "instance-previous");
+            let labels = ownership_labels("agent-1", "instance-previous", "deployment-a");
             let owned = owned_container_from_pod(pod(Some("runner-1"), labels))
                 .expect("owner-labelled pod with a name");
             assert_eq!(owned.id, "runner-1");
@@ -528,7 +528,7 @@ pub mod kube_api {
                 Some("instance-previous")
             );
 
-            assert!(owned_container_from_pod(pod(None, ownership_labels("a", "b"))).is_none());
+            assert!(owned_container_from_pod(pod(None, ownership_labels("a", "b", "c"))).is_none());
             assert!(owned_container_from_pod(pod(
                 Some("foreign"),
                 BTreeMap::from([("app".to_string(), "foreign".to_string())]),
@@ -562,7 +562,7 @@ mod tests {
             nano_cpus: 1_500_000_000,
             pids_limit: 512,
             network_mode: "bridge".into(),
-            labels: ownership_labels("A_1", "test-instance"),
+            labels: ownership_labels("A_1", "test-instance", "test-deployment"),
         }
     }
 
