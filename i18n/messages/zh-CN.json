@@ -1509,6 +1509,58 @@
       "continueOfflineHint": "本地数据仍然可用。共享工作区和事项在登录前不会同步。",
       "continueWith": "使用 {provider} 继续",
       "continueWithLogto": "使用 Logto 继续",
+      "deployment": {
+        "cancel": "取消",
+        "change": "更换",
+        "check": "检查",
+        "checking": "检查中",
+        "current": {
+          "fingerprint": "指纹",
+          "session": "账号",
+          "url": "网关"
+        },
+        "description": "此账户登录的 Cognia Cloud。填写网关地址，先检查它提供什么，再使用它：之后由登录页面接管。",
+        "error": {
+          "invalid": "请输入 http(s) 地址；若主机为自签名，再填 64 位十六进制指纹。"
+        },
+        "field": {
+          "fingerprint": "证书指纹（可选）",
+          "fingerprintHint": "仅自签名主机需要。从主机的“连接”设置中复制。",
+          "fingerprintPlaceholder": "SHA-256，64 位十六进制",
+          "url": "网关地址",
+          "urlPlaceholder": "https://cognia.example.com"
+        },
+        "forget": "忘记",
+        "result": {
+          "collaboration": "协作服务",
+          "collaborationMissing": "未公布。登录会在加入工作区前停下。",
+          "policy": "加入策略",
+          "providers": "登录方式",
+          "providersNone": "仅 Logto 账号",
+          "singleUser": "此网关运行在单用户模式，没有可登录的云账号。",
+          "status": {
+            "none": "不是多用户部署",
+            "ready": "此部署可以登录",
+            "unavailable": "无法读取此部署"
+          },
+          "unavailableMessage": "{message}"
+        },
+        "revocationFailed": "身份提供方未确认退出，那边的会话可能仍然有效。",
+        "session": {
+          "active": "已登录",
+          "error": "身份提供方返回错误",
+          "loading": "检查中",
+          "offline": "已登录，身份提供方不可达",
+          "reauth-required": "需要重新登录",
+          "signed-out": "未登录"
+        },
+        "signIn": "登录",
+        "signOut": "退出登录",
+        "signOutDone": "已退出云账号。",
+        "signOutFailed": "退出失败：{message}",
+        "title": "云端部署",
+        "use": "使用此部署"
+      },
       "description": "此部署使用共享的身份提供方。登录一次，这个配置文件在任何地方都是你的。",
       "error": {
         "callbackMalformed": "这不是回调地址或授权码。",
@@ -1531,6 +1583,7 @@
       },
       "provider": {
         "feishu": "飞书",
+        "feishu-web": "飞书",
         "github": "GitHub",
         "google": "Google",
         "lark": "Lark",
@@ -17245,59 +17298,6 @@
         "title": "允许 Locked Use",
         "toggleAria": "切换 {label} 的 Locked Use",
         "unavailable": "此版本暂不可用"
-      },
-      "logto": {
-        "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
-        "cancel": "取消",
-        "description": "登录你的 Logto 租户，使此桌面端可作为云端 / 无头 companion 网关的已认证客户端。",
-        "errorState": {
-          "note": "身份提供方返回了错误：{reason}",
-          "title": "云会话出错"
-        },
-        "errors": {
-          "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
-          "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
-          "profileBoundToAnother": "此本地档案已登录为 {name}。请先在此档案退出登录，再以其他身份登录。",
-          "stateMismatch": "粘贴的回调与本次登录不匹配。请重新开始。"
-        },
-        "field": {
-          "clientId": "Client ID",
-          "code": "授权码",
-          "codePlaceholder": "https://…/callback?code=… 或直接填 code",
-          "expires": "过期时间",
-          "expiresUnknown": "未知",
-          "issuer": "Issuer",
-          "org": "组织 ID（可选）",
-          "person": "登录身份",
-          "personNone": "尚未关联到 Cognia 账户",
-          "redirectUri": "回调 URI",
-          "resource": "API 资源",
-          "scope": "作用域（可选）"
-        },
-        "loading": "正在检查云会话…",
-        "offline": {
-          "note": "无法连接身份提供方。本地数据照常可用，云端功能将在网络恢复后继续。",
-          "retry": "重试",
-          "title": "云会话离线"
-        },
-        "reauth": {
-          "bindingMissing": "此云会话尚未关联到本地档案。请重新登录以完成关联。",
-          "expired": "云会话已过期。请重新登录以继续使用协作与远程功能。",
-          "revoked": "云会话已被身份提供方撤销。请重新登录以继续。",
-          "signInAgain": "重新登录",
-          "title": "需要重新登录"
-        },
-        "signIn": "使用 Logto 登录",
-        "signOut": "退出登录",
-        "storageFallback": "登录令牌保存在本浏览器/应用内的加密保险库中，而不是操作系统钥匙串。",
-        "submitCode": "完成登录",
-        "title": "Logto 云登录",
-        "toast": {
-          "hostMirrorFailed": "已登录，但本机未能记录你的身份。配对仍然可用；等 companion 服务启动后可重试。",
-          "revocationFailed": "已在本设备退出登录，但未能通知身份提供方撤销令牌。",
-          "signedIn": "已登录 Logto。",
-          "signedOut": "已退出 Logto。"
-        }
       },
       "mdns": {
         "autostartFailed": "上次已开启广播，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",

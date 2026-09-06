@@ -1509,6 +1509,58 @@
       "continueOfflineHint": "Your local data stays available. Shared workspaces and issues will not sync until you sign in.",
       "continueWith": "Continue with {provider}",
       "continueWithLogto": "Continue with Logto",
+      "deployment": {
+        "cancel": "Cancel",
+        "change": "Change",
+        "check": "Check",
+        "checking": "Checking",
+        "current": {
+          "fingerprint": "Fingerprint",
+          "session": "Account",
+          "url": "Gateway"
+        },
+        "description": "The Cognia Cloud this profile signs in to. Enter the gateway address, check what it offers, then use it: the sign-in screen takes over from there.",
+        "error": {
+          "invalid": "Enter an http(s) address, and a 64-character hex fingerprint if the host is self-signed."
+        },
+        "field": {
+          "fingerprint": "Certificate fingerprint (optional)",
+          "fingerprintHint": "Only for a self-signed host. Copy it from the host's Connectivity settings.",
+          "fingerprintPlaceholder": "SHA-256, 64 hex characters",
+          "url": "Gateway address",
+          "urlPlaceholder": "https://cognia.example.com"
+        },
+        "forget": "Forget",
+        "result": {
+          "collaboration": "Collaboration",
+          "collaborationMissing": "Not announced. Sign-in will stop before joining a workspace.",
+          "policy": "Join policy",
+          "providers": "Sign in with",
+          "providersNone": "Logto account only",
+          "singleUser": "This gateway runs in single-user mode. There is no cloud account to sign in to.",
+          "status": {
+            "none": "Not a multi-user deployment",
+            "ready": "This deployment accepts sign-in",
+            "unavailable": "Could not read this deployment"
+          },
+          "unavailableMessage": "{message}"
+        },
+        "revocationFailed": "The identity provider did not confirm the sign-out. The session may still be valid there.",
+        "session": {
+          "active": "Signed in",
+          "error": "The identity provider answered with an error",
+          "loading": "Checking",
+          "offline": "Signed in, identity provider unreachable",
+          "reauth-required": "Sign-in needed again",
+          "signed-out": "Not signed in"
+        },
+        "signIn": "Sign in",
+        "signOut": "Sign out",
+        "signOutDone": "Signed out of the cloud account.",
+        "signOutFailed": "Sign-out failed: {message}",
+        "title": "Cloud deployment",
+        "use": "Use this deployment"
+      },
       "description": "This deployment uses a shared identity provider. Sign in once and this profile is yours everywhere.",
       "error": {
         "callbackMalformed": "That is not a callback address or code.",
@@ -1531,6 +1583,7 @@
       },
       "provider": {
         "feishu": "Feishu",
+        "feishu-web": "Feishu",
         "github": "GitHub",
         "google": "Google",
         "lark": "Lark",
@@ -17245,59 +17298,6 @@
         "title": "Allow Locked Use",
         "toggleAria": "Toggle Locked Use for {label}",
         "unavailable": "Not available in this build"
-      },
-      "logto": {
-        "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
-        "cancel": "Cancel",
-        "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
-        "errorState": {
-          "note": "The identity provider answered with an error: {reason}",
-          "title": "Cloud session error"
-        },
-        "errors": {
-          "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
-          "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
-          "profileBoundToAnother": "This local profile is already signed in as {name}. Sign out of this profile before signing in as someone else.",
-          "stateMismatch": "The pasted callback does not match this sign-in attempt. Start again."
-        },
-        "field": {
-          "clientId": "Client ID",
-          "code": "Authorization code",
-          "codePlaceholder": "https://…/callback?code=… or the code",
-          "expires": "Expires",
-          "expiresUnknown": "unknown",
-          "issuer": "Issuer",
-          "org": "Organization ID (optional)",
-          "person": "Signed in as",
-          "personNone": "Not linked to a Cognia account yet",
-          "redirectUri": "Redirect URI",
-          "resource": "API resource",
-          "scope": "Scopes (optional)"
-        },
-        "loading": "Checking cloud session…",
-        "offline": {
-          "note": "The identity provider could not be reached. Local data keeps working; cloud features resume when the connection returns.",
-          "retry": "Retry",
-          "title": "Cloud session offline"
-        },
-        "reauth": {
-          "bindingMissing": "This cloud session is not linked to the local profile. Sign in again to link it.",
-          "expired": "Your cloud session has expired. Sign in again to keep using collaboration and remote features.",
-          "revoked": "Your cloud session was revoked by the identity provider. Sign in again to continue.",
-          "signInAgain": "Sign in again",
-          "title": "Sign-in required"
-        },
-        "signIn": "Sign in with Logto",
-        "signOut": "Sign out",
-        "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
-        "submitCode": "Finish sign-in",
-        "title": "Logto cloud sign-in",
-        "toast": {
-          "hostMirrorFailed": "Signed in, but this desktop could not record who you are. Pairing keeps working; try again once the companion service is running.",
-          "revocationFailed": "Signed out on this device, but the identity provider could not be told to revoke the token.",
-          "signedIn": "Signed in to Logto.",
-          "signedOut": "Signed out of Logto."
-        }
       },
       "mdns": {
         "autostartFailed": "Broadcast was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
