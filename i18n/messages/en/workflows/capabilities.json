@@ -9,6 +9,7 @@
     "headless": "Headless runtime",
     "keyring": "OS keyring",
     "mcp-runtime": "MCP runtime",
+    "media": "Media pipeline",
     "ocr": "OCR",
     "pty": "Integrated terminal",
     "push-display": "Notifications",

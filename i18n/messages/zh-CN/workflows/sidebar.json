@@ -33,20 +33,24 @@
   "searchPlaceholder": "搜索节点…",
   "section": {
     "agents": "智能体与团队",
+    "conversations": "会话",
     "plans": "计划",
+    "issues": "事项",
     "goals": "目标",
     "memory": "记忆与数字分身",
+    "search": "搜索",
     "skills-tools": "技能与工具",
     "connectors": "连接器",
     "human": "人工介入",
     "scheduler": "定时调度",
+    "browser": "浏览器",
     "desktop": "桌面与桌宠",
     "files-git": "文件与源代码管理",
+    "media": "媒体与图像",
     "terminal": "终端",
     "sites": "站点",
     "mobile": "移动端",
     "eval": "评测",
-    "other": "其他",
-    "issues": "事项"
+    "other": "其他"
   }
 }

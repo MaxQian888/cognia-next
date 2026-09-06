@@ -9,6 +9,7 @@
     "headless": "无头运行时",
     "keyring": "系统钥匙串",
     "mcp-runtime": "MCP 运行时",
+    "media": "媒体处理",
     "ocr": "OCR",
     "pty": "集成终端",
     "push-display": "通知",

@@ -104,6 +104,25 @@ describe("detectLocalCapabilities", () => {
     expect(detectLocalCapabilities()).not.toContain("pro-ide")
   })
 
+  // `action.media.*` gates on this. The FFmpeg commands in `crates/cognia-media`
+  // are raw `invoke` with no companion RPC arm and no command-manifest
+  // descriptor, so they are unreachable from the brain, a companion, and a
+  // remote host. Without a tauri-only id those nodes would preflight green on
+  // the brain (a bare `desktopOnly` resolves to `["shell"]`, which the
+  // server-backed baseline holds) and then throw mid-run.
+  it("keeps the native media pipeline on the desktop shell only", () => {
+    setTauri(true)
+    expect(detectLocalCapabilities()).toContain("media")
+
+    setTauri(false)
+    setCapacitorNative(true)
+    expect(detectLocalCapabilities()).not.toContain("media")
+
+    setCapacitorNative(false)
+    expect(detectLocalCapabilities()).not.toContain("media")
+    expect(serverBackedCapabilities("cloud-companion")).not.toContain("media")
+  })
+
   it("returns the mobile baseline under Capacitor native", () => {
     setCapacitorNative(true)
     const caps = detectLocalCapabilities()

@@ -33,20 +33,24 @@
   "searchPlaceholder": "Search nodes…",
   "section": {
     "agents": "Agents & teams",
+    "conversations": "Conversations",
     "plans": "Plans",
+    "issues": "Issues",
     "goals": "Goals",
     "memory": "Memory & twin",
+    "search": "Search",
     "skills-tools": "Skills & tools",
     "connectors": "Connectors",
     "human": "Human in the loop",
     "scheduler": "Scheduler",
+    "browser": "Browser",
     "desktop": "Desktop & pet",
     "files-git": "Files & source control",
+    "media": "Media & images",
     "terminal": "Terminal",
     "sites": "Sites",
     "mobile": "Mobile",
     "eval": "Evaluation",
-    "other": "Other",
-    "issues": "Issues"
+    "other": "Other"
   }
 }

@@ -26,6 +26,14 @@ import { detectPlatform, type Platform } from "./detect"
  * - `keyring`           — OS keyring access for `keyring:*` secret refs.
  * - `uia-automation`    — desktop UI automation (screenshot, click, UIA events).
  * - `ocr`               — native OCR pipeline.
+ * - `media`             — native FFmpeg/FFprobe media pipeline
+ *                         (`crates/cognia-media`). Desktop-only because those
+ *                         commands are raw `invoke`, absent from the companion
+ *                         RPC allowlist and the command manifest, so they are
+ *                         unreachable from the brain, a companion, or a remote
+ *                         host. Whether ffmpeg is actually on PATH stays a
+ *                         run-time answer (`VideoError::MissingDependency`);
+ *                         this id only says the command surface exists here.
  * - `camera` / `geolocation` / `barcode-scan` / `voice-record` / `share-sheet`
  *                       — Capacitor-native mobile facilities.
  * - `push-display`      — can surface push/local notifications to a human.
@@ -65,6 +73,7 @@ export const CORE_CAPABILITY_IDS = [
   "mcp-runtime",
   "pro-ide",
   "thread-handoff-v1",
+  "media",
 ] as const
 
 export type CoreCapabilityId = (typeof CORE_CAPABILITY_IDS)[number]
@@ -119,6 +128,7 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
     "browser",
     "pro-ide",
     "thread-handoff-v1",
+    "media",
   ] as const),
   mobile: Object.freeze([
     "webview",
