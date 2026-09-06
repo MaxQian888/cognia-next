@@ -226,6 +226,8 @@
     "audit:agent-control-methods": "node scripts/gates/check-agent-control-methods.mjs",
     "audit:agent-host-image": "node scripts/gates/check-agent-host-image.mjs",
     "audit:agent-host-image:test": "node --test scripts/gates/check-agent-host-image.test.mjs",
+    "audit:deploy-suite": "node scripts/gates/check-deploy-suite.mjs",
+    "audit:deploy-suite:test": "node --test scripts/gates/check-deploy-suite.test.mjs",
     "audit:ai-elements": "node scripts/gates/check-ai-elements-adoption.mjs",
     "audit:ai-elements:test": "node --test scripts/gates/check-ai-elements-adoption.test.mjs",
     "audit:colocated-tests": "node scripts/gates/check-colocated-tests.mjs",

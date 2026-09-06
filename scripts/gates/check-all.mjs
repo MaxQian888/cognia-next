@@ -169,6 +169,11 @@ const REGISTRY = [
   // remaining unpinned launches so the hole shrinks instead of going quiet.
   { script: "audit:external-agent-runtimes", group: "audit" },
   { script: "audit:agent-host-image", group: "audit" },
+  // The deploy suite's own drift detector: Dockerfile bases vs the Rust /
+  // Node / pnpm pins, compose default images vs what images.yml publishes,
+  // and the multi-instance invariants (parametrized host ports, project +
+  // workspaces volume + runner ownership label derived from COGNIA_INSTANCE).
+  { script: "audit:deploy-suite", group: "audit" },
   // Its sibling: the capability answer per protocol, plus the binary allowlist
   // and sandbox state roots the Rust launcher keeps compiled in. Those literals
   // cannot read the JSON at runtime — an allowlist that does is not one — so
@@ -275,6 +280,7 @@ const REGISTRY = [
   { script: "web:test:scripts", group: "gate-tests" },
   { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
   { script: "audit:agent-host-image:test", group: "gate-tests" },
+  { script: "audit:deploy-suite:test", group: "gate-tests" },
   // `node --test` over the live-IM harness (scripts/smoke/im-live/). Pure
   // logic — markers, redaction, the diagnostic table, the per-conversation
   // lock, and every driver against a local fake server — so it needs no
