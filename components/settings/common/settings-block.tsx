@@ -54,15 +54,28 @@ export function SettingsStack({ children, className }: SettingsStackProps) {
 
 /* ── Block ──────────────────────────────────────────────────────────────── */
 
+/**
+ * Render the title as a real heading instead of a styled `<span>`.
+ *
+ * Left off by default: the collapsible variant puts the header inside a
+ * `<button>`, whose content model is phrasing-only, and 49 call sites already
+ * ship the span. A page that IS a stack of major sections (rather than one
+ * settings panel among sixty) should pass it, so the document keeps an
+ * outline a screen reader can jump through.
+ */
+export type SettingsBlockHeadingLevel = 2 | 3 | 4
+
 interface BlockHeaderProps {
   icon?: ReactNode
   title: string
   description?: string
   badge?: ReactNode
   action?: ReactNode
+  headingLevel?: SettingsBlockHeadingLevel
 }
 
-function BlockHeader({ icon, title, description, badge }: BlockHeaderProps) {
+function BlockHeader({ icon, title, description, badge, headingLevel }: BlockHeaderProps) {
+  const Title = headingLevel ? (`h${headingLevel}` as const) : "span"
   return (
     <div className="flex min-w-0 flex-1 items-start gap-2.5 text-left">
       {icon ? (
@@ -72,7 +85,7 @@ function BlockHeader({ icon, title, description, badge }: BlockHeaderProps) {
       ) : null}
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold tracking-tight">{title}</span>
+          <Title className="text-sm font-semibold tracking-tight">{title}</Title>
           {badge}
         </span>
         {description ? (
@@ -118,6 +131,7 @@ export function SettingsBlock({
   description,
   badge,
   action,
+  headingLevel,
   children,
   className,
   contentClassName,
@@ -128,7 +142,17 @@ export function SettingsBlock({
   attributes,
 }: SettingsBlockProps) {
   const [open, setOpen] = useState(defaultOpen)
-  const header = <BlockHeader icon={icon} title={title} description={description} badge={badge} />
+  const header = (
+    <BlockHeader
+      icon={icon}
+      title={title}
+      description={description}
+      badge={badge}
+      // A heading is phrasing-hostile inside the `<button>` the collapsible
+      // variant builds, so the disclosure form keeps the span either way.
+      headingLevel={collapsible ? undefined : headingLevel}
+    />
+  )
   const content = <div className={cn("mt-4 space-y-4", contentClassName)}>{children}</div>
 
   if (!collapsible) {

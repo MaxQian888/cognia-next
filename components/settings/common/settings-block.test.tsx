@@ -24,6 +24,36 @@ describe("SettingsStack", () => {
 })
 
 describe("SettingsBlock", () => {
+  it("keeps the title a plain span unless a heading level is asked for", () => {
+    render(
+      <SettingsBlock title="Judge">
+        <p>body</p>
+      </SettingsBlock>
+    )
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument()
+  })
+
+  it("promotes the title to a real heading when a level is given", () => {
+    render(
+      <SettingsBlock title="Judge" headingLevel={2}>
+        <p>body</p>
+      </SettingsBlock>
+    )
+    expect(screen.getByRole("heading", { level: 2, name: "Judge" })).toBeInTheDocument()
+  })
+
+  it("refuses the heading in the collapsible form, whose header is a button", () => {
+    // `<button>` takes phrasing content only, so a heading inside the
+    // disclosure trigger would be invalid markup.
+    render(
+      <SettingsBlock title="Judge" headingLevel={2} collapsible>
+        <p>body</p>
+      </SettingsBlock>
+    )
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Judge/ })).toBeInTheDocument()
+  })
+
   it("renders title, description, icon, badge and action without any card chrome", () => {
     const { container } = render(
       <SettingsBlock
