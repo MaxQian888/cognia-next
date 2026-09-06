@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { FolderOpen, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { useCreatorStore } from "@/stores/creator/creator-store"
 import type { AuthoringRootRejection } from "@/lib/creator/authoring-root"
@@ -48,15 +49,13 @@ export function AuthoringRootCard() {
   const hostSupported = canUseTauriInvoke()
 
   return (
-    <section className="space-y-3 rounded-lg border p-4">
-      <div className="space-y-1">
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
-          {t("title")}
-        </h2>
-        <p className="text-xs text-muted-foreground">{t("description")}</p>
-      </div>
-
+    <SettingsBlock
+      icon={<ShieldCheck aria-hidden />}
+      title={t("title")}
+      description={t("description")}
+      headingLevel={2}
+      contentClassName="space-y-3"
+    >
       {root ? (
         <div className="space-y-2">
           <div className="flex items-baseline gap-2 text-sm">
@@ -90,7 +89,7 @@ export function AuthoringRootCard() {
           {t(`rejected.${rejection}`)}
         </p>
       ) : null}
-    </section>
+    </SettingsBlock>
   )
 }
 

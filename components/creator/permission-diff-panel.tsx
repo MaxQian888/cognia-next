@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl"
 import { Minus, Plus } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Button } from "@/components/ui/button"
 import { approvalCoversDiff } from "@/lib/creator/permission-diff"
 import type { CreatorPermissionDiff } from "@/types/creator"
@@ -42,16 +43,18 @@ export function PermissionDiffPanel({
   const stale = !covered && approvedAdditions.length > 0
 
   return (
-    <section className="space-y-3 rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">{t("title")}</h2>
-        {covered && diff.requiresApproval ? (
+    <SettingsBlock
+      title={t("title")}
+      headingLevel={2}
+      badge={
+        covered && diff.requiresApproval ? (
           <Badge variant="outline" className="text-[10px]">
             {t("approved")}
           </Badge>
-        ) : null}
-      </div>
-
+        ) : null
+      }
+      contentClassName="space-y-3"
+    >
       {diff.changes.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("none")}</p>
       ) : (
@@ -93,7 +96,7 @@ export function PermissionDiffPanel({
           </Button>
         </div>
       ) : null}
-    </section>
+    </SettingsBlock>
   )
 }
 

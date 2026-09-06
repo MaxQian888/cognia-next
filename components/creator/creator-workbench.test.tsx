@@ -49,6 +49,21 @@ beforeEach(() => {
 const startButton = () => screen.getByRole("button", { name: creatorMessages.run.start })
 
 describe("CreatorWorkbench", () => {
+  it("keeps one page heading and names every section under it", () => {
+    // The five `rounded-lg border p-4` sections became flat blocks, so the
+    // only thing separating them now is the heading each one carries.
+    renderWorkbench()
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
+    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThanOrEqual(4)
+  })
+
+  it("still names the artifact-kind select after the label became a heading", () => {
+    renderWorkbench()
+    expect(
+      screen.getByRole("combobox", { name: creatorMessages.artifact.label })
+    ).toBeInTheDocument()
+  })
+
   it("refuses to start a run without an authoring root", () => {
     renderWorkbench()
     expect(startButton()).toBeDisabled()

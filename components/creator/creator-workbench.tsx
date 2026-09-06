@@ -13,6 +13,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { HammerIcon } from "lucide-react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import {
@@ -23,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import { Textarea } from "@/components/ui/textarea"
 import { AuthoringRootCard } from "./authoring-root-card"
 import { CreatorStepRail } from "./creator-step-rail"
@@ -132,112 +135,123 @@ export function CreatorWorkbench({
   const writesAllowed = canWrite(advanceState)
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl min-h-0 flex-col gap-4 overflow-y-auto p-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-      </header>
+    // Five identically framed `rounded-lg border p-4` sections stacked down a
+    // column is five frames competing for the same attention, and the page
+    // title was a hand-rolled `<h1>` in the scroll body while every other
+    // feature route wears the shared band. The blocks below carry the same
+    // grouping with type and one hairline.
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
+      <FeaturePageHeader icon={<HammerIcon />} title={t("title")} description={t("subtitle")} />
 
-      <AuthoringRootCard />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <SettingsStack className="mx-auto w-full max-w-4xl px-4 py-5 sm:px-6">
+          <AuthoringRootCard />
 
-      <section className="space-y-2 rounded-lg border p-4">
-        <label className="text-sm font-medium" htmlFor="creator-artifact-kind">
-          {t("artifact.label")}
-        </label>
-        <Select
-          value={artifactKind}
-          onValueChange={(value) => setArtifactKind(value as CreatorArtifactKind)}
-          disabled={Boolean(activeRunId)}
-        >
-          <SelectTrigger id="creator-artifact-kind" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CREATOR_ARTIFACT_KINDS.map((kind) => (
-              <SelectItem key={kind} value={kind}>
-                {t(`artifact.kinds.${kind}`)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          <SettingsBlock title={t("artifact.label")} headingLevel={2} contentClassName="space-y-2">
+            <Select
+              value={artifactKind}
+              onValueChange={(value) => setArtifactKind(value as CreatorArtifactKind)}
+              disabled={Boolean(activeRunId)}
+            >
+              {/* The block title carries this control's name now that the
+                  standalone `<label htmlFor>` is gone, and a heading cannot
+                  label a form control. */}
+              <SelectTrigger
+                id="creator-artifact-kind"
+                aria-label={t("artifact.label")}
+                className="w-full"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CREATOR_ARTIFACT_KINDS.map((kind) => (
+                  <SelectItem key={kind} value={kind}>
+                    {t(`artifact.kinds.${kind}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-        {activeRunId ? (
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <p className="truncate text-xs text-muted-foreground">
-              {t("run.active", { runId: activeRunId })}
-            </p>
-            <Button size="sm" variant="ghost" onClick={endRun}>
-              {t("run.end")}
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-1 pt-1">
-            <Button size="sm" onClick={begin} disabled={!root}>
-              {t("run.start")}
-            </Button>
-            {!root ? <p className="text-xs text-muted-foreground">{t("run.needsRoot")}</p> : null}
-          </div>
-        )}
-      </section>
+            {activeRunId ? (
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <p className="truncate text-xs text-muted-foreground">
+                  {t("run.active", { runId: activeRunId })}
+                </p>
+                <Button size="sm" variant="ghost" onClick={endRun}>
+                  {t("run.end")}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-1 pt-1">
+                <Button size="sm" onClick={begin} disabled={!root}>
+                  {t("run.start")}
+                </Button>
+                {!root ? (
+                  <p className="text-xs text-muted-foreground">{t("run.needsRoot")}</p>
+                ) : null}
+              </div>
+            )}
+          </SettingsBlock>
 
-      <section className="space-y-3 rounded-lg border p-4">
-        <h2 className="text-sm font-medium">{t("steps.title")}</h2>
-        <CreatorStepRail
-          state={advanceState}
-          failed={progress?.failed}
-          activeStep={run.activeStep ?? activeStep}
-        />
+          <SettingsBlock title={t("steps.title")} headingLevel={2} contentClassName="space-y-3">
+            <CreatorStepRail
+              state={advanceState}
+              failed={progress?.failed}
+              activeStep={run.activeStep ?? activeStep}
+            />
 
-        <div className="space-y-1.5 border-t pt-3">
-          <label
-            className="text-xs font-medium text-muted-foreground"
-            htmlFor="creator-requirements"
-          >
-            {t("run.requirements")}
-          </label>
-          <Textarea
-            id="creator-requirements"
-            value={requirements}
-            onChange={(event) => setRequirements(event.target.value)}
-            placeholder={t("run.requirementsPlaceholder")}
-            rows={2}
-            disabled={run.busy}
-          />
-          <div className="flex items-center gap-2 pt-1">
-            <Button size="sm" onClick={advance} disabled={!activeRunId || !root || run.busy}>
-              {t("run.advance")}
-            </Button>
-            <p className="text-xs text-muted-foreground">{t("run.advanceHint")}</p>
-          </div>
-          {/*
+            <div className="space-y-1.5 border-t pt-3">
+              <label
+                className="text-xs font-medium text-muted-foreground"
+                htmlFor="creator-requirements"
+              >
+                {t("run.requirements")}
+              </label>
+              <Textarea
+                id="creator-requirements"
+                value={requirements}
+                onChange={(event) => setRequirements(event.target.value)}
+                placeholder={t("run.requirementsPlaceholder")}
+                rows={2}
+                disabled={run.busy}
+              />
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" onClick={advance} disabled={!activeRunId || !root || run.busy}>
+                  {t("run.advance")}
+                </Button>
+                <p className="text-xs text-muted-foreground">{t("run.advanceHint")}</p>
+              </div>
+              {/*
             The executor stops rather than prompts, so the reason it stopped is
             the only thing telling the user what to do next — a missing approval,
             a failing check, or a port this host cannot serve.
           */}
-          {run.lastOutcome && run.lastOutcome.status !== "completed" ? (
-            <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-              {t("run.stopped", {
-                step: run.lastOutcome.step ? t(`steps.${run.lastOutcome.step}`) : "—",
-                detail: run.lastOutcome.detail ?? "",
-              })}
-            </p>
+              {run.lastOutcome && run.lastOutcome.status !== "completed" ? (
+                <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+                  {t("run.stopped", {
+                    step: run.lastOutcome.step ? t(`steps.${run.lastOutcome.step}`) : "—",
+                    detail: run.lastOutcome.detail ?? "",
+                  })}
+                </p>
+              ) : null}
+            </div>
+          </SettingsBlock>
+
+          <PermissionDiffPanel
+            diff={diff}
+            approvedAdditions={approvedAdditions}
+            onApprove={approveAdditions}
+            disabled={!activeRunId}
+          />
+
+          <ReviewPanel verdict={verdict} />
+
+          {/* Surfaced as plain text so the guarantee is legible without opening a step. */}
+          {!writesAllowed ? (
+            <p className="text-xs text-muted-foreground">{t("permissions.writesBlocked")}</p>
           ) : null}
-        </div>
-      </section>
-
-      <PermissionDiffPanel
-        diff={diff}
-        approvedAdditions={approvedAdditions}
-        onApprove={approveAdditions}
-        disabled={!activeRunId}
-      />
-
-      <ReviewPanel verdict={verdict} />
-
-      {/* Surfaced as plain text so the guarantee is legible without opening a step. */}
-      {!writesAllowed ? (
-        <p className="text-xs text-muted-foreground">{t("permissions.writesBlocked")}</p>
-      ) : null}
+        </SettingsStack>
+      </div>
     </div>
   )
 }

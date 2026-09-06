@@ -9,6 +9,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { CircleAlert, Info } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -23,10 +24,13 @@ export function ReviewPanel({ verdict, className }: ReviewPanelProps) {
   const t = useTranslations("creator.review")
 
   return (
-    <section className={cn("space-y-3 rounded-lg border p-4", className)}>
-      <h2 className="text-sm font-medium">{t("title")}</h2>
-      <p className="text-xs text-muted-foreground">{t("readOnly")}</p>
-
+    <SettingsBlock
+      title={t("title")}
+      description={t("readOnly")}
+      headingLevel={2}
+      className={className}
+      contentClassName="space-y-3"
+    >
       {!verdict ? (
         <p className="text-sm text-muted-foreground">{t("pending")}</p>
       ) : (
@@ -51,7 +55,7 @@ export function ReviewPanel({ verdict, className }: ReviewPanelProps) {
           )}
         </div>
       )}
-    </section>
+    </SettingsBlock>
   )
 }
 
