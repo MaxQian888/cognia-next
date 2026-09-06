@@ -32,7 +32,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { usePathname } from "next/navigation"
 import { useTranslations } from "next-intl"
 
-import { extractCallback } from "@/components/settings/companion/logto-login-card"
+import { extractCallback } from "@/lib/logto/extract-callback"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import { isCapacitor as detectCapacitor } from "@/lib/platform/detect"
@@ -50,6 +50,7 @@ import {
   type DeploymentDiscovery,
   type ReadyDeployment,
 } from "@/lib/identity/deployment-discovery"
+import { subscribeDeploymentSource } from "@/lib/identity/deployment-source"
 import {
   CloudSignInError,
   adoptOrganization,
@@ -112,6 +113,18 @@ function rememberOffline(localAccountId: string): void {
   }
 }
 
+/**
+ * Withdraw the tab's "continue offline" choice, so the next decision asks
+ * again. Settings call this before pointing the gate at a deployment.
+ */
+export function forgetOfflineChoice(localAccountId: string): void {
+  try {
+    sessionStorage.removeItem(offlineKey(localAccountId))
+  } catch {
+    // Nothing to forget.
+  }
+}
+
 async function defaultSignOut(localAccountId: string): Promise<void> {
   await signOutFromLogto({ localAccountId })
   await completeSignOut({ localAccountId })
@@ -132,6 +145,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [personName, setPersonName] = useState<string | null>(null)
+  // Bumped when the profile chooses or forgets a deployment in Settings, so
+  // the decision runs again against the new host without a reload.
+  const [discoveryEpoch, setDiscoveryEpoch] = useState(0)
   const deploymentRef = useRef<ReadyDeployment | null>(null)
   const sessionRef = useRef<LogtoSession | null>(null)
   // The decision effect reads its collaborators through refs: the deps
@@ -211,8 +227,10 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     settleRef.current = settle
   })
 
-  // The decision, once per profile and path. Deferred out of the effect body
-  // so no state is set synchronously inside it.
+  useEffect(() => subscribeDeploymentSource(() => setDiscoveryEpoch((epoch) => epoch + 1)), [])
+
+  // The decision, once per profile, path and chosen deployment. Deferred out
+  // of the effect body so no state is set synchronously inside it.
   useEffect(() => {
     if (!loaded || locked || !localAccountId) return
     if (ungated) {
@@ -222,9 +240,19 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     let cancelled = false
     queueMicrotask(() => {
       void (async () => {
-        const discovery = await (depsRef.current.discover ?? discoverDeployment)()
+        if (discoveryEpoch > 0) {
+          // A deployment chosen after boot: the gate is probably passed, and
+          // must not stay passed against a host it has never asked.
+          setPhase("checking")
+          setView({ kind: "checking" })
+          setError(null)
+        }
+        const discovery = await (
+          depsRef.current.discover ?? (() => discoverDeployment({ localAccountId }))
+        )()
         if (cancelled) return
         if (discovery.status === "none") {
+          deploymentRef.current = null
           setPhase("pass")
           return
         }
@@ -288,7 +316,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     return () => {
       cancelled = true
     }
-  }, [loaded, locked, localAccountId, ungated])
+  }, [loaded, locked, localAccountId, ungated, discoveryEpoch])
 
   const driversFor = useCallback(
     (

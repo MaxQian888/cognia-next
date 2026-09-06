@@ -26,7 +26,8 @@ import { discoverDeployment, type DeploymentDiscovery } from "@/lib/identity/dep
 import { signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
 import { openUrl } from "@/lib/native/opener"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
-import { CLOUD_OFFLINE_KEY_PREFIX } from "@/components/account/cloud-sign-in-gate"
+import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
+import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
 
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
@@ -80,7 +81,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
     const d = depsRef.current
     const [next, found] = await Promise.all([
       (d.readState ?? ((id: string) => readCloudSessionState({ localAccountId: id })))(account.id),
-      (d.discover ?? discoverDeployment)(),
+      (d.discover ?? (() => discoverDeployment({ localAccountId: account.id })))(),
     ])
     setState(next)
     setDiscovery(found)
@@ -145,11 +146,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
 
   const signIn = () => {
     // The gate decides at boot. Forget the tab's offline choice and let it.
-    try {
-      sessionStorage.removeItem(`${CLOUD_OFFLINE_KEY_PREFIX}.${account.id}`)
-    } catch {
-      // Nothing to forget.
-    }
+    forgetOfflineChoice(account.id)
     ;(depsRef.current.reload ?? (() => window.location.reload()))()
   }
 
@@ -276,10 +273,18 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
             <LogInIcon data-icon="inline-start" />
             {t("signIn")}
           </Button>
-        ) : (
-          <p className="text-xs text-muted-foreground">{t("noDeployment")}</p>
-        )}
+        ) : null}
       </div>
+
+      {discovery.status !== "ready" ? (
+        // No deployment to sign in to: the only useful control is naming one.
+        // A desktop or a phone cannot discover a cloud deployment any other
+        // way, and the card's own explanation replaces the bare notice.
+        <section className="flex flex-col gap-2" data-testid="account-identity-deployment">
+          <h4 className="text-xs font-medium text-muted-foreground">{t("noDeployment")}</h4>
+          <CloudDeploymentCard frame="plain" deps={{ localAccountId: account.id }} />
+        </section>
+      ) : null}
     </div>
   )
 }

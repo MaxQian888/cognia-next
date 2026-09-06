@@ -18,7 +18,11 @@ import { Surface } from "@/components/surface/surface"
 import { isInvitationTokenShaped } from "@/lib/identity/pending-invitation"
 
 import type { CollabAccountMembership } from "@/lib/collab/client"
-import type { ReadyDeployment, SocialProvider } from "@/lib/identity/deployment-discovery"
+import {
+  KNOWN_SOCIAL_PROVIDERS,
+  type ReadyDeployment,
+  type SocialProvider,
+} from "@/lib/identity/deployment-discovery"
 import type { CloudSessionReauthReason } from "@/lib/identity/cloud-session"
 import type { LogtoClientConfig } from "@/lib/logto/client"
 
@@ -55,8 +59,6 @@ export interface CloudSignInScreenProps {
   onClaim: (input: { credential: string; orgName: string }) => void
   onSignOut: () => void
 }
-
-const KNOWN_PROVIDERS = new Set(["github", "feishu", "lark", "google", "microsoft", "wechat"])
 
 export function CloudSignInScreen(props: CloudSignInScreenProps) {
   const t = useTranslations("account.cloud")
@@ -218,7 +220,7 @@ function SignInBody({
           >
             <LogInIcon data-icon="inline-start" />
             {t("continueWith", {
-              provider: KNOWN_PROVIDERS.has(provider.provider)
+              provider: KNOWN_SOCIAL_PROVIDERS.has(provider.provider)
                 ? t(`provider.${provider.provider}`)
                 : provider.provider,
             })}

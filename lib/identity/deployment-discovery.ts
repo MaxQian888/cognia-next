@@ -3,15 +3,22 @@
  *
  * # Where the answer comes from
  *
- * `GET /api/auth/config` is served by the companion host, and which host that
- * is depends on the shape this client runs in (`detectHostProfile`):
+ * `GET /api/auth/config` is served by the companion host. A deployment the
+ * profile chose (`deployment-source.ts`) is asked first on every shell but
+ * headless: it is the only way a desktop or a phone can name a cloud
+ * deployment before it has paired with anything. Without one, which host to
+ * ask depends on the shape this client runs in (`detectHostProfile`):
  *
- * - desktop: its own companion server, on the loopback port it is bound to.
- *   A stopped server means there is nothing to discover, not an error.
+ * - desktop: its own companion server, on the loopback port it is bound to,
+ *   and the build-time server URL when that server is stopped. A stopped
+ *   server with no build-time URL means there is nothing to discover.
  * - cloud companion / mobile companion: the paired host, whose base URL and
  *   TLS fingerprint the companion config already holds.
  * - web standalone: the build-time server URL, if the bundle was built with
- *   one. Otherwise there is no deployment, and sign-in is a manual affair.
+ *   one, else its own origin when the bundle was built for a same-origin
+ *   front door (`NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST=1`, the compose web
+ *   image, where Caddy proxies `/api/*` to the gateway). Otherwise there is
+ *   no deployment, and sign-in is a manual affair.
  * - headless: never asks. It is the host.
  *
  * # What "none" means
@@ -31,8 +38,26 @@ import {
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { loadCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
+import { loadDeploymentSource, type DeploymentSource } from "./deployment-source"
 
 export type SocialProvider = ReturnType<typeof authConfigSocialProviders>[number]
+
+/**
+ * Connector targets the sign-in screen has a label for. Logto's official
+ * Feishu connector is `@logto/connector-feishu-web` and its target is
+ * `feishu-web`, which the screen used to print as a bare string. Anything
+ * else still renders under its target name, so a new connector is never
+ * hidden, only unlabelled.
+ */
+export const KNOWN_SOCIAL_PROVIDERS: ReadonlySet<string> = new Set([
+  "github",
+  "feishu",
+  "feishu-web",
+  "lark",
+  "google",
+  "microsoft",
+  "wechat",
+])
 
 export type DeploymentDiscovery =
   | { status: "none"; reason: "no-host" | "single-user" | "server-stopped" }
@@ -63,6 +88,12 @@ export interface DiscoverySource {
 
 export interface DiscoverDeploymentDeps {
   profile?: HostProfile
+  /** Whose stored deployment to read. Defaults to the install-level record. */
+  localAccountId?: string | null
+  /** The deployment the profile chose. Defaults to the stored record. */
+  deploymentSource?: () => DeploymentSource | null
+  /** This page's own origin, asked on a same-origin web build. */
+  sameOrigin?: () => string | null
   companionConfig?: () => CompanionConfig | null
   /** The desktop's own companion server. Defaults to the Tauri command. */
   serverStatus?: () => Promise<{ running: boolean; boundPort?: number | null }>
@@ -80,18 +111,35 @@ async function desktopServerStatus(): Promise<{ running: boolean; boundPort?: nu
   )
 }
 
+function sameOriginHost(): string | null {
+  if (process.env.NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST !== "1") return null
+  if (typeof window === "undefined") return null
+  const origin = window.location.origin
+  return /^https?:\/\//.test(origin) ? origin : null
+}
+
 /** The host to ask, or the reason there is none. Pure per profile. */
 export async function resolveDiscoverySource(
   deps: DiscoverDeploymentDeps = {}
 ): Promise<DiscoverySource | { none: "no-host" | "server-stopped" }> {
   const profile = deps.profile ?? detectHostProfile()
+  if (profile === "headless") return { none: "no-host" }
+  const chosen = (
+    deps.deploymentSource ?? (() => loadDeploymentSource(deps.localAccountId ?? null))
+  )()
+  if (chosen) {
+    return chosen.fingerprint
+      ? { baseUrl: chosen.baseUrl, fingerprint: chosen.fingerprint }
+      : { baseUrl: chosen.baseUrl }
+  }
   switch (profile) {
-    case "headless":
-      return { none: "no-host" }
     case "desktop": {
       const status = await (deps.serverStatus ?? desktopServerStatus)()
-      if (!status.running || !status.boundPort) return { none: "server-stopped" }
-      return { baseUrl: `http://127.0.0.1:${status.boundPort}` }
+      if (status.running && status.boundPort) {
+        return { baseUrl: `http://127.0.0.1:${status.boundPort}` }
+      }
+      const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
+      return built ? { baseUrl: built } : { none: "server-stopped" }
     }
     case "cloud-companion":
     case "mobile-companion": {
@@ -106,7 +154,9 @@ export async function resolveDiscoverySource(
     }
     case "web-standalone": {
       const built = (deps.buildTimeUrl ?? buildTimeServerUrl)()
-      return built ? { baseUrl: built } : { none: "no-host" }
+      if (built) return { baseUrl: built }
+      const own = (deps.sameOrigin ?? sameOriginHost)()
+      return own ? { baseUrl: own } : { none: "no-host" }
     }
   }
 }

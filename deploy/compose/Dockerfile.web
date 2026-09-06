@@ -22,14 +22,18 @@ ARG NPM_CONFIG_REGISTRY
 #   NEXT_PUBLIC_E2E / NEXT_PUBLIC_ACCOUNT_GATE — the CI web-headless lane.
 #   NEXT_PUBLIC_COGNIA_LARK_API_BASE — ONLY for a split-origin deployment where
 #   the companion API is not served from this same origin (README § Lark).
+#   NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST — always 1 here: Caddy proxies /api/*
+#   to the gateway, so the page's own origin is the deployment to sign in to.
 ARG NEXT_PUBLIC_E2E
 ARG NEXT_PUBLIC_ACCOUNT_GATE
 ARG NEXT_PUBLIC_COGNIA_LARK_API_BASE
+ARG NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST=1
 ENV HUSKY=0 \
     CI=1 \
     NEXT_PUBLIC_E2E=${NEXT_PUBLIC_E2E} \
     NEXT_PUBLIC_ACCOUNT_GATE=${NEXT_PUBLIC_ACCOUNT_GATE} \
-    NEXT_PUBLIC_COGNIA_LARK_API_BASE=${NEXT_PUBLIC_COGNIA_LARK_API_BASE}
+    NEXT_PUBLIC_COGNIA_LARK_API_BASE=${NEXT_PUBLIC_COGNIA_LARK_API_BASE} \
+    NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST=${NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST}
 # Node 25+ no longer bundles Corepack. Pin both explicitly so the image keeps
 # using the repository's pinned pnpm even when the Node base moves.
 RUN npm install --global "corepack@${COREPACK_VERSION}" "pnpm@${PNPM_VERSION}"

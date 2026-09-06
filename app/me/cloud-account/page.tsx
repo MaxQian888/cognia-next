@@ -1,15 +1,12 @@
 "use client"
 
 /**
- * Mobile cloud-account route — signing in to the Logto tenant that fronts a
- * cloud or headless `cognia-server` (ADR-0059).
+ * Mobile cloud-account route: which Cognia Cloud this phone signs in to.
  *
- * The card was already host-neutral in everything but its own claim: `openUrl`
- * routes through the Capacitor in-app browser, the PKCE flow is plain fetch,
- * and the session store falls back to an encrypted IndexedDB vault. It just had
- * no route on the phone and told the user cloud sign-in was desktop-only. So a
- * phone connecting directly to a multi-user cloud deployment — the exact setup
- * Logto exists for — had no way to authenticate.
+ * A phone has no pairing and no build-time server URL, so without this card
+ * discovery finds nothing and the sign-in gate lets the person straight past.
+ * The card stores the gateway address, and the gate (which already runs
+ * through the in-app browser on Capacitor) does the sign-in itself.
  *
  * Reused rather than rebuilt, the same way `/me/appearance` embeds the desktop
  * appearance section.
@@ -17,7 +14,7 @@
 
 import { useTranslations } from "next-intl"
 
-import { LogtoLoginCard } from "@/components/settings/companion/logto-login-card"
+import { CloudDeploymentCard } from "@/components/settings/companion/cloud-deployment-card"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 
 export default function MobileCloudAccountPage() {
@@ -29,7 +26,7 @@ export default function MobileCloudAccountPage() {
       backAria={t("appearanceBackAria")}
       testid="mobile-cloud-account-page"
     >
-      <LogtoLoginCard />
+      <CloudDeploymentCard />
     </SubPageShell>
   )
 }

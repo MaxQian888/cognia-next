@@ -177,10 +177,19 @@ memberships into Logto so tokens carry the right `organization_id`.
    ```
 
 **Callback modes.** The web app redirects to `<web origin>/logto/callback` (the
-SPA app). The CLI listens on a loopback port. The desktop app sends the system
-browser to the deep link `cognia://logto/callback` and asks the person to paste
-the address it lands on. All three URIs must be registered on the matching
-Logto application or Logto refuses the authorization request.
+SPA app). The CLI listens on a loopback port. The desktop app and the phone
+send the browser to the deep link `cognia://logto/callback`, which the OS
+hands back to the running app (the desktop also accepts the pasted address
+when the browser never comes back). All three URIs must be registered on the
+matching Logto application or Logto refuses the authorization request.
+
+**Which deployment a client asks.** The web app built by `Dockerfile.web`
+asks its own origin. A browser paired through `/pair` asks its paired host.
+The desktop app and the phone know no host until the person names one in
+**Settings → Cloud deployment** (or `/me/cloud-account` on the phone): the
+gateway address plus, for a self-signed host, its certificate fingerprint.
+The card fetches `/api/auth/config` and shows the sign-in methods before the
+address is stored, and the sign-in gate takes over once it is.
 
 **Rotation.** The bootstrap credential is consumed by the first successful
 claim. After that, set `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED=false` or mint a new

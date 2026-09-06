@@ -88,7 +88,6 @@
     "components/settings/common/section-reset-button.tsx",
     "components/settings/common/settings-section.tsx",
     "components/settings/common/unsaved-bar.tsx",
-    "components/settings/companion/logto-login-card.tsx",
     "components/settings/companion/sync-status-card.tsx",
     "components/settings/connections/adapters/tabs/health-detail.tsx",
     "components/settings/connections/forms/dingtalk-config.tsx",

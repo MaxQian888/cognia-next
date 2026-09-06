@@ -38,9 +38,12 @@ jest.mock("@/stores/account/account-store", () => ({
 
 import { CollabError } from "@/lib/collab/client"
 import { publishLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
+import { forgetDeploymentSource, saveDeploymentSource } from "@/lib/identity/deployment-source"
 import {
   CLOUD_OFFLINE_KEY_PREFIX,
   CloudSignInGate,
+  forgetOfflineChoice,
+  hasChosenOffline,
   type CloudSignInGateDeps,
 } from "./cloud-sign-in-gate"
 import type { ReadyDeployment } from "@/lib/identity/deployment-discovery"
@@ -349,5 +352,38 @@ describe("CloudSignInGate", () => {
       })
     )
     expect(await screen.findByTestId("cloud-sign-in-reauth-expired")).toBeInTheDocument()
+  })
+
+  /**
+   * Settings can point a running app at a deployment. The gate must ask that
+   * host, not stay passed on the answer it got from the old one.
+   */
+  it("decides again when the profile chooses a deployment after boot", async () => {
+    localStorage.clear()
+    let found: Awaited<ReturnType<NonNullable<CloudSignInGateDeps["discover"]>>> = {
+      status: "none",
+      reason: "single-user",
+    }
+    const discover = jest.fn(async () => found)
+    renderGate(deps({ discover }))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    found = deployment
+    saveDeploymentSource("acct_a", { baseUrl: "https://cloud.example" })
+    expect(await screen.findByTestId("cloud-sign-in")).toBeInTheDocument()
+    expect(discover).toHaveBeenCalledTimes(2)
+
+    found = { status: "none", reason: "single-user" }
+    forgetDeploymentSource("acct_a")
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(discover).toHaveBeenCalledTimes(3)
+  })
+
+  it("forgets the tab's offline choice on request", () => {
+    sessionStorage.setItem(`${CLOUD_OFFLINE_KEY_PREFIX}.acct_a`, "1")
+    expect(hasChosenOffline("acct_a")).toBe(true)
+    forgetOfflineChoice("acct_a")
+    expect(hasChosenOffline("acct_a")).toBe(false)
   })
 })

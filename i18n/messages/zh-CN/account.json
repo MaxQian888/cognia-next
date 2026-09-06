@@ -269,6 +269,7 @@
     "provider": {
       "github": "GitHub",
       "feishu": "飞书",
+      "feishu-web": "飞书",
       "lark": "Lark",
       "google": "Google",
       "microsoft": "Microsoft",
@@ -347,7 +348,59 @@
       "stateMismatch": "该回调属于另一次登录尝试，请重新开始。"
     },
     "signedInAs": "已以 {name} 登录",
-    "signOut": "退出登录"
+    "signOut": "退出登录",
+    "deployment": {
+      "title": "云端部署",
+      "description": "此账户登录的 Cognia Cloud。填写网关地址，先检查它提供什么，再使用它：之后由登录页面接管。",
+      "field": {
+        "url": "网关地址",
+        "urlPlaceholder": "https://cognia.example.com",
+        "fingerprint": "证书指纹（可选）",
+        "fingerprintPlaceholder": "SHA-256，64 位十六进制",
+        "fingerprintHint": "仅自签名主机需要。从主机的“连接”设置中复制。"
+      },
+      "check": "检查",
+      "checking": "检查中",
+      "use": "使用此部署",
+      "cancel": "取消",
+      "change": "更换",
+      "forget": "忘记",
+      "signIn": "登录",
+      "signOut": "退出登录",
+      "signOutDone": "已退出云账号。",
+      "signOutFailed": "退出失败：{message}",
+      "revocationFailed": "身份提供方未确认退出，那边的会话可能仍然有效。",
+      "error": {
+        "invalid": "请输入 http(s) 地址；若主机为自签名，再填 64 位十六进制指纹。"
+      },
+      "current": {
+        "url": "网关",
+        "fingerprint": "指纹",
+        "session": "账号"
+      },
+      "session": {
+        "loading": "检查中",
+        "active": "已登录",
+        "signed-out": "未登录",
+        "reauth-required": "需要重新登录",
+        "offline": "已登录，身份提供方不可达",
+        "error": "身份提供方返回错误"
+      },
+      "result": {
+        "status": {
+          "ready": "此部署可以登录",
+          "none": "不是多用户部署",
+          "unavailable": "无法读取此部署"
+        },
+        "providers": "登录方式",
+        "providersNone": "仅 Logto 账号",
+        "collaboration": "协作服务",
+        "collaborationMissing": "未公布。登录会在加入工作区前停下。",
+        "policy": "加入策略",
+        "singleUser": "此网关运行在单用户模式，没有可登录的云账号。",
+        "unavailableMessage": "{message}"
+      }
+    }
   },
   "identity": {
     "title": "云端身份",

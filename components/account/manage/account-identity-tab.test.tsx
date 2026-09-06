@@ -18,6 +18,16 @@ jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
 import { toast } from "sonner"
 import { openUrl } from "@/lib/native/opener"
 import { CLOUD_OFFLINE_KEY_PREFIX } from "@/components/account/cloud-sign-in-gate"
+
+jest.mock("@/components/settings/companion/cloud-deployment-card", () => ({
+  CloudDeploymentCard: (props: { frame?: string; deps?: { localAccountId?: string } }) => (
+    <div
+      data-testid="stub-deployment-card"
+      data-frame={props.frame}
+      data-account={props.deps?.localAccountId}
+    />
+  ),
+}))
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import type { ReadyDeployment } from "@/lib/identity/deployment-discovery"
 
@@ -130,6 +140,10 @@ describe("AccountIdentityTab", () => {
     await screen.findByTestId("account-identity-signed-out")
     expect(screen.queryByTestId("account-identity-sign-in")).not.toBeInTheDocument()
     expect(screen.getByText("noDeployment")).toBeInTheDocument()
+    // The way out is to name a deployment, right here, for this profile.
+    const card = screen.getByTestId("stub-deployment-card")
+    expect(card).toHaveAttribute("data-frame", "plain")
+    expect(card).toHaveAttribute("data-account", "acct_a")
   })
 
   it("keeps the identity when the membership read fails", async () => {

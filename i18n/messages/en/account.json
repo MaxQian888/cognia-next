@@ -269,6 +269,7 @@
     "provider": {
       "github": "GitHub",
       "feishu": "Feishu",
+      "feishu-web": "Feishu",
       "lark": "Lark",
       "google": "Google",
       "microsoft": "Microsoft",
@@ -347,7 +348,59 @@
       "stateMismatch": "The callback belongs to a different sign-in attempt. Start again."
     },
     "signedInAs": "Signed in as {name}",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "deployment": {
+      "title": "Cloud deployment",
+      "description": "The Cognia Cloud this profile signs in to. Enter the gateway address, check what it offers, then use it: the sign-in screen takes over from there.",
+      "field": {
+        "url": "Gateway address",
+        "urlPlaceholder": "https://cognia.example.com",
+        "fingerprint": "Certificate fingerprint (optional)",
+        "fingerprintPlaceholder": "SHA-256, 64 hex characters",
+        "fingerprintHint": "Only for a self-signed host. Copy it from the host's Connectivity settings."
+      },
+      "check": "Check",
+      "checking": "Checking",
+      "use": "Use this deployment",
+      "cancel": "Cancel",
+      "change": "Change",
+      "forget": "Forget",
+      "signIn": "Sign in",
+      "signOut": "Sign out",
+      "signOutDone": "Signed out of the cloud account.",
+      "signOutFailed": "Sign-out failed: {message}",
+      "revocationFailed": "The identity provider did not confirm the sign-out. The session may still be valid there.",
+      "error": {
+        "invalid": "Enter an http(s) address, and a 64-character hex fingerprint if the host is self-signed."
+      },
+      "current": {
+        "url": "Gateway",
+        "fingerprint": "Fingerprint",
+        "session": "Account"
+      },
+      "session": {
+        "loading": "Checking",
+        "active": "Signed in",
+        "signed-out": "Not signed in",
+        "reauth-required": "Sign-in needed again",
+        "offline": "Signed in, identity provider unreachable",
+        "error": "The identity provider answered with an error"
+      },
+      "result": {
+        "status": {
+          "ready": "This deployment accepts sign-in",
+          "none": "Not a multi-user deployment",
+          "unavailable": "Could not read this deployment"
+        },
+        "providers": "Sign in with",
+        "providersNone": "Logto account only",
+        "collaboration": "Collaboration",
+        "collaborationMissing": "Not announced. Sign-in will stop before joining a workspace.",
+        "policy": "Join policy",
+        "singleUser": "This gateway runs in single-user mode. There is no cloud account to sign in to.",
+        "unavailableMessage": "{message}"
+      }
+    }
   },
   "identity": {
     "title": "Cloud identity",

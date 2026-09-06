@@ -251,6 +251,9 @@ services:
       args:
         NEXT_PUBLIC_E2E: ${NEXT_PUBLIC_E2E:-}
         NEXT_PUBLIC_ACCOUNT_GATE: ${NEXT_PUBLIC_ACCOUNT_GATE:-}
+        # Caddy serves the app and proxies /api/* on one origin, so the page's
+        # own origin is the deployment the sign-in gate discovers.
+        NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST: ${NEXT_PUBLIC_COGNIA_SAME_ORIGIN_HOST:-1}
     depends_on:
       cognia-server:
         condition: service_healthy
