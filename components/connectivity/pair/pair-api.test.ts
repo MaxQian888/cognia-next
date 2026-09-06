@@ -14,7 +14,14 @@ jest.mock("@/lib/logto/app-session", () => ({
   getActiveLogtoSession: jest.fn(),
   signInToLogto: jest.fn(),
 }))
-jest.mock("@/lib/logto/web-popup", () => ({ createLogtoWebPopupDrivers: () => ({}) }))
+jest.mock("@/lib/logto/web-popup", () => ({
+  createLogtoWebPopupDrivers: () => ({ flavour: "popup" }),
+}))
+jest.mock("@/lib/logto/capacitor-drivers", () => ({
+  createLogtoCapacitorDrivers: () => ({ flavour: "capacitor" }),
+}))
+let capacitorShell = false
+jest.mock("@/lib/platform/detect", () => ({ isCapacitor: () => capacitorShell }))
 jest.mock("./pair-helpers", () => ({ getDeviceLabel: () => "Test phone" }))
 
 const register = registerCompanionDevice as jest.MockedFunction<typeof registerCompanionDevice>
@@ -121,10 +128,53 @@ it("starts canonical Logto PKCE when an oidc pairing has no active session", asy
       clientId: session.clientId,
       resource: session.resource,
       organizationId: payload.tenantId,
+      redirectUri: `${window.location.origin}/logto/callback`,
+      // The gate adopts an organization by refreshing this very session, and
+      // Logto only honours that for a session that asked for the scope.
+      scopes: ["openid", "offline_access", "urn:logto:scope:organizations"],
     }),
-    expect.any(Object)
+    { flavour: "popup" }
   )
   expect(register).toHaveBeenCalledWith(expect.objectContaining({ oidc: session }), undefined)
+})
+
+it("signs in through the in-app browser and the native application on Capacitor", async () => {
+  capacitorShell = true
+  try {
+    activeSession.mockResolvedValue(null)
+    authConfig.mockResolvedValue({
+      deploymentMode: "multi-tenant",
+      hostId: payload.hostId,
+      oidc: {
+        issuer: "https://id.example/oidc",
+        audience: "https://host.example/api",
+        webClientId: "web-client",
+        nativeClientId: "native-client",
+        scopes: ["openid"],
+      },
+      signaling: { url: "wss://host.example/signaling", iceServers: [] },
+    })
+    signIn.mockResolvedValue({
+      issuer: "https://id.example/oidc",
+      clientId: "native-client",
+      resource: "https://host.example/api",
+      accessToken: "oidc-access",
+      scopes: ["openid"],
+    })
+    register.mockResolvedValue(config)
+
+    await registerDecodedPairPayload({ ...payload, mode: "oidc", invitation: undefined })
+
+    expect(signIn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "native-client",
+        redirectUri: "cognia://logto/callback",
+      }),
+      { flavour: "capacitor" }
+    )
+  } finally {
+    capacitorShell = false
+  }
 })
 
 it("rejects old and malformed payloads without registering", async () => {

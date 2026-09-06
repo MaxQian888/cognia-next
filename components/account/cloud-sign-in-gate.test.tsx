@@ -21,6 +21,10 @@ jest.mock("@/lib/logto/web-popup", () => ({
   createLogtoWebPopupDrivers: () => ({ openUrl: jest.fn(), waitForCode: jest.fn() }),
 }))
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
+jest.mock("@/lib/logto/capacitor-drivers", () => ({
+  ...jest.requireActual("@/lib/logto/capacitor-drivers"),
+  createLogtoCapacitorDrivers: () => ({ flavour: "capacitor" }),
+}))
 
 let mockStore = {
   loaded: true,
@@ -310,6 +314,27 @@ describe("CloudSignInGate", () => {
     })
     expect(await screen.findByTestId("cloud-sign-in-error")).toHaveTextContent("state mismatch")
     expect(screen.queryByTestId("app")).not.toBeInTheDocument()
+  })
+
+  /** G4: a WebView cannot pop a window, so Capacitor takes the native path. */
+  it("on Capacitor, signs in through the in-app browser drivers and the native application", async () => {
+    const signIn = jest.fn(async () => session)
+    renderGate(
+      deps({
+        profile: "mobile-companion",
+        isCapacitor: () => true,
+        signIn: signIn as never,
+      })
+    )
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-social-github"))
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(signIn).toHaveBeenCalledWith(
+      deployment,
+      { kind: "social", directSignIn: "social:github" },
+      { flavour: "capacitor" },
+      { redirectUri: "cognia://logto/callback", clientKind: "native" },
+      { localAccountId: "acct_a" }
+    )
   })
 
   it("says why a lapsed session must be renewed", async () => {

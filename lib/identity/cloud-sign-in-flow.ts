@@ -36,6 +36,7 @@ import { saveCollabConnection } from "@/lib/collab/connection"
 import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import {
+  ORGANIZATIONS_SCOPE,
   refreshLogtoToken,
   type LogtoClientConfig,
   type LogtoDrivers,
@@ -47,8 +48,7 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import type { ReadyDeployment } from "./deployment-discovery"
 
-/** Logto only mints organization tokens for a session that asked for this. */
-export const ORGANIZATIONS_SCOPE = "urn:logto:scope:organizations"
+export { ORGANIZATIONS_SCOPE }
 
 export type CloudSignInMethod =
   | { kind: "social"; directSignIn: string }

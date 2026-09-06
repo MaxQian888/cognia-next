@@ -35,9 +35,11 @@ import { useTranslations } from "next-intl"
 import { extractCallback } from "@/components/settings/companion/logto-login-card"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
+import { isCapacitor as detectCapacitor } from "@/lib/platform/detect"
 import { openUrl } from "@/lib/native/opener"
 import { createLogtoWebPopupDrivers } from "@/lib/logto/web-popup"
 import { waitForLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
+import { LogtoSignInCancelled, createLogtoCapacitorDrivers } from "@/lib/logto/capacitor-drivers"
 import { signOutFromLogto } from "@/lib/logto/app-session"
 import { CollabError, type CollabAccountMembership } from "@/lib/collab/client"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
@@ -59,15 +61,14 @@ import {
 } from "@/lib/identity/cloud-sign-in-flow"
 import { useAccountStore } from "@/stores/account/account-store"
 
-import type { LogtoDrivers, LogtoSession } from "@/lib/logto/client"
+import { NATIVE_CALLBACK_URI, type LogtoDrivers, type LogtoSession } from "@/lib/logto/client"
 import type { SocialProvider } from "@/lib/identity/deployment-discovery"
 
 import { CloudSignInScreen, type CloudSignInView } from "./cloud-sign-in-screen"
 
 export const CLOUD_OFFLINE_KEY_PREFIX = "cognia.cloud-sign-in.offline"
 const UNGATED_PATHS = ["/logto/callback", "/invite", "/pair", "/onboarding"]
-/** The redirect URI registered on the native Logto application. */
-export const NATIVE_CALLBACK_URI = "cognia://logto/callback"
+export { NATIVE_CALLBACK_URI }
 export const DESKTOP_CALLBACK_URI = NATIVE_CALLBACK_URI
 
 export interface CloudSignInGateDeps {
@@ -80,6 +81,8 @@ export interface CloudSignInGateDeps {
   redeem?: typeof redeemInvitation
   signOut?: (localAccountId: string) => Promise<void>
   profile?: HostProfile
+  /** Whether this is the Capacitor shell. Defaults to the runtime detector. */
+  isCapacitor?: () => boolean
   pathname?: string | null
 }
 
@@ -158,6 +161,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
           name: cause.existing?.displayName ?? cause.existing?.userId ?? "",
         })
       }
+      if (cause instanceof LogtoSignInCancelled) return ""
       if (cause instanceof CloudSignInError) {
         if (cause.code === "cancelled") return ""
         if (cause.code === "reauth-required") return t("error.reauthRequired")
@@ -290,6 +294,16 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     (
       deployment: ReadyDeployment
     ): { drivers: LogtoDrivers; redirectUri: string; clientKind: "web" | "native" } => {
+      // The Capacitor WebView cannot pop a window and has no https origin to
+      // land on, so it is asked before the popup test that would otherwise
+      // claim it: the in-app browser plus the native deep link is its path.
+      if ((deps.isCapacitor ?? detectCapacitor)()) {
+        return {
+          drivers: createLogtoCapacitorDrivers(),
+          redirectUri: NATIVE_CALLBACK_URI,
+          clientKind: "native",
+        }
+      }
       const profile = deps.profile ?? detectHostProfile()
       const popupCapable =
         profile !== "desktop" && typeof window !== "undefined" && typeof window.open === "function"
@@ -327,7 +341,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
         clientKind: "native",
       }
     },
-    [deps.profile]
+    [deps.profile, deps.isCapacitor]
   )
 
   const runSignIn = async (method: CloudSignInMethod) => {

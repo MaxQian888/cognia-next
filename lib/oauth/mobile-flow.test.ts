@@ -65,6 +65,37 @@ describe("awaitCallback", () => {
     expect(out).toEqual({ kind: "timeout" })
   })
 
+  it("lets the caller decide which deep links settle the wait", async () => {
+    let push: ((route: unknown) => void) | null = null
+    const subscribe = ((handler: (route: unknown) => void) => {
+      push = handler
+      return Promise.resolve(() => {})
+    }) as never
+    const accept = (route: { kind: string; state?: string | null; code?: string | null }) => {
+      if (route.kind !== "logto_callback") return null
+      if (route.state !== "st") return "mismatch" as const
+      return { code: route.code!, state: route.state }
+    }
+    const promise = awaitCallback({ provider: "logto", timeoutMs: 1000, subscribe, accept })
+    await new Promise((r) => setTimeout(r, 0))
+    push!({ kind: "oauth_callback", provider: "logto", code: "ignored", state: "st", raw: "" })
+    push!({ kind: "logto_callback", code: "c-1", state: "st", error: null, raw: "" })
+    expect(await promise).toEqual({
+      kind: "ok",
+      result: { code: "c-1", state: "st", via: "deeplink" },
+    })
+
+    const refused = awaitCallback({
+      provider: "logto",
+      timeoutMs: 1000,
+      subscribe,
+      accept: () => ({ error: "access_denied" }),
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    push!({ kind: "logto_callback", code: null, state: "st", error: "access_denied", raw: "" })
+    expect(await refused).toEqual({ kind: "error", error: "access_denied" })
+  })
+
   it("resolves via manualPaste race", async () => {
     const subscribe = (() => Promise.resolve(() => {})) as never
     const out = await awaitCallback({

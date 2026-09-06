@@ -27,9 +27,31 @@ import {
  * OAuth dialog doesn't leak listeners forever.
  */
 
+/**
+ * What a deep link means to the flow that is waiting. `null` is "not mine,
+ * keep waiting", `"mismatch"` is "mine but wrong" (a callback without a code,
+ * or one minted for another state), an `error` is the provider refusing, and
+ * a code settles the wait.
+ */
+export type CallbackAccept = (
+  route: DeeplinkRoute
+) => { code: string; state: string | null } | { error: string } | "mismatch" | null
+
+/** The historical rule: `cognia://oauth/<provider>` for the named provider. */
+export function acceptOAuthCallbackFor(provider: string): CallbackAccept {
+  return (route) => {
+    if (route.kind !== "oauth_callback") return null
+    if (route.provider !== provider) return null
+    if (!route.code) return "mismatch"
+    return { code: route.code, state: route.state }
+  }
+}
+
 export interface AwaitCallbackOptions {
   /** The provider key encoded in the deeplink path (`cognia://oauth/<provider>`). */
   provider: string
+  /** Which deep links settle this wait. Defaults to `acceptOAuthCallbackFor(provider)`. */
+  accept?: CallbackAccept
   /** Timeout in ms — defaults to 5 minutes (matches typical authorize page lifespan). */
   timeoutMs?: number
   /**
@@ -54,6 +76,7 @@ export type CallbackOutcome =
   | { kind: "timeout" }
   | { kind: "cancelled" }
   | { kind: "mismatch" }
+  | { kind: "error"; error: string }
 
 /**
  * Wait for the OAuth callback to arrive. Returns when EITHER:
@@ -62,7 +85,13 @@ export type CallbackOutcome =
  *   - the timeout elapses (returns kind=timeout)
  */
 export async function awaitCallback(opts: AwaitCallbackOptions): Promise<CallbackOutcome> {
-  const { provider, timeoutMs = 5 * 60_000, manualPaste, subscribe = subscribeDeeplink } = opts
+  const {
+    provider,
+    timeoutMs = 5 * 60_000,
+    manualPaste,
+    subscribe = subscribeDeeplink,
+    accept = acceptOAuthCallbackFor(provider),
+  } = opts
 
   return new Promise<CallbackOutcome>((resolve) => {
     let settled = false
@@ -76,13 +105,17 @@ export async function awaitCallback(opts: AwaitCallbackOptions): Promise<Callbac
 
     let unsubDeeplink: (() => void) | null = null
     void subscribe((route: DeeplinkRoute) => {
-      if (route.kind !== "oauth_callback") return
-      if (route.provider !== provider) return
-      if (!route.code) {
+      const verdict = accept(route)
+      if (verdict === null) return
+      if (verdict === "mismatch") {
         settle({ kind: "mismatch" })
         return
       }
-      finish({ code: route.code, state: route.state, via: "deeplink" })
+      if ("error" in verdict) {
+        settle({ kind: "error", error: verdict.error })
+        return
+      }
+      finish({ code: verdict.code, state: verdict.state, via: "deeplink" })
     })
       .then((u) => {
         if (settled) {
@@ -129,6 +162,8 @@ export interface RunOAuthOptions {
    * "slack-bot". Determines which appUrlOpen routes get accepted.
    */
   provider: string
+  /** See `awaitCallback`. */
+  accept?: CallbackAccept
   /** Optional toolbar tint for the in-app browser. */
   toolbarColor?: string
   /** See `awaitCallback`. */
@@ -155,6 +190,7 @@ export async function runOAuth(opts: RunOAuthOptions): Promise<CallbackOutcome> 
   try {
     const outcome = await awaitCallback({
       provider: opts.provider,
+      accept: opts.accept,
       manualPaste: opts.manualPaste,
       timeoutMs: opts.timeoutMs,
     })

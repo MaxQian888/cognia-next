@@ -44,6 +44,16 @@ export interface LogtoClientConfig {
   directSignIn?: string
 }
 
+/** Logto only mints organization tokens for a session that asked for this. */
+export const ORGANIZATIONS_SCOPE = "urn:logto:scope:organizations"
+
+/**
+ * The redirect URI registered on the native Logto application. The desktop
+ * and the Capacitor shells both land here, and each resolves the wait from
+ * the deep link its OS delivers.
+ */
+export const NATIVE_CALLBACK_URI = "cognia://logto/callback"
+
 export interface LogtoDrivers {
   /** Open the authorize URL (window.open / shell open / CLI browser). */
   openUrl: (url: string) => void | Promise<void>
