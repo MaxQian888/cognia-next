@@ -28,6 +28,83 @@ pub enum TunnelError {
     Io(#[from] std::io::Error),
     #[error("timed out waiting for tunnel URL")]
     Timeout,
+    /// A quick tunnel is already exposing a *different* local origin.
+    ///
+    /// One `cloudflared` child per process, two callers that name two
+    /// origins (the companion HTTPS listener, the connectors' webhook
+    /// receiver): before this variant the second start silently killed the
+    /// first, and the surface that started it kept showing a public URL that
+    /// now pointed somewhere else. The caller decides whether to replace; the
+    /// message keeps a stable `tunnel_busy:` prefix so the renderer can tell
+    /// it from every other failure.
+    #[error("tunnel_busy: already exposing {local_url} at {public_url}")]
+    Busy { local_url: String, public_url: String },
+}
+
+/// Whether `cloudflared` can be launched from this process, and which one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelProbe {
+    pub installed: bool,
+    /// Where on `PATH` the binary was found, when it was.
+    pub path: Option<String>,
+    /// First line of `cloudflared --version`, when it ran.
+    pub version: Option<String>,
+}
+
+/// Look for the binary the way [`launch`] will: on this process's `PATH`.
+///
+/// A settings surface used to learn that cloudflared was missing only after
+/// the user flipped the switch and the spawn failed; probing first lets it
+/// show the install guide instead of a switch that snaps back.
+pub fn locate_binary(path_var: Option<&std::ffi::OsStr>) -> Option<std::path::PathBuf> {
+    let path_var = path_var?;
+    let names: &[&str] = if cfg!(windows) {
+        &["cloudflared.exe", "cloudflared"]
+    } else {
+        &["cloudflared"]
+    };
+    std::env::split_paths(path_var)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Probe for `cloudflared` and, when present, ask it for its version.
+pub async fn probe() -> TunnelProbe {
+    let path = locate_binary(std::env::var_os("PATH").as_deref());
+    let Some(path) = path else {
+        return TunnelProbe {
+            installed: false,
+            path: None,
+            version: None,
+        };
+    };
+    let mut cmd = Command::new(&path);
+    cmd.arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let version = match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.output()).await {
+        Ok(Ok(output)) => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let text = if text.trim().is_empty() {
+                String::from_utf8_lossy(&output.stderr)
+            } else {
+                text
+            };
+            text.lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(str::to_string)
+        }
+        _ => None,
+    };
+    TunnelProbe {
+        installed: true,
+        path: Some(path.to_string_lossy().into_owned()),
+        version,
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -235,7 +312,24 @@ impl TunnelState {
     }
 
     /// Start a Quick Tunnel (`cloudflared tunnel --url`).
-    pub async fn start(&self, local_url: &str) -> Result<TunnelInfo, TunnelError> {
+    ///
+    /// Idempotent for the origin already being exposed: asking again for the
+    /// same `local_url` answers the live tunnel. A *different* origin is a
+    /// conflict the caller has to resolve explicitly with `replace`, because
+    /// the process holds one child and the other surface is still showing
+    /// the URL that would die.
+    pub async fn start(&self, local_url: &str, replace: bool) -> Result<TunnelInfo, TunnelError> {
+        if let Some(current) = self.current() {
+            if current.local_url == local_url {
+                return Ok(current);
+            }
+            if !replace {
+                return Err(TunnelError::Busy {
+                    local_url: current.local_url,
+                    public_url: current.public_url,
+                });
+            }
+        }
         self.stop();
         let handle = launch(local_url).await?;
         let info = handle.wait_for_url(20).await?;
@@ -326,6 +420,85 @@ mod tests {
         let s = TunnelState::new();
         assert!(!s.is_running());
         assert!(s.current().is_none());
+    }
+
+    #[test]
+    fn locate_binary_walks_path_and_ignores_empty_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
+        let binary = dir.path().join(name);
+        std::fs::write(&binary, b"#!/bin/sh\n").expect("write");
+        let mut path_var = std::ffi::OsString::new();
+        path_var.push("");
+        path_var.push(if cfg!(windows) { ";" } else { ":" });
+        path_var.push(dir.path());
+        assert_eq!(locate_binary(Some(&path_var)), Some(binary));
+        assert_eq!(locate_binary(Some(std::ffi::OsStr::new(""))), None);
+        assert_eq!(locate_binary(None), None);
+    }
+
+    #[tokio::test]
+    async fn probe_reports_not_installed_on_an_empty_path() {
+        let original_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", "");
+        let result = probe().await;
+        if let Some(p) = original_path {
+            std::env::set_var("PATH", p);
+        }
+        assert_eq!(
+            result,
+            TunnelProbe {
+                installed: false,
+                path: None,
+                version: None
+            }
+        );
+    }
+
+    #[test]
+    fn busy_error_carries_a_stable_prefix_the_renderer_can_match() {
+        let error = TunnelError::Busy {
+            local_url: "http://127.0.0.1:7891".into(),
+            public_url: "https://a.trycloudflare.com".into(),
+        };
+        let text = error.to_string();
+        assert!(text.starts_with("tunnel_busy: "), "{text}");
+        assert!(text.contains("http://127.0.0.1:7891"));
+        assert!(text.contains("https://a.trycloudflare.com"));
+    }
+
+    #[tokio::test]
+    async fn start_refuses_a_second_origin_unless_replacing() {
+        // Seed a "running" tunnel without spawning anything: the handle only
+        // needs an info snapshot for the conflict check.
+        let (_tx, rx) = watch::channel::<Option<TunnelInfo>>(None);
+        let handle = Arc::new(TunnelHandle {
+            child: Mutex::new(None),
+            info: Mutex::new(Some(TunnelInfo {
+                public_url: "https://a.trycloudflare.com".into(),
+                local_url: "http://127.0.0.1:7891".into(),
+            })),
+            info_rx: rx,
+        });
+        let state = TunnelState::new();
+        *state.inner.lock() = Some(handle);
+
+        // Same origin: idempotent, no relaunch.
+        let same = state.start("http://127.0.0.1:7891", false).await.expect("same origin");
+        assert_eq!(same.public_url, "https://a.trycloudflare.com");
+
+        // Different origin, no replace: refused, and the first tunnel survives.
+        match state.start("https://127.0.0.1:27890", false).await {
+            Err(TunnelError::Busy {
+                local_url,
+                public_url,
+            }) => {
+                assert_eq!(local_url, "http://127.0.0.1:7891");
+                assert_eq!(public_url, "https://a.trycloudflare.com");
+            }
+            other => panic!("expected Busy, got {other:?}"),
+        }
+        assert!(state.is_running());
     }
 
     #[tokio::test]

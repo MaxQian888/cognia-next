@@ -1348,7 +1348,8 @@ pub async fn companion_create_owner_invitation(
         (hostname, true)
     } else {
         let host = match state.bind_mode() {
-            Some(BindMode::Lan) => detect_lan_ip().unwrap_or_else(|| "127.0.0.1".to_string()),
+            Some(BindMode::Lan) => advertised_lan_host(state.data_dir())
+                .unwrap_or_else(|| "127.0.0.1".to_string()),
             _ => "127.0.0.1".to_string(),
         };
         (format!("https://{host}:{port}"), false)
@@ -1665,10 +1666,16 @@ pub async fn restore_reachability(
 /// Errors with "not_installed" if cloudflared is missing from PATH, or
 /// "no named config" if the user selected Named mode but hasn't saved a
 /// token/hostname yet.
+///
+/// A quick tunnel already exposing a *different* origin is refused with a
+/// `tunnel_busy:` error unless `replace` is set: two settings surfaces share
+/// this one child (the companion listener and the connectors' webhook
+/// receiver), and the caller has to say it means to take it over.
 #[tauri::command]
 pub async fn companion_tunnel_start(
     state: State<'_, CompanionServerState>,
     local_url: String,
+    replace: Option<bool>,
 ) -> Result<TunnelInfo, String> {
     let config = super::tunnel_config::load_config(state.data_dir());
     match config.mode {
@@ -1685,10 +1692,27 @@ pub async fn companion_tunnel_start(
         }
         super::tunnel_config::TunnelMode::Quick => state
             .tunnel
-            .start(&local_url)
+            .start(&local_url, replace.unwrap_or(false))
             .await
             .map_err(map_tunnel_error),
     }
+}
+
+/// Whether `cloudflared` is installed where the tunnel launcher will look,
+/// and which version. Read-only, never launches a tunnel.
+#[tauri::command]
+pub async fn companion_tunnel_probe() -> tunnel::TunnelProbe {
+    tunnel::probe().await
+}
+
+/// Which mesh-VPN clients (Tailscale, ZeroTier) are on this machine and the
+/// overlay addresses they carry. Interface enumeration is a blocking syscall
+/// walk, so it runs on the blocking pool.
+#[tauri::command]
+pub async fn companion_mesh_status() -> Result<super::mesh::MeshStatus, String> {
+    tauri::async_runtime::spawn_blocking(super::mesh::detect)
+        .await
+        .map_err(|error| format!("mesh detection task failed: {error}"))
 }
 
 fn map_tunnel_error(e: tunnel::TunnelError) -> String {
@@ -2053,6 +2077,21 @@ pub(crate) fn detect_lan_ip() -> Option<String> {
         Ok(IpAddr::V4(v4)) if !v4.is_loopback() && !v4.is_unspecified() => Some(v4.to_string()),
         Ok(IpAddr::V6(v6)) if !v6.is_loopback() && !v6.is_unspecified() => Some(v6.to_string()),
         _ => None,
+    }
+}
+
+/// The host a LAN-bound listener advertises: the saved advertise host
+/// (a mesh-VPN address the user chose, see [`super::mesh`]) when there is
+/// one, else the auto-detected LAN address.
+///
+/// One function behind the desktop invitation command, the host-admin
+/// invitation arm and the `companion_endpoints` LAN report, so the three
+/// surfaces that tell a device "reach me here" cannot disagree.
+pub(crate) fn advertised_lan_host(data_dir: Option<&std::path::Path>) -> Option<String> {
+    let saved = reachability_config::load_config(data_dir);
+    match saved.advertise_host() {
+        Some(host) => Some(host.to_string()),
+        None => detect_lan_ip(),
     }
 }
 

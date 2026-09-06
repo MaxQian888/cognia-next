@@ -2600,7 +2600,7 @@ fn endpoints_response(
 /// `CompanionServerState`; a headless `cognia-server` always binds `0.0.0.0`
 /// (`bin/cognia-server.rs`), so `None` for `bind_lan` there means "assume LAN"
 /// rather than "assume loopback".
-fn lan_base_url(bind_lan: Option<bool>) -> Option<String> {
+fn lan_base_url(bind_lan: Option<bool>, data_dir: Option<&std::path::Path>) -> Option<String> {
     if bind_lan == Some(false) {
         return None;
     }
@@ -2608,7 +2608,7 @@ fn lan_base_url(bind_lan: Option<bool>) -> Option<String> {
         0 => super::server::DEFAULT_PORT,
         p => p,
     };
-    let host = crate::companion_api::commands::detect_lan_ip()?;
+    let host = crate::companion_api::commands::advertised_lan_host(data_dir)?;
     Some(format!("https://{host}:{port}"))
 }
 

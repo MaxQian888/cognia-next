@@ -3518,6 +3518,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "companion_tunnel_probe",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_mesh_status",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "companion_unrevoke_device",
       "target": "client",
       "operation": "side-effect",

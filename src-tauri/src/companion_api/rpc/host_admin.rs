@@ -213,8 +213,10 @@ pub(super) async fn dispatch(
                     } else {
                         let host = match state.bind_mode() {
                             Some(crate::companion_api::BindMode::Lan) => {
-                                crate::companion_api::commands::detect_lan_ip()
-                                    .unwrap_or_else(|| "127.0.0.1".to_string())
+                                crate::companion_api::commands::advertised_lan_host(
+                                    state.data_dir(),
+                                )
+                                .unwrap_or_else(|| "127.0.0.1".to_string())
                             }
                             _ => "127.0.0.1".to_string(),
                         };

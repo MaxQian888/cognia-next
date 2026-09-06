@@ -372,7 +372,7 @@ fn endpoints_response_nulls_absent_channels() {
 fn lan_base_url_is_none_when_bound_loopback() {
     // Loopback bind mode is an explicit "not reachable from the LAN" —
     // handing the phone a 127.0.0.1 URL would make it probe itself.
-    assert_eq!(lan_base_url(Some(false)), None);
+    assert_eq!(lan_base_url(Some(false), None), None);
 }
 
 #[test]
@@ -381,7 +381,7 @@ fn lan_base_url_is_https_with_the_advertised_port_when_lan_bound() {
     // case there is genuinely no LAN address to report. Both outcomes are
     // valid; assert the SHAPE of the one that exists.
     for bind_lan in [Some(true), None] {
-        match lan_base_url(bind_lan) {
+        match lan_base_url(bind_lan, None) {
             Some(url) => {
                 assert!(url.starts_with("https://"), "expected https, got {url}");
                 let port = match super::super::advertised_port() {

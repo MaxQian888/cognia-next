@@ -1289,6 +1289,8 @@ pub fn run() {
             companion_api::commands::companion_tunnel_get_config,
             companion_api::commands::companion_tunnel_set_mode,
             companion_api::commands::companion_tunnel_clear_named,
+            companion_api::commands::companion_tunnel_probe,
+            companion_api::commands::companion_mesh_status,
             // ADR-0021 — WebRTC WAN signaling control surface.
             companion_api::signaling::commands::companion_signaling_sync_devices,
             companion_api::signaling::commands::companion_signaling_configure,

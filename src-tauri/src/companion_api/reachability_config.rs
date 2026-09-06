@@ -72,6 +72,17 @@ pub struct ReachabilityConfig {
     /// Advertise `_cognia._tcp.local.` once the server is up.
     #[serde(default)]
     pub mdns_enabled: bool,
+    /// The host the pairing invitation and the LAN endpoint report name
+    /// instead of the auto-detected LAN address, when set.
+    ///
+    /// The one use today is a mesh-VPN address (Tailscale, ZeroTier, see
+    /// [`super::mesh`]): a phone on the same overlay reaches it from any
+    /// network over the plain HTTPS/WebSocket tier, which the auto-detected
+    /// `192.168.x.x` never will. Only meaningful with a LAN binding, since a
+    /// loopback listener answers no address but its own. `None` or blank
+    /// means "detect", so a config written before this key behaves as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advertise_host: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -89,6 +100,7 @@ impl Default for ReachabilityConfig {
             port: default_port(),
             bind_loopback_only: default_bind_loopback_only(),
             mdns_enabled: false,
+            advertise_host: None,
         }
     }
 }
@@ -109,6 +121,15 @@ impl ReachabilityConfig {
     /// its own switch.
     pub fn advertises(&self) -> bool {
         self.server_enabled && self.mdns_enabled
+    }
+
+    /// The saved advertise host, trimmed, or `None` when it is unset or blank
+    /// (a blank string is what a cleared text field saves).
+    pub fn advertise_host(&self) -> Option<&str> {
+        self.advertise_host
+            .as_deref()
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
     }
 }
 
@@ -202,9 +223,38 @@ mod tests {
             port: 31337,
             bind_loopback_only: false,
             mdns_enabled: true,
+            advertise_host: None,
         };
         save_config(Some(&dir), &config).unwrap();
         assert_eq!(load_config(Some(&dir)), config);
+    }
+
+    #[test]
+    fn a_saved_advertise_host_round_trips_and_a_blank_one_reads_as_detect() {
+        let dir = temp_dir("advertise");
+        let mut config = ReachabilityConfig {
+            server_enabled: true,
+            bind_loopback_only: false,
+            advertise_host: Some("100.101.2.3".into()),
+            ..ReachabilityConfig::default()
+        };
+        save_config(Some(&dir), &config).unwrap();
+        let loaded = load_config(Some(&dir));
+        assert_eq!(loaded.advertise_host(), Some("100.101.2.3"));
+
+        // A cleared text field saves whitespace or an empty string. Both mean
+        // "back to detection", never "advertise the empty host".
+        config.advertise_host = Some("   ".into());
+        save_config(Some(&dir), &config).unwrap();
+        assert_eq!(load_config(Some(&dir)).advertise_host(), None);
+
+        // A file written before the key existed has no key at all.
+        let path = dir.join(CONFIG_SUBDIR).join(CONFIG_FILE);
+        std::fs::write(&path, r#"{"serverEnabled":true,"bindLoopbackOnly":false}"#).unwrap();
+        let older = load_config(Some(&dir));
+        assert_eq!(older.advertise_host, None);
+        assert_eq!(older.advertise_host(), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

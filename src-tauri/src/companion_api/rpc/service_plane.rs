@@ -1263,7 +1263,7 @@ pub(super) async fn dispatch(
         // `tunnelBaseUrl`, not an unsupported command. The LAN address and the
         // TLS fingerprint are process-global and answer correctly on both hosts.
         "companion_endpoints" => {
-            let (tunnel_base_url, bind_lan) = match host.tauri_app(name) {
+            let (tunnel_base_url, bind_lan, data_dir) = match host.tauri_app(name) {
                 Ok(app) => {
                     let server_state: tauri::State<'_, super::super::CompanionServerState> =
                         app.state();
@@ -1275,15 +1275,15 @@ pub(super) async fn dispatch(
                     let bind_lan = server_state
                         .bind_mode()
                         .map(|mode| matches!(mode, super::super::BindMode::Lan));
-                    (tunnel, bind_lan)
+                    (tunnel, bind_lan, server_state.data_dir().map(|d| d.to_path_buf()))
                 }
                 // Headless: no tunnel launcher, and the listener is bound
                 // `0.0.0.0`, so leave `bind_lan` unknown (= assume LAN).
-                Err(_) => (None, None),
+                Err(_) => (None, None, None),
             };
             let server_id = super::super::healthz::derive_server_id(&state.secret.read());
             Ok(endpoints_response(
-                lan_base_url(bind_lan),
+                lan_base_url(bind_lan, data_dir.as_deref()),
                 tunnel_base_url,
                 super::super::tls_fingerprint(),
                 server_id,
