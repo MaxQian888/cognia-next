@@ -8,8 +8,10 @@
  * to a headless Host configures it exactly as the desktop renderer does.
  * Two things are not, and must say so instead of vanishing:
  *
- * - the tunnel is a child process of the desktop app,
- * - mDNS is a LAN multicast socket the desktop opens.
+ * - the tunnel is a child process of the desktop app (and so is asking
+ *   whether `cloudflared` is installed where that child would launch),
+ * - mDNS is a LAN multicast socket the desktop opens,
+ * - the mesh-VPN probe reads the desktop machine's own interfaces.
  *
  * Neither has a headless meaning, and a standalone browser has no Host at all.
  * Same shape as `lib/connectors/control-reach.ts`: one resolver, so the day
@@ -67,6 +69,8 @@ export const DESKTOP_SHELL_COMMANDS: readonly string[] = Object.freeze([
   "companion_tunnel_set_mode",
   "companion_tunnel_save_named_config",
   "companion_tunnel_clear_named",
+  "companion_tunnel_probe",
+  "companion_mesh_status",
   "companion_mdns_start",
   "companion_mdns_stop",
   "companion_mdns_status",

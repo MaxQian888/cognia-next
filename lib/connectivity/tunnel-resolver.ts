@@ -37,24 +37,74 @@ const tauriInvoker: () => Promise<TauriInvoker | null> = async () => {
 export type StartOutcome =
   | { kind: "started"; info: TunnelInfo }
   | { kind: "not_installed" }
+  /**
+   * The one cloudflared child is already exposing a different local origin
+   * (the companion listener vs. the connectors' webhook receiver). Start
+   * again with `replace: true` to take it over, knowingly.
+   */
+  | { kind: "busy"; current: TunnelInfo }
   | { kind: "unsupported" }
   | { kind: "error"; message: string }
 
+/** Mirror of `TunnelError::Busy`'s message in `companion_api/tunnel.rs`. */
+const BUSY_RE = /^tunnel_busy: already exposing (\S+) at (\S+)$/
+
+/** Read the origin conflict out of a `companion_tunnel_start` failure. */
+export function parseTunnelBusy(message: string): TunnelInfo | null {
+  const match = BUSY_RE.exec(message.trim())
+  return match ? { localUrl: match[1], publicUrl: match[2] } : null
+}
+
+export interface StartTunnelOptions {
+  /** Take over a tunnel that is exposing another origin. */
+  replace?: boolean
+}
+
 export async function startTunnel(
   localUrl: string,
-  loader: () => Promise<TauriInvoker | null> = tauriInvoker
+  loader: () => Promise<TauriInvoker | null> = tauriInvoker,
+  options: StartTunnelOptions = {}
 ): Promise<StartOutcome> {
   const invoker = await loader()
   if (!invoker) return { kind: "unsupported" }
   try {
-    const info = await invoker.invoke<TunnelInfo>("companion_tunnel_start", { localUrl })
+    const info = await invoker.invoke<TunnelInfo>("companion_tunnel_start", {
+      localUrl,
+      replace: options.replace === true,
+    })
     return { kind: "started", info }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
+    const busy = parseTunnelBusy(msg)
+    if (busy) return { kind: "busy", current: busy }
     if (/not.installed|cloudflared.*not.found|enoent/i.test(msg)) {
       return { kind: "not_installed" }
     }
     return { kind: "error", message: msg }
+  }
+}
+
+/** Mirror of the Rust `TunnelProbe` (`companion_api/tunnel.rs`). */
+export interface TunnelProbe {
+  installed: boolean
+  path?: string | null
+  version?: string | null
+}
+
+/**
+ * Whether cloudflared is where the launcher will look, before anyone flips
+ * the switch. `null` off the desktop or when the probe itself failed, which
+ * callers treat as "unknown" rather than "missing".
+ */
+export async function probeTunnel(
+  loader: () => Promise<TauriInvoker | null> = tauriInvoker
+): Promise<TunnelProbe | null> {
+  const invoker = await loader()
+  if (!invoker) return null
+  try {
+    return await invoker.invoke<TunnelProbe>("companion_tunnel_probe")
+  } catch {
+    return null
   }
 }
 

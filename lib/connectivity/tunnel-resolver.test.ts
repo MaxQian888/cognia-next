@@ -1,7 +1,10 @@
 import {
   getTunnelConfig,
+  parseTunnelBusy,
+  probeTunnel,
   saveNamedTunnelConfig,
   setTunnelMode,
+  startTunnel,
   type TauriInvoker,
 } from "./tunnel-resolver"
 
@@ -80,5 +83,71 @@ describe("setTunnelMode", () => {
   it("returns unsupported when invoker is null", async () => {
     const result = await setTunnelMode("quick", nullInvoker())
     expect(result).toEqual({ kind: "error", message: "Tauri not available" })
+  })
+})
+
+describe("startTunnel", () => {
+  it("passes the replace flag through and reports a started tunnel", async () => {
+    const seen: Array<Record<string, unknown> | undefined> = []
+    const loader: () => Promise<TauriInvoker | null> = async () => ({
+      async invoke<T>(_cmd: string, args?: Record<string, unknown>): Promise<T> {
+        seen.push(args)
+        return { publicUrl: "https://a.trycloudflare.com", localUrl: "l" } as T
+      },
+    })
+    const result = await startTunnel("https://127.0.0.1:27890", loader, { replace: true })
+    expect(result.kind).toBe("started")
+    expect(seen[0]).toEqual({ localUrl: "https://127.0.0.1:27890", replace: true })
+    await startTunnel("https://127.0.0.1:27890", loader)
+    expect(seen[1]).toEqual({ localUrl: "https://127.0.0.1:27890", replace: false })
+  })
+
+  it("reads the Rust tunnel_busy error into a busy outcome with the current origin", async () => {
+    const loader: () => Promise<TauriInvoker | null> = async () => ({
+      async invoke<T>(): Promise<T> {
+        throw new Error(
+          "tunnel_busy: already exposing http://127.0.0.1:7891 at https://a.trycloudflare.com"
+        )
+      },
+    })
+    expect(await startTunnel("https://127.0.0.1:27890", loader)).toEqual({
+      kind: "busy",
+      current: { localUrl: "http://127.0.0.1:7891", publicUrl: "https://a.trycloudflare.com" },
+    })
+  })
+
+  it("still reads the not-installed message and everything else as error", async () => {
+    const notInstalled: () => Promise<TauriInvoker | null> = async () => ({
+      async invoke<T>(): Promise<T> {
+        throw new Error("cloudflared not found in PATH (install: https://x)")
+      },
+    })
+    expect((await startTunnel("l", notInstalled)).kind).toBe("not_installed")
+    expect((await startTunnel("l", failingInvoker())).kind).toBe("error")
+    expect((await startTunnel("l", nullInvoker())).kind).toBe("unsupported")
+  })
+})
+
+describe("parseTunnelBusy", () => {
+  it("only matches the exact busy shape", () => {
+    expect(parseTunnelBusy("tunnel_busy: already exposing a at b")).toEqual({
+      localUrl: "a",
+      publicUrl: "b",
+    })
+    expect(parseTunnelBusy("timed out waiting for tunnel URL")).toBeNull()
+    expect(parseTunnelBusy("")).toBeNull()
+  })
+})
+
+describe("probeTunnel", () => {
+  it("returns the probe, and null off the desktop or on failure", async () => {
+    const probe = {
+      installed: true,
+      path: "/opt/homebrew/bin/cloudflared",
+      version: "cloudflared version 2026.8.1",
+    }
+    expect(await probeTunnel(makeInvoker({ companion_tunnel_probe: probe }))).toEqual(probe)
+    expect(await probeTunnel(nullInvoker())).toBeNull()
+    expect(await probeTunnel(failingInvoker())).toBeNull()
   })
 })

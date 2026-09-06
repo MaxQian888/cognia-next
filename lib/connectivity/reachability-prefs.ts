@@ -36,6 +36,12 @@ export interface ReachabilityPrefs {
   bindLoopbackOnly: boolean
   /** Advertise `_cognia._tcp.local.` once the listener is up. */
   mdnsEnabled: boolean
+  /**
+   * The host the invitation and the LAN endpoint report name instead of the
+   * auto-detected LAN address. Today: a mesh-VPN address (Tailscale, ZeroTier,
+   * see `lib/connectivity/mesh.ts`). Absent or blank means "detect".
+   */
+  advertiseHost?: string | null
 }
 
 /**
