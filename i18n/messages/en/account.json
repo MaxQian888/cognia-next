@@ -276,7 +276,7 @@
     },
     "continueWithLogto": "Continue with Logto",
     "signingIn": "Signing in",
-    "awaitingCode": "Finish signing in in the browser, then paste the address it landed on.",
+    "awaitingCode": "Finish signing in in the browser. This screen continues on its own once the browser hands you back. If it does not, paste the address it landed on.",
     "codePlaceholder": "Paste the callback address or code",
     "submitCode": "Continue",
     "cancel": "Cancel",

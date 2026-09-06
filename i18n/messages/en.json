@@ -1479,7 +1479,7 @@
         "submit": "Sign in with this configuration",
         "toggle": "Advanced: configure Logto manually"
       },
-      "awaitingCode": "Finish signing in in the browser, then paste the address it landed on.",
+      "awaitingCode": "Finish signing in in the browser. This screen continues on its own once the browser hands you back. If it does not, paste the address it landed on.",
       "cancel": "Cancel",
       "checking": "Checking how this deployment signs people in",
       "choose": {

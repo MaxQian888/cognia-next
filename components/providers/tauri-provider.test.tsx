@@ -25,6 +25,10 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 jest.mock("@/lib/pet/window-role", () => ({ isMainAppWindow: () => isMainAppWindowMock() }))
 jest.mock("@/lib/tauri/cli", () => ({ getLaunchCli: () => getLaunchCliMock() }))
 jest.mock("@/lib/tauri/deep-link", () => ({ getLaunchDeepLink: () => getLaunchDeepLinkMock() }))
+const publishLogtoDeepLinkCallbackMock = jest.fn()
+jest.mock("@/lib/logto/deep-link-callback", () => ({
+  publishLogtoDeepLinkCallback: (route: unknown) => publishLogtoDeepLinkCallbackMock(route),
+}))
 jest.mock("@/lib/chat/start-session", () => ({
   startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
 }))
@@ -178,6 +182,19 @@ describe("<TauriProvider /> launch CLI args", () => {
     expect(input).toEqual({ taskId: "task-9", runToken: "tok-1" })
     deps.navigate("/scheduler")
     expect(routerPushMock).toHaveBeenCalledWith("/scheduler")
+  })
+
+  it("publishes a cold-start Logto callback link to the sign-in seam", async () => {
+    getLaunchDeepLinkMock.mockResolvedValue(["cognia://logto/callback?code=c-2&state=st-2"])
+    render(
+      <TauriProvider>
+        <div />
+      </TauriProvider>
+    )
+    await waitFor(() => expect(publishLogtoDeepLinkCallbackMock).toHaveBeenCalledTimes(1))
+    expect(publishLogtoDeepLinkCallbackMock).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "logto_callback", code: "c-2", state: "st-2" })
+    )
   })
 
   it("renders its children", () => {

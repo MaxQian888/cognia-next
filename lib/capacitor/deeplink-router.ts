@@ -51,6 +51,9 @@ export function dispatchRoute(route: DeeplinkRoute, navigators: DeeplinkNavigato
     case "oauth_callback":
       // Resolved by lib/oauth/mobile-flow.ts:awaitCallback — no nav.
       return
+    case "logto_callback":
+      // Resolved by the cloud sign-in drivers waiting on the deep link — no nav.
+      return
     case "open_im":
     case "open_scheduler_task":
     case "open_settings":

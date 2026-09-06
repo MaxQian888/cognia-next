@@ -33,6 +33,7 @@ jest.mock("@/stores/account/account-store", () => ({
 }))
 
 import { CollabError } from "@/lib/collab/client"
+import { publishLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
 import {
   CLOUD_OFFLINE_KEY_PREFIX,
   CloudSignInGate,
@@ -258,6 +259,57 @@ describe("CloudSignInGate", () => {
       </CloudSignInGate>
     )
     expect(await screen.findByTestId("offline-app")).toBeInTheDocument()
+  })
+
+  /** G1: the OS hands the deep link back and the wait resolves without a paste. */
+  it("on the desktop, a delivered deep link completes the sign-in without pasting", async () => {
+    const signIn = jest.fn(
+      async (
+        _deployment: unknown,
+        _method: unknown,
+        drivers: { waitForCode: (input: { state: string }) => Promise<unknown> }
+      ) => {
+        await drivers.waitForCode({ state: "st-1" })
+        return session
+      }
+    )
+    renderGate(deps({ profile: "desktop", signIn: signIn as never }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-social-github"))
+    expect(await screen.findByTestId("cloud-sign-in-code")).toBeInTheDocument()
+    publishLogtoDeepLinkCallback({
+      kind: "logto_callback",
+      code: "c-1",
+      state: "st-1",
+      error: null,
+      raw: "cognia://logto/callback?code=c-1&state=st-1",
+    })
+    expect(await screen.findByTestId("app")).toBeInTheDocument()
+    expect(signIn).toHaveBeenCalledTimes(1)
+  })
+
+  it("on the desktop, a deep link for another state is refused and the person can retry", async () => {
+    const signIn = jest.fn(
+      async (
+        _deployment: unknown,
+        _method: unknown,
+        drivers: { waitForCode: (input: { state: string }) => Promise<unknown> }
+      ) => {
+        await drivers.waitForCode({ state: "st-1" })
+        return session
+      }
+    )
+    renderGate(deps({ profile: "desktop", signIn: signIn as never }))
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-social-github"))
+    await screen.findByTestId("cloud-sign-in-code")
+    publishLogtoDeepLinkCallback({
+      kind: "logto_callback",
+      code: "c-1",
+      state: "someone-else",
+      error: null,
+      raw: "cognia://logto/callback?code=c-1&state=someone-else",
+    })
+    expect(await screen.findByTestId("cloud-sign-in-error")).toHaveTextContent("state mismatch")
+    expect(screen.queryByTestId("app")).not.toBeInTheDocument()
   })
 
   it("says why a lapsed session must be renewed", async () => {

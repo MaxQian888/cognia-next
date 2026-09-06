@@ -276,7 +276,7 @@
     },
     "continueWithLogto": "使用 Logto 继续",
     "signingIn": "正在登录",
-    "awaitingCode": "在浏览器中完成登录，然后把它跳转到的地址粘贴到这里。",
+    "awaitingCode": "在浏览器中完成登录。浏览器跳回后这里会自动继续。如果没有，把它跳转到的地址粘贴到这里。",
     "codePlaceholder": "粘贴回调地址或授权码",
     "submitCode": "继续",
     "cancel": "取消",

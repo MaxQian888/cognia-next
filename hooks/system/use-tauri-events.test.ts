@@ -51,6 +51,10 @@ const TAURI_EVENTS = {
 }
 
 const emitSchedulerEvent = jest.fn().mockResolvedValue(undefined)
+const publishLogtoDeepLinkCallback = jest.fn()
+jest.mock("@/lib/logto/deep-link-callback", () => ({
+  publishLogtoDeepLinkCallback: (route: unknown) => publishLogtoDeepLinkCallback(route),
+}))
 jest.mock("@/lib/scheduler/event-integration", () => ({
   emitSchedulerEvent: (...args: unknown[]) => emitSchedulerEvent(...args),
 }))
@@ -357,6 +361,14 @@ describe("useTauriEvents", () => {
       await fireDeepLinks(["cognia://chat/abc"])
       expect(setActiveSession).toHaveBeenCalledWith("abc")
       expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    })
+
+    it("hands a Logto callback deep link to the sign-in seam", async () => {
+      await fireDeepLinks(["cognia://logto/callback?code=c-1&state=st-1"])
+      expect(publishLogtoDeepLinkCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "logto_callback", code: "c-1", state: "st-1" })
+      )
+      expect(toastMessage).not.toHaveBeenCalled()
     })
 
     it("chat deep link with no id is ignored", async () => {

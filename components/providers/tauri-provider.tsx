@@ -170,6 +170,17 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
                 }
               } else if (head === "settings") {
                 useUIStore.getState().requestOpenSettings(url.searchParams.get("tab") ?? undefined)
+              } else if (head === "logto") {
+                // A sign-in that started before the app was closed cannot be
+                // resumed (the PKCE verifier lived in the old process), but a
+                // running flow in a window that reloaded can still be waiting.
+                const { parseCogniaDeeplink } = await import("@/lib/navigation/cognia-deeplink")
+                const action = parseCogniaDeeplink(raw)
+                if (action.kind === "logto_callback") {
+                  const { publishLogtoDeepLinkCallback } =
+                    await import("@/lib/logto/deep-link-callback")
+                  publishLogtoDeepLinkCallback(action)
+                }
               } else if (head === "scheduler") {
                 // OS-promoted task wake-up when the timer had to launch the
                 // app (ADR-0128 §5): same handler as the running-app path.

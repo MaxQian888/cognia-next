@@ -53,6 +53,23 @@ describe("parseCogniaDeeplink", () => {
     })
   })
 
+  it("parses the Logto authorization callback and keeps foreign logto paths unknown", () => {
+    expect(parseCogniaDeeplink("cognia://logto/callback?code=abc&state=xyz&error=denied")).toEqual({
+      kind: "logto_callback",
+      code: "abc",
+      state: "xyz",
+      error: "denied",
+      raw: "cognia://logto/callback?code=abc&state=xyz&error=denied",
+    })
+    expect(parseCogniaDeeplink("cognia://logto?code=abc&state=xyz")).toMatchObject({
+      kind: "logto_callback",
+      code: "abc",
+      state: "xyz",
+      error: null,
+    })
+    expect(parseCogniaDeeplink("cognia://logto/other")).toMatchObject({ kind: "unknown" })
+  })
+
   it("supports query fallbacks used by older shell integrations", () => {
     expect(parseCogniaDeeplink("cognia://pair?payload=pair-token")).toMatchObject({
       kind: "pair_qr",

@@ -26,6 +26,7 @@ import {
 } from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
 import { parseCogniaDeeplink } from "@/lib/navigation/cognia-deeplink"
+import { publishLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
 
 function relaySchedulerEvent(
   eventType: "job:exited" | "monitor:fired",
@@ -124,6 +125,12 @@ export function useTauriEvents(): void {
                 `/workflows/run?id=${encodeURIComponent(action.workflowId)}&runId=${encodeURIComponent(action.runId)}`
               )
             }
+            break
+          }
+          case "logto_callback": {
+            // The cloud sign-in gate's desktop driver is waiting on this seam;
+            // when nobody is, the callback is dropped by design.
+            publishLogtoDeepLinkCallback(action)
             break
           }
           case "oauth_callback":

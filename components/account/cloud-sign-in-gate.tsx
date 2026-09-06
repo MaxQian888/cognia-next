@@ -37,6 +37,7 @@ import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { detectHostProfile, type HostProfile } from "@/lib/platform/capabilities"
 import { openUrl } from "@/lib/native/opener"
 import { createLogtoWebPopupDrivers } from "@/lib/logto/web-popup"
+import { waitForLogtoDeepLinkCallback } from "@/lib/logto/deep-link-callback"
 import { signOutFromLogto } from "@/lib/logto/app-session"
 import { CollabError, type CollabAccountMembership } from "@/lib/collab/client"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
@@ -65,7 +66,9 @@ import { CloudSignInScreen, type CloudSignInView } from "./cloud-sign-in-screen"
 
 export const CLOUD_OFFLINE_KEY_PREFIX = "cognia.cloud-sign-in.offline"
 const UNGATED_PATHS = ["/logto/callback", "/invite", "/pair", "/onboarding"]
-export const DESKTOP_CALLBACK_URI = "cognia://logto/callback"
+/** The redirect URI registered on the native Logto application. */
+export const NATIVE_CALLBACK_URI = "cognia://logto/callback"
+export const DESKTOP_CALLBACK_URI = NATIVE_CALLBACK_URI
 
 export interface CloudSignInGateDeps {
   discover?: () => Promise<DeploymentDiscovery>
@@ -141,6 +144,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   const codeResolver = useRef<((value: { code: string; state: string }) => void) | null>(null)
   const codeRejecter = useRef<((error: Error) => void) | null>(null)
   const pendingState = useRef("")
+  const deepLinkWait = useRef<AbortController | null>(null)
 
   const ungated =
     process.env.NEXT_PUBLIC_E2E === "1" ||
@@ -297,8 +301,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
         }
       }
       // The desktop has no popup: the system browser is sent to the deep link
-      // registered on the native application, and the person pastes the
-      // address it lands on.
+      // registered on the native application. The OS hands that link back to
+      // the running app, which resolves the wait on its own; pasting the
+      // address stays available for a browser that never comes back.
       return {
         drivers: {
           openUrl: (url) => {
@@ -307,13 +312,18 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
           waitForCode: ({ state }) => {
             pendingState.current = state
             setView({ kind: "awaiting-code" })
-            return new Promise((resolve, reject) => {
+            deepLinkWait.current?.abort()
+            const controller = new AbortController()
+            deepLinkWait.current = controller
+            const pasted = new Promise<{ code: string; state: string }>((resolve, reject) => {
               codeResolver.current = resolve
               codeRejecter.current = reject
             })
+            const delivered = waitForLogtoDeepLinkCallback({ state, signal: controller.signal })
+            return Promise.race([pasted, delivered]).finally(() => controller.abort())
           },
         },
-        redirectUri: DESKTOP_CALLBACK_URI,
+        redirectUri: NATIVE_CALLBACK_URI,
         clientKind: "native",
       }
     },
@@ -346,6 +356,8 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
     } finally {
       codeResolver.current = null
       codeRejecter.current = null
+      deepLinkWait.current?.abort()
+      deepLinkWait.current = null
     }
   }
 

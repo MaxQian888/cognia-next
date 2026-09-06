@@ -7,6 +7,20 @@ export type CogniaDeeplinkRoute =
       state: string | null
       raw: string
     }
+  | {
+      /**
+       * The Logto authorization response landing on the native application
+       * (`cognia://logto/callback?code=…&state=…`). Consumed by the cloud
+       * sign-in gate on the desktop and by the Capacitor drivers; carries the
+       * raw parameters and no verdict, because only the flow that minted the
+       * `state` can validate it.
+       */
+      kind: "logto_callback"
+      code: string | null
+      state: string | null
+      error: string | null
+      raw: string
+    }
   | { kind: "pair_qr"; payload: string; raw: string }
   | { kind: "open_session"; sessionId: string; raw: string }
   | { kind: "share_target"; text?: string; url?: string; raw: string }
@@ -46,6 +60,15 @@ export function parseCogniaDeeplink(raw: string): CogniaDeeplinkRoute {
       provider: path || params.get("provider") || "default",
       code: params.get("code"),
       state: params.get("state"),
+      raw,
+    }
+  }
+  if (host === "logto" && (path === "" || path === "callback")) {
+    return {
+      kind: "logto_callback",
+      code: params.get("code"),
+      state: params.get("state"),
+      error: params.get("error"),
       raw,
     }
   }
