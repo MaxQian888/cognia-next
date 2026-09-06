@@ -26,6 +26,13 @@
 		}
 	}
 
+	# The collaboration plane, same-origin so a browser needs no CORS grant.
+	# `handle_path` strips the prefix: collab-server mounts /v1/... at its root.
+	@collab path /collab/*
+	handle_path /collab/* {
+		reverse_proxy collab-server:8080
+	}
+
 	handle {
 		root * /srv
 		try_files {path} {path}.html {path}/ /index.html

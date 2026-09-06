@@ -59,7 +59,7 @@ pub fn router() -> Router<SharedState> {
 
 /// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
 /// client built against version 1 keeps reading version 2.
-pub const AUTH_CONFIG_VERSION: u32 = 2;
+pub const AUTH_CONFIG_VERSION: u32 = 3;
 
 /// Registration policy of every deployment this server describes. The first
 /// owner presents the one-time bootstrap credential; everyone after joins by
@@ -75,6 +75,16 @@ pub const ENV_LOGTO_SOCIAL_PROVIDERS: &str = "COGNIA_LOGTO_SOCIAL_PROVIDERS";
 /// The same variable the brain's read-only collaboration client already takes,
 /// so one deployment names its plane once.
 pub const ENV_COLLAB_SERVICE_URL: &str = "COGNIA_COLLAB_URL";
+/// The collaboration server as a BROWSER reaches it. `COGNIA_COLLAB_URL` is
+/// the brain's own route, which under Compose is a network-internal name
+/// (`http://collab-server:8080`) no client can resolve. When the two differ,
+/// this one is announced and the other stays private.
+pub const ENV_PUBLIC_COLLAB_SERVICE_URL: &str = "COGNIA_PUBLIC_COLLAB_URL";
+/// The origin the web app is served from, e.g. `https://cognia.example.com`.
+/// Stamped into invitation links minted on a desktop or a phone, whose own
+/// `window.location.origin` (`tauri://localhost`, `capacitor://localhost`)
+/// opens nothing on a colleague's machine.
+pub const ENV_WEB_ORIGIN: &str = "COGNIA_WEB_ORIGIN";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,6 +130,9 @@ struct SocialProviderConfig {
 struct CollaborationPublicConfig {
     service_url: String,
     registration_policy: &'static str,
+    /// Version 3. The web app's public origin, when the operator named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    web_origin: Option<String>,
 }
 
 const CALLBACK_MODES: [&str; 3] = ["web-popup", "native-loopback", "deep-link"];
@@ -146,14 +159,35 @@ fn social_providers_from(raw: Option<String>) -> Vec<SocialProviderConfig> {
         .collect()
 }
 
-fn collaboration_config_from(service_url: Option<String>) -> Option<CollaborationPublicConfig> {
+fn collaboration_config_from(
+    service_url: Option<String>,
+    web_origin: Option<String>,
+) -> Option<CollaborationPublicConfig> {
     service_url
         .map(|url| url.trim().trim_end_matches('/').to_string())
         .filter(|url| !url.is_empty())
         .map(|service_url| CollaborationPublicConfig {
             service_url,
             registration_policy: REGISTRATION_POLICY_BOOTSTRAP_THEN_INVITE,
+            web_origin: public_origin_from(web_origin),
         })
+}
+
+/// An `http(s)` origin and nothing else: no path, query or fragment, one
+/// trailing slash tolerated. Anything else is dropped rather than announced,
+/// because a link built on a malformed origin fails on the recipient's screen,
+/// which is the one place the operator cannot see.
+fn public_origin_from(raw: Option<String>) -> Option<String> {
+    let value = raw?;
+    let value = value.trim().trim_end_matches('/');
+    let parsed = url::Url::parse(value).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() || parsed.path() != "/" {
+        return None;
+    }
+    Some(parsed.origin().ascii_serialization())
 }
 
 #[derive(Debug, Serialize)]
@@ -232,7 +266,11 @@ async fn auth_config_handler(
                 json!({ "urls": ["stun:stun.cloudflare.com:3478"] }),
             ],
         },
-        collaboration: collaboration_config_from(non_empty_env(ENV_COLLAB_SERVICE_URL)),
+        collaboration: collaboration_config_from(
+            non_empty_env(ENV_PUBLIC_COLLAB_SERVICE_URL)
+                .or_else(|| non_empty_env(ENV_COLLAB_SERVICE_URL)),
+            non_empty_env(ENV_WEB_ORIGIN),
+        ),
     })
     .into_response()
 }
@@ -3082,15 +3120,56 @@ mod tests {
 
     #[test]
     fn the_collaboration_block_is_absent_until_a_service_url_is_set() {
-        assert_eq!(collaboration_config_from(None), None);
-        assert_eq!(collaboration_config_from(Some("  ".into())), None);
+        assert_eq!(collaboration_config_from(None, None), None);
+        assert_eq!(collaboration_config_from(Some("  ".into()), None), None);
+        // A web origin alone announces nothing: without a service there is no
+        // invitation to build a link for.
         assert_eq!(
-            collaboration_config_from(Some("https://collab.example.com/".into())),
+            collaboration_config_from(None, Some("https://app.example.com".into())),
+            None
+        );
+        assert_eq!(
+            collaboration_config_from(Some("https://collab.example.com/".into()), None),
             Some(CollaborationPublicConfig {
                 service_url: "https://collab.example.com".into(),
                 registration_policy: "bootstrap-then-invite",
+                web_origin: None,
             })
         );
+        assert_eq!(
+            collaboration_config_from(
+                Some("https://collab.example.com/collab".into()),
+                Some("https://App.example.com/".into())
+            ),
+            Some(CollaborationPublicConfig {
+                service_url: "https://collab.example.com/collab".into(),
+                registration_policy: "bootstrap-then-invite",
+                web_origin: Some("https://app.example.com".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn the_web_origin_is_an_origin_or_nothing() {
+        assert_eq!(
+            public_origin_from(Some("https://app.example.com".into())),
+            Some("https://app.example.com".into())
+        );
+        assert_eq!(
+            public_origin_from(Some("http://localhost:3000/".into())),
+            Some("http://localhost:3000".into())
+        );
+        for bad in [
+            "app.example.com",
+            "ftp://app.example.com",
+            "https://app.example.com/invite",
+            "https://app.example.com?x=1",
+            "https://app.example.com#top",
+            "   ",
+        ] {
+            assert_eq!(public_origin_from(Some(bad.into())), None, "{bad}");
+        }
+        assert_eq!(public_origin_from(None), None);
     }
 
     #[test]
@@ -3119,7 +3198,7 @@ mod tests {
             collaboration: None,
         };
         let value = serde_json::to_value(&response).unwrap();
-        assert_eq!(value["configVersion"], 2);
+        assert_eq!(value["configVersion"], 3);
         assert_eq!(value["deploymentMode"], "multi-tenant");
         assert_eq!(value["oidc"]["webClientId"], "web");
         assert!(value["oidc"].get("nativeClientId").is_none());

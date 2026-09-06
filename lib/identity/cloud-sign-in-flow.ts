@@ -275,6 +275,7 @@ export async function adoptOrganization(
 
   ;(deps.saveConnection ?? saveCollabConnection)(localAccountId, {
     baseUrl: deployment.collaborationServiceUrl,
+    ...(deployment.webOrigin ? { webOrigin: deployment.webOrigin } : {}),
   })
   await (deps.refreshPlane ?? ((id: string) => refreshCollabPlaneQuietly({ localAccountId: id })))(
     localAccountId

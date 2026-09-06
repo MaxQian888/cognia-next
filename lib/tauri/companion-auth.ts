@@ -44,6 +44,11 @@ export interface CompanionAuthConfig {
   collaboration?: {
     serviceUrl: string
     registrationPolicy: "bootstrap-then-invite"
+    /**
+     * Version 3. The origin the web app is served from, for invitation links
+     * minted on a shell whose own origin opens nothing elsewhere.
+     */
+    webOrigin?: string
   }
 }
 
@@ -83,6 +88,26 @@ export function authConfigCollaborationServiceUrl(
     const parsed = new URL(url.trim())
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null
     return parsed.toString().replace(/\/$/, "")
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The web app's public origin a config names, or `null`. An origin and
+ * nothing more: a value with a path is refused rather than trimmed, because
+ * it means the operator meant something this field does not carry.
+ */
+export function authConfigWebOrigin(
+  config: Pick<CompanionAuthConfig, "collaboration">
+): string | null {
+  const raw = config.collaboration?.webOrigin
+  if (typeof raw !== "string" || !raw.trim()) return null
+  try {
+    const parsed = new URL(raw.trim())
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null
+    if (parsed.pathname !== "/" || parsed.search || parsed.hash) return null
+    return parsed.origin
   } catch {
     return null
   }

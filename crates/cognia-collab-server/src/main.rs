@@ -95,6 +95,11 @@ struct Args {
     /// Logto organization role NAME assigned to an invited member.
     #[arg(long, env = "COLLAB_LOGTO_MEMBER_ROLE", default_value = "member")]
     logto_member_role: String,
+    /// Exact browser origins allowed to call this service cross-origin, comma
+    /// separated (e.g. `https://cognia.example.com`). Empty means same-origin
+    /// and non-browser clients only. Never a wildcard.
+    #[arg(long, env = "COLLAB_ALLOWED_ORIGINS")]
+    allowed_origins: Option<String>,
 }
 
 #[tokio::main]
@@ -178,9 +183,25 @@ async fn main() -> anyhow::Result<()> {
         .with_logto_management(logto)
         .with_account_control(account_control);
 
+    let (allowed_origins, rejected_origins) =
+        cognia_collab_server::cors::parse_allowed_origins(args.allowed_origins.as_deref());
+    for rejected in &rejected_origins {
+        tracing::warn!(origin = %rejected, "COLLAB_ALLOWED_ORIGINS entry is not an origin; ignored");
+    }
+    let app = match cognia_collab_server::cors::cors_layer(&allowed_origins) {
+        Some(cors) => {
+            tracing::info!(
+                count = allowed_origins.len(),
+                "cross-origin browser access enabled"
+            );
+            router(state).layer(cors)
+        }
+        None => router(state),
+    };
+
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     tracing::info!(bind = %args.bind, "collaboration plane listening");
-    axum::serve(listener, router(state))
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown())
         .await?;
     Ok(())

@@ -161,6 +161,26 @@ spec:
                   name: cognia-config
                   key: logtoSocialProviders
                   optional: true
+            # The collaboration server (internal and as a browser reaches it)
+            # and the web app's origin, announced by /api/auth/config.
+            - name: COGNIA_COLLAB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: collabUrl
+                  optional: true
+            - name: COGNIA_PUBLIC_COLLAB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: publicCollabUrl
+                  optional: true
+            - name: COGNIA_WEB_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: webOrigin
+                  optional: true
             - name: COGNIA_SIGNALING_URL
               valueFrom:
                 configMapKeyRef:

@@ -28,6 +28,27 @@ describe("collab connection", () => {
     expect(loadCollabConnection("acct_a", { local })?.baseUrl).toBe("https://collab.example.com")
   })
 
+  it("keeps the web origin beside the service, as an origin only", () => {
+    const { local } = memoryStore()
+    saveCollabConnection(
+      "acct_a",
+      { baseUrl: "https://collab.example.com", webOrigin: "https://app.example.com/anything" },
+      { local }
+    )
+    expect(loadCollabConnection("acct_a", { local })).toEqual({
+      baseUrl: "https://collab.example.com",
+      webOrigin: "https://app.example.com",
+    })
+    saveCollabConnection(
+      "acct_b",
+      { baseUrl: "https://collab.example.com", webOrigin: "nope" },
+      { local }
+    )
+    expect(loadCollabConnection("acct_b", { local })).toEqual({
+      baseUrl: "https://collab.example.com",
+    })
+  })
+
   it("keeps profiles apart", () => {
     // A machine can hold several local profiles, and they may belong to
     // different orgs on different servers.

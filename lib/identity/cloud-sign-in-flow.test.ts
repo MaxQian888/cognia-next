@@ -32,6 +32,7 @@ const deployment: ReadyDeployment = {
   social: [{ provider: "github", directSignIn: "social:github" }],
   collaborationServiceUrl: "https://collab.example",
   registrationPolicy: "bootstrap-then-invite",
+  webOrigin: null,
 }
 
 const session: LogtoSession = {
@@ -227,6 +228,20 @@ describe("adoptOrganization", () => {
     })
     expect(deps.refreshPlane).toHaveBeenCalledWith("acct_a")
     expect(adopted).toMatchObject({ orgId: target.orgId, userId: target.userId, reconciled: true })
+  })
+
+  it("remembers the web origin beside the connection when the deployment names one", async () => {
+    const { deps } = harness()
+    await adoptOrganization(
+      { ...deployment, webOrigin: "https://app.example.com" },
+      session,
+      target,
+      deps
+    )
+    expect(deps.saveConnection).toHaveBeenCalledWith("acct_a", {
+      baseUrl: "https://collab.example",
+      webOrigin: "https://app.example.com",
+    })
   })
 
   it("does not reconcile when the binding already carries the server's user id", async () => {

@@ -31,6 +31,25 @@ const CONNECTION_CHANGED_EVENT = "cognia:collab-connection-changed"
 export interface CollabConnection {
   /** Normalized service origin, path prefix preserved. */
   baseUrl: string
+  /**
+   * The web app's public origin, when the deployment announced one. Invitation
+   * links minted on a desktop or a phone are built on it, because those
+   * shells' own origins (`tauri://localhost`, `capacitor://localhost`) open
+   * nothing on a colleague's machine.
+   */
+  webOrigin?: string
+}
+
+/** An http(s) origin and nothing more, or `null`. */
+function normalizeWebOrigin(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null
+  try {
+    const parsed = new URL(value.trim())
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null
+    return parsed.origin
+  } catch {
+    return null
+  }
 }
 
 /** Storage seam so tests need no `localStorage`. */
@@ -66,11 +85,15 @@ export function loadCollabConnection(
   try {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== "object" || parsed === null) throw new Error("not an object")
-    const candidate = parsed as { baseUrl?: unknown }
+    const candidate = parsed as { baseUrl?: unknown; webOrigin?: unknown }
     if (typeof candidate.baseUrl !== "string" || !candidate.baseUrl) {
       throw new Error("no base url")
     }
-    return { baseUrl: normalizeServiceUrl(candidate.baseUrl) }
+    const webOrigin = normalizeWebOrigin(candidate.webOrigin)
+    return {
+      baseUrl: normalizeServiceUrl(candidate.baseUrl),
+      ...(webOrigin ? { webOrigin } : {}),
+    }
   } catch {
     local.removeItem(connectionKey(localAccountId))
     return null
@@ -82,7 +105,11 @@ export function saveCollabConnection(
   connection: CollabConnection,
   deps: CollabConnectionDeps = {}
 ): CollabConnection {
-  const normalized: CollabConnection = { baseUrl: normalizeServiceUrl(connection.baseUrl) }
+  const webOrigin = normalizeWebOrigin(connection.webOrigin)
+  const normalized: CollabConnection = {
+    baseUrl: normalizeServiceUrl(connection.baseUrl),
+    ...(webOrigin ? { webOrigin } : {}),
+  }
   store(deps)?.setItem(connectionKey(localAccountId), JSON.stringify(normalized))
   if (!deps.local && typeof window !== "undefined") {
     window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT))

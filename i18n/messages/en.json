@@ -49953,7 +49953,8 @@
           "maintainer": "Maintainer",
           "member": "Member",
           "viewer": "Viewer"
-        }
+        },
+        "noWebOrigin": "This deployment announces no web address, so there is no link to copy. Share the token: it can be pasted on the sign-in screen."
       },
       "noMatches": "No member has that role.",
       "offboard": "Remove from organization",

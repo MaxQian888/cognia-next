@@ -152,7 +152,23 @@ memberships into Logto so tokens carry the right `organization_id`.
    COLLAB_LOGTO_ENDPOINT=https://auth.example.com   # == LOGTO_ENDPOINT, not /oidc
    COLLAB_LOGTO_M2M_CLIENT_ID=<M2M App ID>
    COLLAB_LOGTO_M2M_CLIENT_SECRET=<M2M App Secret>
+   # collab-server verifies the same tokens the gateway does
+   COLLAB_OIDC_ISSUER=${COGNIA_LOGTO_ISSUER}
+   COLLAB_OIDC_AUDIENCE=${COGNIA_LOGTO_AUDIENCE}
+   COLLAB_GRANT_KEY=<openssl rand -hex 32>
+   # what the gateway announces to clients in /api/auth/config
+   COGNIA_COLLAB_URL=http://collab-server:8080          # the brain's route
+   COGNIA_PUBLIC_COLLAB_URL=https://cognia.example.com/collab   # a browser's route (Caddy)
+   COGNIA_WEB_ORIGIN=https://cognia.example.com         # invitation links
    ```
+
+   `COGNIA_COLLAB_URL` is what makes the sign-in screen able to join at all:
+   without it `/api/auth/config` carries no `collaboration` block and every
+   sign-in stops at "no collaboration service". The tls profile's Caddy proxies
+   `/collab/*` to `collab-server`, which keeps the browser on one origin. A
+   deployment that puts the collaboration server on another origin sets
+   `COLLAB_ALLOWED_ORIGINS=https://cognia.example.com` on collab-server
+   instead (exact origins, never a wildcard).
 
 5. Restart with all three profiles:
 

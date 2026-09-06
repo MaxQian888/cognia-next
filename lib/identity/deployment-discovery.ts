@@ -24,6 +24,7 @@
 import {
   authConfigCollaborationServiceUrl,
   authConfigSocialProviders,
+  authConfigWebOrigin,
   fetchCompanionAuthConfig,
   type CompanionAuthConfig,
 } from "@/lib/tauri/companion-auth"
@@ -49,6 +50,8 @@ export type DeploymentDiscovery =
       social: SocialProvider[]
       collaborationServiceUrl: string | null
       registrationPolicy: string | null
+      /** Where the web app lives, for links that must open on another machine. */
+      webOrigin: string | null
     }
 
 export type ReadyDeployment = Extract<DeploymentDiscovery, { status: "ready" }>
@@ -140,5 +143,6 @@ export async function discoverDeployment(
     social: authConfigSocialProviders(config),
     collaborationServiceUrl: authConfigCollaborationServiceUrl(config),
     registrationPolicy: config.collaboration?.registrationPolicy ?? null,
+    webOrigin: authConfigWebOrigin(config),
   }
 }

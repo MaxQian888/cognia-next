@@ -63,6 +63,7 @@ pub mod chat_api;
 pub mod chat_attachment_store;
 pub mod chat_metrics;
 pub mod chat_store;
+pub mod cors;
 pub mod logto_management;
 pub mod model;
 pub mod store;

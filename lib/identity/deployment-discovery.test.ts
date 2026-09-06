@@ -16,6 +16,7 @@ const MULTI: CompanionAuthConfig = {
   collaboration: {
     serviceUrl: "https://collab.example",
     registrationPolicy: "bootstrap-then-invite",
+    webOrigin: null,
   },
 } as CompanionAuthConfig
 
@@ -77,7 +78,21 @@ describe("discoverDeployment", () => {
       social: [{ provider: "github", directSignIn: "social:github" }],
       collaborationServiceUrl: "https://collab.example",
       registrationPolicy: "bootstrap-then-invite",
+      webOrigin: null,
     })
+  })
+
+  it("carries the web origin a version-3 server announces", async () => {
+    const result = await discoverDeployment({
+      profile: "cloud-companion",
+      companionConfig: () => ({ baseUrl: "https://host.example" }) as never,
+      fetchConfig: async () =>
+        ({
+          ...MULTI,
+          collaboration: { ...MULTI.collaboration, webOrigin: "https://app.example.com/" },
+        }) as CompanionAuthConfig,
+    })
+    expect(result).toMatchObject({ status: "ready", webOrigin: "https://app.example.com" })
   })
 
   /** Most installs are single-user. That is not a fault, and not a prompt. */

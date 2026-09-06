@@ -1,6 +1,7 @@
 import { decodePairPayload, encodePairPayload } from "@/lib/qr/pair-payload"
 import {
   authConfigCollaborationServiceUrl,
+  authConfigWebOrigin,
   authConfigSocialProviders,
   clearCompanionAccessTokens,
   CompanionApiError,
@@ -513,6 +514,29 @@ describe("auth config version 2 (additive discovery)", () => {
         collaboration: { serviceUrl: "   ", registrationPolicy: "bootstrap-then-invite" },
       })
     ).toBeNull()
+  })
+
+  it("reads the web origin as an origin and nothing more", () => {
+    const named = (webOrigin: string) =>
+      authConfigWebOrigin({
+        collaboration: {
+          serviceUrl: "https://c",
+          registrationPolicy: "bootstrap-then-invite",
+          webOrigin,
+        },
+      })
+    expect(named("https://App.example.com/")).toBe("https://app.example.com")
+    expect(named("http://localhost:3000")).toBe("http://localhost:3000")
+    for (const bad of [
+      "app.example.com",
+      "https://app.example.com/invite",
+      "https://a?x=1",
+      "ftp://a",
+      " ",
+    ]) {
+      expect(named(bad)).toBeNull()
+    }
+    expect(authConfigWebOrigin({})).toBeNull()
   })
 
   it("still accepts a version-1 config with none of the new fields", async () => {

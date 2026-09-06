@@ -185,4 +185,16 @@ describe("invitationLink", () => {
     const { invitationLink } = await import("./workspace-invite-dialog")
     expect(invitationLink("a b")).toBe(`${window.location.origin}/invite?token=a%20b`)
   })
+
+  it("prefers the deployment's web origin, and refuses a shell origin nobody else can open", async () => {
+    const { invitationLink } = await import("./workspace-invite-dialog")
+    expect(invitationLink("t", "https://app.example.com", "tauri://localhost")).toBe(
+      "https://app.example.com/invite?token=t"
+    )
+    expect(invitationLink("t", null, "tauri://localhost")).toBeNull()
+    expect(invitationLink("t", null, "capacitor://localhost")).toBeNull()
+    expect(invitationLink("t", null, "https://cognia.example")).toBe(
+      "https://cognia.example/invite?token=t"
+    )
+  })
 })

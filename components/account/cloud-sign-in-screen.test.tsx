@@ -29,6 +29,7 @@ const deployment: ReadyDeployment = {
   ],
   collaborationServiceUrl: "https://collab.example",
   registrationPolicy: "bootstrap-then-invite",
+  webOrigin: null,
 }
 
 function handlers(): Omit<CloudSignInScreenProps, "view" | "error" | "busy"> {

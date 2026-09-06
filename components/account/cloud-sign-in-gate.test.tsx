@@ -57,6 +57,7 @@ const deployment: ReadyDeployment = {
   social: [{ provider: "github", directSignIn: "social:github" }],
   collaborationServiceUrl: "https://collab.example",
   registrationPolicy: "bootstrap-then-invite",
+  webOrigin: null,
 }
 
 const session: LogtoSession = {

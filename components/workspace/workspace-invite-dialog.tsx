@@ -21,6 +21,9 @@
 
 import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
+
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { loadCollabConnection } from "@/lib/collab/connection"
 import { CheckIcon, CopyIcon, LinkIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -54,10 +57,31 @@ import {
 
 export type InviteScope = "workspace" | "org"
 
-/** The landing link for a token: `/invite` keeps it for the sign-in gate. */
-export function invitationLink(token: string): string {
-  const origin = typeof window === "undefined" ? "" : window.location.origin
-  return `${origin}/invite?token=${encodeURIComponent(token)}`
+function currentShellOrigin(): string | null {
+  return typeof window === "undefined" ? null : window.location.origin
+}
+
+/** An origin a browser elsewhere could open: http(s), nothing else. */
+function openableOrigin(origin: string | null): string | null {
+  return origin && /^https?:\/\//i.test(origin) ? origin : null
+}
+
+/**
+ * The landing link for a token: `/invite` keeps it for the sign-in gate.
+ *
+ * Built on the deployment's announced web origin first. A desktop or a phone
+ * has an origin of its own (`tauri://localhost`, `capacitor://localhost`) that
+ * opens nothing on a colleague's machine, so with no announced origin those
+ * shells get `null` and offer the bare token instead of a link that lies.
+ */
+export function invitationLink(
+  token: string,
+  webOrigin?: string | null,
+  shellOrigin: string | null = currentShellOrigin()
+): string | null {
+  const base = webOrigin ?? openableOrigin(shellOrigin)
+  if (!base) return null
+  return `${base}/invite?token=${encodeURIComponent(token)}`
 }
 
 const EXPIRY_DAYS = [1, 7, 30] as const
@@ -114,6 +138,12 @@ function InviteForm({
   const [issued, setIssued] = useState<IssuedCollabInvitation | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { copied, isCopying, copy } = useCopy({ scope: "collaboration invitation" })
+  // Read once per dialog: the connection is written at sign-in, not while
+  // somebody is filling in this form.
+  const [webOrigin] = useState<string | null>(
+    () => loadCollabConnection(getActiveAccountId())?.webOrigin ?? null
+  )
+  const link = issued ? invitationLink(issued.token, webOrigin) : null
 
   const submit = async () => {
     setError(null)
@@ -176,21 +206,22 @@ function InviteForm({
               )}
               <span aria-live="polite">{t(copied ? "copied" : "copy")}</span>
             </Button>
-            <Button
-              type="button"
-
-              variant="outline"
-
-              disabled={isCopying}
-
-              onClick={() => void copy(invitationLink(issued.token))}
-
-              data-testid="workspace-invite-copy-link"
-            >
-              <LinkIcon data-icon="inline-start" />
-
-              {t("copyLink")}
-            </Button>
+            {link ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isCopying}
+                onClick={() => void copy(link)}
+                data-testid="workspace-invite-copy-link"
+              >
+                <LinkIcon data-icon="inline-start" />
+                {t("copyLink")}
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground" data-testid="workspace-invite-no-link">
+                {t("noWebOrigin")}
+              </p>
+            )}
 
             <Button type="button" onClick={close}>
               {t("done")}
