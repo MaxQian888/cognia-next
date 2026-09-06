@@ -128,6 +128,44 @@
         "label": "Show diff for review"
       }
     },
+    "fs": {
+      "copy": {
+        "description": "Copy an entry within the workspace root. A directory needs the recursive flag. Refuses to clobber an existing destination.",
+        "label": "Copy path"
+      },
+      "delete": {
+        "description": "Delete a file or directory. A non-empty directory needs the recursive flag. Needs an approval upstream on a non-interactive run.",
+        "label": "Delete path"
+      },
+      "list": {
+        "description": "List a directory, optionally recursively. Honours .gitignore and reports what a cap withheld rather than passing a partial tree off as complete.",
+        "label": "List directory"
+      },
+      "mkdir": {
+        "description": "Create a directory and any missing parents.",
+        "label": "Create directory"
+      },
+      "move": {
+        "description": "Move an entry within the workspace root. Refuses to clobber an existing destination. Needs an approval upstream on a non-interactive run.",
+        "label": "Move or rename"
+      },
+      "read": {
+        "description": "Read a UTF-8 text file from the workspace. Stats first and refuses over the byte cap, so a large file never reaches the run log.",
+        "label": "Read file"
+      },
+      "search": {
+        "description": "Search the workspace by file content (with an optional regex) or by file name. Honours .gitignore.",
+        "label": "Search files"
+      },
+      "stat": {
+        "description": "Metadata for one workspace path. Answers with exists: false rather than failing, so a flow can probe before it writes.",
+        "label": "Stat path"
+      },
+      "write": {
+        "description": "Write or append a UTF-8 text file, creating parent directories. Needs an approval upstream on a non-interactive run.",
+        "label": "Write file"
+      }
+    },
     "git": {
       "branch": {
         "description": "Create or switch to a branch.",

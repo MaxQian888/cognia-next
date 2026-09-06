@@ -27997,6 +27997,37 @@
       "tokPerSec": "{value} tok/s"
     }
   },
+  "sessionPower": {
+    "effect": {
+      "mayPauseWhenHidden": "本轮任务在浏览器标签页内运行。标签页长时间处于后台时可能被浏览器挂起，回复会暂停到你回来为止。",
+      "runsOnHost": "任务在本窗口之外运行，熄屏后仍会继续，回来时结果已经在等你。",
+      "screenHeld": "从一轮任务开始到结束，屏幕保持常亮，结束后交回系统电源设置。",
+      "screenHoldUnavailable": "当前运行环境无法保持屏幕常亮，设置会被保存，但在这里不生效。"
+    },
+    "holdingNow": "正在保持亮屏",
+    "policy": {
+      "allowScreenOff": {
+        "description": "保持系统默认的电源行为，屏幕可以熄灭，任务照常运行。",
+        "label": "允许熄屏"
+      },
+      "inherit": {
+        "description": "使用应用默认设置（{mode}）。",
+        "label": "跟随默认"
+      },
+      "keepScreenOn": {
+        "description": "只要这个对话还有任务在运行，屏幕就保持常亮。",
+        "label": "运行时保持亮屏"
+      }
+    },
+    "session": {
+      "description": "这个对话在运行任务时对设备的要求。",
+      "title": "屏幕与电源"
+    },
+    "settings": {
+      "description": "所有对话在运行任务时对设备的默认要求，单个对话可以在自己的会话设置里覆盖。",
+      "title": "运行时的屏幕与电源"
+    }
+  },
   "settings": {
     "a2ui": {
       "debugger": {
@@ -32494,12 +32525,17 @@
         }
       },
       "tunnel": {
+        "busyBody": "本应用只运行一个 cloudflared 进程。它正为伴侣服务器把 {localUrl} 暴露在 {publicUrl}。替换后该公网地址会指向别处，正在使用它的已配对设备会失去这条路线。",
+        "busyKeep": "保留",
+        "busyReplace": "替换隧道",
+        "busyTitle": "隧道正在暴露别的东西",
         "copied": "已复制",
         "copiedCommand": "命令已复制",
         "copy": "复制",
         "copyFailed": "复制失败",
         "description": "把本机的适配器 webhook 接收端口暴露到公网，让 Slack / Lark / Discord 交互能够回到这里。使用 cloudflared 的 `--url` 临时隧道。",
         "desktopOnly": "隧道控制需要桌面端",
+        "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是 webhook 接收器。在这里停止再启动即可指向接收器。",
         "install": {
           "copyAria": "复制 {label} 命令",
           "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",
@@ -32674,6 +32710,32 @@
     },
     "connectivity": {
       "description": "这台设备与主机如何互相触达：本机服务、中继与隧道、配对、远程主机、推送与同步。",
+      "mesh": {
+        "addresses": "{count, plural, =1 {1 个地址} other {# 个地址}}，位于 {interfaces}",
+        "advertiseCleared": "邀请恢复通告自动探测的局域网地址。",
+        "advertiseDescription": "邀请码与本地路线报告将使用 {address}，而不是自动探测的局域网地址。需要伴侣服务器绑定到局域网。",
+        "advertiseDescriptionSaved": "邀请码与本地路线报告将使用 {address}，而不是自动探测的局域网地址。此刻没有任何网卡持有它，关掉此项即可恢复自动探测。",
+        "advertiseLabel": "在邀请中通告 {address}",
+        "advertiseLabelSaved": "停止在邀请中通告 {address}",
+        "advertiseSaved": "邀请现在通告 {address}。",
+        "advertiseStale": "邀请通告的是 {address}，但此刻没有任何网卡持有它。请启动 overlay 客户端，或停止通告。",
+        "advertiseTitle": "对外通告 overlay 地址",
+        "description": "Tailscale 或 ZeroTier 把这台主机和任何地方的手机放进同一个私有网络，出门在外也能走普通的本地路线，且不向公网暴露任何东西。",
+        "installHint": "在本机和设备上都装上客户端，登录同一个网络，然后回到这里：地址会出现在此处。",
+        "loopbackHint": "伴侣服务器仅绑定在本机。请先在「本地主机」里切换到局域网，再通告 overlay 地址。",
+        "openDownload": "打开 {provider} 下载页",
+        "provider": {
+          "tailscale": "Tailscale",
+          "zerotier": "ZeroTier"
+        },
+        "refresh": "刷新",
+        "state": {
+          "absent": "未安装",
+          "connected": "已连接",
+          "installed": "已安装，未连接"
+        },
+        "title": "Overlay 网络"
+      },
       "nav": {
         "groups": {
           "deliveryGroup": "投递",
@@ -32785,6 +32847,68 @@
         "no-host": "在「远程主机」主题中与主机配对，或打开桌面应用。",
         "not-owner": "请所有者授予这台设备主机管理权限，或改用所有者设备。"
       },
+      "relayCheck": {
+        "check": "测试中继",
+        "checking": "测试中",
+        "corsBlocked": "{url} 有响应，但此浏览器 origin 无权读取答案。已部署的 rendezvous 早于可读的健康检查端点与业务 data 通道（ADR-0170）：配对与信令可用，业务流量只能退回点对点通道。请部署当前版本的 signaling server，或改在桌面应用里检测。",
+        "description": "向这台主机拨号的中继询问它能承载什么。这个答案就是另一网络上的设备会得到的答案。",
+        "invalidUrl": "下方的 signaling URL 不是有效的 ws:// 或 wss:// 地址。",
+        "lanes": "通道：{lanes}",
+        "lastChecked": "检测于 {time}",
+        "legacy": "{ms} ms 内可达，但这个 rendezvous 早于业务 data 通道（ADR-0170）。配对与信令可用，业务流量只能退回点对点通道，严格 NAT 后的设备将连不上。请部署当前版本的 signaling server。",
+        "legacyProtocol": "{ms} ms 内可达，但其协议为 {theirs}，本应用为 {ours}。请更新落后的一方。",
+        "notFromHost": "本次检测来自这台设备，而非主机。它只能证明这台设备可以到达 rendezvous；主机自己的出网路线仍未验证，因此上方的总结不会计入。",
+        "notRelay": "{url} 有响应，但不是 Cognia rendezvous（{error}）。请检查下方的 signaling URL。",
+        "off": "下方 WebRTC 卡片里已关闭中继，本网络之外的设备无法通过它配对或连接。",
+        "ready": "{ms} ms 内可达。协议 {protocol}，{backend} 后端，版本 {version}。",
+        "sourceHost": "读取的是主机的中继配置。",
+        "sourceLocal": "读取的是此浏览器自己的中继设置：尚未配对任何主机，这是从这里启动的主机会拨号的地址。",
+        "state": {
+          "corsBlocked": "无法读取",
+          "invalidUrl": "地址无效",
+          "legacy": "旧版中继",
+          "notRelay": "不是中继",
+          "ready": "就绪",
+          "unreachable": "无响应"
+        },
+        "title": "Rendezvous 检测",
+        "unreachable": "{url} 无响应：{error}。在 rendezvous 恢复响应前，另一网络上的设备无法通过中继配对或连接。"
+      },
+      "remoteAccess": {
+        "description": "此刻一台不在本网络的设备能否连到这台主机，以及走的是哪条路。",
+        "route": {
+          "mesh": "Overlay 网络",
+          "relay": "中继",
+          "tunnel": "公网隧道"
+        },
+        "routeState": {
+          "meshDesktopOnly": "仅桌面应用",
+          "meshInstalled": "已安装 {provider}，未连接",
+          "meshOff": "未安装 overlay 客户端",
+          "meshOn": "已持有 {provider} 地址",
+          "relayCorsBlocked": "中继有响应，但此浏览器无权读取",
+          "relayInvalid": "signaling URL 无效",
+          "relayLegacy": "中继可达，但版本早于 data 通道",
+          "relayNotRelay": "该地址有响应，但不是 Cognia rendezvous",
+          "relayOff": "中继已关闭",
+          "relayReady": "中继可达，已提供 data 通道",
+          "relayUnchecked": "未检测",
+          "relayUnreachable": "无法连到 rendezvous",
+          "tunnelDesktopOnly": "仅桌面应用",
+          "tunnelOff": "关闭",
+          "tunnelOn": "公网地址在线",
+          "tunnelOther": "暴露的是 {localUrl}，不是这台主机"
+        },
+        "title": "外网可达性",
+        "verdict": {
+          "anywhere": "任何网络均可达",
+          "anywhereLegacy": "任何网络均可达，但中继无法承载业务流量",
+          "lanOnly": "仅本网络内可达",
+          "meshOnly": "仅同一 overlay 网络内的设备可达",
+          "notHost": "当前外壳不是主机，没有可被连接的对象。",
+          "unknown": "尚未检测"
+        }
+      },
       "remoteHosts": {
         "active": "活动",
         "addDescription": "粘贴或扫描来自主机「配对」主题的邀请。主机无法直连时会走中继。",
@@ -32806,7 +32930,50 @@
           "versionMismatch": "版本不匹配"
         }
       },
-      "title": "连接"
+      "title": "连接",
+      "tunnel": {
+        "busyBody": "本应用只运行一个 cloudflared 进程。它正为另一功能把 {localUrl} 暴露在 {publicUrl}。替换后，这个公网地址会指向别处。",
+        "busyCancelled": "保留了现有隧道。",
+        "busyReplace": "替换隧道",
+        "busyStopBody": "本应用只运行一个 cloudflared 进程，它正为另一功能把 {localUrl} 暴露在 {publicUrl}。在这里停止，那个公网地址也会一并失效。",
+        "busyStopConfirm": "仍然停止",
+        "busyTitle": "隧道正在暴露别的东西",
+        "exposing": "正在暴露 {localUrl}",
+        "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。",
+        "installed": "{version}，位于 {path}",
+        "installedNoVersion": "位于 {path}",
+        "probing": "正在查找 cloudflared"
+      },
+      "tunnelInstall": {
+        "checking": "检测中",
+        "copied": "命令已复制。",
+        "copy": "复制 {via} 命令",
+        "copyFailed": "无法复制命令。",
+        "description": "在本机执行以下任一条，然后重新检测。",
+        "descriptionOs": "在这台 {os} 上执行以下任一条，然后重新检测。",
+        "open": "打开",
+        "os": {
+          "linux": "Linux",
+          "macos": "macOS",
+          "unknown": "电脑",
+          "windows": "Windows"
+        },
+        "recheck": "重新检测",
+        "title": "安装 {tool}",
+        "tool": {
+          "cloudflared": "cloudflared",
+          "tailscale": "Tailscale",
+          "zerotier": "ZeroTier"
+        },
+        "via": {
+          "appStore": "Mac App Store",
+          "apt": "APT",
+          "download": "从 {tool} 下载",
+          "homebrew": "Homebrew",
+          "script": "安装脚本",
+          "winget": "winget"
+        }
+      }
     },
     "conversation": {
       "autoTitle": {
@@ -48462,6 +48629,44 @@
             "label": "展示差异以供审阅"
           }
         },
+        "fs": {
+          "copy": {
+            "description": "在工作区根内复制条目。复制目录需要勾选递归。目标已存在时拒绝覆盖。",
+            "label": "复制路径"
+          },
+          "delete": {
+            "description": "删除文件或目录。非空目录需要勾选递归。非交互触发的运行需要上游有审批节点。",
+            "label": "删除路径"
+          },
+          "list": {
+            "description": "列出一个目录，可选递归。遵循 .gitignore，并会报告因上限而未列出的部分，不会把不完整的树当作完整结果。",
+            "label": "列出目录"
+          },
+          "mkdir": {
+            "description": "创建目录以及缺失的父级目录。",
+            "label": "创建目录"
+          },
+          "move": {
+            "description": "在工作区根内移动条目。目标已存在时拒绝覆盖。非交互触发的运行需要上游有审批节点。",
+            "label": "移动或重命名"
+          },
+          "read": {
+            "description": "从工作区读取一个 UTF-8 文本文件。先取元数据，超过字节上限直接拒绝，所以大文件不会进入运行日志。",
+            "label": "读取文件"
+          },
+          "search": {
+            "description": "按文件内容（可用正则）或文件名搜索工作区。遵循 .gitignore。",
+            "label": "搜索文件"
+          },
+          "stat": {
+            "description": "读取工作区中某个路径的元数据。路径不存在时返回 exists: false 而不是失败，便于写入前先探测。",
+            "label": "查看路径信息"
+          },
+          "write": {
+            "description": "写入或追加一个 UTF-8 文本文件，自动创建父目录。非交互触发的运行需要上游有审批节点。",
+            "label": "写入文件"
+          }
+        },
         "git": {
           "branch": {
             "description": "创建或切换分支。",
@@ -49939,6 +50144,7 @@
         "expiryDays": "{days} 天",
         "expiryLabel": "有效期",
         "issuedHint": "通过你信任的渠道把令牌交给对方。令牌只显示一次，不会保存在本地。",
+        "noWebOrigin": "此部署没有公布网页地址，所以没有可复制的链接。请直接分享令牌，它可以粘贴到登录界面。",
         "orgRole": {
           "admin": "管理员",
           "member": "成员",
@@ -49958,8 +50164,7 @@
           "maintainer": "维护者",
           "member": "成员",
           "viewer": "只读"
-        },
-        "noWebOrigin": "此部署没有公布网页地址，所以没有可复制的链接。请直接分享令牌，它可以粘贴到登录界面。"
+        }
       },
       "noMatches": "没有该角色的成员。",
       "offboard": "移出组织",

@@ -1927,6 +1927,30 @@ const GroupAnnotationParams = z.object({
 
 // ── Registry ───────────────────────────────────────────────────────────────
 
+/**
+ * Root selector shared by every `action.fs.*` node.
+ *
+ * Two flat scalars rather than a discriminated union: the inspector renders
+ * these through `SchemaForm` (no bespoke form component), and a union there
+ * degrades to a raw JSON textarea. The conditional requirement lives in
+ * `superRefine` below, which is where field-level validation belongs anyway.
+ */
+const FsRootParams = {
+  rootMode: z.enum(["project", "host-default", "explicit"]).optional(),
+  rootPath: optionalString,
+  projectId: optionalString,
+}
+
+/** `rootMode: "explicit"` without a `rootPath` addresses nothing. */
+function requireExplicitRootPath(
+  value: { rootMode?: string; rootPath?: string },
+  ctx: z.RefinementCtx
+): void {
+  if (value.rootMode === "explicit" && !value.rootPath?.trim()) {
+    ctx.addIssue({ code: "custom", message: "required", path: ["rootPath"] })
+  }
+}
+
 export const PARAMS_SCHEMAS = {
   // Triggers
   "trigger.manual": ManualTriggerParams,
@@ -2142,6 +2166,76 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Workspace filesystem. `relPath` is deliberately a plain string here: an
+  // absolute or `..`-prefixed path is rejected by name at run time
+  // (`nodes/files/root.ts`) and by the Host's canonicalisation regardless, and
+  // a zod regex would also reject every `{{ }}` expression.
+  "action.fs.read": z
+    .object({
+      ...FsRootParams,
+      relPath: requiredString("required"),
+      maxBytes: numberRange(1, 8 * 1024 * 1024)
+        .int()
+        .optional(),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.write": z
+    .object({
+      ...FsRootParams,
+      relPath: requiredString("required"),
+      content: z.string(),
+      mode: z.enum(["overwrite", "append"]).optional(),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.list": z
+    .object({
+      ...FsRootParams,
+      relPath: optionalString,
+      recursive: z.boolean().optional(),
+      includeDirs: z.boolean().optional(),
+      includeIgnored: z.boolean().optional(),
+      maxEntries: numberRange(1, 50_000).int().optional(),
+      maxDepth: numberRange(1, 64).int().optional(),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.stat": z
+    .object({ ...FsRootParams, relPath: requiredString("required") })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.search": z
+    .object({
+      ...FsRootParams,
+      query: requiredString("required"),
+      target: z.enum(["content", "name"]).optional(),
+      isRegex: z.boolean().optional(),
+      caseSensitive: z.boolean().optional(),
+      maxResults: numberRange(1, 500).int().optional(),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.mkdir": z
+    .object({ ...FsRootParams, relPath: requiredString("required") })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.move": z
+    .object({
+      ...FsRootParams,
+      fromRelPath: requiredString("required"),
+      toRelPath: requiredString("required"),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.copy": z
+    .object({
+      ...FsRootParams,
+      fromRelPath: requiredString("required"),
+      toRelPath: requiredString("required"),
+      recursive: z.boolean().optional(),
+    })
+    .superRefine(requireExplicitRootPath),
+  "action.fs.delete": z
+    .object({
+      ...FsRootParams,
+      relPath: requiredString("required"),
+      recursive: z.boolean().optional(),
+    })
+    .superRefine(requireExplicitRootPath),
   // Local Git (Source Control panel backend — ADR-0038). `repoPath` is
   // optional; it defaults to the active workspace root at run time.
   "action.git.stage": z.object({

@@ -25,6 +25,12 @@ import "../terminal/script"
 // Pro IDE editor nodes (ADR-0088 Phase 3) — open / reveal / diff / read / edit
 // / save against the bound embedded code-server.
 import "../editor"
+// Workspace filesystem nodes. Until these existed a graph could not read or
+// write a file at all: the sidecar's file tools belong to the agent, so it took
+// an `action.agent.turn` and an LLM round trip to move one file. A registry
+// nobody registers into is this repo's most recurrent defect;
+// `executor-coverage.test.ts` fails without this line.
+import "../files"
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "../source-control"

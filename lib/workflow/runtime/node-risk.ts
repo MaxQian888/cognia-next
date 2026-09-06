@@ -42,6 +42,12 @@ import type { RiskAssessment, RiskTier } from "@/lib/policy/risk/classify-risk"
  *    `.stage` / `.branch` are local and reversible → absent.
  *  - `action.mobile.share` hands content to another app / person →
  *    `external-send`. `.notify` is a local notification → absent.
+ *  - `action.fs.write` overwrites a file whose previous contents nothing kept →
+ *    `file-write-broad`, the first kind to claim that surface.
+ *    `action.fs.delete` and `.move` both unlink something →
+ *    `data-destructive`. `.mkdir` and `.copy` are ABSENT: neither destroys
+ *    anything, and the Host refuses to clobber an existing destination, so
+ *    they create or they fail. Every `action.fs.*` read is absent too.
  *  - Deletes of app-local records (`action.goal.delete`, `action.plan.delete`,
  *    `action.scheduler.task.delete`) are deliberately ABSENT. They destroy
  *    something, but gating a workflow that tidies up its own goals would fire on
@@ -72,8 +78,14 @@ export const RISKY_NODE_KINDS: Record<string, RiskSurfaceId> = {
   "action.system.terminal": "native-command",
   "action.terminal.script": "native-command",
   "action.terminal.session.run": "native-command",
+  // ── Writes over a file whose previous contents nothing kept ──
+  "action.fs.write": "file-write-broad",
   // ── Destroys something a human may rely on ──
   "action.connector.delete": "data-destructive",
+  // A move unlinks the source. Copy and mkdir only ever create, and the Host
+  // refuses an existing destination, so neither is here.
+  "action.fs.move": "data-destructive",
+  "action.fs.delete": "data-destructive",
 }
 
 /** The risky node kinds, derived from the map. */
@@ -83,11 +95,10 @@ export const RISKY_NODE_KIND_IDS = Object.keys(RISKY_NODE_KINDS)
  * Map a surface's severity onto a tier, the same way `classify-risk.ts` does, so
  * a node's tier and a roster's tier mean the same thing.
  *
- * Every kind in {@link RISKY_NODE_KINDS} currently maps to a `high` surface —
- * the two `elevated` surfaces (`credential-auth`, `file-write-broad`) have no
- * node kind that expresses them. The `elevated` branch is kept (rather than
- * hard-coding `"high"`) because it is the taxonomy, not this map, that decides
- * severity: the day an elevated-surface kind is added, this stays correct.
+ * `action.fs.write` maps to `file-write-broad`, which is `elevated` rather than
+ * `high`, so this branch is live. It was kept before any kind used it because
+ * severity is the taxonomy's call and not this map's, and that day has now
+ * arrived. `credential-auth` still has no kind.
  */
 export function tierForSurface(surface: RiskSurfaceId): RiskTier {
   return RISK_SURFACES[surface].severity === "high" ? "high" : "medium"

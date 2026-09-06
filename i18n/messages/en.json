@@ -27997,6 +27997,37 @@
       "tokPerSec": "{value} tok/s"
     }
   },
+  "sessionPower": {
+    "effect": {
+      "mayPauseWhenHidden": "This turn runs in the browser tab. If the tab is hidden for a long time the browser may pause it, so the reply can stall until you come back.",
+      "runsOnHost": "The turn runs outside this window and keeps going while the screen is off. Results are waiting when you come back.",
+      "screenHeld": "The screen stays on from the moment a turn starts until it finishes, then power settings take over again.",
+      "screenHoldUnavailable": "This runtime cannot hold the screen on, so the setting stays saved but does nothing here."
+    },
+    "holdingNow": "Holding the screen",
+    "policy": {
+      "allowScreenOff": {
+        "description": "Normal power behaviour. The screen may turn off while the turn keeps running.",
+        "label": "Let the screen turn off"
+      },
+      "inherit": {
+        "description": "Use the app default ({mode}).",
+        "label": "Follow the default"
+      },
+      "keepScreenOn": {
+        "description": "The display stays awake for as long as this conversation has a turn in flight.",
+        "label": "Keep the screen on while running"
+      }
+    },
+    "session": {
+      "description": "What this conversation asks of the device while one of its turns is running.",
+      "title": "Screen & power"
+    },
+    "settings": {
+      "description": "What every conversation asks of the device while a turn is running. Any chat can override it from its own settings sheet.",
+      "title": "Screen & power during a run"
+    }
+  },
   "settings": {
     "a2ui": {
       "debugger": {
@@ -32494,12 +32525,17 @@
         }
       },
       "tunnel": {
+        "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for the companion server. Replacing it changes what that public URL points at, and a paired device using it loses its route.",
+        "busyKeep": "Keep it",
+        "busyReplace": "Replace the tunnel",
+        "busyTitle": "The tunnel is exposing something else",
         "copied": "Copied",
         "copiedCommand": "Command copied",
         "copy": "Copy",
         "copyFailed": "Couldn't copy",
         "description": "Expose this desktop's adapter webhook receiver to the public internet so Slack / Lark / Discord interactions can reach it. Uses the cloudflared `--url` quick-tunnel.",
         "desktopOnly": "Tunnel control requires the desktop app",
+        "exposingOther": "The tunnel currently exposes {localUrl}, not the webhook receiver. Stop it and start it here to point it at the receiver.",
         "install": {
           "copyAria": "Copy {label} command",
           "description": "Run one of the following on your {platform} host, then start the tunnel.",
@@ -32674,6 +32710,32 @@
     },
     "connectivity": {
       "description": "How this device and a Host reach each other: the local server, the relay and tunnel, pairing, remote hosts, push, and sync.",
+      "mesh": {
+        "addresses": "{count, plural, =1 {One address} other {# addresses}} on {interfaces}",
+        "advertiseCleared": "Invitations advertise the auto-detected LAN address again.",
+        "advertiseDescription": "Invitations and the local-route report name {address} instead of the auto-detected LAN address. Requires the companion server to be bound to the LAN.",
+        "advertiseDescriptionSaved": "Invitations and the local-route report name {address} instead of the auto-detected LAN address. No interface carries it right now, so switch this off to go back to detection.",
+        "advertiseLabel": "Advertise {address} in invitations",
+        "advertiseLabelSaved": "Stop advertising {address} in invitations",
+        "advertiseSaved": "Invitations now advertise {address}.",
+        "advertiseStale": "Invitations advertise {address}, but no interface carries it right now. Start the overlay client, or stop advertising it.",
+        "advertiseTitle": "Advertise the overlay address",
+        "description": "Tailscale or ZeroTier put this Host and a phone anywhere on one private network, so the plain local route works from the road with nothing exposed to the internet.",
+        "installHint": "Install a client on this machine and on the device, sign both into the same network, then come back: the address appears here.",
+        "loopbackHint": "The companion server is bound to this machine only. Switch it to LAN under Local host before advertising an overlay address.",
+        "openDownload": "Open {provider} downloads",
+        "provider": {
+          "tailscale": "Tailscale",
+          "zerotier": "ZeroTier"
+        },
+        "refresh": "Refresh",
+        "state": {
+          "absent": "Not installed",
+          "connected": "Connected",
+          "installed": "Installed, not connected"
+        },
+        "title": "Overlay network"
+      },
       "nav": {
         "groups": {
           "deliveryGroup": "Delivery",
@@ -32785,6 +32847,68 @@
         "no-host": "Pair with a Host from the Remote hosts topic, or open the desktop app.",
         "not-owner": "Ask the owner to grant this device host administration, or use the owner device."
       },
+      "relayCheck": {
+        "check": "Test relay",
+        "checking": "Testing",
+        "corsBlocked": "{url} answered, but this browser origin was not allowed to read the answer. The deployed rendezvous predates the readable health endpoint and the application data lane (ADR-0170): pairing and signaling work, application traffic falls back to the peer-to-peer channel only. Deploy the current signaling server, or run this check from the desktop app.",
+        "description": "Asks the relay this Host dials what it can carry. The answer is what a device on another network will get.",
+        "invalidUrl": "The signaling URL below is not a valid ws:// or wss:// address.",
+        "lanes": "Lanes: {lanes}",
+        "lastChecked": "Checked {time}",
+        "legacy": "Reachable in {ms} ms, but this rendezvous predates the application data lane (ADR-0170). Pairing and signaling work. Application traffic falls back to the peer-to-peer channel only, so a device behind a strict NAT will not connect. Deploy the current signaling server.",
+        "legacyProtocol": "Reachable in {ms} ms, but its protocol is {theirs} and this app speaks {ours}. Update the one that is behind.",
+        "notFromHost": "This check ran from this device, not from the Host. It proves this device reaches the rendezvous; the Host's own route out is still unproven, so the summary above does not count it.",
+        "notRelay": "{url} answered, but not as a Cognia rendezvous ({error}). Check the signaling URL below.",
+        "off": "The relay is switched off in the WebRTC card below, so nothing away from this network can pair or connect through it.",
+        "ready": "Reachable in {ms} ms. Protocol {protocol}, {backend} backend, version {version}.",
+        "sourceHost": "Reading the Host's relay configuration.",
+        "sourceLocal": "Reading this browser's own relay setting: nothing is paired, so this is what a Host started from here would dial.",
+        "state": {
+          "corsBlocked": "Unreadable",
+          "invalidUrl": "Bad URL",
+          "legacy": "Older relay",
+          "notRelay": "Not a relay",
+          "ready": "Ready",
+          "unreachable": "No answer"
+        },
+        "title": "Rendezvous check",
+        "unreachable": "No answer from {url}: {error}. A device on another network will not be able to pair or connect through the relay until the rendezvous answers."
+      },
+      "remoteAccess": {
+        "description": "Whether a device away from this network can reach this Host right now, and by which route.",
+        "route": {
+          "mesh": "Overlay network",
+          "relay": "Relay",
+          "tunnel": "Public tunnel"
+        },
+        "routeState": {
+          "meshDesktopOnly": "Desktop app only",
+          "meshInstalled": "{provider} installed, not connected",
+          "meshOff": "No overlay client installed",
+          "meshOn": "{provider} address carried",
+          "relayCorsBlocked": "Relay answered, but this browser may not read it",
+          "relayInvalid": "The signaling URL is not valid",
+          "relayLegacy": "Relay reachable, but it predates the data lane",
+          "relayNotRelay": "The address answers, but it is not a Cognia rendezvous",
+          "relayOff": "Relay switched off",
+          "relayReady": "Relay reachable, data lane served",
+          "relayUnchecked": "Not checked",
+          "relayUnreachable": "Rendezvous not reachable",
+          "tunnelDesktopOnly": "Desktop app only",
+          "tunnelOff": "Off",
+          "tunnelOn": "Public URL live",
+          "tunnelOther": "Exposing {localUrl}, not this Host"
+        },
+        "title": "Reach from outside",
+        "verdict": {
+          "anywhere": "Reachable from anywhere",
+          "anywhereLegacy": "Reachable from anywhere, over a rendezvous that cannot carry app traffic",
+          "lanOnly": "Reachable only from this network",
+          "meshOnly": "Reachable from devices on the same overlay network",
+          "notHost": "This shell is not a Host, so there is nothing to reach.",
+          "unknown": "Not checked yet"
+        }
+      },
       "remoteHosts": {
         "active": "Active",
         "addDescription": "Paste or scan an invitation from the Host's Pairing topic. The relay is used when the Host cannot be reached directly.",
@@ -32806,7 +32930,50 @@
           "versionMismatch": "Version mismatch"
         }
       },
-      "title": "Connectivity"
+      "title": "Connectivity",
+      "tunnel": {
+        "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for another feature. Replacing it changes what that public URL points at.",
+        "busyCancelled": "Left the existing tunnel running.",
+        "busyReplace": "Replace the tunnel",
+        "busyStopBody": "This app runs one cloudflared process, and it is exposing {localUrl} at {publicUrl} for another feature. Stopping it here takes that public URL down too.",
+        "busyStopConfirm": "Stop it anyway",
+        "busyTitle": "The tunnel is exposing something else",
+        "exposing": "Exposing {localUrl}",
+        "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it.",
+        "installed": "{version} at {path}",
+        "installedNoVersion": "Found at {path}",
+        "probing": "Looking for cloudflared"
+      },
+      "tunnelInstall": {
+        "checking": "Checking",
+        "copied": "Command copied.",
+        "copy": "Copy the {via} command",
+        "copyFailed": "Could not copy the command.",
+        "description": "Run one of these on this machine, then check again.",
+        "descriptionOs": "Run one of these on this {os} machine, then check again.",
+        "open": "Open",
+        "os": {
+          "linux": "Linux",
+          "macos": "macOS",
+          "unknown": "computer",
+          "windows": "Windows"
+        },
+        "recheck": "Check again",
+        "title": "Install {tool}",
+        "tool": {
+          "cloudflared": "cloudflared",
+          "tailscale": "Tailscale",
+          "zerotier": "ZeroTier"
+        },
+        "via": {
+          "appStore": "Mac App Store",
+          "apt": "APT",
+          "download": "Download from {tool}",
+          "homebrew": "Homebrew",
+          "script": "Install script",
+          "winget": "winget"
+        }
+      }
     },
     "conversation": {
       "autoTitle": {
@@ -48462,6 +48629,44 @@
             "label": "Show diff for review"
           }
         },
+        "fs": {
+          "copy": {
+            "description": "Copy an entry within the workspace root. A directory needs the recursive flag. Refuses to clobber an existing destination.",
+            "label": "Copy path"
+          },
+          "delete": {
+            "description": "Delete a file or directory. A non-empty directory needs the recursive flag. Needs an approval upstream on a non-interactive run.",
+            "label": "Delete path"
+          },
+          "list": {
+            "description": "List a directory, optionally recursively. Honours .gitignore and reports what a cap withheld rather than passing a partial tree off as complete.",
+            "label": "List directory"
+          },
+          "mkdir": {
+            "description": "Create a directory and any missing parents.",
+            "label": "Create directory"
+          },
+          "move": {
+            "description": "Move an entry within the workspace root. Refuses to clobber an existing destination. Needs an approval upstream on a non-interactive run.",
+            "label": "Move or rename"
+          },
+          "read": {
+            "description": "Read a UTF-8 text file from the workspace. Stats first and refuses over the byte cap, so a large file never reaches the run log.",
+            "label": "Read file"
+          },
+          "search": {
+            "description": "Search the workspace by file content (with an optional regex) or by file name. Honours .gitignore.",
+            "label": "Search files"
+          },
+          "stat": {
+            "description": "Metadata for one workspace path. Answers with exists: false rather than failing, so a flow can probe before it writes.",
+            "label": "Stat path"
+          },
+          "write": {
+            "description": "Write or append a UTF-8 text file, creating parent directories. Needs an approval upstream on a non-interactive run.",
+            "label": "Write file"
+          }
+        },
         "git": {
           "branch": {
             "description": "Create or switch to a branch.",
@@ -49939,6 +50144,7 @@
         "expiryDays": "{days, plural, =1 {1 day} other {# days}}",
         "expiryLabel": "Valid for",
         "issuedHint": "Share this token with the person over a channel you trust. It is shown once and not stored here.",
+        "noWebOrigin": "This deployment announces no web address, so there is no link to copy. Share the token: it can be pasted on the sign-in screen.",
         "orgRole": {
           "admin": "Admin",
           "member": "Member",
@@ -49958,8 +50164,7 @@
           "maintainer": "Maintainer",
           "member": "Member",
           "viewer": "Viewer"
-        },
-        "noWebOrigin": "This deployment announces no web address, so there is no link to copy. Share the token: it can be pasted on the sign-in screen."
+        }
       },
       "noMatches": "No member has that role.",
       "offboard": "Remove from organization",

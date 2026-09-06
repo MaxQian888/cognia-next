@@ -184,6 +184,20 @@ export type WorkflowNodeKind =
   | "action.mobile.notify"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
+  // Workspace filesystem. Addressed as (root, relPath) through
+  // `lib/files/workspace-fs.ts`, so the Host canonicalises and range-checks
+  // every path and a desktop routing to a remote Host reaches that Host's
+  // disk. Text only: `fs_read_workspace_file` is `read_to_string` and this
+  // seam has no binary read.
+  | "action.fs.read"
+  | "action.fs.write"
+  | "action.fs.list"
+  | "action.fs.stat"
+  | "action.fs.search"
+  | "action.fs.mkdir"
+  | "action.fs.move"
+  | "action.fs.copy"
+  | "action.fs.delete"
   // Local Git (Source Control panel backend — ADR-0038)
   | "action.git.stage"
   | "action.git.commit"
@@ -454,6 +468,15 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.waitReply",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
+  "action.fs.read",
+  "action.fs.write",
+  "action.fs.list",
+  "action.fs.stat",
+  "action.fs.search",
+  "action.fs.mkdir",
+  "action.fs.move",
+  "action.fs.copy",
+  "action.fs.delete",
   "action.git.stage",
   "action.git.commit",
   "action.site.build",

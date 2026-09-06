@@ -864,6 +864,320 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Workspace filesystem ──────────────────────────────────────────────────
+  "action.fs.read": {
+    label: "Read file",
+    description:
+      "Read a UTF-8 text file from the workspace. Stats first and refuses over the byte cap, so a large file never reaches the run log.",
+    iconName: "FileText",
+    keywords: ["file", "read", "fs", "text", "open", "cat"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["relPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: {
+          type: "string",
+          format: "expression",
+          title: "Path in the workspace",
+          examples: ["docs/README.md"],
+        },
+        maxBytes: {
+          type: "integer",
+          title: "Byte cap",
+          minimum: 1,
+          maximum: 8388608,
+          default: 1048576,
+        },
+      },
+    },
+  },
+  "action.fs.write": {
+    label: "Write file",
+    description:
+      "Write or append a UTF-8 text file, creating parent directories. Append reads the file first, since the Host has no atomic append.",
+    iconName: "FilePen",
+    keywords: ["file", "write", "fs", "save", "append", "create"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["relPath", "content"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: { type: "string", format: "expression", title: "Path in the workspace" },
+        content: { type: "string", format: "expression", title: "Content" },
+        mode: {
+          type: "string",
+          title: "Mode",
+          enum: ["overwrite", "append"],
+          default: "overwrite",
+        },
+      },
+    },
+  },
+  "action.fs.list": {
+    label: "List directory",
+    description:
+      "List a directory, optionally recursively. Honours .gitignore and reports what a cap withheld rather than passing a partial tree off as complete.",
+    iconName: "FolderTree",
+    keywords: ["file", "list", "fs", "directory", "folder", "walk", "tree"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: {
+          type: "string",
+          format: "expression",
+          title: "Directory",
+          description: "Leave empty for the root itself.",
+        },
+        recursive: { type: "boolean", title: "Recursive", default: false },
+        includeDirs: { type: "boolean", title: "Include directories", default: false },
+        includeIgnored: { type: "boolean", title: "Include .gitignore'd entries", default: false },
+        maxEntries: {
+          type: "integer",
+          title: "Entry cap",
+          minimum: 1,
+          maximum: 50000,
+          default: 5000,
+        },
+        maxDepth: { type: "integer", title: "Depth cap", minimum: 1, maximum: 64, default: 24 },
+      },
+    },
+  },
+  "action.fs.stat": {
+    label: "Stat path",
+    description:
+      "Metadata for one workspace path. Answers with exists: false rather than failing, so a flow can probe before it writes.",
+    iconName: "FileSearch",
+    keywords: ["file", "stat", "fs", "exists", "size", "metadata"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["relPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: { type: "string", format: "expression", title: "Path in the workspace" },
+      },
+    },
+  },
+  "action.fs.search": {
+    label: "Search files",
+    description:
+      "Search the workspace by file content (with an optional regex) or by file name. Honours .gitignore.",
+    iconName: "Search",
+    keywords: ["file", "search", "fs", "grep", "find", "content", "name"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        query: { type: "string", format: "expression", title: "Query" },
+        target: {
+          type: "string",
+          title: "Search",
+          enum: ["content", "name"],
+          default: "content",
+        },
+        isRegex: { type: "boolean", title: "Treat the query as a regex", default: false },
+        caseSensitive: { type: "boolean", title: "Case sensitive", default: false },
+        maxResults: {
+          type: "integer",
+          title: "Result cap",
+          minimum: 1,
+          maximum: 500,
+          default: 100,
+        },
+      },
+    },
+  },
+  "action.fs.mkdir": {
+    label: "Create directory",
+    description: "Create a directory and any missing parents.",
+    iconName: "FolderPlus",
+    keywords: ["file", "fs", "mkdir", "directory", "folder", "create"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["relPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: { type: "string", format: "expression", title: "Directory to create" },
+      },
+    },
+  },
+  "action.fs.move": {
+    label: "Move or rename",
+    description:
+      "Move an entry within the workspace root. Refuses to clobber an existing destination. Needs an approval upstream on a non-interactive run.",
+    iconName: "FileSymlink",
+    keywords: ["file", "fs", "move", "rename", "mv"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["fromRelPath", "toRelPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        fromRelPath: { type: "string", format: "expression", title: "From" },
+        toRelPath: { type: "string", format: "expression", title: "To" },
+      },
+    },
+  },
+  "action.fs.copy": {
+    label: "Copy path",
+    description:
+      "Copy an entry within the workspace root. A directory needs the recursive flag. Refuses to clobber an existing destination.",
+    iconName: "Copy",
+    keywords: ["file", "fs", "copy", "duplicate", "cp"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["fromRelPath", "toRelPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        fromRelPath: { type: "string", format: "expression", title: "From" },
+        toRelPath: { type: "string", format: "expression", title: "To" },
+        recursive: { type: "boolean", title: "Recursive (directories)", default: false },
+      },
+    },
+  },
+  "action.fs.delete": {
+    label: "Delete path",
+    description:
+      "Delete a file or directory. A non-empty directory needs the recursive flag. Needs an approval upstream on a non-interactive run.",
+    iconName: "Trash2",
+    keywords: ["file", "fs", "delete", "remove", "rm", "trash"],
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      required: ["relPath"],
+      properties: {
+        rootMode: {
+          type: "string",
+          title: "Workspace root",
+          enum: ["project", "host-default", "explicit"],
+          default: "project",
+          description:
+            "Which root to address. 'project' uses the run's workspace, 'host-default' the first root the Host declares (portable), 'explicit' a path you supply.",
+        },
+        rootPath: {
+          type: "string",
+          format: "expression",
+          title: "Root path",
+          description: "Only used when the root is 'explicit'. A path this Host will browse.",
+        },
+        relPath: { type: "string", format: "expression", title: "Path to delete" },
+        recursive: { type: "boolean", title: "Recursive (directories)", default: false },
+      },
+    },
+  },
   // ── Local Git (Source Control) ────────────────────────────────────────────
   "action.git.stage": {
     label: "Git stage",

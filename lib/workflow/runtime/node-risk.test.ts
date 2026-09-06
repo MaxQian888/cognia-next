@@ -19,6 +19,11 @@ describe("classifyNodeRisk", () => {
       ["action.terminal.script", "native-command", "high"],
       ["action.terminal.session.run", "native-command", "high"],
       ["action.connector.delete", "data-destructive", "high"],
+      ["action.fs.move", "data-destructive", "high"],
+      ["action.fs.delete", "data-destructive", "high"],
+      // The first kind to claim an `elevated` surface, which is why its tier
+      // is `medium` while every other risky kind is `high`.
+      ["action.fs.write", "file-write-broad", "medium"],
     ])("%s → %s (%s)", (type, surface, tier) => {
       const a = classifyNodeRisk({ type })
       expect(a.tier).toBe(tier)
@@ -47,6 +52,15 @@ describe("classifyNodeRisk", () => {
       "action.desktop.listApps",
       "action.desktop.queryElements",
       "action.desktop.expandElement",
+      // Neither destroys anything, and the Host refuses an existing
+      // destination, so both either create or fail.
+      "action.fs.mkdir",
+      "action.fs.copy",
+      // Reads.
+      "action.fs.read",
+      "action.fs.list",
+      "action.fs.stat",
+      "action.fs.search",
     ])("%s stays low", (type) => {
       expect(classifyNodeRisk({ type }).tier).toBe("low")
     })
@@ -85,10 +99,17 @@ describe("classifyNodeRisk", () => {
       ["credential-auth", "medium"],
       ["file-write-broad", "medium"],
     ] as const)("%s (elevated) → %s", (surface, tier) => {
-      // No node kind maps to these yet. The branch is kept because severity is
-      // the taxonomy's call, not this map's — it must stay correct the day one
-      // is added.
+      // The branch was kept before any kind used it because severity is the
+      // taxonomy's call and not this map's. `action.fs.write` now claims
+      // `file-write-broad`, so it is live. `credential-auth` still has none.
       expect(tierForSurface(surface)).toBe(tier)
+    })
+
+    it("has a kind expressing the elevated file-write surface", () => {
+      // Pins the claim above. If `action.fs.write` ever stops being gated,
+      // this fails rather than letting the doc comment rot.
+      expect(RISKY_NODE_KIND_IDS).toContain("action.fs.write")
+      expect(RISKY_NODE_KINDS["action.fs.write"]).toBe("file-write-broad")
     })
   })
 
