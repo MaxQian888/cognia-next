@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
 import {
   ActivityIcon,
   BellIcon,
@@ -104,7 +103,6 @@ export function PublicStatusPage({
 }: PublicStatusPageProps) {
   const t = useTranslations("publicStatus")
   const locale = useLocale()
-  const reducedMotion = useReducedMotion()
   const [subscriptionOpen, setSubscriptionOpen] = useState(false)
   const [subscriptionSubmitted, setSubscriptionSubmitted] = useState(false)
   const overallStatus = deriveOverallStatus(
@@ -113,9 +111,16 @@ export function PublicStatusPage({
   const platformUptime = calculateUptime(snapshot.components.flatMap((item) => item.history))
   const overallStyle = STATUS_STYLES[overallStatus]
   const OverallIcon = overallStyle.icon
-  const reveal = reducedMotion
-    ? {}
-    : { initial: { opacity: 0, y: 14 }, animate: { opacity: 1, y: 0 } }
+  // A CSS entrance rather than a JS one. This page is a public, static export
+  // whose whole point is to be readable when other things are broken, and a
+  // `motion` reveal makes the content's VISIBILITY depend on an animation
+  // actually running: the hero was caught stranded at `opacity: 0` with its
+  // transform already settled, which renders the entire above-the-fold as an
+  // empty gradient. `animate-in` only supplies the keyframe's starting value,
+  // so the resting state is visible whether or not the animation ever plays,
+  // and `motion-safe:` honours the same preference the hook did.
+  const reveal =
+    "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:duration-500"
 
   const openSubscription = () => {
     setSubscriptionSubmitted(false)
@@ -162,11 +167,7 @@ export function PublicStatusPage({
 
       <div id="top" className="relative mx-auto max-w-6xl px-4 sm:px-6">
         <section className="grid grid-flow-dense grid-cols-1 border-b py-16 md:grid-cols-12 md:py-28">
-          <motion.div
-            {...reveal}
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            className="relative pr-0 md:col-span-7 md:pr-12"
-          >
+          <div className={cn(reveal, "relative pr-0 md:col-span-7 md:pr-12")}>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <Badge variant="outline" className="font-normal">
                 {t("previewData")}
@@ -191,12 +192,14 @@ export function PublicStatusPage({
               <OverallIcon className="size-5" aria-hidden />
               <span className="font-medium">{t(`statuses.overall.${overallStatus}`)}</span>
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div
-            {...reveal}
-            transition={{ duration: 0.4, delay: reducedMotion ? 0 : 0.08, ease: "easeOut" }}
-            className="relative mt-12 flex min-h-72 flex-col justify-between border-t pt-8 md:col-span-5 md:mt-0 md:min-h-0 md:border-t-0 md:border-l md:pt-0 md:pl-12"
+          <div
+            className={cn(
+              reveal,
+              "motion-safe:delay-100",
+              "relative mt-12 flex min-h-72 flex-col justify-between border-t pt-8 md:col-span-5 md:mt-0 md:min-h-0 md:border-t-0 md:border-l md:pt-0 md:pl-12"
+            )}
           >
             <div
               aria-hidden
@@ -226,7 +229,7 @@ export function PublicStatusPage({
                 {t("hero.lastUpdated", { date: formatTimestamp(snapshot.generatedAt, locale) })}
               </p>
             </div>
-          </motion.div>
+          </div>
         </section>
 
         <section id="services" className="scroll-mt-24 py-16 md:py-24">
@@ -235,11 +238,7 @@ export function PublicStatusPage({
             title={t("serviceHealth.title")}
             description={t("serviceHealth.description")}
           />
-          <motion.div
-            {...reveal}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-            className="mt-10"
-          >
+          <div className={cn(reveal, "mt-10")}>
             {snapshot.components.map((component, index) => (
               <ServiceRow
                 key={component.id}
@@ -248,7 +247,7 @@ export function PublicStatusPage({
                 isLast={index === snapshot.components.length - 1}
               />
             ))}
-          </motion.div>
+          </div>
           <StatusLegend />
         </section>
 

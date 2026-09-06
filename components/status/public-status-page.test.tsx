@@ -4,8 +4,6 @@
 
 import { fireEvent, render, screen, within } from "@testing-library/react"
 
-jest.mock("motion/react", () => jest.requireActual("../../__mocks__/motion-react.js"))
-
 jest.mock("recharts", () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AreaChart: ({ children }: { children: React.ReactNode }) => <svg>{children}</svg>,
@@ -42,6 +40,18 @@ describe("PublicStatusPage", () => {
       screen.getByLabelText(/Agent Runtime on Aug 11, 2026: Degraded, 99.18% uptime/)
     ).toBeInTheDocument()
     expect(screen.getByText("99.98%", { exact: false })).toBeInTheDocument()
+  })
+
+  it("shows the hero without waiting for an animation to run", () => {
+    // The reveal used to be a `motion` mount animation on opacity. When that
+    // animation did not run to completion the whole above-the-fold collapsed
+    // to an empty gradient, and the previous version of this suite could not
+    // see it because it mocked `motion/react` away. The entrance is now a CSS
+    // keyframe, so the resting state is visible either way.
+    const { container } = render(<PublicStatusPage snapshot={createPreviewStatusSnapshot()} />)
+
+    expect(screen.getByRole("heading", { level: 1 })).toBeVisible()
+    expect(container.querySelectorAll('[style*="opacity: 0"]')).toHaveLength(0)
   })
 
   it("expands a service row to show latency and regional health", () => {
