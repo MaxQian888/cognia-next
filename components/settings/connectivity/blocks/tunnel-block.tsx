@@ -8,10 +8,12 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, CloudIcon } from "lucide-react"
+import { CheckIcon, CloudIcon, ShieldAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { TunnelInstallGuide } from "@/components/connectivity/tunnel-install-guide"
 import { SettingsBlock, SettingsField } from "@/components/settings/common/settings-block"
+import { Surface } from "@/components/surface/surface"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,13 +21,19 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { useHostAdminReachForCommand } from "@/hooks/connectivity/use-host-admin-reach"
-import { saveNamedTunnelConfig } from "@/lib/connectivity/tunnel-resolver"
+import { cn } from "@/lib/utils"
+import {
+  parseTunnelBusy,
+  saveNamedTunnelConfig,
+  type TunnelProbe,
+} from "@/lib/connectivity/tunnel-resolver"
 
 import {
   DEFAULT_PORT,
   clearNamedTunnelConfig,
   getTunnelConfig,
   getTunnelInfo,
+  probeTunnel,
   setTunnelMode,
   startTunnel,
   stopTunnel,
@@ -35,16 +43,37 @@ import {
 } from "./companion-server-commands"
 import { HostReachNotice } from "./host-reach-notice"
 
+/** The origin this block exposes: the companion HTTPS listener. */
+export const COMPANION_TUNNEL_LOCAL_URL = `https://127.0.0.1:${DEFAULT_PORT}`
+
 export function TunnelBlock() {
   const t = useTranslations("mobile.companion.tunnel")
+  const tc = useTranslations("settings.connectivity.tunnel")
   const reach = useHostAdminReachForCommand("companion_tunnel_start")
   const desktop = reach.available
   const [info, setInfo] = useState<TunnelInfo | null>(null)
   const [config, setConfig] = useState<TunnelConfig | null>(null)
+  const [probe, setProbe] = useState<TunnelProbe | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [conflict, setConflict] = useState<TunnelInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [hostnameInput, setHostnameInput] = useState("")
   const [tokenInput, setTokenInput] = useState("")
+
+  const runProbe = useCallback(async () => {
+    if (!desktop) return
+    setProbing(true)
+    try {
+      setProbe(await probeTunnel())
+    } catch {
+      // "Unknown" rather than "missing": the switch stays usable and the
+      // launcher's own error is the authority.
+      setProbe(null)
+    } finally {
+      setProbing(false)
+    }
+  }, [desktop])
 
   useEffect(() => {
     if (!desktop) return
@@ -57,33 +86,66 @@ export function TunnelBlock() {
         if (cfg?.hostname) setHostnameInput(cfg.hostname)
       })
       .catch(() => {})
+    void probeTunnel()
+      .then((next) => {
+        if (!cancelled) setProbe(next)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [desktop])
 
-  const onToggle = useCallback(
-    async (enabled: boolean) => {
-      if (!desktop) return
+  const start = useCallback(
+    async (replace: boolean) => {
       setBusy(true)
       try {
-        if (enabled) {
-          const next = await startTunnel(`https://127.0.0.1:${DEFAULT_PORT}`)
-          setInfo(next)
-          toast.success(t("started"))
-        } else {
-          await stopTunnel()
-          setInfo(null)
-          toast.success(t("stopped"))
-        }
+        const next = await startTunnel(COMPANION_TUNNEL_LOCAL_URL, replace)
+        setInfo(next)
+        setConflict(null)
+        toast.success(t("started"))
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        toast.error(/cloudflared.*not.found|not.installed/i.test(msg) ? t("notInstalled") : msg)
+        const current = parseTunnelBusy(msg)
+        if (current) {
+          // The one cloudflared child is serving another origin. Show the
+          // conflict and let the user decide, instead of the old silent swap.
+          setConflict(current)
+          return
+        }
+        if (/cloudflared.*not.found|not.installed/i.test(msg)) {
+          setProbe({ installed: false })
+          toast.error(t("notInstalled"))
+          return
+        }
+        toast.error(msg)
       } finally {
         setBusy(false)
       }
     },
-    [desktop, t]
+    [t]
+  )
+
+  const onToggle = useCallback(
+    async (enabled: boolean) => {
+      if (!desktop) return
+      if (enabled) {
+        await start(false)
+        return
+      }
+      setBusy(true)
+      try {
+        await stopTunnel()
+        setInfo(null)
+        setConflict(null)
+        toast.success(t("stopped"))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [desktop, start, t]
   )
 
   const onModeChange = useCallback(
@@ -150,12 +212,28 @@ export function TunnelBlock() {
   const mode = config?.mode ?? "quick"
   const namedReady = Boolean(config?.hasToken && config?.hostname)
   const publicUrl = info ? info.publicUrl : namedReady ? config?.hostname : null
+  const notInstalled = desktop && probe !== null && !probe.installed
+  // A live quick tunnel started elsewhere (the Connections tab exposes the
+  // webhook receiver through the same child) shows as on, with what it is
+  // actually exposing, rather than as this listener's tunnel.
+  const exposingOther = Boolean(
+    info && mode === "quick" && info.localUrl && info.localUrl !== COMPANION_TUNNEL_LOCAL_URL
+  )
 
   return (
     <SettingsBlock
       icon={<CloudIcon />}
       title={t("title")}
       description={t("description")}
+      badge={
+        desktop && probe?.installed ? (
+          <Badge variant="outline" className="text-[10px]" data-testid="tunnel-probe">
+            {probe.version
+              ? tc("installed", { version: probe.version, path: probe.path ?? "" })
+              : tc("installedNoVersion", { path: probe.path ?? "" })}
+          </Badge>
+        ) : null
+      }
       action={
         <Switch
           checked={!!info}
@@ -166,11 +244,73 @@ export function TunnelBlock() {
       }
       testid="tunnel-block"
       settingId="companion-tunnel"
+      attributes={{ "data-exposing": info?.localUrl }}
     >
       {reach.block ? <HostReachNotice block={reach.block} testid="tunnel-reach" /> : null}
       <p className="break-all font-mono text-xs text-muted-foreground" data-testid="tunnel-url">
         {publicUrl ?? t("off")}
       </p>
+      {info?.localUrl ? (
+        <p
+          className={cn(
+            "text-[11px]",
+            exposingOther ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
+          )}
+          data-testid="tunnel-exposing"
+        >
+          {exposingOther
+            ? tc("exposingOther", { localUrl: info.localUrl })
+            : tc("exposing", { localUrl: info.localUrl })}
+        </p>
+      ) : null}
+      {notInstalled ? (
+        <TunnelInstallGuide
+          tool="cloudflared"
+          onRecheck={runProbe}
+          rechecking={probing}
+          testid="tunnel-install-guide"
+        />
+      ) : null}
+      {conflict ? (
+        <Surface asChild layer="base" radius="control">
+          <div
+            role="alertdialog"
+            aria-label={tc("busyTitle")}
+            className="space-y-2 border border-amber-300/70 px-3 py-2.5 dark:border-amber-800"
+            data-testid="tunnel-conflict"
+          >
+            <p className="flex items-start gap-2 text-xs font-medium">
+              <ShieldAlertIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+              {tc("busyTitle")}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {tc("busyBody", { localUrl: conflict.localUrl, publicUrl: conflict.publicUrl })}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => void start(true)}
+                disabled={busy}
+                data-testid="tunnel-conflict-replace"
+              >
+                {tc("busyReplace")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setConflict(null)
+                  toast.success(tc("busyCancelled"))
+                }}
+                disabled={busy}
+                data-testid="tunnel-conflict-keep"
+              >
+                {t("clearButton")}
+              </Button>
+            </div>
+          </div>
+        </Surface>
+      ) : null}
       <RadioGroup
         value={mode}
         onValueChange={(v) => void onModeChange(v as "quick" | "named")}

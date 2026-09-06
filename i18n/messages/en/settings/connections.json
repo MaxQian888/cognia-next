@@ -1685,12 +1685,17 @@
     }
   },
   "tunnel": {
+    "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for the companion server. Replacing it changes what that public URL points at, and a paired device using it loses its route.",
+    "busyKeep": "Keep it",
+    "busyReplace": "Replace the tunnel",
+    "busyTitle": "The tunnel is exposing something else",
     "copied": "Copied",
     "copiedCommand": "Command copied",
     "copy": "Copy",
     "copyFailed": "Couldn't copy",
     "description": "Expose this desktop's adapter webhook receiver to the public internet so Slack / Lark / Discord interactions can reach it. Uses the cloudflared `--url` quick-tunnel.",
     "desktopOnly": "Tunnel control requires the desktop app",
+    "exposingOther": "The tunnel currently exposes {localUrl}, not the webhook receiver. Stop it and start it here to point it at the receiver.",
     "install": {
       "copyAria": "Copy {label} command",
       "description": "Run one of the following on your {platform} host, then start the tunnel.",

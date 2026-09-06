@@ -1685,12 +1685,17 @@
     }
   },
   "tunnel": {
+    "busyBody": "本应用只运行一个 cloudflared 进程。它正为伴侣服务器把 {localUrl} 暴露在 {publicUrl}。替换后该公网地址会指向别处，正在使用它的已配对设备会失去这条路线。",
+    "busyKeep": "保留",
+    "busyReplace": "替换隧道",
+    "busyTitle": "隧道正在暴露别的东西",
     "copied": "已复制",
     "copiedCommand": "命令已复制",
     "copy": "复制",
     "copyFailed": "复制失败",
     "description": "把本机的适配器 webhook 接收端口暴露到公网，让 Slack / Lark / Discord 交互能够回到这里。使用 cloudflared 的 `--url` 临时隧道。",
     "desktopOnly": "隧道控制需要桌面端",
+    "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是 webhook 接收器。在这里停止再启动即可指向接收器。",
     "install": {
       "copyAria": "复制 {label} 命令",
       "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",

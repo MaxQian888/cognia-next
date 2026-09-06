@@ -9,34 +9,37 @@
  * platform admin console (Slack Event Subscriptions, Lark Open Platform
  * webhook callback URL, Telegram webhook URL, etc.).
  *
- * The launcher itself is the same Tauri command set the Companion
+ * The launcher itself is the same Tauri command set the Connectivity
  * section uses (`companion_tunnel_start` / `companion_tunnel_stop` /
- * `companion_tunnel_current`). Cloudflared not being installed is
- * surfaced inline so the operator gets actionable install instructions
- * for their OS.
+ * `companion_tunnel_current`), and the same one cloudflared child: when
+ * that child is already exposing the companion listener, starting here is
+ * a conflict the operator resolves explicitly rather than a silent swap.
+ * Cloudflared not being installed is surfaced inline with the shared
+ * install guide for this OS.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import {
   CheckCircle2Icon,
   CopyIcon,
-  ExternalLinkIcon,
   InfoIcon,
   LoaderIcon,
   PlugIcon,
   PowerIcon,
   PowerOffIcon,
+  ShieldAlertIcon,
   XCircleIcon,
 } from "lucide-react"
+import { TunnelInstallGuide } from "@/components/connectivity/tunnel-install-guide"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConnectorControlReach } from "@/components/connectors/connector-host-notice"
 import {
+  probeTunnel,
   startTunnel,
   stopTunnel,
   getTunnelInfo,
@@ -53,40 +56,6 @@ import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 // it on (`CONNECTORS_SERVER_PORT`). An `https://` origin against the plain-HTTP
 // server fails the TLS handshake (cloudflared → 502).
 const DEFAULT_LOCAL_URL = `http://127.0.0.1:${CONNECTORS_SERVER_PORT}`
-
-interface InstallHint {
-  cmd: string
-  label: string
-  url?: string
-}
-
-const INSTALL_HINTS: Record<string, InstallHint[]> = {
-  mac: [{ cmd: "brew install cloudflared", label: "Homebrew" }],
-  win: [
-    { cmd: "winget install --id Cloudflare.cloudflared", label: "winget" },
-    {
-      cmd: "",
-      label: "Direct download",
-      url: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
-    },
-  ],
-  linux: [
-    {
-      cmd: "",
-      label: "APT / RPM / source",
-      url: "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
-    },
-  ],
-}
-
-function detectPlatform(): "mac" | "win" | "linux" | "unknown" {
-  if (typeof navigator === "undefined") return "unknown"
-  const ua = navigator.userAgent.toLowerCase()
-  if (ua.includes("mac")) return "mac"
-  if (ua.includes("win")) return "win"
-  if (ua.includes("linux")) return "linux"
-  return "unknown"
-}
 
 // Paths MUST match the Rust axum routes (axum_app.rs) and each adapter's own
 // config form (`/webhook/<type>/<id>`). The previous `/connectors/...` prefix
@@ -125,7 +94,8 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
   } | null>(null)
   const [busy, setBusy] = useState(false)
   const [notInstalled, setNotInstalled] = useState(false)
-  const platform = useMemo(() => detectPlatform(), [])
+  const [probing, setProbing] = useState(false)
+  const [conflict, setConflict] = useState<TunnelInfo | null>(null)
 
   // Probe the current tunnel state on mount + every 3 s so the panel
   // reflects external changes (e.g. another window started the tunnel).
@@ -165,7 +135,17 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     }
   }, [defaultLocalUrl, desktop])
 
-  const onStart = async () => {
+  const recheck = useCallback(async () => {
+    setProbing(true)
+    try {
+      const probe = await probeTunnel()
+      if (probe) setNotInstalled(!probe.installed)
+    } finally {
+      setProbing(false)
+    }
+  }, [])
+
+  const onStart = async (replace = false) => {
     if (!desktop) {
       toast.error(t("desktopOnly"))
       return
@@ -173,10 +153,13 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     setBusy(true)
     setNotInstalled(false)
     try {
-      const result = await startTunnel(defaultLocalUrl)
+      const result = await startTunnel(defaultLocalUrl, undefined, { replace })
       if (result.kind === "started") {
         setInfo(result.info)
+        setConflict(null)
         toast.success(t("started"))
+      } else if (result.kind === "busy") {
+        setConflict(result.current)
       } else if (result.kind === "not_installed") {
         setNotInstalled(true)
         toast.error(t("notInstalled"))
@@ -196,6 +179,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
     try {
       await stopTunnel()
       setInfo(null)
+      setConflict(null)
       toast.success(t("stopped"))
     } finally {
       setBusy(false)
@@ -276,7 +260,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             <Button
               type="button"
               size="sm"
-              onClick={() => void onStart()}
+              onClick={() => void onStart(false)}
               disabled={busy || !desktop}
               data-testid="tunnel-start"
             >
@@ -288,7 +272,59 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
               {t("start")}
             </Button>
           )}
-          {notInstalled && <InstallHelp platform={platform} onCopy={copyText} />}
+          {info?.localUrl && info.localUrl !== defaultLocalUrl ? (
+            <p
+              className="text-[11px] text-amber-700 dark:text-amber-300"
+              data-testid="tunnel-exposing-other"
+            >
+              {t("exposingOther", { localUrl: info.localUrl })}
+            </p>
+          ) : null}
+          {notInstalled && (
+            <TunnelInstallGuide
+              tool="cloudflared"
+              onRecheck={recheck}
+              rechecking={probing}
+              testid="tunnel-install-guide"
+            />
+          )}
+          {conflict && (
+            <div
+              role="alertdialog"
+              aria-label={t("busyTitle")}
+              className="space-y-2 rounded-md border border-amber-300 bg-amber-50/40 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20"
+              data-testid="tunnel-conflict"
+            >
+              <p className="flex items-start gap-2 text-xs font-medium">
+                <ShieldAlertIcon className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+                {t("busyTitle")}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("busyBody", { localUrl: conflict.localUrl, publicUrl: conflict.publicUrl })}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void onStart(true)}
+                  disabled={busy}
+                  data-testid="tunnel-conflict-replace"
+                >
+                  {t("busyReplace")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConflict(null)}
+                  disabled={busy}
+                  data-testid="tunnel-conflict-keep"
+                >
+                  {t("busyKeep")}
+                </Button>
+              </div>
+            </div>
+          )}
           {reach.block && (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-xs text-muted-foreground dark:border-amber-800 dark:bg-amber-950/20">
               <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -386,62 +422,5 @@ function TunnelStatusBadge({ running }: { running: boolean }) {
       )}
       {running ? t("status.running") : t("status.off")}
     </Badge>
-  )
-}
-
-function InstallHelp({
-  platform,
-  onCopy,
-}: {
-  platform: "mac" | "win" | "linux" | "unknown"
-  onCopy: (text: string, successKey?: string) => Promise<void>
-}) {
-  const t = useTranslations("settings.connections.tunnel.install")
-  const hints = INSTALL_HINTS[platform] ?? INSTALL_HINTS.linux
-  return (
-    <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50/40 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20">
-      <p className="text-xs font-medium text-amber-900 dark:text-amber-100">{t("title")}</p>
-      <p className="text-[11px] text-amber-800/80 dark:text-amber-200/80">
-        {t("description", { platform })}
-      </p>
-      <ul className="space-y-1">
-        {hints.map((hint, idx) => (
-          <li key={idx} className="flex items-center gap-2">
-            {hint.cmd ? (
-              <>
-                <code className="flex-1 rounded border bg-background px-2 py-1 text-[11px]">
-                  {hint.cmd}
-                </code>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void onCopy(hint.cmd, "copiedCommand")}
-                      data-testid={`tunnel-install-copy-${idx}`}
-                      aria-label={t("copyAria", { label: hint.label })}
-                    >
-                      <CopyIcon className="h-3 w-3" aria-hidden />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{hint.label}</TooltipContent>
-                </Tooltip>
-              </>
-            ) : (
-              <a
-                href={hint.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-primary underline-offset-2 hover:underline"
-              >
-                {hint.label}
-                <ExternalLinkIcon className="ml-1 inline h-3 w-3" aria-hidden />
-              </a>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
   )
 }

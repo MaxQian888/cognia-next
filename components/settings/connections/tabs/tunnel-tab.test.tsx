@@ -22,12 +22,15 @@ const mockStop = jest.fn()
 const mockCurrent = jest.fn()
 const mockConfig = jest.fn()
 const mockRefreshEndpoints = jest.fn()
+const mockProbe = jest.fn()
 jest.mock("@/lib/connectivity/tunnel-resolver", () => ({
   startTunnel: (...args: unknown[]) => mockStart(...args),
   stopTunnel: () => mockStop(),
   getTunnelInfo: () => mockCurrent(),
   getTunnelConfig: () => mockConfig(),
+  probeTunnel: () => mockProbe(),
 }))
+jest.mock("@/lib/tauri/opener", () => ({ openExternal: jest.fn(async () => {}) }))
 jest.mock("@/lib/connectivity/endpoint-refresh", () => ({
   refreshCompanionEndpoints: () => mockRefreshEndpoints(),
 }))
@@ -89,6 +92,8 @@ beforeEach(() => {
   mockConfig.mockResolvedValue(null)
   mockRefreshEndpoints.mockReset()
   mockRefreshEndpoints.mockResolvedValue(null)
+  mockProbe.mockReset()
+  mockProbe.mockResolvedValue({ installed: true, path: "/usr/local/bin/cloudflared" })
   mockUseLiveQuery.mockReset()
   // Default: no adapters registered.
   setAdapters([])
@@ -125,14 +130,54 @@ describe("TunnelTab", () => {
     )
   })
 
-  it("surfaces install instructions when cloudflared is missing", async () => {
+  it("surfaces the shared install guide when cloudflared is missing", async () => {
     mockIsTauri.mockReturnValue(true)
     mockStart.mockResolvedValue({ kind: "not_installed" })
-    Object.defineProperty(navigator, "userAgent", { value: "Mac OS", configurable: true })
+    Object.defineProperty(navigator, "userAgent", { value: "Mac OS X", configurable: true })
     wrap(<TunnelTab />)
     await waitFor(() => expect(screen.getByTestId("tunnel-start")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("tunnel-start"))
-    await waitFor(() => expect(screen.getByTestId("tunnel-install-copy-0")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("tunnel-install-guide")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-install-guide-copy-homebrew")).toBeInTheDocument()
+    // Re-checking after an install clears the guide.
+    mockProbe.mockResolvedValue({ installed: true })
+    fireEvent.click(screen.getByTestId("tunnel-install-guide-recheck"))
+    await waitFor(() => expect(screen.queryByTestId("tunnel-install-guide")).toBeNull())
+  })
+
+  it("shows the origin conflict when the tunnel serves the companion listener, and replaces only on request", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockStart.mockResolvedValueOnce({
+      kind: "busy",
+      current: { localUrl: "https://127.0.0.1:27890", publicUrl: "https://old.trycloudflare.com" },
+    })
+    wrap(<TunnelTab />)
+    await waitFor(() => expect(screen.getByTestId("tunnel-start")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("tunnel-start"))
+    await waitFor(() => expect(screen.getByTestId("tunnel-conflict")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-conflict")).toHaveTextContent("https://127.0.0.1:27890")
+    expect(mockStart).toHaveBeenLastCalledWith(expect.any(String), undefined, { replace: false })
+    mockStart.mockResolvedValueOnce({
+      kind: "started",
+      info: { publicUrl: "https://new.trycloudflare.com", localUrl: "http://127.0.0.1:7891" },
+    })
+    fireEvent.click(screen.getByTestId("tunnel-conflict-replace"))
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-public-url")).toHaveTextContent("new.trycloudflare.com")
+    )
+    expect(mockStart).toHaveBeenLastCalledWith(expect.any(String), undefined, { replace: true })
+    expect(screen.queryByTestId("tunnel-conflict")).toBeNull()
+  })
+
+  it("says what a tunnel started elsewhere is exposing instead of claiming it", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:27890",
+    })
+    wrap(<TunnelTab />)
+    await waitFor(() => expect(screen.getByTestId("tunnel-exposing-other")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-exposing-other")).toHaveTextContent("https://127.0.0.1:27890")
   })
 
   it("falls back to a no-adapters hint when none are registered", async () => {

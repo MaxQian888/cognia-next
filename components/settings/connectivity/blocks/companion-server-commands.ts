@@ -9,6 +9,8 @@
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
 import type { TauriInvoker } from "@/lib/connectivity/mdns-discovery"
+import type { MeshStatus } from "@/lib/connectivity/mesh"
+import type { TunnelProbe } from "@/lib/connectivity/tunnel-resolver"
 
 /**
  * Mirrors Rust `companion_api::server::DEFAULT_PORT`: 27890, outside the
@@ -126,8 +128,22 @@ export const transportInvoker = async (): Promise<TauriInvoker> => ({
     args === undefined ? transport.call<T>(cmd) : transport.call<T>(cmd, args),
 })
 
-export async function startTunnel(localUrl: string): Promise<TunnelInfo> {
-  return transport.call<TunnelInfo>("companion_tunnel_start", { localUrl })
+/**
+ * Start the quick tunnel at `localUrl`. Throws the Rust `tunnel_busy:` error
+ * when the one cloudflared child already exposes another origin and
+ * `replace` is not set. `lib/connectivity/tunnel-resolver.parseTunnelBusy`
+ * reads that message.
+ */
+export async function startTunnel(localUrl: string, replace = false): Promise<TunnelInfo> {
+  return transport.call<TunnelInfo>("companion_tunnel_start", { localUrl, replace })
+}
+
+export async function probeTunnel(): Promise<TunnelProbe> {
+  return transport.call<TunnelProbe>("companion_tunnel_probe")
+}
+
+export async function getMeshStatus(): Promise<MeshStatus> {
+  return transport.call<MeshStatus>("companion_mesh_status")
 }
 
 export async function stopTunnel(): Promise<void> {

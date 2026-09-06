@@ -132,5 +132,122 @@
     "testFailed": "Test push failed: {message}",
     "testNeedsCredentials": "Configure APNs or FCM above first.",
     "testResult": "{count, plural, =0 {Last test reached no devices.} =1 {Last test reached one device.} other {Last test reached # devices.}}"
+  },
+  "remoteAccess": {
+    "title": "Reach from outside",
+    "description": "Whether a device away from this network can reach this Host right now, and by which route.",
+    "verdict": {
+      "anywhere": "Reachable from anywhere",
+      "anywhereLegacy": "Reachable from anywhere, over a rendezvous that cannot carry app traffic",
+      "meshOnly": "Reachable from devices on the same overlay network",
+      "lanOnly": "Reachable only from this network",
+      "unknown": "Not checked yet",
+      "notHost": "This shell is not a Host, so there is nothing to reach."
+    },
+    "route": {
+      "relay": "Relay",
+      "tunnel": "Public tunnel",
+      "mesh": "Overlay network"
+    },
+    "routeState": {
+      "relayReady": "Relay reachable, data lane served",
+      "relayLegacy": "Relay reachable, but it predates the data lane",
+      "relayUnreachable": "Rendezvous not reachable",
+      "relayNotRelay": "The address answers, but it is not a Cognia rendezvous",
+      "relayInvalid": "The signaling URL is not valid",
+      "relayOff": "Relay switched off",
+      "relayUnchecked": "Not checked",
+      "tunnelOn": "Public URL live",
+      "tunnelOff": "Off",
+      "tunnelDesktopOnly": "Desktop app only",
+      "meshOn": "{provider} address carried",
+      "meshInstalled": "{provider} installed, not connected",
+      "meshOff": "No overlay client installed",
+      "meshDesktopOnly": "Desktop app only",
+      "relayCorsBlocked": "Relay answered, but this browser may not read it"
+    }
+  },
+  "relayCheck": {
+    "title": "Rendezvous check",
+    "description": "Asks the relay this Host dials what it can carry. The answer is what a device on another network will get.",
+    "check": "Test relay",
+    "checking": "Testing",
+    "off": "The relay is switched off in the WebRTC card below, so nothing away from this network can pair or connect through it.",
+    "sourceHost": "Reading the Host's relay configuration.",
+    "sourceLocal": "Reading this browser's own relay setting: nothing is paired, so this is what a Host started from here would dial.",
+    "ready": "Reachable in {ms} ms. Protocol {protocol}, {backend} backend, version {version}.",
+    "legacy": "Reachable in {ms} ms, but this rendezvous predates the application data lane (ADR-0170). Pairing and signaling work. Application traffic falls back to the peer-to-peer channel only, so a device behind a strict NAT will not connect. Deploy the current signaling server.",
+    "legacyProtocol": "Reachable in {ms} ms, but its protocol is {theirs} and this app speaks {ours}. Update the one that is behind.",
+    "unreachable": "No answer from {url}: {error}. A device on another network will not be able to pair or connect through the relay until the rendezvous answers.",
+    "notRelay": "{url} answered, but not as a Cognia rendezvous ({error}). Check the signaling URL below.",
+    "invalidUrl": "The signaling URL below is not a valid ws:// or wss:// address.",
+    "lanes": "Lanes: {lanes}",
+    "lastChecked": "Checked {time}",
+    "corsBlocked": "{url} answered, but this browser origin was not allowed to read the answer. The deployed rendezvous predates the readable health endpoint and the application data lane (ADR-0170): pairing and signaling work, application traffic falls back to the peer-to-peer channel only. Deploy the current signaling server, or run this check from the desktop app."
+  },
+  "mesh": {
+    "title": "Overlay network",
+    "description": "Tailscale or ZeroTier put this Host and a phone anywhere on one private network, so the plain local route works from the road with nothing exposed to the internet.",
+    "provider": {
+      "tailscale": "Tailscale",
+      "zerotier": "ZeroTier"
+    },
+    "state": {
+      "connected": "Connected",
+      "installed": "Installed, not connected",
+      "absent": "Not installed"
+    },
+    "addresses": "{count, plural, =1 {One address} other {# addresses}} on {interfaces}",
+    "advertiseTitle": "Advertise the overlay address",
+    "advertiseDescription": "Invitations and the local-route report name {address} instead of the auto-detected LAN address. Requires the companion server to be bound to the LAN.",
+    "advertiseLabel": "Advertise {address} in invitations",
+    "advertiseSaved": "Invitations now advertise {address}.",
+    "advertiseCleared": "Invitations advertise the auto-detected LAN address again.",
+    "advertiseStale": "Invitations advertise {address}, but no interface carries it right now. Start the overlay client, or stop advertising it.",
+    "loopbackHint": "The companion server is bound to this machine only. Switch it to LAN under Local host before advertising an overlay address.",
+    "installHint": "Install a client on this machine and on the device, sign both into the same network, then come back: the address appears here.",
+    "refresh": "Refresh",
+    "openDownload": "Open {provider} downloads"
+  },
+  "tunnelInstall": {
+    "title": "Install {tool}",
+    "description": "Run one of these on this machine, then check again.",
+    "descriptionOs": "Run one of these on this {os} machine, then check again.",
+    "via": {
+      "homebrew": "Homebrew",
+      "winget": "winget",
+      "apt": "APT",
+      "script": "Install script",
+      "download": "Download from {tool}",
+      "appStore": "Mac App Store"
+    },
+    "copy": "Copy the {via} command",
+    "copied": "Command copied.",
+    "copyFailed": "Could not copy the command.",
+    "open": "Open",
+    "recheck": "Check again",
+    "checking": "Checking",
+    "os": {
+      "macos": "macOS",
+      "windows": "Windows",
+      "linux": "Linux",
+      "unknown": "computer"
+    },
+    "tool": {
+      "cloudflared": "cloudflared",
+      "tailscale": "Tailscale",
+      "zerotier": "ZeroTier"
+    }
+  },
+  "tunnel": {
+    "installed": "{version} at {path}",
+    "installedNoVersion": "Found at {path}",
+    "probing": "Looking for cloudflared",
+    "busyTitle": "The tunnel is exposing something else",
+    "busyBody": "This app runs one cloudflared process. It is exposing {localUrl} at {publicUrl} for another feature. Replacing it changes what that public URL points at.",
+    "busyReplace": "Replace the tunnel",
+    "busyCancelled": "Left the existing tunnel running.",
+    "exposing": "Exposing {localUrl}",
+    "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it."
   }
 }

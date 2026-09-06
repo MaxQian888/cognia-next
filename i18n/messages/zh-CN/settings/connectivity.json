@@ -132,5 +132,122 @@
     "testFailed": "测试推送失败：{message}",
     "testNeedsCredentials": "请先在上方配置 APNs 或 FCM。",
     "testResult": "{count, plural, =0 {上次测试没有触达任何设备。} =1 {上次测试触达了 1 台设备。} other {上次测试触达了 # 台设备。}}"
+  },
+  "remoteAccess": {
+    "title": "外网可达性",
+    "description": "此刻一台不在本网络的设备能否连到这台主机，以及走的是哪条路。",
+    "verdict": {
+      "anywhere": "任何网络均可达",
+      "anywhereLegacy": "任何网络均可达，但中继无法承载业务流量",
+      "meshOnly": "仅同一 overlay 网络内的设备可达",
+      "lanOnly": "仅本网络内可达",
+      "unknown": "尚未检测",
+      "notHost": "当前外壳不是主机，没有可被连接的对象。"
+    },
+    "route": {
+      "relay": "中继",
+      "tunnel": "公网隧道",
+      "mesh": "Overlay 网络"
+    },
+    "routeState": {
+      "relayReady": "中继可达，已提供 data 通道",
+      "relayLegacy": "中继可达，但版本早于 data 通道",
+      "relayUnreachable": "无法连到 rendezvous",
+      "relayNotRelay": "该地址有响应，但不是 Cognia rendezvous",
+      "relayInvalid": "signaling URL 无效",
+      "relayOff": "中继已关闭",
+      "relayUnchecked": "未检测",
+      "tunnelOn": "公网地址在线",
+      "tunnelOff": "关闭",
+      "tunnelDesktopOnly": "仅桌面应用",
+      "meshOn": "已持有 {provider} 地址",
+      "meshInstalled": "已安装 {provider}，未连接",
+      "meshOff": "未安装 overlay 客户端",
+      "meshDesktopOnly": "仅桌面应用",
+      "relayCorsBlocked": "中继有响应，但此浏览器无权读取"
+    }
+  },
+  "relayCheck": {
+    "title": "Rendezvous 检测",
+    "description": "向这台主机拨号的中继询问它能承载什么。这个答案就是另一网络上的设备会得到的答案。",
+    "check": "测试中继",
+    "checking": "测试中",
+    "off": "下方 WebRTC 卡片里已关闭中继，本网络之外的设备无法通过它配对或连接。",
+    "sourceHost": "读取的是主机的中继配置。",
+    "sourceLocal": "读取的是此浏览器自己的中继设置：尚未配对任何主机，这是从这里启动的主机会拨号的地址。",
+    "ready": "{ms} ms 内可达。协议 {protocol}，{backend} 后端，版本 {version}。",
+    "legacy": "{ms} ms 内可达，但这个 rendezvous 早于业务 data 通道（ADR-0170）。配对与信令可用，业务流量只能退回点对点通道，严格 NAT 后的设备将连不上。请部署当前版本的 signaling server。",
+    "legacyProtocol": "{ms} ms 内可达，但其协议为 {theirs}，本应用为 {ours}。请更新落后的一方。",
+    "unreachable": "{url} 无响应：{error}。在 rendezvous 恢复响应前，另一网络上的设备无法通过中继配对或连接。",
+    "notRelay": "{url} 有响应，但不是 Cognia rendezvous（{error}）。请检查下方的 signaling URL。",
+    "invalidUrl": "下方的 signaling URL 不是有效的 ws:// 或 wss:// 地址。",
+    "lanes": "通道：{lanes}",
+    "lastChecked": "检测于 {time}",
+    "corsBlocked": "{url} 有响应，但此浏览器 origin 无权读取答案。已部署的 rendezvous 早于可读的健康检查端点与业务 data 通道（ADR-0170）：配对与信令可用，业务流量只能退回点对点通道。请部署当前版本的 signaling server，或改在桌面应用里检测。"
+  },
+  "mesh": {
+    "title": "Overlay 网络",
+    "description": "Tailscale 或 ZeroTier 把这台主机和任何地方的手机放进同一个私有网络，出门在外也能走普通的本地路线，且不向公网暴露任何东西。",
+    "provider": {
+      "tailscale": "Tailscale",
+      "zerotier": "ZeroTier"
+    },
+    "state": {
+      "connected": "已连接",
+      "installed": "已安装，未连接",
+      "absent": "未安装"
+    },
+    "addresses": "{count, plural, =1 {1 个地址} other {# 个地址}}，位于 {interfaces}",
+    "advertiseTitle": "对外通告 overlay 地址",
+    "advertiseDescription": "邀请码与本地路线报告将使用 {address}，而不是自动探测的局域网地址。需要伴侣服务器绑定到局域网。",
+    "advertiseLabel": "在邀请中通告 {address}",
+    "advertiseSaved": "邀请现在通告 {address}。",
+    "advertiseCleared": "邀请恢复通告自动探测的局域网地址。",
+    "advertiseStale": "邀请通告的是 {address}，但此刻没有任何网卡持有它。请启动 overlay 客户端，或停止通告。",
+    "loopbackHint": "伴侣服务器仅绑定在本机。请先在「本地主机」里切换到局域网，再通告 overlay 地址。",
+    "installHint": "在本机和设备上都装上客户端，登录同一个网络，然后回到这里：地址会出现在此处。",
+    "refresh": "刷新",
+    "openDownload": "打开 {provider} 下载页"
+  },
+  "tunnelInstall": {
+    "title": "安装 {tool}",
+    "description": "在本机执行以下任一条，然后重新检测。",
+    "descriptionOs": "在这台 {os} 上执行以下任一条，然后重新检测。",
+    "via": {
+      "homebrew": "Homebrew",
+      "winget": "winget",
+      "apt": "APT",
+      "script": "安装脚本",
+      "download": "从 {tool} 下载",
+      "appStore": "Mac App Store"
+    },
+    "copy": "复制 {via} 命令",
+    "copied": "命令已复制。",
+    "copyFailed": "无法复制命令。",
+    "open": "打开",
+    "recheck": "重新检测",
+    "checking": "检测中",
+    "os": {
+      "macos": "macOS",
+      "windows": "Windows",
+      "linux": "Linux",
+      "unknown": "电脑"
+    },
+    "tool": {
+      "cloudflared": "cloudflared",
+      "tailscale": "Tailscale",
+      "zerotier": "ZeroTier"
+    }
+  },
+  "tunnel": {
+    "installed": "{version}，位于 {path}",
+    "installedNoVersion": "位于 {path}",
+    "probing": "正在查找 cloudflared",
+    "busyTitle": "隧道正在暴露别的东西",
+    "busyBody": "本应用只运行一个 cloudflared 进程。它正为另一功能把 {localUrl} 暴露在 {publicUrl}。替换后，这个公网地址会指向别处。",
+    "busyReplace": "替换隧道",
+    "busyCancelled": "保留了现有隧道。",
+    "exposing": "正在暴露 {localUrl}",
+    "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。"
   }
 }
