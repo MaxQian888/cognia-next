@@ -2166,6 +2166,25 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Search. `kinds` is a plain string array rather than an enum: the engine
+  // filters unknown entries out, and pinning the enum here would mean a second
+  // list to keep in step with `WORKFLOW_SEARCHABLE_KINDS`.
+  "action.search.query": z.object({
+    query: requiredString("required"),
+    kinds: z.array(z.string()).optional(),
+    workspaceScope: z.enum(["current", "all"]).optional(),
+    projectId: optionalString,
+    limit: numberRange(1, 30).int().optional(),
+  }),
+  "action.search.messages": z.object({
+    query: requiredString("required"),
+    workspaceScope: z.enum(["current", "all"]).optional(),
+    projectId: optionalString,
+    roles: z.array(z.string()).optional(),
+    includeArchived: z.boolean().optional(),
+    collapseBySession: z.boolean().optional(),
+    limit: numberRange(1, 200).int().optional(),
+  }),
   // Conversations. No `delete` schema because there is no delete node.
   "action.session.create": z.object({
     title: optionalString,

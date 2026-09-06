@@ -864,6 +864,69 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Search (ADR-0129) ─────────────────────────────────────────────────────
+  "action.search.query": {
+    label: "Search everything",
+    description:
+      "Run the command palette's search over conversations, memories, workflows, issues, skills and the rest. Scoped to this run's workspace unless widened.",
+    iconName: "Search",
+    keywords: ["search", "find", "palette", "lookup", "query", "everything"],
+    paramsSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string", format: "expression", title: "Query" },
+        kinds: {
+          type: "array",
+          title: "Only these kinds",
+          items: { type: "string" },
+          description: "Empty searches every kind a graph can act on.",
+        },
+        workspaceScope: {
+          type: "string",
+          title: "Workspace scope",
+          enum: ["current", "all"],
+          default: "current",
+        },
+        projectId: { type: "string", format: "expression", title: "Workspace id" },
+        limit: { type: "integer", title: "Per-kind limit", minimum: 1, maximum: 30, default: 10 },
+      },
+    },
+  },
+  "action.search.messages": {
+    label: "Search chat history",
+    description:
+      "Search message text across conversations, with the excerpt around each hit. Says when older history was never scanned.",
+    iconName: "MessageSquareText",
+    keywords: ["search", "messages", "chat", "history", "transcript", "grep"],
+    paramsSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string", format: "expression", title: "Query" },
+        workspaceScope: {
+          type: "string",
+          title: "Workspace scope",
+          enum: ["current", "all"],
+          default: "current",
+        },
+        projectId: { type: "string", format: "expression", title: "Workspace id" },
+        roles: {
+          type: "array",
+          title: "Only these roles",
+          items: { type: "string" },
+          description: "user, assistant. Empty means any.",
+        },
+        includeArchived: { type: "boolean", title: "Include archived", default: false },
+        collapseBySession: {
+          type: "boolean",
+          title: "One hit per conversation",
+          default: false,
+        },
+        limit: { type: "integer", title: "Limit", minimum: 1, maximum: 200, default: 20 },
+      },
+    },
+  },
   // ── Conversations ─────────────────────────────────────────────────────────
   "action.session.create": {
     label: "Start conversation",

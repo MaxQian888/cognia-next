@@ -49015,6 +49015,16 @@
             "label": "List upcoming scheduled tasks"
           }
         },
+        "search": {
+          "messages": {
+            "description": "Search message text across conversations, with the excerpt around each hit. Says when older history was never scanned.",
+            "label": "Search chat history"
+          },
+          "query": {
+            "description": "Run the command palette's search over conversations, memories, workflows, issues, skills and the rest. Scoped to this run's workspace unless widened.",
+            "label": "Search everything"
+          }
+        },
         "session": {
           "appendMessage": {
             "description": "Append one message to a conversation's transcript. A user-role message does not start a turn on its own.",

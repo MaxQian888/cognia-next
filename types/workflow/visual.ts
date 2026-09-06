@@ -174,6 +174,11 @@ export type WorkflowNodeKind =
   | "action.approval.request"
   // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
   | "action.humanInput.request"
+  // Search (ADR-0129). `query` runs the same engine and providers the command
+  // palette does, through a React-free context; `messages` runs the chat
+  // history engine, which needs no context at all.
+  | "action.search.query"
+  | "action.search.messages"
   // Conversations. `create` goes through `startSeededSession` (which wraps
   // `startNewSession`) rather than `createSession`, so a conversation a
   // workflow started is the same kind of object as one a person started, and
@@ -477,6 +482,8 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.approval.request",
   "action.humanInput.request",
+  "action.search.query",
+  "action.search.messages",
   "action.session.create",
   "action.session.get",
   "action.session.list",
