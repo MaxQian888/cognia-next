@@ -312,6 +312,20 @@
         "label": "Share from phone"
       }
     },
+    "notify": {
+      "list": {
+        "description": "Read the notification centre, newest first, with the current badge counts.",
+        "label": "List notifications"
+      },
+      "resolve": {
+        "description": "Mark a notification seen, read or done, or snooze it. The lifecycle only moves forward.",
+        "label": "Resolve notification"
+      },
+      "send": {
+        "description": "Raise a notification in the centre and fan it out by the user's own preferences. Nothing waits for it. Use Request approval when the flow needs an answer.",
+        "label": "Send notification"
+      }
+    },
     "pet": {
       "interact": {
         "description": "Feed / play with / clean the desktop pet (optionally consuming a shop item by id).",

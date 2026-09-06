@@ -174,6 +174,13 @@ export type WorkflowNodeKind =
   | "action.approval.request"
   // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
   | "action.humanInput.request"
+  // Notification centre (ADR-0042). Distinct from `action.mobile.notify` (a
+  // proxy addressed at one paired device) and from the approval / human-input
+  // notifications (blocking gates carrying registered commands): these write a
+  // durable row on the executing Host that nothing waits for.
+  | "action.notify.send"
+  | "action.notify.list"
+  | "action.notify.resolve"
   // Remote device steps (ADR 0061 P3): hub-side proxy executors dispatch to
   // a capable paired device via the remote-step broker and marshal the
   // device's output back into the run.
@@ -457,6 +464,9 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.approval.request",
   "action.humanInput.request",
+  "action.notify.send",
+  "action.notify.list",
+  "action.notify.resolve",
   "action.mobile.camera",
   "action.mobile.scanBarcode",
   "action.mobile.location",

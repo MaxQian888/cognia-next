@@ -2166,6 +2166,32 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Notification centre. `source` is not authorable on send: every row these
+  // nodes write is a workflow notification, and `actions` is refused outright
+  // because an authored command that nothing registered renders a dead button.
+  "action.notify.send": z.object({
+    title: requiredString("required"),
+    body: optionalString,
+    level: z.enum(["info", "success", "warning", "error", "critical"]).optional(),
+    directed: z.boolean().optional(),
+    href: optionalString,
+    icon: optionalString,
+    groupKey: optionalString,
+    dedupeKey: optionalString,
+    ttlMs: numberRange(1000).int().optional(),
+  }),
+  "action.notify.list": z.object({
+    source: optionalString,
+    readStates: z.array(z.enum(["unseen", "seen", "read", "done"])).optional(),
+    includeDone: z.boolean().optional(),
+    hideSnoozed: z.boolean().optional(),
+    limit: numberRange(1, 200).int().optional(),
+  }),
+  "action.notify.resolve": z.object({
+    notificationId: requiredString("required"),
+    state: z.enum(["seen", "read", "done"]).optional(),
+    snoozeMs: numberRange(1000).int().optional(),
+  }),
   // Workspace filesystem. `relPath` is deliberately a plain string here: an
   // absolute or `..`-prefixed path is rejected by name at run time
   // (`nodes/files/root.ts`) and by the Host's canonicalisation regardless, and

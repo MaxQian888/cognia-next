@@ -864,6 +864,114 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Notification centre (ADR-0042) ────────────────────────────────────────
+  "action.notify.send": {
+    label: "Send notification",
+    description:
+      "Raise a notification in the centre and fan it out by the user's own preferences. Nothing waits for it. Use Request approval when the flow needs an answer.",
+    iconName: "Bell",
+    keywords: ["notify", "notification", "alert", "toast", "tell", "inform", "push"],
+    paramsSchema: {
+      type: "object",
+      required: ["title"],
+      properties: {
+        title: { type: "string", format: "expression", title: "Title" },
+        body: { type: "string", format: "expression", title: "Body" },
+        level: {
+          type: "string",
+          title: "Level",
+          enum: ["info", "success", "warning", "error", "critical"],
+          default: "info",
+        },
+        directed: {
+          type: "boolean",
+          title: "Needs attention",
+          description: "Counts toward the red badge instead of the ambient dot.",
+          default: false,
+        },
+        href: {
+          type: "string",
+          format: "expression",
+          title: "Open on click",
+          description: "An in-app route such as /agent-runs.",
+        },
+        icon: { type: "string", title: "Lucide icon name" },
+        groupKey: {
+          type: "string",
+          format: "expression",
+          title: "Group key",
+          description: "Defaults to this workflow, so its notifications stack together.",
+        },
+        dedupeKey: {
+          type: "string",
+          format: "expression",
+          title: "Dedupe key",
+          description: "Defaults to this run and step, so a retry bumps rather than duplicates.",
+        },
+        ttlMs: { type: "integer", title: "Auto-expire after (ms)", minimum: 1000 },
+      },
+    },
+  },
+  "action.notify.list": {
+    label: "List notifications",
+    description: "Read the notification centre, newest first, with the current badge counts.",
+    iconName: "Inbox",
+    keywords: ["notify", "notification", "list", "inbox", "unread", "badge"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          title: "Only this source",
+          enum: [
+            "scheduler",
+            "agent-team",
+            "plugin",
+            "connector",
+            "session",
+            "workflow",
+            "system",
+            "issue",
+          ],
+        },
+        readStates: {
+          type: "array",
+          title: "Read states",
+          items: { type: "string" },
+          description: "unseen, seen, read or done. Empty means every state except done.",
+        },
+        includeDone: { type: "boolean", title: "Include archived", default: false },
+        hideSnoozed: { type: "boolean", title: "Hide snoozed", default: true },
+        limit: { type: "integer", title: "Limit", minimum: 1, maximum: 200, default: 20 },
+      },
+    },
+  },
+  "action.notify.resolve": {
+    label: "Resolve notification",
+    description:
+      "Mark a notification seen, read or done, or snooze it. The lifecycle only moves forward.",
+    iconName: "BellOff",
+    keywords: ["notify", "notification", "read", "seen", "done", "archive", "snooze", "dismiss"],
+    paramsSchema: {
+      type: "object",
+      required: ["notificationId"],
+      properties: {
+        notificationId: { type: "string", format: "expression", title: "Notification id" },
+        state: {
+          type: "string",
+          title: "Mark as",
+          enum: ["seen", "read", "done"],
+          default: "read",
+        },
+        snoozeMs: {
+          type: "integer",
+          title: "Snooze for (ms)",
+          minimum: 1000,
+          description: "When set, snoozes instead of changing the read state.",
+        },
+      },
+    },
+  },
   // ── Workspace filesystem ──────────────────────────────────────────────────
   "action.fs.read": {
     label: "Read file",
