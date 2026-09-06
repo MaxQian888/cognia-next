@@ -146,6 +146,11 @@ pub struct HostBinding {
     pub user_id: Option<String>,
     /// The `org_…` that sign-in was scoped to, when the token carried one.
     pub org_id: Option<String>,
+    /// The collaboration server's own id for the same person, when the
+    /// renderer reported one. Unverified alias: ownership decisions read
+    /// `user_id`, the console and the roster read this.
+    pub canonical_user_id: Option<String>,
+    pub canonical_org_id: Option<String>,
 }
 
 impl HostBinding {
@@ -157,6 +162,8 @@ impl HostBinding {
             pair_host_id: row.get(3)?,
             user_id: row.get(4)?,
             org_id: row.get(5)?,
+            canonical_user_id: row.get(6)?,
+            canonical_org_id: row.get(7)?,
         })
     }
 }
@@ -1745,7 +1752,7 @@ impl SecurityStore {
             .lock()
             .query_row(
                 "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id,
-                        user_id, org_id
+                        user_id, org_id, canonical_user_id, canonical_org_id
                  FROM host_bindings WHERE local_account_namespace = ?1",
                 [local_account_namespace],
                 HostBinding::from_row,
@@ -1783,7 +1790,7 @@ impl SecurityStore {
         let existing: Option<HostBinding> = tx
             .query_row(
                 "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id,
-                        user_id, org_id
+                        user_id, org_id, canonical_user_id, canonical_org_id
                  FROM host_bindings WHERE local_account_namespace = ?1",
                 [local_account_namespace],
                 HostBinding::from_row,
@@ -1816,53 +1823,75 @@ impl SecurityStore {
         }
 
         // Adopt the unclaimed legacy bucket, tenant and all.
-        let unclaimed: Option<(String, Option<String>, Option<String>)> = tx
+        type Unclaimed = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let unclaimed: Option<Unclaimed> = tx
             .query_row(
-                "SELECT tenant_id, user_id, org_id
+                "SELECT tenant_id, user_id, org_id, canonical_user_id, canonical_org_id
                  FROM host_bindings WHERE local_account_namespace = ?1",
                 [LOCAL_NAMESPACE_UNBOUND],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()?;
 
-        let binding = if let Some((tenant_id, user_id, org_id)) = unclaimed {
-            tx.execute(
-                "UPDATE host_bindings
+        let binding =
+            if let Some((tenant_id, user_id, org_id, canonical_user_id, canonical_org_id)) =
+                unclaimed
+            {
+                tx.execute(
+                    "UPDATE host_bindings
                  SET local_account_namespace = ?1, verifier_digest = ?2, updated_at = ?3
                  WHERE local_account_namespace = ?4",
-                params![
-                    local_account_namespace,
-                    verifier_digest,
-                    now,
-                    LOCAL_NAMESPACE_UNBOUND
-                ],
-            )?;
-            HostBinding {
-                local_account_namespace: local_account_namespace.to_string(),
-                tenant_id,
-                verifier_digest: verifier_digest.map(str::to_string),
-                pair_host_id: None,
-                user_id,
-                org_id,
-            }
-        } else {
-            let tenant_id = mint_tenant_id();
-            tx.execute(
-                "INSERT INTO host_bindings
+                    params![
+                        local_account_namespace,
+                        verifier_digest,
+                        now,
+                        LOCAL_NAMESPACE_UNBOUND
+                    ],
+                )?;
+                HostBinding {
+                    local_account_namespace: local_account_namespace.to_string(),
+                    tenant_id,
+                    verifier_digest: verifier_digest.map(str::to_string),
+                    pair_host_id: None,
+                    user_id,
+                    org_id,
+                    canonical_user_id,
+                    canonical_org_id,
+                }
+            } else {
+                let tenant_id = mint_tenant_id();
+                tx.execute(
+                    "INSERT INTO host_bindings
                  (local_account_namespace, tenant_id, verifier_digest, bound_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?4)",
-                params![local_account_namespace, tenant_id, verifier_digest, now],
-            )?;
-            HostBinding {
-                local_account_namespace: local_account_namespace.to_string(),
-                tenant_id,
-                verifier_digest: verifier_digest.map(str::to_string),
-                pair_host_id: None,
-                // A brand-new row: nobody has signed into this profile yet.
-                user_id: None,
-                org_id: None,
-            }
-        };
+                    params![local_account_namespace, tenant_id, verifier_digest, now],
+                )?;
+                HostBinding {
+                    local_account_namespace: local_account_namespace.to_string(),
+                    tenant_id,
+                    verifier_digest: verifier_digest.map(str::to_string),
+                    pair_host_id: None,
+                    // A brand-new row: nobody has signed into this profile yet.
+                    user_id: None,
+                    org_id: None,
+                    canonical_user_id: None,
+                    canonical_org_id: None,
+                }
+            };
         tx.commit()?;
         Ok(binding)
     }
@@ -1902,12 +1931,22 @@ impl SecurityStore {
         local_account_namespace: &str,
         user_id: &str,
         org_id: Option<&str>,
+        canonical_user_id: Option<&str>,
+        canonical_org_id: Option<&str>,
         now: i64,
     ) -> Result<(), SecurityStoreError> {
         let changed = self.conn.lock().execute(
-            "UPDATE host_bindings SET user_id = ?1, org_id = ?2, updated_at = ?3
-             WHERE local_account_namespace = ?4",
-            params![user_id, org_id, now, local_account_namespace],
+            "UPDATE host_bindings SET user_id = ?1, org_id = ?2,
+                 canonical_user_id = ?3, canonical_org_id = ?4, updated_at = ?5
+             WHERE local_account_namespace = ?6",
+            params![
+                user_id,
+                org_id,
+                canonical_user_id,
+                canonical_org_id,
+                now,
+                local_account_namespace
+            ],
         )?;
         if changed == 0 {
             return Err(SecurityStoreError::HostBindingMismatch);
@@ -1925,7 +1964,8 @@ impl SecurityStore {
         now: i64,
     ) -> Result<(), SecurityStoreError> {
         self.conn.lock().execute(
-            "UPDATE host_bindings SET user_id = NULL, org_id = NULL, updated_at = ?1
+            "UPDATE host_bindings SET user_id = NULL, org_id = NULL,
+                 canonical_user_id = NULL, canonical_org_id = NULL, updated_at = ?1
              WHERE local_account_namespace = ?2",
             params![now, local_account_namespace],
         )?;
@@ -2594,6 +2634,7 @@ const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 /// account unlock has something to adopt.
 const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
 const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
+const MIGRATION_HOST_BINDING_CANONICAL: &str = "host-binding-canonical-v1";
 const MIGRATION_DEVICE_USER: &str = "device-user-v1";
 const MIGRATION_DEVICE_QUARANTINE: &str = "device-quarantine-v1";
 const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
@@ -2686,6 +2727,7 @@ fn apply_schema_migrations(
     migrate_device_status_suspended(conn, now, backup_target)?;
     migrate_host_binding_legacy(conn, now)?;
     migrate_host_binding_person(conn, now)?;
+    migrate_host_binding_canonical(conn, now)?;
     migrate_device_user(conn, now)?;
     migrate_device_quarantine(conn, now, backup_target)?;
     migrate_client_plane_grants(conn, now)?;
@@ -2859,6 +2901,41 @@ fn migrate_host_binding_person(conn: &mut Connection, now: i64) -> Result<(), Se
         }
     }
     mark_migration(&tx, MIGRATION_HOST_BINDING_PERSON, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Give `host_bindings` the server-assigned aliases of the person.
+///
+/// A sign-in that reaches the collaboration server is rebound to the ids the
+/// server chose (`lib/identity/reconcile-user-id.ts`), while the host can only
+/// verify the derived ones. Without the alias, the device console named a
+/// person by one id and the roster by another. Nullable, never backfilled,
+/// never consulted for a permission: `OWNER_PREDICATE_SQL` reads `user_id`.
+fn migrate_host_binding_canonical(
+    conn: &mut Connection,
+    now: i64,
+) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_HOST_BINDING_CANONICAL)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for column in ["canonical_user_id", "canonical_org_id"] {
+        let present: bool = {
+            let mut statement = tx.prepare("PRAGMA table_info('host_bindings')")?;
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            names.iter().any(|name| name == column)
+        };
+        if !present {
+            tx.execute(
+                &format!("ALTER TABLE host_bindings ADD COLUMN {column} TEXT"),
+                [],
+            )?;
+        }
+    }
+    mark_migration(&tx, MIGRATION_HOST_BINDING_CANONICAL, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -3670,6 +3747,84 @@ CREATE TABLE devices (
     }
 
     #[test]
+    fn the_canonical_alias_columns_are_added_once_and_never_backfilled() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE security_migrations (key TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
+             CREATE TABLE host_bindings (
+                 local_account_namespace TEXT PRIMARY KEY,
+                 tenant_id TEXT NOT NULL UNIQUE,
+                 verifier_digest TEXT,
+                 pair_host_id TEXT,
+                 user_id TEXT,
+                 org_id TEXT,
+                 bound_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             INSERT INTO host_bindings
+                 (local_account_namespace, tenant_id, user_id, bound_at, updated_at)
+             VALUES ('acct_old', 'tnt_old', 'usr_ada', 1, 1);",
+        )
+        .unwrap();
+
+        migrate_host_binding_canonical(&mut conn, 300).unwrap();
+        let columns: Vec<String> = {
+            let mut statement = conn.prepare("PRAGMA table_info('host_bindings')").unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(columns.iter().any(|name| name == "canonical_user_id"));
+        assert!(columns.iter().any(|name| name == "canonical_org_id"));
+        let alias: Option<String> = conn
+            .query_row(
+                "SELECT canonical_user_id FROM host_bindings WHERE local_account_namespace = 'acct_old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(alias, None);
+        migrate_host_binding_canonical(&mut conn, 301).unwrap();
+        assert!(migration_applied(&conn, MIGRATION_HOST_BINDING_CANONICAL).unwrap());
+    }
+
+    #[test]
+    fn binding_a_person_records_the_aliases_and_signing_out_clears_them() {
+        let store = SecurityStore::in_memory().unwrap();
+        store.bind_host_account("acct_a", None, 10).unwrap();
+        store
+            .bind_host_person(
+                "acct_a",
+                "usr_derived0000000000000000",
+                Some("org_derived00000000000000000"),
+                Some("usr_canonical00000000000000"),
+                Some("org_canonical0000000000000"),
+                11,
+            )
+            .unwrap();
+        let binding = store.host_binding("acct_a").unwrap().unwrap();
+        assert_eq!(
+            binding.user_id.as_deref(),
+            Some("usr_derived0000000000000000")
+        );
+        assert_eq!(
+            binding.canonical_user_id.as_deref(),
+            Some("usr_canonical00000000000000")
+        );
+        assert_eq!(
+            binding.canonical_org_id.as_deref(),
+            Some("org_canonical0000000000000")
+        );
+        store.clear_host_person("acct_a", 12).unwrap();
+        let binding = store.host_binding("acct_a").unwrap().unwrap();
+        assert_eq!(binding.user_id, None);
+        assert_eq!(binding.canonical_user_id, None);
+        assert_eq!(binding.canonical_org_id, None);
+    }
+
+    #[test]
     fn a_fresh_database_already_carries_the_person_columns() {
         let store = SecurityStore::in_memory().unwrap();
         let conn = store.conn.lock();
@@ -3691,7 +3846,7 @@ CREATE TABLE devices (
     fn a_person_cannot_be_recorded_against_an_unknown_profile() {
         let store = SecurityStore::in_memory().unwrap();
         let error = store
-            .bind_host_person("acct_never_bound", "usr_ada", None, 100)
+            .bind_host_person("acct_never_bound", "usr_ada", None, None, None, 100)
             .unwrap_err();
         assert!(matches!(error, SecurityStoreError::HostBindingMismatch));
     }
@@ -4187,7 +4342,9 @@ CREATE TABLE devices (
         let store = SecurityStore::in_memory().unwrap();
         store.bind_host_account("acct_a", None, 90).unwrap();
         let tenant = store.host_binding("acct_a").unwrap().unwrap().tenant_id;
-        store.bind_host_person("acct_a", ADA, None, 95).unwrap();
+        store
+            .bind_host_person("acct_a", ADA, None, None, None, 95)
+            .unwrap();
 
         register(&store, &tenant, "device-a", 100);
         assert_eq!(
@@ -4290,7 +4447,9 @@ CREATE TABLE devices (
     /// A host bound to `person`; returns the tenant its devices live under.
     fn host_bound_to(store: &SecurityStore, person: &str) -> String {
         let tenant = host_with_no_person(store);
-        store.bind_host_person("acct_a", person, None, 95).unwrap();
+        store
+            .bind_host_person("acct_a", person, None, None, None, 95)
+            .unwrap();
         tenant
     }
 
@@ -4355,7 +4514,9 @@ CREATE TABLE devices (
             .unwrap());
 
         // ...and then somebody signs in, which claims it.
-        store.bind_host_person("acct_a", ADA, None, 110).unwrap();
+        store
+            .bind_host_person("acct_a", ADA, None, None, None, 110)
+            .unwrap();
         assert_eq!(store.adopt_unowned_devices(&tenant, ADA, 120).unwrap(), 1);
         assert_eq!(
             device_user(&store, &tenant, "device-a"),
@@ -4386,7 +4547,9 @@ CREATE TABLE devices (
             .unwrap());
 
         // Ada signs in on this host; Bob's device is now a stranger's.
-        store.bind_host_person("acct_a", ADA, None, 120).unwrap();
+        store
+            .bind_host_person("acct_a", ADA, None, None, None, 120)
+            .unwrap();
         assert!(!store
             .has_capability(&tenant, "device-a", "host.admin")
             .unwrap());
@@ -4434,7 +4597,9 @@ CREATE TABLE devices (
 
         for (host_person, device_person) in cases {
             match host_person {
-                Some(person) => store.bind_host_person("acct_a", person, None, 110).unwrap(),
+                Some(person) => store
+                    .bind_host_person("acct_a", person, None, None, None, 110)
+                    .unwrap(),
                 None => store.clear_host_person("acct_a", 110).unwrap(),
             }
             store

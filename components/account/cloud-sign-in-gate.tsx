@@ -45,6 +45,7 @@ import { CollabError, type CollabAccountMembership } from "@/lib/collab/client"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import { UserBindingError } from "@/lib/identity/user-binding"
+import { configureHostDeployment } from "@/lib/identity/host-person"
 import {
   discoverDeployment,
   type DeploymentDiscovery,
@@ -81,6 +82,8 @@ export interface CloudSignInGateDeps {
   claim?: typeof claimDeployment
   redeem?: typeof redeemInvitation
   signOut?: (localAccountId: string) => Promise<void>
+  /** Point the desktop host at the deployment. Defaults to the Tauri command. */
+  configureHost?: typeof configureHostDeployment
   profile?: HostProfile
   /** Whether this is the Capacitor shell. Defaults to the runtime detector. */
   isCapacitor?: () => boolean
@@ -271,6 +274,21 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
           return
         }
         deploymentRef.current = discovery
+        if ((depsRef.current.profile ?? detectHostProfile()) === "desktop") {
+          // The host verifies every sign-in against a trust anchor of its own.
+          // A desktop has no environment to read one from, so it is pointed at
+          // the same gateway the renderer just discovered, and fetches the
+          // issuer from there itself. Best-effort: a host that refuses (locked,
+          // or a companion server that never ran) leaves sign-in usable and
+          // only the device attribution undone.
+          void (depsRef.current.configureHost ?? configureHostDeployment)({
+            gatewayUrl: discovery.baseUrl,
+            ...(discovery.fingerprint ? { fingerprint: discovery.fingerprint } : {}),
+            replace: true,
+          }).catch((cause: unknown) => {
+            console.warn("[identity] the host could not be pointed at the deployment", cause)
+          })
+        }
         const state = await (
           depsRef.current.readState ??
           ((id: string) => readCloudSessionState({ localAccountId: id }))

@@ -13,6 +13,7 @@ description = "Enables every application-defined Tauri command for trusted local
 commands.allow = [
   "a2ui_bridge_runtime_paths",
   "account_bind_person",
+  "account_clear_cloud_deployment",
   "account_password_create_verifier",
   "account_password_rotate",
   "account_password_verify",
@@ -20,6 +21,7 @@ commands.allow = [
   "account_quick_unlock_clear",
   "account_quick_unlock_create_verifier",
   "account_quick_unlock_verify",
+  "account_set_cloud_deployment",
   "account_unbind_local",
   "account_unbind_person",
   "acp_terminal_create",
@@ -728,6 +730,7 @@ commands.allow = [
   "plugin_window_unmaximize",
   "plugin_workspace_repo_dir",
   "plugin_workspace_repo_remove",
+  "power_screen_holds_set",
   "preview_local_manifest",
   "project_environment_execute",
   "provider_diagnostics_clear_balance_token",

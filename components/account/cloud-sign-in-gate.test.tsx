@@ -380,6 +380,30 @@ describe("CloudSignInGate", () => {
     expect(discover).toHaveBeenCalledTimes(3)
   })
 
+  it("on the desktop, points the host at the discovered deployment before asking", async () => {
+    const configureHost = jest.fn(async () => null)
+    renderGate(
+      deps({
+        profile: "desktop",
+        configureHost,
+        discover: jest.fn(async () => ({ ...deployment, fingerprint: "ab".repeat(32) })),
+      })
+    )
+    expect(await screen.findByTestId("cloud-sign-in")).toBeInTheDocument()
+    expect(configureHost).toHaveBeenCalledWith({
+      gatewayUrl: "https://host.example",
+      fingerprint: "ab".repeat(32),
+      replace: true,
+    })
+  })
+
+  it("does not touch a host on a browser or a phone", async () => {
+    const configureHost = jest.fn(async () => null)
+    renderGate(deps({ profile: "cloud-companion", configureHost }))
+    expect(await screen.findByTestId("cloud-sign-in")).toBeInTheDocument()
+    expect(configureHost).not.toHaveBeenCalled()
+  })
+
   it("forgets the tab's offline choice on request", () => {
     sessionStorage.setItem(`${CLOUD_OFFLINE_KEY_PREFIX}.acct_a`, "1")
     expect(hasChosenOffline("acct_a")).toBe(true)

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
+pub mod cloud_deployment;
+
 const ALGORITHM: &str = "argon2id-v1";
 const SALT_LEN: usize = 16;
 const OUTPUT_LEN: usize = 32;
@@ -46,11 +48,15 @@ pub struct AccountSecuritySession {
     active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
     throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
     throttle_path: Option<PathBuf>,
+    /// Where the cloud deployment record lives (`cloud_deployment`).
+    data_dir: Option<PathBuf>,
 }
 
 impl AccountSecuritySession {
     pub fn new(data_dir: Option<PathBuf>) -> Self {
-        let throttle_path = data_dir.map(|dir| dir.join("cognia").join("account-throttle.json"));
+        let throttle_path = data_dir
+            .as_ref()
+            .map(|dir| dir.join("cognia").join("account-throttle.json"));
         let throttle = throttle_path
             .as_ref()
             .and_then(|path| std::fs::read(path).ok())
@@ -60,7 +66,12 @@ impl AccountSecuritySession {
             active: parking_lot::RwLock::new(None),
             throttle: parking_lot::Mutex::new(throttle),
             throttle_path,
+            data_dir,
         }
+    }
+
+    fn data_dir(&self) -> Option<&std::path::Path> {
+        self.data_dir.as_deref()
     }
 
     fn activate(&self, account_id: &str, verifier_digest: String) {
@@ -448,16 +459,25 @@ fn account_password_rotate_inner(
 /// A host with no security database (no companion server has ever run here) is
 /// a normal desktop state, so it is reported as success with nothing recorded,
 /// exactly as `bind_host_to_account` treats it.
+///
+/// `user_id` / `org_id` are the ids DERIVED from the token (issuer + subject),
+/// which the host recomputes and compares. `canonical_user_id` /
+/// `canonical_org_id` are the ids the collaboration server assigned, which the
+/// host cannot verify and stores as aliases only: the device console and the
+/// roster name the same person with them, and nothing on the host trusts them.
 #[tauri::command]
 pub async fn account_bind_person(
     security_session: tauri::State<'_, AccountSecuritySession>,
     access_token: String,
     user_id: String,
     org_id: Option<String>,
+    canonical_user_id: Option<String>,
+    canonical_org_id: Option<String>,
 ) -> Result<(), String> {
     use crate::companion_api::host_identity::{
         adopt_unowned_devices, bind_person, HostIdentityError,
     };
+    use cognia_tenant_auth::{OrgId, UserId};
 
     let active = security_session.require_active()?;
     // The trust anchor is HOST configuration, never an IPC argument.
@@ -470,14 +490,17 @@ pub async fn account_bind_person(
     // issuer, so the check compared an attacker's value against itself. It was
     // also an SSRF primitive: the host fetched any URL named over IPC.
     //
-    // `from_env()` reads COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_AUDIENCE and is
-    // `None` on a host with no identity provider configured — an unconfigured
-    // host must refuse to bind a person, not accept one on the caller's word.
-    let verifier = crate::companion_api::oidc::OidcAuthenticator::from_env().ok_or_else(|| {
-        "this host is not configured for Logto sign-in (COGNIA_LOGTO_ISSUER / \
-         COGNIA_LOGTO_AUDIENCE are unset)"
-            .to_owned()
-    })?;
+    // The environment (COGNIA_LOGTO_ISSUER / COGNIA_LOGTO_AUDIENCE) wins on a
+    // headless host. A desktop has no such environment and uses the deployment
+    // record `account_set_cloud_deployment` fetched itself. Neither configured
+    // means the host refuses to bind a person rather than take the caller's
+    // word for one.
+    let verifier =
+        cloud_deployment::resolve_verifier(security_session.data_dir()).ok_or_else(|| {
+            "this host is not configured for Logto sign-in (no COGNIA_LOGTO_ISSUER / \
+             COGNIA_LOGTO_AUDIENCE, and no cloud deployment has been chosen)"
+                .to_owned()
+        })?;
     let issuer = verifier.issuer().to_owned();
     let claims = verifier
         .authenticate(&access_token)
@@ -491,8 +514,31 @@ pub async fn account_bind_person(
     if user_id != expected_user_id || org_id != expected_org_id {
         return Err("the requested person does not match the verified Logto token".into());
     }
+    // Shape only. These are unverified by construction (see the doc comment).
+    let canonical_user_id = canonical_user_id
+        .filter(|value| value != &user_id)
+        .map(|value| {
+            UserId::parse(value.as_str())
+                .map(|parsed| parsed.as_str().to_owned())
+                .map_err(|error| format!("canonical user id: {error}"))
+        })
+        .transpose()?;
+    let canonical_org_id = canonical_org_id
+        .filter(|value| org_id.as_deref() != Some(value.as_str()))
+        .map(|value| {
+            OrgId::parse(value.as_str())
+                .map(|parsed| parsed.as_str().to_owned())
+                .map_err(|error| format!("canonical org id: {error}"))
+        })
+        .transpose()?;
 
-    match bind_person(&active.account_id, &user_id, org_id.as_deref()) {
+    match bind_person(
+        &active.account_id,
+        &user_id,
+        org_id.as_deref(),
+        canonical_user_id.as_deref(),
+        canonical_org_id.as_deref(),
+    ) {
         Ok(()) => {
             // ADR-0149 §5 step one: the devices on this profile that nobody has
             // claimed belong to whoever just proved they hold it. Best-effort —
@@ -541,6 +587,64 @@ pub fn account_person(
         Err(HostIdentityError::StoreUnavailable) | Err(HostIdentityError::Unbound) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// Point this host at a cloud deployment: fetch its `/api/auth/config` from
+/// here, keep the issuer and audience it announced, and verify every later
+/// sign-in against them.
+///
+/// Refused on a headless host (its environment is the anchor, and a renderer
+/// must not be able to swap it), while the profile is locked, and when a
+/// record already exists unless `replace` is set. The renderer's own copy of
+/// the configuration is never consulted: it is an argument, not a fact.
+#[tauri::command]
+pub async fn account_set_cloud_deployment(
+    security_session: tauri::State<'_, AccountSecuritySession>,
+    gateway_url: String,
+    fingerprint: Option<String>,
+    replace: bool,
+) -> Result<cloud_deployment::CloudDeploymentConfig, String> {
+    security_session.require_active()?;
+    if crate::companion_api::oidc::OidcAuthenticator::from_env().is_some() {
+        return Err(
+            "this host takes its identity provider from the environment; the cloud \
+             deployment cannot be changed here"
+                .into(),
+        );
+    }
+    let gateway_url = cloud_deployment::validate_gateway_url(&gateway_url, cfg!(debug_assertions))?;
+    let fingerprint = cloud_deployment::normalize_fingerprint(fingerprint.as_deref())?;
+    let data_dir = security_session.data_dir();
+    if let Some(existing) = cloud_deployment::load(data_dir) {
+        let same = existing.gateway_url == gateway_url && existing.fingerprint == fingerprint;
+        if !replace && !same {
+            return Err(format!(
+                "this host already trusts {}; forget it first or replace it explicitly",
+                existing.gateway_url
+            ));
+        }
+    }
+    let remote = cloud_deployment::fetch_auth_config(&gateway_url, fingerprint.as_deref()).await?;
+    let config =
+        cloud_deployment::config_from_remote(gateway_url, fingerprint, remote, unix_time_secs())?;
+    cloud_deployment::save(data_dir, &config)?;
+    log::info!(
+        "cloud deployment recorded: gateway={} issuer={}",
+        config.gateway_url,
+        config.issuer
+    );
+    Ok(config)
+}
+
+/// Forget the cloud deployment. Bindings already recorded stay as they are.
+#[tauri::command]
+pub fn account_clear_cloud_deployment(
+    security_session: tauri::State<'_, AccountSecuritySession>,
+) -> Result<(), String> {
+    security_session.require_active()?;
+    cloud_deployment::clear(security_session.data_dir())?;
+    log::info!("cloud deployment forgotten");
+    Ok(())
 }
 
 fn bind_host_to_account(

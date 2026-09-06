@@ -202,6 +202,10 @@ pub struct HostPerson {
     pub local_account_namespace: String,
     pub user_id: Option<String>,
     pub org_id: Option<String>,
+    /// The server-assigned alias of `user_id`, when one was reported. Never
+    /// verified by the host: it is what the roster calls the same person.
+    pub canonical_user_id: Option<String>,
+    pub canonical_org_id: Option<String>,
 }
 
 /// Record the person a profile belongs to after a completed sign-in (ADR-0149).
@@ -215,6 +219,8 @@ pub fn bind_person(
     local_account_namespace: &str,
     user_id: &str,
     org_id: Option<&str>,
+    canonical_user_id: Option<&str>,
+    canonical_org_id: Option<&str>,
 ) -> Result<(), HostIdentityError> {
     if local_account_namespace.trim().is_empty() {
         return Err(HostIdentityError::Unbound);
@@ -230,6 +236,20 @@ pub fn bind_person(
                 .map_err(|error| HostIdentityError::MalformedId(format!("org id: {error}")))
         })
         .transpose()?;
+    let canonical_user_id = canonical_user_id
+        .map(|value| {
+            UserId::parse(value).map_err(|error| {
+                HostIdentityError::MalformedId(format!("canonical user id: {error}"))
+            })
+        })
+        .transpose()?;
+    let canonical_org_id = canonical_org_id
+        .map(|value| {
+            OrgId::parse(value).map_err(|error| {
+                HostIdentityError::MalformedId(format!("canonical org id: {error}"))
+            })
+        })
+        .transpose()?;
 
     let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
     store
@@ -237,6 +257,8 @@ pub fn bind_person(
             local_account_namespace,
             user_id.as_str(),
             org_id.as_ref().map(OrgId::as_str),
+            canonical_user_id.as_ref().map(UserId::as_str),
+            canonical_org_id.as_ref().map(OrgId::as_str),
             unix_time_secs(),
         )
         .map_err(|error| match error {
@@ -296,6 +318,8 @@ pub fn person(local_account_namespace: &str) -> Result<HostPerson, HostIdentityE
         local_account_namespace: binding.local_account_namespace,
         user_id: binding.user_id,
         org_id: binding.org_id,
+        canonical_user_id: binding.canonical_user_id,
+        canonical_org_id: binding.canonical_org_id,
     })
 }
 
@@ -397,7 +421,7 @@ mod tests {
         install();
         let before = bind_local_account("acct_deadbeef", "digest-a").unwrap();
 
-        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme"), None, None).unwrap();
 
         let found = person("acct_deadbeef").unwrap();
         assert_eq!(found.user_id.as_deref(), Some("usr_ada"));
@@ -412,7 +436,7 @@ mod tests {
         install();
         bind_local_account("acct_deadbeef", "digest-a").unwrap();
 
-        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", None, None, None).unwrap();
         let found = person("acct_deadbeef").unwrap();
         assert_eq!(found.user_id.as_deref(), Some("usr_ada"));
         assert_eq!(found.org_id, None);
@@ -423,7 +447,7 @@ mod tests {
         let _scope = store_scope();
         install();
         let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
-        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme"), None, None).unwrap();
 
         unbind_person("acct_deadbeef").unwrap();
 
@@ -439,7 +463,7 @@ mod tests {
         let _scope = store_scope();
         install();
 
-        let error = bind_person("acct_never_unlocked", "usr_ada", None).unwrap_err();
+        let error = bind_person("acct_never_unlocked", "usr_ada", None, None, None).unwrap_err();
         assert!(matches!(error, HostIdentityError::BindingMismatch));
         assert!(matches!(
             person("acct_never_unlocked").unwrap_err(),
@@ -454,11 +478,11 @@ mod tests {
         bind_local_account("acct_deadbeef", "digest-a").unwrap();
 
         assert!(matches!(
-            bind_person("", "usr_ada", None).unwrap_err(),
+            bind_person("", "usr_ada", None, None, None).unwrap_err(),
             HostIdentityError::Unbound
         ));
         assert!(matches!(
-            bind_person("acct_deadbeef", "   ", None).unwrap_err(),
+            bind_person("acct_deadbeef", "   ", None, None, None).unwrap_err(),
             HostIdentityError::MalformedId(_)
         ));
         assert_eq!(person("acct_deadbeef").unwrap().user_id, None);
@@ -498,7 +522,7 @@ mod tests {
             None
         );
 
-        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", None, None, None).unwrap();
         assert_eq!(adopt_unowned_devices("acct_deadbeef").unwrap(), 1);
         assert_eq!(
             store
@@ -546,7 +570,7 @@ mod tests {
                 100,
             )
             .unwrap();
-        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", None, None, None).unwrap();
         adopt_unowned_devices("acct_deadbeef").unwrap();
 
         unbind_person("acct_deadbeef").unwrap();
@@ -573,7 +597,7 @@ mod tests {
         for junk in ["undefined", "null", "acct_deadbeef", "usr_", "{}"] {
             assert!(
                 matches!(
-                    bind_person("acct_deadbeef", junk, None),
+                    bind_person("acct_deadbeef", junk, None, None, None),
                     Err(HostIdentityError::MalformedId(_))
                 ),
                 "accepted user id {junk:?}"
@@ -581,12 +605,12 @@ mod tests {
         }
         // An org id in the user slot is a wiring bug, not a coercible value.
         assert!(matches!(
-            bind_person("acct_deadbeef", "org_acme", None),
+            bind_person("acct_deadbeef", "org_acme", None, None, None),
             Err(HostIdentityError::MalformedId(_))
         ));
         // And the same standard applies to the org slot.
         assert!(matches!(
-            bind_person("acct_deadbeef", "usr_ada", Some("acme")),
+            bind_person("acct_deadbeef", "usr_ada", Some("acme"), None, None),
             Err(HostIdentityError::MalformedId(_))
         ));
 
@@ -603,7 +627,7 @@ mod tests {
         install_security_store(None);
 
         assert!(matches!(
-            bind_person("acct_deadbeef", "nonsense", None),
+            bind_person("acct_deadbeef", "nonsense", None, None, None),
             Err(HostIdentityError::MalformedId(_))
         ));
     }
@@ -616,8 +640,8 @@ mod tests {
 
         // The renderer owns the refusal (a profile bound to another person is
         // a `UserBindingError` there); the host records whatever survived it.
-        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
-        bind_person("acct_deadbeef", "usr_bob", None).unwrap();
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme"), None, None).unwrap();
+        bind_person("acct_deadbeef", "usr_bob", None, None, None).unwrap();
 
         let found = person("acct_deadbeef").unwrap();
         assert_eq!(found.user_id.as_deref(), Some("usr_bob"));
@@ -776,5 +800,43 @@ mod tests {
             Some(restored) => unsafe { std::env::set_var(key, restored) },
             None => unsafe { std::env::remove_var(key) },
         }
+    }
+
+    #[test]
+    fn the_canonical_aliases_ride_along_and_are_shape_checked() {
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+        bind_person(
+            "acct_deadbeef",
+            "usr_ada",
+            Some("org_acme"),
+            Some("usr_server_side"),
+            Some("org_server_side"),
+        )
+        .unwrap();
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.user_id.as_deref(), Some("usr_ada"));
+        assert_eq!(found.canonical_user_id.as_deref(), Some("usr_server_side"));
+        assert_eq!(found.canonical_org_id.as_deref(), Some("org_server_side"));
+
+        assert!(matches!(
+            bind_person("acct_deadbeef", "usr_ada", None, Some("nonsense"), None),
+            Err(HostIdentityError::MalformedId(_))
+        ));
+        assert!(matches!(
+            bind_person(
+                "acct_deadbeef",
+                "usr_ada",
+                None,
+                None,
+                Some("usr_not_an_org")
+            ),
+            Err(HostIdentityError::MalformedId(_))
+        ));
+
+        unbind_person("acct_deadbeef").unwrap();
+        let cleared = person("acct_deadbeef").unwrap();
+        assert_eq!(cleared.canonical_user_id, None);
     }
 }

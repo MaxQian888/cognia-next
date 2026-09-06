@@ -21,7 +21,7 @@ function session(access: Record<string, unknown> = {}): LogtoSession {
     issuer: ISSUER,
     clientId: "app_1",
     resource: "https://api.cognia.local",
-    accessToken: token({ sub: "logto_ada", ...access }),
+    accessToken: token({ iss: ISSUER, sub: "logto_ada", ...access }),
     scopes: [],
   }
 }
@@ -58,10 +58,14 @@ describe("completeSignIn", () => {
 
     expect(await registry.get("acct_alpha")).toMatchObject({ userId: identity.user.id })
     expect(seen).toHaveLength(1)
+    // A first sign-in binds the derived ids, so the host gets them as the
+    // verifiable pair and no aliases.
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
       accessToken: signedIn.accessToken,
       userId: identity.user.id,
       orgId: identity.org!.id,
+      canonicalUserId: null,
+      canonicalOrgId: null,
     })
   })
 

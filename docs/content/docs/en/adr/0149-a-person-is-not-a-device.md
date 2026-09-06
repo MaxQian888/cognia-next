@@ -640,3 +640,42 @@ redemption and the bootstrap claim. Invitation links land on `/invite` and are
 redeemed after sign-in. The desktop sends the system browser to the registered
 `cognia://logto/callback` deep link, the CLI to its loopback port and the web
 app to `/logto/callback`. Deployment wiring lives in `deploy/compose/LOGTO.md`.
+
+## Implementation update: the desktop's trust anchor (2026-09-07)
+
+Section 9 has the host verify a sign-in before it records the person, and
+section 5 hangs device attribution off that record. Both only ever ran on a
+headless host, because the verifier was built from `COGNIA_LOGTO_ISSUER` and
+`COGNIA_LOGTO_AUDIENCE` and nothing sets those on a desktop: every
+`account_bind_person` was refused, the renderer logged it and moved on, and
+`host_bindings.user_id` stayed NULL on every laptop.
+
+What changed:
+
+- **The desktop names its deployment.** `lib/identity/deployment-source.ts`
+  stores the gateway a profile signs in to (address plus an optional SPKI
+  fingerprint). Discovery asks it first on every shell but headless, and the
+  Settings card that used to run PKCE by hand now only checks and stores that
+  address. The sign-in gate does the rest.
+- **The host fetches its own anchor.** `account_set_cloud_deployment`
+  (`src-tauri/src/account_auth/cloud_deployment.rs`) fetches
+  `/api/auth/config` from the named gateway inside the host process, with the
+  certificate pinned when a fingerprint was given and redirects refused, and
+  stores the issuer and audience it answered with under `<data_dir>/cognia/`.
+  The renderer's discovered configuration is never an argument: a caller that
+  supplies the trust anchor is verifying a token against itself. The
+  environment still wins when it is set, and the command refuses on such a
+  host.
+- **Two ids for one person, one of them verified.** The host can only verify
+  the ids derived from the token (issuer and subject). After the
+  collaboration server assigns its own `usr_` the renderer holds that one
+  instead, and the mirror used to send it and be refused. `bindHostPerson`
+  now recomputes the derived pair from the token and sends the caller's ids
+  as `canonical_user_id` / `canonical_org_id`, which `host_bindings` stores
+  as unverified aliases (`host-binding-canonical-v1`). Ownership decisions
+  keep reading `user_id`. The console and the roster can now name the same
+  person.
+
+Not changed: `tenant_id` stays UNIQUE on `host_bindings`, for the reason the
+person-columns migration gives.
+

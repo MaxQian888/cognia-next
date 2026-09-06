@@ -13,10 +13,15 @@ import {
 } from "@/lib/db/identity"
 
 import { reconcileUserId } from "./reconcile-user-id"
+import { deriveOrgId, deriveUserId } from "./sign-in"
 
 const dbFixture = createDbTestFixture()
 
 const LEGACY = "usr_derived00000000000000"
+const ISSUER = "https://logto.example.com/oidc"
+const ACCESS_TOKEN = `header.${Buffer.from(
+  JSON.stringify({ iss: ISSUER, sub: "logto_ada", organization_id: "org_logto_1" })
+).toString("base64url")}.signature`
 const CANONICAL = "usr_canonical0000000000000"
 const ORG = "org_acme0000000000000000000"
 
@@ -219,15 +224,18 @@ describe("reconcileUserId", () => {
         legacyUserId: LEGACY,
         canonicalUserId: CANONICAL,
         orgId: ORG,
-        accessToken: "at",
+        accessToken: ACCESS_TOKEN,
       },
       { registry: registry(), host: { invokeFn: invokeFn as never, isDesktop: () => true } }
     )
     expect(report.hostRebound).toBe(true)
+    // The host verifies the derived pair and keeps the server's ids as aliases.
     expect(invokeFn).toHaveBeenCalledWith("account_bind_person", {
-      accessToken: "at",
-      userId: CANONICAL,
-      orgId: ORG,
+      accessToken: ACCESS_TOKEN,
+      userId: await deriveUserId(ISSUER, "logto_ada"),
+      orgId: await deriveOrgId(ISSUER, "org_logto_1"),
+      canonicalUserId: CANONICAL,
+      canonicalOrgId: ORG,
     })
   })
 
@@ -239,7 +247,7 @@ describe("reconcileUserId", () => {
         localAccountId: "acct_a",
         legacyUserId: LEGACY,
         canonicalUserId: CANONICAL,
-        accessToken: "at",
+        accessToken: ACCESS_TOKEN,
       },
       {
         registry: registry(),

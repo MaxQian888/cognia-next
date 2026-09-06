@@ -32,6 +32,7 @@ import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { forgetOfflineChoice } from "@/components/account/cloud-sign-in-gate"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
+import { clearHostDeployment } from "@/lib/identity/host-person"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import {
   KNOWN_SOCIAL_PROVIDERS,
@@ -60,6 +61,8 @@ export interface CloudDeploymentCardDeps {
   ) => Promise<{ endSessionUrl?: string | null; tokensLive: boolean }>
   /** What "sign in" does once the offline choice is withdrawn. */
   reload?: () => void
+  /** Forget the desktop host's own trust anchor. Defaults to the Tauri command. */
+  clearHost?: () => Promise<boolean>
   storage?: DeploymentSourceDeps
 }
 
@@ -169,6 +172,12 @@ export function CloudDeploymentCard({ frame = "block", deps = {} }: CloudDeploym
     setStored(loadDeploymentSource(localAccountId, depsRef.current.storage))
     setSession(null)
     setEditing(false)
+    // The desktop host keeps its own copy of the anchor (it fetched it itself).
+    // Best-effort: off the desktop there is none, and a locked host keeps a
+    // record that the next sign-in gate decision would replace anyway.
+    void (depsRef.current.clearHost ?? (() => clearHostDeployment()))().catch((cause: unknown) => {
+      console.warn("[identity] the host kept its cloud deployment record", cause)
+    })
   }
 
   const signIn = () => {

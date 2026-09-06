@@ -202,13 +202,14 @@ describe("CloudDeploymentCard", () => {
     expect(d.reload).toHaveBeenCalled()
   })
 
-  it("forgets the deployment and returns to the form, and change pre-fills it", async () => {
+  it("forgets the deployment here and on the host, and change pre-fills the form", async () => {
     const local = memory()
     local.setItem(
       "cognia.cloud.deployment.acct_a",
       JSON.stringify({ baseUrl: "https://c.example" })
     )
-    const d = deps({ storage: { local } })
+    const clearHost = jest.fn(async () => true)
+    const d = deps({ storage: { local }, clearHost })
     render(<CloudDeploymentCard deps={d} />)
     fireEvent.click(await screen.findByTestId("cloud-deployment-change"))
     expect(screen.getByTestId("cloud-deployment-url")).toHaveValue("https://c.example")
@@ -216,6 +217,27 @@ describe("CloudDeploymentCard", () => {
     fireEvent.click(screen.getByTestId("cloud-deployment-forget"))
     expect(screen.getByTestId("cloud-deployment-form")).toBeInTheDocument()
     expect(local.map.has("cognia.cloud.deployment.acct_a")).toBe(false)
+    expect(clearHost).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the local forget when the host refuses to forget", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const local = memory()
+    local.setItem(
+      "cognia.cloud.deployment.acct_a",
+      JSON.stringify({ baseUrl: "https://c.example" })
+    )
+    const d = deps({
+      storage: { local },
+      clearHost: jest.fn(async () => {
+        throw new Error("locked")
+      }),
+    })
+    render(<CloudDeploymentCard deps={d} />)
+    fireEvent.click(await screen.findByTestId("cloud-deployment-forget"))
+    expect(local.map.has("cognia.cloud.deployment.acct_a")).toBe(false)
+    await waitFor(() => expect(warn).toHaveBeenCalled())
+    warn.mockRestore()
   })
 
   it("defaults to the active profile and renders plain without the block chrome", () => {
