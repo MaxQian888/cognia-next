@@ -115,6 +115,26 @@ describe("<DiscoverItemCard />", () => {
     expect(screen.getByText("Alpha")).toBeInTheDocument()
   })
 
+  it("gives the name the row and lets the badges wrap under it", () => {
+    // `Badge` is `shrink-0`. Beside a `truncate` name in a non-wrapping row,
+    // two badges take their full width out of a narrow grid tile and the name
+    // absorbs the whole shortfall, down to three characters and an ellipsis.
+    render(
+      <DiscoverItemCard
+        item={mkTeam("t1", "Sandbox Preview Squad")}
+        view="grid"
+        selected={false}
+        onSelect={jest.fn()}
+      />
+    )
+    const name = screen.getByText("Sandbox Preview Squad")
+    expect(name).toHaveClass("min-w-0", "truncate")
+    // Not `flex-1`: that pins the basis to 0, so the name reports as
+    // zero-wide, never forces a line break, and absorbs the shortfall anyway.
+    expect(name).not.toHaveClass("flex-1")
+    expect(name.parentElement).toHaveClass("flex-wrap")
+  })
+
   it("shows the built-in badge for built-in items", () => {
     render(<DiscoverItemCard item={mkTeam("t1", "Squad")} selected={false} onSelect={jest.fn()} />)
     // The team factory marks isBuiltIn: true.

@@ -384,10 +384,21 @@ export function DiscoverItemCard({
       >
         <Avatars meta={meta} size={isGrid ? "lg" : isCompact ? "sm" : "md"} />
         <div className={cn("flex min-w-0 flex-col gap-0.5", isGrid ? "w-full" : "flex-1")}>
-          <div className="flex w-full items-center gap-2">
+          {/* Wraps rather than shrinks. `Badge` is `shrink-0`, so on a narrow
+              card the two of them took their full width out of the row and the
+              name absorbed every pixel of the shortfall: a grid tile at 375px
+              showed "San…" and "Shar…" beside a pair of legible badges.
+              Wrapping breaks the line before anything shrinks, which gives the
+              name the whole first row and drops the badges underneath. */}
+          <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
             <span
               className={cn(
-                "truncate font-medium",
+                // `min-w-0` without `flex-1`. Flexbox breaks lines from each
+                // item's HYPOTHETICAL main size, and `flex-1` pins that to
+                // `flex-basis: 0`, so a long name reports as zero-wide, never
+                // forces a break, and simply absorbs the shortfall instead.
+                // Leaving the basis at `auto` is what makes the wrap fire.
+                "min-w-0 truncate font-medium",
                 isCompact ? "text-xs" : "text-sm",
                 isGrid && onToggleFavorite && "pr-6"
               )}
