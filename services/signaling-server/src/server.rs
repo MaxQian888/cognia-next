@@ -102,15 +102,24 @@ pub fn router(state: AppState) -> Router {
 
 async fn healthz(
     axum::extract::State(state): axum::extract::State<AppState>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let stats = state.registry.stats();
-    Json(json!({
+    let mut body = json!({
         "ok": true,
+        "backend": "axum",
         "rooms": stats.rooms,
         "peers": stats.peers,
         "uptimeSeconds": state.metrics.uptime_seconds(),
         "version": env!("CARGO_PKG_VERSION"),
-    }))
+    });
+    // The capabilities block (ADR-0170) is what lets a client tell a relay
+    // that carries the data lane from one that only signals.
+    body["capabilities"] = serde_json::to_value(cognia_signaling_core::health::capabilities())
+        .unwrap_or(serde_json::Value::Null);
+    (
+        [cognia_signaling_core::health::CORS_ALLOW_ORIGIN_HEADER],
+        Json(body),
+    )
 }
 
 async fn metrics_handler(
@@ -274,14 +283,25 @@ mod tests {
 
     #[tokio::test]
     async fn healthz_returns_ok_json() {
-        let (status, _headers, body) = get("/healthz").await;
+        let (status, headers, body) = get("/healthz").await;
         assert_eq!(status, StatusCode::OK);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["ok"], true);
+        assert_eq!(v["backend"], "axum");
         assert_eq!(v["rooms"], 0);
         assert_eq!(v["peers"], 0);
         assert!(v["version"].is_string());
         assert!(v["uptimeSeconds"].is_number());
+        // ADR-0170: the relay names the lanes it serves, and a browser on any
+        // origin may read the answer.
+        assert_eq!(v["capabilities"]["relayDataLane"], true);
+        assert_eq!(v["capabilities"]["lanes"][1], "data");
+        assert_eq!(
+            headers
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("*")
+        );
     }
 
     /// A plain GET on either signaling path reaches the upgrade handler (which

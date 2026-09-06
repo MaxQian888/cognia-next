@@ -8,6 +8,7 @@
 //! transport against Durable Objects but reuses these wire types and the rate
 //! limiter verbatim.
 
+pub mod health;
 pub mod limits;
 pub mod policy;
 pub mod proto;

@@ -28,11 +28,22 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         // Global rooms/peers counts are NOT available here — they live in the
         // per-rid Durable Objects with no cross-DO view; query Analytics Engine
         // (the `METRICS` dataset) for fleet-wide totals.
-        "/healthz" => Response::from_json(&serde_json::json!({
-            "ok": true,
-            "version": env!("CARGO_PKG_VERSION"),
-            "backend": "worker",
-        })),
+        "/healthz" => {
+            let mut body = serde_json::json!({
+                "ok": true,
+                "version": env!("CARGO_PKG_VERSION"),
+                "backend": "worker",
+            });
+            // ADR-0170: name the lanes so a client can tell this deployment
+            // from a pre-lane one that answers the same `ok`.
+            body["capabilities"] =
+                serde_json::to_value(cognia_signaling_core::health::capabilities())
+                    .unwrap_or(serde_json::Value::Null);
+            let (cors_name, cors_value) = cognia_signaling_core::health::CORS_ALLOW_ORIGIN_HEADER;
+            let headers = Headers::new();
+            headers.set(cors_name, cors_value)?;
+            Ok(Response::from_json(&body)?.with_headers(headers))
+        }
         // `/v2/signaling` is the pre-rename path, still baked into the endpoint
         // that already-paired devices dial. Keep serving it.
         "/signaling" | "/v2/signaling" => route_signaling(req, env).await,
