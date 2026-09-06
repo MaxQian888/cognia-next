@@ -16,6 +16,7 @@ import { Loader2Icon, RotateCcwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import { resetKeysForSection } from "@/lib/settings/section-keys"
 import {
@@ -68,15 +70,31 @@ export function SectionResetButton({ sectionId }: { sectionId: SettingsSectionId
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setOpen(true)}
-        data-testid="section-reset-button"
-      >
-        <RotateCcwIcon className="mr-2 size-3.5" />
-        {t("button")}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpen(true)}
+            aria-label={t("button")}
+            data-testid="section-reset-button"
+            className={cn(
+              // Same collapse `FeaturePageHeader`'s own `responsive` actions
+              // use. The header's action slot is `shrink-0` and the header is
+              // `overflow-hidden`, so a button that always renders its label
+              // does not wrap — it eats the title instead: at 375px the
+              // settings heading was clipped to "Se" to make room for this
+              // one control.
+              "size-8 px-0",
+              "@2xl/feature-header:h-8 @2xl/feature-header:w-auto @2xl/feature-header:px-3"
+            )}
+          >
+            <RotateCcwIcon className="size-3.5" />
+            <span className="hidden @2xl/feature-header:inline">{t("button")}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t("button")}</TooltipContent>
+      </Tooltip>
 
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
