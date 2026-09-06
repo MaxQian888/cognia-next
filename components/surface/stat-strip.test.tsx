@@ -61,4 +61,9 @@ describe("StatStrip", () => {
     render(<StatStrip stats={[stat("caps", { value: 2, tone: "attention" })]} />)
     expect(screen.getByText("2").className).toContain("text-amber-600")
   })
+
+  it("separates a bad number from a merely notable one", () => {
+    render(<StatStrip stats={[stat("caps", { value: 3, tone: "critical" })]} />)
+    expect(screen.getByText("3").className).toContain("text-red-600")
+  })
 })

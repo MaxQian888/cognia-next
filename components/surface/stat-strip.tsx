@@ -24,7 +24,13 @@ import type { ConsolePaneName } from "@/components/surface/console-section"
 import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 
-export type StatStripTone = "positive" | "attention" | "neutral"
+/**
+ * `critical` is the tone a strip needs to be able to say "this is bad", not
+ * merely "look here". Without it a failing success rate had to read amber,
+ * the same colour as a paused-but-fine count, and the two are not the same
+ * news.
+ */
+export type StatStripTone = "positive" | "attention" | "critical" | "neutral"
 
 export interface StatStripItem {
   /** Stable id, also the cell's `data-testid` suffix. */
@@ -68,6 +74,7 @@ const STAT_COLUMNS: Record<ConsolePaneName, Record<number, string>> = {
 const STAT_TONE: Record<StatStripTone, string> = {
   positive: "text-emerald-600 dark:text-emerald-400",
   attention: "text-amber-600 dark:text-amber-400",
+  critical: "text-red-600 dark:text-red-400",
   neutral: "text-foreground",
 }
 

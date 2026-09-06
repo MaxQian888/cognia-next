@@ -51,7 +51,7 @@ describe("MobileSchedulerStatStrip", () => {
     expect(screen.getByTestId("stat-success")).toHaveTextContent("0%")
   })
 
-  it("uses red tier styling when success rate is below 70%", () => {
+  it("marks a failing success rate as critical, not merely notable", () => {
     render(
       <MobileSchedulerStatStrip
         statistics={makeStats({ totalExecutions: 10, successfulExecutions: 5 })}
@@ -59,10 +59,10 @@ describe("MobileSchedulerStatStrip", () => {
     )
     const cell = screen.getByTestId("stat-success")
     expect(cell.textContent).toContain("50%")
-    expect(cell.querySelector(".text-red-500")).toBeInTheDocument()
+    expect(cell.querySelector(".text-red-600")).toBeInTheDocument()
   })
 
-  it("uses yellow tier styling when success rate is 70-89%", () => {
+  it("uses the attention tone when success rate is 70-89%", () => {
     render(
       <MobileSchedulerStatStrip
         statistics={makeStats({ totalExecutions: 10, successfulExecutions: 8 })}
@@ -70,12 +70,27 @@ describe("MobileSchedulerStatStrip", () => {
     )
     const cell = screen.getByTestId("stat-success")
     expect(cell.textContent).toContain("80%")
-    expect(cell.querySelector(".text-yellow-500")).toBeInTheDocument()
+    expect(cell.querySelector(".text-amber-600")).toBeInTheDocument()
+  })
+
+  it("shows every stat at once instead of hiding two behind a swipe", () => {
+    // The carousel this replaced sized each card at `w-[42%]`, so a 375px
+    // screen showed two and a half of four and put the executions count and
+    // the success rate, the two that carry bad news, off the right edge.
+    render(<MobileSchedulerStatStrip statistics={makeStats()} />)
+    const strip = screen.getByTestId("mobile-scheduler-stat-strip")
+    expect(strip).not.toHaveClass("overflow-x-auto")
+    expect(strip).toHaveClass("grid-cols-2")
+  })
+
+  it("carries the run count as the success rate's denominator", () => {
+    // 100% of two runs and 100% of two hundred are not the same claim.
+    render(<MobileSchedulerStatStrip statistics={makeStats()} />)
+    expect(screen.getByTestId("stat-success")).toHaveTextContent("90%/20")
   })
 
   it("applies passed-in className alongside the strip defaults", () => {
     render(<MobileSchedulerStatStrip statistics={makeStats()} className="ring-2" />)
     expect(screen.getByTestId("mobile-scheduler-stat-strip")).toHaveClass("ring-2")
-    expect(screen.getByTestId("mobile-scheduler-stat-strip")).toHaveClass("overflow-x-auto")
   })
 })
