@@ -1,17 +1,20 @@
 "use client"
 
 /**
- * GoalsMobileStatStrip — horizontal snap-scroll summary cards for the mobile
- * Goals view. Reuses the shared `StatCard` primitive (size="sm") with the same
- * gradient accents as the desktop console, so the two surfaces stay in
- * lock-step. Mirrors `MobileSchedulerStatStrip`.
+ * GoalsMobileStatStrip: the three goal counts, all three on one row.
+ *
+ * This was a snap-scrolling carousel of `StatCard`s at `w-[42%]`, the same
+ * shape `MobileSchedulerStatStrip` carried, so a 375px screen showed two and a
+ * half of three and left the completed count behind a horizontal swipe with no
+ * affordance pointing at it. Three small counts have no business hiding.
+ *
+ * It is now the shared `StatStrip`, one hairline instrument rather than three
+ * floating boxes with gradient accents.
  */
 
 import { useTranslations } from "next-intl"
-import { ActivityIcon, CheckCircle2Icon, PauseIcon } from "lucide-react"
 
-import { cn } from "@/lib/utils"
-import { StatCard } from "@/components/scheduler/stat-card"
+import { StatStrip, type StatStripItem } from "@/components/surface/stat-strip"
 
 export interface GoalsMobileStatStripProps {
   active: number
@@ -20,63 +23,49 @@ export interface GoalsMobileStatStripProps {
   className?: string
 }
 
-export function GoalsMobileStatStrip({ active, paused, done, className }: GoalsMobileStatStripProps) {
+export function GoalsMobileStatStrip({
+  active,
+  paused,
+  done,
+  className,
+}: GoalsMobileStatStripProps) {
   const t = useTranslations("goal")
 
-  const cells = [
+  const stats: StatStripItem[] = [
     {
-      testid: "mobile-goal-stat-active",
+      id: "active",
       label: t("console.stats.active"),
       value: active,
-      icon: <ActivityIcon className="h-4 w-4 text-green-500" aria-hidden />,
-      valueClassName: "text-green-500",
-      accentGradient: "from-green-500 to-emerald-400",
-      iconBgClassName: "bg-green-500/10",
+      tone: "positive",
     },
     {
-      testid: "mobile-goal-stat-paused",
+      id: "paused",
       label: t("console.stats.paused"),
       value: paused,
-      icon: <PauseIcon className="h-4 w-4 text-yellow-500" aria-hidden />,
-      valueClassName: "text-yellow-500",
-      accentGradient: "from-yellow-500 to-amber-400",
-      iconBgClassName: "bg-yellow-500/10",
+      // Paused is a state someone chose. Worth seeing, not bad news, and not
+      // worth tinting when there are none.
+      tone: paused > 0 ? "attention" : "neutral",
     },
     {
-      testid: "mobile-goal-stat-done",
+      id: "done",
       label: t("console.stats.done"),
       value: done,
-      icon: <CheckCircle2Icon className="h-4 w-4 text-muted-foreground" aria-hidden />,
-      valueClassName: "text-foreground",
-      accentGradient: "from-border to-border/50",
-      iconBgClassName: "bg-muted/50",
+      tone: "neutral",
     },
   ]
 
   return (
-    <div
-      data-testid="mobile-goals-stats"
-      className={cn(
-        // Horizontal carousel with snap, hidden scrollbar — feels native on iOS/Android.
-        "-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 [&::-webkit-scrollbar]:hidden",
-        className
-      )}
-    >
-      {cells.map((cell) => (
-        <StatCard
-          key={cell.testid}
-          testid={cell.testid}
-          size="sm"
-          label={cell.label}
-          value={cell.value}
-          icon={cell.icon}
-          valueClassName={cell.valueClassName}
-          accentGradient={cell.accentGradient}
-          iconBgClassName={cell.iconBgClassName}
-          className="w-[42%] shrink-0 snap-start sm:w-[28%]"
-        />
-      ))}
-    </div>
+    <StatStrip
+      stats={stats}
+      testId="mobile-goals-stats"
+      // `StatStrip` stacks three stats into one column until its console pane
+      // is wide, because that is what a narrow inspector rail needs. This strip
+      // is not in a pane, it is the full width of a phone, and three counts of
+      // one or two digits fit across it comfortably. The className escape hatch
+      // is how a caller states the width it actually has.
+      className={className ? `grid-cols-3 ${className}` : "grid-cols-3"}
+      cellTestIdPrefix="mobile-goal-stat"
+    />
   )
 }
 
