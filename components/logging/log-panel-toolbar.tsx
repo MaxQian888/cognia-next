@@ -328,8 +328,35 @@ function LogPanelToolbarImpl({
 
   return (
     <div data-testid="log-panel-toolbar" className="border-b bg-muted/30">
-      {/* ── Layer 1: Primary bar ── */}
-      <div className="flex items-center gap-2 p-2 sm:p-3">
+      {/* ── Layer 1: Primary bar ──
+          Wraps. Six controls and a search field do not fit across 375px: the
+          search was the only flexible item, so it absorbed the whole shortfall
+          and its input measured 38px, about three characters, while every icon
+          button beside it kept its full size. On a phone the search now takes
+          a line of its own and the buttons share the next one. */}
+      <div className="flex flex-wrap items-center gap-2 p-2 sm:p-3">
+        {/* Search with accessible combobox-based history.
+            First in the DOM, not second, because it is the one control that
+            takes a whole row on a phone. Leaving it between the view toggle
+            and the trailing buttons would have stranded the toggle alone on
+            row one, or needed an `order` utility, which is how a toolbar ends
+            up tabbing top row, bottom row, back to the top row. */}
+        {/* Search with accessible combobox-based history */}
+        <SearchWithHistory
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          useRegex={useRegex}
+          setUseRegex={setUseRegex}
+          searchHistory={searchHistory}
+          addSearchHistory={addSearchHistory}
+          removeSearchHistoryItem={removeSearchHistoryItem}
+          clearSearchHistory={clearSearchHistory}
+          showSearchHistory={showSearchHistory}
+          setShowSearchHistory={setShowSearchHistory}
+          regexPlaceholder={t("panel.regexPlaceholder")}
+          searchPlaceholder={t("panel.searchPlaceholder")}
+        />
+
         {/* View mode toggle — a radio group in behaviour, so it says so:
             `aria-pressed` carries the selection and `aria-label` carries the
             name the tooltip used to be the only source of. */}
@@ -361,22 +388,6 @@ function LogPanelToolbarImpl({
             )
           })}
         </div>
-
-        {/* Search with accessible combobox-based history */}
-        <SearchWithHistory
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          useRegex={useRegex}
-          setUseRegex={setUseRegex}
-          searchHistory={searchHistory}
-          addSearchHistory={addSearchHistory}
-          removeSearchHistoryItem={removeSearchHistoryItem}
-          clearSearchHistory={clearSearchHistory}
-          showSearchHistory={showSearchHistory}
-          setShowSearchHistory={setShowSearchHistory}
-          regexPlaceholder={t("panel.regexPlaceholder")}
-          searchPlaceholder={t("panel.searchPlaceholder")}
-        />
 
         {/* Advanced filters toggle */}
         <Tooltip>
@@ -1125,11 +1136,13 @@ function SearchWithHistory({
   const historyItems = useMemo(() => searchHistory, [searchHistory])
 
   return (
-    // The 12rem floor is a desktop assumption: with the view toggle and the
-    // three trailing icon buttons it puts the bar at ~458px, so on a 375px
-    // screen "refresh" and "more actions" sat past the edge with nothing to
-    // scroll them into view. Below `sm` the field gives way instead.
-    <div className="relative min-w-0 flex-1 sm:min-w-[12rem]">
+    // The 12rem floor used to be a desktop-only assumption: with the view
+    // toggle and the three trailing icon buttons it put the bar at ~458px, so
+    // on a 375px screen "refresh" and "more actions" sat past the edge with
+    // nothing to scroll them into view, and the field gave way instead, down
+    // to a 38px input. The bar wraps now, so the overflow has somewhere to go
+    // and the field can claim a row of its own rather than surrender one.
+    <div className="relative w-full min-w-0 basis-full sm:w-auto sm:flex-1 sm:basis-auto sm:min-w-[12rem]">
       <InputGroup className="h-8">
         <InputGroupAddon>
           <Search className="h-4 w-4" />
