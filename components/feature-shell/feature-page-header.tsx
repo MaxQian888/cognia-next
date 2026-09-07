@@ -248,7 +248,15 @@ export function FeaturePageHeader({
             <Heading
               className={cn(
                 "truncate font-semibold tracking-tight",
-                isCompact ? "text-sm" : "text-base @xl/feature-header:text-[17px]"
+                isCompact ? "text-sm" : "text-base @xl/feature-header:text-[17px]",
+                // Inline navigation shares this row with the title, and on a
+                // phone the tabs win: /logs put five channel tabs, a status
+                // pill and two buttons beside the heading, which left it about
+                // 60px and printed "Lo…". A two-letter fragment names nothing,
+                // so below `@md` the icon tile carries the identity and the
+                // heading goes to assistive tech only. It stays a real heading
+                // either way, so the document outline is unchanged.
+                inlineNavigation && "sr-only @md/feature-header:not-sr-only"
               )}
             >
               {title}

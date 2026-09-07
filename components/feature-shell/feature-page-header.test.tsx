@@ -248,3 +248,26 @@ test("every navigation and control slot can scroll its own overflow", () => {
   expect(breadcrumb).toHaveClass("overflow-x-auto")
   expect(breadcrumb).not.toHaveClass("shrink-0")
 })
+
+test("hands the identity row to inline navigation on a phone, keeping the heading for assistive tech", () => {
+  // Inline navigation shares the row with the title. /logs put five channel
+  // tabs, a status pill and two buttons beside the heading, which left it
+  // about 60px and printed "Lo…". A two-letter fragment names nothing.
+  renderHeader(
+    <FeaturePageHeader
+      variant="compact"
+      title="Logs"
+      navigationPlacement="inline"
+      navigation={<nav>tabs</nav>}
+    />
+  )
+
+  const heading = screen.getByRole("heading", { name: "Logs" })
+  expect(heading).toHaveClass("sr-only", "@md/feature-header:not-sr-only")
+})
+
+test("keeps the title visible at every width when navigation has its own row", () => {
+  renderHeader(<FeaturePageHeader variant="compact" title="Logs" navigation={<nav>tabs</nav>} />)
+
+  expect(screen.getByRole("heading", { name: "Logs" })).not.toHaveClass("sr-only")
+})
