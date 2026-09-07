@@ -99,7 +99,12 @@ export function PresetCard({
         selectionMode && selected === true && "bg-primary/5"
       )}
     >
-      <div className="flex items-start gap-3">
+      {/* Wraps. The text column sat between a 40px avatar and five `shrink-0`
+          action buttons, so on a 375px phone it was left about 137px and a
+          one-line description became six lines beside two thirds of an empty
+          row. Wrapping drops the actions onto their own line before anything
+          is squeezed. */}
+      <div className="flex flex-wrap items-start gap-3">
         {selectionMode ? (
           <Checkbox
             checked={selected === true}
@@ -126,7 +131,11 @@ export function PresetCard({
         >
           {presetGlyph(preset)}
         </span>
-        <div className="min-w-0 flex-1">
+        {/* `grow basis-64`, not `flex-1`. Flexbox breaks lines from each item's
+            hypothetical main size, and `flex-1` pins that to `flex-basis: 0`,
+            so this column would report as zero-wide, never force the break,
+            and go on absorbing the shortfall exactly as before. */}
+        <div className="min-w-0 grow basis-64">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{preset.name}</p>
             {preset.isDefault && (
@@ -168,7 +177,7 @@ export function PresetCard({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
