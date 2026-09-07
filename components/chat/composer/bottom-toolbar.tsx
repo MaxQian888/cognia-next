@@ -451,8 +451,8 @@ function GenericBottomToolbar({
     )
   }
 
-  // Compact (mobile / narrow workflow sidebar): two rows at most — Tier 1 on
-  // the first, context usage + overflow sharing the second.
+  // Compact (mobile / narrow workflow sidebar): ONE row, with the tail of the
+  // roster folded behind `⋯` instead of wrapped onto a line of its own.
   //
   // `layout` can no longer BE `expanded` here — `resolveToolbarLayout` already
   // downgraded it if the pane is this narrow — but the guard stays so the two
@@ -461,13 +461,26 @@ function GenericBottomToolbar({
     return (
       <div
         ref={rootRef}
-        className="mt-2 flex flex-col gap-1 px-1 text-[11px] text-muted-foreground"
+        className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-1 px-1 text-[11px] text-muted-foreground"
+        data-testid="composer-footer"
+        data-toolbar-layout="compact"
       >
-        <div className="flex min-w-0 items-center gap-1">
-          {leading}
-          {runConfigGroup}
-        </div>
-        <div className="flex items-center justify-end gap-x-1">
+        {leading}
+        {runConfigGroup}
+        {/* Same three zones as the wide row, packed tighter. This used to be a
+            second FLEX ROW below the controls, on the theory that two honest
+            rows beat one row of stubs. On the phone welcome screen that theory
+            broke down: the left half of the second row is always empty, so the
+            cost was a full 28px band carrying three glyph-sized read-outs and
+            nothing else, directly under the box the user is about to type in.
+            The measured content is ~317px inside a 375px phone's 319px
+            composer, so the row fits, and the only labels that give up letters
+            when it does not are the model id and the composition preset (every
+            short-labelled chip is pinned `shrink-0`). */}
+        <div
+          className="ms-auto flex shrink-0 items-center gap-x-0.5 ps-1"
+          data-testid="composer-status-cluster"
+        >
           {runtimeControl}
           {sessionStatus}
           {contextIndicator}
@@ -528,13 +541,19 @@ function GenericBottomToolbar({
 }
 
 /**
- * Below this measured width, split the status line into two compact rows.
+ * Below this measured width, drop to the compact ROSTER.
  *
- * 384 → 520. The one-row packing needs about 520px before the only chips with
- * long labels (the model id, the composition preset) are shaved past reading —
- * and past that point every other chip starts giving up letters too, which is
- * how a 420px pane ended up rendering "A…" and "Def…". Two honest rows beat one
- * row of stubs; the compact branch already exists and holds the full roster.
+ * 384 → 520: the wide row needs about 520px before the only chips with long
+ * labels (the model id, the composition preset) are shaved past reading, and
+ * past that point every other chip starts giving up letters too, which is how a
+ * 420px pane ended up rendering "A…" and "Def…".
+ *
+ * What changes below the threshold is WHICH controls are laid out, not how many
+ * lines they take: the compact branch folds the composition chip and the
+ * advanced controls behind `⋯`, which is what buys back the width. It used to
+ * also wrap into two rows, and that second row only ever held three read-only
+ * glyphs against an empty left half — 28px of chrome under the composer for
+ * numbers nobody was reading on an empty welcome screen.
  */
 const COMPACT_TOOLBAR_PX = 520
 

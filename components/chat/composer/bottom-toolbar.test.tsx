@@ -405,19 +405,33 @@ describe("BottomToolbar — narrow-width More menu", () => {
     expect(root.className).not.toContain("flex-col")
   })
 
-  // Regression: the compact toolbar must cap at TWO rows (Tier 1, then the
-  // overflow menu + context indicator sharing the second row) instead of
-  // letting `⋯` and the usage `%` each wrap onto their own line (three rows).
-  it("caps the compact toolbar at two rows and groups secondary status controls at the end", () => {
+  // Regression: the compact toolbar is ONE row. It used to wrap into two, with
+  // the read-only status glyphs pushed onto a second line whose left half was
+  // always empty — 28px of chrome directly under the composer, on the surface
+  // (the phone welcome screen) with the least room for it. The width is bought
+  // by folding the tail of the roster behind `⋯`, not by wrapping.
+  it("keeps the compact toolbar on one row with the status controls clustered at the end", () => {
     mockToolbarWidth = 300
     const { container } = render(<BottomToolbar session={session} />)
     const root = container.firstChild as HTMLElement
-    expect(root.className).toContain("flex-col")
-    // Context usage and More belong to one secondary cluster, not opposite
-    // edges of an otherwise empty row.
+    expect(root.className).not.toContain("flex-col")
+    expect(root.className).toContain("flex-nowrap")
+    // Context usage and More belong to one secondary cluster pinned right, not
+    // to opposite edges of an otherwise empty row.
     const more = screen.getByTestId("composer-toolbar-more")
-    expect((more.parentElement as HTMLElement).className).toContain("justify-end")
-    expect((more.parentElement as HTMLElement).className).not.toContain("justify-between")
+    const cluster = more.parentElement as HTMLElement
+    expect(cluster).toBe(screen.getByTestId("composer-status-cluster"))
+    expect(cluster.className).toContain("ms-auto")
+    expect(cluster.className).toContain("shrink-0")
+  })
+
+  // The left half has to be the side that gives up width: every control on the
+  // right is a glyph with no label to shave.
+  it("lets the compact row's config side shrink instead of the status cluster", () => {
+    mockToolbarWidth = 300
+    const { container } = render(<BottomToolbar session={session} />)
+    expect((container.firstChild as HTMLElement).className).toContain("min-w-0")
+    expect(screen.getByTestId("composer-status-cluster").className).toContain("shrink-0")
   })
 })
 
