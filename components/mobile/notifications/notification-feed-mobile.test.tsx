@@ -56,6 +56,17 @@ it("shows the empty state when there are no notifications", () => {
   expect(screen.getByTestId("notification-feed-empty")).toBeInTheDocument()
 })
 
+it("carries no heading of its own, because the page header already names it", () => {
+  // The page said "Notifications" three times: the sticky header, this feed's
+  // own title, and the section under it. The actions keep their aria labels.
+  hook.items = []
+  const { container } = render(<NotificationFeedMobile />)
+  expect(container.textContent).not.toContain("center.title")
+  expect(
+    screen.getByRole("button", { name: "notificationCenter.center.markAllRead" })
+  ).toBeInTheDocument()
+})
+
 it("refreshes the feed on mount", () => {
   render(<NotificationFeedMobile />)
   expect(hook.refresh).toHaveBeenCalled()

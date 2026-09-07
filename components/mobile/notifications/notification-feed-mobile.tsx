@@ -36,8 +36,11 @@ export function NotificationFeedMobile() {
 
   return (
     <div className="flex flex-col" data-testid="notification-feed-mobile">
-      <div className="flex items-center justify-between px-1 pb-2">
-        <span className="text-sm font-medium">{t("center.title")}</span>
+      {/* No heading of its own. This feed renders on exactly one page, whose
+          sticky header already says "Notifications", and the section under it
+          said it a third time. The two actions keep their aria labels, so the
+          row loses a duplicate title, not a name. */}
+      <div className="flex items-center justify-end px-1 pb-2">
         <div className="flex items-center gap-1">
           <Button
             size="icon"

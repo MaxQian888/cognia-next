@@ -29,6 +29,17 @@ describe("<NotificationsSection />", () => {
     expect(screen.getByText("Scheduled notifications")).toBeInTheDocument()
   })
 
+  it("puts its one row inside a surface like every other /me block", () => {
+    // The entry sat bare at `px-0` under a hand-rolled h3, so it was the only
+    // /me row with nothing under it.
+    const { container } = render(<NotificationsSection />)
+    const group = container.querySelector('[data-slot="item-group"]')
+    expect(group).not.toBeNull()
+    expect(
+      group?.contains(screen.getByTestId("mobile-settings-notifications-queue-entry"))
+    ).toBe(true)
+  })
+
   it("clicking the queue row opens the queue sheet", () => {
     render(<NotificationsSection />)
     expect(screen.getByTestId("notifications-queue-sheet-stub")).toHaveAttribute(
