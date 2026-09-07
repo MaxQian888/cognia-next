@@ -67,6 +67,13 @@ export interface AgentRunsPanelProps {
    */
   teamId?: string
   /**
+   * Only this Bot installation's runs. The `/bots` Runs section is this panel
+   * with the installation pinned, for the same reason the Squad tab is: a Bot
+   * run is an `ExecutionRun` like any other, and a second history here would
+   * be a second answer to a question this panel already answers.
+   */
+  botInstallationId?: string
+  /**
    * Hosted inside another page. Drops the page header (the host has one) and
    * keeps the filter controls and the list/detail split.
    */
@@ -81,6 +88,7 @@ export function AgentRunsPanel({
   filterKind = "all",
   onFilterKind,
   teamId,
+  botInstallationId,
   embedded = false,
 }: AgentRunsPanelProps) {
   const t = useTranslations("agentRuns")
@@ -99,6 +107,7 @@ export function AgentRunsPanel({
     ...(statusGroup !== "all" ? { statusGroup } : {}),
     ...(filterKind !== "all" ? { kind: filterKind } : {}),
     ...(teamId ? { teamId } : {}),
+    ...(botInstallationId ? { botInstallationId } : {}),
     ...(selectedId ? { selectedId } : {}),
   })
   const actions = useRunControlActions()

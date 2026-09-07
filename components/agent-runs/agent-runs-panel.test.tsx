@@ -358,3 +358,24 @@ describe("AgentRunsPanel", () => {
     expect(screen.getAllByText("live")).toHaveLength(1)
   })
 })
+
+describe("pinning the panel to one source", () => {
+  beforeEach(() => {
+    cockpit = fromJournal([])
+  })
+
+  it("passes a Bot installation through to the cockpit query", () => {
+    render(
+      <AgentRunsPanel embedded onSelect={jest.fn()} filterKind="bot" botInstallationId="boti_1" />
+    )
+    expect(lastOptions).toMatchObject({ kind: "bot", botInstallationId: "boti_1" })
+  })
+
+  it("omits the key entirely when nothing is pinned, rather than sending undefined", () => {
+    // `CockpitFilter` treats a present key as a narrowing, so an explicit
+    // undefined and an absent one have to stay distinguishable.
+    render(<AgentRunsPanel onSelect={jest.fn()} />)
+    expect(lastOptions).not.toHaveProperty("botInstallationId")
+    expect(lastOptions).not.toHaveProperty("teamId")
+  })
+})

@@ -245,6 +245,11 @@ describe("buildCockpitFacets", () => {
     unified({ rowId: "goal-two", kind: "goal", status: "done" }),
     unified({ rowId: "squad-build", kind: "team", status: "running", teamId: "team_1" }),
     unified({ rowId: "squad-ship", kind: "team", status: "error", teamId: "team_1" }),
+    unified({ rowId: "bot-digest", kind: "bot", status: "done", sourceId: "boti_1" }),
+    unified({ rowId: "bot-other", kind: "bot", status: "running", sourceId: "boti_2" }),
+    // Same `sourceId` as the Bot above, different kind. `sourceId` is not
+    // unique across kinds, which is why the Bot filter checks both.
+    unified({ rowId: "wf-collision", kind: "workflow", status: "done", sourceId: "boti_1" }),
   ]
 
   /**
@@ -257,6 +262,7 @@ describe("buildCockpitFacets", () => {
       { kind: "team" },
       { teamId: "team_1" },
       { kind: "team", teamId: "team_1" },
+      { botInstallationId: "boti_1" },
       { query: "squad-" },
     ]
     for (const base of pinned) {
@@ -276,7 +282,7 @@ describe("buildCockpitFacets", () => {
   /** The reported bug, pinned as a number. */
   it("counts the Squad's universe, not the journal's, under a pinned kind", () => {
     const everything = buildCockpitFacets(rows)
-    expect(everything.statusTotal).toBe(6)
+    expect(everything.statusTotal).toBe(9)
 
     const squadTab = buildCockpitFacets(rows, { kind: "team" })
     expect(squadTab.statusTotal).toBe(2)
@@ -335,5 +341,54 @@ describe("legacyAgentRunRow", () => {
     expect(row.status).toBe("waiting")
     expect(row.source).toBe("legacy")
     expect(row.rowId).toBe("legacy:goal:g1")
+  })
+})
+
+describe("filterCockpitRows by Bot installation", () => {
+  function unified(over: Partial<UnifiedExecutionRow>): UnifiedExecutionRow {
+    return {
+      rowId: "r",
+      source: "journal",
+      nativeId: "n",
+      kind: "bot",
+      label: "Run",
+      status: "running",
+      startedAt: 1_000,
+      cancellable: false,
+      ...over,
+    }
+  }
+
+  const rows: UnifiedExecutionRow[] = [
+    unified({ rowId: "mine", sourceId: "boti_1" }),
+    unified({ rowId: "theirs", sourceId: "boti_2" }),
+    // A workflow run whose own source id happens to equal an installation id.
+    unified({ rowId: "collision", kind: "workflow", sourceId: "boti_1" }),
+    // A Bot row from before the stamp, with no source id at all.
+    unified({ rowId: "unstamped" }),
+  ]
+
+  it("keeps only that installation's runs", () => {
+    expect(filterCockpitRows(rows, { botInstallationId: "boti_1" }).map((r) => r.rowId)).toEqual([
+      "mine",
+    ])
+  })
+
+  it("does not match a row of another kind that shares the id", () => {
+    // `sourceId` is not unique across kinds: a workflow row's is a workflow id.
+    // Leaving the kind to the caller's separate filter would pull a stranger's
+    // run into a Bot's history whenever the two ids collided.
+    const kept = filterCockpitRows(rows, { botInstallationId: "boti_1" })
+    expect(kept.some((r) => r.rowId === "collision")).toBe(false)
+  })
+
+  it("drops a Bot row that carries no source id rather than showing it under one", () => {
+    expect(
+      filterCockpitRows(rows, { botInstallationId: "boti_1" }).some((r) => r.rowId === "unstamped")
+    ).toBe(false)
+  })
+
+  it("passes everything through when no installation is pinned", () => {
+    expect(filterCockpitRows(rows, {})).toHaveLength(4)
   })
 })

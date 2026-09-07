@@ -58,6 +58,8 @@ export interface UseExecutionCockpitOptions {
   query?: string
   /** Only this Squad's runs. See `CockpitFilter.teamId`. */
   teamId?: string
+  /** Only this Bot installation's runs. See `CockpitFilter.botInstallationId`. */
+  botInstallationId?: string
   projectId?: string
   /** Run id carried by a deep link; fetched independently of the page ceiling. */
   selectedId?: string
@@ -168,8 +170,9 @@ export function useExecutionCockpit(
       ...(options.kind ? { kind: options.kind } : {}),
       ...(options.query ? { query: options.query } : {}),
       ...(options.teamId ? { teamId: options.teamId } : {}),
+      ...(options.botInstallationId ? { botInstallationId: options.botInstallationId } : {}),
     }),
-    [options.statusGroup, options.kind, options.query, options.teamId]
+    [options.statusGroup, options.kind, options.query, options.teamId, options.botInstallationId]
   )
 
   // One call owns the list AND every number above it, so a chip cannot report

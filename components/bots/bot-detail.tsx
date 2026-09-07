@@ -29,6 +29,7 @@
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import {
+  HistoryIcon,
   IdCardIcon,
   InboxIcon,
   KeyRoundIcon,
@@ -48,6 +49,7 @@ import { BotConfigSection } from "./sections/config-section"
 import { BotCredentialsSection } from "./sections/credentials-section"
 import { BotDeliveriesSection } from "./sections/deliveries-section"
 import { BotPolicySection } from "./sections/policy-section"
+import { BotRunsSection } from "./sections/runs-section"
 import { BotTriggersSection } from "./sections/triggers-section"
 import { useBotProblemText, useBotRelativeTime } from "./bot-visuals"
 
@@ -165,6 +167,18 @@ export function BotDetail({ row, onUninstalled }: BotDetailProps) {
             description={t("config.description")}
           >
             <BotConfigSection row={row} />
+          </ConsoleSection>
+
+          {/* Full width: the cockpit is a list beside a detail pane, and half a
+              pane seats neither. */}
+          <ConsoleSection
+            id="runs"
+            title={t("runs.title")}
+            icon={HistoryIcon}
+            description={t("runs.description")}
+            wide
+          >
+            <BotRunsSection row={row} />
           </ConsoleSection>
 
           {/* Full width: each row can carry a whole error message, and in half

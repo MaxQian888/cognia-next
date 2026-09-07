@@ -190,6 +190,12 @@
     "blockedOrphan": "There is no definition left to run.",
     "label": "Run now"
   },
+  "runs": {
+    "description": "Every run this Bot has produced, from the same cockpit as /agent-runs.",
+    "orphanBody": "The definition is gone, so there is nothing here to say what these runs were. The full cockpit still lists them.",
+    "orphanTitle": "Runs are still on /agent-runs",
+    "title": "Runs"
+  },
   "runtime": {
     "none": {
       "body": "This browser has no long-lived runtime and no paired Host, so nothing will pick up a Bot's work. Pair a Host or use the desktop app to make these Bots run.",

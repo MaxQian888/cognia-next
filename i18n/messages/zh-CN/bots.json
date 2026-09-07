@@ -190,6 +190,12 @@
     "blockedOrphan": "已经没有定义可以运行了。",
     "label": "立即运行"
   },
+  "runs": {
+    "description": "这个 Bot 产生的全部运行，与 /agent-runs 用的是同一个面板。",
+    "orphanBody": "定义已不存在，这里无法说明这些运行分别是什么。完整面板仍然列着它们。",
+    "orphanTitle": "运行记录仍在 /agent-runs 上",
+    "title": "运行记录"
+  },
   "runtime": {
     "none": {
       "body": "这个浏览器既没有常驻运行时，也没有配对的宿主，因此没有任何东西会接手 Bot 的工作。配对一台宿主或使用桌面应用，这些 Bot 才会运行。",

@@ -265,6 +265,21 @@ export interface CockpitFilter {
    * rather than shown under a Squad they may not belong to.
    */
   teamId?: string
+  /**
+   * Keep only the runs of one Bot installation.
+   *
+   * Deliberately NOT mirrored on the row the way `teamId` is. A Bot run
+   * already records its installation as `ExecutionRun.sourceId`, which
+   * `journalRunRow` projects verbatim, so a second copy would be a field that
+   * could disagree with the one the runtime writes.
+   *
+   * The kind is part of the predicate rather than left to the caller's
+   * separate `kind` filter, because `sourceId` is not unique across kinds: a
+   * workflow row's is a workflow id, a team row's is a run or team id, and an
+   * installation id that happened to collide would pull a stranger's run into
+   * a Bot's history.
+   */
+  botInstallationId?: string
 }
 
 export function filterCockpitRows(
@@ -276,6 +291,12 @@ export function filterCockpitRows(
     if (filter.statusGroup && cockpitStatusGroup(row) !== filter.statusGroup) return false
     if (filter.kind && executionRowFilterKind(row) !== filter.kind) return false
     if (filter.teamId && row.teamId !== filter.teamId) return false
+    if (
+      filter.botInstallationId &&
+      !(row.kind === "bot" && row.sourceId === filter.botInstallationId)
+    ) {
+      return false
+    }
     if (query && !row.label.toLowerCase().includes(query)) return false
     return true
   })
