@@ -77,6 +77,30 @@ describe("HostAutomationPanel", () => {
     expect(screen.queryByTestId("host-halted")).toBeNull()
   })
 
+  it("is a section, and stops nesting bordered boxes inside a bordered box", async () => {
+    // The panel was a Card on a page whose other blocks are sections, and it
+    // then drew four bordered count cells and a bordered row per recent
+    // decision inside that frame. Hairlines separate them now.
+    readAutomationSupervision.mockResolvedValue(
+      snapshot({
+        recent: [
+          row("a", { command: "desktop_type" }),
+          row("b", { command: "desktop_click", decision: "deny" }),
+        ] as AutomationSupervisionSnapshot["recent"],
+      })
+    )
+    const { container } = renderPanel()
+    await waitFor(() => expect(screen.getByTestId("host-recent-list")).toBeInTheDocument())
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(copy.title)
+    const recent = screen.getByTestId("host-recent-list")
+    expect(recent.className).toMatch(/border/)
+    for (const row of Array.from(recent.children)) {
+      expect(row.className).toMatch(/not-last:border-b/)
+      expect(row.className).not.toMatch(/rounded-md border/)
+    }
+  })
+
   it("marks a halted host", async () => {
     readAutomationSupervision.mockResolvedValue(snapshot({ killSwitchEngaged: true }))
     renderPanel()

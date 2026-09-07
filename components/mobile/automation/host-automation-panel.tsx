@@ -38,7 +38,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useCanControl } from "@/hooks/data/use-can-control"
@@ -114,15 +114,15 @@ export function HostAutomationPanel() {
 
   if (loading && !snapshot) {
     return (
-      <Card data-testid="host-automation-loading">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">{t("title")}</CardTitle>
-          <CardDescription className="text-xs">{t("loading")}</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <MeSection
+        testid="host-automation-loading"
+        title={t("title")}
+        description={t("loading")}
+      >
+        <div className="px-3 py-3">
           <Skeleton className="h-24 w-full" />
-        </CardContent>
-      </Card>
+        </div>
+      </MeSection>
     )
   }
 
@@ -139,26 +139,25 @@ export function HostAutomationPanel() {
   const tierLabel = tierText(snapshot.defaultTier, t)
 
   return (
-    <Card data-testid="host-automation-panel">
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <CardTitle className="text-sm">{t("title")}</CardTitle>
-            <CardDescription className="text-xs">{t("description")}</CardDescription>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            aria-label={t("refresh")}
-            onClick={refresh}
-          >
-            <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} aria-hidden="true" />
-          </Button>
-        </div>
-      </CardHeader>
-
-      <CardContent className="space-y-4 px-4 pb-4">
+    // The page around this is sections now, so the panel is one too. Reload
+    // moves onto the heading line, where the section primitive keeps it.
+    <MeSection
+      testid="host-automation-panel"
+      title={t("title")}
+      description={t("description")}
+      action={
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0 text-muted-foreground"
+          aria-label={t("refresh")}
+          onClick={refresh}
+        >
+          <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} aria-hidden="true" />
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4 px-3 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             variant={snapshot.enabled && !snapshot.killSwitchEngaged ? "secondary" : "outline"}
@@ -176,7 +175,9 @@ export function HostAutomationPanel() {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* One bordered block whose cells are separated by a border-coloured
+            ground, not four bordered boxes inside an already-bordered section. */}
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-4">
           <CountCell label={t("countsTotal")} value={snapshot.counts.total} />
           <CountCell label={t("countsAllow")} value={snapshot.counts.allow} />
           <CountCell label={t("countsDeny")} value={snapshot.counts.deny} />
@@ -190,11 +191,14 @@ export function HostAutomationPanel() {
               {t("recentEmpty")}
             </p>
           ) : (
-            <ul className="space-y-1" data-testid="host-recent-list">
+            <ul
+              className="overflow-hidden rounded-md border"
+              data-testid="host-recent-list"
+            >
               {snapshot.recent.map((row) => (
                 <li
                   key={row.id}
-                  className="flex flex-wrap items-center gap-2 rounded-md border px-2 py-1.5"
+                  className="flex flex-wrap items-center gap-2 px-2 py-1.5 not-last:border-b"
                 >
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                     {new Date(row.ts).toLocaleTimeString()}
@@ -244,14 +248,14 @@ export function HostAutomationPanel() {
             </p>
           )}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </MeSection>
   )
 }
 
 function CountCell({ label, value }: { label: string; value: number }) {
   return (
-    <div className="min-w-0 rounded-md border px-2 py-1.5">
+    <div className="min-w-0 bg-card px-2 py-1.5">
       <p className="truncate text-[10px] text-muted-foreground">{label}</p>
       <p className="font-mono text-sm">{value}</p>
     </div>
