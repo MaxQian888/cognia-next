@@ -102,7 +102,7 @@ describe("pendingBotInstallationIds", () => {
     const release = markPendingBotInstallationMutation("boti_mem")
     const table = getDb().mobileOutboundQueue
     const original = table.toArray.bind(table)
-    table.toArray = (() => Promise.reject(new Error("closed"))) as typeof table.toArray
+    table.toArray = (() => Promise.reject(new Error("closed"))) as unknown as typeof table.toArray
     await expect(pendingBotInstallationIds()).resolves.toEqual(new Set(["boti_mem"]))
     table.toArray = original
     release()

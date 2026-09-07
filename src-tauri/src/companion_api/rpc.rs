@@ -694,6 +694,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "connectors_onebot_probe",
     "workflow_trigger_manual",
     "twin_ingest_source",
+    // The Bot control plane. Arm, run by hand and replay a dead letter. The
+    // installation lifecycle is Host-only and has no command here.
+    "bot_trigger_set_armed",
+    "bot_run_manual",
+    "bot_delivery_replay",
     // ADR-0060 — a paired device reports its platform capability manifest
     // (camera, geolocation, …) on connect; persisted onto its `pairedDevices`
     // row by the TS dispatch arm. Direct `transport.call` from the mobile
@@ -2066,6 +2071,11 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "connector_approve_draft",
     "connector_reject_draft",
     "conversation_overrides_update",
+    // The Bot control plane. A manual run and a replay are attributable
+    // actions: the run they produce records which device asked for it, and the
+    // id is one the client must not be able to choose.
+    "bot_run_manual",
+    "bot_delivery_replay",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
     "provider_diagnostics_start",

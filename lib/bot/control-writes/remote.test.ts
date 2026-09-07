@@ -1,5 +1,28 @@
+/** @jest-environment jsdom */
+
+import "fake-indexeddb/auto"
+
+import { installBot } from "@/lib/db/bot-installations"
+import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
+import { getDb, __resetDbForTesting } from "@/lib/db/schema"
+
+const enqueue = jest.fn(
+  async (input: { command: string; idempotencyKey: string; payload: Record<string, unknown> }) =>
+    ({ id: "job_1", ...input }) as unknown as MobileOutboundJobRow
+)
+jest.mock("@/lib/db/mobile-outbound-queue", () => ({
+  enqueue: (input: { command: string; idempotencyKey: string; payload: Record<string, unknown> }) =>
+    enqueue(input),
+}))
+
 import { BOT_WRITE_COMMANDS } from "./route"
-import { BotRelayNotImplementedError, botWriteIdempotencyKey, relayBotWrite } from "./remote"
+import {
+  botWriteIdempotencyKey,
+  replayBotDeliveryRemotely,
+  runBotManuallyRemotely,
+  setBotTriggerArmedRemotely,
+} from "./remote"
+import { hasPendingBotInstallationMutation } from "./pending-installations"
 
 const fresh = () => "uuid-1"
 
@@ -49,12 +72,118 @@ describe("botWriteIdempotencyKey", () => {
   })
 })
 
-describe("relayBotWrite", () => {
-  it("refuses with a typed error rather than silently doing nothing", async () => {
-    // The dormant half. A phone must show a disabled control with a reason,
-    // not a button that appears to work.
-    await expect(relayBotWrite(BOT_WRITE_COMMANDS.runManual)).rejects.toBeInstanceOf(
-      BotRelayNotImplementedError
+describe("setBotTriggerArmedRemotely", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    enqueue.mockClear()
+  })
+
+  it("enqueues the absolute value under a derived key", async () => {
+    await setBotTriggerArmedRemotely({
+      installationId: "boti_1",
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: BOT_WRITE_COMMANDS.setTriggerArmed,
+        idempotencyKey: "bot-arm:boti_1:nightly:1",
+        payload: { installationId: "boti_1", triggerId: "nightly", armed: true },
+      })
+    )
+  })
+
+  it("flips the local mirror so the switch settles immediately", async () => {
+    const row = await installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+    })
+    await setBotTriggerArmedRemotely({
+      installationId: row.id,
+      triggerId: "nightly",
+      armed: false,
+    })
+    const stored = await getDb().botInstallations.get(row.id)
+    expect(stored?.triggerOverrides).toEqual({ nightly: false })
+  })
+
+  it("leaves the other overrides alone", async () => {
+    const row = await installBot({
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      triggerOverrides: { weekly: true },
+    })
+    await setBotTriggerArmedRemotely({ installationId: row.id, triggerId: "nightly", armed: true })
+    const stored = await getDb().botInstallations.get(row.id)
+    expect(stored?.triggerOverrides).toEqual({ weekly: true, nightly: true })
+  })
+
+  it("writes nothing locally when the installation is not mirrored here", async () => {
+    // A relayed arm for a Bot this device has never seen still has to reach
+    // the Host, and inventing a local row for it would put a Bot on screen
+    // that no installation anywhere holds.
+    await setBotTriggerArmedRemotely({
+      installationId: "boti_absent",
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(await getDb().botInstallations.get("boti_absent")).toBeUndefined()
+    expect(enqueue).toHaveBeenCalled()
+  })
+
+  it("releases the pending marker even when the enqueue throws", async () => {
+    // A marker left held would make the sync handler skip this installation
+    // forever, freezing the mirror on a value the Host never took.
+    enqueue.mockRejectedValueOnce(new Error("offline"))
+    await expect(
+      setBotTriggerArmedRemotely({ installationId: "boti_1", triggerId: "n", armed: true })
+    ).rejects.toThrow("offline")
+    expect(hasPendingBotInstallationMutation("boti_1")).toBe(false)
+  })
+})
+
+describe("runBotManuallyRemotely", () => {
+  beforeEach(() => enqueue.mockClear())
+
+  it("reuses the caller's key, so a retry is not a second run", async () => {
+    await runBotManuallyRemotely({ installationId: "boti_1", idempotencyKey: "uuid-7" })
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: BOT_WRITE_COMMANDS.runManual,
+        idempotencyKey: "uuid-7",
+      })
+    )
+  })
+
+  it("carries the key in the payload too, because the Host derives the event id from it", async () => {
+    await runBotManuallyRemotely({ installationId: "boti_1", idempotencyKey: "uuid-7" })
+    const [call] = enqueue.mock.calls as unknown as Array<[{ payload: { idempotencyKey: string } }]>
+    expect(call![0].payload.idempotencyKey).toBe("uuid-7")
+  })
+
+  it("omits an absent trigger rather than sending undefined", async () => {
+    await runBotManuallyRemotely({ installationId: "boti_1", idempotencyKey: "k" })
+    const [call] = enqueue.mock.calls as unknown as Array<[{ payload: Record<string, unknown> }]>
+    expect("triggerId" in call![0].payload).toBe(false)
+  })
+})
+
+describe("replayBotDeliveryRemotely", () => {
+  beforeEach(() => enqueue.mockClear())
+
+  it("keys on the delivery, so a duplicate request finds nothing to do", async () => {
+    await replayBotDeliveryRemotely("bdl_9")
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: BOT_WRITE_COMMANDS.replayDelivery,
+        idempotencyKey: "bot-replay:bdl_9",
+        payload: { deliveryId: "bdl_9" },
+      })
     )
   })
 })

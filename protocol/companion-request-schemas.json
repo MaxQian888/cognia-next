@@ -864,6 +864,65 @@
       },
       "additionalProperties": false
     },
+    "bot_delivery_replay": {
+      "type": "object",
+      "description": "Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed request is a no-op rather than a second run.",
+      "required": [
+        "deliveryId"
+      ],
+      "properties": {
+        "deliveryId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "bot_run_manual": {
+      "type": "object",
+      "description": "Start one Bot run by hand. `idempotencyKey` becomes the event id, so a retried press folds onto the delivery the first attempt created instead of starting a second run.",
+      "required": [
+        "installationId",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "installationId": {
+          "type": "string"
+        },
+        "triggerId": {
+          "type": "string",
+          "description": "The manual trigger to attribute the run to. Defaults to the definition's only manual trigger."
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "idempotencyKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "bot_trigger_set_armed": {
+      "type": "object",
+      "description": "Arm or disarm one trigger. An absolute value rather than a toggle, so a queued command replayed after a reconnect lands on what the user last asked for.",
+      "required": [
+        "installationId",
+        "triggerId",
+        "armed"
+      ],
+      "properties": {
+        "installationId": {
+          "type": "string"
+        },
+        "triggerId": {
+          "type": "string"
+        },
+        "armed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
     "browser_companion_capability": {
       "type": "object",
       "properties": {

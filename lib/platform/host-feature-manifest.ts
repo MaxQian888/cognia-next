@@ -39,12 +39,9 @@ export const HOST_FEATURE_IDS = [
   "session.attachment-upload",
   "session.thread-handoff",
   "connectors.inbox-relay",
-  // The Bot control plane's relayed writes (arm a trigger, run one now,
-  // replay a dead letter). Declared here but NOT yet advertised by any host,
-  // which is the honest state and the order this file's closing rule asks
-  // for: transport, authorization and dispatch first, feature second. A
-  // client asking for it today gets `false`, which is exactly right, where an
-  // unregistered id makes `supportsHostFeatureOperation` throw.
+  // The Bot control plane's relayed writes: arm a trigger, run one now, replay
+  // a dead letter. Advertised by a host that runs a delivery runner. The
+  // installation lifecycle has no operation here on purpose.
   "bots.control",
   "workflow.execution",
   // Host-owned external-agent configurations. Its presence is what tells a
@@ -216,11 +213,11 @@ export const INBOX_RELAY_HOST_OPERATIONS = Object.freeze([
 /**
  * The Bot control operations a Host would implement for a companion.
  *
- * Listed before the arms exist so the client half can be written against a
- * real name rather than a string literal, and so the day the Rust dispatch
- * lands the only change is advertising the descriptor. Nothing reads this as
- * proof of support: `supportsHostFeatureOperation` answers from the manifest a
- * host actually sent, and no host sends this feature yet.
+ * A Host that runs a delivery runner advertises these as `bots.control`, and
+ * `resolveBotWriteAvailability` answers from the manifest a host actually
+ * sent rather than from this list. Installing, configuring and binding a
+ * credential are deliberately absent: those carry a config blob and account
+ * ids and stay Host-side actions.
  */
 export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
   "bot_trigger_set_armed",
@@ -482,6 +479,16 @@ export function buildLocalHostFeatureManifest({
     features["connectors.inbox-relay"] = {
       version: 1,
       operations: [...INBOX_RELAY_HOST_OPERATIONS],
+    }
+    // The Bot control plane. Advertised only now that the Rust dispatch, the
+    // command manifest and the TS arms all exist: this descriptor is what
+    // `resolveBotWriteAvailability` reads to decide whether a paired device's
+    // arm, run or replay may leave the device at all, so advertising it ahead
+    // of the arms would have produced a control that enqueues into a Host that
+    // answers `unknown command`.
+    features["bots.control"] = {
+      version: 1,
+      operations: [...BOT_CONTROL_HOST_OPERATIONS],
     }
     features["notifications.remote"] = {
       version: 1,

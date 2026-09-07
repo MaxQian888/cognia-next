@@ -22,7 +22,7 @@
     {
       "id": "automation",
       "title": "Workflows and automation",
-      "description": "Workflows, schedules, background jobs, monitors, and consent decisions.",
+      "description": "Workflows, schedules, Bots, background jobs, monitors, and consent decisions.",
       "skill": "cognia-host-automation"
     },
     {
@@ -101,6 +101,11 @@
       "id": "backup",
       "title": "Backup",
       "category": "system"
+    },
+    {
+      "id": "bot",
+      "title": "Bot",
+      "category": "automation"
     },
     {
       "id": "browser",
@@ -3602,6 +3607,169 @@
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
         "x-cognia-schema-owner": "backup"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "bot_delivery_replay",
+      "category": "automation",
+      "resource": "bot",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "bot_delivery_replay (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Requeue a dead-lettered Bot delivery. The host refuses a row that is no longer dead-lettered, so a replayed request is a no-op rather than a second run.",
+        "required": [
+          "deliveryId"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "`replayed` is false when the row was no longer dead-lettered, which is what a duplicated request produces.",
+        "required": [
+          "deliveryId",
+          "replayed"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "bot_run_manual",
+      "category": "automation",
+      "resource": "bot",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "bot_run_manual (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Start one Bot run by hand. `idempotencyKey` becomes the event id, so a retried press folds onto the delivery the first attempt created instead of starting a second run.",
+        "required": [
+          "installationId",
+          "idempotencyKey"
+        ],
+        "properties": {
+          "installationId": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string",
+            "description": "The manual trigger to attribute the run to. Defaults to the definition's only manual trigger."
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "`created` is false when the idempotency key matched an existing delivery, i.e. this was a retry replay rather than a second run.",
+        "required": [
+          "deliveryId",
+          "created"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string"
+          },
+          "created": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "bot_trigger_set_armed",
+      "category": "automation",
+      "resource": "bot",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "bot_trigger_set_armed (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "description": "Arm or disarm one trigger. An absolute value rather than a toggle, so a queued command replayed after a reconnect lands on what the user last asked for.",
+        "required": [
+          "installationId",
+          "triggerId",
+          "armed"
+        ],
+        "properties": {
+          "installationId": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "armed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The value the host settled on. Echoed back so a client can reconcile its optimistic flip.",
+        "required": [
+          "installationId",
+          "triggerId",
+          "armed"
+        ],
+        "properties": {
+          "installationId": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "armed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -39065,7 +39233,10 @@
               "platformIdentities",
               "connectorCallbackBindings",
               "workflowDeployments",
-              "executionRunBindings"
+              "executionRunBindings",
+              "botDefinitions",
+              "botInstallations",
+              "botEventDeliveries"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -48676,5 +48847,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "7b2134ce44cb484e52872b642b126ad609802d78a2c47b8059718d0a84112cce"
+  "catalogHash": "bad5259cda5cf7e67a830c513d64d4c6e0937d76d986bfc1459cfe1e99c7d5e9"
 }

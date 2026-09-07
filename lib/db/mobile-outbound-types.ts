@@ -98,6 +98,14 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   // HostStateProtocol — the same durable queue now carries attached-client
   // session intents from Web, Mobile, Desktop, and TUI adapters.
   "host_state_submit",
+  // The Bot control plane. A paired device can arm a trigger, start a run by
+  // hand and replay a dead letter. Installing, configuring and binding a
+  // credential stay Host-only: those carry a config blob and account ids, and
+  // a phone that "installed" a Bot into its own mirror would watch the next
+  // pull delete it.
+  "bot_trigger_set_armed",
+  "bot_run_manual",
+  "bot_delivery_replay",
   // ADR-0149 collaboration-plane writes. These are drained by the collab
   // dispatcher, not Companion RPC, but intentionally share this durable queue.
   "collab_issue_create",

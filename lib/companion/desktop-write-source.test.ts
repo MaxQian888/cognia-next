@@ -17,6 +17,22 @@ jest.mock("@/lib/connectors/bootstrap/install-connector-runtime", () => ({
 
 const ownsRuntimeMock = isConnectorRuntimeOwnedHere as jest.Mock
 
+// The Bot delivery runner's own ownership question. Same shape, different
+// runtime: a relayed run or replay must not land on a process with no runner.
+const ownsBotRunnerMock = jest.fn(() => true)
+jest.mock("@/lib/bot/runtime/runner-owner", () => ({
+  isBotRunnerOwnedHere: () => ownsBotRunnerMock(),
+}))
+
+const botTriggerArmed = jest.fn(async (_input: unknown) => ({ id: "boti_1" }))
+const botRunLocal = jest.fn(async (_input: unknown) => ({ deliveryId: "bdl_1", created: true }))
+const botReplayLocal = jest.fn(async (_id: string) => true)
+jest.mock("@/lib/bot/control-writes/local", () => ({
+  setBotTriggerArmedLocally: (input: unknown) => botTriggerArmed(input),
+  runBotManuallyLocally: (input: unknown) => botRunLocal(input),
+  replayBotDeliveryLocally: (id: string) => botReplayLocal(id),
+}))
+
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: () => mockActiveRuntimeTarget(),
 }))
@@ -2153,5 +2169,108 @@ describe("dispatchCommand: unknown command", () => {
     await expect(dispatchCommand("not_a_real_command", {})).rejects.toThrow(
       /unknown desktop-write command: not_a_real_command/
     )
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// The Bot control plane's relayed writes
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("dispatchCommand: the Bot control arms", () => {
+  beforeEach(() => {
+    ownsBotRunnerMock.mockReturnValue(true)
+    botTriggerArmed.mockClear()
+    botRunLocal.mockClear()
+    botReplayLocal.mockClear()
+  })
+
+  it("arms a trigger through the domain mutator, not a raw Dexie write", async () => {
+    // The mutator re-derives the status and reconciles the scheduler rows. A
+    // `botInstallations.put` here would arm a cron nothing ever fires.
+    const result = await dispatchCommand("bot_trigger_set_armed", {
+      installationId: "boti_1",
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(botTriggerArmed).toHaveBeenCalledWith({
+      installationId: "boti_1",
+      triggerId: "nightly",
+      armed: true,
+    })
+    expect(result).toEqual({ installationId: "boti_1", triggerId: "nightly", armed: true })
+  })
+
+  it("does NOT ask for a runner before arming", async () => {
+    // Arming writes configuration whichever runner takes the next delivery
+    // reads. Refusing it on a host between runners would be wrong.
+    ownsBotRunnerMock.mockReturnValue(false)
+    await expect(
+      dispatchCommand("bot_trigger_set_armed", {
+        installationId: "boti_1",
+        triggerId: "n",
+        armed: false,
+      })
+    ).resolves.toBeDefined()
+  })
+
+  it.each([
+    ["installationId", { triggerId: "n", armed: true }],
+    ["triggerId", { installationId: "boti_1", armed: true }],
+  ])("refuses an arm missing %s", async (_field, payload) => {
+    await expect(dispatchCommand("bot_trigger_set_armed", payload)).rejects.toThrow(/is required/)
+  })
+
+  it("refuses an arm whose armed field is not a boolean", async () => {
+    // A missing boolean would coerce to `false` and silently disarm.
+    await expect(
+      dispatchCommand("bot_trigger_set_armed", { installationId: "b", triggerId: "n" })
+    ).rejects.toThrow(/must be a boolean/)
+  })
+
+  it("passes the client's idempotency key through, because the event id derives from it", async () => {
+    await dispatchCommand("bot_run_manual", {
+      installationId: "boti_1",
+      triggerId: "run",
+      idempotencyKey: "uuid-7",
+    })
+    expect(botRunLocal).toHaveBeenCalledWith({
+      installationId: "boti_1",
+      triggerId: "run",
+      idempotencyKey: "uuid-7",
+    })
+  })
+
+  it("refuses a manual run with no idempotency key", async () => {
+    await expect(dispatchCommand("bot_run_manual", { installationId: "boti_1" })).rejects.toThrow(
+      /idempotencyKey is required/
+    )
+  })
+
+  it("replays a delivery and reports whether it was still dead-lettered", async () => {
+    botReplayLocal.mockResolvedValue(false)
+    const result = await dispatchCommand("bot_delivery_replay", { deliveryId: "bdl_9" })
+    expect(result).toEqual({ deliveryId: "bdl_9", replayed: false })
+  })
+})
+
+describe("relayed Bot writes on a process with no delivery runner", () => {
+  beforeEach(() => ownsBotRunnerMock.mockReturnValue(false))
+  afterEach(() => ownsBotRunnerMock.mockReturnValue(true))
+
+  it.each([
+    ["bot_run_manual", { installationId: "boti_1", idempotencyKey: "k" }],
+    ["bot_delivery_replay", { deliveryId: "bdl_1" }],
+  ])("refuses %s rather than queueing work nothing drains", async (command, payload) => {
+    await expect(dispatchCommand(command, payload)).rejects.toThrow(/bot_runner_not_owner/)
+  })
+
+  it("throws a message the durable queue treats as RETRYABLE", async () => {
+    // The client's queue must replay across a lease handoff rather than
+    // dead-letter a run that would have worked a second later. `isRetryable`
+    // keys off the message, so the wording is load-bearing.
+    const error = await dispatchCommand("bot_delivery_replay", { deliveryId: "bdl_1" }).catch(
+      (e: unknown) => e
+    )
+    expect(isRetryable(error)).toBe(true)
   })
 })

@@ -53,6 +53,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "workflow_placement_probe",
     "workflow_handoff_create",
     "twin_ingest_source",
+    "bot_trigger_set_armed",
+    "bot_run_manual",
+    "bot_delivery_replay",
     "device_capabilities_report",
     "session_attach",
     "session_detach",
@@ -695,6 +698,14 @@ pub(super) async fn dispatch(
         | "workflow_placement_probe"
         | "workflow_handoff_create"
         | "twin_ingest_source"
+        // The Bot control plane. Sharing this arm is safe because all three
+        // carry an EXPLICIT request schema in
+        // `protocol/companion-request-schemas.json`, and an explicit schema
+        // wins over the one `extractCommandArgumentSchemas` would derive from
+        // the arm and hand to every name in it.
+        | "bot_trigger_set_armed"
+        | "bot_run_manual"
+        | "bot_delivery_replay"
         // ADR-0060 — device capability report; TS arm persists onto the
         // caller's `pairedDevices` row (caller id injected below).
         | "device_capabilities_report"

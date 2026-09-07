@@ -556,9 +556,14 @@ const HOST_CATEGORIES = [
   {
     id: "automation",
     title: "Workflows and automation",
-    description: "Workflows, schedules, background jobs, monitors, and consent decisions.",
+    description: "Workflows, schedules, Bots, background jobs, monitors, and consent decisions.",
     skill: "cognia-host-automation",
-    pattern: /^(workflow_|scheduled_task_|automation_|background_)/,
+    // `bot_` belongs here rather than under `agents`: a Bot is a binding, and
+    // the things it binds are exactly this category's. Its timed triggers
+    // become `scheduledTasks`, and its executors are the workflow
+    // orchestrator, a Squad or one agent turn. `agents` is about runtimes and
+    // sessions, which a Bot never owns.
+    pattern: /^(workflow_|scheduled_task_|automation_|background_|bot_)/,
   },
   {
     id: "connectors",

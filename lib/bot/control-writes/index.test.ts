@@ -1,9 +1,9 @@
 const setLocal = jest.fn(async () => ({ id: "boti_1" }))
 const runLocal = jest.fn(async () => ({ deliveryId: "bdl_1", created: true }))
 const replayLocal = jest.fn(async () => true)
-const relay = jest.fn(async () => {
-  throw new Error("relayed")
-})
+const relayArm = jest.fn(async (_input: unknown) => ({ id: "job_1" }))
+const relayRun = jest.fn(async (_input: unknown) => ({ id: "job_2" }))
+const relayReplay = jest.fn(async (_id: string) => ({ id: "job_3" }))
 
 jest.mock("./local", () => ({
   setBotTriggerArmedLocally: (...args: unknown[]) => setLocal(...(args as [])),
@@ -13,8 +13,9 @@ jest.mock("./local", () => ({
   MANUAL_RUN_EVENT_TYPE: "manual.run",
 }))
 jest.mock("./remote", () => ({
-  relayBotWrite: (...args: unknown[]) => relay(...(args as [])),
-  BotRelayNotImplementedError: class extends Error {},
+  setBotTriggerArmedRemotely: (input: unknown) => relayArm(input),
+  runBotManuallyRemotely: (input: unknown) => relayRun(input),
+  replayBotDeliveryRemotely: (id: string) => relayReplay(id),
   botWriteIdempotencyKey: () => "k",
 }))
 
@@ -45,7 +46,9 @@ beforeEach(() => {
   setLocal.mockClear()
   runLocal.mockClear()
   replayLocal.mockClear()
-  relay.mockClear()
+  relayArm.mockClear()
+  relayRun.mockClear()
+  relayReplay.mockClear()
 })
 
 afterEach(() => {
@@ -62,7 +65,7 @@ describe("the facade picks the executor", () => {
       triggerId: "n",
       armed: true,
     })
-    expect(relay).not.toHaveBeenCalled()
+    expect(relayArm).not.toHaveBeenCalled()
   })
 
   it("runs a local manual run and replay once a runner is here", async () => {
@@ -100,6 +103,82 @@ describe("the facade picks the executor", () => {
     await expect(
       setBotTriggerArmed({ installationId: "boti_1", triggerId: "n", armed: true })
     ).rejects.toBeInstanceOf(BotWriteUnavailableError)
-    expect(relay).not.toHaveBeenCalled()
+    expect(relayArm).not.toHaveBeenCalled()
+  })
+})
+
+describe("the facade routes to the relay", () => {
+  const ALL_THREE = [
+    BOT_WRITE_COMMANDS.setTriggerArmed,
+    BOT_WRITE_COMMANDS.runManual,
+    BOT_WRITE_COMMANDS.replayDelivery,
+  ]
+
+  /**
+   * A remote host that advertises the whole control feature AND reports every
+   * operation healthy. A schema-2 manifest needs both: the feature descriptor
+   * says the host implements it, the operation health says it can right now.
+   */
+  function manifest(operations: readonly string[]) {
+    return {
+      schemaVersion: 2,
+      features: { "bots.control": { version: 1, operations: [...operations] } },
+      operations: operations.map((name) => ({ name, healthy: true })),
+    } as never
+  }
+
+  function connectedHost() {
+    route({
+      isRemoteHostActive: () => true,
+      activeHostFeatureManifest: () => manifest(ALL_THREE),
+    })
+  }
+
+  it("relays an arm and answers undefined, because the queue row is not an installation", async () => {
+    connectedHost()
+    const result = await setBotTriggerArmed({
+      installationId: "boti_1",
+      triggerId: "n",
+      armed: true,
+    })
+    expect(relayArm).toHaveBeenCalledWith({
+      installationId: "boti_1",
+      triggerId: "n",
+      armed: true,
+    })
+    expect(setLocal).not.toHaveBeenCalled()
+    expect(result).toBeUndefined()
+  })
+
+  it("relays a manual run without inventing a delivery id", async () => {
+    // The Host mints it from the idempotency key. Reporting one here would
+    // name a row this device cannot see.
+    connectedHost()
+    const result = await runBotManually({ installationId: "boti_1", idempotencyKey: "k" })
+    expect(relayRun).toHaveBeenCalledWith({ installationId: "boti_1", idempotencyKey: "k" })
+    expect(runLocal).not.toHaveBeenCalled()
+    expect(result).toBeUndefined()
+  })
+
+  it("relays a replay and leaves the verdict to sync", async () => {
+    connectedHost()
+    const result = await replayBotDeliveryWrite("bdl_9")
+    expect(relayReplay).toHaveBeenCalledWith("bdl_9")
+    expect(replayLocal).not.toHaveBeenCalled()
+    expect(result).toBeUndefined()
+  })
+
+  it("prefers the relay over the local leg on a desktop driving a remote host", async () => {
+    // The ordering trap: that desktop still reports `always-on` while its own
+    // runtimes are torn down.
+    route({
+      isRemoteHostActive: () => true,
+      hasLocalDatabase: () => true,
+      isRunnerOwnedHere: () => true,
+      activeHostFeatureManifest: () => manifest([BOT_WRITE_COMMANDS.runManual]),
+    })
+    await runBotManually({ installationId: "boti_1", idempotencyKey: "k" })
+    expect(relayRun).toHaveBeenCalled()
+    expect(runLocal).not.toHaveBeenCalled()
   })
 })

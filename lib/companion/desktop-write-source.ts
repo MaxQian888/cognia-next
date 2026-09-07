@@ -409,6 +409,15 @@ export async function dispatchCommand(
       return connectorApproveDraft(payload)
     case "connector_reject_draft":
       return connectorRejectDraft(payload)
+    // The Bot control plane. A paired device can arm, run and replay, and the
+    // installation lifecycle deliberately has no arm here: an install carries
+    // a config blob and credential ids, and stays a Host-side action.
+    case "bot_trigger_set_armed":
+      return botTriggerSetArmed(payload)
+    case "bot_run_manual":
+      return botRunManual(payload)
+    case "bot_delivery_replay":
+      return botDeliveryReplay(payload)
     case "workflow_placement_probe":
       return workflowPlacementProbe(payload)
     case "workflow_handoff_create":
@@ -1698,6 +1707,101 @@ function requireConnectorRuntimeOwnership(command: string): void {
   throw new Error(
     `connector_runtime_not_owner: ${command} reached a process that does not own the connector runtime; retry`
   )
+}
+
+/**
+ * Refuse a relayed Bot write when THIS process does not run a delivery runner.
+ *
+ * The twin of `requireConnectorRuntimeOwnership`, and it asks the same kind of
+ * question: not "may this caller write" (the caller's device id is injected
+ * upstream in `rpc.rs`) but "will anything here act on the row this write
+ * creates". A delivery only ever moves because a runner drains it, so a
+ * `bot_run_manual` handled by a process between runners would enqueue work
+ * nothing picks up.
+ *
+ * `hasCapability("always-on")` is deliberately NOT the predicate. It is a
+ * static baseline a desktop still reports while it is driving a remote Cognia
+ * with its own runtimes torn down.
+ *
+ * The message avoids every word `lib/queue/retry-policy.ts` classifies as
+ * terminal, so the client's durable queue RETRIES across a lease handoff
+ * instead of dead-lettering a write that would have worked a second later.
+ */
+async function requireBotRunnerOwnership(command: string): Promise<void> {
+  const { isBotRunnerOwnedHere } = await import("@/lib/bot/runtime/runner-owner")
+  if (isBotRunnerOwnedHere()) return
+  throw new Error(
+    `bot_runner_not_owner: ${command} reached a process that does not run a Bot delivery runner; retry`
+  )
+}
+
+/**
+ * Arm or disarm one trigger on behalf of a paired device.
+ *
+ * No runner guard. This writes `botInstallations.triggerOverrides`, which is
+ * configuration whichever runner picks the next delivery up will read, and
+ * refusing it on a host that happens to be between runners would be wrong.
+ * It goes through the domain mutator so the scheduler reconciliation a desktop
+ * click triggers happens for a relayed caller too.
+ */
+async function botTriggerSetArmed(
+  payload: Record<string, unknown>
+): Promise<{ installationId: string; triggerId: string; armed: boolean }> {
+  const installationId = String(payload.installationId ?? "")
+  const triggerId = String(payload.triggerId ?? "")
+  if (!installationId) throw new Error("bot_trigger_set_armed.installationId is required")
+  if (!triggerId) throw new Error("bot_trigger_set_armed.triggerId is required")
+  if (typeof payload.armed !== "boolean") {
+    throw new Error("bot_trigger_set_armed.armed must be a boolean")
+  }
+  const { setBotTriggerArmedLocally } = await import("@/lib/bot/control-writes/local")
+  await setBotTriggerArmedLocally({ installationId, triggerId, armed: payload.armed })
+  return { installationId, triggerId, armed: payload.armed }
+}
+
+/**
+ * Start one run by hand on behalf of a paired device.
+ *
+ * The client's idempotency key becomes the envelope's event id, so
+ * `botDeliveryDedupKey` folds a retried press back onto the delivery the first
+ * attempt created rather than starting a second run.
+ */
+async function botRunManual(
+  payload: Record<string, unknown>
+): Promise<{ deliveryId: string; created: boolean }> {
+  await requireBotRunnerOwnership("bot_run_manual")
+  const installationId = String(payload.installationId ?? "")
+  const idempotencyKey = String(payload.idempotencyKey ?? "")
+  if (!installationId) throw new Error("bot_run_manual.installationId is required")
+  if (!idempotencyKey) throw new Error("bot_run_manual.idempotencyKey is required")
+  const { runBotManuallyLocally } = await import("@/lib/bot/control-writes/local")
+  const result = await runBotManuallyLocally({
+    installationId,
+    ...(typeof payload.triggerId === "string" ? { triggerId: payload.triggerId } : {}),
+    ...(payload.input && typeof payload.input === "object"
+      ? { input: payload.input as Record<string, unknown> }
+      : {}),
+    idempotencyKey,
+  })
+  return result
+}
+
+/**
+ * Replay a dead-lettered delivery on behalf of a paired device.
+ *
+ * `replayBotDeliveryLocally` is guarded on the row still being `deadletter`,
+ * so a duplicate request answers `false` instead of re-running work that has
+ * already been re-queued.
+ */
+async function botDeliveryReplay(
+  payload: Record<string, unknown>
+): Promise<{ deliveryId: string; replayed: boolean }> {
+  await requireBotRunnerOwnership("bot_delivery_replay")
+  const deliveryId = String(payload.deliveryId ?? "")
+  if (!deliveryId) throw new Error("bot_delivery_replay.deliveryId is required")
+  const { replayBotDeliveryLocally } = await import("@/lib/bot/control-writes/local")
+  const replayed = await replayBotDeliveryLocally(deliveryId)
+  return { deliveryId, replayed }
 }
 
 type ConnectorSegment = { type?: string; text?: string }

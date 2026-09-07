@@ -6758,6 +6758,37 @@
     "browser_close_page": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "bot_delivery_replay": {
+      "type": "object",
+      "description": "`replayed` is false when the row was no longer dead-lettered, which is what a duplicated request produces.",
+      "required": ["deliveryId", "replayed"],
+      "properties": {
+        "deliveryId": { "type": "string" },
+        "replayed": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "bot_run_manual": {
+      "type": "object",
+      "description": "`created` is false when the idempotency key matched an existing delivery, i.e. this was a retry replay rather than a second run.",
+      "required": ["deliveryId", "created"],
+      "properties": {
+        "deliveryId": { "type": "string" },
+        "created": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "bot_trigger_set_armed": {
+      "type": "object",
+      "description": "The value the host settled on. Echoed back so a client can reconcile its optimistic flip.",
+      "required": ["installationId", "triggerId", "armed"],
+      "properties": {
+        "installationId": { "type": "string" },
+        "triggerId": { "type": "string" },
+        "armed": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "browser_companion_capability": {
       "$ref": "#/$defs/BrowserCompanionCapability"
     },

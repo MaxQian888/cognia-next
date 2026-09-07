@@ -26,7 +26,11 @@ import {
   type RunBotManuallyResult,
   type SetTriggerArmedInput,
 } from "./local"
-import { relayBotWrite } from "./remote"
+import {
+  replayBotDeliveryRemotely,
+  runBotManuallyRemotely,
+  setBotTriggerArmedRemotely,
+} from "./remote"
 import {
   BOT_WRITE_COMMANDS,
   canEnqueueBotWrite,
@@ -64,7 +68,11 @@ export async function setBotTriggerArmed(
 ): Promise<BotInstallationRow | undefined> {
   const route = resolveRouteOrThrow(BOT_WRITE_COMMANDS.setTriggerArmed)
   if (route === "local") return setBotTriggerArmedLocally(input)
-  return relayBotWrite(BOT_WRITE_COMMANDS.setTriggerArmed)
+  // The relay answers with a queue row, not an installation. The caller reads
+  // the switch from the mirror the relay just wrote, so `undefined` here means
+  // "in flight" rather than "nothing happened".
+  await setBotTriggerArmedRemotely(input)
+  return undefined
 }
 
 export async function runBotManually(
@@ -72,13 +80,19 @@ export async function runBotManually(
 ): Promise<RunBotManuallyResult | undefined> {
   const route = resolveRouteOrThrow(BOT_WRITE_COMMANDS.runManual)
   if (route === "local") return runBotManuallyLocally(input)
-  return relayBotWrite(BOT_WRITE_COMMANDS.runManual)
+  // No delivery id yet: the Host mints it from the idempotency key. Reporting
+  // one here would name a row this device cannot see.
+  await runBotManuallyRemotely(input)
+  return undefined
 }
 
 export async function replayBotDeliveryWrite(deliveryId: string): Promise<boolean | undefined> {
   const route = resolveRouteOrThrow(BOT_WRITE_COMMANDS.replayDelivery)
   if (route === "local") return replayBotDeliveryLocally(deliveryId)
-  return relayBotWrite(BOT_WRITE_COMMANDS.replayDelivery)
+  // Whether the row was still dead-lettered is the Host's answer, and it comes
+  // back through sync rather than through the queue.
+  await replayBotDeliveryRemotely(deliveryId)
+  return undefined
 }
 
 export {
@@ -91,7 +105,7 @@ export {
 }
 export { BotControlTargetMissingError, MANUAL_RUN_EVENT_TYPE } from "./local"
 export type { RunBotManuallyInput, RunBotManuallyResult, SetTriggerArmedInput } from "./local"
-export { BotRelayNotImplementedError, botWriteIdempotencyKey } from "./remote"
+export { botWriteIdempotencyKey } from "./remote"
 
 /**
  * The installation lifecycle, re-exported through the same door.

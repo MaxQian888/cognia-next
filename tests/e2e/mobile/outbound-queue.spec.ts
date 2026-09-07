@@ -55,6 +55,10 @@ const COMMAND_KINDS = [
   "workflow_delete",
   "workflow_schedule_pause",
   "workflow_schedule_resume",
+  // Bot control plane
+  "bot_trigger_set_armed",
+  "bot_run_manual",
+  "bot_delivery_replay",
   // Twin subsystem
   "twin_ingest_source",
   "twin_source_create",

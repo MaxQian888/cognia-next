@@ -15615,6 +15615,42 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "bot_delivery_replay",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "bot_run_manual",
+      "target": "execution",
+      "operation": "write",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "bot_trigger_set_armed",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "workflow_trigger_manual",
       "target": "execution",
       "operation": "write",
