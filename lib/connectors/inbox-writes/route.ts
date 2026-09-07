@@ -31,9 +31,11 @@ import {
   type OperationAvailability,
 } from "@/lib/runtime/operation-availability"
 import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { resolveWritePlaneRoute, type WritePlaneRoute } from "@/lib/runtime/write-plane-route"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 
-export type InboxWriteRoute = "local" | "remote" | "unavailable"
+/** Re-exported so callers keep importing the route type from the facade. */
+export type InboxWriteRoute = WritePlaneRoute
 
 /** The RPC each relayed write travels as; local writes never leave the process. */
 export const INBOX_WRITE_COMMANDS = Object.freeze({
@@ -75,10 +77,14 @@ export function __setInboxWriteRouteDepsForTests(next: Partial<InboxWriteRouteDe
 }
 
 export function resolveInboxWriteRoute(): InboxWriteRoute {
-  if (deps.isRemoteHostActive()) return "remote"
-  if (deps.hasConnectorRuntime()) return "local"
-  if (deps.getRuntimeSnapshot().target?.kind === "companion") return "remote"
-  return "unavailable"
+  // The ordering lives in `lib/runtime/write-plane-route.ts` now, because the
+  // Bot control plane needs the same answer and the trap it avoids (a static
+  // capability outliving the runtime it names) is not connector-specific.
+  return resolveWritePlaneRoute({
+    isRemoteHostActive: deps.isRemoteHostActive,
+    hasLocalExecutor: deps.hasConnectorRuntime,
+    targetKind: () => deps.getRuntimeSnapshot().target?.kind,
+  })
 }
 
 /**

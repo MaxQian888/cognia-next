@@ -489,6 +489,11 @@ export async function countActiveBotDeliveriesForKey(
   ).length
 }
 
+/** One delivery by id. A primary-key read, so a control write can check state. */
+export async function getBotDelivery(id: string): Promise<BotEventDeliveryRow | undefined> {
+  return getDb().botEventDeliveries.get(id)
+}
+
 export async function listBotDeliveries(query: {
   installationId?: string
   status?: BotDeliveryStatus

@@ -4659,6 +4659,25 @@
       "title": "凭据",
       "unbound": "待绑定"
     },
+    "delivery": {
+      "attempts": "{count, plural, =0 {尚未尝试} =1 {尝试 1 次} other {尝试 # 次}}",
+      "deadLetterCount": "{count, plural, =1 {1 条死信} other {# 条死信}}",
+      "description": "这个 Bot 背后的队列。一条从未跑起来的投递，在别处看不到任何运行记录。",
+      "emptyBody": "还没有任何东西投递给这个 Bot。武装一个触发器，或者手动跑一次。",
+      "emptyTitle": "没有投递",
+      "replay": "重放",
+      "status": {
+        "deadletter": "已放弃",
+        "dismissed": "已作废",
+        "failed": "重试中",
+        "leased": "已领取",
+        "parked": "等待中",
+        "pending": "排队中",
+        "running": "运行中",
+        "succeeded": "已完成"
+      },
+      "title": "投递"
+    },
     "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
     "detail": {
       "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
@@ -4752,6 +4771,11 @@
       "deadLetters": "{count, plural, =1 {1 条死信} other {# 条死信}}",
       "needsAttention": "需要处理"
     },
+    "run": {
+      "blockedNoTrigger": "这个 Bot 没有声明手动触发器，手动运行无处归属。",
+      "blockedOrphan": "已经没有定义可以运行了。",
+      "label": "立即运行"
+    },
     "runtime": {
       "none": {
         "body": "这个浏览器既没有常驻运行时，也没有配对的宿主，因此没有任何东西会接手 Bot 的工作。配对一台宿主或使用桌面应用，这些 Bot 才会运行。",
@@ -4788,8 +4812,8 @@
     "summary": "{total} 个中有 {armed} 个已武装",
     "title": "Bot",
     "trigger": {
-      "armed": "已武装",
-      "disarmed": "已关闭",
+      "armAria": "武装「{name}」",
+      "armBlockedOrphan": "定义缺失时无法武装触发器。",
       "everyHours": "每 {value} 小时",
       "everyMinutes": "每 {value} 分钟",
       "everySeconds": "每 {value} 秒",
@@ -4809,6 +4833,39 @@
       "orphanBody": "触发器读自定义，而这条安装记录已经没有定义可读。",
       "orphanTitle": "定义缺失",
       "title": "触发器"
+    },
+    "write": {
+      "alreadyQueued": "这次运行已经在排队了。",
+      "alreadyReplayed": "这条投递已经不是死信了。",
+      "armed": "触发器已武装",
+      "disarmed": "触发器已关闭",
+      "failed": "改动未能保存",
+      "missing": {
+        "delivery": "这条投递已经不存在了。",
+        "installation": "这个 Bot 已经不在安装列表里了。",
+        "trigger": "这个定义没有声明该触发器。"
+      },
+      "reason": {
+        "companion-not-paired": "先把这台设备与一台宿主配对，才能改动。",
+        "connection-offline": "当前离线。恢复连接后会自动发送。",
+        "host-admin-only": "只有宿主的所有者可以改动。",
+        "host-manifest-missing": "还在确认所连宿主支持哪些能力。",
+        "host-protocol": "所连宿主使用的协议版本不同。",
+        "legacy-readonly": "所连宿主版本太旧，无法接受这项改动。",
+        "local-executor": "在本设备处理。",
+        "local-host": "在本设备处理。",
+        "missing-grant": "这台设备没有被授予该权限。",
+        "offline-cache": "显示的是最后已知状态。重新连接后才能改动。",
+        "offline-queue": "已排队，恢复连接后发送。",
+        "operation-unavailable": "当前没有可用的投递运行器。桌面应用或配对的宿主才会运行它们。",
+        "requires-companion": "浏览器无法运行 Bot。请配对一台宿主，或使用桌面应用。",
+        "service-only": "这是内部操作。",
+        "unknown-command": "当前版本不认识该操作。",
+        "vault-locked": "先解锁保险库才能改动。"
+      },
+      "replayed": "投递已重新排队",
+      "started": "运行已启动",
+      "unavailable": "这项改动无法从这里进行"
     }
   },
   "browser": {

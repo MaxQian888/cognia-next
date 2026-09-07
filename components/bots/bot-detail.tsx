@@ -28,7 +28,7 @@
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { IdCardIcon, KeyRoundIcon, ShieldIcon, ZapIcon } from "lucide-react"
+import { IdCardIcon, InboxIcon, KeyRoundIcon, ShieldIcon, ZapIcon } from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
 import { FactList, FactRow } from "@/components/surface/fact-list"
@@ -38,6 +38,7 @@ import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
 import { BotHero } from "./bot-hero"
 import { BotCredentialsSection } from "./sections/credentials-section"
+import { BotDeliveriesSection } from "./sections/deliveries-section"
 import { BotPolicySection } from "./sections/policy-section"
 import { BotTriggersSection } from "./sections/triggers-section"
 import { useBotProblemText, useBotRelativeTime } from "./bot-visuals"
@@ -145,6 +146,23 @@ export function BotDetail({ row }: BotDetailProps) {
             }
           >
             <BotCredentialsSection row={row} />
+          </ConsoleSection>
+
+          {/* Full width: each row can carry a whole error message, and in half
+              a pane one of those is a paragraph. */}
+          <ConsoleSection
+            id="deliveries"
+            title={t("delivery.title")}
+            icon={InboxIcon}
+            description={t("delivery.description")}
+            meta={
+              row.deadLetters > 0
+                ? t("delivery.deadLetterCount", { count: row.deadLetters })
+                : undefined
+            }
+            wide
+          >
+            <BotDeliveriesSection row={row} />
           </ConsoleSection>
 
           {/* Full width: a fact list of up to seven rows, each carrying a

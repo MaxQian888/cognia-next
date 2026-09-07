@@ -1,10 +1,43 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+import type { BotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
+const setBotTriggerArmed = jest.fn(
+  async (_input: { installationId: string; triggerId: string; armed: boolean }) => undefined
+)
+let readiness: BotWriteReadiness = {
+  route: "local",
+  availability: { state: "available", reason: "local-host" },
+  can: true,
+}
+
+jest.mock("@/hooks/bots/use-bot-control-writes", () => ({
+  // The real hook, minus its subscriptions. What this suite pins is that the
+  // section routes through the facade at all, which a component writing Dexie
+  // directly would pass without.
+  useBotWriteReadiness: () => readiness,
+  useBotControlActions: () => ({
+    pending: new Set<string>(),
+    setTriggerArmed: (installationId: string, triggerId: string, armed: boolean) =>
+      setBotTriggerArmed({ installationId, triggerId, armed }),
+    runNow: jest.fn(),
+    replayDelivery: jest.fn(),
+  }),
+}))
+
 import { BotTriggersSection } from "./triggers-section"
+
+beforeEach(() => {
+  setBotTriggerArmed.mockClear()
+  readiness = {
+    route: "local",
+    availability: { state: "available", reason: "local-host" },
+    can: true,
+  }
+})
 
 function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
   return {
@@ -39,13 +72,45 @@ describe("BotTriggersSection", () => {
     render(<BotTriggersSection row={row()} />)
     const nightly = screen.getByTestId("bot-trigger-nightly")
     expect(nightly).toHaveAttribute("data-armed", "false")
-    expect(nightly).toHaveTextContent("Off")
+    expect(screen.getByTestId("bot-trigger-switch-nightly")).not.toBeChecked()
   })
 
-  it("marks an armed trigger", () => {
+  it("marks an armed trigger, with the state on the switch and not only in colour", () => {
     render(<BotTriggersSection row={row()} />)
     expect(screen.getByTestId("bot-trigger-push")).toHaveAttribute("data-armed", "true")
-    expect(screen.getByTestId("bot-trigger-push")).toHaveTextContent("Armed")
+    expect(screen.getByTestId("bot-trigger-switch-push")).toBeChecked()
+  })
+
+  it("writes an absolute value through the facade, never a toggle", async () => {
+    render(<BotTriggersSection row={row()} />)
+    fireEvent.click(screen.getByTestId("bot-trigger-switch-nightly"))
+    await waitFor(() =>
+      expect(setBotTriggerArmed).toHaveBeenCalledWith({
+        installationId: "boti_1",
+        triggerId: "nightly",
+        armed: true,
+      })
+    )
+  })
+
+  it("disables the switch and says why when this shell cannot arm anything", () => {
+    // Hiding it collapses "no such trigger", "not from here" and "already
+    // armed" into one answer.
+    readiness = {
+      route: "unavailable",
+      availability: { state: "unsupported", reason: "requires-companion" },
+      can: false,
+    }
+    render(<BotTriggersSection row={row()} />)
+    expect(screen.getByTestId("bot-trigger-switch-push")).toBeDisabled()
+    expect(screen.getByTestId("bot-arm-blocked")).toHaveTextContent("This browser cannot run Bots")
+  })
+
+  it("refuses to arm an orphan, whose trigger no longer exists to reconcile", () => {
+    render(<BotTriggersSection row={row({ orphaned: true })} />)
+    expect(screen.getByTestId("bot-arm-blocked")).toHaveTextContent(
+      "Triggers cannot be armed while the definition is missing."
+    )
   })
 
   it("prints the kind and its literal detail", () => {

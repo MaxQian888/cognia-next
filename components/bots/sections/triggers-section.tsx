@@ -3,26 +3,41 @@
 /**
  * What wakes this Bot up, and which of those are armed.
  *
- * Read-only here on purpose. Arming a trigger is a write that has to route
- * through the same seam on a desktop and on a phone, so the switch arrives
- * with that seam rather than as a direct Dexie write this component would
- * later have to give up.
+ * The switch writes through `lib/bot/control-writes`, never Dexie: arming a
+ * cron trigger has to reconcile a scheduler row, and a raw
+ * `botInstallations.put` here would arm a schedule nothing ever fires. The
+ * same facade routes the write to a paired Host when this shell is not the one
+ * that runs the Bot, so one switch is correct on a desktop and on a phone.
  *
- * A disarmed trigger is rendered, not hidden. "This Bot has no schedule" and
- * "this Bot has a schedule that is switched off" are different answers, and
- * dropping the row makes them look identical.
+ * When the write plane cannot act, the switch is rendered and DISABLED with
+ * the reason beneath it, not hidden. Hiding it collapses three different
+ * answers into one: this Bot has no such trigger, this shell cannot arm it
+ * from here, and it is armed already.
+ *
+ * A disarmed trigger is rendered too. "This Bot has no schedule" and "this Bot
+ * has a schedule that is switched off" are different answers, and dropping the
+ * row makes them look identical.
  */
 
 import { useTranslations } from "next-intl"
 
-import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
+import { Switch } from "@/components/ui/switch"
+import { useBotControlActions, useBotWriteReadiness } from "@/hooks/bots/use-bot-control-writes"
+import { BOT_WRITE_COMMANDS } from "@/lib/bot/control-writes"
 import type { BotConsoleRow, BotTriggerSummary } from "@/lib/bot/console/bot-rows"
 import { cn } from "@/lib/utils"
 
 import { BotTriggerIcon, useBotIntervalText } from "../bot-visuals"
 
-function TriggerRow({ trigger }: { trigger: BotTriggerSummary }) {
+interface TriggerRowProps {
+  trigger: BotTriggerSummary
+  canArm: boolean
+  busy: boolean
+  onArmedChange: (armed: boolean) => void
+}
+
+function TriggerRow({ trigger, canArm, busy, onArmedChange }: TriggerRowProps) {
   const t = useTranslations("bots")
   const interval = useBotIntervalText()
 
@@ -48,21 +63,19 @@ function TriggerRow({ trigger }: { trigger: BotTriggerSummary }) {
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              "min-w-0 truncate text-xs font-medium",
+              "min-w-0 flex-1 truncate text-xs font-medium",
               !trigger.armed && "text-muted-foreground"
             )}
           >
             {title}
           </span>
-          <Badge
-            variant="outline"
-            className={cn(
-              "shrink-0 font-normal",
-              trigger.armed ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
-            )}
-          >
-            {t(trigger.armed ? "trigger.armed" : "trigger.disarmed")}
-          </Badge>
+          <Switch
+            checked={trigger.armed}
+            disabled={!canArm || busy}
+            onCheckedChange={onArmedChange}
+            aria-label={t("trigger.armAria", { name: title })}
+            data-testid={`bot-trigger-switch-${trigger.id}`}
+          />
         </div>
         <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
           {t(`trigger.kind.${trigger.kind}`)}
@@ -75,6 +88,8 @@ function TriggerRow({ trigger }: { trigger: BotTriggerSummary }) {
 
 export function BotTriggersSection({ row }: { row: BotConsoleRow }) {
   const t = useTranslations("bots")
+  const readiness = useBotWriteReadiness(BOT_WRITE_COMMANDS.setTriggerArmed)
+  const actions = useBotControlActions()
 
   if (row.triggers.length === 0) {
     return (
@@ -91,11 +106,32 @@ export function BotTriggersSection({ row }: { row: BotConsoleRow }) {
     )
   }
 
+  // An orphan has no definition to reconcile against, so arming one would
+  // write an override for a trigger that no longer exists.
+  const canArm = readiness.can && !row.orphaned
+
   return (
-    <ul className="divide-y" data-testid="bot-triggers">
-      {row.triggers.map((trigger) => (
-        <TriggerRow key={trigger.id} trigger={trigger} />
-      ))}
-    </ul>
+    <div className="flex flex-col gap-2">
+      <ul className="divide-y" data-testid="bot-triggers">
+        {row.triggers.map((trigger) => (
+          <TriggerRow
+            key={trigger.id}
+            trigger={trigger}
+            canArm={canArm}
+            busy={actions.pending.has(`trigger:${trigger.id}`)}
+            onArmedChange={(armed) => void actions.setTriggerArmed(row.id, trigger.id, armed)}
+          />
+        ))}
+      </ul>
+      {!canArm ? (
+        // Rendered rather than hidden: a disabled switch with a reason says
+        // "not from here", where an absent one says "this Bot has no trigger".
+        <p className="text-[11px] leading-snug text-muted-foreground" data-testid="bot-arm-blocked">
+          {row.orphaned
+            ? t("trigger.armBlockedOrphan")
+            : t(`write.reason.${readiness.availability.reason}`)}
+        </p>
+      ) : null}
+    </div>
   )
 }

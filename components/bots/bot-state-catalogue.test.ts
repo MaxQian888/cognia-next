@@ -20,7 +20,13 @@ import zh from "@/i18n/messages/zh-CN/bots.json"
 import { BOT_STATUS_FILTERS, type BotStatId, type BotTriggerKind } from "@/lib/bot/console/bot-rows"
 import { BOT_POLICY_LAYERS } from "@/lib/bot/policy/ceilings"
 import type { BotRuntimeReach } from "@/lib/bot/console/runtime-reach"
-import type { BotDefinitionSource, BotInstallationStatus, BotScopeKind } from "@/lib/db/bot-types"
+import type { OperationAvailabilityReason } from "@/lib/runtime/operation-availability"
+import type {
+  BotDefinitionSource,
+  BotDeliveryStatus,
+  BotInstallationStatus,
+  BotScopeKind,
+} from "@/lib/db/bot-types"
 import type { BotResolutionProblem } from "@/lib/bot/installed-bot"
 import type { PluginBotExecutor, PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
@@ -76,6 +82,43 @@ const POLICY_FIELDS = [
 /** `local` is deliberately absent: the notice renders nothing for it. */
 const REACHES = ["remote", "paired", "none"] as const satisfies readonly BotRuntimeReach[]
 
+const DELIVERY_STATUSES = [
+  "pending",
+  "leased",
+  "running",
+  "parked",
+  "succeeded",
+  "failed",
+  "deadletter",
+  "dismissed",
+] as const satisfies readonly BotDeliveryStatus[]
+
+/**
+ * Every reason `resolveOperationAvailability` and the Bot route can produce.
+ *
+ * The console prints one of these verbatim whenever a control refuses, so a
+ * reason with no entry ships a paragraph reading `write.reason.vault-locked`
+ * at exactly the moment a user is already stuck.
+ */
+const WRITE_REASONS = [
+  "local-executor",
+  "local-host",
+  "requires-companion",
+  "legacy-readonly",
+  "vault-locked",
+  "companion-not-paired",
+  "host-protocol",
+  "host-manifest-missing",
+  "operation-unavailable",
+  "missing-grant",
+  "offline-cache",
+  "offline-queue",
+  "connection-offline",
+  "service-only",
+  "host-admin-only",
+  "unknown-command",
+] as const satisfies readonly OperationAvailabilityReason[]
+
 type Catalogue = {
   status: Record<string, string>
   executor: Record<string, string>
@@ -88,6 +131,8 @@ type Catalogue = {
   listPane: { filter: Record<string, string> }
   policyField: Record<string, string>
   policyLayer: Record<string, string>
+  delivery: { status: Record<string, string> }
+  write: { reason: Record<string, string> }
 }
 
 const catalogues: Record<string, Catalogue> = {
@@ -140,6 +185,14 @@ describe.each(Object.entries(catalogues))("bots catalogue (%s)", (_locale, catal
 
   it.each(BOT_POLICY_LAYERS)("labels the %s policy layer", (layer) => {
     expect(typeof catalogue.policyLayer[layer]).toBe("string")
+  })
+
+  it.each(DELIVERY_STATUSES)("labels the %s delivery status", (status) => {
+    expect(typeof catalogue.delivery.status[status]).toBe("string")
+  })
+
+  it.each(WRITE_REASONS)("explains the %s write refusal", (reason) => {
+    expect(typeof catalogue.write.reason[reason]).toBe("string")
   })
 
   it("carries the orphan badge, which is not a fourth status", () => {

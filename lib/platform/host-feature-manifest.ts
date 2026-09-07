@@ -39,6 +39,13 @@ export const HOST_FEATURE_IDS = [
   "session.attachment-upload",
   "session.thread-handoff",
   "connectors.inbox-relay",
+  // The Bot control plane's relayed writes (arm a trigger, run one now,
+  // replay a dead letter). Declared here but NOT yet advertised by any host,
+  // which is the honest state and the order this file's closing rule asks
+  // for: transport, authorization and dispatch first, feature second. A
+  // client asking for it today gets `false`, which is exactly right, where an
+  // unregistered id makes `supportsHostFeatureOperation` throw.
+  "bots.control",
   "workflow.execution",
   // Host-owned external-agent configurations. Its presence is what tells a
   // browser that this host can BE the authority for an external agent — that
@@ -204,6 +211,21 @@ export const INBOX_RELAY_HOST_OPERATIONS = Object.freeze([
   "event:connector://message-added",
   "sync:connectorDrafts",
   "sync:outboundQueue",
+] as const)
+
+/**
+ * The Bot control operations a Host would implement for a companion.
+ *
+ * Listed before the arms exist so the client half can be written against a
+ * real name rather than a string literal, and so the day the Rust dispatch
+ * lands the only change is advertising the descriptor. Nothing reads this as
+ * proof of support: `supportsHostFeatureOperation` answers from the manifest a
+ * host actually sent, and no host sends this feature yet.
+ */
+export const BOT_CONTROL_HOST_OPERATIONS = Object.freeze([
+  "bot_trigger_set_armed",
+  "bot_run_manual",
+  "bot_delivery_replay",
 ] as const)
 
 /** Git operations implemented by the remote execution host (native watchers remain client-local). */

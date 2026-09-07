@@ -16,6 +16,7 @@ import { buildBotStats, type BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import type { PluginBotExecutor } from "@/types/plugin/plugin-bot"
 import { cn } from "@/lib/utils"
 
+import { RunBotNowButton } from "./run-bot-now-button"
 import { BotExecutorIcon, BotOrphanBadge, BotSourceIcon, BotStatusBadge } from "./bot-visuals"
 
 /**
@@ -88,6 +89,13 @@ export function BotHero({ row }: { row: BotConsoleRow }) {
             <p className="mt-1.5 text-xs leading-snug text-muted-foreground">{row.description}</p>
           ) : null}
         </div>
+      </div>
+      {/* Its own row rather than beside the title: when the write plane cannot
+          act, the reason is a sentence, and a sentence does not fit in a
+          heading. Above the strip because it acts on the Bot the strip
+          describes. */}
+      <div className="mt-3">
+        <RunBotNowButton row={row} />
       </div>
       {stats.length > 0 ? (
         <StatStrip

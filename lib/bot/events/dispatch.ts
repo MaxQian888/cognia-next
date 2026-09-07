@@ -17,6 +17,7 @@ import { resolveInstalledBot, isRunnableBot, type InstalledBot } from "@/lib/bot
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 import type { PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
+import { botDeliveryId, interpolateEnvelopeTemplate } from "./envelope"
 import {
   routeBotEvent,
   type BotRouteQuery,
@@ -123,4 +124,62 @@ export async function dispatchBotEvent(
   }
 
   return { enqueued, rejected: routed.rejected, unresolved }
+}
+
+/**
+ * Start one run by hand, on a named installation and trigger.
+ *
+ * Separate from {@link dispatchBotEvent} rather than a flag on it, because
+ * every filter that function applies is one a manual run has to skip, and a
+ * `force` option would leave the safe path one boolean away from the unsafe
+ * one:
+ *
+ *  * The candidate list is one installation, already chosen by the person.
+ *  * The trigger is named, so the router's `triggerMatches` has nothing to
+ *    decide, and it answers `false` for `manual` anyway, on purpose: a manual
+ *    trigger is fired by a person, never by an arriving event.
+ *  * A disarmed trigger still runs. Pressing Run IS the arming, for this once.
+ *
+ * What it does NOT skip is the queue. The delivery is enqueued exactly like
+ * any other, so the lease, the concurrency key and the retry policy all apply.
+ * A manual press during a busy period therefore waits behind the event-driven
+ * run holding the same key instead of racing it, which is the whole reason
+ * this goes through `enqueueBotDelivery` rather than straight to the runner.
+ */
+export interface DispatchManualBotRunInput {
+  resolved: InstalledBot
+  triggerId: string
+  envelope: Omit<BotEventEnvelopeV1, "installationId" | "triggerId" | "deliveryId">
+  now?: number
+}
+
+export async function dispatchManualBotRun(
+  input: DispatchManualBotRunInput
+): Promise<BotEventDeliveryRow> {
+  const trigger = input.resolved.definition.triggers.find((t) => t.id === input.triggerId)
+  if (!trigger) {
+    throw new Error(`bot trigger "${input.triggerId}" is not declared by this definition`)
+  }
+
+  const installationId = input.resolved.installation.id
+  const envelope: BotEventEnvelopeV1 = {
+    ...input.envelope,
+    installationId,
+    triggerId: trigger.id,
+    deliveryId: botDeliveryId(input.envelope.eventId, installationId),
+  }
+
+  // Interpolated the same way the router does it, and scoped per installation
+  // for the same reason: a manual run that ignored the key would run beside
+  // the very delivery the key exists to serialise it against.
+  const rawKey = trigger.concurrencyKey
+  const concurrencyKey = rawKey
+    ? `${installationId}::${interpolateEnvelopeTemplate(rawKey, envelope)}`
+    : undefined
+
+  return enqueueBotDelivery({
+    envelope,
+    ...(concurrencyKey ? { concurrencyKey } : {}),
+    ...(input.now !== undefined ? { now: input.now } : {}),
+  })
 }

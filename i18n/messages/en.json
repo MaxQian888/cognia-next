@@ -4659,6 +4659,25 @@
       "title": "Credentials",
       "unbound": "Needs binding"
     },
+    "delivery": {
+      "attempts": "{count, plural, =0 {No attempts yet} =1 {1 attempt} other {# attempts}}",
+      "deadLetterCount": "{count, plural, =1 {1 dead letter} other {# dead letters}}",
+      "description": "The queue behind this Bot. A delivery that never ran has no run to show anywhere else.",
+      "emptyBody": "Nothing has been delivered to this Bot yet. Arm a trigger, or run it once by hand.",
+      "emptyTitle": "No deliveries",
+      "replay": "Replay",
+      "status": {
+        "deadletter": "Gave up",
+        "dismissed": "Dismissed",
+        "failed": "Retrying",
+        "leased": "Claimed",
+        "parked": "Waiting",
+        "pending": "Queued",
+        "running": "Running",
+        "succeeded": "Done"
+      },
+      "title": "Deliveries"
+    },
     "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
     "detail": {
       "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
@@ -4752,6 +4771,11 @@
       "deadLetters": "{count, plural, =1 {1 dead letter} other {# dead letters}}",
       "needsAttention": "Needs attention"
     },
+    "run": {
+      "blockedNoTrigger": "This Bot declares no manual trigger, so there is nothing to attribute a hand-started run to.",
+      "blockedOrphan": "There is no definition left to run.",
+      "label": "Run now"
+    },
     "runtime": {
       "none": {
         "body": "This browser has no long-lived runtime and no paired Host, so nothing will pick up a Bot's work. Pair a Host or use the desktop app to make these Bots run.",
@@ -4788,8 +4812,8 @@
     "summary": "{armed} of {total} armed",
     "title": "Bots",
     "trigger": {
-      "armed": "Armed",
-      "disarmed": "Off",
+      "armAria": "Arm {name}",
+      "armBlockedOrphan": "Triggers cannot be armed while the definition is missing.",
       "everyHours": "Every {value}h",
       "everyMinutes": "Every {value}m",
       "everySeconds": "Every {value}s",
@@ -4809,6 +4833,39 @@
       "orphanBody": "Triggers are read from the definition, and this one has none to read.",
       "orphanTitle": "Definition missing",
       "title": "Triggers"
+    },
+    "write": {
+      "alreadyQueued": "That run is already queued.",
+      "alreadyReplayed": "That delivery is no longer dead-lettered.",
+      "armed": "Trigger armed",
+      "disarmed": "Trigger switched off",
+      "failed": "The change could not be saved",
+      "missing": {
+        "delivery": "That delivery no longer exists.",
+        "installation": "That Bot is no longer installed.",
+        "trigger": "That trigger is not declared by this definition."
+      },
+      "reason": {
+        "companion-not-paired": "Pair this device with a Host to make changes.",
+        "connection-offline": "Offline. The change will be sent when the connection returns.",
+        "host-admin-only": "Only the Host's owner can change this.",
+        "host-manifest-missing": "Still working out what the Host you are connected to can do.",
+        "host-protocol": "The Host you are connected to speaks a different version of this protocol.",
+        "legacy-readonly": "The Host you are connected to is too old to accept this change.",
+        "local-executor": "Handled on this device.",
+        "local-host": "Handled on this device.",
+        "missing-grant": "This device has not been granted permission for that.",
+        "offline-cache": "Showing what was last known. Reconnect to make changes.",
+        "offline-queue": "Queued. It will be sent when the connection returns.",
+        "operation-unavailable": "No delivery runner is available for this Bot right now. The desktop app or a paired Host runs them.",
+        "requires-companion": "This browser cannot run Bots. Pair a Host or use the desktop app.",
+        "service-only": "That is an internal operation.",
+        "unknown-command": "This build does not know that operation.",
+        "vault-locked": "Unlock the vault to make changes."
+      },
+      "replayed": "Delivery queued again",
+      "started": "Run started",
+      "unavailable": "That change cannot be made from here"
     }
   },
   "browser": {
