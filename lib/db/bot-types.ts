@@ -141,6 +141,20 @@ export interface BotInstallationRow {
   config: Record<string, unknown>
   /** Slot id to binding. A slot the definition requires and this map lacks is what makes an installation `needs_setup`. */
   credentialBindings: Record<string, BotCredentialBinding>
+  /**
+   * Mirrored from a Host, not owned here.
+   *
+   * The twin of the flag on `BotEventDeliveryRow`, and it fences a different
+   * failure. A companion syncs installations to SHOW them, and the scheduler
+   * reconciler turns an armed timed trigger into a local `type: "bot"` task.
+   * Left unfenced, a desktop that mirrored another Host's installations and
+   * then unpaired would sweep at boot and start firing that Host's schedules
+   * from its own scheduler, against rows the other machine is also firing.
+   *
+   * The fence is in `syncBotTriggerSchedules`, which both the per-edit path and
+   * the boot sweep flow through, rather than at either caller.
+   */
+  syncedFromHost?: true
   /** Trigger id to armed. A trigger absent here uses the definition's default. */
   triggerOverrides?: Record<string, boolean>
   triggerState?: Record<string, BotTriggerRuntimeState>

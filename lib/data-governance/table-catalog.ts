@@ -556,6 +556,17 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // bindings cursor on a non-indexed `updatedAt` scan (an index would cost a
   // schema reset); callback bindings on max(createdAt, consumedAt) and expire
   // client-side; deployments on their indexed `updatedAt`.
+  // The Bot control plane. A phone mounts `/bots` and could only ever see it
+  // empty: there is no `bot_*` read command, so sync is the only way an
+  // installed Bot, its setup state or a dead-lettered delivery reaches a
+  // paired device. Definitions cross in full, installations as a projection
+  // that drops the runner's own state, and deliveries as status only.
+  // `botRunSteps` is deliberately absent: its `output` is stored verbatim
+  // BECAUSE redaction would break a resumed handler, and its primary key IS
+  // the memoization key, so a mirror would let one host read another's memos.
+  "botDefinitions",
+  "botInstallations",
+  "botEventDeliveries",
   "connectorHeartbeats",
   "platformIdentities",
   "connectorCallbackBindings",
@@ -607,6 +618,9 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "issueEvents",
   "issueRuns",
   "issueCycles",
+  "botDefinitions",
+  "botInstallations",
+  "botEventDeliveries",
   "connectorHeartbeats",
   "platformIdentities",
   "connectorCallbackBindings",

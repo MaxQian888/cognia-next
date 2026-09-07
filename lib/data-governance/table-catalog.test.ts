@@ -82,8 +82,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 44 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(44)
+  it("maps all 47 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(47)
     // Saved chat templates. The mobile composer's `/` menu reads the local
     // Dexie, so before this the phone offered nothing there.
     expect(COMPANION_SYNC_TABLES.has("chatTemplates")).toBe(true)

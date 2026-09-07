@@ -250,3 +250,29 @@ describe("reconcileAllBotSchedules", () => {
     await expect(reconcileAllBotSchedules()).resolves.toBeUndefined()
   })
 })
+
+describe("the mirror fence", () => {
+  const CRON: PluginBotTriggerDef = { id: "nightly", kind: "schedule", cron: "0 9 * * *" }
+
+  it("refuses to reconcile an installation this device mirrored from a Host", async () => {
+    // Left unfenced, a desktop that mirrored another Host's installations and
+    // then unpaired would sweep at boot and start firing that Host's crons
+    // from its own scheduler, against rows the other machine is also firing.
+    await syncBotTriggerSchedules(resolved([CRON], { syncedFromHost: true }))
+    expect(schedulerApi.createTask).not.toHaveBeenCalled()
+    expect(schedulerApi.getAllTasks).not.toHaveBeenCalled()
+  })
+
+  it("still reconciles an installation this device owns", async () => {
+    await syncBotTriggerSchedules(resolved([CRON]))
+    expect(schedulerApi.createTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("fences the boot sweep too, through the same function", async () => {
+    // One fence at the chokepoint rather than one per caller.
+    listBotInstallations.mockResolvedValue([installation({ syncedFromHost: true })])
+    resolveInstalledBot.mockResolvedValue(resolved([CRON], { syncedFromHost: true }))
+    await reconcileAllBotSchedules()
+    expect(schedulerApi.createTask).not.toHaveBeenCalled()
+  })
+})

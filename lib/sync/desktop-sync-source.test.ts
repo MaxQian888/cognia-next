@@ -36,6 +36,8 @@ import {
   HEARTBEAT_FIRST_SYNC_WINDOW_MS,
   HEARTBEAT_PAGE_SIZE,
   installDesktopSyncSource,
+  projectBotDeliveryRow,
+  projectBotInstallationRow,
   readDexieDelta,
 } from "./desktop-sync-source"
 import {
@@ -1084,5 +1086,125 @@ describe("installDesktopSyncSource", () => {
     expect(tauriListen).toHaveBeenCalledWith("companion://sync-pull-request", expect.any(Function))
     teardown()
     expect(unlisten).toHaveBeenCalled()
+  })
+})
+
+describe("the Bot control plane projections", () => {
+  const NOW = 1_700_000_000_000
+
+  function installation(
+    over: Partial<import("@/lib/db/bot-types").BotInstallationRow> = {}
+  ): import("@/lib/db/bot-types").BotInstallationRow {
+    return {
+      id: "boti_1",
+      definitionId: "acme:digest",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      status: "enabled",
+      config: { channel: "#ops" },
+      credentialBindings: { gh: { integrationAccountId: "iacc_1", authSessionId: "sess_1" } },
+      createdAt: 10,
+      updatedAt: 20,
+      ...over,
+    }
+  }
+
+  function delivery(
+    over: Partial<import("@/lib/db/bot-types").BotEventDeliveryRow> = {}
+  ): import("@/lib/db/bot-types").BotEventDeliveryRow {
+    return {
+      id: "bdl_1",
+      eventId: "evt_1",
+      installationId: "boti_1",
+      triggerId: "cron",
+      source: "integration",
+      type: "pull_request.opened",
+      status: "failed",
+      attempts: 2,
+      lastError: "upstream 500",
+      runId: "botrun_1",
+      receivedAt: NOW,
+      updatedAt: NOW + 5,
+      nextAttemptAt: NOW + 60_000,
+      dedupKey: "boti_1::evt_1",
+      concurrencyKey: "boti_1::repo",
+      leaseOwner: "darwin:acct",
+      leaseExpiresAt: NOW + 120_000,
+      envelope: {
+        version: 1,
+        eventId: "evt_1",
+        deliveryId: "bdl_1",
+        source: "integration",
+        type: "pull_request.opened",
+        occurredAt: NOW,
+        actor: { kind: "system" },
+        provenance: { selfProduced: false, depth: 0 },
+        payload: { body: "somebody's pull request description" },
+      },
+      ...over,
+    } as import("@/lib/db/bot-types").BotEventDeliveryRow
+  }
+
+  it("empties the two installation fields that are not the client's business", () => {
+    // `credentialBindings` names integration accounts and auth sessions, and
+    // the answer the client needs is already folded into `status`. `config` is
+    // arbitrary user input with no editor on the far side.
+    const projected = projectBotInstallationRow(installation())
+    expect(projected.config).toEqual({})
+    expect(projected.credentialBindings).toEqual({})
+    expect(projected.status).toBe("enabled")
+  })
+
+  it("drops triggerState, which is the runner's own cursor", () => {
+    const projected = projectBotInstallationRow(
+      installation({ triggerState: { cron: { watermark: 99 } } })
+    )
+    expect("triggerState" in projected).toBe(false)
+  })
+
+  it("marks the installation mirrored, which is what fences the scheduler", () => {
+    expect(projectBotInstallationRow(installation()).syncedFromHost).toBe(true)
+  })
+
+  it("reduces a delivery to what a status list renders", () => {
+    const projected = projectBotDeliveryRow(delivery())
+    expect(projected).toMatchObject({
+      id: "bdl_1",
+      status: "failed",
+      attempts: 2,
+      lastError: "upstream 500",
+      runId: "botrun_1",
+    })
+  })
+
+  it("never carries the event payload across", () => {
+    // The envelope holds the whole inbound event, which is why the table is
+    // classified `encrypted-content`.
+    const projected = projectBotDeliveryRow(delivery())
+    expect(projected.envelope).toEqual({
+      deliveryId: "bdl_1",
+      source: "integration",
+      type: "pull_request.opened",
+    })
+    expect(JSON.stringify(projected)).not.toContain("pull request description")
+  })
+
+  it("drops the dedupe key and every scheduling field", () => {
+    const projected = projectBotDeliveryRow(delivery()) as Record<string, unknown>
+    for (const field of ["dedupKey", "concurrencyKey", "leaseOwner", "leaseExpiresAt"]) {
+      expect(field in projected).toBe(false)
+    }
+  })
+
+  it("marks the delivery mirrored and zeroes its next attempt", () => {
+    const projected = projectBotDeliveryRow(delivery())
+    expect(projected.syncedFromHost).toBe(true)
+    expect(projected.nextAttemptAt).toBe(0)
+  })
+
+  it("keeps runId, the one link out to the already-synced run", () => {
+    expect(projectBotDeliveryRow(delivery()).runId).toBe("botrun_1")
+    expect("runId" in projectBotDeliveryRow(delivery({ runId: undefined }))).toBe(false)
   })
 })

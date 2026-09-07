@@ -37,6 +37,8 @@ import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction
 import type { WorkflowDeployment } from "@/types/workflow/deployment"
 import type { ExecutionRunBinding } from "@/types/execution/run"
 import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { BotDefinitionRow, BotEventDeliveryRow, BotInstallationRow } from "@/lib/db/bot-types"
+import { BOT_DELIVERY_RETENTION_MS } from "@/lib/db/bot-event-deliveries"
 import { getDb } from "@/lib/db/schema"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
 import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
@@ -233,6 +235,12 @@ export async function readDexieDelta(
       return readConnectorDraftsDelta(since)
     case "outboundQueue":
       return readOutboundQueueDelta(since)
+    case "botDefinitions":
+      return readBotDefinitionsDelta(since)
+    case "botInstallations":
+      return readBotInstallationsDelta(since)
+    case "botEventDeliveries":
+      return readBotEventDeliveriesDelta(since)
     case "connectorHeartbeats":
       return readConnectorHeartbeatsDelta(since)
     case "platformIdentities":
@@ -682,6 +690,167 @@ async function readOutboundQueueDelta(
   // row this host does not own.
   const owned = rows.filter((row) => row.syncedFromHost !== true)
   return finalizeDelta("outboundQueue", owned.map(projectOutboundJobRow), since)
+}
+
+// ── The Bot control plane ────────────────────────────────────────────────
+//
+// Three tables, three different shapes, and the differences are the point.
+//
+// A DEFINITION is what a Bot is, and every field of it is already visible in
+// the console, so it crosses whole. Only the ones a person wrote are in this
+// table at all: a plugin's live in the registry overlay and come and go with
+// the plugin, so a mirror carries no plugin state with it.
+//
+// An INSTALLATION is what a Bot is bound to, and three of its fields are not
+// the client's business. `triggerState` is the runner's own cursor and
+// watermark: mirrored back it is one write away from rewinding a poll.
+// `credentialBindings` names integration accounts and auth sessions, and the
+// answer the client actually needs is already folded into `status`.
+// `config` is arbitrary user input with no editor on the far side this round.
+//
+// A DELIVERY crosses as status only. `envelope` holds the entire inbound event
+// payload, which is why this table is classified `encrypted-content`, and
+// `dedupKey` is a UNIQUE index: pushing the host's key into the client's
+// unique index reserves a `ConstraintError` for the first time two hosts
+// mirror into one device.
+
+/**
+ * `botInstallations` minus the three fields a mirror must not carry.
+ *
+ * `syncedFromHost` is what stops the client's scheduler reconciler from
+ * turning another Host's armed cron trigger into a local task
+ * (`syncBotTriggerSchedules`).
+ */
+export type BotInstallationProjectionRow = Pick<
+  BotInstallationRow,
+  | "id"
+  | "definitionId"
+  | "definitionSource"
+  | "pinnedVersion"
+  | "scope"
+  | "workspaceId"
+  | "projectId"
+  | "status"
+  | "triggerOverrides"
+  | "placementRef"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  config: Record<string, never>
+  credentialBindings: Record<string, never>
+  syncedFromHost: true
+}
+
+export function projectBotInstallationRow(row: BotInstallationRow): BotInstallationProjectionRow {
+  return {
+    id: row.id,
+    definitionId: row.definitionId,
+    definitionSource: row.definitionSource,
+    pinnedVersion: row.pinnedVersion,
+    scope: row.scope,
+    ...(row.workspaceId !== undefined ? { workspaceId: row.workspaceId } : {}),
+    ...(row.projectId !== undefined ? { projectId: row.projectId } : {}),
+    status: row.status,
+    ...(row.triggerOverrides !== undefined ? { triggerOverrides: row.triggerOverrides } : {}),
+    ...(row.placementRef !== undefined ? { placementRef: row.placementRef } : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    config: {},
+    credentialBindings: {},
+    syncedFromHost: true,
+  }
+}
+
+/**
+ * `botEventDeliveries` reduced to what a status list can render.
+ *
+ * `runId` is kept because it is the key into `executionRuns`, which already
+ * syncs: without it a mirrored delivery row is a dead end, and with it the
+ * client can open the same run the host sees.
+ */
+export type BotDeliveryProjectionRow = Pick<
+  BotEventDeliveryRow,
+  | "id"
+  | "eventId"
+  | "installationId"
+  | "triggerId"
+  | "source"
+  | "type"
+  | "status"
+  | "attempts"
+  | "lastError"
+  | "runId"
+  | "receivedAt"
+  | "updatedAt"
+  | "settledAt"
+> & {
+  envelope: Pick<BotEventDeliveryRow["envelope"], "deliveryId" | "source" | "type">
+  nextAttemptAt: 0
+  syncedFromHost: true
+}
+
+export function projectBotDeliveryRow(row: BotEventDeliveryRow): BotDeliveryProjectionRow {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    installationId: row.installationId,
+    triggerId: row.triggerId,
+    source: row.source,
+    type: row.type,
+    status: row.status,
+    attempts: row.attempts,
+    ...(row.lastError !== undefined ? { lastError: row.lastError } : {}),
+    ...(row.runId !== undefined ? { runId: row.runId } : {}),
+    receivedAt: row.receivedAt,
+    updatedAt: row.updatedAt,
+    ...(row.settledAt !== undefined ? { settledAt: row.settledAt } : {}),
+    // A shell, not the event. The three fields left are the ones the row's own
+    // columns already carry, kept so a reader that reaches through the
+    // envelope finds the same answer instead of `undefined`.
+    envelope: { deliveryId: row.envelope.deliveryId, source: row.source, type: row.type },
+    // `nextAttemptAt: 0` makes the row MORE due, not less, so it is the fence
+    // rather than the number that keeps a client from draining it. See
+    // `isLocallyDispatchableBotDelivery`.
+    nextAttemptAt: 0,
+    syncedFromHost: true,
+  }
+}
+
+async function readBotDefinitionsDelta(since: number): Promise<SyncDelta<BotDefinitionRow>> {
+  const rows = await getDb().botDefinitions.where("updatedAt").above(since).toArray()
+  return finalizeDelta("botDefinitions", rows, since)
+}
+
+async function readBotInstallationsDelta(
+  since: number
+): Promise<SyncDelta<BotInstallationProjectionRow>> {
+  const rows = await getDb().botInstallations.where("updatedAt").above(since).toArray()
+  // Never re-export a projection this host itself mirrored from a further
+  // upstream Host: its own paired devices would see a row this host does not
+  // own, and its `updatedAt` would keep winning the cursor race.
+  const owned = rows.filter((row) => row.syncedFromHost !== true)
+  return finalizeDelta("botInstallations", owned.map(projectBotInstallationRow), since)
+}
+
+/**
+ * Deliveries changed since the cursor, over a bounded window.
+ *
+ * `botEventDeliveries` has no `updatedAt` index (see `lib/db/schema.ts`), and
+ * a status change moves `updatedAt` without touching `receivedAt`, so a pure
+ * `receivedAt` cursor would never re-export a row that went from `running` to
+ * `failed`. Adding the index would reset every existing database, which a
+ * mirror is not worth, so this is the bounded scan
+ * `readConnectorHeartbeatsDelta` and `readPlatformIdentitiesDelta` already
+ * use: page the indexed column over the retention window, filter `updatedAt`
+ * in memory.
+ */
+async function readBotEventDeliveriesDelta(
+  since: number
+): Promise<SyncDelta<BotDeliveryProjectionRow>> {
+  const floor = Date.now() - BOT_DELIVERY_RETENTION_MS
+  const rows = await getDb().botEventDeliveries.where("receivedAt").above(floor).toArray()
+  const changed = rows.filter((row) => row.syncedFromHost !== true && row.updatedAt > since)
+  return finalizeDelta("botEventDeliveries", changed.map(projectBotDeliveryRow), since)
 }
 
 // ── The Inbox sidebar's host-only tables ─────────────────────────────────

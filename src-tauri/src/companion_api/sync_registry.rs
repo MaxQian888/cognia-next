@@ -347,6 +347,23 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Run-to-conversation delivery bindings behind the Inbox delegation chips (cursored on updatedAt; controls travel back as run RPCs)".to_string(),
             has_tombstones: false,
         },
+        // The Bot control plane. No `bot_*` read command exists, so sync is the
+        // only way `/bots` renders anything at all on a paired device.
+        SyncTableDescriptor {
+            name: "botDefinitions".to_string(),
+            description: "Locally authored Bot definitions (full rows; a plugin's live in the registry overlay and never cross)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "botInstallations".to_string(),
+            description: "Bot installations as a projection: identity, scope, status and trigger overrides, with config, credential bindings and runner state dropped".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "botEventDeliveries".to_string(),
+            description: "Bot delivery status projection (no event envelope, no dedupe key; host-owned, never drained by the client)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -383,6 +400,9 @@ mod tests {
         assert!(r.contains("connectorCallbackBindings"));
         assert!(r.contains("workflowDeployments"));
         assert!(r.contains("executionRunBindings"));
+        assert!(r.contains("botDefinitions"));
+        assert!(r.contains("botInstallations"));
+        assert!(r.contains("botEventDeliveries"));
         // No literal total. This was `24` and went stale the moment a table was
         // legitimately added — the same rot `command_manifest.rs` records: a
         // hardcoded inventory count goes red on every correct addition, and a

@@ -79,6 +79,12 @@ async function scheduler() {
 export async function syncBotTriggerSchedules(resolved: InstalledBot): Promise<void> {
   const { isBotTriggerArmed } = await import("@/lib/db/bot-installations")
   const installation = resolved.installation
+  // A row this device mirrored from a Host belongs to that Host's scheduler.
+  // Reconciling one here would create a local `type: "bot"` task firing the
+  // other machine's schedule, and both would run. The fence is here rather
+  // than at the two callers because both flow through this function, which is
+  // the same reason the delivery fence lives in the queue module.
+  if (installation.syncedFromHost === true) return
   const api = await scheduler()
   const all = await api.getAllTasks()
   const prefix = `bot-trigger:${installation.id}:`
@@ -141,7 +147,8 @@ export async function removeBotTriggerSchedules(installationId: string): Promise
  *
  * Picks up rows written before this module existed, and repairs a schedule a
  * crash left half-written. Best-effort by construction: a Bot whose definition
- * no longer resolves is skipped rather than allowed to fail the sweep.
+ * no longer resolves is skipped rather than allowed to fail the sweep, and one
+ * mirrored from a Host is refused by `syncBotTriggerSchedules` itself.
  */
 export async function reconcileAllBotSchedules(): Promise<void> {
   const [{ listBotInstallations }, { resolveInstalledBot }] = await Promise.all([

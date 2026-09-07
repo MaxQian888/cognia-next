@@ -54,6 +54,9 @@ import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
 import { syncConnectorDrafts } from "./handlers/connector-drafts"
 import { syncOutboundQueue } from "./handlers/outbound-queue"
+import { syncBotDefinitions } from "./handlers/bot-definitions"
+import { syncBotEventDeliveries } from "./handlers/bot-event-deliveries"
+import { syncBotInstallations } from "./handlers/bot-installations"
 import { syncConnectorHeartbeats } from "./handlers/connector-heartbeats"
 import { syncPlatformIdentities } from "./handlers/platform-identities"
 import { syncConnectorCallbackBindings } from "./handlers/connector-callback-bindings"
@@ -186,6 +189,13 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // the Inbox paints, so their tables are wanted within seconds; the contact
   // drawer, the callback inspector and the override form open on demand and
   // fill in behind them (background, below).
+  // The Bot control plane. `/bots` is a rail item a paired device can land on
+  // directly, and both halves of what it renders are here: the installations
+  // are the list, and the deliveries are the dead-letter count the header
+  // lights up for. Definitions follow in `background`, below, because a name
+  // arriving a moment late leaves an orphan row rather than an empty page.
+  { table: "botInstallations", stage: "interactive", run: syncBotInstallations },
+  { table: "botEventDeliveries", stage: "interactive", run: syncBotEventDeliveries },
   { table: "executionRunBindings", stage: "interactive", run: syncExecutionRunBindings },
   { table: "connectorHeartbeats", stage: "interactive", run: syncConnectorHeartbeats },
 
@@ -244,6 +254,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "agentTeams", stage: "background", run: syncAgentTeams },
   { table: "agentTeammates", stage: "background", run: syncAgentTeammates },
   { table: "agentTeamTasks", stage: "background", run: syncAgentTeamTasks },
+  // Locally authored Bot definitions. A plugin's are a registry overlay and
+  // never cross, so a mirrored device resolves those from its own plugin state
+  // or reads the installation as an orphan, which the console already renders.
+  { table: "botDefinitions", stage: "background", run: syncBotDefinitions },
 ]
 
 /** Which stage each table is pulled in. */
@@ -356,6 +370,18 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   workflowDeployments: syncDomain("append-only", "internal"),
   // Settled in place, never deleted.
   executionRunBindings: syncDomain("append-only"),
+  // A definition can be deleted, and a deletion has to reach the phone or the
+  // console keeps naming a Bot that no longer exists.
+  botDefinitions: syncDomain("tombstone"),
+  // Uninstalling is user intent and tombstones like any other deletion.
+  // `internal` rather than `confidential`: the projection is ids, a status and
+  // a set of booleans, with the config and the credential bindings emptied.
+  botInstallations: syncDomain("tombstone", "internal"),
+  // Status only, no envelope. The host prunes settled rows after 14 days
+  // without tombstones and the client ages them out on the same window
+  // (`handlers/bot-event-deliveries.ts`). `opaque`: the cursor is a bounded
+  // `receivedAt` scan filtered on `updatedAt`, not an indexed `updatedAt`.
+  botEventDeliveries: syncDomain("ttl", "internal", "opaque"),
 })
 
 interface SyncState {
