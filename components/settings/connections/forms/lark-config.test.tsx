@@ -33,7 +33,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
 
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so pinning this to "desktop" for the whole file
+// would make the cloud block below assert against the desktop branch and pass
+// for the wrong reason, which is how the tunnel-gated empty state survived.
+let hostProfile: string = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -457,10 +461,12 @@ describe("LarkConfigDialog — cloud host", () => {
   beforeEach(() => {
     // A cloud deployment: no Tauri, and no cloudflared tunnel to derive from.
     mockIsTauri.mockReturnValue(false)
+    hostProfile = "cloud-companion"
   })
 
   afterEach(() => {
     mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
   })
 
   it("defaults a NEW adapter to webhook transport", async () => {

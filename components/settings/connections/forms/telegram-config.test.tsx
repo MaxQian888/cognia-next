@@ -31,7 +31,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
 
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so a file-wide "desktop" makes every assertion below
+// describe the tunnel branch and the cloud branch goes untested, which is
+// exactly how the tunnel-gated empty state survived on cloud installs.
+let hostProfile: string = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -282,6 +286,24 @@ describe("TelegramConfigDialog — edit existing", () => {
     createdAt: 1000,
     updatedAt: 2000,
   }
+
+  const webhookRow: AdapterInstanceRow = { ...existingRow, transportMode: "webhook" }
+
+  it("serves the webhook URL from its own origin under /connectors on a cloud host", () => {
+    // The form derived this from the cloudflared tunnel unconditionally, so a
+    // cloud install saw the tunnel empty state and the address that actually
+    // reaches it appeared nowhere in the product.
+    hostProfile = "headless"
+    try {
+      render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+      expect(screen.getByTestId("telegram-webhook-url-input")).toHaveValue(
+        `${window.location.origin}/connectors/webhook/telegram/cai_existing`
+      )
+      expect(screen.queryByTestId("telegram-webhook-url-tunnel-off")).not.toBeInTheDocument()
+    } finally {
+      hostProfile = "desktop"
+    }
+  })
 
   it("renders 'Configure Telegram Bot' title for existing row", () => {
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)

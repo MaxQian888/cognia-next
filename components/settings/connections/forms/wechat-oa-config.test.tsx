@@ -33,7 +33,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so a file-wide "desktop" makes every assertion below
+// describe the tunnel branch and the cloud branch goes untested, which is
+// exactly how the tunnel-gated empty state survived on cloud installs.
+let hostProfile: string = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -122,14 +126,31 @@ describe("WechatOaConfigDialog", () => {
     )
   })
 
+  it("serves the webhook URL from its own origin under /connectors on a cloud host", () => {
+    // WeChat OA is webhook-only: with no reachable address there is no bot at
+    // all. This form derived the address from the desktop tunnel, so a cloud
+    // install could not be told where its own callback lives.
+    hostProfile = "headless"
+    try {
+      render(<WechatOaConfigDialog open onOpenChange={jest.fn()} row={SAVED_ROW} />)
+      expect(screen.getByTestId("wechat-oa-webhook-url-input")).toHaveValue(
+        `${window.location.origin}/connectors/webhook/wechat-oa/wxoa-existing`
+      )
+      expect(screen.queryByTestId("wechat-oa-webhook-url-tunnel-off")).not.toBeInTheDocument()
+    } finally {
+      hostProfile = "desktop"
+    }
+  })
+
   it("does not render a pseudo webhook path before the adapter has been saved", () => {
     render(<WechatOaConfigDialog open onOpenChange={jest.fn()} row={null} />)
 
-    expect(screen.getByTestId("wechat-oa-webhook-url-input")).toHaveValue("(generated after save)")
-    expect(screen.getByTestId("wechat-oa-webhook-url-input")).not.toHaveValue(
-      expect.stringContaining("/webhook/wechat-oa/")
-    )
+    // No field at all now, rather than a field holding a placeholder. The URL
+    // is built from the adapter id, so before there is one there is nothing
+    // to show and the card says so in words.
+    expect(screen.queryByTestId("wechat-oa-webhook-url-input")).not.toBeInTheDocument()
     expect(screen.queryByTestId("wechat-oa-webhook-url-copy")).not.toBeInTheDocument()
+    expect(screen.getByText(/save the adapter first/i)).toBeInTheDocument()
   })
 
   it("copies the public webhook URL for a saved adapter", async () => {
@@ -145,30 +166,25 @@ describe("WechatOaConfigDialog", () => {
     })
   })
 
-  it("falls back to the relative webhook path when the public tunnel is not running", () => {
-    mockUseTunnelStatus.mockReturnValueOnce({
-      url: null,
-      running: false,
-      loading: false,
-    })
+  it("shows no address at all when nothing public can reach this host", () => {
+    mockUseTunnelStatus.mockReturnValue({ url: null, running: false, loading: false })
 
     render(<WechatOaConfigDialog open onOpenChange={jest.fn()} row={SAVED_ROW} />)
 
-    expect(screen.getByTestId("wechat-oa-webhook-url-input")).toHaveValue(
-      "/webhook/wechat-oa/wxoa-existing"
-    )
+    // This form used to put the RELATIVE path in a field labelled Webhook URL,
+    // an address WeChat servers can never call, in the one place a user goes
+    // specifically to copy something into WeChat's console. The shared card
+    // shows the reason instead of a value that cannot work.
+    expect(screen.queryByTestId("wechat-oa-webhook-url-input")).not.toBeInTheDocument()
     expect(screen.getByTestId("wechat-oa-webhook-url-tunnel-off")).toBeInTheDocument()
   })
 
-  it("disables the copy button while the tunnel is down so the relative path can't be copied", () => {
-    // Tunnel down (running:false) → webhookUrlIsPublic is false regardless of url.
-    mockUseTunnelStatus.mockReturnValueOnce({
-      url: "https://demo.trycloudflare.com",
-      running: false,
-      loading: false,
-    })
+  it("offers no copy button while the tunnel is down", () => {
+    // Stronger than the disabled button this form used to render: with no
+    // reachable base there is no URL anywhere in the DOM to copy by any means.
+    mockUseTunnelStatus.mockReturnValue({ url: null, running: false, loading: false })
     render(<WechatOaConfigDialog open onOpenChange={jest.fn()} row={SAVED_ROW} />)
-    expect(screen.getByTestId("wechat-oa-webhook-url-copy")).toBeDisabled()
+    expect(screen.queryByTestId("wechat-oa-webhook-url-copy")).not.toBeInTheDocument()
   })
 
   it("shows a success status after minting an access token", async () => {

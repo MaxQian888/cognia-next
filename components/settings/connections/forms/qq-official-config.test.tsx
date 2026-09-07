@@ -27,7 +27,16 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so a file-wide "desktop" makes every assertion below
+// describe the tunnel branch and the cloud branch goes untested, which is
+// exactly how the tunnel-gated empty state survived on cloud installs.
+let hostProfile: string = "desktop"
+// A running tunnel by default, so the desktop branch has an origin to render.
+// Individual tests switch the host profile to exercise the cloud branch.
+const mockTunnel = { running: true, url: "https://demo.trycloudflare.com", loading: false }
+jest.mock("@/hooks/use-tunnel-status", () => ({ useTunnelStatus: () => mockTunnel }))
+
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -254,5 +263,56 @@ describe("QQOfficialConfigDialog — credential prefill", () => {
     expect((screen.getByLabelText(/client secret/i) as HTMLInputElement).value).toBe("")
     // A blank box nobody could read must never be taken for a deletion.
     expect(mockKeyringDelete).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Callback URL. The form has offered a webhook radio since it shipped and
+// never told the operator where to point it, so picking webhook here produced
+// a bot that could not receive anything and gave no clue why.
+// ---------------------------------------------------------------------------
+
+describe("QQOfficialConfigDialog callback URL", () => {
+  const webhookRow = {
+    id: "qq-hook",
+    type: "qq-official",
+    displayName: "QQ Hook",
+    enabled: true,
+    transportMode: "webhook",
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+    trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as AdapterInstanceRow
+
+  afterEach(() => {
+    hostProfile = "desktop"
+  })
+
+  it("surfaces the callback URL once webhook transport is selected", () => {
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByTestId("qq-webhook-url-input")).toHaveValue(
+      "https://demo.trycloudflare.com/webhook/qq-official/qq-hook"
+    )
+  })
+
+  it("shows nothing while the row is still on the gateway transport", () => {
+    // Gateway dials out. Advertising a callback address for it would invite
+    // the operator to register an endpoint nothing is listening on.
+    const gatewayRow = { ...webhookRow, transportMode: "gateway" } as AdapterInstanceRow
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={gatewayRow} />)
+    expect(screen.queryByTestId("qq-webhook-url-input")).not.toBeInTheDocument()
+  })
+
+  it("serves the URL from its own origin under /connectors on a cloud host", () => {
+    hostProfile = "headless"
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByTestId("qq-webhook-url-input")).toHaveValue(
+      `${window.location.origin}/connectors/webhook/qq-official/qq-hook`
+    )
+    expect(screen.queryByTestId("qq-webhook-url-tunnel-off")).not.toBeInTheDocument()
   })
 })

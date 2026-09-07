@@ -17,9 +17,8 @@
  * the OS keyring.
  */
 
-import { useMemo, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
 import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -47,16 +46,12 @@ import {
   useConnectorControlReach,
 } from "@/components/connectors/connector-host-notice"
 import type { ConnectorControlReach } from "@/lib/connectors/control-reach"
-import {
-  connectorWebhookPath,
-  LARK_OAUTH_RELAY_PATH,
-  resolveConnectorsIngressBase,
-} from "@/lib/connectors/server-transport"
-import { resolveLarkApiBase } from "@/lib/connectors/lark-web/entry-client"
+import { connectorWebhookPath, LARK_OAUTH_RELAY_PATH } from "@/lib/connectors/server-transport"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { refreshSelfBotOpenId } from "@/lib/connectors/adapter-registry"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { useConnectorIngress, type ConnectorIngress } from "@/hooks/use-connector-ingress"
+import { WebhookUrlCard } from "@/components/settings/connections/forms/shared/webhook-url-card"
 import {
   useAdapterCredentials,
   type UseAdapterCredentialsResult,
@@ -199,24 +194,18 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   const [authorizing, setAuthorizing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // Two different questions that `isTauri()` used to answer at once.
-  // `desktopShell` shapes the INGRESS — cloudflared versus a public origin —
-  // and is a property of the machine this page runs on. `reach` answers
-  // whether the connector controls can be driven from here at all.
-  const desktopShell = isTauri()
+  // Two different questions `isTauri()` used to answer at once. The ingress
+  // shape, cloudflared versus a public origin, now belongs to
+  // `useConnectorIngress`. `reach` answers the other one: whether the
+  // connector controls can be driven from here at all.
   const reach = useConnectorControlReach()
-  const tunnel = useTunnelStatus()
 
   // Public base a platform should be pointed at, per host. Declared up here
-  // because the authorize handler needs it too — the desktop reaches the
-  // internet through cloudflared, while a cloud install serves the same
-  // connectors router nested under `/connectors` on its own origin.
-  const ingressBase = resolveConnectorsIngressBase({
-    isDesktop: desktopShell,
-    tunnelUrl: tunnel.url,
-    publicBase:
-      resolveLarkApiBase() || (typeof window === "undefined" ? null : window.location.origin),
-  })
+  // because the authorize handler needs it too. `useConnectorIngress` owns the
+  // per-host shape now, so the desktop tunnel and a cloud origin stop being
+  // five different derivations across five forms.
+  const ingress = useConnectorIngress()
+  const ingressBase = ingress.base
 
   // Treat any non-secret edit as dirty so the Save button is enabled even
   // before the user touches a credential field. Secret entry alone also
@@ -441,7 +430,6 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   // form uses. The previous `/connectors/lark/...` prefix 404'd, so a Feishu
   // webhook aimed at the surfaced URL never reached the receiver.
   const webhookPath = isNew ? null : connectorWebhookPath("lark", row?.id ?? "")
-  const webhookUrl = ingressBase && webhookPath ? `${ingressBase}${webhookPath}` : null
 
   // Lark Open Platform deep link to the app's Event-subscriptions panel.
   const openConsoleUrl = appId.trim().startsWith("cli_")
@@ -496,10 +484,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         transport={transport}
         setTransport={setTransport}
         saving={saving}
-        desktop={desktopShell}
-        webhookUrl={webhookUrl}
-        tunnelLoading={tunnel.loading}
-        tunnelRunning={tunnel.running}
+        ingress={ingress}
         webhookPath={webhookPath}
         openConsoleUrl={openConsoleUrl}
         onCopyWebhookUrl={handleCopyWebhookUrl}
@@ -570,8 +555,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
             effectiveRedirectUri={effectiveRedirectUri}
             onCopyRedirectUri={handleCopyRedirectUri}
             openSecurityConsoleUrl={openSecurityConsoleUrl}
-            tunnelLoading={tunnel.loading}
-            tunnelRunning={tunnel.running}
+            ingress={ingress}
           />
         ),
       }
@@ -625,8 +609,7 @@ interface SendAsUserFieldsProps {
   effectiveRedirectUri: string
   onCopyRedirectUri: (url: string) => void
   openSecurityConsoleUrl: string
-  tunnelLoading: boolean
-  tunnelRunning: boolean
+  ingress: ConnectorIngress
 }
 
 function SendAsUserFields(p: SendAsUserFieldsProps) {
@@ -681,7 +664,13 @@ function SendAsUserFields(p: SendAsUserFieldsProps) {
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground">{t("redirectUriRegisterHelp")}</p>
-        {!p.tunnelRunning && !p.tunnelLoading && !p.redirectUri.trim() && (
+        {/*
+          Gated on the tunnel specifically, not on "no base". A cloud install
+          derives its relay from its own origin and has no tunnel to start, so
+          the old `!tunnelRunning` test printed the desktop's remedy to a
+          deployment that was already correct.
+        */}
+        {p.ingress.reason === "tunnel-off" && !p.redirectUri.trim() && (
           <p
             className="text-[10px] text-amber-700 dark:text-amber-400"
             data-testid="lark-redirect-uri-tunnel-off"
@@ -970,14 +959,10 @@ interface DeliveryFieldsProps {
   setTransport: (t: TransportMode) => void
   saving: boolean
   /**
-   * `isTauri()`, threaded down rather than re-derived: with no reachable
-   * ingress the desktop's remedy is to start the cloudflared tunnel, while a
-   * cloud install has no tunnel and needs none — two different empty states.
+   * Threaded down rather than re-derived, so the section and the authorize
+   * handler above cannot disagree about where this deployment is reachable.
    */
-  desktop: boolean
-  webhookUrl: string | null
-  tunnelLoading: boolean
-  tunnelRunning: boolean
+  ingress: ConnectorIngress
   webhookPath: string | null
   openConsoleUrl: string
   onCopyWebhookUrl: (url: string) => void
@@ -985,16 +970,6 @@ interface DeliveryFieldsProps {
 
 function DeliveryFields(p: DeliveryFieldsProps) {
   const t = useTranslations("settings.connections.lark")
-  const router = useRouter()
-
-  const onOpenConsole = useMemo(
-    () => () => {
-      if (typeof window !== "undefined") {
-        window.open(p.openConsoleUrl, "_blank", "noopener,noreferrer")
-      }
-    },
-    [p.openConsoleUrl]
-  )
 
   return (
     <div className="space-y-4">
@@ -1023,76 +998,14 @@ function DeliveryFields(p: DeliveryFieldsProps) {
 
       {/* Webhook URL — only when transport = webhook */}
       {p.transport === "webhook" && (
-        <div className="space-y-2 rounded border bg-card px-3 py-3">
-          <Label className="text-xs font-medium">{t("webhookUrlLabel")}</Label>
-
-          {p.webhookPath === null ? (
-            <p className="text-xs text-muted-foreground">{t("webhookUrlNewAdapterHint")}</p>
-          ) : p.tunnelLoading ? (
-            <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
-          ) : p.tunnelRunning && p.webhookUrl ? (
-            <div className="space-y-2">
-              <Input
-                readOnly
-                value={p.webhookUrl}
-                className="font-mono text-[11px]"
-                data-testid="lark-webhook-url-input"
-                aria-label={t("webhookUrlLabel")}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => p.onCopyWebhookUrl(p.webhookUrl!)}
-                  aria-label={t("webhookUrlCopyAria")}
-                  data-testid="lark-webhook-url-copy"
-                >
-                  {t("webhookUrlCopy")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={onOpenConsole}
-                  aria-label={t("openConsoleAria")}
-                >
-                  <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
-                  {t("openConsole")}
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
-            </div>
-          ) : p.desktop ? (
-            <div className="space-y-2">
-              <p
-                className="text-xs text-amber-700 dark:text-amber-400"
-                data-testid="lark-webhook-url-tunnel-off"
-              >
-                {t("webhookUrlTunnelOffHelp")}
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
-                aria-label={t("openCompanionAria")}
-                data-testid="lark-open-companion"
-              >
-                {t("openCompanion")}
-              </Button>
-            </div>
-          ) : (
-            // A cloud install has no tunnel and needs none — pointing it at the
-            // tunnel settings was advice for the wrong host.
-            <p
-              className="text-xs text-amber-700 dark:text-amber-400"
-              data-testid="lark-webhook-url-origin-missing"
-            >
-              {t("webhookUrlOriginMissingHelp")}
-            </p>
-          )}
-        </div>
+        <WebhookUrlCard
+          ingress={p.ingress}
+          webhookPath={p.webhookPath}
+          namespace="settings.connections.lark"
+          testIdPrefix="lark"
+          onCopy={p.onCopyWebhookUrl}
+          consoleUrl={p.openConsoleUrl}
+        />
       )}
     </div>
   )

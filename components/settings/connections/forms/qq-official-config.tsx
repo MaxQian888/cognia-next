@@ -25,6 +25,9 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { WebhookUrlCard } from "./shared/webhook-url-card"
+import { connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress } from "@/hooks/use-connector-ingress"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import {
@@ -78,6 +81,20 @@ export function QQOfficialConfigDialog({
   const [saving, setSaving] = useState(false)
 
   const reach = useConnectorControlReach()
+  const ingress = useConnectorIngress()
+  // This form has offered a webhook radio since it shipped and never told the
+  // operator where to point it, so choosing webhook here produced a bot that
+  // could not receive anything and gave no clue why.
+  const webhookPath = row ? connectorWebhookPath("qq-official", row.id) : null
+
+  const handleCopyWebhookUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t("webhookUrlCopied"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
   const desktop = reach.available
 
   const dirty =
@@ -307,6 +324,17 @@ export function QQOfficialConfigDialog({
             </div>
           </div>
         </RadioGroup>
+
+        {transportMode === "webhook" && (
+          <WebhookUrlCard
+            ingress={ingress}
+            webhookPath={webhookPath}
+            namespace="settings.connections.qqOfficial"
+            testIdPrefix="qq"
+            onCopy={handleCopyWebhookUrl}
+            consoleUrl="https://q.qq.com/qqbot"
+          />
+        )}
       </div>
     ),
   }

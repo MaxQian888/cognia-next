@@ -31,7 +31,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
 
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so a file-wide "desktop" makes every assertion below
+// describe the tunnel branch and the cloud branch goes untested, which is
+// exactly how the tunnel-gated empty state survived on cloud installs.
+let hostProfile: string = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -312,7 +316,7 @@ describe("DiscordConfigDialog — create new", () => {
       updatedAt: 2,
     }
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
-    const urlInput = screen.getByTestId("dc-interactions-url-input") as HTMLInputElement
+    const urlInput = screen.getByTestId("dc-webhook-url-input") as HTMLInputElement
     expect(urlInput.value).toBe("https://tunnel.example.com/webhook/discord/dc-wh")
   })
 
@@ -320,7 +324,7 @@ describe("DiscordConfigDialog — create new", () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     // The URL card only renders in webhook mode; gateway shows neither the
     // URL field nor its copy control.
-    expect(screen.queryByTestId("dc-interactions-url-input")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("dc-webhook-url-input")).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: /copy interactions endpoint url/i })
     ).not.toBeInTheDocument()
@@ -355,6 +359,21 @@ describe("DiscordConfigDialog — edit existing", () => {
     createdAt: 1000,
     updatedAt: 2000,
   }
+
+  const webhookRow: AdapterInstanceRow = { ...existingRow, transportMode: "webhook" }
+
+  it("serves the interactions endpoint from its own origin on a cloud host", () => {
+    hostProfile = "headless"
+    try {
+      render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+      expect(screen.getByTestId("dc-webhook-url-input")).toHaveValue(
+        `${window.location.origin}/connectors/webhook/discord/dc-existing`
+      )
+      expect(screen.queryByTestId("dc-webhook-url-tunnel-off")).not.toBeInTheDocument()
+    } finally {
+      hostProfile = "desktop"
+    }
+  })
 
   it("renders 'Configure Discord Bot' title for existing row", () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)

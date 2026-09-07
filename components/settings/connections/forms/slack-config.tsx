@@ -11,8 +11,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
-import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -34,11 +33,9 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { beginSlackOAuth } from "@/lib/connectors/adapters/slack/oauth-begin"
 import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
-import {
-  connectorOAuthRelayPath,
-  resolveConnectorsIngressBase,
-} from "@/lib/connectors/server-transport"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { connectorOAuthRelayPath, connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress } from "@/hooks/use-connector-ingress"
+import { WebhookUrlCard } from "@/components/settings/connections/forms/shared/webhook-url-card"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -172,7 +169,6 @@ const SLACK_KEYRING_ACCOUNTS = [...SLACK_CREDENTIALS, ...SLACK_DERIVED_CREDENTIA
 
 export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
-  const router = useRouter()
   const isNew = row === null
   const persisted = (row?.settings ?? {}) as SlackPersistedSettings
 
@@ -202,13 +198,14 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const [saving, setSaving] = useState(false)
 
   const reach = useConnectorControlReach()
+  /** Whether the connector controls can be driven from here at all. */
   const desktop = reach.available
-  const tunnel = useTunnelStatus()
-  const ingressBase = resolveConnectorsIngressBase({
-    isDesktop: desktop,
-    tunnelUrl: tunnel.url,
-    publicBase: typeof window === "undefined" ? null : window.location.origin,
-  })
+  // `reach.available` used to be passed as `isDesktop`, which is a different
+  // question and reads true on a headless profile, so a cloud install derived
+  // a tunnel URL for a host that has no tunnel. The ingress shape belongs to
+  // the host profile, which is what this hook reads.
+  const ingress = useConnectorIngress()
+  const ingressBase = ingress.base
   /** Exact redirect Slack's console must have registered. Null with no ingress. */
   const relayUrl = ingressBase ? `${ingressBase}${connectorOAuthRelayPath("slack")}` : null
 
@@ -411,9 +408,11 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
     }
   }
 
-  const webhookPath = isNew ? null : `/webhook/slack/${row?.id ?? ""}`
-  const webhookUrl =
-    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
+  // Built from the shared helper rather than by hand, and prefixed with the
+  // resolved ingress rather than the raw tunnel origin. Reading `tunnel.url`
+  // here bypassed the resolver entirely, so the `/connectors` nest a cloud
+  // host serves under never appeared.
+  const webhookPath = isNew ? null : connectorWebhookPath("slack", row?.id ?? "")
 
   const identitySection: FormSection = {
     id: "identity",
@@ -636,65 +635,14 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
         )}
 
         {transport === "events-api-webhook" && (
-          <div className="space-y-2 rounded border bg-card px-3 py-3">
-            <Label className="text-xs font-medium">{t("webhookUrlLabel")}</Label>
-            {webhookPath === null ? (
-              <p className="text-xs text-muted-foreground">{t("webhookUrlNewAdapterHint")}</p>
-            ) : tunnel.loading ? (
-              <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
-            ) : tunnel.running && webhookUrl ? (
-              <div className="space-y-2">
-                <Input
-                  readOnly
-                  value={webhookUrl}
-                  className="font-mono text-[11px]"
-                  aria-label={t("webhookUrlLabel")}
-                  data-testid="slack-webhook-url-input"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleCopyWebhookUrl(webhookUrl)}
-                    aria-label={t("webhookUrlCopyAria")}
-                  >
-                    {t("webhookUrlCopy")}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      typeof window !== "undefined" &&
-                      window.open("https://api.slack.com/apps", "_blank", "noopener,noreferrer")
-                    }
-                  >
-                    <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
-                    {t("openConsole")}
-                  </Button>
-                </div>
-                <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p
-                  className="text-xs text-amber-700 dark:text-amber-400"
-                  data-testid="slack-webhook-url-tunnel-off"
-                >
-                  {t("webhookUrlTunnelOffHelp")}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
-                >
-                  {t("openCompanion")}
-                </Button>
-              </div>
-            )}
-          </div>
+          <WebhookUrlCard
+            ingress={ingress}
+            webhookPath={webhookPath}
+            namespace="settings.connections.slack"
+            testIdPrefix="slack"
+            onCopy={handleCopyWebhookUrl}
+            consoleUrl="https://api.slack.com/apps"
+          />
         )}
 
         {/* Slack "Agents & AI Apps" opt-in. Read by `buildSlackAdapter`

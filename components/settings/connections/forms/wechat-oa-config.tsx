@@ -12,14 +12,15 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
-import { CheckCircle2Icon, CopyIcon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress } from "@/hooks/use-connector-ingress"
+import { WebhookUrlCard } from "@/components/settings/connections/forms/shared/webhook-url-card"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getWechatOaAccessToken } from "@/lib/connectors/adapters/wechat-oa/auth"
@@ -60,7 +61,6 @@ export function WechatOaConfigDialog({
   onCreated,
 }: WechatOaConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatOa")
-  const router = useRouter()
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
@@ -81,7 +81,7 @@ export function WechatOaConfigDialog({
 
   const reach = useConnectorControlReach()
   const desktop = reach.available
-  const tunnel = useTunnelStatus()
+  const ingress = useConnectorIngress()
 
   const dirty =
     isNew ||
@@ -90,26 +90,11 @@ export function WechatOaConfigDialog({
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
-  const webhookPath = row ? `/webhook/wechat-oa/${row.id}` : null
-  // Only an absolute, tunnel-backed URL is reachable by WeChat's servers; when
-  // the tunnel is down `webhookUrl` falls back to the relative `webhookPath`.
-  const webhookUrlIsPublic = Boolean(webhookPath && tunnel.running && tunnel.url)
-  const webhookUrl =
-    webhookUrlIsPublic && tunnel.url
-      ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}`
-      : (webhookPath ?? t("webhookUrlAfterSave"))
+  const webhookPath = row ? connectorWebhookPath("wechat-oa", row.id) : null
 
-  const handleCopyWebhookUrl = async () => {
-    if (!row) return
-    if (!webhookUrlIsPublic) {
-      // Don't copy the relative fallback path — pasting it into the WeChat
-      // admin console yields an unreachable callback. Prompt to start the
-      // public tunnel first instead.
-      toast.error(t("webhookUrlTunnelOffHelp"))
-      return
-    }
+  const handleCopyWebhookUrl = async (url: string) => {
     try {
-      await navigator.clipboard.writeText(webhookUrl)
+      await navigator.clipboard.writeText(url)
       toast.success(t("webhookUrlCopied"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -329,57 +314,13 @@ export function WechatOaConfigDialog({
     defaultOpen: true,
     children: (
       <div className="flex flex-col gap-2">
-        <Label htmlFor="wxoa-webhook">{t("webhookUrlLabel")}</Label>
-        <p className="text-xs text-muted-foreground">{t("webhookUrlHelp")}</p>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            id="wxoa-webhook"
-            value={webhookUrl}
-            readOnly
-            className="font-mono text-xs"
-            onFocus={(e) => e.currentTarget.select()}
-            data-testid="wechat-oa-webhook-url-input"
-            aria-label={t("webhookUrlLabel")}
-          />
-          {row && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCopyWebhookUrl}
-              disabled={!webhookUrlIsPublic}
-              aria-label={t("webhookUrlCopyAria")}
-              data-testid="wechat-oa-webhook-url-copy"
-              className="shrink-0"
-            >
-              <CopyIcon data-icon="inline-start" />
-              {t("webhookUrlCopy")}
-            </Button>
-          )}
-        </div>
-        {row && tunnel.loading && (
-          <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
-        )}
-        {row && !tunnel.loading && !tunnel.running && (
-          <div className="flex flex-col gap-2 rounded-md bg-muted px-3 py-2">
-            <p
-              className="text-xs text-muted-foreground"
-              data-testid="wechat-oa-webhook-url-tunnel-off"
-            >
-              {t("webhookUrlTunnelOffHelp")}
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="self-start"
-              onClick={() => router.push("/settings?section=connections&connectionsTab=tunnel")}
-              aria-label={t("openCompanionAria")}
-            >
-              {t("openCompanion")}
-            </Button>
-          </div>
-        )}
+        <WebhookUrlCard
+          ingress={ingress}
+          webhookPath={webhookPath}
+          namespace="settings.connections.wechatOa"
+          testIdPrefix="wechat-oa"
+          onCopy={handleCopyWebhookUrl}
+        />
         <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
           {t("windowNote")}
         </p>

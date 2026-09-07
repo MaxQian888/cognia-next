@@ -31,7 +31,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
 
-const hostProfile = "desktop"
+// Settable, not a constant. `useConnectorIngress` reads the host profile to
+// pick the ingress shape, so a file-wide "desktop" makes every assertion below
+// describe the tunnel branch and the cloud branch goes untested, which is
+// exactly how the tunnel-gated empty state survived on cloud installs.
+let hostProfile: string = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
   useHostProfile: () => hostProfile,
@@ -766,6 +770,46 @@ describe("parseSlackHistoryMaxPages", () => {
 // ---------------------------------------------------------------------------
 // Tests — Events API request URL (existing row)
 // ---------------------------------------------------------------------------
+
+describe("SlackConfigDialog — cloud host request URL", () => {
+  const webhookRow = {
+    id: "sl-cloud",
+    type: "slack",
+    displayName: "Cloud Bot",
+    enabled: true,
+    transportMode: "webhook",
+    settings: { transport: "events-api-webhook" },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
+    trigger: defaultPrivateChatPolicy(),
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1000,
+    updatedAt: 2000,
+  } as AdapterInstanceRow
+
+  beforeEach(() => {
+    hostProfile = "headless"
+  })
+  afterEach(() => {
+    hostProfile = "desktop"
+  })
+
+  it("serves the URL from its own origin under /connectors, with no tunnel running", () => {
+    // `reach.available` used to be passed as `isDesktop`, and it reads true on
+    // a headless profile, so this deployment derived a tunnel URL for a host
+    // that has no tunnel and then hid it behind a tunnel-running check.
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.getByTestId("slack-webhook-url-input")).toHaveValue(
+      `${window.location.origin}/connectors/webhook/slack/sl-cloud`
+    )
+  })
+
+  it("does not offer the cloudflared tunnel CTA to a host that has no tunnel", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    expect(screen.queryByTestId("slack-webhook-url-tunnel-off")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("slack-open-companion")).not.toBeInTheDocument()
+  })
+})
 
 describe("SlackConfigDialog — Events API request URL", () => {
   const webhookRow: AdapterInstanceRow = {

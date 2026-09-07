@@ -13,7 +13,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -29,7 +29,9 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress } from "@/hooks/use-connector-ingress"
+import { WebhookUrlCard } from "@/components/settings/connections/forms/shared/webhook-url-card"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
@@ -121,13 +123,11 @@ export function DiscordConfigDialog({
 
   const reach = useConnectorControlReach()
   const desktop = reach.available
-  const tunnel = useTunnelStatus()
+  const ingress = useConnectorIngress()
 
-  // Interactions Endpoint URL (webhook mode) — the tunnel origin + the Rust
-  // webhook route path. Only resolvable once the adapter has an id.
-  const webhookPath = isNew ? null : `/webhook/discord/${row?.id ?? ""}`
-  const webhookUrl =
-    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
+  // Interactions Endpoint URL (webhook mode) — the resolved ingress base plus
+  // the Rust webhook route path. Only resolvable once the adapter has an id.
+  const webhookPath = isNew ? null : connectorWebhookPath("discord", row?.id ?? "")
 
   const dirty =
     isNew ||
@@ -141,7 +141,7 @@ export function DiscordConfigDialog({
   const handleCopyWebhookUrl = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url)
-      toast.success(t("interactionsUrlCopied"))
+      toast.success(t("webhookUrlCopied"))
     } catch {
       toast.error(t("connectionFailedToast"))
     }
@@ -414,61 +414,14 @@ export function DiscordConfigDialog({
               />
             </div>
 
-            <div className="space-y-2 rounded border bg-card px-3 py-3">
-              <Label className="text-xs font-medium">{t("interactionsUrlLabel")}</Label>
-              {webhookPath === null ? (
-                <p className="text-xs text-muted-foreground">
-                  {t("interactionsUrlNewAdapterHint")}
-                </p>
-              ) : tunnel.loading ? (
-                <p className="text-xs text-muted-foreground">{t("interactionsUrlTunnelLoading")}</p>
-              ) : tunnel.running && webhookUrl ? (
-                <div className="space-y-2">
-                  <Input
-                    readOnly
-                    value={webhookUrl}
-                    className="font-mono text-[11px]"
-                    aria-label={t("interactionsUrlLabel")}
-                    data-testid="dc-interactions-url-input"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleCopyWebhookUrl(webhookUrl)}
-                      aria-label={t("interactionsUrlCopyAria")}
-                    >
-                      {t("interactionsUrlCopy")}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        typeof window !== "undefined" &&
-                        window.open(
-                          "https://discord.com/developers/applications",
-                          "_blank",
-                          "noopener,noreferrer"
-                        )
-                      }
-                    >
-                      <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
-                      {t("openConsole")}
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{t("interactionsUrlHelp")}</p>
-                </div>
-              ) : (
-                <p
-                  className="text-xs text-amber-700 dark:text-amber-400"
-                  data-testid="dc-interactions-url-tunnel-off"
-                >
-                  {t("interactionsUrlTunnelOffHelp")}
-                </p>
-              )}
-            </div>
+            <WebhookUrlCard
+              ingress={ingress}
+              webhookPath={webhookPath}
+              namespace="settings.connections.discord"
+              testIdPrefix="dc"
+              onCopy={handleCopyWebhookUrl}
+              consoleUrl="https://discord.com/developers/applications"
+            />
           </>
         )}
       </div>

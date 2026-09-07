@@ -12,8 +12,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
-import { CheckCircle2Icon, ExternalLinkIcon, LoaderIcon, XCircleIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -36,7 +35,9 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
-import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress } from "@/hooks/use-connector-ingress"
+import { WebhookUrlCard } from "@/components/settings/connections/forms/shared/webhook-url-card"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
@@ -107,7 +108,6 @@ export function TelegramConfigDialog({
   onCreated,
 }: TelegramConfigDialogProps) {
   const t = useTranslations("settings.connections.telegram")
-  const router = useRouter()
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
@@ -129,7 +129,7 @@ export function TelegramConfigDialog({
 
   const reach = useConnectorControlReach()
   const desktop = reach.available
-  const tunnel = useTunnelStatus()
+  const ingress = useConnectorIngress()
 
   const dirty =
     isNew ||
@@ -263,9 +263,11 @@ export function TelegramConfigDialog({
     }
   }
 
-  const webhookPath = isNew ? null : `/webhook/telegram/${row?.id ?? ""}`
-  const webhookUrl =
-    tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
+  // The shared helper rather than a hand-built path, and the resolved ingress
+  // rather than the raw tunnel origin. Reading `tunnel.url` here meant a cloud
+  // install never saw the `/connectors` nest it actually serves under, so the
+  // address it needed to hand Telegram appeared nowhere in the product.
+  const webhookPath = isNew ? null : connectorWebhookPath("telegram", row?.id ?? "")
 
   const identitySection: FormSection = {
     id: "identity",
@@ -396,71 +398,16 @@ export function TelegramConfigDialog({
               />
             </div>
 
-            <div className="space-y-2 rounded border bg-card px-3 py-3">
-              <Label className="text-xs font-medium">{t("webhookUrlLabel")}</Label>
-              {webhookPath === null ? (
-                <p className="text-xs text-muted-foreground">{t("webhookUrlNewAdapterHint")}</p>
-              ) : tunnel.loading ? (
-                <p className="text-xs text-muted-foreground">{t("webhookUrlTunnelLoading")}</p>
-              ) : tunnel.running && webhookUrl ? (
-                <div className="space-y-2">
-                  <Input
-                    readOnly
-                    value={webhookUrl}
-                    className="font-mono text-[11px]"
-                    aria-label={t("webhookUrlLabel")}
-                    data-testid="telegram-webhook-url-input"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleCopyWebhookUrl(webhookUrl)}
-                      aria-label={t("webhookUrlCopyAria")}
-                    >
-                      {t("webhookUrlCopy")}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        typeof window !== "undefined" &&
-                        window.open(
-                          "https://core.telegram.org/bots/api#setwebhook",
-                          "_blank",
-                          "noopener,noreferrer"
-                        )
-                      }
-                    >
-                      <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
-                      {t("openDocs")}
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{t("webhookUrlHelp")}</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p
-                    className="text-xs text-amber-700 dark:text-amber-400"
-                    data-testid="telegram-webhook-url-tunnel-off"
-                  >
-                    {t("webhookUrlTunnelOffHelp")}
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      router.push("/settings?section=connections&connectionsTab=tunnel")
-                    }
-                  >
-                    {t("openCompanion")}
-                  </Button>
-                </div>
-              )}
-            </div>
+            <WebhookUrlCard
+              ingress={ingress}
+              webhookPath={webhookPath}
+              namespace="settings.connections.telegram"
+              testIdPrefix="telegram"
+              onCopy={handleCopyWebhookUrl}
+              consoleUrl="https://core.telegram.org/bots/api#setwebhook"
+              consoleLabelKey="openDocs"
+              consoleAriaKey="openDocsAria"
+            />
           </>
         )}
       </div>
