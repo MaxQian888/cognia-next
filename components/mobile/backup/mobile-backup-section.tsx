@@ -21,13 +21,13 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CheckCircle2Icon, CloudUploadIcon, DownloadIcon, ImportIcon } from "lucide-react"
+import { CheckCircle2Icon, DownloadIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
 import { Input } from "@/components/ui/input"
 import { Item, ItemContent, ItemDescription, ItemMedia } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
@@ -249,19 +249,15 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
   }
 
   return (
-    <div className={cn("flex flex-col gap-4", className)} data-testid="mobile-backup-section">
-      {/* Export card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            <CloudUploadIcon className="size-4" />
-            {t("title")}
-          </CardTitle>
-          <CardDescription className="text-xs">{t("description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Label className="flex flex-col gap-1 text-xs font-medium">
-            <span>{t("passphraseLabel")}</span>
+    <div className={cn("flex flex-col gap-5", className)} data-testid="mobile-backup-section">
+      <MeSection title={t("title")} description={t("description")}>
+        <div className="flex flex-col gap-3 px-3 py-3">
+          {/* `items-start` because the Label primitive is `flex items-center`,
+              and a `flex-col` on top of that centres the label text and the
+              control under it. Every form on the phone was left aligned except
+              the two on this page. */}
+          <Label className="flex flex-col items-start gap-1 text-xs font-medium">
+            <span>{t("passphraseLabel", { min: MIN_PASSPHRASE_LENGTH })}</span>
             <Input
               type="password"
               value={passphrase}
@@ -275,11 +271,16 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               aria-invalid={passphrase.length > 0 && !passphraseValid}
               aria-describedby="backup-passphrase-help"
             />
+            {/* Muted until the reader has typed something. The hint used to
+                open red on an untouched field, which reads as a failure the
+                reader caused rather than the rule they have yet to meet. */}
             <span
               id="backup-passphrase-help"
               className={cn(
                 "text-[11px]",
-                passphraseValid ? "text-muted-foreground" : "text-destructive"
+                passphrase.length > 0 && !passphraseValid
+                  ? "text-destructive"
+                  : "text-muted-foreground"
               )}
               data-testid="backup-passphrase-help"
             >
@@ -288,6 +289,7 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           </Label>
           <Button
             type="button"
+            className="self-start"
             onClick={onExport}
             disabled={exporting || !passphraseValid}
             data-testid="backup-export"
@@ -297,22 +299,17 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
           {!isMobile ? (
             <p className="text-[11px] text-muted-foreground">{t("webModeNote")}</p>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </MeSection>
 
-      {/* Import card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            <ImportIcon className="size-4" />
-            {t("importPick")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Label className="flex flex-col gap-1 text-xs font-medium">
+      <MeSection title={t("importPick")}>
+        <div className="flex flex-col gap-3 px-3 py-3">
+          <Label className="flex flex-col items-start gap-1 text-xs font-medium">
             <span>{t("importStrategy")}</span>
             <Select value={strategy} onValueChange={(v) => setStrategy(v as ImportMergeStrategy)}>
-              <SelectTrigger data-testid="backup-strategy">
+              {/* The trigger is `w-fit` by default, so it sat as a short pill
+                  in the middle of the column. */}
+              <SelectTrigger className="w-full" data-testid="backup-strategy">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -322,7 +319,11 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               </SelectContent>
             </Select>
           </Label>
-          <Button asChild variant="outline" className={cn(importing && "opacity-60")}>
+          <Button
+            asChild
+            variant="outline"
+            className={cn("self-start", importing && "opacity-60")}
+          >
             <label className="touch-target cursor-pointer">
               <DownloadIcon />
               {importing ? t("importing") : t("importPick")}
@@ -335,97 +336,91 @@ export function MobileBackupSection({ className }: MobileBackupSectionProps) {
               />
             </label>
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </MeSection>
 
-      {/* Auto-backup */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
-            <span>{t("autoBackup")}</span>
-            <Switch
-              checked={autoBackup}
-              onCheckedChange={setAutoBackup}
-              data-testid="backup-auto-toggle"
-              aria-label={t("autoBackup")}
-            />
-          </CardTitle>
-          <CardDescription className="text-xs">{t("autoBackupHint")}</CardDescription>
-        </CardHeader>
+      <MeSection
+        title={t("autoBackup")}
+        description={t("autoBackupHint")}
+        action={
+          <Switch
+            checked={autoBackup}
+            onCheckedChange={setAutoBackup}
+            data-testid="backup-auto-toggle"
+            aria-label={t("autoBackup")}
+          />
+        }
+      >
         {autoBackup ? (
-          <CardContent>
-            <Label className="flex flex-col gap-1 text-xs">
-              <span>{t("autoBackupInterval")}</span>
-              <Input
-                type="number"
-                min={1}
-                max={30}
-                value={intervalDays}
-                onChange={(e) => setIntervalDays(Number(e.target.value) || 1)}
-                data-testid="backup-auto-interval"
-              />
-            </Label>
-          </CardContent>
+          <Label className="flex flex-col items-start gap-1 px-3 py-3 text-xs">
+            <span>{t("autoBackupInterval")}</span>
+            <Input
+              type="number"
+              min={1}
+              max={30}
+              value={intervalDays}
+              onChange={(e) => setIntervalDays(Number(e.target.value) || 1)}
+              data-testid="backup-auto-interval"
+            />
+          </Label>
         ) : null}
-      </Card>
+      </MeSection>
 
-      {/* WebDAV sync — uploads an encrypted snapshot another device can restore. */}
+      {/* WebDAV sync uploads an encrypted snapshot another device can restore. */}
       <WebDavSyncCard />
 
-      {/* History */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium">{t("historyHeader")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {history.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("historyEmpty")}</p>
-          ) : (
-            <motion.ul
-              role="list"
-              aria-label={t("historyHeader")}
-              className="flex flex-col gap-1"
-              initial={reduce ? false : "initial"}
-              animate="animate"
-              variants={STAGGER_CONTAINER}
-            >
-              {history.slice(0, 8).map((row) => (
-                <motion.li key={row.id} variants={STAGGER_CHILD}>
-                  <Item size="sm" className="px-0 py-1" data-testid={`backup-history-${row.id}`}>
-                    <ItemMedia className="bg-transparent">
-                      <CheckCircle2Icon
-                        aria-hidden="true"
-                        className={cn(
-                          "size-3.5",
-                          row.success ? "text-emerald-500" : "text-destructive"
-                        )}
-                      />
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemDescription className="text-xs">
-                        {new Date(row.completedAt).toLocaleString()}
-                        {row.deviceLabel ? ` · ${row.deviceLabel}` : ""}
-                      </ItemDescription>
-                    </ItemContent>
-                    <Badge variant="outline" className="text-[10px]">
-                      {row.encryption === "passphrase"
-                        ? t("historyEncryptionPassphrase")
-                        : row.encryption === "auto-key"
-                          ? t("historyEncryptionAutoKey")
-                          : t("historyEncryptionNone")}
+      <MeSection title={t("historyHeader")}>
+        {history.length === 0 ? (
+          <p className="px-3 py-3 text-xs text-muted-foreground">{t("historyEmpty")}</p>
+        ) : (
+          <motion.ul
+            role="list"
+            aria-label={t("historyHeader")}
+            className="flex flex-col"
+            initial={reduce ? false : "initial"}
+            animate="animate"
+            variants={STAGGER_CONTAINER}
+          >
+            {history.slice(0, 8).map((row) => (
+              <motion.li key={row.id} variants={STAGGER_CHILD}>
+                <Item
+                  size="sm"
+                  className="px-3 py-2 not-last:border-b"
+                  data-testid={`backup-history-${row.id}`}
+                >
+                  <ItemMedia className="bg-transparent">
+                    <CheckCircle2Icon
+                      aria-hidden="true"
+                      className={cn(
+                        "size-3.5",
+                        row.success ? "text-emerald-500" : "text-destructive"
+                      )}
+                    />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemDescription className="text-xs">
+                      {new Date(row.completedAt).toLocaleString()}
+                      {row.deviceLabel ? ` \u00b7 ${row.deviceLabel}` : ""}
+                    </ItemDescription>
+                  </ItemContent>
+                  <Badge variant="outline" className="text-[10px]">
+                    {row.encryption === "passphrase"
+                      ? t("historyEncryptionPassphrase")
+                      : row.encryption === "auto-key"
+                        ? t("historyEncryptionAutoKey")
+                        : t("historyEncryptionNone")}
+                  </Badge>
+                  {!row.success ? (
+                    <Badge variant="destructive" className="text-[10px]">
+                      {row.errorMessage ?? t("historyFailedLabel")}
                     </Badge>
-                    {!row.success ? (
-                      <Badge variant="destructive" className="text-[10px]">
-                        {row.errorMessage ?? t("historyFailedLabel")}
-                      </Badge>
-                    ) : null}
-                  </Item>
-                </motion.li>
-              ))}
-            </motion.ul>
-          )}
-        </CardContent>
-      </Card>
+                  ) : null}
+                </Item>
+              </motion.li>
+            ))}
+          </motion.ul>
+        )}
+      </MeSection>
     </div>
   )
 }

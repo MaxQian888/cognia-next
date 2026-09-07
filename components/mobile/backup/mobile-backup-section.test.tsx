@@ -215,6 +215,41 @@ describe("<MobileBackupSection />", () => {
     detectNativePlatformMock.mockReturnValue("mobile")
   })
 
+  describe("form layout", () => {
+    it("left aligns its labels and gives the strategy select the full width", () => {
+      // The Label primitive is `flex items-center`; a `flex-col` on top of it
+      // centred the label text and the control under it, so these two forms
+      // were the only centred ones in the app. SelectTrigger is `w-fit` by
+      // default, so the strategy dropdown sat as a short pill mid-column.
+      const { container } = render(<MobileBackupSection />)
+      const columnLabels = Array.from(container.querySelectorAll('[data-slot="label"]')).filter(
+        (label) => label.className.includes("flex-col")
+      )
+      expect(columnLabels.length).toBeGreaterThan(0)
+      for (const label of columnLabels) {
+        expect(label.className).toMatch(/items-start/)
+      }
+      expect(screen.getByTestId("backup-strategy").className).toMatch(/w-full/)
+    })
+
+    it("keeps the passphrase hint muted until something has been typed", () => {
+      // The field opened with a red "Required so the encrypted archive can be
+      // opened later." under an untouched input, which reads as a failure the
+      // reader caused rather than a rule they have yet to meet.
+      render(<MobileBackupSection />)
+      const help = screen.getByTestId("backup-passphrase-help")
+      expect(help.className).toMatch(/text-muted-foreground/)
+      expect(help.className).not.toMatch(/text-destructive/)
+      fireEvent.change(screen.getByTestId("backup-passphrase"), { target: { value: "abc" } })
+      expect(screen.getByTestId("backup-passphrase-help").className).toMatch(/text-destructive/)
+    })
+
+    it("drops the desktop card chrome for its own sections", () => {
+      const { container } = render(<MobileBackupSection />)
+      expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    })
+  })
+
   describe("export flow", () => {
     it("delegates the encrypted backup to saveExport and reports the outcome", async () => {
       const outcome = {

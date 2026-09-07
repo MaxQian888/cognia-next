@@ -12,6 +12,10 @@ export default function MobileBackupPage() {
       title={t("backupRow")}
       backAria={t("appearanceBackAria")}
       testid="mobile-backup-page"
+      // MobileBackupSection embeds WebDavSyncCard from components/settings/,
+      // which ships its own card chrome. Marking the body a settings panel is
+      // what makes that section shed the frame on a phone.
+      settingsPanel
     >
       <MobileBackupSection />
     </SubPageShell>

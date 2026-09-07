@@ -23,7 +23,7 @@
   "importSuccess": "Restore complete",
   "importWrongPassphrase": "Wrong passphrase — the backup could not be decrypted.",
   "importing": "Restoring…",
-  "passphraseLabel": "Optional passphrase (blank uses auto key)",
+  "passphraseLabel": "Passphrase (at least {min} characters)",
   "passphraseRequiredHint": "Required so the encrypted archive can be opened later.",
   "shareFile": "Share file",
   "shareTitle": "Cognia Backup",

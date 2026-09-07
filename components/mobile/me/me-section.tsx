@@ -72,24 +72,29 @@ export function MeSection({
           sits at, and `panel` is the named radius step that tracks `--radius`
           instead of pinning 12px. The border stays a class because a tier
           implies a background, not a stroke. */}
-      <Surface
-        asChild
-        layer="raised"
-        radius="panel"
-        className="overflow-hidden border"
-        aria-label={title}
-      >
-        <ItemGroup>
-          {withSeparators
-            ? items.map((child, idx) => (
-                <React.Fragment key={(child as React.ReactElement).key ?? idx}>
-                  {idx > 0 ? <ItemSeparator /> : null}
-                  {child}
-                </React.Fragment>
-              ))
-            : items}
-        </ItemGroup>
-      </Surface>
+      {/* No children, no surface. A section whose rows are all conditional
+          (the auto-backup interval, for one) otherwise painted an empty
+          bordered box two pixels tall under its own heading. */}
+      {items.length > 0 ? (
+        <Surface
+          asChild
+          layer="raised"
+          radius="panel"
+          className="overflow-hidden border"
+          aria-label={title}
+        >
+          <ItemGroup>
+            {withSeparators
+              ? items.map((child, idx) => (
+                  <React.Fragment key={(child as React.ReactElement).key ?? idx}>
+                    {idx > 0 ? <ItemSeparator /> : null}
+                    {child}
+                  </React.Fragment>
+                ))
+              : items}
+          </ItemGroup>
+        </Surface>
+      ) : null}
     </section>
   )
 }

@@ -23,7 +23,7 @@
   "importSuccess": "恢复完成",
   "importWrongPassphrase": "口令错误——无法解密该备份。",
   "importing": "正在恢复…",
-  "passphraseLabel": "可选密码（留空则使用自动密钥）",
+  "passphraseLabel": "密码短语（至少 {min} 个字符）",
   "passphraseRequiredHint": "需要密码短语才能在以后解开加密备份。",
   "shareFile": "分享文件",
   "shareTitle": "Cognia 备份",
