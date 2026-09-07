@@ -376,3 +376,51 @@ describe("botEventDeliveries recovery after a host stops mid-attempt", () => {
     expect(row?.lastError).toContain("retention")
   })
 })
+
+/**
+ * A mirrored row is here to be READ. The run id is derived from the delivery
+ * id and `executionRuns` is itself synced, so a companion that drained one
+ * would mint the same run id as the Host that owns it.
+ */
+describe("botEventDeliveries mirrored from a Host", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botEventDeliveries.clear()
+  }, 15_000)
+
+  async function mirroredDelivery() {
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo#1", now: NOW })
+    const row = await getDb().botEventDeliveries.get("del_1")
+    await getDb().botEventDeliveries.put({ ...row!, syncedFromHost: true })
+  }
+
+  it("is never due", async () => {
+    await mirroredDelivery()
+    expect(await listDueBotDeliveries(10, NOW)).toEqual([])
+  })
+
+  it("cannot be claimed", async () => {
+    await mirroredDelivery()
+    expect(await claimBotDelivery("del_1", "runner-a", NOW)).toBeUndefined()
+  })
+
+  it("does not hold a concurrency key against local work", async () => {
+    await mirroredDelivery()
+    const row = await getDb().botEventDeliveries.get("del_1")
+    await getDb().botEventDeliveries.put({ ...row!, status: "running" })
+
+    expect(await countActiveBotDeliveriesForKey("repo#1", NOW)).toBe(0)
+  })
+
+  it("is not recovered or retired on the owning Host's behalf", async () => {
+    await mirroredDelivery()
+    const row = await getDb().botEventDeliveries.get("del_1")
+    await getDb().botEventDeliveries.put({ ...row!, status: "running", leaseOwner: "host-a" })
+
+    expect(await recoverAbandonedBotDelivery("del_1", NOW + 10 * 60_000)).toBeNull()
+    expect(await recoverStaleBotDeliveries({ owner: "host-a", now: NOW })).toBe(0)
+
+    await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)
+    expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("running")
+  })
+})

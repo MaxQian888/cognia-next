@@ -5,9 +5,13 @@ import "fake-indexeddb/auto"
 import type { HeadlessRuntimeContext } from "../types"
 
 const startBotDeliveryRunner = jest.fn()
+const recoverStaleBotDeliveries = jest.fn(async () => 0)
 
 jest.mock("@/lib/bot/runtime/delivery-runner", () => ({
   startBotDeliveryRunner: (...args: unknown[]) => startBotDeliveryRunner(...args),
+}))
+jest.mock("@/lib/db/bot-event-deliveries", () => ({
+  recoverStaleBotDeliveries: (...args: unknown[]) => recoverStaleBotDeliveries(...args),
 }))
 
 function context(overrides: Partial<HeadlessRuntimeContext> = {}): HeadlessRuntimeContext {
@@ -37,6 +41,7 @@ async function loadRuntime() {
 }
 
 beforeEach(() => {
+  recoverStaleBotDeliveries.mockReset().mockResolvedValue(0)
   startBotDeliveryRunner.mockReset()
 })
 
@@ -58,4 +63,13 @@ describe("bot-delivery-runner headless runtime", () => {
     if (typeof dispose === "function") dispose()
     expect(stop).toHaveBeenCalled()
   })
+})
+
+it("reclaims the rows this brain abandoned before it starts draining", async () => {
+  startBotDeliveryRunner.mockReturnValue({ stop: jest.fn() })
+  const runtime = await loadRuntime()
+
+  runtime.start(context())
+
+  expect(recoverStaleBotDeliveries).toHaveBeenCalledWith({ owner: "brain:acct_1" })
 })

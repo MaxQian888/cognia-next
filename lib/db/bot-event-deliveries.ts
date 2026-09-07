@@ -50,6 +50,19 @@ export const BOT_DELIVERY_INTERRUPTED_ERROR = "bot run interrupted: the host sto
  * pruned it, and `countActiveBotDeliveriesForKey` counted it as live, so its
  * concurrency key was retired along with it.
  */
+/**
+ * May this process act on the row at all?
+ *
+ * A mirrored row belongs to the Host that synced it. Fencing here rather than
+ * in the runner is deliberate: `listDueBotDeliveries`, `claimBotDelivery` and
+ * `countActiveBotDeliveriesForKey` all flow through this module, and a fence in
+ * only one of them leaves the other two able to act on a foreign row. This is
+ * the same choke point `isLocallyDispatchable` occupies for the outbound queue.
+ */
+function isLocallyOwned(row: BotEventDeliveryRow): boolean {
+  return row.syncedFromHost !== true
+}
+
 function isMidAttempt(status: BotDeliveryStatus): boolean {
   return status === "leased" || status === "running"
 }
@@ -174,6 +187,7 @@ export async function listDueBotDeliveries(
   const rows = await getDb().botEventDeliveries.toArray()
   return rows
     .filter((row) => {
+      if (!isLocallyOwned(row)) return false
       if (row.status === "pending") return row.nextAttemptAt <= now
       return isAbandonedAttempt(row, now)
     })
@@ -197,6 +211,7 @@ export async function claimBotDelivery(
   return db.transaction("rw", db.botEventDeliveries, async () => {
     const row = await db.botEventDeliveries.get(id)
     if (!row) return undefined
+    if (!isLocallyOwned(row)) return undefined
     if (isTerminalBotDelivery(row.status)) return undefined
     // `running` counts here too. A live lease is a live lease whichever half of
     // the attempt its holder had reached, and letting a second runner take a
@@ -368,7 +383,7 @@ export async function recoverAbandonedBotDelivery(
   const db = getDb()
   return db.transaction("rw", db.botEventDeliveries, async () => {
     const row = await db.botEventDeliveries.get(id)
-    if (!row || !isAbandonedAttempt(row, now)) return null
+    if (!row || !isLocallyOwned(row) || !isAbandonedAttempt(row, now)) return null
     const next = chargeAbandonedAttempt(row, now, random)
     await db.botEventDeliveries.put(next)
     return next.status === "deadletter" ? "deadlettered" : "recovered"
@@ -397,7 +412,9 @@ export async function recoverStaleBotDeliveries(input: {
     const rows = await db.botEventDeliveries.toArray()
     const mine = rows.filter(
       (row) =>
-        row.leaseOwner === input.owner && (row.status === "leased" || row.status === "running")
+        isLocallyOwned(row) &&
+        row.leaseOwner === input.owner &&
+        (row.status === "leased" || row.status === "running")
     )
     for (const row of mine) {
       await db.botEventDeliveries.put(chargeAbandonedAttempt(row, now, input.random))
@@ -419,7 +436,9 @@ export async function countActiveBotDeliveriesForKey(
   // unconditionally is what used to retire a concurrency key permanently: one
   // crash left a row nothing could clear, and every later delivery on that key
   // was skipped as serialised forever after.
-  return rows.filter((row) => !isAbandonedAttempt(row, now) && isMidAttempt(row.status)).length
+  return rows.filter(
+    (row) => isLocallyOwned(row) && !isAbandonedAttempt(row, now) && isMidAttempt(row.status)
+  ).length
 }
 
 export async function listBotDeliveries(query: {
@@ -461,7 +480,7 @@ export async function pruneSettledBotDeliveries(now = Date.now()): Promise<numbe
   const rows = await db.botEventDeliveries.toArray()
 
   const expired = rows.filter(
-    (row) => !isTerminalBotDelivery(row.status) && row.receivedAt <= cutoff
+    (row) => isLocallyOwned(row) && !isTerminalBotDelivery(row.status) && row.receivedAt <= cutoff
   )
   for (const row of expired) {
     await dismissBotDelivery(row.id, "unsettled past the retention window", now)

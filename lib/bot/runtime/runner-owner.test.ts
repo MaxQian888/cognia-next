@@ -10,7 +10,12 @@ jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: { getState: () => getState() },
 }))
 
-import { getLocalAccountId } from "./runner-owner"
+import {
+  __resetBotRunnerOwnershipForTests,
+  getLocalAccountId,
+  isBotRunnerOwnedHere,
+  markBotRunnerOwned,
+} from "./runner-owner"
 
 beforeEach(() => {
   detectPlatform.mockReturnValue("tauri")
@@ -48,5 +53,39 @@ describe("getLocalAccountId", () => {
       throw new Error("store not ready")
     })
     expect(await getLocalAccountId()).toBe("tauri:unbound")
+  })
+})
+
+describe("bot runner ownership", () => {
+  beforeEach(() => __resetBotRunnerOwnershipForTests())
+
+  it("reports no owner before a runner starts", () => {
+    expect(isBotRunnerOwnedHere()).toBe(false)
+  })
+
+  it("reports an owner while a runner holds it", () => {
+    const release = markBotRunnerOwned()
+    expect(isBotRunnerOwnedHere()).toBe(true)
+    release()
+    expect(isBotRunnerOwnedHere()).toBe(false)
+  })
+
+  it("survives the overlap a StrictMode remount creates", () => {
+    // Effect#2 marks before cleanup#1 releases. A boolean would go false here
+    // and leave the host arms refusing writes for a process that is running.
+    const first = markBotRunnerOwned()
+    const second = markBotRunnerOwned()
+    first()
+    expect(isBotRunnerOwnedHere()).toBe(true)
+    second()
+    expect(isBotRunnerOwnedHere()).toBe(false)
+  })
+
+  it("ignores a release called twice", () => {
+    const release = markBotRunnerOwned()
+    markBotRunnerOwned()
+    release()
+    release()
+    expect(isBotRunnerOwnedHere()).toBe(true)
   })
 })

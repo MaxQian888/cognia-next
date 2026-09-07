@@ -169,6 +169,17 @@ export type BotDeliveryStatus =
   "pending" | "leased" | "running" | "succeeded" | "failed" | "deadletter" | "dismissed"
 
 export interface BotEventDeliveryRow {
+  /**
+   * Mirrored from a Host, not owned here.
+   *
+   * A companion syncs these rows to SHOW them. It must never drain one: the run
+   * id is derived from the delivery id, so a second host running a mirrored
+   * delivery mints the same `ExecutionRun` id as the host that owns it, and
+   * `executionRuns` is itself synced. Two writers on one row is a corruption,
+   * not a duplicated effort, which is why the fence lives in the queue module
+   * every claim path flows through rather than in the runner.
+   */
+  syncedFromHost?: true
   /** The delivery id. Also `envelope.deliveryId`. */
   id: string
   eventId: string

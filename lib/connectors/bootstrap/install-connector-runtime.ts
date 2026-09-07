@@ -38,6 +38,7 @@
 import type { PlatformAdapter } from "@/types/connectors/adapter"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { isTauri } from "@/lib/tauri"
+import { acquireExclusiveWebLock } from "@/lib/runtime/exclusive-web-lock"
 import { getBus } from "@/lib/connectors/bus"
 import {
   inboundEventToSendContent,
@@ -199,57 +200,6 @@ export function __resetConnectorRuntimeOwnershipForTests(): void {
 }
 
 /**
- * Default singleton guard via the Web Locks API. Issues a QUEUED exclusive
- * request — NOT `ifAvailable` — and, once granted, holds the lock (callback
- * promise stays pending) until `signal` aborts.
- *
- * Queued-with-`signal` semantics matter for two callers:
- *
- * - A second main-role webview waits here until the owner releases (window
- *   closed / runtime torn down) and then takes over — it never double-boots
- *   while the owner lives.
- * - A React StrictMode remount (dev): effect#1 → cleanup#1 → effect#2 run in
- *   ONE task, so effect#1's request is still queued (the webview's lock
- *   manager grants cross-process, never same-task) when effect#2's request is
- *   issued. `ifAvailable` would refuse effect#2 because effect#1 is queued
- *   ahead — leaving NO runtime at all (the dev-only "Lark connected but bot
- *   silent" bug). With `{ signal }`, cleanup#1's abort withdraws effect#1's
- *   queued request (AbortError → `false`) and effect#2 is granted next.
- *
- * Degrades to `true` when Web Locks is absent (SSR / older webview) or the
- * request fails for any reason other than our own abort — no guard, but boot
- * must not be blocked.
- */
-function acquireWebLock(signal: AbortSignal): Promise<boolean> {
-  const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks
-  if (!locks?.request) return Promise.resolve(true)
-  if (signal.aborted) return Promise.resolve(false)
-  return new Promise<boolean>((resolveAcquired) => {
-    void locks
-      .request(CONNECTOR_RUNTIME_LOCK, { signal }, (lock) => {
-        if (!lock) {
-          resolveAcquired(false)
-          return
-        }
-        resolveAcquired(true)
-        // Hold the lock for the runtime's lifetime. Aborting `signal` after
-        // the grant is a no-op for the request itself (per spec), so the
-        // release rides on this held promise instead.
-        return new Promise<void>((release) => {
-          if (signal.aborted) return release()
-          signal.addEventListener("abort", () => release(), { once: true })
-        })
-      })
-      .catch((err: unknown) => {
-        // AbortError → our own teardown withdrew the still-queued request; we
-        // never owned the runtime. Anything else is a lock-API failure →
-        // degrade to booting, same as when Web Locks is absent.
-        resolveAcquired(!(err instanceof Error && err.name === "AbortError"))
-      })
-  })
-}
-
-/**
  * The desktop's default guard: the Web Lock first, then the Rust runtime
  * lease. Both are required, and they cover different collisions — the lock
  * sees this app's other webviews and nothing else; the lease sees every other
@@ -281,7 +231,7 @@ function makeDefaultAcquireRuntimeLock(
       return false
     }
 
-    const won = await acquireWebLock(webLockAbort.signal)
+    const won = await acquireExclusiveWebLock(CONNECTOR_RUNTIME_LOCK, webLockAbort.signal)
     if (!won) return false
     const acquired = await createConnectorRuntimeLease({
       ownerClass: "desktop",
