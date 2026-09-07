@@ -27,6 +27,7 @@
 
 import {
   brokerLegRow,
+  countExecutionRowsByKind,
   hasLiveBrokerLeg,
   journalRunRow,
   journalSourceKey,
@@ -291,6 +292,65 @@ export function countCockpitRowsByStatus(
   }
   for (const row of rows) counts[cockpitStatusGroup(row)] += 1
   return counts
+}
+
+/**
+ * Every number the cockpit shows, derived from the same predicate that builds
+ * the list it sits above.
+ *
+ * The panel used to count one set and render another: the chips read
+ * `allRows.length` — every run in the journal — while the list applied the
+ * host's pinned axes on top. On the `/squads` Runs tab, which pins
+ * `kind: "team"` and (once a Squad is selected) its `teamId`, that produced
+ * "All 6 / Failed 1 / Finished 5" over "No runs match these filters". Six runs
+ * existed; none of them were Squad runs; the chips were counting the wrong
+ * universe.
+ *
+ * So a count here is never a tally of some other list. It is the SIZE OF THE
+ * RESULT of picking that chip: each axis is counted with every other axis —
+ * pinned or user-selected — still applied, and `rows` is derived from the same
+ * intermediate the status counts are taken from, so
+ * `rows.length === statusCounts[filter.statusGroup]` holds by construction
+ * rather than by two functions agreeing.
+ *
+ * This is the shape `lib/scheduler/unified-filter.ts` settled on for the same
+ * defect on `/scheduler`, for the same reason.
+ */
+export interface CockpitFacets {
+  /** Exactly the rows the list renders under `filter`. */
+  rows: UnifiedExecutionRow[]
+  /** The `all` status chip: this filter with the status axis released. */
+  statusTotal: number
+  /** Per bucket, how many rows selecting that bucket would render. */
+  statusCounts: Record<CockpitStatusGroup, number>
+  /** The `all kinds` option: this filter with the kind axis released. */
+  kindTotal: number
+  /** Per kind, how many rows selecting that kind would render. */
+  kindCounts: Record<ExecutionFilterKind, number>
+}
+
+export function buildCockpitFacets(
+  rows: readonly UnifiedExecutionRow[],
+  filter: CockpitFilter = {}
+): CockpitFacets {
+  const { statusGroup, kind, ...pinned } = filter
+  // The host's axes (Squad, query) bind every count on the page: they are not
+  // something the reader can release, so a number that ignored them would
+  // describe a list this page can never show.
+  const scoped = filterCockpitRows(rows, pinned)
+  // `scoped` already carries the pinned axes, so each base only has to add the
+  // OTHER user axis.
+  const statusBase = kind ? filterCockpitRows(scoped, { kind }) : scoped
+  const kindBase = statusGroup ? filterCockpitRows(scoped, { statusGroup }) : scoped
+  return {
+    // Off `statusBase`, not off `rows` again: the list and the chip that
+    // selected it are then the same computation, and cannot drift apart.
+    rows: statusGroup ? filterCockpitRows(statusBase, { statusGroup }) : statusBase,
+    statusTotal: statusBase.length,
+    statusCounts: countCockpitRowsByStatus(statusBase),
+    kindTotal: kindBase.length,
+    kindCounts: countExecutionRowsByKind(kindBase),
+  }
 }
 
 /**

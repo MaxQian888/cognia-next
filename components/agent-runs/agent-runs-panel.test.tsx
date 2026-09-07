@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { AgentRunsPanel } from "./agent-runs-panel"
+import {
+  COCKPIT_STATUS_GROUPS,
+  buildCockpitFacets,
+  type CockpitFilter,
+} from "@/lib/execution/cockpit-model"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 
 // Namespace-aware so the status pill (which scopes to `agentRuns.status`)
@@ -74,12 +79,29 @@ function state(over: Record<string, unknown> = {}) {
   return {
     rows: [row()],
     allRows: [row()],
+    statusTotal: 1,
     statusCounts: { running: 1, waiting: 0, failed: 0, finished: 0 },
+    kindTotal: 1,
     kindCounts: { chat: 1 },
     isLoading: false,
     hasMore: false,
     loadMore: jest.fn(),
     ...over,
+  }
+}
+
+/**
+ * The cockpit state as the REAL model would answer it, so a case can assert
+ * the chips against the list rather than against a hand-written record that
+ * cannot disagree with anything.
+ */
+function fromJournal(allRows: UnifiedExecutionRow[], filter: CockpitFilter = {}) {
+  return {
+    ...buildCockpitFacets(allRows, filter),
+    allRows,
+    isLoading: false,
+    hasMore: false,
+    loadMore: jest.fn(),
   }
 }
 
@@ -197,14 +219,102 @@ describe("AgentRunsPanel", () => {
     expect(loadMore).toHaveBeenCalled()
   })
 
-  it("distinguishes an empty list from an over-filtered one", () => {
+  /**
+   * "No runs match these filters" is only honest when the reader owns a
+   * control that would widen the view. A host that PINS an axis renders none,
+   * so an empty Squad reads "No runs yet" instead of sending the reader
+   * looking for a knob that is not on the page.
+   */
+  it("blames a filter only when the reader can release one", () => {
     cockpit = state({ rows: [], allRows: [] })
     const { rerender } = render(<AgentRunsPanel onSelect={jest.fn()} />)
     expect(screen.getByText("empty")).toBeInTheDocument()
 
     cockpit = state({ rows: [], allRows: [row()] })
-    rerender(<AgentRunsPanel onSelect={jest.fn()} />)
+    rerender(<AgentRunsPanel onSelect={jest.fn()} statusGroup="failed" onStatusGroup={jest.fn()} />)
     expect(screen.getByText("emptyFiltered")).toBeInTheDocument()
+
+    // Same empty list, but the kind is pinned by the host and has no control.
+    rerender(<AgentRunsPanel onSelect={jest.fn()} filterKind="team" />)
+    expect(screen.getByText("empty")).toBeInTheDocument()
+  })
+
+  /** A dropdown that shows a value it will not let you change is a lie. */
+  it("renders the kind control only where it is one", () => {
+    render(<AgentRunsPanel onSelect={jest.fn()} filterKind="team" />)
+    expect(screen.queryByLabelText("filters.kindLabel")).not.toBeInTheDocument()
+
+    render(<AgentRunsPanel onSelect={jest.fn()} filterKind="team" onFilterKind={jest.fn()} />)
+    expect(screen.getByLabelText("filters.kindLabel")).toBeInTheDocument()
+  })
+
+  /**
+   * The `/squads` Runs tab: six runs in the journal, two of them a Squad's.
+   * The panel is pinned to `kind: "team"`, so the list renders two — while the
+   * chips, counting `allRows`, read "All 6 / Failed 1 / Finished 5" over "No
+   * runs match these filters". A chip and the list below it are now one
+   * computation, and this walks every chip to prove it.
+   */
+  it("never shows a chip count the list below it cannot produce", () => {
+    const journal = [
+      row({ rowId: "j:1", nativeId: "1", runId: "1", label: "Chat one", status: "running" }),
+      row({ rowId: "j:2", nativeId: "2", runId: "2", label: "Chat two", status: "error" }),
+      row({ rowId: "j:3", nativeId: "3", runId: "3", kind: "goal", label: "G1", status: "done" }),
+      row({ rowId: "j:4", nativeId: "4", runId: "4", kind: "goal", label: "G2", status: "done" }),
+      row({
+        rowId: "j:5",
+        nativeId: "5",
+        runId: "5",
+        kind: "team",
+        label: "Squad build",
+        status: "running",
+        teamId: "team_1",
+      }),
+      row({
+        rowId: "j:6",
+        nativeId: "6",
+        runId: "6",
+        kind: "team",
+        label: "Squad ship",
+        status: "error",
+        teamId: "team_1",
+      }),
+    ]
+
+    for (const group of ["all", ...COCKPIT_STATUS_GROUPS] as const) {
+      const pinned: CockpitFilter = { kind: "team" }
+      cockpit = fromJournal(journal, group === "all" ? pinned : { ...pinned, statusGroup: group })
+      const view = render(
+        <AgentRunsPanel
+          onSelect={jest.fn()}
+          filterKind="team"
+          statusGroup={group}
+          onStatusGroup={jest.fn()}
+        />
+      )
+
+      const chip = screen.getByRole("tab", { name: new RegExp(`^filters\\.${group}`) })
+      const shown = Number(/(\d+)$/.exec(chip.textContent ?? "")?.[1] ?? 0)
+      const rendered = within(screen.getByRole("list", { name: "title" })).queryAllByRole(
+        "button"
+      ).length
+
+      expect({ group, shown }).toEqual({ group, shown: rendered })
+      view.unmount()
+    }
+  })
+
+  /** The pinned scope binds the `all` chip too — it is not "everything". */
+  it("counts the pinned scope on the all chip, not the whole journal", () => {
+    const journal = [
+      row({ rowId: "j:1", nativeId: "1", runId: "1", label: "Chat" }),
+      row({ rowId: "j:2", nativeId: "2", runId: "2", kind: "goal", label: "Goal" }),
+    ]
+    cockpit = fromJournal(journal, { kind: "team" })
+    render(<AgentRunsPanel onSelect={jest.fn()} filterKind="team" />)
+
+    expect(screen.getByRole("tab", { name: /^filters\.all/ })).toHaveTextContent(/^filters\.all$/)
+    expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
   it("keeps the two-pane split when there is room for it", () => {

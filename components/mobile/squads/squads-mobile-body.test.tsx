@@ -28,11 +28,15 @@ jest.mock("@/components/agent-runs/agent-runs-panel", () => ({
     embedded,
     filterKind,
     selectedId,
+    statusGroup,
+    onStatusGroup,
   }: {
     teamId?: string
     embedded?: boolean
     filterKind?: string
     selectedId?: string
+    statusGroup?: string
+    onStatusGroup?: (group: string) => void
   }) => (
     <div
       data-testid="agent-runs-panel"
@@ -40,7 +44,16 @@ jest.mock("@/components/agent-runs/agent-runs-panel", () => ({
       data-embedded={String(Boolean(embedded))}
       data-kind={filterKind ?? "all"}
       data-run={selectedId ?? ""}
-    />
+      data-status={statusGroup ?? ""}
+    >
+      {/* The chips were rendered with no setter behind them. This stands in
+          for one, so a case can prove the click reaches the URL. */}
+      <button
+        type="button"
+        data-testid="agent-runs-status-chip"
+        onClick={() => onStatusGroup?.("failed")}
+      />
+    </div>
   ),
 }))
 jest.mock("@/components/agent/workspace/tasks", () => ({
@@ -81,18 +94,21 @@ function seed(teams: AgentTeam[]) {
 
 const setSelectedId = jest.fn()
 const setRunId = jest.fn()
+const setRunStatus = jest.fn()
 const setTab = jest.fn()
 
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
   return {
     selectedId: undefined,
     runId: undefined,
+    runStatus: "all",
     tab: undefined,
     query: "",
     filter: "all",
     narrowed: false,
     setSelectedId,
     setRunId,
+    setRunStatus,
     setTab,
     setQuery: jest.fn(),
     setFilter: jest.fn(),
@@ -142,6 +158,15 @@ describe("SquadsMobileBody", () => {
     const panel = screen.getByTestId("agent-runs-panel")
     expect(panel).toHaveAttribute("data-embedded", "true")
     expect(panel).toHaveAttribute("data-kind", "team")
+  })
+
+  /** Same inert-chip fix as the wide pane: the phone writes `?status=` too. */
+  it("gives the run chips a URL to write to", async () => {
+    render(<SquadsMobileBody route={route({ tab: "runs", runStatus: "finished" })} />)
+    expect(screen.getByTestId("agent-runs-panel")).toHaveAttribute("data-status", "finished")
+
+    await userEvent.click(screen.getByTestId("agent-runs-status-chip"))
+    expect(setRunStatus).toHaveBeenCalledWith("failed")
   })
 
   it("reports a tab change instead of owning it", async () => {

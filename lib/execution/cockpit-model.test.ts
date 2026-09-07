@@ -1,12 +1,16 @@
 import {
   COCKPIT_PAGE_SIZE,
+  COCKPIT_STATUS_GROUPS,
+  buildCockpitFacets,
   buildCockpitRows,
   cockpitHasMore,
   cockpitStatusGroup,
   countCockpitRowsByStatus,
   filterCockpitRows,
   legacyAgentRunRow,
+  type CockpitFilter,
 } from "./cockpit-model"
+import { EXECUTION_FILTER_KINDS, type UnifiedExecutionRow } from "./monitor-model"
 import type { ExecutionLegSnapshot } from "./types"
 import type { ExecutionRun, ExecutionRunStatus, RunControlAction } from "@/types/execution/run"
 import type { Goal } from "@/types/goal"
@@ -212,6 +216,101 @@ describe("filterCockpitRows", () => {
   it("matches the label case-insensitively", () => {
     expect(filterCockpitRows(rows, { query: "FLAKE" })).toHaveLength(1)
     expect(filterCockpitRows(rows, { query: "   " })).toHaveLength(2)
+  })
+})
+
+describe("buildCockpitFacets", () => {
+  // Six runs; two of them belong to a Squad. This is the `/squads` Runs tab's
+  // shape, where the chips read "All 6 / Failed 1 / Finished 5" over a list
+  // that rendered "No runs match these filters".
+  function unified(
+    over: Partial<UnifiedExecutionRow> & Pick<UnifiedExecutionRow, "rowId" | "status">
+  ): UnifiedExecutionRow {
+    return {
+      source: "journal",
+      nativeId: over.rowId,
+      runId: over.rowId,
+      kind: "agent-turn",
+      label: over.rowId,
+      startedAt: 1_000,
+      cancellable: false,
+      ...over,
+    }
+  }
+
+  const rows: UnifiedExecutionRow[] = [
+    unified({ rowId: "chat-run", status: "running" }),
+    unified({ rowId: "chat-failed", status: "error" }),
+    unified({ rowId: "goal-one", kind: "goal", status: "done" }),
+    unified({ rowId: "goal-two", kind: "goal", status: "done" }),
+    unified({ rowId: "squad-build", kind: "team", status: "running", teamId: "team_1" }),
+    unified({ rowId: "squad-ship", kind: "team", status: "error", teamId: "team_1" }),
+  ]
+
+  /**
+   * The whole point. Whatever a chip says, that is how many rows come back
+   * when you pick it — under EVERY pinned axis, not just the unpinned ones.
+   */
+  it("makes every count the size of the result of picking it", () => {
+    const pinned: CockpitFilter[] = [
+      {},
+      { kind: "team" },
+      { teamId: "team_1" },
+      { kind: "team", teamId: "team_1" },
+      { query: "squad-" },
+    ]
+    for (const base of pinned) {
+      const facets = buildCockpitFacets(rows, base)
+      expect(facets.statusTotal).toBe(filterCockpitRows(rows, base).length)
+      for (const group of COCKPIT_STATUS_GROUPS) {
+        const picked = buildCockpitFacets(rows, { ...base, statusGroup: group })
+        expect(picked.rows).toHaveLength(facets.statusCounts[group])
+      }
+      for (const kind of EXECUTION_FILTER_KINDS) {
+        const picked = buildCockpitFacets(rows, { ...base, kind })
+        expect(picked.rows).toHaveLength(facets.kindCounts[kind])
+      }
+    }
+  })
+
+  /** The reported bug, pinned as a number. */
+  it("counts the Squad's universe, not the journal's, under a pinned kind", () => {
+    const everything = buildCockpitFacets(rows)
+    expect(everything.statusTotal).toBe(6)
+
+    const squadTab = buildCockpitFacets(rows, { kind: "team" })
+    expect(squadTab.statusTotal).toBe(2)
+    expect(squadTab.rows).toHaveLength(2)
+    expect(squadTab.statusCounts).toEqual({ running: 1, waiting: 0, failed: 1, finished: 0 })
+  })
+
+  /** No Squads yet: the chips say nothing rather than advertising six runs. */
+  it("reads zero everywhere when the pinned scope is empty", () => {
+    const facets = buildCockpitFacets(rows, { teamId: "team_missing" })
+    expect(facets.rows).toHaveLength(0)
+    expect(facets.statusTotal).toBe(0)
+    expect(Object.values(facets.statusCounts)).toEqual([0, 0, 0, 0])
+  })
+
+  /**
+   * The other half of a filter count: it must not collapse to the list either.
+   * "Failed 1" has to survive selecting Running, or the chips stop being a way
+   * to move between buckets.
+   */
+  it("keeps the other buckets visible while one is selected", () => {
+    const facets = buildCockpitFacets(rows, { kind: "team", statusGroup: "running" })
+    expect(facets.rows).toHaveLength(1)
+    expect(facets.statusCounts.failed).toBe(1)
+    expect(facets.statusTotal).toBe(2)
+  })
+
+  /** A kind count is read while a status is selected, so it obeys it too. */
+  it("counts kinds under the selected status, not across all of them", () => {
+    const facets = buildCockpitFacets(rows, { statusGroup: "failed" })
+    expect(facets.kindTotal).toBe(2)
+    expect(facets.kindCounts.team).toBe(1)
+    expect(facets.kindCounts.chat).toBe(1)
+    expect(facets.kindCounts.goal).toBe(0)
   })
 })
 

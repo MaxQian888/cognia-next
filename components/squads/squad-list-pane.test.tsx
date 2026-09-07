@@ -18,11 +18,15 @@ const clearFilters = jest.fn()
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
   return {
     selectedId: undefined,
+    runId: undefined,
+    runStatus: "all",
     tab: undefined,
     query: "",
     filter: "all",
     narrowed: false,
     setSelectedId,
+    setRunId: jest.fn(),
+    setRunStatus: jest.fn(),
     setTab: jest.fn(),
     setQuery,
     setFilter,

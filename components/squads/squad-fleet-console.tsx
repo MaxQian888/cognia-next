@@ -183,6 +183,8 @@ export function SquadFleetConsole({ route }: SquadFleetConsoleProps) {
             {...(inspectorId ? { teamId: inspectorId } : {})}
             selectedId={route.runId}
             onSelect={(id) => route.setRunId(id ?? undefined)}
+            statusGroup={route.runStatus}
+            onStatusGroup={route.setRunStatus}
           />
         </TabsContent>
         <TabsContent value="board" className="min-h-0 flex-1 overflow-y-auto p-4">

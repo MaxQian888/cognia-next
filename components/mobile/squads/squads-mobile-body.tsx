@@ -126,6 +126,8 @@ export function SquadsMobileBody({ route }: SquadsMobileBodyProps) {
             {...(selectedId ? { teamId: selectedId } : {})}
             selectedId={route.runId}
             onSelect={(id) => route.setRunId(id ?? undefined)}
+            statusGroup={route.runStatus}
+            onStatusGroup={route.setRunStatus}
           />
         </TabsContent>
 

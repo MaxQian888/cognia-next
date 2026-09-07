@@ -34,14 +34,13 @@ import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import {
   COCKPIT_PAGE_SIZE,
+  buildCockpitFacets,
   buildCockpitRows,
   cockpitHasMore,
-  countCockpitRowsByStatus,
-  filterCockpitRows,
+  type CockpitFilter,
   type CockpitStatusGroup,
 } from "@/lib/execution/cockpit-model"
 import {
-  countExecutionRowsByKind,
   journalRunRow,
   type ExecutionFilterKind,
   type UnifiedExecutionRow,
@@ -68,14 +67,23 @@ export interface UseExecutionCockpitResult {
   /** Rows after the status / kind / query filter. */
   rows: UnifiedExecutionRow[]
   /**
-   * Rows before filtering.
+   * Every row the page loaded, before ANY filter.
    *
-   * The chip counts are computed from this, not from `rows`: a count derived
-   * from the filtered list would read "Failed 0" the moment you selected
-   * Running, which is the opposite of what a filter count is for.
+   * Only for resolving a deep link that the current filter hides — a `?run=`
+   * from an IM card must still open its detail pane. Never count this: it
+   * spans kinds and Squads the list is pinned away from, and counting it is
+   * exactly the bug `buildCockpitFacets` exists to prevent.
    */
   allRows: UnifiedExecutionRow[]
+  /**
+   * Chip counts, from `buildCockpitFacets` — the size of the result of picking
+   * each chip, not a tally of some wider list. A count derived from `rows`
+   * would read "Failed 0" the moment you selected Running; one derived from
+   * `allRows` disagrees with the list under every pinned axis.
+   */
+  statusTotal: number
   statusCounts: Record<CockpitStatusGroup, number>
+  kindTotal: number
   kindCounts: Record<ExecutionFilterKind, number>
   /** Canonical row for a deep link that is outside the currently loaded page. */
   selectedRow?: UnifiedExecutionRow
@@ -154,16 +162,19 @@ export function useExecutionCockpit(
     [brokerLegs, persisted, options.projectId]
   )
 
-  const rows = useMemo(
-    () =>
-      filterCockpitRows(allRows, {
-        ...(options.statusGroup ? { statusGroup: options.statusGroup } : {}),
-        ...(options.kind ? { kind: options.kind } : {}),
-        ...(options.query ? { query: options.query } : {}),
-        ...(options.teamId ? { teamId: options.teamId } : {}),
-      }),
-    [allRows, options.statusGroup, options.kind, options.query, options.teamId]
+  const filter = useMemo<CockpitFilter>(
+    () => ({
+      ...(options.statusGroup ? { statusGroup: options.statusGroup } : {}),
+      ...(options.kind ? { kind: options.kind } : {}),
+      ...(options.query ? { query: options.query } : {}),
+      ...(options.teamId ? { teamId: options.teamId } : {}),
+    }),
+    [options.statusGroup, options.kind, options.query, options.teamId]
   )
+
+  // One call owns the list AND every number above it, so a chip cannot report
+  // a set the list does not render.
+  const facets = useMemo(() => buildCockpitFacets(allRows, filter), [allRows, filter])
 
   const loadMore = useCallback(() => setLimit((current) => current + COCKPIT_PAGE_SIZE), [])
   const selectedRow = useMemo(
@@ -189,10 +200,12 @@ export function useExecutionCockpit(
   }, [persisted])
 
   return {
-    rows,
+    rows: facets.rows,
     allRows,
-    statusCounts: useMemo(() => countCockpitRowsByStatus(allRows), [allRows]),
-    kindCounts: useMemo(() => countExecutionRowsByKind(allRows), [allRows]),
+    statusTotal: facets.statusTotal,
+    statusCounts: facets.statusCounts,
+    kindTotal: facets.kindTotal,
+    kindCounts: facets.kindCounts,
     ...(selectedRow ? { selectedRow } : {}),
     isLoading: persisted === undefined,
     hasMore,

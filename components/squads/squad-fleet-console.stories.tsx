@@ -66,11 +66,15 @@ function seed(teams: AgentTeam[], members: AgentTeammate[] = [], waitingOn: stri
 function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
   return {
     selectedId: undefined,
+    runId: undefined,
+    runStatus: "all",
     tab: undefined,
     query: "",
     filter: "all",
     narrowed: false,
     setSelectedId: () => undefined,
+    setRunId: () => undefined,
+    setRunStatus: () => undefined,
     setTab: () => undefined,
     setQuery: () => undefined,
     setFilter: () => undefined,

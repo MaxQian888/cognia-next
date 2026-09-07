@@ -84,13 +84,23 @@ export function AgentRunsPanel({
   embedded = false,
 }: AgentRunsPanelProps) {
   const t = useTranslations("agentRuns")
-  const { rows, allRows, selectedRow, statusCounts, kindCounts, isLoading, hasMore, loadMore } =
-    useExecutionCockpit({
-      ...(statusGroup !== "all" ? { statusGroup } : {}),
-      ...(filterKind !== "all" ? { kind: filterKind } : {}),
-      ...(teamId ? { teamId } : {}),
-      ...(selectedId ? { selectedId } : {}),
-    })
+  const {
+    rows,
+    allRows,
+    selectedRow,
+    statusTotal,
+    statusCounts,
+    kindTotal,
+    kindCounts,
+    isLoading,
+    hasMore,
+    loadMore,
+  } = useExecutionCockpit({
+    ...(statusGroup !== "all" ? { statusGroup } : {}),
+    ...(filterKind !== "all" ? { kind: filterKind } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(selectedId ? { selectedId } : {}),
+  })
   const actions = useRunControlActions()
   const compact = useCompactLayout()
 
@@ -110,12 +120,27 @@ export function AgentRunsPanel({
     [rows, allRows, selectedRow, selectedId]
   )
 
+  /**
+   * Whether "No runs match these filters" is true. It is only true when the
+   * reader can actually widen the view — a narrowed axis they own a control
+   * for. A host that PINS an axis (the `/squads` Runs tab, `kind: "team"`)
+   * renders no control for it, so blaming a filter for an empty Squad's list
+   * would send the reader looking for a knob that is not on the page.
+   */
+  const canWiden =
+    (onStatusGroup !== undefined && statusGroup !== "all") ||
+    (onFilterKind !== undefined && filterKind !== "all")
+
   const controls = (
     <div className="flex flex-wrap items-center gap-1.5">
       <div className="flex gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
+        {/* `statusTotal`, never `allRows.length`. This chip is "release the
+            status axis", not "every run in the journal": under a host that
+            pins the kind or the Squad, those are two different numbers, and
+            the second one describes a list this panel cannot render. */}
         <FilterChip
           label={t("filters.all")}
-          count={allRows.length}
+          count={statusTotal}
           selected={statusGroup === "all"}
           onSelect={() => onStatusGroup?.("all")}
         />
@@ -129,27 +154,38 @@ export function AgentRunsPanel({
           />
         ))}
       </div>
-      <Select
-        value={filterKind}
-        onValueChange={(value) => onFilterKind?.(value as ExecutionFilterKind | "all")}
-      >
-        <SelectTrigger size="sm" aria-label={t("filters.kindLabel")} className="w-auto">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{t("filters.allKinds")}</SelectItem>
-          {EXECUTION_FILTER_KINDS.map((kind) => {
-            const label = t(`kind.${filterKindLabelKey(kind)}`)
-            return (
-              <SelectItem key={kind} value={kind}>
-                {kindCounts[kind]
-                  ? t("filters.kindOption", { label, count: kindCounts[kind] })
-                  : label}
-              </SelectItem>
-            )
-          })}
-        </SelectContent>
-      </Select>
+      {/* Rendered only where it is a CONTROL. The `/squads` Runs tab pins the
+          kind to `team` and passes no setter, and a dropdown that shows a
+          value it will not let you change is a third kind of lie next to the
+          chips this component just stopped telling. The pinned scope is
+          already named by the page around it. */}
+      {onFilterKind ? (
+        <Select
+          value={filterKind}
+          onValueChange={(value) => onFilterKind(value as ExecutionFilterKind | "all")}
+        >
+          <SelectTrigger size="sm" aria-label={t("filters.kindLabel")} className="w-auto">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              {kindTotal
+                ? t("filters.kindOption", { label: t("filters.allKinds"), count: kindTotal })
+                : t("filters.allKinds")}
+            </SelectItem>
+            {EXECUTION_FILTER_KINDS.map((kind) => {
+              const label = t(`kind.${filterKindLabelKey(kind)}`)
+              return (
+                <SelectItem key={kind} value={kind}>
+                  {kindCounts[kind]
+                    ? t("filters.kindOption", { label, count: kindCounts[kind] })
+                    : label}
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
+      ) : null}
     </div>
   )
 
@@ -183,7 +219,7 @@ export function AgentRunsPanel({
           <ul className="min-h-0 flex-1 overflow-y-auto" aria-label={t("title")}>
             {!isLoading && rows.length === 0 && (
               <li className="p-4 text-center text-xs text-muted-foreground">
-                {allRows.length === 0 ? t("empty") : t("emptyFiltered")}
+                {canWiden ? t("emptyFiltered") : t("empty")}
               </li>
             )}
             {rows.map((row) => (

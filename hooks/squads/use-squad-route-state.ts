@@ -24,6 +24,8 @@
 import { useCallback, useMemo } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
+import { COCKPIT_STATUS_GROUPS, type CockpitStatusGroup } from "@/lib/execution/cockpit-model"
+
 export const SQUAD_TABS = ["squads", "runs", "board"] as const
 export type SquadFleetTab = (typeof SQUAD_TABS)[number]
 
@@ -42,6 +44,17 @@ export interface SquadRouteState {
   selectedId: string | undefined
   /** `?run=`: the execution run open in the Runs tab. Same id space as `/agent-runs?run=`. */
   runId: string | undefined
+  /**
+   * `?status=`: the Runs tab's status bucket, from the same closed set as
+   * `/agent-runs?status=`.
+   *
+   * In the URL rather than component state for the reason `tab` is: the Runs
+   * tab lives inside `FeaturePageShell`, which renders the desktop and narrow
+   * layouts through two different trees and REMOUNTS on the breakpoint. It is
+   * here at all because the chips were rendered with no setter behind them —
+   * clickable, counted, and inert.
+   */
+  runStatus: CockpitStatusGroup | "all"
   /** `undefined` when the URL names none, so each surface can pick its own landing tab. */
   tab: SquadFleetTab | undefined
   query: string
@@ -50,6 +63,7 @@ export interface SquadRouteState {
   narrowed: boolean
   setSelectedId: (id: string | undefined) => void
   setRunId: (runId: string | undefined) => void
+  setRunStatus: (group: CockpitStatusGroup | "all") => void
   setTab: (tab: SquadFleetTab) => void
   setQuery: (value: string) => void
   setFilter: (value: SquadFilter) => void
@@ -83,17 +97,21 @@ export function useSquadRouteState(): SquadRouteState {
 
   const filter = oneOf(searchParams?.get("filter") ?? null, SQUAD_FILTERS) ?? "all"
   const query = searchParams?.get("q") ?? ""
+  const runStatus =
+    oneOf(searchParams?.get("status") ?? null, COCKPIT_STATUS_GROUPS) ?? ("all" as const)
 
   return useMemo(
     () => ({
       selectedId: searchParams?.get("id") ?? undefined,
       runId: searchParams?.get("run") ?? undefined,
+      runStatus,
       tab: oneOf(searchParams?.get("tab") ?? null, SQUAD_TABS),
       query,
       filter,
       narrowed: filter !== "all" || query.trim().length > 0,
       setSelectedId: (id) => setParams({ id }),
       setRunId: (runId) => setParams({ run: runId }),
+      setRunStatus: (group) => setParams({ status: group === "all" ? undefined : group }),
       // `runs` is the wide-pane default, so naming it in the URL would be
       // noise. Every other tab is worth linking to.
       setTab: (tab) => setParams({ tab: tab === "runs" ? undefined : tab }),
@@ -101,6 +119,6 @@ export function useSquadRouteState(): SquadRouteState {
       setFilter: (value) => setParams({ filter: value === "all" ? undefined : value }),
       clearFilters: () => setParams({ q: undefined, filter: undefined }),
     }),
-    [searchParams, setParams, query, filter]
+    [searchParams, setParams, query, filter, runStatus]
   )
 }

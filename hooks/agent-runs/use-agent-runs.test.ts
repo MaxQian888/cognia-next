@@ -141,16 +141,50 @@ describe("useExecutionCockpit", () => {
     expect(result.current.selectedRow?.runId).toBe("older-deep-link")
   })
 
-  /** A count derived from the filtered list would read "Failed 0" once you pick Running. */
-  it("counts against the UNFILTERED list so the chips stay meaningful", () => {
+  /**
+   * A count derived from the filtered list would read "Failed 0" once you pick
+   * Running, so the status axis is released for its own counts. Every OTHER
+   * axis stays applied, which is what makes a count the size of the result of
+   * picking it rather than a tally of a list this page cannot render.
+   */
+  it("releases only the axis it is counting, and holds every other one", () => {
     persisted = sources({
       executionRuns: [run("r1", "goal", "running"), run("r2", "goal", "failed")],
     })
     const { result } = renderHook(() => useExecutionCockpit({ statusGroup: "running" }))
     expect(result.current.rows).toHaveLength(1)
     expect(result.current.allRows).toHaveLength(2)
+    // Released: picking Failed would render one row.
     expect(result.current.statusCounts.failed).toBe(1)
-    expect(result.current.kindCounts.goal).toBe(2)
+    expect(result.current.statusTotal).toBe(2)
+    // Held: picking the Goal kind while Running is selected renders one row,
+    // not two. It used to read 2 — a number the list could not produce.
+    expect(result.current.kindCounts.goal).toBe(1)
+    expect(result.current.kindTotal).toBe(1)
+  })
+
+  /**
+   * The `/squads` Runs tab pins `kind: "team"`. The chips counted `allRows`
+   * and advertised every run in the journal over a list that rendered none.
+   */
+  it("counts inside a pinned kind, not across the whole journal", () => {
+    persisted = sources({
+      executionRuns: [
+        run("r1", "goal", "running"),
+        run("r2", "goal", "failed"),
+        run("r3", "agent-turn", "completed"),
+      ],
+    })
+    const { result } = renderHook(() => useExecutionCockpit({ kind: "team" }))
+    expect(result.current.allRows).toHaveLength(3)
+    expect(result.current.rows).toHaveLength(0)
+    expect(result.current.statusTotal).toBe(0)
+    expect(result.current.statusCounts).toEqual({
+      running: 0,
+      waiting: 0,
+      failed: 0,
+      finished: 0,
+    })
   })
 
   it("filters by kind and by label query", () => {

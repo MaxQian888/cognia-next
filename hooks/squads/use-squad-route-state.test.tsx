@@ -55,6 +55,17 @@ describe("reading", () => {
   it("is not narrowed by whitespace alone", () => {
     expect(at("q=%20%20").result.current.narrowed).toBe(false)
   })
+
+  /**
+   * The Runs tab's status chips. They were rendered with no setter behind
+   * them — clickable, counted, and inert — so this axis is the difference
+   * between a control and a decoration.
+   */
+  it("reads the Runs tab's status bucket, defaulting to all", () => {
+    expect(at("status=failed").result.current.runStatus).toBe("failed")
+    expect(at("").result.current.runStatus).toBe("all")
+    expect(at("status=exploded").result.current.runStatus).toBe("all")
+  })
 })
 
 describe("writing", () => {
@@ -87,6 +98,16 @@ describe("writing", () => {
     const { result } = at("id=team_1&q=review&filter=live")
     act(() => result.current.clearFilters())
     expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1", { scroll: false })
+  })
+
+  it("keeps the run status out of the URL when it is the default", () => {
+    const { result } = at("id=team_1&run=exec_1")
+    act(() => result.current.setRunStatus("failed"))
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1&run=exec_1&status=failed", {
+      scroll: false,
+    })
+    act(() => result.current.setRunStatus("all"))
+    expect(replace).toHaveBeenLastCalledWith("/squads?id=team_1&run=exec_1", { scroll: false })
   })
 
   it("drops the selection to the bare path when nothing else is set", () => {
