@@ -604,6 +604,44 @@ describe("SessionSettingsSheet", () => {
     expect(updateSession).toHaveBeenCalledWith("ses_memory", { memoryLearn: true })
   })
 
+  it("stores a per-chat screen-power choice", async () => {
+    const user = userEvent.setup()
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_power" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    await user.click(screen.getByRole("button", { name: /screen . power/i }))
+    await user.click(screen.getByTestId("session-power-option-keepScreenOn"))
+    expect(updateSession).toHaveBeenCalledWith("ses_power", { powerPolicy: "keepScreenOn" })
+  })
+
+  it("clears a screen-power override back to an absent column, not the word inherit", async () => {
+    const user = userEvent.setup()
+    const updateSession = jest.fn(async (_id: string, _patch: unknown) => undefined)
+    render(
+      <DataAdapterProvider adapter={makeAdapter({ updateSession })}>
+        <SessionSettingsSheet
+          session={mkSession({ id: "ses_power2", powerPolicy: "keepScreenOn" })}
+          open
+          onOpenChange={jest.fn()}
+        />
+      </DataAdapterProvider>
+    )
+
+    // The section auto-expands because the session already carries an override.
+    await user.click(screen.getByTestId("session-power-option-inherit"))
+    // Storing the literal string would leave the badge claiming an override
+    // nobody made any more.
+    expect(updateSession).toHaveBeenCalledWith("ses_power2", { powerPolicy: undefined })
+  })
+
   it("picks a working directory via the Tauri folder dialog", async () => {
     mockIsTauri.mockReturnValue(true)
     mockOpenDialog.mockResolvedValueOnce("/picked/dir")

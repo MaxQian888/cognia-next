@@ -112,14 +112,26 @@ export function aggregateRunState(input: AggregateRunStateInput): AggregateRunSt
 }
 
 /**
+ * Every session with work in flight, focused or not. Ordered by key.
+ *
+ * The same predicate as `active` counts, exposed as a list for surfaces that
+ * must act per conversation rather than per app: the session power coordinator
+ * holds the screen for these ids, and it must include the focused one (a user
+ * watching a long turn is the main reason to hold the screen at all).
+ */
+export function inFlightSessionIds(sessions: AggregateRunStateInput["sessions"]): string[] {
+  return Object.entries(sessions ?? {})
+    .filter(([, slice]) => isInFlight(slice?.status ?? "idle"))
+    .map(([id]) => id)
+    .sort()
+}
+
+/**
  * Sessions with work in flight, excluding the focused one. Ordered by key.
  *
  * Exactly the sessions `activeElsewhere` is true about, so a caller that has
  * this list does not need to ask twice — its length IS the answer.
  */
 export function backgroundActiveSessionIds(input: AggregateRunStateInput): string[] {
-  return Object.entries(input.sessions ?? {})
-    .filter(([id, slice]) => id !== input.activeSessionId && isInFlight(slice?.status ?? "idle"))
-    .map(([id]) => id)
-    .sort()
+  return inFlightSessionIds(input.sessions).filter((id) => id !== input.activeSessionId)
 }

@@ -1,0 +1,31 @@
+{
+  "effect": {
+    "mayPauseWhenHidden": "本轮任务在浏览器标签页内运行。标签页长时间处于后台时可能被浏览器挂起，回复会暂停到你回来为止。",
+    "runsOnHost": "任务在本窗口之外运行，熄屏后仍会继续，回来时结果已经在等你。",
+    "screenHeld": "从一轮任务开始到结束，屏幕保持常亮，结束后交回系统电源设置。",
+    "screenHoldUnavailable": "当前运行环境无法保持屏幕常亮，设置会被保存，但在这里不生效。"
+  },
+  "holdingNow": "正在保持亮屏",
+  "policy": {
+    "allowScreenOff": {
+      "description": "保持系统默认的电源行为，屏幕可以熄灭，任务照常运行。",
+      "label": "允许熄屏"
+    },
+    "inherit": {
+      "description": "使用应用默认设置（{mode}）。",
+      "label": "跟随默认"
+    },
+    "keepScreenOn": {
+      "description": "只要这个对话还有任务在运行，屏幕就保持常亮。",
+      "label": "运行时保持亮屏"
+    }
+  },
+  "session": {
+    "description": "这个对话在运行任务时对设备的要求。",
+    "title": "屏幕与电源"
+  },
+  "settings": {
+    "description": "所有对话在运行任务时对设备的默认要求，单个对话可以在自己的会话设置里覆盖。",
+    "title": "运行时的屏幕与电源"
+  }
+}

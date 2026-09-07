@@ -12,6 +12,7 @@ import { ComposerSkinCard } from "./composer-skin-card"
 import { EffortPreferencesCard } from "./effort-preferences-card"
 import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
+import { SessionPowerCard } from "./session-power-card"
 import { ComposerAssistanceCard } from "../chat/composer-assistance-card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -165,6 +166,10 @@ export function ConversationSection() {
       <ConversationSidebarCard />
 
       <RunStatusBarCard />
+
+      {/* What a running turn asks of the device. Sits with the run-status bar
+          because both answer "what happens while a turn is in flight". */}
+      <SessionPowerCard />
 
       <CompactionSettings />
 

@@ -23,6 +23,7 @@ import {
   SlidersHorizontalIcon,
   SparklesIcon,
   StarIcon,
+  SunIcon,
   TerminalIcon,
   Trash2Icon,
   WandSparklesIcon,
@@ -112,6 +113,8 @@ import { primaryRootOf } from "@/lib/workspace/roots"
 import { SessionExecutionWorkspace } from "./session-execution-workspace"
 import { SessionCommunicationSheet } from "./session-communication-sheet"
 import { SessionSettingsSection } from "./session-settings-section"
+import { SessionPowerPicker } from "@/components/power/session-power-picker"
+import { resolveDefaultPowerMode } from "@/lib/power/session-power-policy"
 import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import { loggers } from "@cognia/logging"
@@ -131,6 +134,7 @@ import type {
   AgentEnvBinding,
   AppSettings,
   ChatSession,
+  SessionPowerPolicy,
   SystemPromptPreset,
 } from "@cognia/agent-config-types"
 import type { MessageDisplayPreferences } from "@/types/appearance"
@@ -178,7 +182,7 @@ function executionFormState(session: ChatSession) {
  * collapses) and is therefore not part of this union.
  */
 export type SessionSettingsSectionId =
-  "mode" | "status" | "account" | "behavior" | "execution" | "memory" | "role" | "display"
+  "mode" | "status" | "account" | "behavior" | "execution" | "power" | "memory" | "role" | "display"
 
 export type SessionSettingsSectionState = Record<SessionSettingsSectionId, boolean>
 
@@ -201,6 +205,7 @@ export function defaultSectionState(session: ChatSession): SessionSettingsSectio
     behavior: true,
     role: true,
     execution: hasExecutionOverride,
+    power: session.powerPolicy !== undefined && session.powerPolicy !== "inherit",
     memory: session.memoryUse !== undefined || session.memoryLearn !== undefined,
     display: session.messageDisplayOverride !== undefined,
   }
@@ -239,6 +244,7 @@ export function SessionSettingsSheet({
   showAmbientStatus = false,
 }: SessionSettingsSheetProps) {
   const t = useTranslations("chat.header")
+  const tPower = useTranslations("sessionPower")
   const tPermission = useTranslations("chat.permissionMode")
   const tComposition = useTranslations("agentComposition")
   const [compositionAdvancedOpen, setCompositionAdvancedOpen] = useState(false)
@@ -288,6 +294,7 @@ export function SessionSettingsSheet({
   )
   const defaultWorkingDir = useSettingsStore((s) => s.settings?.defaultWorkingDir)
   const globalMessageDisplay = useSettingsStore((s) => s.settings?.messageDisplay)
+  const appPowerDefault = resolveDefaultPowerMode(useSettingsStore((s) => s.settings))
   const executionRoot = session.executionContext
     ? resolveSessionWorkspaceRoot(session.executionContext)
     : undefined
@@ -377,6 +384,15 @@ export function SessionSettingsSheet({
   const handlePickDir = async () => {
     const picked = await directoryPicker.browse()
     if (picked) setForm((f) => ({ ...f, workingDir: picked }))
+  }
+
+  /**
+   * `inherit` is stored as an absent column rather than the literal string, so
+   * a conversation that never chose keeps reading as untouched and the section
+   * badge does not claim an override nobody made.
+   */
+  const handlePowerPolicy = async (next: SessionPowerPolicy) => {
+    await updateSession(session.id, { powerPolicy: next === "inherit" ? undefined : next })
   }
 
   const handleMemoryOverride = async (
@@ -631,6 +647,7 @@ export function SessionSettingsSheet({
       (form.executionEffort !== "inherit" ? 1 : 0) +
       (form.executionMaxTurns.trim() ? 1 : 0) +
       form.executionEnvBindings.length,
+    power: session.powerPolicy !== undefined && session.powerPolicy !== "inherit" ? 1 : 0,
     memory: (session.memoryUse !== undefined ? 1 : 0) + (session.memoryLearn !== undefined ? 1 : 0),
     role: (presetId ? 1 : 0) + disabledSkillIds.size,
     display: messageDisplayPreference ? 1 : 0,
@@ -1192,6 +1209,27 @@ export function SessionSettingsSheet({
                   )
                 })}
               </div>
+            </SessionSettingsSection>
+
+            {/* Screen & power: what this conversation asks of the device while
+                one of its turns is in flight. */}
+            <SessionSettingsSection
+              id="power"
+              icon={SunIcon}
+              title={tPower("session.title")}
+              summary={summaryFor(overrideCounts.power)}
+              overrideCount={overrideCounts.power}
+              open={sectionOpen.power}
+              onOpenChange={setSection("power")}
+            >
+              <p className="text-xs text-muted-foreground">{tPower("session.description")}</p>
+              <SessionPowerPicker
+                value={session.powerPolicy ?? "inherit"}
+                onValueChange={(next) => void handlePowerPolicy(next)}
+                includeInherit
+                appDefault={appPowerDefault}
+                idPrefix={`session-power-${session.id}`}
+              />
             </SessionSettingsSection>
 
             {/* Memory */}

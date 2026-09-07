@@ -1,4 +1,8 @@
-import { aggregateRunState, backgroundActiveSessionIds } from "./aggregate-run-state"
+import {
+  aggregateRunState,
+  backgroundActiveSessionIds,
+  inFlightSessionIds,
+} from "./aggregate-run-state"
 
 const sessions = (map: Record<string, string>) =>
   Object.fromEntries(
@@ -119,6 +123,27 @@ describe("aggregateRunState", () => {
       activeElsewhere: false,
       focused: "idle",
     })
+  })
+})
+
+describe("inFlightSessionIds", () => {
+  it("includes the focused conversation, unlike the background list", () => {
+    // The session power coordinator holds the screen for these ids. Excluding
+    // the conversation on screen would drop the hold for the exact case the
+    // feature exists for: watching a long turn without touching the trackpad.
+    const sessions = {
+      a: { status: "streaming" as const },
+      b: { status: "idle" as const },
+      c: { status: "awaiting_approval" as const },
+      d: { status: "error" as const },
+    }
+    expect(inFlightSessionIds(sessions)).toEqual(["a", "c"])
+    expect(backgroundActiveSessionIds({ sessions, activeSessionId: "a" })).toEqual(["c"])
+  })
+
+  it("survives an empty store", () => {
+    expect(inFlightSessionIds({})).toEqual([])
+    expect(inFlightSessionIds(undefined as never)).toEqual([])
   })
 })
 

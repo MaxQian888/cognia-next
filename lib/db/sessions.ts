@@ -112,6 +112,17 @@ export async function getSession(id: string): Promise<ChatSession | undefined> {
 }
 
 /**
+ * Rows for a known set of ids, missing ones dropped. One indexed `bulkGet`
+ * rather than N `get`s, because the session power coordinator re-runs this for
+ * every conversation with a turn in flight.
+ */
+export async function getSessionsByIds(ids: readonly string[]): Promise<ChatSession[]> {
+  if (ids.length === 0) return []
+  const rows = await getDb().sessions.bulkGet([...ids])
+  return rows.filter((row): row is ChatSession => row !== undefined)
+}
+
+/**
  * Create a fresh chat session row. When the caller provides no character or
  * team and no override fields, the user's default preset (if any) is auto-
  * applied — its `content` becomes the session's `systemPrompt`, and any of

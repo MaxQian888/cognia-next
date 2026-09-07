@@ -6,7 +6,9 @@ import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initiali
 import { DesktopNetworkRuntimeInitializer } from "./desktop-network-runtime-initializer"
 import { ExecutionControlInitializer } from "./execution-control-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
+import { ProviderOAuthRefreshInitializer } from "./provider-oauth-refresh-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
+import { SessionPowerInitializer } from "./session-power-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
 import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
@@ -45,11 +47,21 @@ export function DeferredBootInitializersImpl() {
     <>
       <DesktopNetworkRuntimeInitializer />
       <ProviderCoreRuntimeInitializer />
+      {/* After ProviderCoreRuntimeInitializer: its renewals go through the
+      same proxy-fetch adapter that initializer installs. */}
+      <ProviderOAuthRefreshInitializer />
       <RoutingRuntimeInitializer />
       <RemoteNotificationInitializer />
       <GatewayProvider />
       {/* No ordering dependency: a registration-only dispatch table. */}
       <ExecutionControlInitializer />
+      {/*
+        Holds the screen for conversations whose power policy asks for it, for
+        as long as they are running. Order-independent, and deliberately here
+        rather than in a chat pane: the conversation that most needs the hold is
+        the one the user has navigated away from.
+      */}
+      <SessionPowerInitializer />
       {/*
         Settling a turn's managed working copy is a chat obligation, not a
         workflow one. This subscriber is what calls `settleTaskWorkspaceTurn` on

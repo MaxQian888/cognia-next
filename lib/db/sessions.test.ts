@@ -8,6 +8,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 import {
   createSession,
   getSession,
+  getSessionsByIds,
   updateSession,
   setSessionActiveBranchSelection,
   listSessions,
@@ -138,6 +139,18 @@ describe("createSession — without default preset", () => {
     expect(session).toMatchObject(seeded)
     // Not just the returned object — the row Dexie actually holds.
     await expect(getSession(session.id)).resolves.toMatchObject(seeded)
+  })
+
+  it("reads a known set of sessions in one go, dropping ids that are gone", async () => {
+    const a = await createSession({ title: "A", powerPolicy: "keepScreenOn" })
+    const b = await createSession({ title: "B" })
+
+    const rows = await getSessionsByIds([a.id, "s_missing", b.id])
+    expect(rows.map((row) => row.id).sort()).toEqual([a.id, b.id].sort())
+    expect(rows.find((row) => row.id === a.id)?.powerPolicy).toBe("keepScreenOn")
+    // The session power coordinator calls this on every turn edge, including
+    // the edge where nothing is running.
+    await expect(getSessionsByIds([])).resolves.toEqual([])
   })
 
   it("rejects working-set writes that bypass the CAS mutation service", async () => {

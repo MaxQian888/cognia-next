@@ -2155,6 +2155,13 @@ export interface ChatSession {
    * anything. Non-indexed optional column — no Dexie schema bump.
    */
   trialSkillId?: string
+  /**
+   * Per-chat screen-power override. `inherit` (or absent) follows
+   * {@link AppSettings.sessionPowerPolicy}. Read by the renderer's power
+   * coordinator (`lib/power/session-power-policy.ts`), which holds the display
+   * for exactly as long as this conversation has a turn in flight.
+   */
+  powerPolicy?: SessionPowerPolicy
   /** Per-chat learned-memory recall override. */
   memoryUse?: boolean
   /** Per-chat automatic learned-memory write override. */
@@ -2884,6 +2891,29 @@ export interface ConversationSidebarSettings {
  * (legacy settings) keeps the sensible defaults there. Speed/tokens/cost derive
  * from the bound session's live `metadata.usage`; context% from the latest turn.
  */
+/**
+ * What a conversation asks of the device while one of its turns is running.
+ *
+ * - `keepScreenOn` — hold the display awake for as long as the turn is in
+ *   flight (a desktop display assertion, or `navigator.wakeLock` in a browser /
+ *   mobile WebView). For watching a long run from across the room.
+ * - `allowScreenOff` — take no screen hold. The turn keeps running wherever it
+ *   actually executes: the desktop sidecar and every paired host are separate
+ *   processes and do not stop when the panel goes dark.
+ *
+ * Deliberately not a boolean. "Keep the screen on" and "let the screen go off"
+ * are two different asks a user makes on purpose, and a boolean would have made
+ * the second one indistinguishable from never having chosen.
+ */
+export type SessionPowerMode = "keepScreenOn" | "allowScreenOff"
+
+/**
+ * A conversation's own answer, where `inherit` follows
+ * {@link AppSettings.sessionPowerPolicy}. Absent on legacy rows, which read as
+ * `inherit`.
+ */
+export type SessionPowerPolicy = SessionPowerMode | "inherit"
+
 export interface RunStatusBarSettings {
   /** Active-work elapsed clock (e.g. "12.3s"). Defaults to on. */
   showElapsed?: boolean
@@ -3757,6 +3787,12 @@ export interface AppSettings {
   conversationSidebar?: ConversationSidebarSettings
   /** Which metrics the chat run-status bar surfaces (speed, tokens, cost, …). */
   runStatusBar?: RunStatusBarSettings
+  /**
+   * What every conversation asks of the device while a turn runs, unless the
+   * conversation overrides it. Absent means `allowScreenOff` — the behaviour
+   * that shipped before this setting existed.
+   */
+  sessionPowerPolicy?: SessionPowerMode
   /**
    * Set once the user has confirmed the run panel's "interrupt and send"
    * action. That action aborts the running turn's in-flight tool calls to

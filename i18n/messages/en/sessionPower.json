@@ -1,0 +1,31 @@
+{
+  "effect": {
+    "mayPauseWhenHidden": "This turn runs in the browser tab. If the tab is hidden for a long time the browser may pause it, so the reply can stall until you come back.",
+    "runsOnHost": "The turn runs outside this window and keeps going while the screen is off. Results are waiting when you come back.",
+    "screenHeld": "The screen stays on from the moment a turn starts until it finishes, then power settings take over again.",
+    "screenHoldUnavailable": "This runtime cannot hold the screen on, so the setting stays saved but does nothing here."
+  },
+  "holdingNow": "Holding the screen",
+  "policy": {
+    "allowScreenOff": {
+      "description": "Normal power behaviour. The screen may turn off while the turn keeps running.",
+      "label": "Let the screen turn off"
+    },
+    "inherit": {
+      "description": "Use the app default ({mode}).",
+      "label": "Follow the default"
+    },
+    "keepScreenOn": {
+      "description": "The display stays awake for as long as this conversation has a turn in flight.",
+      "label": "Keep the screen on while running"
+    }
+  },
+  "session": {
+    "description": "What this conversation asks of the device while one of its turns is running.",
+    "title": "Screen & power"
+  },
+  "settings": {
+    "description": "What every conversation asks of the device while a turn is running. Any chat can override it from its own settings sheet.",
+    "title": "Screen & power during a run"
+  }
+}
