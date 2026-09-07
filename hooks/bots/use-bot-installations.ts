@@ -45,11 +45,15 @@ import type { Plugin } from "@/types/plugin"
  * only moves it out of `enabled`.
  */
 export function enabledPluginKey(plugins: Record<string, Plugin>): string {
-  return Object.values(plugins)
-    .filter((plugin) => plugin.status === "enabled")
-    .map((plugin) => plugin.id)
-    .sort()
-    .join(",")
+  return (
+    Object.entries(plugins)
+      .filter(([, plugin]) => plugin.status === "enabled")
+      // The record key, not `plugin.id`: a `Plugin` carries its identity on its
+      // manifest, and the store is already keyed by the same id.
+      .map(([id]) => id)
+      .sort()
+      .join(",")
+  )
 }
 
 export interface UseBotInstallationsResult {

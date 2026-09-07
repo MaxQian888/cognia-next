@@ -3,6 +3,18 @@
     "refresh": "刷新"
   },
   "attentionCount": "{count, plural, =1 {1 项需要处理} other {# 项需要处理}}",
+  "credentials": {
+    "boundTo": "绑定到 {target}",
+    "description": "定义声明的凭据槽。绑定记的是账号，不是密钥。",
+    "emptyBody": "这个 Bot 不访问 Cognia 之外的任何东西，因此不需要凭据。",
+    "emptyTitle": "不需要凭据",
+    "notBound": "未绑定",
+    "optional": "可选",
+    "orphanBody": "凭据槽读自定义，而这条安装记录已经没有定义可读。",
+    "orphanTitle": "定义缺失",
+    "title": "凭据",
+    "unbound": "待绑定"
+  },
   "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
   "detail": {
     "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
@@ -45,6 +57,36 @@
     "source": "来源",
     "status": "状态",
     "updated": "更新于"
+  },
+  "policy": {
+    "cost": "每次运行 {usd} 美元",
+    "description": "各层求交之后最严的那个上限。下层只能收窄。",
+    "duration": "每次运行 {seconds} 秒",
+    "no": "否",
+    "orphanBody": "上限由定义和安装记录一起折叠得出，而现在已经没有定义可折叠。",
+    "orphanTitle": "定义缺失",
+    "refusal": "{layer} 试图放宽「{field}」，已被驳回。",
+    "refusalsHint": "每一层都只能收窄。下面这些要的比上层允许的更多。",
+    "title": "策略上限",
+    "unconstrainedBody": "没有任何一层设过限制，因此这个 Bot 与其他运行使用同一套默认值。",
+    "unconstrainedTitle": "未设上限",
+    "yes": "是"
+  },
+  "policyField": {
+    "allowSelfTriggering": "响应自己产生的事件",
+    "maxAuthority": "最高权限",
+    "maxAutonomy": "最高自主度",
+    "maxConcurrentRuns": "并发运行数",
+    "maxRunCostUsd": "花费上限",
+    "maxRunDurationMs": "时长上限",
+    "requireApprovalForWrites": "每次写入都需审批"
+  },
+  "policyLayer": {
+    "definition": "定义",
+    "installation": "安装记录",
+    "organization": "组织",
+    "plugin": "插件",
+    "request": "本次运行请求"
   },
   "problem": {
     "definition_missing": {

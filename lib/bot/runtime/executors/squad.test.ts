@@ -170,11 +170,11 @@ describe("createSquadBotExecutor", () => {
     // would mark the Bot run complete while the Squad was still going, and the
     // plan-approval delegate would then ask a question on a closed run.
     const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
-    const parked = await createSquadBotExecutor({
-      start,
-      isSquadRunSettled: () => false,
-      now: () => 1_000,
-    })(ctx()).catch((error: unknown) => error)
+    // The executor's return type allows a plain value, so the rejection is
+    // awaited through `Promise.resolve` rather than `.catch` on the call.
+    const parked = await Promise.resolve(
+      createSquadBotExecutor({ start, isSquadRunSettled: () => false, now: () => 1_000 })(ctx())
+    ).catch((error: unknown) => error)
 
     expect(parked).toBeInstanceOf(BotRunParkedError)
     expect((parked as BotRunParkedError).waitingFor).toBe("squad:sq_1")

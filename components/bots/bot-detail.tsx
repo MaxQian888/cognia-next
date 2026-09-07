@@ -28,7 +28,7 @@
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { IdCardIcon, ZapIcon } from "lucide-react"
+import { IdCardIcon, KeyRoundIcon, ShieldIcon, ZapIcon } from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
 import { FactList, FactRow } from "@/components/surface/fact-list"
@@ -37,6 +37,8 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
 import { BotHero } from "./bot-hero"
+import { BotCredentialsSection } from "./sections/credentials-section"
+import { BotPolicySection } from "./sections/policy-section"
 import { BotTriggersSection } from "./sections/triggers-section"
 import { useBotProblemText, useBotRelativeTime } from "./bot-visuals"
 
@@ -126,6 +128,36 @@ export function BotDetail({ row }: BotDetailProps) {
             meta={t("row.armedOfTotal", { armed: row.armedTriggers, total: row.triggers.length })}
           >
             <BotTriggersSection row={row} />
+          </ConsoleSection>
+
+          <ConsoleSection
+            id="credentials"
+            title={t("credentials.title")}
+            icon={KeyRoundIcon}
+            description={t("credentials.description")}
+            meta={
+              row.requiredSlots.length > 0
+                ? t("row.armedOfTotal", {
+                    armed: row.requiredSlots.length - row.unboundSlots.length,
+                    total: row.requiredSlots.length,
+                  })
+                : undefined
+            }
+          >
+            <BotCredentialsSection row={row} />
+          </ConsoleSection>
+
+          {/* Full width: a fact list of up to seven rows, each carrying a
+              provenance badge, plus a refusal list underneath. In half a pane
+              every value wraps under its own label. */}
+          <ConsoleSection
+            id="policy"
+            title={t("policy.title")}
+            icon={ShieldIcon}
+            description={t("policy.description")}
+            wide
+          >
+            <BotPolicySection row={row} />
           </ConsoleSection>
         </div>
       </div>

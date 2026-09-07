@@ -32,6 +32,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
     armedTriggers: 1,
     unboundSlots: [],
     requiredSlots: [],
+    credentials: [],
     deadLetters: 0,
     updatedAt: 10,
     ...over,

@@ -3,6 +3,7 @@
 import { render, screen } from "@testing-library/react"
 
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+import { resolveBotPolicy } from "@/lib/bot/policy/ceilings"
 
 import { BotDetail } from "./bot-detail"
 
@@ -21,6 +22,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
     armedTriggers: 1,
     unboundSlots: [],
     requiredSlots: [],
+    credentials: [],
     deadLetters: 0,
     updatedAt: 1_700_000_000_000,
     ...over,
@@ -38,6 +40,42 @@ describe("BotDetail", () => {
     expect(screen.getByTestId("console-section-identity")).toBeInTheDocument()
     expect(screen.getByTestId("console-section-triggers")).toBeInTheDocument()
     expect(screen.getByTestId("bot-trigger-push")).toBeInTheDocument()
+  })
+
+  it("carries the credential and policy sections, not only identity and triggers", () => {
+    render(
+      <BotDetail
+        row={row({
+          credentials: [{ id: "token", label: "GitHub token", optional: false, bound: false }],
+          requiredSlots: [{ id: "token", label: "GitHub token" }],
+          unboundSlots: ["token"],
+          policy: resolveBotPolicy([{ name: "definition", policy: { maxConcurrentRuns: 1 } }]),
+        })}
+      />
+    )
+    expect(screen.getByTestId("console-section-credentials")).toBeInTheDocument()
+    expect(screen.getByTestId("bot-credential-token")).toHaveTextContent("Needs binding")
+    expect(screen.getByTestId("console-section-policy")).toBeInTheDocument()
+    expect(screen.getByTestId("bot-policy")).toHaveTextContent("Concurrent runs")
+  })
+
+  it("counts bound credentials on the section header, where the shortfall shows", () => {
+    render(
+      <BotDetail
+        row={row({
+          requiredSlots: [
+            { id: "token", label: "Token" },
+            { id: "chat", label: "Chat" },
+          ],
+          unboundSlots: ["token"],
+          credentials: [
+            { id: "token", label: "Token", optional: false, bound: false },
+            { id: "chat", label: "Chat", optional: false, bound: true },
+          ],
+        })}
+      />
+    )
+    expect(screen.getByTestId("console-section-credentials")).toHaveTextContent("1/2")
   })
 
   it("states each resolution problem separately, not as one unavailable line", () => {

@@ -24,6 +24,7 @@ import type {
   BotInstallationStatus,
 } from "@/lib/db/bot-types"
 import type { BotResolutionProblem, InstalledBot } from "@/lib/bot/installed-bot"
+import type { ResolvedBotPolicy } from "@/lib/bot/policy/ceilings"
 import type {
   PluginBotCredentialSlot,
   PluginBotExecutor,
@@ -48,6 +49,26 @@ export interface BotTriggerSummary {
   detail?: string
   /** Present for `poll` and `derivedState`. The caller formats it. */
   everyMs?: number
+}
+
+/**
+ * One credential slot as the console reads it.
+ *
+ * The binding is an id, never a secret. Which of the three ids a slot needs is
+ * the integration's business, so `bound` is true when it names ANY of them,
+ * exactly as `unboundCredentialSlots` decides.
+ */
+export interface BotCredentialRow {
+  id: string
+  label: string
+  optional: boolean
+  bound: boolean
+  /** Integration the account must belong to, when the slot names one. */
+  integration?: string
+  strategy?: string
+  /** What it is bound TO, for a reader checking they picked the right account. */
+  integrationAccountId?: string
+  adapterId?: string
 }
 
 /** One installation, as the list and the detail pane both read it. */
@@ -80,6 +101,14 @@ export interface BotConsoleRow {
   /** Required slots this installation has not bound yet. */
   unboundSlots: readonly string[]
   requiredSlots: readonly PluginBotCredentialSlot[]
+  /** Every declared slot, joined to what it is bound to. Empty for an orphan. */
+  credentials: readonly BotCredentialRow[]
+  /**
+   * The intersected ceiling with its audit trail. Absent for an orphan: no
+   * definition means no layers to fold, and an empty policy would read as "no
+   * limits" rather than "nothing to limit".
+   */
+  policy?: ResolvedBotPolicy
   /** Dead-lettered deliveries waiting for a person to replay or dismiss them. */
   deadLetters: number
   updatedAt: number
@@ -141,6 +170,8 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
     summarizeTrigger(installation, trigger)
   )
 
+  const unbound = unboundCredentialSlots(requiredSlots, installation.credentialBindings)
+
   return {
     id: installation.id,
     definitionId: installation.definitionId,
@@ -154,8 +185,28 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
     problems: resolved?.problems ?? [],
     triggers,
     armedTriggers: triggers.filter((trigger) => trigger.armed).length,
-    unboundSlots: unboundCredentialSlots(requiredSlots, installation.credentialBindings),
+    unboundSlots: unbound,
     requiredSlots,
+    credentials: requiredSlots.map((slot) => {
+      const binding = installation.credentialBindings[slot.id]
+      return {
+        id: slot.id,
+        label: slot.label,
+        optional: slot.optional === true,
+        // An optional slot is never "unbound" as far as status goes, so it is
+        // asked directly rather than inferred from the unbound set.
+        bound: Boolean(
+          binding?.integrationAccountId ?? binding?.authSessionId ?? binding?.adapterId
+        ),
+        ...(slot.integration ? { integration: slot.integration } : {}),
+        ...(slot.strategy ? { strategy: slot.strategy } : {}),
+        ...(binding?.integrationAccountId
+          ? { integrationAccountId: binding.integrationAccountId }
+          : {}),
+        ...(binding?.adapterId ? { adapterId: binding.adapterId } : {}),
+      }
+    }),
+    ...(resolved ? { policy: resolved.policyResolution } : {}),
     deadLetters: input.deadLetters ?? 0,
     updatedAt: installation.updatedAt,
   }

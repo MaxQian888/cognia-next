@@ -18,10 +18,11 @@
 import en from "@/i18n/messages/en/bots.json"
 import zh from "@/i18n/messages/zh-CN/bots.json"
 import { BOT_STATUS_FILTERS, type BotStatId, type BotTriggerKind } from "@/lib/bot/console/bot-rows"
+import { BOT_POLICY_LAYERS } from "@/lib/bot/policy/ceilings"
 import type { BotRuntimeReach } from "@/lib/bot/console/runtime-reach"
 import type { BotDefinitionSource, BotInstallationStatus, BotScopeKind } from "@/lib/db/bot-types"
 import type { BotResolutionProblem } from "@/lib/bot/installed-bot"
-import type { PluginBotExecutor } from "@/types/plugin/plugin-bot"
+import type { PluginBotExecutor, PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
 const STATUSES = [
   "enabled",
@@ -57,6 +58,21 @@ const PROBLEMS = [
 
 const STATS = ["triggers", "credentials", "deadLetters"] as const satisfies readonly BotStatId[]
 
+/**
+ * Mirrors `policy-section.tsx`'s own `POLICY_FIELDS`, which is itself
+ * `satisfies readonly (keyof PluginBotPolicyV1)[]`. A field added to the
+ * policy and rendered without a label prints its own key.
+ */
+const POLICY_FIELDS = [
+  "maxAuthority",
+  "maxAutonomy",
+  "maxRunDurationMs",
+  "maxRunCostUsd",
+  "maxConcurrentRuns",
+  "requireApprovalForWrites",
+  "allowSelfTriggering",
+] as const satisfies readonly (keyof PluginBotPolicyV1)[]
+
 /** `local` is deliberately absent: the notice renders nothing for it. */
 const REACHES = ["remote", "paired", "none"] as const satisfies readonly BotRuntimeReach[]
 
@@ -66,10 +82,12 @@ type Catalogue = {
   trigger: { kind: Record<string, string> }
   scope: Record<string, string>
   source: Record<string, string>
-  problem: Record<string, { title: string; body: string }>
+  problem: Record<string, { title: string; body: string; badge?: string }>
   stat: Record<string, string>
   runtime: Record<string, { title: string; body: string }>
   listPane: { filter: Record<string, string> }
+  policyField: Record<string, string>
+  policyLayer: Record<string, string>
 }
 
 const catalogues: Record<string, Catalogue> = {
@@ -114,6 +132,14 @@ describe.each(Object.entries(catalogues))("bots catalogue (%s)", (_locale, catal
 
   it.each(BOT_STATUS_FILTERS)("labels the %s list filter", (filter) => {
     expect(typeof catalogue.listPane.filter[filter]).toBe("string")
+  })
+
+  it.each(POLICY_FIELDS)("labels the %s policy field", (field) => {
+    expect(typeof catalogue.policyField[field]).toBe("string")
+  })
+
+  it.each(BOT_POLICY_LAYERS)("labels the %s policy layer", (layer) => {
+    expect(typeof catalogue.policyLayer[layer]).toBe("string")
   })
 
   it("carries the orphan badge, which is not a fourth status", () => {

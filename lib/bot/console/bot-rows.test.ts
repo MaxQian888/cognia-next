@@ -1,5 +1,6 @@
 import type { BotInstallationRow } from "@/lib/db/bot-types"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
+import { resolveBotPolicy } from "@/lib/bot/policy/ceilings"
 import type { PluginBotTriggerDef } from "@/types/plugin/plugin-bot"
 
 import {
@@ -39,18 +40,26 @@ function resolved(
   over: Partial<InstalledBot["definition"]> = {},
   problems: InstalledBot["problems"] = []
 ): InstalledBot {
+  const definition = {
+    id: row.definitionId,
+    name: "Review",
+    version: "1.0.0",
+    executor: "handler" as const,
+    triggers: [MANUAL],
+    source: "plugin" as const,
+    ...over,
+  }
+  // The real fold rather than an empty object: the console renders the
+  // provenance, and a stubbed `{}` here would let a row that drops it pass.
+  const policyResolution = resolveBotPolicy([
+    { name: "definition", policy: definition.policy },
+    { name: "installation", policy: row.policyGrant },
+  ])
   return {
     installation: row,
-    definition: {
-      id: row.definitionId,
-      name: "Review",
-      version: "1.0.0",
-      executor: "handler",
-      triggers: [MANUAL],
-      source: "plugin",
-      ...over,
-    },
-    policy: {},
+    definition,
+    policy: policyResolution.policy,
+    policyResolution,
     problems,
   }
 }
@@ -139,6 +148,57 @@ describe("buildBotRow", () => {
       ]),
     })
     expect(row.problems).toEqual([{ kind: "version_drift", pinned: "1.0.0", available: "1.1.0" }])
+  })
+})
+
+describe("buildBotRow credentials and policy", () => {
+  it("joins each declared slot to what it is bound to, never to a secret", () => {
+    const inst = installation({
+      credentialBindings: { token: { integrationAccountId: "acct_9" }, chat: {} },
+    })
+    const row = buildBotRow({
+      installation: inst,
+      resolved: resolved(inst, {
+        requires: {
+          credentials: [
+            { id: "token", label: "Token", integration: "github" },
+            { id: "chat", label: "Chat", optional: true },
+          ],
+        },
+      }),
+    })
+    expect(row.credentials).toEqual([
+      {
+        id: "token",
+        label: "Token",
+        optional: false,
+        bound: true,
+        integration: "github",
+        integrationAccountId: "acct_9",
+      },
+      // An empty object under a slot id is a half-finished wizard, not a
+      // binding, so this one is listed and unbound.
+      { id: "chat", label: "Chat", optional: true, bound: false },
+    ])
+  })
+
+  it("carries the policy fold with its provenance, not just the numbers", () => {
+    const inst = installation({ policyGrant: { maxConcurrentRuns: 1 } })
+    const row = buildBotRow({
+      installation: inst,
+      resolved: resolved(inst, { policy: { maxRunDurationMs: 60_000 } }),
+    })
+    expect(row.policy?.policy).toMatchObject({ maxRunDurationMs: 60_000, maxConcurrentRuns: 1 })
+    expect(row.policy?.provenance).toMatchObject({
+      maxRunDurationMs: "definition",
+      maxConcurrentRuns: "installation",
+    })
+  })
+
+  it("leaves the policy absent for an orphan rather than reading as no limits", () => {
+    const row = buildBotRow({ installation: installation(), resolved: null })
+    expect(row.policy).toBeUndefined()
+    expect(row.credentials).toEqual([])
   })
 })
 

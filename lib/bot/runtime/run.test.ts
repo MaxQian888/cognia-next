@@ -58,6 +58,9 @@ async function seed(): Promise<{ delivery: BotEventDeliveryRow; resolved: Instal
         source: "plugin",
       },
       policy: {},
+      // The audit trail beside the ceiling. Empty here because no layer has an
+      // opinion, which `resolveBotPolicy([])` is the honest way to spell.
+      policyResolution: { policy: {}, provenance: {}, refusals: [] },
       problems: [],
     },
   }

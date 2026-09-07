@@ -3,6 +3,18 @@
     "refresh": "Refresh"
   },
   "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
+  "credentials": {
+    "boundTo": "Bound to {target}",
+    "description": "Slots the definition declares. A binding names an account, never a secret.",
+    "emptyBody": "This Bot reaches nothing outside Cognia, so it asks for no credentials.",
+    "emptyTitle": "No credentials needed",
+    "notBound": "Not bound",
+    "optional": "Optional",
+    "orphanBody": "Credential slots are read from the definition, and this one has none to read.",
+    "orphanTitle": "Definition missing",
+    "title": "Credentials",
+    "unbound": "Needs binding"
+  },
   "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
   "detail": {
     "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
@@ -45,6 +57,36 @@
     "source": "Source",
     "status": "Status",
     "updated": "Updated"
+  },
+  "policy": {
+    "cost": "${usd} per run",
+    "description": "The strictest ceiling every layer agreed on. A lower layer can only narrow.",
+    "duration": "{seconds}s per run",
+    "no": "No",
+    "orphanBody": "A ceiling is folded from the definition and the installation together, and there is no definition left to fold.",
+    "orphanTitle": "Definition missing",
+    "refusal": "{layer} asked to widen {field} and was overruled.",
+    "refusalsHint": "A layer can only narrow. These asked for more than the layer above allowed.",
+    "title": "Policy ceiling",
+    "unconstrainedBody": "No layer set a limit, so this Bot runs under the same defaults as any other run.",
+    "unconstrainedTitle": "No ceiling set",
+    "yes": "Yes"
+  },
+  "policyField": {
+    "allowSelfTriggering": "Answer its own events",
+    "maxAuthority": "Maximum authority",
+    "maxAutonomy": "Maximum autonomy",
+    "maxConcurrentRuns": "Concurrent runs",
+    "maxRunCostUsd": "Cost ceiling",
+    "maxRunDurationMs": "Time ceiling",
+    "requireApprovalForWrites": "Approve every write"
+  },
+  "policyLayer": {
+    "definition": "Definition",
+    "installation": "Installation",
+    "organization": "Organisation",
+    "plugin": "Plugin",
+    "request": "Run request"
   },
   "problem": {
     "definition_missing": {

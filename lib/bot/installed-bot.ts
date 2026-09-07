@@ -11,7 +11,11 @@
 import { getBotDefinition } from "@/lib/db/bot-definitions"
 import type { BotInstallationRow } from "@/lib/db/bot-types"
 import { getBot } from "@/lib/plugin/registries/bot-registry"
-import { resolveBotPolicy, type BotPolicyLayer } from "@/lib/bot/policy/ceilings"
+import {
+  resolveBotPolicy,
+  type BotPolicyLayer,
+  type ResolvedBotPolicy,
+} from "@/lib/bot/policy/ceilings"
 import type { BotHandlerV1 } from "@/types/bot/run"
 import type {
   PluginBotCompositionRequestV1,
@@ -60,6 +64,15 @@ export interface InstalledBot {
   definition: ResolvedBotDefinition
   /** The intersected ceiling. Never a grant. */
   policy: PluginBotPolicyV1
+  /**
+   * The same fold, with its audit trail: which layer set each value, and which
+   * layers asked to widen something and were overruled.
+   *
+   * Carried alongside rather than replacing `policy`, because the runtime only
+   * ever needs the numbers and a console needs to answer "why can this Bot not
+   * do that". `policy` is `policyResolution.policy`, so the two cannot drift.
+   */
+  policyResolution: ResolvedBotPolicy
   problems: BotResolutionProblem[]
 }
 
@@ -110,10 +123,13 @@ export async function resolveInstalledBot(
     { name: "request", policy: options.requestPolicy },
   ]
 
+  const policyResolution = resolveBotPolicy(layers)
+
   return {
     installation,
     definition,
-    policy: resolveBotPolicy(layers).policy,
+    policy: policyResolution.policy,
+    policyResolution,
     problems,
   }
 }

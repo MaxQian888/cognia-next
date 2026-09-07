@@ -71,11 +71,11 @@ beforeEach(() => {
 
 describe("enabledPluginKey", () => {
   it("changes when a plugin is disabled, and not when the load order shuffles", () => {
-    const a = { id: "a", status: "enabled" } as Plugin
-    const b = { id: "b", status: "enabled" } as Plugin
+    const a = { status: "enabled" } as Plugin
+    const b = { status: "enabled" } as Plugin
     expect(enabledPluginKey({ a, b })).toBe("a,b")
     expect(enabledPluginKey({ b, a })).toBe("a,b")
-    expect(enabledPluginKey({ a, b: { ...b, status: "disabled" } as Plugin })).toBe("a")
+    expect(enabledPluginKey({ a, b: { ...b, status: "disabled" } })).toBe("a")
   })
 })
 
@@ -84,7 +84,7 @@ describe("useBotInstallations", () => {
     // A plugin's definitions live in the registry overlay, which no Dexie
     // query watches. Without this dependency a disabled plugin left its Bots
     // on screen looking healthy.
-    plugins = { a: { id: "a", status: "enabled" } as Plugin }
+    plugins = { a: { status: "enabled" } as Plugin }
     renderHook(() => useBotInstallations())
     expect(liveDeps).toEqual(["a"])
   })
