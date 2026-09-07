@@ -124,6 +124,22 @@ describe("<SubPageShell />", () => {
     expect(container.querySelector("header > div")?.className).toMatch(/max-w-2xl/)
   })
 
+  it("lets the body fill the screen it owns, so an empty state can centre", () => {
+    // Without `flex-1` on the body, a page whose entire content is an empty
+    // state (every PairedOnly gate) rendered as a stub pinned to the top of
+    // 700px of blank. `min-h-0` keeps a scrolling child from overflowing.
+    const { container } = render(
+      <SubPageShell title="X" backAria="Back">
+        body
+      </SubPageShell>
+    )
+    const section = container.querySelector("section")?.className ?? ""
+    expect(section).toMatch(/\bflex\b/)
+    expect(section).toMatch(/\bflex-1\b/)
+    expect(section).toMatch(/\bmin-h-0\b/)
+    expect(section).toMatch(/\bflex-col\b/)
+  })
+
   it("keeps the default width without the lg relaxation", () => {
     const { container } = render(
       <SubPageShell title="X" backAria="Back">

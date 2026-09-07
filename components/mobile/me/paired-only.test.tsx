@@ -58,6 +58,31 @@ describe("<PairedOnly />", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it("offers a route to pairing instead of naming a section to go find", () => {
+    mockConfig({ paired: false })
+    render(
+      <PairedOnly>
+        <div>panel</div>
+      </PairedOnly>
+    )
+    const action = screen.getByTestId("paired-only-action")
+    expect(action).toHaveAttribute("href", "/pair")
+    // The placeholder is the whole page when it shows, so it must not be a
+    // card. `MeSection` wrapped it in a bordered surface under a small-caps
+    // label, which read as a stub pinned to the top of a blank screen.
+    expect(document.querySelector('[data-slot="item-group"]')).toBeNull()
+  })
+
+  it("keeps the placeholder heading addressable", () => {
+    mockConfig({ paired: false })
+    render(
+      <PairedOnly>
+        <div>panel</div>
+      </PairedOnly>
+    )
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Desktop required")
+  })
+
   it("honors a custom placeholder testid", () => {
     mockConfig({ paired: false })
     render(

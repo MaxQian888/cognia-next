@@ -1,5 +1,6 @@
 {
+  "action": "Pair a desktop",
   "description": "Connect a desktop to edit these settings",
-  "hint": "Agent settings run on your paired desktop. Pair a desktop from the Account section to edit them here.",
+  "hint": "These settings run on the desktop this phone is paired with. Connect one to edit them from here.",
   "title": "Desktop required"
 }

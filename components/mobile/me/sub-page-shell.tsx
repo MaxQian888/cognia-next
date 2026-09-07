@@ -118,7 +118,17 @@ export function SubPageShell({
         </div>
       </header>
       <section
-        className={cn("mx-auto w-full px-4 py-4", widthClass, bodyClassName)}
+        className={cn(
+          // `flex min-h-0 flex-1 flex-col` rather than a plain block: a page
+          // whose whole body is an empty state (every `PairedOnly` gate, and
+          // any list that renders nothing yet) could not centre itself in the
+          // screen it owns, so it opened as a stub pinned to the top of 700px
+          // of blank. Short content still stacks from the top, because a flex
+          // column does not stretch its items vertically.
+          "mx-auto flex w-full min-h-0 flex-1 flex-col px-4 py-4",
+          widthClass,
+          bodyClassName
+        )}
         {...(settingsPanel ? { "data-settings-panel": "" } : {})}
       >
         <Suspense fallback={fallback ?? <DefaultFallback />}>{children}</Suspense>
