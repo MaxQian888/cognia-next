@@ -67,6 +67,22 @@ describe("<GoalsMobileBody />", () => {
     expect(screen.getByText("ship the thing")).toBeInTheDocument()
   })
 
+  it("joins the goal rows into one surface instead of a frame each", () => {
+    // A card per goal turned a status list into a stack of boxes. The rail
+    // each row draws on its own left edge now runs into the surface edge.
+    liveQuery.mockReturnValue([
+      goal({ id: "g1", status: "active", safeObjective: "ship the thing" }),
+      goal({ id: "g2", status: "active", safeObjective: "write the docs" }),
+    ])
+    const { container } = render(<GoalsMobileBody />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    const list = screen.getByTestId("mobile-goal-g1").closest("ul")
+    expect(list?.className).not.toMatch(/gap-2/)
+    expect(screen.getByTestId("mobile-goal-g1").closest("li")?.className).toMatch(
+      /not-last:border-b/
+    )
+  })
+
   it("shows the empty state when there are no goals", () => {
     liveQuery.mockReturnValue([])
     render(<GoalsMobileBody />)

@@ -19,7 +19,7 @@
 
 import { useTranslations } from "next-intl"
 
-import { Card, CardContent } from "@/components/ui/card"
+import { Surface } from "@/components/surface/surface"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -66,28 +66,30 @@ export function RemoteSessionsList({ onSelect }: RemoteSessionsListProps) {
   }
 
   return (
-    <div className="space-y-2 p-3" data-testid="remote-sessions-list">
-      {sessions.map((s) => (
-        <Card
-          key={s.id}
-          role="button"
-          tabIndex={0}
-          onClick={() => onSelect(s.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              onSelect(s.id)
-            }
-          }}
-          aria-label={t("openAria", { title: s.title ?? t("untitled") })}
-          data-testid={`remote-session-row-${s.id}`}
-          className="cursor-pointer transition-colors hover:bg-accent/40"
-        >
-          <CardContent className="px-3 py-2">
+    <div className="flex flex-col gap-2 p-3" data-testid="remote-sessions-list">
+      {/* One surface with hairline rows. A card per session turned a list of
+          one-line titles into a stack of framed boxes, each 8px apart. */}
+      <Surface layer="raised" radius="panel" className="overflow-hidden border">
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelect(s.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault()
+                onSelect(s.id)
+              }
+            }}
+            aria-label={t("openAria", { title: s.title ?? t("untitled") })}
+            data-testid={`remote-session-row-${s.id}`}
+            className="cursor-pointer px-3 py-2.5 transition-colors not-last:border-b hover:bg-accent/40"
+          >
             <p className="truncate text-sm">{s.title ?? t("untitled")}</p>
-          </CardContent>
-        </Card>
-      ))}
+          </div>
+        ))}
+      </Surface>
       {query.error ? (
         <p className="text-xs text-destructive" data-testid="remote-sessions-error">
           {t("error", { reason: query.error })}

@@ -18,7 +18,7 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { Card } from "@/components/ui/card"
+import { Surface } from "@/components/surface/surface"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { GoalDetailSheet } from "@/components/goal/goal-detail-sheet"
@@ -93,11 +93,16 @@ export function GoalsMobileBody() {
               title={section === "overview" ? t("console.activeEmpty") : t("history.empty")}
             />
           ) : (
-            <ul className="flex flex-col gap-2">
-              {rows.map((goal) => (
-                <GoalRow key={goal.id} goal={goal} onOpen={() => setSelected(goal)} />
-              ))}
-            </ul>
+            // One surface with hairline rows. A frame per goal turned a
+            // status list into a stack of boxes, and the status rail each row
+            // draws on its own left edge now runs into the surface edge.
+            <Surface layer="raised" radius="panel" className="overflow-hidden border">
+              <ul className="flex flex-col">
+                {rows.map((goal) => (
+                  <GoalRow key={goal.id} goal={goal} onOpen={() => setSelected(goal)} />
+                ))}
+              </ul>
+            </Surface>
           )}
         </section>
       </PullToRefresh>
@@ -120,8 +125,8 @@ function GoalRow({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
   const t = useTranslations("goal")
   const style = goalStatusStyle(goal.status)
   return (
-    <li>
-      <Card
+    <li className="not-last:border-b">
+      <div
         role="button"
         tabIndex={0}
         onClick={onOpen}
@@ -132,7 +137,7 @@ function GoalRow({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
           }
         }}
         data-testid={`mobile-goal-${goal.id}`}
-        className="relative flex cursor-pointer flex-col gap-1.5 overflow-hidden rounded-lg p-3 pl-4 shadow-none transition-colors active:bg-muted/50"
+        className="relative flex cursor-pointer flex-col gap-1.5 p-3 pl-4 transition-colors active:bg-muted/50"
       >
         <span aria-hidden className={cn("absolute inset-y-0 left-0 w-1", style.rail)} />
         <div className="flex items-center gap-2">
@@ -151,7 +156,7 @@ function GoalRow({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
         </div>
         <p className="line-clamp-2 text-sm font-medium">{goal.safeObjective}</p>
         <GoalRunControls goal={goal} />
-      </Card>
+      </div>
     </li>
   )
 }

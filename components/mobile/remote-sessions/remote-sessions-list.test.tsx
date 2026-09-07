@@ -48,6 +48,18 @@ describe("<RemoteSessionsList />", () => {
     expect(onSelect).toHaveBeenCalledWith("s1")
   })
 
+  it("joins the sessions into one surface instead of a card per title", () => {
+    // A card per session turned a list of one-line titles into a stack of
+    // framed boxes, each eight pixels from the next.
+    queryState.data = [
+      { id: "s1", title: "Build feature" },
+      { id: "s2", title: "Fix bug" },
+    ]
+    const { container } = render(<RemoteSessionsList onSelect={jest.fn()} />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getByTestId("remote-session-row-s1").className).toMatch(/not-last:border-b/)
+  })
+
   it("shows the empty state when there are no sessions", () => {
     queryState.data = []
     render(<RemoteSessionsList onSelect={jest.fn()} />)
