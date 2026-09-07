@@ -59,6 +59,34 @@ describe("<DeviceInfoCard />", () => {
     expect(screen.getByText("FACE_ID")).toBeInTheDocument()
   })
 
+  it("groups the readouts under headings and lets a permission row break its line", async () => {
+    // The page used to be three stacked desktop Cards on a 375px screen, and
+    // the permission rows used the default `flex-1` content column. Flex lines
+    // break from the hypothetical main size, so a zero basis meant the row
+    // could never wrap: "Biometric (Face ID / fingerprint)" was squeezed into
+    // about 90px, three lines tall, beside its own badge and button.
+    const { container } = render(
+      <DeviceInfoCard
+        appInfoLoader={async () => ({ version: "1.2.3", build: null })}
+        deviceInfoLoader={async () => fullDevice}
+        permissionsLoader={async () => ({
+          biometric: "unavailable",
+          localNotifications: "granted",
+        })}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("device-row-biometric")).toBeInTheDocument())
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    const content = screen
+      .getByTestId("device-row-biometric")
+      .querySelector('[data-slot="item-content"]')
+    // The basis rides in the `flex` shorthand so tailwind-merge drops the
+    // primitive's `flex-1` instead of emitting both and letting stylesheet
+    // order decide which flex-basis wins.
+    expect(content?.className).toMatch(/flex-\[1_1_12rem\]/)
+    expect(content?.className).not.toMatch(/flex-1\b/)
+  })
+
   it("falls back to APP_VERSION and omits device rows when the device loader returns null", async () => {
     render(
       <DeviceInfoCard
