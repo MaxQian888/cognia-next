@@ -76,6 +76,14 @@ pub async fn workflow_register_trigger(
         // We accept the call as a no-op so the TS bridge can register all
         // trigger kinds uniformly.
         "trigger.connector.inbound"
+        // `trigger.connector.system` and `trigger.issue.event` were missing
+        // here while `SYNCED_TRIGGER_KINDS` on the TS side registers the
+        // former. Rust answered Err, `safeInvoke` swallowed it, and the
+        // failure was invisible. Harmless while both are TS-hook triggers, and
+        // exactly the shape a future kind that DOES need Rust state would fail
+        // in.
+        | "trigger.connector.system"
+        | "trigger.issue.event"
         | "trigger.chat.message"
         | "trigger.goal.completed"
         | "trigger.terminal.command"
@@ -84,6 +92,10 @@ pub async fn workflow_register_trigger(
         | "trigger.integration.event"
         | "trigger.team"
         | "trigger.workflow.completed"
+        | "trigger.plan.event"
+        | "trigger.scheduler.taskCompleted"
+        | "trigger.capture.item"
+        | "trigger.memory.written"
         | "trigger.manual" => Ok(()),
         other => Err(format!(
             "workflow_register_trigger: unsupported kind '{other}'"

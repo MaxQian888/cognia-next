@@ -8,6 +8,14 @@
  * - `initDesktopEventTrigger` (workflow runtime) — the desktop UIA watcher
  *   does not exist in cognia-server. (`installTriggerBridge` now rides the
  *   events WS — see ./workflow-trigger-bridge.ts.)
+ * - `initCaptureEventTrigger` — content capture's only producer is the desktop
+ *   capture bubble, a user-confirmation component. The subscription would
+ *   mount fine here and never fire, so its absence is a statement rather than
+ *   an omission.
+ *
+ * `initPetEventTrigger` and `initIssueEventTrigger` were absent for neither
+ * reason: the pet and the tracker both run on the brain, so both were dormant
+ * there. They are mounted below.
  * - `subscription-initializer` — keyed to the interactive account unlock and
  *   uses toast i18n; the brain's provider creds arrive via the `claude_set_*`
  *   arms instead (R7).
@@ -52,6 +60,10 @@ registerHeadlessRuntime({
   start: async (ctx) => {
     const [
       { initTriggerSubscriptions, disposeTriggerSubscriptions },
+      { initPetEventTrigger, disposePetEventTrigger },
+      { initIssueEventTrigger, disposeIssueEventTrigger },
+      { initPlanEventTrigger, disposePlanEventTrigger },
+      { initMemoryWrittenTrigger, disposeMemoryWrittenTrigger },
       { listWorkflows },
       { resolveWorkflowDeployment },
       { syncWorkflowTriggers, unsyncWorkflowTriggers },
@@ -63,6 +75,10 @@ registerHeadlessRuntime({
       { registerThreadHandoffDelivery },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
+      import("@/lib/workflow/runtime/pet-event-trigger"),
+      import("@/lib/workflow/runtime/issue-event-trigger"),
+      import("@/lib/workflow/runtime/plan-event-trigger"),
+      import("@/lib/workflow/runtime/memory-written-trigger"),
       import("@/lib/db/workflows"),
       import("@/lib/db/workflow-deployments"),
       import("@/lib/workflow/runtime/webhook-bridge"),
@@ -78,6 +94,10 @@ registerHeadlessRuntime({
     const unregisterThreadHandoff = registerThreadHandoffDelivery()
     const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.localAccountId })
     initTriggerSubscriptions()
+    initPetEventTrigger()
+    initIssueEventTrigger()
+    initPlanEventTrigger()
+    initMemoryWrittenTrigger()
     initPluginTriggerLifecycle()
     try {
       const all = await listWorkflows()
@@ -110,6 +130,10 @@ registerHeadlessRuntime({
     )
     return async () => {
       disposeTriggerSubscriptions()
+      disposePetEventTrigger()
+      disposeIssueEventTrigger()
+      disposePlanEventTrigger()
+      disposeMemoryWrittenTrigger()
       await disposePluginTriggerLifecycle()
       await hostDispatchRuntime.stop()
       unregisterScheduleHandoff()

@@ -3,6 +3,18 @@
 import { useEffect, useRef } from "react"
 import { installTriggerBridge } from "@/lib/workflow/runtime/trigger-bridge"
 import {
+  initPlanEventTrigger,
+  disposePlanEventTrigger,
+} from "@/lib/workflow/runtime/plan-event-trigger"
+import {
+  initCaptureEventTrigger,
+  disposeCaptureEventTrigger,
+} from "@/lib/workflow/runtime/capture-event-trigger"
+import {
+  initMemoryWrittenTrigger,
+  disposeMemoryWrittenTrigger,
+} from "@/lib/workflow/runtime/memory-written-trigger"
+import {
   initTriggerSubscriptions,
   disposeTriggerSubscriptions,
 } from "@/lib/workflow/runtime/trigger-subscriptions"
@@ -151,6 +163,26 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.warn?.("workflow runtime: initIssueEventTrigger failed", {
           error: err instanceof Error ? err.message : String(err),
         })
+      }
+
+      // Plan trail, captured items and long-term memory writes. All three ride
+      // in-renderer buses, so none is Tauri-gated. `trigger.capture.item` only
+      // ever fires on the desktop in practice, because the capture bubble is
+      // its only producer, and mounting the subscription elsewhere costs a Set.
+      for (const [name, init, dispose] of [
+        ["plan-event", initPlanEventTrigger, disposePlanEventTrigger],
+        ["capture-event", initCaptureEventTrigger, disposeCaptureEventTrigger],
+        ["memory-written", initMemoryWrittenTrigger, disposeMemoryWrittenTrigger],
+      ] as const) {
+        try {
+          init()
+          disposers.push(() => dispose())
+          log.info?.(`workflow runtime: ${name} trigger initialised`)
+        } catch (err) {
+          log.warn?.(`workflow runtime: init ${name} trigger failed`, {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
       }
 
       // Approval-gate notification actions (ADR 0061 P2) — the Approve /

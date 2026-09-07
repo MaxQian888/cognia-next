@@ -41,6 +41,10 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.issue.event",
   "trigger.workflow.completed",
   "trigger.integration.event",
+  "trigger.plan.event",
+  "trigger.scheduler.taskCompleted",
+  "trigger.capture.item",
+  "trigger.memory.written",
 ]
 
 interface SubscriptionState {
@@ -170,6 +174,42 @@ export interface TriggerMatchContext {
   /** Container of the issue (trigger.issue.event), matched against `issueProjectId`. */
   issueProjectId?: string
   /**
+   * Plan trail event kind (trigger.plan.event): approved / step_failed /
+   * exit / ... matched against the node's `kinds` array param.
+   */
+  planEventKind?: string
+  /** The plan itself (trigger.plan.event) — optional equality match. */
+  planId?: string
+  /** How the plan was authored (trigger.plan.event) — optional equality match. */
+  planSource?: string
+  /** The settled task (trigger.scheduler.taskCompleted) — optional equality. */
+  taskId?: string
+  /** Its type, matched against the node's `taskTypes` array param. */
+  taskType?: string
+  /** Its structured terminal reason, matched against `terminalReasons`. */
+  terminalReason?: string
+  /**
+   * Captured item kind (trigger.capture.item): text / url / image, matched
+   * against the node's `kinds` array param.
+   */
+  captureItemKind?: string
+  /** Source application, matched as a substring against `sourceAppContains`. */
+  sourceApp?: string
+  /** Host of the source url, matched as a substring against `urlHostContains`. */
+  urlHost?: string
+  /** Whether the capture was enriched, matched against `enrichedOnly`. */
+  hasEnrichment?: boolean
+  /** Memory classification (trigger.memory.written), matched against arrays. */
+  memoryType?: string
+  memoryScope?: string
+  memoryProvenance?: string
+  /** Memory importance, matched against the node's `minImportance`. */
+  importance?: number
+  /** The author's dedupe slug, matched as a prefix against `keyPrefix`. */
+  memoryKey?: string
+  /** Agent that owns the memory, matched against `agentId`. */
+  agentId?: string
+  /**
    * Platform system-event kind (trigger.connector.system) — reaction_added /
    * reaction_removed / poke / request / lifecycle, matched against the node's
    * `kinds` array param. A node without a `kinds` filter matches every kind.
@@ -267,13 +307,64 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
     // Shared `kinds` filter shape — desktop and pet triggers each pass their
     // own ctx field, and entries are already partitioned per trigger kind.
     const eventKind =
-      ctx.desktopEventKind ?? ctx.petEventKind ?? ctx.connectorSystemKind ?? ctx.issueEventKind
+      ctx.desktopEventKind ??
+      ctx.petEventKind ??
+      ctx.connectorSystemKind ??
+      ctx.issueEventKind ??
+      ctx.planEventKind ??
+      ctx.captureItemKind
     if (typeof eventKind !== "string" || !p.kinds.includes(eventKind)) {
       return false
     }
   }
   if (typeof p.issueProjectId === "string" && p.issueProjectId.length > 0) {
     if (ctx.issueProjectId !== p.issueProjectId) return false
+  }
+  if (typeof p.planId === "string" && p.planId.length > 0) {
+    if (ctx.planId !== p.planId) return false
+  }
+  if (typeof p.source === "string" && p.source.length > 0) {
+    if (ctx.planSource !== p.source) return false
+  }
+  if (typeof p.taskId === "string" && p.taskId.length > 0) {
+    if (ctx.taskId !== p.taskId) return false
+  }
+  if (Array.isArray(p.taskTypes) && p.taskTypes.length > 0) {
+    if (typeof ctx.taskType !== "string" || !p.taskTypes.includes(ctx.taskType)) return false
+  }
+  if (Array.isArray(p.terminalReasons) && p.terminalReasons.length > 0) {
+    if (typeof ctx.terminalReason !== "string" || !p.terminalReasons.includes(ctx.terminalReason)) {
+      return false
+    }
+  }
+  if (typeof p.sourceAppContains === "string" && p.sourceAppContains.length > 0) {
+    if (typeof ctx.sourceApp !== "string" || !ctx.sourceApp.includes(p.sourceAppContains)) {
+      return false
+    }
+  }
+  if (typeof p.urlHostContains === "string" && p.urlHostContains.length > 0) {
+    if (typeof ctx.urlHost !== "string" || !ctx.urlHost.includes(p.urlHostContains)) return false
+  }
+  if (p.enrichedOnly === true && ctx.hasEnrichment !== true) return false
+  if (Array.isArray(p.types) && p.types.length > 0) {
+    if (typeof ctx.memoryType !== "string" || !p.types.includes(ctx.memoryType)) return false
+  }
+  if (Array.isArray(p.scopes) && p.scopes.length > 0) {
+    if (typeof ctx.memoryScope !== "string" || !p.scopes.includes(ctx.memoryScope)) return false
+  }
+  if (Array.isArray(p.provenances) && p.provenances.length > 0) {
+    if (typeof ctx.memoryProvenance !== "string" || !p.provenances.includes(ctx.memoryProvenance)) {
+      return false
+    }
+  }
+  if (typeof p.minImportance === "number") {
+    if (typeof ctx.importance !== "number" || ctx.importance < p.minImportance) return false
+  }
+  if (typeof p.keyPrefix === "string" && p.keyPrefix.length > 0) {
+    if (typeof ctx.memoryKey !== "string" || !ctx.memoryKey.startsWith(p.keyPrefix)) return false
+  }
+  if (typeof p.agentId === "string" && p.agentId.length > 0) {
+    if (ctx.agentId !== p.agentId) return false
   }
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false

@@ -123,6 +123,144 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "CircleDot",
     keywords: ["issue", "tracker", "event", "created", "status", "assigned", "comment", "run"],
   },
+  "trigger.plan.event": {
+    label: "On plan event",
+    description:
+      "Fires when a plan is approved, refined, paused, cancelled, a step starts, completes or fails, or the plan exits. Scope it with the kinds filter.",
+    iconName: "ListChecks",
+    keywords: ["plan", "approved", "step", "failed", "completed", "event", "trail"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        kinds: {
+          type: "array",
+          title: "Only these events",
+          items: { type: "string" },
+          description: "Empty fires for every plan event.",
+        },
+        planId: { type: "string", format: "expression", title: "Only this plan" },
+        sessionId: { type: "string", format: "expression", title: "Only this conversation" },
+        characterId: { type: "string", format: "expression", title: "Only this character" },
+        status: { type: "string", title: "Only when the plan is in this status" },
+        source: {
+          type: "string",
+          title: "Only plans authored this way",
+          enum: [
+            "exit_plan_mode",
+            "agent_tool",
+            "planner_llm",
+            "team_projection",
+            "goal_projection",
+            "manual",
+          ],
+        },
+        cooldownMs: { type: "integer", title: "Cooldown (ms)", minimum: 0, default: 2000 },
+      },
+    },
+  },
+  "trigger.scheduler.taskCompleted": {
+    label: "On scheduled task finished",
+    description:
+      "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",
+    iconName: "CalendarCheck",
+    keywords: ["scheduler", "task", "finished", "completed", "failed", "settled", "cron"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", format: "expression", title: "Only this task" },
+        taskTypes: {
+          type: "array",
+          title: "Only these task types",
+          items: { type: "string" },
+          description: "workflow, agent, chat, plan, goal and the rest. Empty means any.",
+        },
+        status: {
+          type: "string",
+          title: "Only this outcome",
+          enum: ["completed", "failed", "cancelled", "skipped"],
+        },
+        terminalReasons: {
+          type: "array",
+          title: "Only these terminal reasons",
+          items: { type: "string" },
+        },
+        projectId: { type: "string", format: "expression", title: "Only this workspace" },
+        cooldownMs: { type: "integer", title: "Cooldown (ms)", minimum: 0, default: 2000 },
+      },
+    },
+  },
+  "trigger.capture.item": {
+    label: "On captured item",
+    description:
+      "Fires when content capture saves an item. Carries ids and classification; the captured text rides only when you ask for it, and always through the redaction gate.",
+    iconName: "ClipboardCheck",
+    keywords: ["capture", "clipboard", "saved", "item", "text", "url", "image"],
+    desktopOnly: true,
+    requires: ["shell"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        kinds: {
+          type: "array",
+          title: "Only these kinds",
+          items: { type: "string" },
+          description: "text, url or image. Empty fires for every kind.",
+        },
+        sourceAppContains: {
+          type: "string",
+          format: "expression",
+          title: "Source app contains",
+        },
+        urlHostContains: { type: "string", format: "expression", title: "Source host contains" },
+        enrichedOnly: { type: "boolean", title: "Only enriched captures", default: false },
+        includeText: {
+          type: "boolean",
+          title: "Include the captured text",
+          description:
+            "Off by default. The text is your clipboard, and it still passes the redaction gate.",
+          default: false,
+        },
+        cooldownMs: { type: "integer", title: "Cooldown (ms)", minimum: 0, default: 2000 },
+      },
+    },
+  },
+  "trigger.memory.written": {
+    label: "On memory written",
+    description:
+      "Fires when a long-term memory is created. Never carries the memory text: read it downstream with Recall memory if you need it.",
+    iconName: "Brain",
+    keywords: ["memory", "written", "created", "remember", "long-term"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        types: {
+          type: "array",
+          title: "Only these types",
+          items: { type: "string" },
+          description: "semantic, episodic or procedural. Empty means any.",
+        },
+        scopes: {
+          type: "array",
+          title: "Only these scopes",
+          items: { type: "string" },
+          description: "global, workspace, character or agent.",
+        },
+        provenances: {
+          type: "array",
+          title: "Only these provenances",
+          items: { type: "string" },
+          description:
+            "explicit is what the user deliberately captured. user is what the extractor mined.",
+        },
+        minImportance: { type: "integer", title: "Minimum importance", minimum: 1, maximum: 10 },
+        characterId: { type: "string", format: "expression", title: "Only this character" },
+        projectId: { type: "string", format: "expression", title: "Only this workspace" },
+        agentId: { type: "string", format: "expression", title: "Only this agent" },
+        keyPrefix: { type: "string", format: "expression", title: "Key starts with" },
+        cooldownMs: { type: "integer", title: "Cooldown (ms)", minimum: 0, default: 2000 },
+      },
+    },
+  },
   "trigger.pet.event": {
     label: "On pet event",
     description:

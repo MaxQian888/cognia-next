@@ -334,10 +334,32 @@ class PlanRuntime {
       completedSteps: applied.completedSteps,
       currentStepId: applied.currentStepId,
     })
+    const step = applied.steps.find((candidate) => candidate.id === stepId)
+    // `step_failed` is declared in `PlanEventKind` with its own payload and,
+    // until now, was appended by nobody: a kind that existed in the type and
+    // never in the trail. This is its chokepoint. The orchestrated path
+    // (`step-dispatch` through the writer adapter), the plugin API and
+    // `action.plan.setStepStatus` all land here, and the conversational turn
+    // driver cannot double-emit because it only ever writes `completed`.
+    if (status === "failed" && step) {
+      void appendPlanEvent({
+        planId,
+        kind: "step_failed",
+        payload: {
+          kind: "step_failed",
+          stepId,
+          title: step.title,
+          error: typeof patch.error === "string" ? patch.error : "step failed",
+          attempt: typeof step.attempts === "number" ? step.attempts : 1,
+        },
+      }).catch(() => {
+        // The trail is a projection of the plan, so a failed append must not
+        // fail the status write that is the source of truth.
+      })
+    }
     // A step bound to a tracker issue tells the issue how it ended (spec
     // 2026-09-06 D9). Off the write path and best-effort: the plan is the
     // source of truth, the trail entry is a projection of it.
-    const step = applied.steps.find((candidate) => candidate.id === stepId)
     if (step?.issueId && isTerminalStepStatus(status)) {
       void import("@/lib/issues/work-item-link")
         .then(({ recordWorkSettled }) =>

@@ -43,6 +43,10 @@ const SYNCED_TRIGGER_KINDS = new Set<WorkflowNode["type"]>([
   "trigger.terminal.command",
   "trigger.pet.event",
   "trigger.workflow.completed",
+  "trigger.plan.event",
+  "trigger.scheduler.taskCompleted",
+  "trigger.capture.item",
+  "trigger.memory.written",
 ])
 
 const syncedTriggersByWorkflow = new Map<string, Map<string, WorkflowNode["type"]>>()

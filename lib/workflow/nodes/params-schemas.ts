@@ -1966,6 +1966,27 @@ const ImageOutputParams = {
   quality: numberRange(0, 100).int().optional(),
 }
 
+/** Plan trail kinds a `trigger.plan.event` node may filter on. */
+export const PLAN_TRIGGER_KINDS = [
+  "plan_created",
+  "plan_updated",
+  "approved",
+  "rejected",
+  "deferred",
+  "refined",
+  "step_started",
+  "step_completed",
+  "step_failed",
+  "replanned",
+  "paused",
+  "resumed",
+  "cancelled",
+  "exit",
+] as const
+
+/** Captured-item kinds a `trigger.capture.item` node may filter on. */
+export const CAPTURE_TRIGGER_KINDS = ["text", "url", "image"] as const
+
 export const PARAMS_SCHEMAS = {
   // Triggers
   "trigger.manual": ManualTriggerParams,
@@ -2359,6 +2380,48 @@ export const PARAMS_SCHEMAS = {
   "action.session.export": z.object({
     sessionId: requiredString("required"),
     format: z.enum(["markdown", "json"]).optional(),
+  }),
+  // One kind per family with a `kinds[]` filter, matching the shape
+  // `trigger.issue.event` (seven kinds) and `trigger.pet.event` (four) already
+  // use. Splitting each into a family would triple every registration for the
+  // same data.
+  "trigger.plan.event": z.object({
+    kinds: z.array(z.enum(PLAN_TRIGGER_KINDS)).optional(),
+    planId: optionalString,
+    sessionId: optionalString,
+    characterId: optionalString,
+    status: optionalString,
+    source: optionalString,
+    cooldownMs: numberRange(0).int().optional(),
+  }),
+  "trigger.scheduler.taskCompleted": z.object({
+    taskId: optionalString,
+    taskTypes: z.array(z.string().min(1)).optional(),
+    status: z
+      .union([z.enum(["completed", "failed", "cancelled", "skipped"]), z.literal("")])
+      .optional(),
+    terminalReasons: z.array(z.string().min(1)).optional(),
+    projectId: optionalString,
+    cooldownMs: numberRange(0).int().optional(),
+  }),
+  "trigger.capture.item": z.object({
+    kinds: z.array(z.enum(CAPTURE_TRIGGER_KINDS)).optional(),
+    sourceAppContains: optionalString,
+    urlHostContains: optionalString,
+    enrichedOnly: z.boolean().optional(),
+    includeText: z.boolean().optional(),
+    cooldownMs: numberRange(0).int().optional(),
+  }),
+  "trigger.memory.written": z.object({
+    types: z.array(z.enum(["semantic", "episodic", "procedural"])).optional(),
+    scopes: z.array(z.enum(["global", "workspace", "character", "agent"])).optional(),
+    provenances: z.array(z.string().min(1)).optional(),
+    minImportance: numberRange(1, 10).int().optional(),
+    characterId: optionalString,
+    projectId: optionalString,
+    agentId: optionalString,
+    keyPrefix: optionalString,
+    cooldownMs: numberRange(0).int().optional(),
   }),
   // Notification centre. `source` is not authorable on send: every row these
   // nodes write is a workflow notification, and `actions` is refused outright

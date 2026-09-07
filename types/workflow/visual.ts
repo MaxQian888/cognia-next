@@ -324,6 +324,20 @@ export type WorkflowNodeKind =
   // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
   | "trigger.pet.event"
   | "trigger.issue.event"
+  // Plan trail (ADR-0045). One kind with a `kinds[]` filter, the way
+  // `trigger.issue.event` covers seven and `trigger.pet.event` four. Until
+  // this, `action.plan.*` had seventeen nodes and nothing to react to one.
+  | "trigger.plan.event"
+  // A scheduled task settled (ADR-0128 / 0167). Fired from the settle point in
+  // the scheduler's own `finally`, which is the only place that sees every
+  // task type and every terminal status, failures included.
+  | "trigger.scheduler.taskCompleted"
+  // Content capture landed an item (ADR-0060). Payload is ids and
+  // classification; the clipboard text rides only when the node asks and only
+  // through the PII gate.
+  | "trigger.capture.item"
+  // A long-term memory was created (ADR-0069). Never carries the memory text.
+  | "trigger.memory.written"
   | "action.pet.interact"
   // Chained workflows (ADR-0081): fires when another workflow's run reaches a
   // terminal status (succeeded/failed). Emitted by the orchestrator through
@@ -601,6 +615,10 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.terminal.command",
   "trigger.pet.event",
   "trigger.issue.event",
+  "trigger.plan.event",
+  "trigger.scheduler.taskCompleted",
+  "trigger.capture.item",
+  "trigger.memory.written",
   "action.pet.interact",
   "trigger.workflow.completed",
   "ai.prompt",

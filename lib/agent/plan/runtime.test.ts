@@ -263,6 +263,36 @@ describe("setStepStatus", () => {
     expect(mockRecordWorkSettled).toHaveBeenCalledTimes(1)
   })
 
+  it("appends a step_failed trail entry, which nothing used to write", async () => {
+    // `step_failed` was declared in PlanEventKind with its own payload and
+    // appended by nobody: a kind that existed in the type and never in the
+    // trail. Without this, `trigger.plan.event` filtering on it would be a
+    // catalog entry that can never fire.
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "failed", { error: "boom" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const events = await listPlanEvents(plan.id)
+    const failed = events.find((event) => event.kind === "step_failed")
+    expect(failed).toBeDefined()
+    expect(failed?.payload).toMatchObject({
+      kind: "step_failed",
+      stepId: plan.steps[0].id,
+      error: "boom",
+    })
+  })
+
+  it("appends nothing for a non-terminal or successful status", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "completed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const events = await listPlanEvents(plan.id)
+    expect(events.some((event) => event.kind === "step_failed")).toBe(false)
+  })
+
   it("writes one step's status and updates the cursor + counts", async () => {
     const rt = getPlanRuntime()
     const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))

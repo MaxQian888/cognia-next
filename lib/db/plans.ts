@@ -194,6 +194,13 @@ export async function appendPlanEvent(input: AppendPlanEventInput): Promise<Plan
         .then(() => pruneEventsForPlan(input.planId, EVENTS_PER_PLAN_CAP, db))
     )
   })
+  // Published after the transaction commits, the way `appendIssueEvent` does,
+  // so a subscriber never sees an entry that is not in the trail.
+  void import("@/lib/agent/plan/plan-event-bus")
+    .then(({ emitPlanEvent }) => emitPlanEvent(row))
+    .catch(() => {
+      // A bus nobody loaded is not a reason to fail the append.
+    })
   return row
 }
 

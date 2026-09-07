@@ -49527,6 +49527,30 @@
             "label": "On pet event"
           }
         },
+        "memory": {
+          "written": {
+            "description": "Fires when a long-term memory is created. Never carries the memory text: read it downstream with Recall memory if you need it.",
+            "label": "On memory written"
+          }
+        },
+        "capture": {
+          "item": {
+            "description": "Fires when content capture saves an item. Carries ids and classification; the captured text rides only when you ask for it, and always through the redaction gate.",
+            "label": "On captured item"
+          }
+        },
+        "scheduler": {
+          "taskCompleted": {
+            "description": "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",
+            "label": "On scheduled task finished"
+          }
+        },
+        "plan": {
+          "event": {
+            "description": "Fires when a plan is approved, refined, paused, cancelled, a step starts, completes or fails, or the plan exits. Scope it with the kinds filter.",
+            "label": "On plan event"
+          }
+        },
         "team": {
           "description": "Internal trigger fired by the agent-team synthesizer when a team run starts. Not hand-authored.",
           "label": "On team run start"

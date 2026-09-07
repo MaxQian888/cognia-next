@@ -2229,6 +2229,18 @@ class TaskSchedulerImpl {
           })
         }
 
+        // Workflow fan-out for `trigger.scheduler.taskCompleted`. This is the
+        // settle chokepoint: the row is committed, retries are excluded, and
+        // every task type and every terminal status passes through here.
+        // `emitSchedulerEvent` cannot stand in for it, because that one fires
+        // only on success and collapses the type into a hard-coded subset, so
+        // a failed task emits nothing at all.
+        void import("./task-completion-linkage")
+          .then(({ dispatchScheduledTaskSettled }) => dispatchScheduledTaskSettled(task, execution))
+          .catch((err) => {
+            log.warn?.("Failed to fan a settled task out to workflows:", err)
+          })
+
         if (context.scheduledSlotClaimed) {
           await this.finalizeClaimedScheduledRun(task)
         } else if (!context.deferNextRunUpdate) {

@@ -54,14 +54,24 @@ export type MemoryCreateInput = Omit<
   tags?: string[]
   /** Defaults to `false`. */
   pinned?: boolean
+  /**
+   * Who asked for this write, for the memory-written trigger's self-rejection.
+   *
+   * Event-only: `createMemory` reads it for the bus and never persists it, so
+   * this costs no column and no schema version. Without it a workflow that
+   * writes a memory would re-trigger itself through any write that lands after
+   * its own run window closed, which the in-flight guard cannot see.
+   */
+  writeOrigin?: import("@/lib/memory/memory-event-bus").MemoryWriteOrigin
 }
 
 export async function createMemory(input: MemoryCreateInput): Promise<Memory> {
   const now = input.createdAt ?? Date.now()
+  const { writeOrigin: _writeOrigin, ...persistable } = input
   const row: Memory = {
     tags: [],
     pinned: false,
-    ...input,
+    ...persistable,
     id: input.id ?? newMemoryId(),
     createdAt: now,
     updatedAt: now,
@@ -71,6 +81,29 @@ export async function createMemory(input: MemoryCreateInput): Promise<Memory> {
     status: input.status ?? "active",
   }
   await getDb().memories.add(row)
+  // Published after the write commits, so a subscriber never sees a memory
+  // that is not in the table. Ids and classification only: the row's `text` is
+  // a durable fact about the user, and the bus is not the place to carry one.
+  void import("@/lib/memory/memory-event-bus")
+    .then(({ emitMemoryWritten }) =>
+      emitMemoryWritten({
+        memoryId: row.id,
+        type: row.type,
+        scope: row.scope,
+        provenance: row.provenance,
+        importance: row.importance,
+        ...(row.sourceChannel ? { sourceChannel: row.sourceChannel } : {}),
+        ...(row.characterId ? { characterId: row.characterId } : {}),
+        ...(row.projectId ? { projectId: row.projectId } : {}),
+        ...(row.agentId ? { agentId: row.agentId } : {}),
+        ...(row.key ? { key: row.key } : {}),
+        at: now,
+        ...(input.writeOrigin ? { origin: input.writeOrigin } : {}),
+      })
+    )
+    .catch(() => {
+      // A bus nobody loaded is not a reason to fail a memory write.
+    })
   return row
 }
 
