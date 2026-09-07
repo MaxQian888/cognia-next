@@ -142,12 +142,16 @@ export function MobileTabBar({ className, badges, keyboardHidden = false }: Mobi
   return (
     <nav
       className={cn(
-        // `min-h-14` instead of fixed `h-14` so a longer translated label
-        // (e.g. Chinese 工作流 keeps fine, but future locales may wrap) never
-        // clips the icon; each link still reserves 56px so the existing
-        // `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]` reserve
-        // stays correct.
-        "fixed inset-x-0 bottom-0 z-40 flex h-14 min-h-14 items-stretch border-t border-border bg-background/95 backdrop-blur safe-area-pb",
+        // The height is `56px + env(safe-area-inset-bottom)`, with the inset as
+        // padding INSIDE it. `h-14` + `safe-area-pb` was the same declaration
+        // read the other way round: `box-sizing: border-box` made the inset eat
+        // the 56px instead of adding to it, so on any device with a gesture bar
+        // the icon column compressed and the labels sat in the system zone,
+        // while the callers' `calc(theme(spacing.14) + env(safe-area-inset-
+        // bottom))` reserve above the bar was that many pixels too tall and
+        // showed as a strip of bare background. One number, stated once.
+        "fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-border bg-background/95 backdrop-blur safe-area-pb",
+        "h-[calc(theme(spacing.14)+env(safe-area-inset-bottom))] min-h-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]",
         "transition-transform duration-200 ease-out",
         keyboardHidden && "pointer-events-none translate-y-full",
         className

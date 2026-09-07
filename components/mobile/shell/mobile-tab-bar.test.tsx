@@ -124,6 +124,31 @@ describe("<MobileTabBar />", () => {
     expect(bar).not.toHaveAttribute("aria-hidden")
     expect(bar.className).not.toContain("translate-y-full")
   })
+
+  /**
+   * The bar is `56px + env(safe-area-inset-bottom)` tall, with the inset as
+   * padding inside that box.
+   *
+   * `h-14` beside `safe-area-pb` said the opposite under `box-sizing:
+   * border-box`: the inset came OUT of the 56px, so on a phone with a gesture
+   * bar the icon column compressed and the labels sat in the system zone. It
+   * also broke the contract with the callers, which all reserve
+   * `calc(theme(spacing.14) + env(safe-area-inset-bottom))` above the bar and
+   * were therefore over-reserving by exactly the inset, showing as a strip of
+   * bare background between the page and the bar.
+   */
+  it("is 56px tall PLUS the safe-area inset, matching the reserve its callers make", () => {
+    render(<MobileTabBar />)
+    const bar = screen.getByTestId("mobile-tab-bar")
+    const height = "h-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
+    expect(bar.className).toContain(height)
+    expect(bar.className).toContain(`min-${height}`)
+    expect(bar.className).toContain("safe-area-pb")
+    // The old shape. `h-14` would make the inset eat the row instead of adding
+    // to it, so it must not come back alongside the padding.
+    expect(bar.className).not.toMatch(/(^|\s)h-14(\s|$)/)
+    expect(bar.className).not.toMatch(/(^|\s)min-h-14(\s|$)/)
+  })
 })
 
 describe("<MobileTabBar /> — active indicator", () => {

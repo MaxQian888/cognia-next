@@ -25,8 +25,20 @@
  * A trailing slash means "this route and everything under it". `/workflows/`
  * is deliberately prefix-only: the `/workflows` LIST scrolls normally, and only
  * its detail routes own the viewport.
+ *
+ * `"/"` is the one exception, and {@link needsFullViewport} spells it out: read
+ * as a prefix it would match every path in the app.
  */
 export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
+  // The chat shell itself. `AppShellMobile` is a `h-full` column whose chat pane
+  // is `overflow-hidden`, so it owns the viewport exactly the way a feature
+  // shell does. Under the `min-h-[100dvh]` branch the wrapper's tab-bar padding
+  // was ADDED to a box that was already one viewport tall, so the document ran
+  // 56px + safe-area longer than the screen. `body[data-app-shell]{overflow:
+  // hidden}` swallowed it here and the moment the user left `/` (the attribute
+  // is cleared on unmount) the same reserve surfaced as a bare strip under the
+  // page.
+  "/",
   // Detail routes host a fixed-height ReactFlow canvas.
   "/workflows/",
   // The A2UI hub wraps its body in a `ScrollArea h-full`.
@@ -44,6 +56,10 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/twin",
   "/browser",
   "/issues",
+  // Pre-existing gap, caught by the coverage sweep below: `BotConsole` is a
+  // `FeaturePageShell` and shipped without its entry, so the compact shell was
+  // rendering it as a blank strip under the top bar.
+  "/bots",
   // Compact bodies that REPLACE the shell and still own the viewport.
   // `TemplatesMobileBody` and `DiscoverMobileBody` are both `flex h-full
   // min-h-0`, so the exemption from the feature-shell sweep was never an
@@ -84,6 +100,12 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
 /** Whether the compact shell must give this route a definite viewport height. */
 export function needsFullViewport(pathname: string): boolean {
   for (const pattern of FULL_VIEWPORT_ROUTE_PATTERNS) {
+    // The root route is exact, never a prefix. Every other trailing slash means
+    // "and everything under it", which for `"/"` would be the entire app.
+    if (pattern === "/") {
+      if (pathname === "/") return true
+      continue
+    }
     if (pattern.endsWith("/")) {
       if (pathname.startsWith(pattern)) return true
     } else if (pathname === pattern) {

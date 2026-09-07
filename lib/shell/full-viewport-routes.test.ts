@@ -94,8 +94,18 @@ describe("needsFullViewport", () => {
   })
 
   it("leaves an ordinary scrolling route alone", () => {
-    expect(needsFullViewport("/")).toBe(false)
     expect(needsFullViewport("/settings")).toBe(false)
+  })
+
+  // `AppShellMobile` is a definite-height column that clips its own chat pane,
+  // so the home route belongs on the list. Read as a prefix, though, `"/"`
+  // matches every path in the app and would hand `min-h-[100dvh]` pages a
+  // viewport-height box they cannot scroll out of.
+  it("treats the root route as exact, never as a prefix for the whole app", () => {
+    expect(needsFullViewport("/")).toBe(true)
+    for (const route of ["/settings", "/inbox/all", "/memory", "/goals", "/notifications"]) {
+      expect(needsFullViewport(route)).toBe(false)
+    }
   })
 })
 
