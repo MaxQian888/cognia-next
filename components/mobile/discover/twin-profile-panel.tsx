@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
 import { transport } from "@/lib/tauri"
 import { summarizeTwinProfile, type TwinProfileSummary } from "@/lib/twin/profile-summary"
 import type { TwinProfile } from "@/types/twin"
@@ -80,25 +80,28 @@ export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
   }
 
   return (
-    <Card data-testid="twin-profile-panel">
-      <CardHeader>
-        <CardTitle className="text-base">{t("title")}</CardTitle>
-        <CardDescription>
-          {profile.updatedAt
-            ? t("updatedAt", { when: new Date(profile.updatedAt).toLocaleString() })
-            : t("noUpdates")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
+    // A section, because the sources panel directly below it is one and this
+    // was the only card on the tab. Two adjacent panels were speaking two
+    // different layout languages.
+    <MeSection
+      testid="twin-profile-panel"
+      title={t("title")}
+      description={
+        profile.updatedAt
+          ? t("updatedAt", { when: new Date(profile.updatedAt).toLocaleString() })
+          : t("noUpdates")
+      }
+    >
+      <div className="flex flex-col gap-2 px-3 py-3 text-sm">
         <p className="text-muted-foreground">{t("samples", { count: profile.sampleCount })}</p>
         <p className="text-muted-foreground">{t("entities", { count: profile.entityCount })}</p>
         {profile.styleSummary ? (
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted-foreground">{t("style")}</span>
-            <p className="rounded-md border bg-muted/40 p-2 text-xs">{profile.styleSummary}</p>
+            <p className="rounded-md bg-muted/40 p-2 text-xs">{profile.styleSummary}</p>
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </MeSection>
   )
 }

@@ -70,6 +70,14 @@ describe("TwinProfilePanel", () => {
     expect(screen.getByText("Direct and concise.")).toBeInTheDocument()
   })
 
+  it("is a section like the sources panel beneath it, not the tab's only card", async () => {
+    callMock.mockResolvedValue({ profile: rawProfile() })
+    const { container } = render(<TwinProfilePanel twinId="default" />)
+    expect(await screen.findByTestId("twin-profile-panel")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getByRole("heading", { level: 2 })).toBeInTheDocument()
+  })
+
   it("hides the style block when the voice summary is blank", async () => {
     callMock.mockResolvedValue({ profile: rawProfile({ voiceSummary: "  " }) })
     render(<TwinProfilePanel twinId="default" />)
