@@ -17,7 +17,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { isInvitationTokenShaped } from "@/lib/identity/pending-invitation"
 
-import type { CollabAccountMembership } from "@/lib/collab/client"
+import type { CollabAccountMembership, CollabExternalIdentity } from "@/lib/collab/client"
 import {
   KNOWN_SOCIAL_PROVIDERS,
   type ReadyDeployment,
@@ -38,7 +38,11 @@ export type CloudSignInView =
   | { kind: "awaiting-code" }
   | { kind: "signing-in" }
   | { kind: "settling" }
-  | { kind: "choose"; memberships: CollabAccountMembership[] }
+  | {
+      kind: "choose"
+      memberships: CollabAccountMembership[]
+      identities?: CollabExternalIdentity[]
+    }
   | { kind: "unaffiliated"; deployment: ReadyDeployment; allowClaim: boolean }
   | { kind: "unavailable"; baseUrl: string; message: string; canContinueOffline: boolean }
 

@@ -54,9 +54,21 @@ const membership = (overrides: Partial<CollabAccountMembership> = {}): CollabAcc
   ...overrides,
 })
 
-function harness(memberships: CollabAccountMembership[] = [membership()]) {
+const IDENTITIES = [
+  { provider: "github", subject: "12345", label: "ada" },
+  { provider: "feishu-web", subject: "on_union", tenant: "tk_1" },
+]
+
+function harness(
+  memberships: CollabAccountMembership[] = [membership()],
+  identities: typeof IDENTITIES | undefined = undefined
+) {
   const client = {
-    accountMemberships: jest.fn(async () => ({ subject: "sub", memberships })),
+    accountMemberships: jest.fn(async () => ({
+      subject: "sub",
+      memberships,
+      ...(identities ? { identities } : {}),
+    })),
     bootstrapAccount: jest.fn(async () => ({
       operationId: "op",
       orgId: "org_new00000000000000000000",
@@ -95,6 +107,7 @@ function harness(memberships: CollabAccountMembership[] = [membership()]) {
     makeClient: jest.fn(() => client),
     saveConnection: jest.fn((_: string, connection: { baseUrl: string }) => connection),
     reconcile: jest.fn(async () => ({}) as never),
+    linkIdentities: jest.fn(async () => ({ linked: [], conflicts: [], skipped: [] })),
     refreshPlane: jest.fn(async () => null),
     operationId: () => "op_fixed",
     now: () => 99,
@@ -168,10 +181,16 @@ describe("signInWithDeployment", () => {
 describe("resolveStanding", () => {
   it("reads the memberships with the plain token and classifies them", async () => {
     const none = harness([])
-    expect(await resolveStanding(deployment, session, none.deps)).toEqual({ kind: "none" })
+    expect(await resolveStanding(deployment, session, none.deps)).toEqual({
+      kind: "none",
+      identities: [],
+    })
     expect(none.deps.makeClient).toHaveBeenCalledWith("https://collab.example", "at-plain")
-    const one = harness([membership()])
-    expect(await resolveStanding(deployment, session, one.deps)).toMatchObject({ kind: "one" })
+    const one = harness([membership()], IDENTITIES)
+    expect(await resolveStanding(deployment, session, one.deps)).toMatchObject({
+      kind: "one",
+      identities: IDENTITIES,
+    })
     const many = harness([membership(), membership({ orgId: "org_two0000000000000000000" })])
     expect(await resolveStanding(deployment, session, many.deps)).toMatchObject({ kind: "many" })
   })
@@ -257,6 +276,49 @@ describe("adoptOrganization", () => {
     expect(adopted.reconciled).toBe(false)
   })
 
+  /** The login and the IM principal become one person here, on the server's id. */
+  it("links the reported social identities onto the server's user id, and surfaces conflicts", async () => {
+    const { deps } = harness()
+    deps.linkIdentities.mockResolvedValueOnce({
+      linked: [],
+      conflicts: [
+        { provider: "lark", subject: "on_union", tenant: "tk_1", existingUserId: "usr_im_first" },
+      ],
+      skipped: [],
+    })
+    const adopted = await adoptOrganization(
+      deployment,
+      session,
+      { ...target, identities: IDENTITIES },
+      deps
+    )
+    expect(deps.linkIdentities).toHaveBeenCalledWith({
+      userId: target.userId,
+      identities: IDENTITIES,
+    })
+    expect(adopted.identityConflicts).toEqual([
+      { provider: "lark", subject: "on_union", tenant: "tk_1", existingUserId: "usr_im_first" },
+    ])
+  })
+
+  it("adopts without identities when the server reported none, and survives a failed link", async () => {
+    const { deps } = harness()
+    const plain = await adoptOrganization(deployment, session, target, deps)
+    expect(deps.linkIdentities).not.toHaveBeenCalled()
+    expect(plain.identityConflicts).toEqual([])
+    deps.linkIdentities.mockRejectedValueOnce(new Error("dexie closed"))
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const adopted = await adoptOrganization(
+      deployment,
+      session,
+      { ...target, identities: IDENTITIES },
+      deps
+    )
+    expect(adopted.orgId).toBe(target.orgId)
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it("keeps the refresh token when the org token answer omits one", async () => {
     const { deps } = harness()
     deps.refresh.mockResolvedValueOnce({
@@ -314,14 +376,23 @@ describe("claimDeployment and redeemInvitation", () => {
 
 describe("settleAfterSignIn", () => {
   it("adopts the single org, offers several, and reports none", async () => {
-    const one = harness()
+    const one = harness([membership()], IDENTITIES)
     expect(await settleAfterSignIn(deployment, session, one.deps)).toMatchObject({
       outcome: "adopted",
       adopted: { orgId: "org_server0000000000000000" },
     })
-    const many = harness([membership(), membership({ orgId: "org_two0000000000000000000" })])
+    // The identities travel into adoption, so the join happens on the first pass.
+    expect(one.deps.linkIdentities).toHaveBeenCalledWith({
+      userId: "usr_server0000000000000000",
+      identities: IDENTITIES,
+    })
+    const many = harness(
+      [membership(), membership({ orgId: "org_two0000000000000000000" })],
+      IDENTITIES
+    )
     expect(await settleAfterSignIn(deployment, session, many.deps)).toMatchObject({
       outcome: "choose",
+      identities: IDENTITIES,
     })
     const none = harness([])
     expect(await settleAfterSignIn(deployment, session, none.deps)).toEqual({

@@ -218,7 +218,11 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
         if (result.outcome === "adopted") {
           setPhase("pass")
         } else if (result.outcome === "choose") {
-          setView({ kind: "choose", memberships: result.memberships })
+          setView({
+            kind: "choose",
+            memberships: result.memberships,
+            identities: result.identities,
+          })
         } else {
           setView({
             kind: "unaffiliated",
@@ -500,6 +504,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
               orgId: membership.orgId,
               logtoOrganizationId: membership.logtoOrganizationId ?? "",
               userId: membership.userId,
+              ...(view.kind === "choose" && view.identities ? { identities: view.identities } : {}),
             },
             { localAccountId }
           )

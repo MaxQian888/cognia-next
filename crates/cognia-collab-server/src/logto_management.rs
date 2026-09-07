@@ -24,6 +24,9 @@
 //! - `POST /api/organizations { name }` → `{ id }`
 //! - `POST /api/organizations/{id}/users { userIds }`
 //! - `POST /api/organizations/{id}/users/{userId}/roles { organizationRoleNames }`
+//! - `GET /api/users/{id}` → `{ identities: { <connector target>: { userId, details } } }`,
+//!   read so a GitHub or Feishu login can be joined to the person the IM
+//!   adapters already know (ADR-0149 section 3).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -47,10 +50,84 @@ pub enum LogtoManagementError {
     Malformed(String),
 }
 
+/// One social identity Logto holds for a user: the connector target it came
+/// through and the provider's own id for the person.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalIdentityClaim {
+    /// The connector target, e.g. `github`, `feishu-web`. Clients map it.
+    pub provider: String,
+    /// The provider's stable id: GitHub's numeric user id, Feishu's union id
+    /// when the connector recorded one, else its open id.
+    pub subject: String,
+    /// The provider-side tenant, when the provider has them (Feishu's tenant key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+    /// A display label the connector recorded, for rosters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+/// Read the identities out of a Logto user record. Pure, and tolerant: a
+/// provider whose details carry no usable id is left out rather than invented.
+pub fn identities_from_user(user: &serde_json::Value) -> Vec<ExternalIdentityClaim> {
+    let Some(identities) = user.get("identities").and_then(|value| value.as_object()) else {
+        return Vec::new();
+    };
+    let text = |value: Option<&serde_json::Value>| -> Option<String> {
+        value
+            .and_then(|value| match value {
+                serde_json::Value::String(text) => Some(text.clone()),
+                serde_json::Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+            .map(|text| text.trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    let mut claims = Vec::new();
+    for (target, identity) in identities {
+        let details = identity.get("details");
+        let detail = |key: &str| text(details.and_then(|details| details.get(key)));
+        // Feishu's union id is stable across the apps of one tenant, the open
+        // id only within one app. Logto's `userId` is whatever the connector
+        // chose, so the explicit union id wins when it is there.
+        let subject = if target.starts_with("feishu") || target == "lark" {
+            detail("unionId")
+                .or_else(|| detail("union_id"))
+                .or_else(|| text(identity.get("userId")))
+                .or_else(|| detail("openId"))
+                .or_else(|| detail("open_id"))
+        } else {
+            text(identity.get("userId")).or_else(|| detail("id"))
+        };
+        let Some(subject) = subject else { continue };
+        let tenant = detail("tenantKey").or_else(|| detail("tenant_key"));
+        let label = detail("name")
+            .or_else(|| detail("login"))
+            .or_else(|| detail("nickname"))
+            .or_else(|| detail("email"));
+        claims.push(ExternalIdentityClaim {
+            provider: target.clone(),
+            subject,
+            tenant,
+            label,
+        });
+    }
+    claims
+}
+
 #[async_trait]
 pub trait LogtoManagement: Send + Sync {
     /// Create an organization and return Logto's id for it.
     async fn create_organization(&self, name: &str) -> Result<String, LogtoManagementError>;
+
+    /// The social identities Logto holds for a user (its `sub`). A deployment
+    /// without management access answers with none: the join is a nicety, and
+    /// sign-in must not depend on it.
+    async fn get_user_identities(
+        &self,
+        logto_user_id: &str,
+    ) -> Result<Vec<ExternalIdentityClaim>, LogtoManagementError>;
 
     /// Add a Logto user to an organization. Idempotent on Logto's side.
     async fn add_organization_user(
@@ -87,6 +164,12 @@ impl LogtoManagement for UnconfiguredLogtoManagement {
         _: &str,
     ) -> Result<(), LogtoManagementError> {
         Err(not_configured())
+    }
+    async fn get_user_identities(
+        &self,
+        _: &str,
+    ) -> Result<Vec<ExternalIdentityClaim>, LogtoManagementError> {
+        Ok(Vec::new())
     }
 }
 
@@ -198,6 +281,32 @@ impl HttpLogtoManagement {
         Ok(parsed.access_token)
     }
 
+    async fn get_json(&self, path: &str) -> Result<String, LogtoManagementError> {
+        let token = self.access_token().await?;
+        let response = self
+            .client
+            .get(format!("{}{path}", self.base()))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|error| LogtoManagementError::Request(error.to_string()))?;
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .map_err(|error| LogtoManagementError::Request(error.to_string()))?;
+        if !status.is_success() {
+            if status.as_u16() == 401 {
+                *self.token.lock() = None;
+            }
+            return Err(LogtoManagementError::Rejected {
+                status: status.as_u16(),
+                body: text,
+            });
+        }
+        Ok(text)
+    }
+
     async fn post_json(
         &self,
         path: &str,
@@ -268,6 +377,25 @@ impl LogtoManagement for HttpLogtoManagement {
         .await
         .map(drop)
     }
+
+    async fn get_user_identities(
+        &self,
+        logto_user_id: &str,
+    ) -> Result<Vec<ExternalIdentityClaim>, LogtoManagementError> {
+        let encoded: String = logto_user_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        if encoded.is_empty() || encoded != logto_user_id {
+            return Err(LogtoManagementError::Request(
+                "Logto user id contains characters this client does not send".into(),
+            ));
+        }
+        let text = self.get_json(&format!("/api/users/{encoded}")).await?;
+        let user: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|error| LogtoManagementError::Malformed(error.to_string()))?;
+        Ok(identities_from_user(&user))
+    }
 }
 
 /// `application/x-www-form-urlencoded`, by hand. The resource indicator is a
@@ -308,6 +436,9 @@ pub enum LogtoCall {
         user_id: String,
         role_name: String,
     },
+    GetUserIdentities {
+        user_id: String,
+    },
 }
 
 /// In-memory double for the route tests.
@@ -322,6 +453,8 @@ pub struct FakeLogtoManagement {
     /// "organization created, membership not yet" resume path.
     fail_next_add_user: Mutex<bool>,
     next_id: Mutex<u32>,
+    /// `logto user id -> identities`, what `GET /api/users/{id}` would say.
+    identities: Mutex<BTreeMap<String, Vec<ExternalIdentityClaim>>>,
 }
 
 impl FakeLogtoManagement {
@@ -335,6 +468,12 @@ impl FakeLogtoManagement {
 
     pub fn fail_with(&self, message: &str) {
         *self.failure.lock() = Some(message.to_owned());
+    }
+
+    pub fn set_identities(&self, logto_user_id: &str, identities: Vec<ExternalIdentityClaim>) {
+        self.identities
+            .lock()
+            .insert(logto_user_id.to_owned(), identities);
     }
 
     pub fn recover(&self) {
@@ -412,6 +551,22 @@ impl LogtoManagement for FakeLogtoManagement {
         });
         Ok(())
     }
+
+    async fn get_user_identities(
+        &self,
+        logto_user_id: &str,
+    ) -> Result<Vec<ExternalIdentityClaim>, LogtoManagementError> {
+        self.check()?;
+        self.calls.lock().push(LogtoCall::GetUserIdentities {
+            user_id: logto_user_id.to_owned(),
+        });
+        Ok(self
+            .identities
+            .lock()
+            .get(logto_user_id)
+            .cloned()
+            .unwrap_or_default())
+    }
 }
 
 #[cfg(test)]
@@ -488,5 +643,70 @@ mod tests {
         .unwrap();
         // The endpoint is the Logto base, and a trailing slash is not a path.
         assert_eq!(port.base(), "https://auth.example.com");
+    }
+
+    #[test]
+    fn identities_are_read_from_a_logto_user_record() {
+        let user = serde_json::json!({
+            "id": "logto-ada",
+            "identities": {
+                "github": { "userId": "12345", "details": { "login": "ada", "id": 12345 } },
+                "feishu-web": {
+                    "userId": "ou_open",
+                    "details": { "openId": "ou_open", "unionId": "on_union", "tenantKey": "tk_1", "name": "Ada" }
+                },
+                "google": { "userId": "", "details": {} }
+            }
+        });
+        let mut claims = identities_from_user(&user);
+        claims.sort_by(|a, b| a.provider.cmp(&b.provider));
+        assert_eq!(
+            claims,
+            vec![
+                ExternalIdentityClaim {
+                    provider: "feishu-web".into(),
+                    subject: "on_union".into(),
+                    tenant: Some("tk_1".into()),
+                    label: Some("Ada".into()),
+                },
+                ExternalIdentityClaim {
+                    provider: "github".into(),
+                    subject: "12345".into(),
+                    tenant: None,
+                    label: Some("ada".into()),
+                },
+            ]
+        );
+        assert!(identities_from_user(&serde_json::json!({ "id": "x" })).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unconfigured_deployment_holds_no_identities_and_the_fake_replays_them() {
+        assert_eq!(
+            UnconfiguredLogtoManagement
+                .get_user_identities("logto-ada")
+                .await
+                .unwrap(),
+            Vec::<ExternalIdentityClaim>::new()
+        );
+        let fake = FakeLogtoManagement::new();
+        fake.set_identities(
+            "logto-ada",
+            vec![ExternalIdentityClaim {
+                provider: "github".into(),
+                subject: "1".into(),
+                tenant: None,
+                label: None,
+            }],
+        );
+        assert_eq!(
+            fake.get_user_identities("logto-ada").await.unwrap().len(),
+            1
+        );
+        assert!(fake.get_user_identities("nobody").await.unwrap().is_empty());
+        assert!(matches!(
+            fake.calls().last(),
+            Some(LogtoCall::GetUserIdentities { user_id }) if user_id == "nobody"
+        ));
     }
 }

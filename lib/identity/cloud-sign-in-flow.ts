@@ -29,9 +29,18 @@
 import { completeSignIn, type CompleteSignInDeps } from "./complete-sign-in"
 import { clearPendingInvitation, readPendingInvitation } from "./pending-invitation"
 import { reconcileUserId } from "./reconcile-user-id"
+import {
+  linkSignedInIdentities,
+  type IdentityConflict,
+  type LinkSignedInIdentitiesReport,
+} from "./link-signed-in-identities"
 import { UserBindingRegistry } from "./user-binding"
 
-import { CollabClient, type CollabAccountMembership } from "@/lib/collab/client"
+import {
+  CollabClient,
+  type CollabAccountMembership,
+  type CollabExternalIdentity,
+} from "@/lib/collab/client"
 import { saveCollabConnection } from "@/lib/collab/connection"
 import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
@@ -86,6 +95,10 @@ export interface CloudSignInDeps {
   ) => Pick<CollabClient, "accountMemberships" | "bootstrapAccount" | "acceptInvitationByToken">
   saveConnection?: typeof saveCollabConnection
   reconcile?: typeof reconcileUserId
+  linkIdentities?: (input: {
+    userId: string
+    identities: readonly CollabExternalIdentity[]
+  }) => Promise<LinkSignedInIdentitiesReport>
   refreshPlane?: (localAccountId: string) => Promise<unknown>
   operationId?: () => string
   now?: () => number
@@ -164,9 +177,9 @@ export async function signInWithDeployment(
 }
 
 export type AccountStanding =
-  | { kind: "none" }
-  | { kind: "one"; membership: CollabAccountMembership }
-  | { kind: "many"; memberships: CollabAccountMembership[] }
+  | { kind: "none"; identities: CollabExternalIdentity[] }
+  | { kind: "one"; membership: CollabAccountMembership; identities: CollabExternalIdentity[] }
+  | { kind: "many"; memberships: CollabAccountMembership[]; identities: CollabExternalIdentity[] }
 
 /** What the collaboration server says this subject holds. */
 export async function resolveStanding(
@@ -181,10 +194,10 @@ export async function resolveStanding(
     )
   }
   const client = clientFor(deps, deployment.collaborationServiceUrl, session.accessToken)
-  const { memberships } = await client.accountMemberships()
-  if (memberships.length === 0) return { kind: "none" }
-  if (memberships.length === 1) return { kind: "one", membership: memberships[0]! }
-  return { kind: "many", memberships }
+  const { memberships, identities = [] } = await client.accountMemberships()
+  if (memberships.length === 0) return { kind: "none", identities }
+  if (memberships.length === 1) return { kind: "one", membership: memberships[0]!, identities }
+  return { kind: "many", memberships, identities }
 }
 
 export interface OrganizationTarget {
@@ -193,6 +206,12 @@ export interface OrganizationTarget {
   logtoOrganizationId: string
   /** The server's user id for this person in that org. */
   userId: string
+  /**
+   * The social identities the server reported for the subject. Linked onto
+   * `userId` after adoption, so the GitHub or Feishu login and the IM
+   * principal the adapters filed resolve to one person.
+   */
+  identities?: readonly CollabExternalIdentity[]
 }
 
 export interface AdoptedOrganization {
@@ -201,6 +220,11 @@ export interface AdoptedOrganization {
   userId: string
   /** True when the binding carried a derived id that was moved aside. */
   reconciled: boolean
+  /**
+   * Social subjects that already belong to ANOTHER local user. Nothing was
+   * merged: two Users for one human is a migration a person confirms.
+   */
+  identityConflicts: IdentityConflict[]
 }
 
 /**
@@ -273,6 +297,27 @@ export async function adoptOrganization(
   }
   await registry.setOrgId(localAccountId, target.orgId, now())
 
+  // The join of this login to the people the IM adapters already know.
+  // Best-effort: a failure here leaves the person adopted and unjoined.
+  let identityConflicts: IdentityConflict[] = []
+  if (target.identities && target.identities.length > 0) {
+    try {
+      const report = await (deps.linkIdentities ?? linkSignedInIdentities)({
+        userId: target.userId,
+        identities: target.identities,
+      })
+      identityConflicts = report.conflicts
+      if (identityConflicts.length > 0) {
+        console.warn(
+          "[identity] social identities already belong to another user",
+          identityConflicts
+        )
+      }
+    } catch (error) {
+      console.warn("[identity] could not link the sign-in's social identities", error)
+    }
+  }
+
   ;(deps.saveConnection ?? saveCollabConnection)(localAccountId, {
     baseUrl: deployment.collaborationServiceUrl,
     ...(deployment.webOrigin ? { webOrigin: deployment.webOrigin } : {}),
@@ -280,7 +325,13 @@ export async function adoptOrganization(
   await (deps.refreshPlane ?? ((id: string) => refreshCollabPlaneQuietly({ localAccountId: id })))(
     localAccountId
   )
-  return { session: merged, orgId: target.orgId, userId: target.userId, reconciled }
+  return {
+    session: merged,
+    orgId: target.orgId,
+    userId: target.userId,
+    reconciled,
+    identityConflicts,
+  }
 }
 
 export interface ClaimDeploymentInput {
@@ -366,7 +417,11 @@ export async function settleAfterSignIn(
   deps: CloudSignInDeps = {}
 ): Promise<
   | { outcome: "adopted"; adopted: AdoptedOrganization }
-  | { outcome: "choose"; memberships: CollabAccountMembership[] }
+  | {
+      outcome: "choose"
+      memberships: CollabAccountMembership[]
+      identities: CollabExternalIdentity[]
+    }
   | { outcome: "unaffiliated" }
 > {
   const pending = readPendingInvitation()
@@ -390,11 +445,16 @@ export async function settleAfterSignIn(
             orgId: standing.membership.orgId,
             logtoOrganizationId: standing.membership.logtoOrganizationId ?? "",
             userId: standing.membership.userId,
+            identities: standing.identities,
           },
           deps
         ),
       }
     case "many":
-      return { outcome: "choose", memberships: standing.memberships }
+      return {
+        outcome: "choose",
+        memberships: standing.memberships,
+        identities: standing.identities,
+      }
   }
 }

@@ -291,9 +291,20 @@ export interface CollabAccountMembership {
   workspaceCount: number
 }
 
+/** A social identity Logto holds for the subject, by connector target. */
+export interface CollabExternalIdentity {
+  /** Connector target: `github`, `feishu-web`. Map it before storing. */
+  provider: string
+  subject: string
+  tenant?: string
+  label?: string
+}
+
 export interface CollabAccountMemberships {
   subject: string
   memberships: CollabAccountMembership[]
+  /** Absent when the deployment has no Logto management access. */
+  identities?: CollabExternalIdentity[]
 }
 
 export interface BootstrapCollabAccountInput {

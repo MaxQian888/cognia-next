@@ -679,3 +679,21 @@ What changed:
 Not changed: `tenant_id` stays UNIQUE on `host_bindings`, for the reason the
 person-columns migration gives.
 
+## Implementation update: the login joins the IM principal (2026-09-07)
+
+Section 3 hangs external identities off the User, and the Feishu adapter had
+been filing `lark` subjects as principals for months. The GitHub or Feishu
+login never met them: `logto-claims.ts` read `sub`, `email` and `name`, and
+`externalIdentities` had no production writer.
+
+`GET /v1/account/memberships` now carries `identities[]`, read from Logto's
+Management API (`GET /api/users/{sub}`: the connector target, the provider id,
+Feishu's union id and tenant key). It is best-effort and absent on a
+deployment without management access. Adoption links each identity onto the
+canonical `usr_` (`lib/identity/link-signed-in-identities.ts`, `feishu-web`
+mapping to the `lark` vocabulary), which is what `resolveExternalPerson` reads.
+A subject that already belongs to another User is returned as a conflict and
+left as it was: two Users for one human is a migration a person confirms, as
+the Batch 5 note says. Server-side `external_identities` rows for GitHub and
+Feishu are not written yet: nothing on the server reads them.
+

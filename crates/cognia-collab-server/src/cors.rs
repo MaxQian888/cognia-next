@@ -32,7 +32,7 @@ pub fn parse_allowed_origins(raw: Option<&str>) -> (Vec<HeaderValue>, Vec<String
         match normalize_origin(entry) {
             Some(origin) => {
                 if let Ok(value) = HeaderValue::from_str(&origin) {
-                    if !accepted.iter().any(|existing| existing == &value) {
+                    if !accepted.contains(&value) {
                         accepted.push(value);
                     }
                 }

@@ -1063,6 +1063,12 @@ pub struct AccountMembershipsResponse {
     /// The identity-provider subject the answer is about.
     pub subject: String,
     pub memberships: Vec<AccountMembership>,
+    /// The social identities Logto holds for the subject (GitHub id, Feishu
+    /// union id and tenant), so the client can join the login person to the
+    /// people its IM adapters already know. Best-effort: absent when the
+    /// deployment has no management access or Logto did not answer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identities: Vec<crate::logto_management::ExternalIdentityClaim>,
 }
 
 #[derive(Deserialize)]
@@ -1217,9 +1223,19 @@ async fn account_memberships(
         ..subject.clone()
     };
     let memberships = state.store.list_account_memberships(&lookup).await?;
+    // Best-effort. The join of a login to an IM principal is a nicety, and
+    // a Logto that is slow or unconfigured must not stop anyone signing in.
+    let identities = match state.logto.get_user_identities(&subject.subject).await {
+        Ok(identities) => identities,
+        Err(error) => {
+            tracing::warn!(subject = %subject.subject, %error, "Logto identities unavailable");
+            Vec::new()
+        }
+    };
     Ok(Json(AccountMembershipsResponse {
         subject: subject.subject,
         memberships,
+        identities,
     }))
 }
 
@@ -4068,6 +4084,53 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["memberships"].as_array().unwrap().len(), 0);
+        assert!(body.get("identities").is_none(), "no identities, no field");
+    }
+
+    #[tokio::test]
+    async fn memberships_carry_the_subjects_social_identities_when_logto_answers() {
+        use crate::logto_management::ExternalIdentityClaim;
+        let store = InMemoryStore::new();
+        let logto = FakeLogtoManagement::new();
+        logto.set_identities(
+            "logto-ada",
+            vec![
+                ExternalIdentityClaim {
+                    provider: "github".into(),
+                    subject: "12345".into(),
+                    tenant: None,
+                    label: Some("ada".into()),
+                },
+                ExternalIdentityClaim {
+                    provider: "feishu-web".into(),
+                    subject: "on_union".into(),
+                    tenant: Some("tk_1".into()),
+                    label: None,
+                },
+            ],
+        );
+        let (status, body) = call(
+            account_app(store.clone(), logto.clone()),
+            get("/v1/account/memberships", &subject_token("logto-ada")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let identities = body["identities"].as_array().unwrap();
+        assert_eq!(identities.len(), 2);
+        assert_eq!(identities[1]["provider"], "feishu-web");
+        assert_eq!(identities[1]["subject"], "on_union");
+        assert_eq!(identities[1]["tenant"], "tk_1");
+        assert!(identities[0].get("tenant").is_none());
+
+        // Logto failing is not the person's problem.
+        logto.fail_with("management down");
+        let (status, body) = call(
+            account_app(store, logto),
+            get("/v1/account/memberships", &subject_token("logto-ada")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.get("identities").is_none());
     }
 
     #[tokio::test]
