@@ -2,9 +2,9 @@
   "id": "cognia-scheduler-tools",
   "name": "Scheduler Tools",
   "version": "0.1.0",
-  "description": "Lets an in-chat agent create, list, cancel, and run scheduled tasks (gated by the scheduler permission policy).",
+  "description": "Lets an in-chat agent create, list, cancel, and run scheduled tasks (gated by the scheduler permission policy), and ships a Schedule digest Bot.",
   "type": "frontend",
-  "capabilities": ["tools", "scheduler"],
+  "capabilities": ["tools", "scheduler", "bot"],
   "permissions": ["settings:read", "database:read", "database:write", "agent:control"],
   "main": "src/index.ts",
   "author": "cognia-next",
@@ -15,8 +15,57 @@
   },
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
-    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
-    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
-  }
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "bots": [
+    {
+      "id": "schedule-digest",
+      "name": "Schedule digest",
+      "description": "Reports how many scheduled tasks are active, paused, failing or stale.",
+      "version": "1.0.0",
+      "executor": "handler",
+      "entry": "src/index.ts",
+      "export": "scheduleDigestBot",
+      "triggers": [
+        {
+          "id": "daily",
+          "kind": "schedule",
+          "label": "Every morning",
+          "cron": "0 9 * * *",
+          "enabledByDefault": false
+        },
+        {
+          "id": "now",
+          "kind": "manual",
+          "label": "Digest now"
+        }
+      ],
+      "policy": {
+        "maxRunDurationMs": 30000,
+        "maxConcurrentRuns": 1
+      },
+      "configSchema": {
+        "type": "object",
+        "properties": {
+          "staleAfterDays": {
+            "type": "number",
+            "title": "Stale after (days)",
+            "description": "An active task that has not run in this long is called out.",
+            "default": 14
+          }
+        }
+      }
+    }
+  ]
 }

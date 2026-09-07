@@ -14,7 +14,9 @@
  * `needsConfirmation` result instead of silently creating.
  */
 
-import type { PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+import type { BotHandlerV1, PluginContext, PluginDefinition } from "@cognia/plugin-sdk"
+
+import { createScheduleDigestBot } from "./bot"
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
@@ -62,6 +64,31 @@ function defaultDeps(ctx: PluginContext): SchedulerToolDeps {
     runTaskNow: ctx.userScheduler.runTaskNow,
   }
 }
+
+/**
+ * The plugin context, captured on activate.
+ *
+ * Null before the first activate and after deactivate, and the handler says so
+ * rather than reading an empty schedule: "the plugin is not running" and "you
+ * have no scheduled tasks" are different answers, and a digest reporting zero
+ * for the first one is a lie the run list would keep.
+ */
+let activeContext: PluginContext | null = null
+
+/**
+ * The named export `manifest.bots[].export` resolves to.
+ *
+ * A thin binding over {@link createScheduleDigestBot} so the logic stays
+ * testable without a plugin runtime, and so the capability is read at CALL
+ * time rather than captured at module load, when nothing has activated yet.
+ */
+export const scheduleDigestBot: BotHandlerV1 = (ctx) =>
+  createScheduleDigestBot({
+    listTasks: async () => {
+      if (!activeContext) throw new Error("scheduler-tools is not active")
+      return activeContext.userScheduler.listTasks()
+    },
+  })(ctx)
 
 export interface ManageScheduledTaskArgs {
   action: "create" | "list" | "cancel" | "run"
@@ -200,12 +227,20 @@ const definition: PluginDefinition = {
     name: "Scheduler Tools",
     version: "0.1.0",
     type: "frontend",
-    capabilities: ["tools", "scheduler"],
+    capabilities: ["tools", "scheduler", "bot"],
     permissions: ["settings:read", "database:read", "database:write", "agent:control"],
     main: "src/index.ts",
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("scheduler-tools activated")
+    // The Bot handler is a MODULE EXPORT the bots bridge resolves by name, so
+    // it cannot be handed the context the way a tool's `execute` closure is.
+    // `BotRunContextV1` carries no `PluginContext` on purpose: the same shape
+    // has to reach a Python handler across stdio, where a live object with
+    // methods cannot go. Capturing it here is what a JS handler is left with,
+    // and the assignment happens on activate rather than at module scope
+    // because a disabled plugin must not keep a live capability handle.
+    activeContext = ctx
     ctx.agent?.registerTool?.({
       name: "manage_scheduled_task",
       pluginId: ctx.pluginId,
@@ -260,6 +295,7 @@ const definition: PluginDefinition = {
   },
   deactivate: async () => {
     // Tools are unregistered by the runtime on deactivate.
+    activeContext = null
   },
 }
 

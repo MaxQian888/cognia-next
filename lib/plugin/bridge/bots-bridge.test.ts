@@ -218,3 +218,34 @@ describe("unregisterBotsForPlugin", () => {
     expect(listBotIds()).toEqual(["beta:b"])
   })
 })
+
+describe("the in-tree reference plugin crosses this bridge", () => {
+  // `bots-bridge` and the bot registry shipped with no plugin exercising them.
+  // Every test above builds its own manifest, so all of them would still pass
+  // if the one real contribution in the tree were malformed. This is the case
+  // that reads the shipped manifest and the shipped module.
+  it("resolves the Schedule digest handler out of the real manifest and module", async () => {
+    const [schedulerManifest, schedulerModule] = await Promise.all([
+      import("@/plugins/cognia-scheduler-tools/plugin.json"),
+      import("@/plugins/cognia-scheduler-tools/src/index"),
+    ])
+    const exports = schedulerModule as unknown as Record<string, unknown>
+
+    const result = await registerBotsForPlugin(
+      schedulerManifest.default as unknown as PluginManifest,
+      "builtin://cognia-scheduler-tools",
+      // Exactly what `importInstalledEntry` hands back for a `builtin://`
+      // root: the whole module, not a path import.
+      { importer: async () => exports }
+    )
+
+    expect(result.errors).toEqual([])
+    expect(result.registered).toBe(1)
+    const registered = getBot("cognia-scheduler-tools:schedule-digest")
+    expect(typeof registered?.handler).toBe("function")
+    // Not the definition object. A `{ default: definition }` fallback would
+    // satisfy "is a function" for a plugin whose default export happens to be
+    // callable, so the identity is what pins it.
+    expect(registered?.handler).toBe(exports.scheduleDigestBot)
+  })
+})

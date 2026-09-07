@@ -74,7 +74,10 @@ import gameWorldsThemeModule from "@/plugins/cognia-game-worlds-theme/src/index"
 import honkaiStarRailThemeModule from "@/plugins/cognia-honkai-star-rail-theme/src/index"
 import zenlessZoneZeroThemeModule from "@/plugins/cognia-zenless-zone-zero-theme/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
-import schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
+// Namespace import, not default: the manifest declares `bots[]`, and the
+// bots bridge takes `scheduleDigestBot` by NAME off these exports. A default
+// import would hand the registry the definition object alone.
+import * as schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
 import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
 import shareWatchModule from "@/plugins/cognia-share-watch/src/index"
 import sandboxedToolsModule from "@/plugins/cognia-sandboxed-tools/src/index"
@@ -356,6 +359,13 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-scheduler-tools",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(schedulerToolsModule),
+    // Required, not optional. The manifest declares `bots[]`, and the bots
+    // bridge resolves `scheduleDigestBot` by name out of these exports.
+    // A built-in never takes the import path: `importInstalledEntry` short
+    // circuits on `builtin://` and hands back whatever is here, so the
+    // `{ default: definition }` fallback would drop the handler and the Bot
+    // would register as `handler_missing`.
+    moduleExports: schedulerToolsModule as unknown as Record<string, unknown>,
   },
   {
     manifest: builtinManifest(goalInsightsManifest, goalInsightsModule),
