@@ -88,6 +88,17 @@ describe("<MeSection />", () => {
     expect(header?.children).toHaveLength(1)
   })
 
+  it("skips the surface when every row is conditional and none rendered", () => {
+    // Auto backup on /me/backup has one row, an interval field that only
+    // exists while the toggle is on. With the surface unconditional, the
+    // section painted an empty bordered box two pixels tall under its heading.
+    const { container } = render(
+      <MeSection title="Auto backup">{false}</MeSection>
+    )
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Auto backup")
+    expect(container.querySelector('[data-slot="item-group"]')).toBeNull()
+  })
+
   it("attaches the supplied testid to the section element", () => {
     render(
       <MeSection title="测试" testid="me-section-account">
