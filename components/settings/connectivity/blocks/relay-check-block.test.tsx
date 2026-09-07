@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
-import { RelayCheckBlock } from "./relay-check-block"
+import { RELAY_STATE_LABEL_KEY, RelayCheckBlock } from "./relay-check-block"
+import type { RelayProbeState } from "@/lib/signaling/relay-probe"
 
 import type { RelaySlice } from "@/hooks/connectivity/use-remote-access"
 
@@ -15,6 +16,8 @@ function slice(overrides: Partial<RelaySlice> = {}): RelaySlice {
     enabled: true,
     signalingUrl: "wss://signaling.cognia.cn/signaling",
     route: "unchecked",
+    // Default to the Host's own vantage; the companion case overrides it.
+    probedFromHost: true,
     result: null,
     checkedAt: null,
     checking: false,
@@ -120,5 +123,32 @@ describe("RelayCheckBlock", () => {
     render(<RelayCheckBlock relay={slice({ source: "local" })} />)
     expect(screen.getByTestId("relay-check-block")).toHaveAttribute("data-source", "local")
     expect(screen.getByText("sourceLocal")).toBeInTheDocument()
+  })
+
+  it("says so when the probe measured this device instead of the Host", () => {
+    const relay = slice({
+      probedFromHost: false,
+      route: "unchecked",
+      result: { state: "ready", healthUrl: "https://r/healthz", latencyMs: 3 },
+    })
+    render(<RelayCheckBlock relay={relay} />)
+    expect(screen.getByTestId("relay-check-vantage")).toHaveTextContent("notFromHost")
+  })
+
+  it("names every probe state with a key, never the wire identifier", () => {
+    // `t()` is stubbed to echo the key, so a missing entry would surface as
+    // `undefined`. Dynamic keys are invisible to `lint:i18n`; this is the pin.
+    const states: RelayProbeState[] = [
+      "ready",
+      "legacy",
+      "not-a-relay",
+      "cors-blocked",
+      "unreachable",
+      "invalid-url",
+    ]
+    for (const state of states) {
+      expect(RELAY_STATE_LABEL_KEY[state]).toMatch(/^state\.[a-zA-Z]+$/)
+    }
+    expect(new Set(Object.values(RELAY_STATE_LABEL_KEY)).size).toBe(states.length)
   })
 })

@@ -11,10 +11,12 @@
 //!
 //! Detection is by address and interface name, not by talking to a daemon.
 //! Tailscale hands out `100.64.0.0/10` (CGNAT, RFC 6598) and
-//! `fd7a:115c:a1e0::/48`. ZeroTier names its interfaces `zt*` (Linux, BSD),
-//! `feth*` (macOS) or "ZeroTier One [...]" (Windows). A daemon that is
-//! installed but down shows up as `installed: true` with no addresses, which
-//! is exactly the state the settings copy needs to name.
+//! `fd7a:115c:a1e0::/48`. ZeroTier names its interfaces `zt*` (Linux, BSD) or
+//! "ZeroTier One [...]" (Windows); on macOS it borrows the kernel's generic
+//! `feth*` device, which Docker Desktop, UTM and other vmnet clients also use,
+//! so that name counts only when the ZeroTier client is installed here. A
+//! daemon that is installed but down shows up as `installed: true` with no
+//! addresses, which is exactly the state the settings copy needs to name.
 
 use std::net::IpAddr;
 use std::path::Path;
@@ -66,11 +68,14 @@ fn is_tailscale_v6(segments: [u16; 8]) -> bool {
 }
 
 /// Which provider, if any, an interface + address pair belongs to. Pure.
+///
+/// Only unambiguous tells. macOS's `feth*` is deliberately not one of them —
+/// see [`is_weak_zerotier_name`] and [`classify_with`].
 pub fn classify(interface: &str, address: IpAddr) -> Option<MeshProvider> {
     let lower = interface.to_ascii_lowercase();
     // Name first: ZeroTier hands out arbitrary ranges, so its interface is the
     // only tell, and a `zt*` interface carrying a CGNAT address is ZeroTier.
-    if lower.starts_with("zt") || lower.starts_with("feth") || lower.contains("zerotier") {
+    if lower.starts_with("zt") || lower.contains("zerotier") {
         return Some(MeshProvider::Zerotier);
     }
     if lower.starts_with("tailscale") {
@@ -83,12 +88,37 @@ pub fn classify(interface: &str, address: IpAddr) -> Option<MeshProvider> {
     }
 }
 
+/// A name that ZeroTier uses on macOS but does not own: `feth*` is the
+/// kernel's generic fake-Ethernet device, also created by Docker Desktop, UTM
+/// and any other vmnet / Network Extension client. On its own it says nothing.
+fn is_weak_zerotier_name(interface: &str) -> bool {
+    interface.to_ascii_lowercase().starts_with("feth")
+}
+
+/// [`classify`] plus the weak macOS tell, admitted only when the ZeroTier
+/// client is actually on this machine.
+///
+/// Without that gate a Docker `feth0` bridge address is reported as a live
+/// overlay, offered as the host to advertise, and then named by every pairing
+/// invitation — a private address no remote device can route to.
+pub fn classify_with(
+    interface: &str,
+    address: IpAddr,
+    zerotier_installed: bool,
+) -> Option<MeshProvider> {
+    if zerotier_installed && is_weak_zerotier_name(interface) {
+        return Some(MeshProvider::Zerotier);
+    }
+    classify(interface, address)
+}
+
 /// Group a machine's interfaces by provider. Pure. The order of `PROVIDERS`
 /// is kept so the UI is stable across polls.
 pub fn group(
     interfaces: &[(String, IpAddr)],
     installed: impl Fn(MeshProvider) -> bool,
 ) -> MeshStatus {
+    let zerotier_installed = installed(MeshProvider::Zerotier);
     let networks = PROVIDERS
         .iter()
         .map(|&provider| MeshNetwork {
@@ -96,7 +126,9 @@ pub fn group(
             installed: installed(provider),
             addresses: interfaces
                 .iter()
-                .filter(|(name, address)| classify(name, *address) == Some(provider))
+                .filter(|(name, address)| {
+                    classify_with(name, *address, zerotier_installed) == Some(provider)
+                })
                 .map(|(name, address)| MeshAddress {
                     interface: name.clone(),
                     address: address.to_string(),
@@ -209,9 +241,27 @@ mod tests {
             classify("zt5u4uptm3", IpAddr::V4(Ipv4Addr::new(10, 147, 17, 5))),
             Some(MeshProvider::Zerotier)
         );
+        // `feth*` is macOS's generic fake-Ethernet device: on its own it is
+        // nobody's mesh, and only counts once ZeroTier is known to be here.
         assert_eq!(
             classify("feth4593", IpAddr::V4(Ipv4Addr::new(192, 168, 191, 5))),
+            None
+        );
+        assert_eq!(
+            classify_with(
+                "feth4593",
+                IpAddr::V4(Ipv4Addr::new(192, 168, 191, 5)),
+                true
+            ),
             Some(MeshProvider::Zerotier)
+        );
+        assert_eq!(
+            classify_with(
+                "feth4593",
+                IpAddr::V4(Ipv4Addr::new(192, 168, 191, 5)),
+                false
+            ),
+            None
         );
         assert_eq!(
             classify(
@@ -235,6 +285,24 @@ mod tests {
             classify("ztabc", IpAddr::V4(Ipv4Addr::new(100, 70, 0, 1))),
             Some(MeshProvider::Zerotier)
         );
+    }
+
+    #[test]
+    fn a_docker_feth_bridge_is_not_an_overlay_until_zerotier_is_installed() {
+        // A Mac running Docker Desktop or UTM carries `feth0` with a private
+        // bridge address. Reporting it as a live overlay would offer it as the
+        // host to advertise, and every invitation would then name an address
+        // no remote device can route to.
+        let interfaces = vec![(
+            "feth0".to_string(),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 191, 5)),
+        )];
+        let without = group(&interfaces, |_| false);
+        assert!(without.networks[1].addresses.is_empty());
+        assert_eq!(preferred_address(&without), None);
+
+        let with = group(&interfaces, |provider| provider == MeshProvider::Zerotier);
+        assert_eq!(with.networks[1].addresses[0].address, "192.168.191.5");
     }
 
     #[test]

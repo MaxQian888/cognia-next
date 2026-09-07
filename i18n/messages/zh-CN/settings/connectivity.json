@@ -164,7 +164,8 @@
       "meshInstalled": "已安装 {provider}，未连接",
       "meshOff": "未安装 overlay 客户端",
       "meshDesktopOnly": "仅桌面应用",
-      "relayCorsBlocked": "中继有响应，但此浏览器无权读取"
+      "relayCorsBlocked": "中继有响应，但此浏览器无权读取",
+      "tunnelOther": "暴露的是 {localUrl}，不是这台主机"
     }
   },
   "relayCheck": {
@@ -183,7 +184,16 @@
     "invalidUrl": "下方的 signaling URL 不是有效的 ws:// 或 wss:// 地址。",
     "lanes": "通道：{lanes}",
     "lastChecked": "检测于 {time}",
-    "corsBlocked": "{url} 有响应，但此浏览器 origin 无权读取答案。已部署的 rendezvous 早于可读的健康检查端点与业务 data 通道（ADR-0170）：配对与信令可用，业务流量只能退回点对点通道。请部署当前版本的 signaling server，或改在桌面应用里检测。"
+    "corsBlocked": "{url} 有响应，但此浏览器 origin 无权读取答案。已部署的 rendezvous 早于可读的健康检查端点与业务 data 通道（ADR-0170）：配对与信令可用，业务流量只能退回点对点通道。请部署当前版本的 signaling server，或改在桌面应用里检测。",
+    "state": {
+      "ready": "就绪",
+      "legacy": "旧版中继",
+      "notRelay": "不是中继",
+      "corsBlocked": "无法读取",
+      "unreachable": "无响应",
+      "invalidUrl": "地址无效"
+    },
+    "notFromHost": "本次检测来自这台设备，而非主机。它只能证明这台设备可以到达 rendezvous；主机自己的出网路线仍未验证，因此上方的总结不会计入。"
   },
   "mesh": {
     "title": "Overlay 网络",
@@ -207,7 +217,9 @@
     "loopbackHint": "伴侣服务器仅绑定在本机。请先在「本地主机」里切换到局域网，再通告 overlay 地址。",
     "installHint": "在本机和设备上都装上客户端，登录同一个网络，然后回到这里：地址会出现在此处。",
     "refresh": "刷新",
-    "openDownload": "打开 {provider} 下载页"
+    "openDownload": "打开 {provider} 下载页",
+    "advertiseDescriptionSaved": "邀请码与本地路线报告将使用 {address}，而不是自动探测的局域网地址。此刻没有任何网卡持有它，关掉此项即可恢复自动探测。",
+    "advertiseLabelSaved": "停止在邀请中通告 {address}"
   },
   "tunnelInstall": {
     "title": "安装 {tool}",
@@ -248,6 +260,8 @@
     "busyReplace": "替换隧道",
     "busyCancelled": "保留了现有隧道。",
     "exposing": "正在暴露 {localUrl}",
-    "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。"
+    "exposingOther": "这条隧道当前暴露的是 {localUrl}，不是本监听器。在这里关掉再打开即可指向伴侣服务器，或留给正在使用它的功能。",
+    "busyStopBody": "本应用只运行一个 cloudflared 进程，它正为另一功能把 {localUrl} 暴露在 {publicUrl}。在这里停止，那个公网地址也会一并失效。",
+    "busyStopConfirm": "仍然停止"
   }
 }

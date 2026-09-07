@@ -142,4 +142,31 @@ describe("TunnelBlock", () => {
     expect(screen.getByTestId("tunnel-reach")).toHaveAttribute("data-reach", "needs-desktop-shell")
     expect(call).not.toHaveBeenCalled()
   })
+
+  it("asks before stopping a tunnel that is exposing another origin", async () => {
+    // The one cloudflared child is shared with the Connections tunnel tab.
+    // Turning this switch off must not silently take that public URL down.
+    call.mockImplementation(async (name: string) => {
+      if (name === "companion_tunnel_current")
+        return { publicUrl: "https://a.trycloudflare.com", localUrl: "http://127.0.0.1:17890" }
+      if (name === "companion_tunnel_get_config") return { mode: "quick", hasToken: false }
+      if (name === "companion_tunnel_probe") return { installed: true, path: "/x" }
+      return undefined
+    })
+    render(<TunnelBlock />)
+    await waitFor(() => expect(screen.getByTestId("tunnel-exposing")).toBeInTheDocument())
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("switch"))
+    })
+    const conflict = await screen.findByTestId("tunnel-conflict")
+    expect(conflict).toHaveAttribute("data-intent", "stop")
+    expect(call).not.toHaveBeenCalledWith("companion_tunnel_stop")
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("tunnel-conflict-replace"))
+    })
+    expect(call).toHaveBeenCalledWith("companion_tunnel_stop")
+    expect(screen.queryByTestId("tunnel-conflict")).toBeNull()
+  })
 })

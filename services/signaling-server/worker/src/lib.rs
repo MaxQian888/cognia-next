@@ -40,9 +40,13 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 serde_json::to_value(cognia_signaling_core::health::capabilities())
                     .unwrap_or(serde_json::Value::Null);
             let (cors_name, cors_value) = cognia_signaling_core::health::CORS_ALLOW_ORIGIN_HEADER;
-            let headers = Headers::new();
-            headers.set(cors_name, cors_value)?;
-            Ok(Response::from_json(&body)?.with_headers(headers))
+            // Append to the response's own headers: `with_headers` *replaces*
+            // the map, which would drop the `content-type: application/json`
+            // `from_json` just set and leave this backend answering differently
+            // from the axum one that shares `health.rs`.
+            let mut response = Response::from_json(&body)?;
+            response.headers_mut().set(cors_name, cors_value)?;
+            Ok(response)
         }
         // `/v2/signaling` is the pre-rename path, still baked into the endpoint
         // that already-paired devices dial. Keep serving it.

@@ -89,6 +89,66 @@ describe("useRemoteAccess", () => {
     expect(readSignalingStatus).not.toHaveBeenCalled()
   })
 
+  it("drops a verdict that belonged to a rendezvous no longer configured", async () => {
+    let url = "wss://first/signaling"
+    const probe = jest.fn(async () => ({
+      state: "ready" as const,
+      healthUrl: "https://first/healthz",
+    }))
+    const { result } = renderHook(() =>
+      useRemoteAccess({
+        // A live poll, so the Host can report a different URL mid-session.
+        pollMs: 20,
+        meshPollMs: 0,
+        readSignalingStatus: async () => ({ enabled: true, signalingUrl: url }),
+        readTunnel: async () => null,
+        readMesh: async () => ({ networks: [] }),
+        probe,
+      })
+    )
+    await waitFor(() => expect(result.current.relay.signalingUrl).toBe("wss://first/signaling"))
+    await act(async () => {
+      await result.current.relay.check()
+    })
+    expect(result.current.relay.route).toBe("ready")
+
+    // The Host reports a different rendezvous: the old `ready` said nothing
+    // about it, so it goes, and the check is offered again.
+    url = "wss://second/signaling"
+    await waitFor(() => expect(result.current.relay.signalingUrl).toBe("wss://second/signaling"))
+    await waitFor(() => expect(result.current.relay.result).toBeNull())
+    expect(result.current.relay.route).toBe("unchecked")
+    expect(result.current.relay.checkedAt).toBeNull()
+  })
+
+  it("a companion's own probe never stands in for the Host's route out", async () => {
+    // `probeRelay` goes out over this shell's transport. From a paired phone
+    // that measures the phone, so the result is kept but the route is unproven.
+    profile = "cloud-companion"
+    const probe = jest.fn(async () => ({
+      state: "ready" as const,
+      healthUrl: "https://r/healthz",
+    }))
+    const { result } = renderHook(() =>
+      useRemoteAccess({
+        pollMs: 0,
+        readSignalingStatus: async () => ({ enabled: true, signalingUrl: "wss://r/signaling" }),
+        readTunnel: async () => null,
+        readMesh: async () => ({ networks: [] }),
+        probe,
+      })
+    )
+    // Wait for the Host's URL, not just for `source`: until the first read
+    // lands the hook is still showing the default rendezvous.
+    await waitFor(() => expect(result.current.relay.signalingUrl).toBe("wss://r/signaling"))
+    await act(async () => {
+      await result.current.relay.check()
+    })
+    expect(result.current.relay.probedFromHost).toBe(false)
+    expect(result.current.relay.result?.state).toBe("ready")
+    expect(result.current.relay.route).toBe("unchecked")
+  })
+
   it("a Host that refuses the status read is reported unavailable, not as a default", async () => {
     const { result } = renderHook(() =>
       useRemoteAccess({

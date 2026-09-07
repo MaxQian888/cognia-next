@@ -38,7 +38,10 @@ pub enum TunnelError {
     /// message keeps a stable `tunnel_busy:` prefix so the renderer can tell
     /// it from every other failure.
     #[error("tunnel_busy: already exposing {local_url} at {public_url}")]
-    Busy { local_url: String, public_url: String },
+    Busy {
+        local_url: String,
+        public_url: String,
+    },
 }
 
 /// Whether `cloudflared` can be launched from this process, and which one.
@@ -72,7 +75,16 @@ pub fn locate_binary(path_var: Option<&std::ffi::OsStr>) -> Option<std::path::Pa
 
 /// Probe for `cloudflared` and, when present, ask it for its version.
 pub async fn probe() -> TunnelProbe {
-    let path = locate_binary(std::env::var_os("PATH").as_deref());
+    probe_with(std::env::var_os("PATH").as_deref()).await
+}
+
+/// [`probe`] against an explicit `PATH`.
+///
+/// The seam exists so tests never write the process-global `PATH`: cargo runs
+/// them on parallel threads in one binary, and two tests swapping that
+/// variable clobber each other's saved value.
+pub async fn probe_with(path_var: Option<&std::ffi::OsStr>) -> TunnelProbe {
+    let path = locate_binary(path_var);
     let Some(path) = path else {
         return TunnelProbe {
             installed: false,
@@ -85,7 +97,8 @@ pub async fn probe() -> TunnelProbe {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let version = match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.output()).await {
+    let version = match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.output()).await
+    {
         Ok(Ok(output)) => {
             let text = String::from_utf8_lossy(&output.stdout);
             let text = if text.trim().is_empty() {
@@ -425,7 +438,11 @@ mod tests {
     #[test]
     fn locate_binary_walks_path_and_ignores_empty_entries() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let name = if cfg!(windows) { "cloudflared.exe" } else { "cloudflared" };
+        let name = if cfg!(windows) {
+            "cloudflared.exe"
+        } else {
+            "cloudflared"
+        };
         let binary = dir.path().join(name);
         std::fs::write(&binary, b"#!/bin/sh\n").expect("write");
         let mut path_var = std::ffi::OsString::new();
@@ -439,14 +456,18 @@ mod tests {
 
     #[tokio::test]
     async fn probe_reports_not_installed_on_an_empty_path() {
-        let original_path = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-        let result = probe().await;
-        if let Some(p) = original_path {
-            std::env::set_var("PATH", p);
-        }
+        // The `PATH` is handed in, never swapped on the process: this suite
+        // shares one process with every other test in the crate.
         assert_eq!(
-            result,
+            probe_with(Some(std::ffi::OsStr::new(""))).await,
+            TunnelProbe {
+                installed: false,
+                path: None,
+                version: None
+            }
+        );
+        assert_eq!(
+            probe_with(None).await,
             TunnelProbe {
                 installed: false,
                 path: None,
@@ -484,7 +505,10 @@ mod tests {
         *state.inner.lock() = Some(handle);
 
         // Same origin: idempotent, no relaunch.
-        let same = state.start("http://127.0.0.1:7891", false).await.expect("same origin");
+        let same = state
+            .start("http://127.0.0.1:7891", false)
+            .await
+            .expect("same origin");
         assert_eq!(same.public_url, "https://a.trycloudflare.com");
 
         // Different origin, no replace: refused, and the first tunnel survives.

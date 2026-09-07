@@ -33,6 +33,13 @@ export interface RelaySlice {
   signalingUrl: string
   /** The banner's word for the relay route. */
   route: RelayRouteState
+  /**
+   * Whether the probe ran on the Host itself. `probeRelay` fetches through
+   * *this* shell's transport, so on a paired companion it measures the phone's
+   * network, not the Host's. A result from elsewhere is shown, but it never
+   * upgrades the verdict.
+   */
+  probedFromHost: boolean
   result: RelayProbeResult | null
   checkedAt: number | null
   checking: boolean
@@ -71,6 +78,14 @@ interface TunnelInfoSnapshot {
 export interface UseRemoteAccessOptions {
   /** How often the desktop-process facts are re-read. `0` disables polling. */
   pollMs?: number
+  /**
+   * How often the overlay answer is re-read. `0` disables it. Much slower than
+   * {@link pollMs} on purpose: `companion_mesh_status` walks every network
+   * interface and stats the install locations of two clients, to answer a
+   * question that only changes when a VPN client is installed or a daemon
+   * starts. The block's own refresh button covers the impatient case.
+   */
+  meshPollMs?: number
   /** Test seams. */
   readSignalingStatus?: () => Promise<SignalingStatusSnapshot>
   readTunnel?: () => Promise<TunnelInfoSnapshot | null>
@@ -79,6 +94,7 @@ export interface UseRemoteAccessOptions {
 }
 
 const DEFAULT_POLL_MS = 5_000
+const DEFAULT_MESH_POLL_MS = 60_000
 
 const defaultReadSignalingStatus = () =>
   transport.call<SignalingStatusSnapshot>("companion_signaling_status")
@@ -89,6 +105,7 @@ const defaultReadMesh = () => transport.call<MeshStatus>("companion_mesh_status"
 export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAccessState {
   const {
     pollMs = DEFAULT_POLL_MS,
+    meshPollMs = DEFAULT_MESH_POLL_MS,
     readSignalingStatus = defaultReadSignalingStatus,
     readTunnel = defaultReadTunnel,
     readMesh = defaultReadMesh,
@@ -141,14 +158,6 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
           if (live) setTunnel(null)
         }
       }
-      if (meshReach.available) {
-        try {
-          const status = await readers.current.readMesh()
-          if (live) setMesh(status)
-        } catch {
-          if (live) setMesh(null)
-        }
-      }
     }
     void tick()
     if (pollMs <= 0) {
@@ -161,7 +170,32 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
       live = false
       clearInterval(id)
     }
-  }, [meshReach.available, pollMs, signalingReach.available, tunnelReach.available])
+  }, [pollMs, signalingReach.available, tunnelReach.available])
+
+  // The overlay answer on its own, much slower clock: see `meshPollMs`.
+  useEffect(() => {
+    if (!meshReach.available) return
+    let live = true
+    const tick = async () => {
+      try {
+        const status = await readers.current.readMesh()
+        if (live) setMesh(status)
+      } catch {
+        if (live) setMesh(null)
+      }
+    }
+    void tick()
+    if (meshPollMs <= 0) {
+      return () => {
+        live = false
+      }
+    }
+    const id = setInterval(() => void tick(), meshPollMs)
+    return () => {
+      live = false
+      clearInterval(id)
+    }
+  }, [meshPollMs, meshReach.available])
 
   const source: RelaySlice["source"] = signalingReach.available
     ? hostSignalingFailed && !hostSignaling
@@ -181,6 +215,26 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
       ? (hostSignaling?.signalingUrl ?? DEFAULT_SIGNALING_URL)
       : (settings?.signalingUrl ?? DEFAULT_SIGNALING_URL)
 
+  // A probe answers for one rendezvous. When the configured URL changes — the
+  // user edits it below, or the Host reports a new one — the old verdict stops
+  // being about anything on screen, so it is dropped and the check re-offered
+  // rather than left claiming `ready` for an address no longer in use.
+  const probedUrl = useRef<string | null>(null)
+  const observedUrl = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = observedUrl.current
+    observedUrl.current = signalingUrl
+    if (previous === null || previous === signalingUrl) return
+    // A probe still in flight was launched for the PREVIOUS rendezvous. Abort
+    // it so the `aborted` check in `check` refuses to commit: left running it
+    // resolves after this effect has already gone, stamps `probedUrl` with the
+    // old address and sets a result this effect will never fire again to clear.
+    inFlight.current?.abort()
+    probedUrl.current = null
+    setResult(null)
+    setCheckedAt(null)
+  }, [signalingUrl])
+
   const check = useCallback(async () => {
     inFlight.current?.abort()
     const controller = new AbortController()
@@ -189,6 +243,7 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
     try {
       const next = await readers.current.probe(signalingUrl, { signal: controller.signal })
       if (controller.signal.aborted) return
+      probedUrl.current = signalingUrl
       setResult(next)
       setCheckedAt(Date.now())
     } finally {
@@ -201,7 +256,16 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
 
   useEffect(() => () => inFlight.current?.abort(), [])
 
-  const route: RelayRouteState = !enabled ? "off" : result ? result.state : "unchecked"
+  // `probeRelay` goes out over *this* shell's transport. Only when this shell
+  // is the Host does the answer say anything about the Host's own reach; from
+  // a paired companion it measures the phone's network, so the result is still
+  // shown and explained, but the route stays unproven.
+  const probedFromHost = isHost
+  const route: RelayRouteState = !enabled
+    ? "off"
+    : result && probedFromHost
+      ? result.state
+      : "unchecked"
 
   const refreshMesh = useCallback(async () => {
     if (!meshReach.available) return
@@ -214,7 +278,17 @@ export function useRemoteAccess(options: UseRemoteAccessOptions = {}): RemoteAcc
 
   return {
     isHost,
-    relay: { source, enabled, signalingUrl, route, result, checkedAt, checking, check },
+    relay: {
+      source,
+      enabled,
+      signalingUrl,
+      route,
+      probedFromHost,
+      result,
+      checkedAt,
+      checking,
+      check,
+    },
     tunnel: {
       available: tunnelReach.available,
       publicUrl: tunnel?.publicUrl ?? null,

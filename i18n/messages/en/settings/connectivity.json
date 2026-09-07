@@ -164,7 +164,8 @@
       "meshInstalled": "{provider} installed, not connected",
       "meshOff": "No overlay client installed",
       "meshDesktopOnly": "Desktop app only",
-      "relayCorsBlocked": "Relay answered, but this browser may not read it"
+      "relayCorsBlocked": "Relay answered, but this browser may not read it",
+      "tunnelOther": "Exposing {localUrl}, not this Host"
     }
   },
   "relayCheck": {
@@ -183,7 +184,16 @@
     "invalidUrl": "The signaling URL below is not a valid ws:// or wss:// address.",
     "lanes": "Lanes: {lanes}",
     "lastChecked": "Checked {time}",
-    "corsBlocked": "{url} answered, but this browser origin was not allowed to read the answer. The deployed rendezvous predates the readable health endpoint and the application data lane (ADR-0170): pairing and signaling work, application traffic falls back to the peer-to-peer channel only. Deploy the current signaling server, or run this check from the desktop app."
+    "corsBlocked": "{url} answered, but this browser origin was not allowed to read the answer. The deployed rendezvous predates the readable health endpoint and the application data lane (ADR-0170): pairing and signaling work, application traffic falls back to the peer-to-peer channel only. Deploy the current signaling server, or run this check from the desktop app.",
+    "state": {
+      "ready": "Ready",
+      "legacy": "Older relay",
+      "notRelay": "Not a relay",
+      "corsBlocked": "Unreadable",
+      "unreachable": "No answer",
+      "invalidUrl": "Bad URL"
+    },
+    "notFromHost": "This check ran from this device, not from the Host. It proves this device reaches the rendezvous; the Host's own route out is still unproven, so the summary above does not count it."
   },
   "mesh": {
     "title": "Overlay network",
@@ -207,7 +217,9 @@
     "loopbackHint": "The companion server is bound to this machine only. Switch it to LAN under Local host before advertising an overlay address.",
     "installHint": "Install a client on this machine and on the device, sign both into the same network, then come back: the address appears here.",
     "refresh": "Refresh",
-    "openDownload": "Open {provider} downloads"
+    "openDownload": "Open {provider} downloads",
+    "advertiseDescriptionSaved": "Invitations and the local-route report name {address} instead of the auto-detected LAN address. No interface carries it right now, so switch this off to go back to detection.",
+    "advertiseLabelSaved": "Stop advertising {address} in invitations"
   },
   "tunnelInstall": {
     "title": "Install {tool}",
@@ -248,6 +260,8 @@
     "busyReplace": "Replace the tunnel",
     "busyCancelled": "Left the existing tunnel running.",
     "exposing": "Exposing {localUrl}",
-    "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it."
+    "exposingOther": "This tunnel currently exposes {localUrl}, not this listener. Turn it off and on again here to point it at the companion server, or leave it for the feature using it.",
+    "busyStopBody": "This app runs one cloudflared process, and it is exposing {localUrl} at {publicUrl} for another feature. Stopping it here takes that public URL down too.",
+    "busyStopConfirm": "Stop it anyway"
   }
 }

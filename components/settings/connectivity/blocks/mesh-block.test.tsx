@@ -151,4 +151,51 @@ describe("MeshBlock", () => {
     expect(screen.queryByTestId("mesh-providers")).toBeNull()
     expect(screen.getByTestId("mesh-refresh")).toBeDisabled()
   })
+
+  it("can stop advertising a host no interface carries any more", async () => {
+    // The daemon went down, so there is nothing to pick. The switch is the
+    // only control that writes `advertiseHost: null` — it has to stay.
+    const patch = jest.fn(async () => prefs())
+    const empty = {
+      networks: [
+        { provider: "tailscale" as const, installed: true, addresses: [] },
+        { provider: "zerotier" as const, installed: false, addresses: [] },
+      ],
+    }
+    render(
+      <MeshBlock
+        mesh={{ available: true, status: empty, refresh: async () => {} }}
+        loadPrefs={async () => prefs({ advertiseHost: "100.101.2.3" })}
+        patchPrefs={patch}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("mesh-advertise-stale")).toBeInTheDocument())
+    const toggle = screen.getByRole("switch")
+    expect(toggle).toBeChecked()
+    expect(toggle).not.toBeDisabled()
+    await act(async () => {
+      fireEvent.click(toggle)
+    })
+    expect(patch).toHaveBeenCalledWith({ advertiseHost: null })
+  })
+
+  it("stays checked when the carried address changed under a saved host", async () => {
+    const moved = {
+      networks: [
+        {
+          provider: "tailscale" as const,
+          installed: true,
+          addresses: [{ interface: "utun4", address: "100.101.9.9" }],
+        },
+        { provider: "zerotier" as const, installed: false, addresses: [] },
+      ],
+    }
+    render(
+      <MeshBlock
+        mesh={{ available: true, status: moved, refresh: async () => {} }}
+        loadPrefs={async () => prefs({ advertiseHost: "100.101.2.3" })}
+      />
+    )
+    await waitFor(() => expect(screen.getByRole("switch")).toBeChecked())
+  })
 })

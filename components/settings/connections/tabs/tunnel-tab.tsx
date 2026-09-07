@@ -115,10 +115,12 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
         if (!desktop) {
           const companion = await refreshCompanionEndpoints()
           if (!cancelled) {
+            // `localUrl` is genuinely unknown here: the companion endpoint
+            // report names the public URL only. Synthesising `defaultLocalUrl`
+            // would make the "exposing another origin" check below compare a
+            // value against itself and never fire.
             setInfo(
-              companion?.tunnelBaseUrl
-                ? { publicUrl: companion.tunnelBaseUrl, localUrl: defaultLocalUrl }
-                : null
+              companion?.tunnelBaseUrl ? { publicUrl: companion.tunnelBaseUrl, localUrl: "" } : null
             )
             setConfig(null)
           }
@@ -282,6 +284,7 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             </Button>
           )}
           {info?.localUrl && info.localUrl !== defaultLocalUrl ? (
+            // Only a reported origin can disagree; `""` is "not reported".
             <p
               className="text-[11px] text-amber-700 dark:text-amber-300"
               data-testid="tunnel-exposing-other"

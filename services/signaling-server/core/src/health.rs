@@ -22,8 +22,8 @@ pub const PROTOCOL_VERSION: u32 = 2;
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub protocol: u32,
-    /// Every lane the server budgets separately. A build without the data
-    /// lane lists only `signal`.
+    /// Every lane the server budgets separately. This build serves both;
+    /// a deployment that drops the data lane would list only `signal`.
     pub lanes: Vec<String>,
     /// Convenience for the client: `lanes` contains `data`.
     pub relay_data_lane: bool,
@@ -37,7 +37,11 @@ pub fn capabilities() -> Capabilities {
     ];
     Capabilities {
         protocol: PROTOCOL_VERSION,
-        relay_data_lane: lanes.iter().any(|lane| lane == RelayLane::Data.as_str()),
+        // This build serves the data lane; the flag is stated beside the list
+        // rather than searched out of it, because deriving a constant from a
+        // literal reads like a feature gate that does not exist. A build that
+        // drops the lane edits both lines together.
+        relay_data_lane: true,
         lanes,
     }
 }
@@ -53,7 +57,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn this_build_advertises_both_lanes_and_the_flag_agrees_with_the_list() {
+    fn this_build_advertises_both_lanes_and_the_data_lane_flag() {
         let caps = capabilities();
         assert_eq!(caps.protocol, PROTOCOL_VERSION);
         assert_eq!(caps.lanes, vec!["signal".to_string(), "data".to_string()]);

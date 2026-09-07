@@ -23,10 +23,17 @@ import {
 } from "@/lib/connectivity/remote-access"
 import { cn } from "@/lib/utils"
 
+import { COMPANION_TUNNEL_LOCAL_URL } from "@/lib/connectivity/tunnel-resolver"
+
 export interface RemoteAccessSummaryProps {
   isHost: boolean
   relay: RelayRouteState
-  tunnel: { available: boolean; publicUrl: string | null }
+  /**
+   * `localUrl` matters as much as `publicUrl`: one cloudflared child is shared
+   * with the connectors' webhook receiver, so a live tunnel is only a route to
+   * *this* Host when it is the companion listener it exposes.
+   */
+  tunnel: { available: boolean; publicUrl: string | null; localUrl: string | null }
   mesh: { available: boolean; status: MeshStatus | null }
 }
 
@@ -76,19 +83,28 @@ export function RemoteAccessSummary({ isHost, relay, tunnel, mesh }: RemoteAcces
   const meshInstalled = mesh.status?.networks.find(
     (network) => meshProviderState(network) === "installed"
   )
+  const tunnelExposesHost = Boolean(
+    tunnel.publicUrl && tunnel.localUrl === COMPANION_TUNNEL_LOCAL_URL
+  )
+  const tunnelExposesOther = Boolean(tunnel.publicUrl) && !tunnelExposesHost
   const verdict = remoteAccessVerdict({
     isHost,
     relay,
-    tunnelOn: Boolean(tunnel.publicUrl),
+    tunnelOn: tunnelExposesHost,
     meshConnected: meshPick !== null,
   })
   const relayState = relayRow(relay)
 
   const tunnelRow: { text: string; tone: RouteTone } = !tunnel.available
     ? { text: t("routeState.tunnelDesktopOnly"), tone: "muted" }
-    : tunnel.publicUrl
+    : tunnelExposesHost
       ? { text: t("routeState.tunnelOn"), tone: "on" }
-      : { text: t("routeState.tunnelOff"), tone: "off" }
+      : tunnelExposesOther
+        ? {
+            text: t("routeState.tunnelOther", { localUrl: tunnel.localUrl ?? "" }),
+            tone: "warn",
+          }
+        : { text: t("routeState.tunnelOff"), tone: "off" }
 
   const meshRow: { text: string; tone: RouteTone } = !mesh.available
     ? { text: t("routeState.meshDesktopOnly"), tone: "muted" }

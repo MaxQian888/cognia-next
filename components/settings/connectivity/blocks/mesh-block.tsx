@@ -83,10 +83,20 @@ export function MeshBlock({
   }, [desktop, loadPrefs])
 
   const pick = preferredMeshAddress(mesh.status)
+  // The address as a string: a primitive dependency the memoization rule can
+  // reason about, where the freshly-built `pick` object cannot be.
+  const pickAddress = pick?.address ?? null
   const advertised = prefs?.advertiseHost?.trim() || null
-  const advertisingMesh = Boolean(advertised && pick && advertised === pick.address)
+  // Checked reflects "a host is saved", not "the saved host is still the one
+  // we would pick": otherwise the switch reads off whenever the carried
+  // address changes, and the only control that can clear it disappears
+  // exactly when the daemon goes down and it needs clearing.
+  const advertisingMesh = Boolean(advertised)
   const stale = Boolean(advertised && !advertisedHostIsCarried(mesh.status, advertised))
   const loopback = prefs?.bindLoopbackOnly === true
+  // The address the control talks about: what we would advertise, or what is
+  // already advertised when nothing is carried any more.
+  const advertiseAddress = pickAddress ?? advertised
 
   const onAdvertise = useCallback(
     async (enabled: boolean) => {
@@ -94,11 +104,13 @@ export function MeshBlock({
       setSaving(true)
       try {
         const next = await patchPrefs({
-          advertiseHost: enabled && pick ? pick.address : null,
+          advertiseHost: enabled && pickAddress ? pickAddress : null,
         })
         setPrefs(next)
         toast.success(
-          enabled && pick ? t("advertiseSaved", { address: pick.address }) : t("advertiseCleared")
+          enabled && pickAddress
+            ? t("advertiseSaved", { address: pickAddress })
+            : t("advertiseCleared")
         )
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -106,7 +118,7 @@ export function MeshBlock({
         setSaving(false)
       }
     },
-    [desktop, patchPrefs, pick, t]
+    [desktop, patchPrefs, pickAddress, t]
   )
 
   const onRefresh = useCallback(async () => {
@@ -171,19 +183,29 @@ export function MeshBlock({
           {t("installHint")}
         </p>
       ) : null}
-      {desktop && pick ? (
+      {desktop && advertiseAddress ? (
         <SettingsField
           htmlFor="mesh-advertise"
           label={t("advertiseTitle")}
-          description={t("advertiseDescription", { address: pick.address })}
+          description={
+            pick
+              ? t("advertiseDescription", { address: advertiseAddress })
+              : t("advertiseDescriptionSaved", { address: advertiseAddress })
+          }
           testid="mesh-advertise-field"
         >
           <Switch
             id="mesh-advertise"
             checked={advertisingMesh}
             onCheckedChange={(next) => void onAdvertise(next)}
-            disabled={saving || loopback}
-            aria-label={t("advertiseLabel", { address: pick.address })}
+            // With nothing carried the switch can still be turned off — that
+            // is the only way back to detection.
+            disabled={saving || loopback || (!pick && !advertised)}
+            aria-label={
+              pick
+                ? t("advertiseLabel", { address: advertiseAddress })
+                : t("advertiseLabelSaved", { address: advertiseAddress })
+            }
           />
         </SettingsField>
       ) : null}

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react"
 
 import { RemoteAccessSummary } from "./remote-access-summary"
+import { COMPANION_TUNNEL_LOCAL_URL } from "@/lib/connectivity/tunnel-resolver"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
@@ -24,7 +25,7 @@ describe("RemoteAccessSummary", () => {
       <RemoteAccessSummary
         isHost
         relay="ready"
-        tunnel={{ available: true, publicUrl: null }}
+        tunnel={{ available: true, publicUrl: null, localUrl: null }}
         mesh={{ available: true, status: tailscale }}
       />
     )
@@ -42,7 +43,7 @@ describe("RemoteAccessSummary", () => {
       <RemoteAccessSummary
         isHost
         relay="legacy"
-        tunnel={{ available: true, publicUrl: null }}
+        tunnel={{ available: true, publicUrl: null, localUrl: null }}
         mesh={{ available: true, status: null }}
       />
     )
@@ -54,7 +55,11 @@ describe("RemoteAccessSummary", () => {
       <RemoteAccessSummary
         isHost
         relay="legacy"
-        tunnel={{ available: true, publicUrl: "https://a.trycloudflare.com" }}
+        tunnel={{
+          available: true,
+          publicUrl: "https://a.trycloudflare.com",
+          localUrl: COMPANION_TUNNEL_LOCAL_URL,
+        }}
         mesh={{ available: true, status: null }}
       />
     )
@@ -62,12 +67,34 @@ describe("RemoteAccessSummary", () => {
     expect(screen.getByTestId("remote-access-tunnel")).toHaveTextContent("a.trycloudflare.com")
   })
 
+  it("a tunnel exposing another origin is not a route to this Host", () => {
+    // One cloudflared child is shared with the connectors' webhook receiver.
+    // A public URL in front of *that* proves nothing about reaching this Host.
+    render(
+      <RemoteAccessSummary
+        isHost
+        relay="unchecked"
+        tunnel={{
+          available: true,
+          publicUrl: "https://a.trycloudflare.com",
+          localUrl: "http://127.0.0.1:17890",
+        }}
+        mesh={{ available: true, status: null }}
+      />
+    )
+    expect(screen.getByTestId("remote-access-verdict")).toHaveAttribute("data-verdict", "unknown")
+    expect(screen.getByTestId("remote-access-tunnel")).toHaveAttribute("data-tone", "warn")
+    expect(screen.getByTestId("remote-access-tunnel")).toHaveTextContent(
+      "routeState.tunnelOther:http://127.0.0.1:17890"
+    )
+  })
+
   it("labels desktop-only routes as such off the desktop and never hides them", () => {
     render(
       <RemoteAccessSummary
         isHost
         relay="unchecked"
-        tunnel={{ available: false, publicUrl: null }}
+        tunnel={{ available: false, publicUrl: null, localUrl: null }}
         mesh={{ available: false, status: null }}
       />
     )
@@ -83,7 +110,7 @@ describe("RemoteAccessSummary", () => {
       <RemoteAccessSummary
         isHost={false}
         relay="off"
-        tunnel={{ available: false, publicUrl: null }}
+        tunnel={{ available: false, publicUrl: null, localUrl: null }}
         mesh={{
           available: true,
           status: {

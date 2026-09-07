@@ -23,28 +23,24 @@ import { Switch } from "@/components/ui/switch"
 import { useHostAdminReachForCommand } from "@/hooks/connectivity/use-host-admin-reach"
 import { cn } from "@/lib/utils"
 import {
-  parseTunnelBusy,
+  COMPANION_TUNNEL_LOCAL_URL,
+  probeTunnel,
   saveNamedTunnelConfig,
+  startTunnel,
   type TunnelProbe,
 } from "@/lib/connectivity/tunnel-resolver"
 
 import {
-  DEFAULT_PORT,
   clearNamedTunnelConfig,
   getTunnelConfig,
   getTunnelInfo,
-  probeTunnel,
   setTunnelMode,
-  startTunnel,
   stopTunnel,
   transportInvoker,
   type TunnelConfig,
   type TunnelInfo,
 } from "./companion-server-commands"
 import { HostReachNotice } from "./host-reach-notice"
-
-/** The origin this block exposes: the companion HTTPS listener. */
-export const COMPANION_TUNNEL_LOCAL_URL = `https://127.0.0.1:${DEFAULT_PORT}`
 
 export function TunnelBlock() {
   const t = useTranslations("mobile.companion.tunnel")
@@ -55,7 +51,12 @@ export function TunnelBlock() {
   const [config, setConfig] = useState<TunnelConfig | null>(null)
   const [probe, setProbe] = useState<TunnelProbe | null>(null)
   const [probing, setProbing] = useState(false)
-  const [conflict, setConflict] = useState<TunnelInfo | null>(null)
+  // The one cloudflared child is shared with the Connections tunnel tab, so
+  // both taking it over and shutting it down need the user's word first.
+  const [conflict, setConflict] = useState<{
+    current: TunnelInfo
+    intent: "start" | "stop"
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [hostnameInput, setHostnameInput] = useState("")
@@ -65,11 +66,9 @@ export function TunnelBlock() {
     if (!desktop) return
     setProbing(true)
     try {
-      setProbe(await probeTunnel())
-    } catch {
-      // "Unknown" rather than "missing": the switch stays usable and the
+      // `null` is "unknown", not "missing": the switch stays usable and the
       // launcher's own error is the authority.
-      setProbe(null)
+      setProbe(await probeTunnel(transportInvoker))
     } finally {
       setProbing(false)
     }
@@ -86,7 +85,10 @@ export function TunnelBlock() {
         if (cfg?.hostname) setHostnameInput(cfg.hostname)
       })
       .catch(() => {})
-    void probeTunnel()
+    // Written from a promise callback, never synchronously: the effect
+    // set-state rule is what keeps this honest, so this does not call
+    // `runProbe` (which flips `probing` on the spot for the button).
+    void probeTunnel(transportInvoker)
       .then((next) => {
         if (!cancelled) setProbe(next)
       })
@@ -96,35 +98,64 @@ export function TunnelBlock() {
     }
   }, [desktop])
 
+  const mode = config?.mode ?? "quick"
+  // A live quick tunnel started elsewhere (the Connections tab exposes the
+  // webhook receiver through the same child) shows as on, with what it is
+  // actually exposing, rather than as this listener's tunnel. Every path that
+  // would take that child away from the other surface asks first.
+  const exposingOther = Boolean(
+    info && mode === "quick" && info.localUrl && info.localUrl !== COMPANION_TUNNEL_LOCAL_URL
+  )
+
   const start = useCallback(
     async (replace: boolean) => {
       setBusy(true)
       try {
-        const next = await startTunnel(COMPANION_TUNNEL_LOCAL_URL, replace)
-        setInfo(next)
-        setConflict(null)
-        toast.success(t("started"))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        const current = parseTunnelBusy(msg)
-        if (current) {
-          // The one cloudflared child is serving another origin. Show the
-          // conflict and let the user decide, instead of the old silent swap.
-          setConflict(current)
-          return
+        const outcome = await startTunnel(COMPANION_TUNNEL_LOCAL_URL, transportInvoker, {
+          replace,
+        })
+        switch (outcome.kind) {
+          case "started":
+            setInfo(outcome.info)
+            setConflict(null)
+            toast.success(t("started"))
+            break
+          case "busy":
+            // The child is serving another origin. Show the conflict and let
+            // the user decide, instead of the old silent swap.
+            setConflict({ current: outcome.current, intent: "start" })
+            break
+          case "not_installed":
+            setProbe({ installed: false })
+            toast.error(t("notInstalled"))
+            break
+          case "error":
+            toast.error(outcome.message)
+            break
+          case "unsupported":
+            // No launcher on this shell; `HostReachNotice` already says why.
+            break
         }
-        if (/cloudflared.*not.found|not.installed/i.test(msg)) {
-          setProbe({ installed: false })
-          toast.error(t("notInstalled"))
-          return
-        }
-        toast.error(msg)
       } finally {
         setBusy(false)
       }
     },
     [t]
   )
+
+  const stop = useCallback(async () => {
+    setBusy(true)
+    try {
+      await stopTunnel()
+      setInfo(null)
+      setConflict(null)
+      toast.success(t("stopped"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }, [t])
 
   const onToggle = useCallback(
     async (enabled: boolean) => {
@@ -133,19 +164,15 @@ export function TunnelBlock() {
         await start(false)
         return
       }
-      setBusy(true)
-      try {
-        await stopTunnel()
-        setInfo(null)
-        setConflict(null)
-        toast.success(t("stopped"))
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : String(err))
-      } finally {
-        setBusy(false)
+      if (exposingOther && info) {
+        // Stopping would take down a public URL another surface is showing.
+        // The same conflict `TunnelError::Busy` refuses on the way in.
+        setConflict({ current: info, intent: "stop" })
+        return
       }
+      await stop()
     },
-    [desktop, start, t]
+    [desktop, exposingOther, info, start, stop]
   )
 
   const onModeChange = useCallback(
@@ -157,7 +184,9 @@ export function TunnelBlock() {
         const next = await getTunnelConfig()
         setConfig(next)
         if (next?.hostname) setHostnameInput(next.hostname)
-        if (mode === "quick") {
+        // Only tear down a tunnel this block owns: the same child may be
+        // serving the connectors' webhook receiver.
+        if (mode === "quick" && !exposingOther) {
           await stopTunnel()
           setInfo(null)
         }
@@ -167,7 +196,7 @@ export function TunnelBlock() {
         setBusy(false)
       }
     },
-    [desktop]
+    [desktop, exposingOther]
   )
 
   const onSaveNamed = useCallback(async () => {
@@ -209,16 +238,9 @@ export function TunnelBlock() {
     }
   }, [desktop, t])
 
-  const mode = config?.mode ?? "quick"
   const namedReady = Boolean(config?.hasToken && config?.hostname)
   const publicUrl = info ? info.publicUrl : namedReady ? config?.hostname : null
   const notInstalled = desktop && probe !== null && !probe.installed
-  // A live quick tunnel started elsewhere (the Connections tab exposes the
-  // webhook receiver through the same child) shows as on, with what it is
-  // actually exposing, rather than as this listener's tunnel.
-  const exposingOther = Boolean(
-    info && mode === "quick" && info.localUrl && info.localUrl !== COMPANION_TUNNEL_LOCAL_URL
-  )
 
   return (
     <SettingsBlock
@@ -278,22 +300,31 @@ export function TunnelBlock() {
             aria-label={tc("busyTitle")}
             className="space-y-2 border border-amber-300/70 px-3 py-2.5 dark:border-amber-800"
             data-testid="tunnel-conflict"
+            data-intent={conflict.intent}
           >
             <p className="flex items-start gap-2 text-xs font-medium">
               <ShieldAlertIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
               {tc("busyTitle")}
             </p>
             <p className="text-[11px] text-muted-foreground">
-              {tc("busyBody", { localUrl: conflict.localUrl, publicUrl: conflict.publicUrl })}
+              {conflict.intent === "stop"
+                ? tc("busyStopBody", {
+                    localUrl: conflict.current.localUrl,
+                    publicUrl: conflict.current.publicUrl,
+                  })
+                : tc("busyBody", {
+                    localUrl: conflict.current.localUrl,
+                    publicUrl: conflict.current.publicUrl,
+                  })}
             </p>
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                onClick={() => void start(true)}
+                onClick={() => void (conflict.intent === "stop" ? stop() : start(true))}
                 disabled={busy}
                 data-testid="tunnel-conflict-replace"
               >
-                {tc("busyReplace")}
+                {conflict.intent === "stop" ? tc("busyStopConfirm") : tc("busyReplace")}
               </Button>
               <Button
                 size="sm"

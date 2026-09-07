@@ -1348,8 +1348,9 @@ pub async fn companion_create_owner_invitation(
         (hostname, true)
     } else {
         let host = match state.bind_mode() {
-            Some(BindMode::Lan) => advertised_lan_host(state.data_dir())
-                .unwrap_or_else(|| "127.0.0.1".to_string()),
+            Some(BindMode::Lan) => {
+                advertised_lan_host(state.data_dir()).unwrap_or_else(|| "127.0.0.1".to_string())
+            }
             _ => "127.0.0.1".to_string(),
         };
         (format!("https://{host}:{port}"), false)
@@ -2088,10 +2089,35 @@ pub(crate) fn detect_lan_ip() -> Option<String> {
 /// invitation arm and the `companion_endpoints` LAN report, so the three
 /// surfaces that tell a device "reach me here" cannot disagree.
 pub(crate) fn advertised_lan_host(data_dir: Option<&std::path::Path>) -> Option<String> {
-    let saved = reachability_config::load_config(data_dir);
-    match saved.advertise_host() {
-        Some(host) => Some(host.to_string()),
-        None => detect_lan_ip(),
+    // Only a real data directory holds a preference worth trusting.
+    // `reachability_config::config_path(None)` falls back to the system temp
+    // directory, which on Unix is world-writable: reading it here would let any
+    // local process drop a file that renames the host every paired device is
+    // told to dial. Without a data dir (a headless `companion_endpoints`, a
+    // desktop state with no resolved dir) there is no saved preference at all,
+    // so detection is the whole answer.
+    let saved = data_dir
+        .map(|dir| reachability_config::load_config(Some(dir)))
+        .unwrap_or_default();
+    let host = match saved.advertise_host() {
+        Some(host) => host.to_string(),
+        None => detect_lan_ip()?,
+    };
+    Some(host_for_authority(&host))
+}
+
+/// A host as it may appear between `https://` and `:port`.
+///
+/// An IPv6 literal has to be bracketed there (RFC 3986 §3.2.2) or the colons
+/// swallow the port: `https://fd7a::1:27890` names no host and no port any
+/// parser can recover. Both sources reach this — a ZeroTier network with only
+/// IPv6 auto-assign, and `detect_lan_ip`'s own V6 arm. Names, IPv4 addresses
+/// and already-bracketed hosts pass through untouched.
+fn host_for_authority(host: &str) -> String {
+    if host.starts_with('[') || host.parse::<std::net::Ipv6Addr>().is_err() {
+        host.to_string()
+    } else {
+        format!("[{host}]")
     }
 }
 
@@ -2113,6 +2139,51 @@ mod tests {
 
     #[test]
     fn commands_module_compiles() {}
+
+    #[test]
+    fn an_ipv6_advertise_host_is_bracketed_for_the_url_authority() {
+        assert_eq!(host_for_authority("100.101.2.3"), "100.101.2.3");
+        assert_eq!(host_for_authority("host.example.com"), "host.example.com");
+        assert_eq!(
+            host_for_authority("fd7a:115c:a1e0::1"),
+            "[fd7a:115c:a1e0::1]"
+        );
+        // Already bracketed stays as it is; double-bracketing is also invalid.
+        assert_eq!(
+            host_for_authority("[fd7a:115c:a1e0::1]"),
+            "[fd7a:115c:a1e0::1]"
+        );
+    }
+
+    #[test]
+    fn without_a_data_dir_no_saved_advertise_host_is_consulted() {
+        // `reachability_config::config_path(None)` resolves into the system
+        // temp directory, which on Unix any local process can write. Planting
+        // a preference there must not rename the host paired devices dial.
+        //
+        // Proved against a PRIVATE data dir rather than by writing the shared
+        // temp path: cargo runs this crate's tests as parallel threads in one
+        // binary, so planting a file at a process-global location races every
+        // other test that reads it, and a panic before the restore leaves it
+        // on disk for every later run. The same planted config is consulted
+        // when a data dir names it and ignored when none is given, which is
+        // exactly the distinction that matters.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let planted = dir.path().join("cognia").join("reachability.json");
+        std::fs::create_dir_all(planted.parent().expect("parent")).expect("create");
+        std::fs::write(&planted, br#"{"advertiseHost":"attacker.example.com"}"#).expect("write");
+
+        assert_eq!(
+            advertised_lan_host(Some(dir.path())).as_deref(),
+            Some("attacker.example.com"),
+            "a preference under a real data dir is the whole point of the setting"
+        );
+
+        let answer = advertised_lan_host(None);
+        assert_ne!(answer.as_deref(), Some("attacker.example.com"));
+        // Whatever it answers is detection, which may legitimately be `None`.
+        assert_eq!(answer, detect_lan_ip().map(|h| host_for_authority(&h)));
+    }
 
     /// The lifecycle commands are desktop-local and must stay off the wire.
     ///

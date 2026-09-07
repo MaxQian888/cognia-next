@@ -8,6 +8,22 @@
 
 import { isTauri } from "@/lib/platform/detect"
 
+/**
+ * Mirrors Rust `companion_api::server::DEFAULT_PORT`: 27890, outside the
+ * 789x Clash mixed/SOCKS range so it cannot collide with a local proxy.
+ */
+export const COMPANION_SERVER_DEFAULT_PORT = 27890
+
+/**
+ * The origin the companion tunnel exposes: this Host's HTTPS listener.
+ *
+ * Lives beside `startTunnel` / `probeTunnel` rather than in a settings block,
+ * because "is this tunnel pointed at the Host" is a connectivity fact, and
+ * every surface that has to answer it would otherwise import a React component
+ * to read one string.
+ */
+export const COMPANION_TUNNEL_LOCAL_URL = `https://127.0.0.1:${COMPANION_SERVER_DEFAULT_PORT}`
+
 export interface TunnelInfo {
   publicUrl: string
   localUrl: string

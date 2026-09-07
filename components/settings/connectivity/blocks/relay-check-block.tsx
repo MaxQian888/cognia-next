@@ -17,9 +17,23 @@ import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { RelaySlice } from "@/hooks/connectivity/use-remote-access"
-import { relayProtocolMatches } from "@/lib/signaling/relay-probe"
+import { relayProtocolMatches, type RelayProbeState } from "@/lib/signaling/relay-probe"
 import { SIGNALING_PROTOCOL_VERSION } from "@/lib/signaling/types"
 import { cn } from "@/lib/utils"
+
+/**
+ * The badge word for each probe state. The raw union members are wire
+ * identifiers (`not-a-relay`, `cors-blocked`), not language: `data-state`
+ * below still carries them for tests and styling.
+ */
+export const RELAY_STATE_LABEL_KEY: Record<RelayProbeState, string> = {
+  ready: "state.ready",
+  legacy: "state.legacy",
+  "not-a-relay": "state.notRelay",
+  "cors-blocked": "state.corsBlocked",
+  unreachable: "state.unreachable",
+  "invalid-url": "state.invalidUrl",
+}
 
 export interface RelayCheckBlockProps {
   relay: RelaySlice
@@ -93,7 +107,7 @@ export function RelayCheckBlock({ relay, formatTime = defaultFormatTime }: Relay
             data-state={result.state}
           >
             <CircleIcon className="size-2 fill-current" aria-hidden="true" />
-            {result.state}
+            {t(RELAY_STATE_LABEL_KEY[result.state])}
           </Badge>
         ) : null
       }
@@ -125,6 +139,14 @@ export function RelayCheckBlock({ relay, formatTime = defaultFormatTime }: Relay
       <p className="text-[11px] text-muted-foreground">
         {source === "local" ? t("sourceLocal") : source === "host" ? t("sourceHost") : null}
       </p>
+      {result && !relay.probedFromHost ? (
+        <p
+          className="text-[11px] text-amber-700 dark:text-amber-300"
+          data-testid="relay-check-vantage"
+        >
+          {t("notFromHost")}
+        </p>
+      ) : null}
       {message ? (
         <p role="status" className={cn("text-xs", tone)} data-testid="relay-check-message">
           {message}
