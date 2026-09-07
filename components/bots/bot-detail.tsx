@@ -28,7 +28,14 @@
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { IdCardIcon, InboxIcon, KeyRoundIcon, ShieldIcon, ZapIcon } from "lucide-react"
+import {
+  IdCardIcon,
+  InboxIcon,
+  KeyRoundIcon,
+  ShieldIcon,
+  SlidersHorizontalIcon,
+  ZapIcon,
+} from "lucide-react"
 
 import { ConsoleSection } from "@/components/surface/console-section"
 import { FactList, FactRow } from "@/components/surface/fact-list"
@@ -37,6 +44,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
 
 import { BotHero } from "./bot-hero"
+import { BotConfigSection } from "./sections/config-section"
 import { BotCredentialsSection } from "./sections/credentials-section"
 import { BotDeliveriesSection } from "./sections/deliveries-section"
 import { BotPolicySection } from "./sections/policy-section"
@@ -45,9 +53,11 @@ import { useBotProblemText, useBotRelativeTime } from "./bot-visuals"
 
 export interface BotDetailProps {
   row: BotConsoleRow | null
+  /** Called after the installation is removed, so the console can deselect. */
+  onUninstalled?: () => void
 }
 
-export function BotDetail({ row }: BotDetailProps) {
+export function BotDetail({ row, onUninstalled }: BotDetailProps) {
   const t = useTranslations("bots")
   const relative = useBotRelativeTime()
   const problemText = useBotProblemText()
@@ -71,7 +81,7 @@ export function BotDetail({ row }: BotDetailProps) {
 
   return (
     <div className="@container/console-pane flex h-full min-h-0 flex-col" data-testid="bot-detail">
-      <BotHero row={row} />
+      <BotHero row={row} {...(onUninstalled ? { onUninstalled } : {})} />
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
         {/* Installation-wide alerts sit above the grid, not inside a card:
@@ -146,6 +156,15 @@ export function BotDetail({ row }: BotDetailProps) {
             }
           >
             <BotCredentialsSection row={row} />
+          </ConsoleSection>
+
+          <ConsoleSection
+            id="config"
+            title={t("config.title")}
+            icon={SlidersHorizontalIcon}
+            description={t("config.description")}
+          >
+            <BotConfigSection row={row} />
           </ConsoleSection>
 
           {/* Full width: each row can carry a whole error message, and in half

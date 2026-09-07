@@ -212,6 +212,36 @@ describe("buildBotRows", () => {
   })
 })
 
+describe("configuration on the row", () => {
+  it("carries the definition's schema and the installation's stored values", () => {
+    const install = installation({ config: { channel: "#ops" } })
+    const row = buildBotRow({
+      installation: install,
+      resolved: resolved(install, {
+        configSchema: { properties: { channel: { type: "string" } } },
+      }),
+    })
+    expect(row.configSchema).toEqual({ properties: { channel: { type: "string" } } })
+    expect(row.config).toEqual({ channel: "#ops" })
+  })
+
+  it("omits the schema for a definition that has none, rather than an empty object", () => {
+    // "Nothing to configure" and "an empty form" are different answers.
+    const install = installation()
+    const row = buildBotRow({ installation: install, resolved: resolved(install) })
+    expect("configSchema" in row).toBe(false)
+  })
+
+  it("keeps an orphan's stored config, which is all that is left of it", () => {
+    const row = buildBotRow({
+      installation: installation({ config: { channel: "#ops" } }),
+      resolved: null,
+    })
+    expect(row.config).toEqual({ channel: "#ops" })
+    expect("configSchema" in row).toBe(false)
+  })
+})
+
 describe("countDeadLettersByInstallation", () => {
   it("counts only dead letters, per installation", () => {
     expect(

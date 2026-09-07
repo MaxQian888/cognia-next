@@ -16,6 +16,7 @@ import { buildBotStats, type BotConsoleRow } from "@/lib/bot/console/bot-rows"
 import type { PluginBotExecutor } from "@/types/plugin/plugin-bot"
 import { cn } from "@/lib/utils"
 
+import { BotLifecycleControls } from "./bot-lifecycle-controls"
 import { RunBotNowButton } from "./run-bot-now-button"
 import { BotExecutorIcon, BotOrphanBadge, BotSourceIcon, BotStatusBadge } from "./bot-visuals"
 
@@ -33,7 +34,13 @@ const EXECUTOR_PLATE: Record<PluginBotExecutor, string> = {
   handler: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
 }
 
-export function BotHero({ row }: { row: BotConsoleRow }) {
+export interface BotHeroProps {
+  row: BotConsoleRow
+  /** Called after the installation is removed, so the console can deselect. */
+  onUninstalled?: () => void
+}
+
+export function BotHero({ row, onUninstalled }: BotHeroProps) {
   const t = useTranslations("bots")
 
   // Labels are translated here rather than inside the strip: `StatStrip` is
@@ -94,8 +101,9 @@ export function BotHero({ row }: { row: BotConsoleRow }) {
           act, the reason is a sentence, and a sentence does not fit in a
           heading. Above the strip because it acts on the Bot the strip
           describes. */}
-      <div className="mt-3">
+      <div className="mt-3 flex flex-col gap-2">
         <RunBotNowButton row={row} />
+        <BotLifecycleControls row={row} {...(onUninstalled ? { onUninstalled } : {})} />
       </div>
       {stats.length > 0 ? (
         <StatStrip

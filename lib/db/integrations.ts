@@ -133,6 +133,29 @@ export async function listIntegrationAccounts(
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
+/**
+ * Every integration account on this device, optionally narrowed to one
+ * integration.
+ *
+ * Deliberately without a plugin id, unlike {@link listIntegrationAccounts}. The
+ * caller that needs this is a credential picker: a slot names an INTEGRATION
+ * (`github-delivery`), and the account that satisfies it may well have been
+ * created by a plugin other than the one asking.
+ *
+ * A full-table read on purpose. `integrationId` on its own is not an index,
+ * and adding one would reset every existing database (`CURRENT_SCHEMA_VERSION`
+ * only upgrades upward) to speed up a list a person opens by hand.
+ */
+export async function listAllIntegrationAccounts(
+  filter: { integrationId?: string } = {}
+): Promise<IntegrationAccount[]> {
+  const rows = await getDb().integrationAccounts.toArray()
+  const visible = filter.integrationId
+    ? rows.filter((row) => row.integrationId === filter.integrationId)
+    : rows
+  return visible.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
 export async function getIntegrationAccount(
   pluginId: string,
   accountId: string

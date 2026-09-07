@@ -12,6 +12,7 @@ import {
   getIntegrationIngressEndpoint,
   getIntegrationActionJob,
   insertIntegrationEvent,
+  listAllIntegrationAccounts,
   listIntegrationAccounts,
   listIntegrationSubscriptions,
   updateIntegrationSubscription,
@@ -54,6 +55,36 @@ describe("Integration persistence", () => {
     await expect(listIntegrationSubscriptions("gitlab-delivery", github.id)).resolves.toHaveLength(
       0
     )
+  })
+
+  it("lists accounts across plugins, narrowed by integration", async () => {
+    // A Bot credential slot names an integration, and the account satisfying
+    // it may belong to a plugin other than the one that shipped the Bot.
+    await createIntegrationAccount("github-delivery", {
+      integrationId: "github",
+      providerId: "github-oauth",
+      authSessionId: "opaque-gh",
+      remoteAccountId: "octocat",
+      label: "Octocat",
+    })
+    await createIntegrationAccount("some-other-plugin", {
+      integrationId: "github",
+      providerId: "github-oauth",
+      authSessionId: "opaque-gh2",
+      remoteAccountId: "hubot",
+      label: "Hubot",
+    })
+    await createIntegrationAccount("gitlab-delivery", {
+      integrationId: "gitlab",
+      providerId: "gitlab-oauth",
+      authSessionId: "opaque-gl",
+      remoteAccountId: "octocat",
+      label: "GitLab Octocat",
+    })
+
+    const github = await listAllIntegrationAccounts({ integrationId: "github" })
+    expect(github.map((a) => a.label).sort()).toEqual(["Hubot", "Octocat"])
+    await expect(listAllIntegrationAccounts()).resolves.toHaveLength(3)
   })
 
   it("shares one host-owned ingress endpoint across account subscriptions", async () => {

@@ -3,11 +3,31 @@
     "refresh": "Refresh"
   },
   "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
+  "config": {
+    "description": "What this installation passes to every run.",
+    "emptyBody": "This Bot ships no settings form. Everything it needs comes from its triggers and credentials.",
+    "emptyTitle": "Nothing to configure",
+    "orphanBody": "The definition is gone, so there is no form to render. Whatever this installation stored is still on the row.",
+    "orphanTitle": "No settings to show",
+    "save": "Save settings",
+    "title": "Settings"
+  },
   "credentials": {
+    "bindAria": "Bind {slot}",
+    "blockedOrphan": "Bindings cannot be changed while the definition is missing, because there is nothing left to check them against.",
     "boundTo": "Bound to {target}",
+    "candidate": "{label} · {detail}",
+    "candidateDisabled": "{label} · {detail} (switched off)",
+    "choosePlaceholder": "Choose an account",
+    "clear": "Not bound",
     "description": "Slots the definition declares. A binding names an account, never a secret.",
     "emptyBody": "This Bot reaches nothing outside Cognia, so it asks for no credentials.",
     "emptyTitle": "No credentials needed",
+    "noCandidates": {
+      "adapter": "No connector for this platform yet. Add one under Settings, Connections.",
+      "either": "Nothing to bind yet. Connect an integration account or add a connector first.",
+      "integration": "No account for this integration yet. Connect one under Settings, Connections."
+    },
     "notBound": "Not bound",
     "optional": "Optional",
     "orphanBody": "Credential slots are read from the definition, and this one has none to read.",
@@ -44,6 +64,44 @@
     "handler": "Plugin handler",
     "squad": "Squad",
     "workflow": "Workflow"
+  },
+  "install": {
+    "action": "Install",
+    "description": "Every definition this device can see, from your plugins and your own.",
+    "emptyBody": "No plugin on this device contributes a Bot, and you have not written one.",
+    "emptyFiltered": "No definition matches that search.",
+    "emptyTitle": "Nothing to install",
+    "installedCount": "{count, plural, =1 {1 installed} other {# installed}}",
+    "noWorkspace": "No workspace is open, so there is nothing to scope this to yet.",
+    "scopeHint": {
+      "account": "Runs everywhere you are signed in.",
+      "project": "Binding to a single project needs a project picker, which this console does not have yet.",
+      "workspace": "Runs only inside the workspace you have open."
+    },
+    "scopeLabel": "Install for",
+    "searchAria": "Search Bot definitions",
+    "searchPlaceholder": "Search definitions",
+    "slotCount": "{count, plural, =1 {1 credential} other {# credentials}}",
+    "submit": "Install",
+    "title": "Install a Bot",
+    "triggerCount": "{count, plural, =1 {1 trigger} other {# triggers}}",
+    "unresolvedHandler": "Its handler did not load, so this Bot could not run once installed."
+  },
+  "lifecycle": {
+    "bound": "Credential bound",
+    "configSaved": "Settings saved",
+    "definitionMissing": "That Bot's definition is gone. Reinstall the plugin that owned it, or uninstall this Bot.",
+    "enabledLabel": "Enabled",
+    "installed": "{name} installed",
+    "notInstallable": "That Bot cannot be installed while its handler is missing.",
+    "status": {
+      "disabled": "Bot disabled",
+      "enabled": "Bot enabled",
+      "needs_setup": "Still needs a credential, so it stays off"
+    },
+    "unavailable": "That change cannot be made from here",
+    "unbound": "Credential cleared",
+    "uninstalled": "Bot uninstalled"
   },
   "listPane": {
     "emptyBody": "Bots arrive with the plugins that declare them. Install a plugin that contributes one to get started.",
@@ -189,6 +247,14 @@
     "orphanBody": "Triggers are read from the definition, and this one has none to read.",
     "orphanTitle": "Definition missing",
     "title": "Triggers"
+  },
+  "uninstall": {
+    "action": "Uninstall",
+    "body": "Its scheduled triggers stop and their scheduler tasks are removed. Any dead-lettered deliveries can no longer be replayed. Turning the Bot off instead keeps all of it.",
+    "cancel": "Keep it",
+    "confirm": "Uninstall",
+    "orphanBody": "Its definition is already gone, so this removes the leftover row and any scheduler tasks it still owns.",
+    "title": "Uninstall {name}?"
   },
   "write": {
     "alreadyQueued": "That run is already queued.",

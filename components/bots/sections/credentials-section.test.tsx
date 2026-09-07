@@ -1,10 +1,51 @@
 /** @jest-environment jsdom */
 
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import type { BotConsoleRow } from "@/lib/bot/console/bot-rows"
+import type { BotCredentialCandidate } from "@/lib/bot/console/credential-candidates"
+
+const bindCredential = jest.fn(
+  async (_installationId: string, _slotId: string, _candidate: BotCredentialCandidate | null) =>
+    undefined
+)
+let readiness = { availability: { state: "available", reason: "local-host" }, can: true }
+let candidates: BotCredentialCandidate[] = []
+
+jest.mock("@/hooks/bots/use-bot-lifecycle-actions", () => ({
+  useBotLifecycleReadiness: () => readiness,
+  useBotLifecycleActions: () => ({
+    pending: new Set<string>(),
+    bindCredential: (
+      installationId: string,
+      slotId: string,
+      candidate: BotCredentialCandidate | null
+    ) => bindCredential(installationId, slotId, candidate),
+  }),
+}))
+jest.mock("@/hooks/bots/use-credential-candidates", () => ({
+  useCredentialCandidates: () => ({ forSlot: () => candidates, loading: false }),
+}))
 
 import { BotCredentialsSection } from "./credentials-section"
+
+function candidate(over: Partial<BotCredentialCandidate> = {}): BotCredentialCandidate {
+  return {
+    value: "iacc_1",
+    kind: "integration-account",
+    label: "Octocat",
+    detail: "github",
+    disabled: false,
+    ...over,
+  }
+}
+
+beforeEach(() => {
+  bindCredential.mockClear()
+  readiness = { availability: { state: "available", reason: "local-host" }, can: true }
+  candidates = [candidate()]
+})
 
 function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
   return {
@@ -32,6 +73,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
       },
       { id: "extra", label: "Analytics", optional: true, bound: false },
     ],
+    config: {},
     deadLetters: 0,
     updatedAt: 10,
     ...over,
@@ -72,5 +114,64 @@ describe("BotCredentialsSection", () => {
 
     render(<BotCredentialsSection row={row({ credentials: [], orphaned: true })} />)
     expect(screen.getByText("Definition missing")).toBeInTheDocument()
+  })
+})
+
+describe("binding a credential", () => {
+  it("writes exactly one id, and only for the slot that was changed", async () => {
+    const user = userEvent.setup()
+    render(<BotCredentialsSection row={row()} />)
+    await user.click(screen.getByTestId("bot-credential-select-token"))
+    await user.click(await screen.findByRole("option", { name: /Octocat/ }))
+    expect(bindCredential).toHaveBeenCalledWith("boti_1", "token", candidate())
+  })
+
+  it("clears a binding rather than leaving an empty object behind", async () => {
+    const user = userEvent.setup()
+    render(<BotCredentialsSection row={row()} />)
+    await user.click(screen.getByTestId("bot-credential-select-chat"))
+    await user.click(await screen.findByRole("option", { name: "Not bound" }))
+    expect(bindCredential).toHaveBeenCalledWith("boti_1", "chat", null)
+  })
+
+  it("renders the picker DISABLED with a reason rather than hiding it", async () => {
+    // Hiding it would collapse "this Bot needs no credentials", "you cannot
+    // bind from here" and "it is bound already" into one blank space.
+    readiness = {
+      availability: { state: "unsupported", reason: "requires-companion" },
+      can: false,
+    }
+    render(<BotCredentialsSection row={row()} />)
+    expect(screen.getByTestId("bot-credential-select-token")).toBeDisabled()
+    expect(screen.getByTestId("bot-credentials-blocked")).toHaveTextContent(
+      "This browser cannot run Bots"
+    )
+  })
+
+  it("refuses on an orphan and says why, because the write would refuse too", () => {
+    render(<BotCredentialsSection row={row({ orphaned: true })} />)
+    expect(screen.getByTestId("bot-credential-select-token")).toBeDisabled()
+    expect(screen.getByTestId("bot-credentials-blocked")).toHaveTextContent(
+      "nothing left to check them against"
+    )
+  })
+
+  it("tells an empty candidate list apart from a disallowed write", () => {
+    // Nothing to pick and not being allowed to pick need different remedies.
+    candidates = []
+    render(<BotCredentialsSection row={row()} />)
+    expect(screen.queryByTestId("bot-credential-select-token")).not.toBeInTheDocument()
+    expect(screen.getByTestId("bot-credential-empty-token")).toHaveTextContent(
+      "No account for this integration yet"
+    )
+  })
+
+  it("marks a switched-off candidate without removing it from the list", async () => {
+    // Binding to a disabled account is a legitimate way to prepare a Bot.
+    const user = userEvent.setup()
+    candidates = [candidate({ disabled: true })]
+    render(<BotCredentialsSection row={row()} />)
+    await user.click(screen.getByTestId("bot-credential-select-token"))
+    expect(await screen.findByRole("option", { name: /switched off/ })).toBeInTheDocument()
   })
 })

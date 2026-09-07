@@ -10,9 +10,17 @@ let loading = false
 
 jest.mock("@/hooks/bots/use-bot-installations", () => ({
   useBotInstallations: () => ({ rows, summary, loading }),
+  // Also read by `use-bot-catalog`, which the install sheet pulls in.
+  enabledPluginKey: () => "",
 }))
 jest.mock("./bot-runtime-notice", () => ({
   BotRuntimeNotice: () => <div data-testid="bot-runtime-notice-stub" />,
+}))
+// The sheet has its own suite. Stubbed here so the console's tests are about
+// the console, and so a Dexie read does not have to be stood up for each one.
+jest.mock("./install-bot-sheet", () => ({
+  InstallBotSheet: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="install-bot-sheet-stub" /> : null,
 }))
 
 import { BotConsole } from "./bot-console"
@@ -33,6 +41,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
     unboundSlots: [],
     requiredSlots: [],
     credentials: [],
+    config: {},
     deadLetters: 0,
     updatedAt: 10,
     ...over,
@@ -84,5 +93,32 @@ describe("BotConsole", () => {
   it("always mounts the runtime notice, which is the surface contract's explain half", () => {
     render(<BotConsole onSelect={jest.fn()} />)
     expect(screen.getByTestId("bot-runtime-notice-stub")).toBeInTheDocument()
+  })
+})
+
+describe("the install entry point", () => {
+  it("opens the sheet from the header", () => {
+    render(<BotConsole onSelect={jest.fn()} />)
+    expect(screen.queryByTestId("install-bot-sheet-stub")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("bots-install-open"))
+    expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
+  })
+
+  it("opens from `?install=1`, latched during render rather than in an effect", () => {
+    render(<BotConsole onSelect={jest.fn()} installParam="1" />)
+    expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
+  })
+
+  it("stays shut when the param is absent", () => {
+    render(<BotConsole onSelect={jest.fn()} installParam={null} />)
+    expect(screen.queryByTestId("install-bot-sheet-stub")).not.toBeInTheDocument()
+  })
+
+  it("does not slam a hand-opened sheet shut when the param clears", () => {
+    // Only a NEW param opens it. Clearing one must not close what the user
+    // opened from the header.
+    const { rerender } = render(<BotConsole onSelect={jest.fn()} installParam="1" />)
+    rerender(<BotConsole onSelect={jest.fn()} installParam={null} />)
+    expect(screen.getByTestId("install-bot-sheet-stub")).toBeInTheDocument()
   })
 })

@@ -24,6 +24,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
     requiredSlots: [],
     credentials: [],
     policy: resolveBotPolicy([]),
+    config: {},
     deadLetters: 0,
     updatedAt: 10,
     ...over,

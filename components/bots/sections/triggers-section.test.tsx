@@ -59,6 +59,7 @@ function row(over: Partial<BotConsoleRow> = {}): BotConsoleRow {
     unboundSlots: [],
     requiredSlots: [],
     credentials: [],
+    config: {},
     deadLetters: 0,
     updatedAt: 10,
     ...over,

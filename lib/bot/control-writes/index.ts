@@ -92,3 +92,22 @@ export {
 export { BotControlTargetMissingError, MANUAL_RUN_EVENT_TYPE } from "./local"
 export type { RunBotManuallyInput, RunBotManuallyResult, SetTriggerArmedInput } from "./local"
 export { BotRelayNotImplementedError, botWriteIdempotencyKey } from "./remote"
+
+/**
+ * The installation lifecycle, re-exported through the same door.
+ *
+ * It routes on a different question (see `resolveBotLifecycleWriteAvailability`)
+ * but a component should not have to know that there are two doors.
+ */
+export {
+  BotDefinitionMissingError,
+  BotLifecycleUnavailableError,
+  BotNotInstallableError,
+  bindBotCredential,
+  installBotFromCatalog,
+  setBotInstallationEnabled,
+  uninstallBotInstallation,
+  updateBotConfig,
+} from "./lifecycle"
+export type { InstallBotFromCatalogInput } from "./lifecycle"
+export { canWriteBotLifecycle, resolveBotLifecycleWriteAvailability } from "./route"

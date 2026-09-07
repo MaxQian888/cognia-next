@@ -46,6 +46,7 @@ function row(): BotConsoleRow {
     unboundSlots: [],
     requiredSlots: [],
     credentials: [],
+    config: {},
     deadLetters: 0,
     updatedAt: 10,
   }

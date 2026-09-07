@@ -109,6 +109,19 @@ export interface BotConsoleRow {
    * limits" rather than "nothing to limit".
    */
   policy?: ResolvedBotPolicy
+  /**
+   * The definition's per-installation form, when it ships one. Absent means
+   * this Bot has nothing to configure, which the pane states rather than
+   * rendering an empty form.
+   */
+  configSchema?: Record<string, unknown>
+  /**
+   * What this installation has stored, unresolved. The defaults are folded in
+   * by `resolveBotConfig` at the point of rendering rather than here, so the
+   * row keeps saying what the USER set and the form can still show a default
+   * as a default.
+   */
+  config: Record<string, unknown>
   /** Dead-lettered deliveries waiting for a person to replay or dismiss them. */
   deadLetters: number
   updatedAt: number
@@ -207,6 +220,8 @@ export function buildBotRow(input: BotRowInput): BotConsoleRow {
       }
     }),
     ...(resolved ? { policy: resolved.policyResolution } : {}),
+    ...(definition?.configSchema ? { configSchema: definition.configSchema } : {}),
+    config: installation.config,
     deadLetters: input.deadLetters ?? 0,
     updatedAt: installation.updatedAt,
   }

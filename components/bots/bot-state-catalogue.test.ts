@@ -20,6 +20,7 @@ import zh from "@/i18n/messages/zh-CN/bots.json"
 import { BOT_STATUS_FILTERS, type BotStatId, type BotTriggerKind } from "@/lib/bot/console/bot-rows"
 import { BOT_POLICY_LAYERS } from "@/lib/bot/policy/ceilings"
 import type { BotRuntimeReach } from "@/lib/bot/console/runtime-reach"
+import type { BotCredentialSourceKind } from "@/lib/bot/console/credential-candidates"
 import type { OperationAvailabilityReason } from "@/lib/runtime/operation-availability"
 import type {
   BotDefinitionSource,
@@ -119,6 +120,44 @@ const WRITE_REASONS = [
   "unknown-command",
 ] as const satisfies readonly OperationAvailabilityReason[]
 
+/**
+ * The sources a credential slot can draw from.
+ *
+ * `credentials.noCandidates.<source>` says what to do about an empty picker,
+ * and the remedy genuinely differs: connect an integration account, add a
+ * connector, or either. One missing entry prints its own key at the moment a
+ * user is stuck with nothing to choose.
+ */
+const CREDENTIAL_SOURCES = [
+  "integration",
+  "adapter",
+  "either",
+] as const satisfies readonly BotCredentialSourceKind[]
+
+/**
+ * The scopes the install sheet offers, including the one it disables.
+ *
+ * `project` is rendered and refused rather than dropped, so its hint has to
+ * exist in order to say why.
+ */
+const INSTALL_SCOPES = [
+  "account",
+  "workspace",
+  "project",
+] as const satisfies readonly BotScopeKind[]
+
+/**
+ * The statuses `setBotInstallationEnabled` can RESULT in.
+ *
+ * Reported rather than the status that was requested, because asking to enable
+ * a Bot with an unbound slot answers `needs_setup`.
+ */
+const LIFECYCLE_RESULTS = [
+  "enabled",
+  "disabled",
+  "needs_setup",
+] as const satisfies readonly BotInstallationStatus[]
+
 type Catalogue = {
   status: Record<string, string>
   executor: Record<string, string>
@@ -133,6 +172,9 @@ type Catalogue = {
   policyLayer: Record<string, string>
   delivery: { status: Record<string, string> }
   write: { reason: Record<string, string> }
+  credentials: { noCandidates: Record<string, string> }
+  install: { scopeHint: Record<string, string> }
+  lifecycle: { status: Record<string, string> }
 }
 
 const catalogues: Record<string, Catalogue> = {
@@ -195,6 +237,18 @@ describe.each(Object.entries(catalogues))("bots catalogue (%s)", (_locale, catal
     expect(typeof catalogue.write.reason[reason]).toBe("string")
   })
 
+  it.each(CREDENTIAL_SOURCES)("says what an empty %s picker needs", (source) => {
+    expect(typeof catalogue.credentials.noCandidates[source]).toBe("string")
+  })
+
+  it.each(INSTALL_SCOPES)("explains what the %s install scope means", (scope) => {
+    expect(typeof catalogue.install.scopeHint[scope]).toBe("string")
+  })
+
+  it.each(LIFECYCLE_RESULTS)("reports the %s result of an enable", (status) => {
+    expect(typeof catalogue.lifecycle.status[status]).toBe("string")
+  })
+
   it("carries the orphan badge, which is not a fourth status", () => {
     // Rendered by `BotOrphanBadge`. An installation whose definition is gone
     // is inert, not disabled, so it needs a word of its own.
@@ -214,6 +268,12 @@ describe("catalogue coverage", () => {
       PROBLEMS,
       STATS,
       REACHES,
+      DELIVERY_STATUSES,
+      WRITE_REASONS,
+      POLICY_FIELDS,
+      CREDENTIAL_SOURCES,
+      INSTALL_SCOPES,
+      LIFECYCLE_RESULTS,
     ]) {
       expect(list.length).toBeGreaterThan(0)
     }

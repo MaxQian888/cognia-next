@@ -1,6 +1,8 @@
 import {
   BOT_WRITE_COMMANDS,
   canEnqueueBotWrite,
+  canWriteBotLifecycle,
+  resolveBotLifecycleWriteAvailability,
   resolveBotWriteAvailability,
   resolveBotWriteRoute,
   __setBotWriteRouteDepsForTests,
@@ -123,5 +125,57 @@ describe("canEnqueueBotWrite", () => {
       expect(canEnqueueBotWrite({ state, reason: "local-host" })).toBe(true)
     }
     expect(canEnqueueBotWrite({ state: "unsupported", reason: "requires-companion" })).toBe(false)
+  })
+})
+
+describe("resolveBotLifecycleWriteAvailability", () => {
+  it("allows the lifecycle on a shell that owns the database", () => {
+    setup({ hasLocalDatabase: () => true })
+    expect(resolveBotLifecycleWriteAvailability()).toEqual({
+      state: "available",
+      reason: "local-host",
+    })
+    expect(canWriteBotLifecycle()).toBe(true)
+  })
+
+  it("does not need a delivery runner, unlike a manual run", () => {
+    // An install is configuration. Nothing about it has to be drained.
+    setup({ hasLocalDatabase: () => true, isRunnerOwnedHere: () => false })
+    expect(canWriteBotLifecycle()).toBe(true)
+    expect(resolveBotWriteRoute(BOT_WRITE_COMMANDS.runManual)).toBe("unavailable")
+  })
+
+  it("refuses on a desktop that is driving a remote host", () => {
+    // The trap the shared ordering exists for: `always-on` is a static
+    // baseline this desktop still reports while its runtimes are torn down.
+    setup({
+      isRemoteHostActive: () => true,
+      hasLocalDatabase: () => true,
+      getRuntimeSnapshot: (() => ({ target: { kind: "companion" } })) as never,
+    })
+    expect(resolveBotLifecycleWriteAvailability()).toEqual({
+      state: "unsupported",
+      reason: "operation-unavailable",
+    })
+  })
+
+  it("tells a companion it needs a Host rather than that the operation is missing", () => {
+    setup({
+      hasLocalDatabase: () => false,
+      getRuntimeSnapshot: (() => ({ target: { kind: "companion" } })) as never,
+    })
+    expect(resolveBotLifecycleWriteAvailability()).toEqual({
+      state: "unsupported",
+      reason: "operation-unavailable",
+    })
+  })
+
+  it("refuses a browser with neither a database nor a Host", () => {
+    setup({ hasLocalDatabase: () => false })
+    expect(resolveBotLifecycleWriteAvailability()).toEqual({
+      state: "unsupported",
+      reason: "requires-companion",
+    })
+    expect(canWriteBotLifecycle()).toBe(false)
   })
 })

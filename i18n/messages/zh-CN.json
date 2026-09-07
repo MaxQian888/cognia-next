@@ -4647,11 +4647,31 @@
       "refresh": "刷新"
     },
     "attentionCount": "{count, plural, =1 {1 项需要处理} other {# 项需要处理}}",
+    "config": {
+      "description": "该安装每次运行时传入的配置。",
+      "emptyBody": "这个 Bot 没有设置表单。它需要的一切都来自触发器和凭据。",
+      "emptyTitle": "无需配置",
+      "orphanBody": "定义已不存在，无法渲染表单。该安装此前存下的内容仍留在记录里。",
+      "orphanTitle": "没有可显示的设置",
+      "save": "保存设置",
+      "title": "设置"
+    },
     "credentials": {
+      "bindAria": "绑定 {slot}",
+      "blockedOrphan": "定义缺失期间无法修改绑定，因为没有任何依据可以校验它们。",
       "boundTo": "绑定到 {target}",
+      "candidate": "{label} · {detail}",
+      "candidateDisabled": "{label} · {detail}（已停用）",
+      "choosePlaceholder": "选择一个账号",
+      "clear": "未绑定",
       "description": "定义声明的凭据槽。绑定记的是账号，不是密钥。",
       "emptyBody": "这个 Bot 不访问 Cognia 之外的任何东西，因此不需要凭据。",
       "emptyTitle": "不需要凭据",
+      "noCandidates": {
+        "adapter": "还没有这个平台的连接器。请到「设置 - 连接」里添加一个。",
+        "either": "暂时没有可绑定的对象。先连接一个集成账号或添加一个连接器。",
+        "integration": "还没有这个集成的账号。请到「设置 - 连接」里连接一个。"
+      },
       "notBound": "未绑定",
       "optional": "可选",
       "orphanBody": "凭据槽读自定义，而这条安装记录已经没有定义可读。",
@@ -4688,6 +4708,44 @@
       "handler": "插件处理器",
       "squad": "Squad",
       "workflow": "工作流"
+    },
+    "install": {
+      "action": "安装",
+      "description": "这台设备能看到的全部定义，来自你的插件和你自己写的。",
+      "emptyBody": "这台设备上没有插件贡献 Bot，你也还没有写过。",
+      "emptyFiltered": "没有定义匹配该搜索。",
+      "emptyTitle": "没有可安装的内容",
+      "installedCount": "{count, plural, =1 {已安装 1 个} other {已安装 # 个}}",
+      "noWorkspace": "当前没有打开的工作区，暂时无法按工作区限定范围。",
+      "scopeHint": {
+        "account": "在你登录的所有地方运行。",
+        "project": "绑定到单个项目需要项目选择器，这个控制台还没有。",
+        "workspace": "只在你当前打开的工作区里运行。"
+      },
+      "scopeLabel": "安装范围",
+      "searchAria": "搜索 Bot 定义",
+      "searchPlaceholder": "搜索定义",
+      "slotCount": "{count, plural, =1 {1 项凭据} other {# 项凭据}}",
+      "submit": "安装",
+      "title": "安装 Bot",
+      "triggerCount": "{count, plural, =1 {1 个触发器} other {# 个触发器}}",
+      "unresolvedHandler": "它的处理函数没有加载成功，安装后也无法运行。"
+    },
+    "lifecycle": {
+      "bound": "凭据已绑定",
+      "configSaved": "设置已保存",
+      "definitionMissing": "这个 Bot 的定义已不存在。请重新安装拥有它的插件，或卸载这个 Bot。",
+      "enabledLabel": "已启用",
+      "installed": "已安装 {name}",
+      "notInstallable": "处理函数缺失期间无法安装这个 Bot。",
+      "status": {
+        "disabled": "Bot 已停用",
+        "enabled": "Bot 已启用",
+        "needs_setup": "仍缺少凭据，因此保持关闭"
+      },
+      "unavailable": "无法从这里进行该更改",
+      "unbound": "凭据已解除绑定",
+      "uninstalled": "Bot 已卸载"
     },
     "listPane": {
       "emptyBody": "Bot 随声明它的插件一起到来。安装一个贡献了 Bot 的插件即可开始。",
@@ -4833,6 +4891,14 @@
       "orphanBody": "触发器读自定义，而这条安装记录已经没有定义可读。",
       "orphanTitle": "定义缺失",
       "title": "触发器"
+    },
+    "uninstall": {
+      "action": "卸载",
+      "body": "它的定时触发器会停止，对应的计划任务会被删除。已进入死信的投递将无法再重放。如果只是想暂停，停用它可以保留全部内容。",
+      "cancel": "先留着",
+      "confirm": "卸载",
+      "orphanBody": "它的定义已经消失，卸载会清掉这条残留记录以及它仍持有的计划任务。",
+      "title": "卸载 {name}？"
     },
     "write": {
       "alreadyQueued": "这次运行已经在排队了。",
@@ -25140,6 +25206,13 @@
     "janDescription": "开源 ChatGPT 替代方案",
     "justNow": "刚刚",
     "keepaliveInterval": "心跳间隔（秒）",
+    "keyLogin": {
+      "getKey": "获取密钥",
+      "invalid": "密钥被拒绝",
+      "unverified": "无法验证",
+      "valid": "密钥可用",
+      "verify": "验证"
+    },
     "keyManagement": {
       "createKey": "创建 API 密钥",
       "createKeyDesc": "创建用于 OpenRouter 的新 API 密钥",
@@ -41161,6 +41234,10 @@
         },
         "cardDescription": "该服务商的自动刷新行为。",
         "cardTitle": "连接设置",
+        "failover": {
+          "description": "当前账号的配额窗口用尽时，把活跃账号切换到你添加的另一个 Codex 账号。每分钟级别的短时限流仍会在同一账号上等待恢复。请注意，切换会改变实际计费的订阅。",
+          "title": "配额耗尽时切换账号"
+        },
         "invalidCadence": "轮询间隔必须是至少 60 秒的数字。",
         "invalidThreshold": "预警阈值必须是 0 到 100 之间的数字。",
         "pending": "更改尚未应用。",
@@ -41615,7 +41692,6 @@
         "description": "当前账号的配额窗口用尽时，把活跃账号切换到你在同一服务商下添加的另一个账号。",
         "enableHelp": "默认关闭。只有账号级别的配额上限才会触发切换：每分钟级别的短时限流会在同一账号上等待恢复。每个账号在一轮里最多尝试一次，已被阻断或需要重新登录的账号会跳过。请注意，切换会改变实际计费的订阅。",
         "enableLabel": "配额耗尽时切换账号",
-        "noSiblings": "为该服务商添加第二个账号后才能启用自动切换。",
         "title": "账号自动切换"
       },
       "probe": {
