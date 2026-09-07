@@ -403,6 +403,63 @@ describe("<EmptyChatState />", () => {
     expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
   })
 
+  // The row's second reason to exist (housing the execution picker) must carry
+  // the `fullscreen` guard too. Without it this case renders a secondary action
+  // row on a surface that has never had one, and the test above stays green
+  // only because it omits the slot.
+  it("hides the actions row in the inline variant even with execution controls", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        variant="inline"
+        composerSlot={<div data-testid="hero-composer" />}
+        executionControlsSlot={<div data-testid="exec-controls" />}
+      />
+    )
+    expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
+  })
+
+  // `hideCreateAction` drops the demoted ghost. The mobile shell sets it: a
+  // phone reaches a new conversation from the overflow menu, the quick-action
+  // grid, and the composer itself, and this fourth control also discarded the
+  // draft.
+  it("drops the demoted New chat button when hideCreateAction is set", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        composerSlot={<div data-testid="hero-composer" />}
+        hideCreateAction
+      />
+    )
+    expect(screen.getByTestId("hero-composer")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+    // Nothing left to hold, so the row and its gap go too.
+    expect(screen.queryByTestId("welcome-actions")).not.toBeInTheDocument()
+  })
+
+  // ...unless the execution picker still needs a home. It is a real per-turn
+  // choice with nowhere else to go on this surface.
+  it("keeps the actions row for execution controls under hideCreateAction", () => {
+    render(
+      <EmptyChatState
+        {...baseProps()}
+        composerSlot={<div data-testid="hero-composer" />}
+        executionControlsSlot={<div data-testid="exec-controls" />}
+        hideCreateAction
+      />
+    )
+    expect(screen.getByTestId("welcome-actions")).toBeInTheDocument()
+    expect(screen.getByTestId("exec-controls")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+  })
+
+  // The hero's own primary action answers to the same flag on surfaces that
+  // render no composer at all.
+  it("drops the hero New chat button when hideCreateAction is set with no composer", () => {
+    render(<EmptyChatState {...baseProps()} hideCreateAction />)
+    expect(screen.queryByRole("button", { name: /newChat/ })).not.toBeInTheDocument()
+  })
+
   // ── Mobile home slots (hideSamples / header / quick actions) ──────────
   it("suppresses the dev-tool starters when hideSamples is set", () => {
     render(<EmptyChatState {...baseProps()} hideSamples />)

@@ -285,8 +285,13 @@ export function EmptyChatState({
   const showHeroAction = variant === "fullscreen" && !composerSlot && !hideCreateAction
   // The row survives `hideCreateAction` only when the execution picker needs a
   // home; an empty flex row would still cost its `gap` on the welcome column.
-  const showDemotedCreate = variant === "fullscreen" && !!composerSlot && !hideCreateAction
-  const showDemotedActions = showDemotedCreate || (!!composerSlot && !!executionControlsSlot)
+  // Both clauses keep the `fullscreen` guard: the inline variant renders no
+  // secondary action row at all, and dropping the guard from the second one
+  // would have started rendering one there the day a caller passed execution
+  // controls to an inline empty state.
+  const isFullscreenComposer = variant === "fullscreen" && !!composerSlot
+  const showDemotedCreate = isFullscreenComposer && !hideCreateAction
+  const showDemotedActions = showDemotedCreate || (isFullscreenComposer && !!executionControlsSlot)
 
   return (
     <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 @2xl:py-10">

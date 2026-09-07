@@ -140,8 +140,12 @@ jest.mock("@/lib/data-hooks/context", () => ({
   useCharacter: jest.fn(() => undefined),
 }))
 
+let isCompactLayout = false
 jest.mock("@/hooks/ui/use-mobile", () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => isCompactLayout,
+}))
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => isCompactLayout,
 }))
 
 jest.mock("@/hooks/chat/use-effective-cwd", () => ({
@@ -697,6 +701,66 @@ describe("ChatPane", () => {
     EmptyChatState.mockReturnValue(ReactForMocks.createElement("div", { "data-test": "empty" }))
     render(<ChatPane {...makeProps()} activeSession={null} />)
     expect(document.querySelector("[data-test='empty']")).toBeTruthy()
+  })
+
+  /**
+   * Welcome density follows the LAYOUT, not the runtime. `app/page.tsx` picks
+   * the mobile shell off `useCompactLayout()`, so a 375px browser window used
+   * to render `AppShellMobile` and then get the rich hero anyway, complete with
+   * a rich/minimal toggle the mobile shell deliberately withholds.
+   */
+  it("forces the minimal hero and withholds the style toggle on a compact layout", () => {
+    const { EmptyChatState } = jest.requireMock("./empty-state") as { EmptyChatState: jest.Mock }
+    EmptyChatState.mockClear()
+    settingsState.settings = { welcomeStyle: "rich" }
+    isCompactLayout = true
+    try {
+      render(<ChatPane {...makeProps()} activeSession={null} />)
+      const props = EmptyChatState.mock.calls[0][0]
+      expect(props.welcomeStyle).toBe("minimal")
+      expect(props.onToggleStyle).toBeUndefined()
+    } finally {
+      isCompactLayout = false
+      settingsState.settings = null
+    }
+  })
+
+  it("keeps the stored style and the toggle on a wide layout", () => {
+    const { EmptyChatState } = jest.requireMock("./empty-state") as { EmptyChatState: jest.Mock }
+    EmptyChatState.mockClear()
+    settingsState.settings = { welcomeStyle: "rich" }
+    try {
+      render(<ChatPane {...makeProps()} activeSession={null} />)
+      const props = EmptyChatState.mock.calls[0][0]
+      expect(props.welcomeStyle).toBe("rich")
+      expect(props.onToggleStyle).toEqual(expect.any(Function))
+    } finally {
+      settingsState.settings = null
+    }
+  })
+
+  // The mobile shell asks for the demoted "New chat" ghost to be dropped; the
+  // flag has to survive the trip through `welcomeExtras`.
+  it("forwards welcomeExtras.hideNewChatAction to the empty state", () => {
+    const { EmptyChatState } = jest.requireMock("./empty-state") as { EmptyChatState: jest.Mock }
+    EmptyChatState.mockClear()
+    render(
+      <ChatPane
+        {...makeProps()}
+        activeSession={null}
+        welcomeExtras={{ hideSamples: true, hideNewChatAction: true }}
+      />
+    )
+    const props = EmptyChatState.mock.calls[0][0]
+    expect(props.hideCreateAction).toBe(true)
+    expect(props.hideSamples).toBe(true)
+  })
+
+  it("leaves the create action alone when no caller asks for it", () => {
+    const { EmptyChatState } = jest.requireMock("./empty-state") as { EmptyChatState: jest.Mock }
+    EmptyChatState.mockClear()
+    render(<ChatPane {...makeProps()} activeSession={null} />)
+    expect(EmptyChatState.mock.calls[0][0].hideCreateAction).toBeUndefined()
   })
 
   it("renders EmptyChatState inline when session exists but messages list is empty", () => {
