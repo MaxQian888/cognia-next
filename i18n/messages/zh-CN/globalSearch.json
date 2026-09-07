@@ -70,6 +70,7 @@
   "jumpFailed": "无法打开匹配的消息。",
   "kinds": {
     "action": "命令",
+    "bot": "Bot",
     "character": "角色",
     "device": "设备",
     "git-branch": "分支",

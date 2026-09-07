@@ -186,6 +186,7 @@
       "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
     },
     "auxiliaryGroup": "个人与日志",
+    "bots": "Bot",
     "browser": "浏览器",
     "canvas": "画布",
     "createTeam": "创建团队",

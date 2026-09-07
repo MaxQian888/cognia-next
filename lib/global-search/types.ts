@@ -53,6 +53,8 @@ export type GlobalSearchKind =
   | "issue"
   /** A paired device, remote host or execution worker (`/devices`). */
   | "device"
+  /** An installed Bot on the `/bots` console: a trigger bound to an executor. */
+  | "bot"
   /** A Cognia Site — a deployable project on the `/sites` console. */
   | "site"
   /** A git branch in the bound repository. */
@@ -105,6 +107,9 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   "pi-package": ["library"],
   issue: ["library"],
   device: ["library"],
+  // Library, not commands: a Bot is an installed asset you configure, not
+  // something the palette can run in place.
+  bot: ["library"],
   site: ["library"],
   "git-branch": ["library"],
   "git-worktree": ["library"],
@@ -140,15 +145,18 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   "pi-package": 19,
   issue: 20,
   device: 21,
-  site: 22,
+  // Beside devices: both are things you manage rather than things you open,
+  // and neither should outrank the workflow or skill that matched the needle.
+  bot: 22,
+  site: 23,
   // After the library definitions it can be handed work from: you reach for a
   // Squad by name much less often than for the workflow or skill it will run.
-  squad: 23,
+  squad: 24,
   // Below the library definitions: a branch is scoped to whichever repository
   // the panel is bound to right now, so it should not outrank a workspace-wide
   // asset that matched the same needle.
-  "git-branch": 24,
-  "git-worktree": 25,
+  "git-branch": 25,
+  "git-worktree": 26,
 }
 
 /** What the dialog does when an item is chosen. */

@@ -70,6 +70,10 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
     why: "A Squad belongs to a workspace: `createTeam` stamps the active project and the store purges per project. Out of scope it is noise, not a preference. Templates carry no projectId and `byProjectId` treats that as everywhere.",
   },
   "builtin.devices": { scoping: "global", why: "The device fleet is not per-workspace." },
+  "builtin.bots": {
+    scoping: "global",
+    why: "An installation carries a scope, but the palette lists them across workspaces for the same reason scheduled tasks are listed that way: a Bot runs unattended, and the moment you search for one by name is the moment it misfired, from wherever you happen to be standing.",
+  },
   "builtin.git-branches": {
     scoping: "global",
     why:

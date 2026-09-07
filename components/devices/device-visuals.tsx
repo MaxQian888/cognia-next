@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { useFormatter, useTranslations } from "next-intl"
 
+import { FactList, FactRow } from "@/components/surface/fact-list"
 import { Badge } from "@/components/ui/badge"
 import type {
   DeviceAdminState,
@@ -256,64 +257,22 @@ export function shortenFingerprint(value: string | undefined): string | null {
 /**
  * One labelled fact, stacked label-over-value.
  *
- * A definition list rather than a grid of plain divs, because these really are
- * term/description pairs — a screen reader reading "Paired · 3 days ago" as a
- * pair is the difference between a fact and two loose strings.
- *
- * Stacked rather than label-left/value-right: the detail pane is the wide half
- * of the console, and a `justify-between` row there strands the value against
- * the far edge with several hundred pixels of nothing in between, so the eye
- * has to cross the full width to bind each pair.
- *
- * Values wrap instead of truncating. A fingerprint or a base URL is exactly
- * the fact someone opened this pane to read, and half of one is not useful.
+ * The frame lives in `components/surface/fact-list.tsx` now. Nothing about a
+ * label above a value was ever device-specific, and `/bots` needed the same
+ * record, so this is the same lift `DeviceSection` made to `ConsoleSection`.
  */
-export function DeviceFactRow({
-  label,
-  children,
-  mono,
-}: {
-  label: string
-  children: React.ReactNode
-  mono?: boolean
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[11px] leading-tight text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "mt-0.5 min-w-0 break-words text-xs font-medium leading-snug",
-          mono && "font-mono text-[11px] font-normal break-all"
-        )}
-      >
-        {children}
-      </dd>
-    </div>
-  )
+export function DeviceFactRow(props: React.ComponentProps<typeof FactRow>) {
+  return <FactRow {...props} />
 }
 
 /**
  * Wraps a group of {@link DeviceFactRow}s in the `<dl>` they belong to.
  *
- * Frameless on purpose: these live inside a {@link DeviceSection} card, which
- * already draws the border. A second one here is the classic nested-panel
- * look, and it makes the card read as two cards.
+ * Pins `pane="device-pane"` so the columns keep sizing off
+ * `@container/device-card`, which is the container `DeviceSection` names. The
+ * shared default is the console pane, and inheriting it would leave every
+ * existing fact list here sizing off a container this route does not have.
  */
-export function DeviceFactList({
-  children,
-  className,
-}: {
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <dl
-      className={cn(
-        "grid gap-x-5 gap-y-3 @sm/device-card:grid-cols-2 @3xl/device-card:grid-cols-3",
-        className
-      )}
-    >
-      {children}
-    </dl>
-  )
+export function DeviceFactList(props: Omit<React.ComponentProps<typeof FactList>, "pane">) {
+  return <FactList {...props} pane="device-pane" />
 }

@@ -256,6 +256,21 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "bots",
+    route: "/bots",
+    navigation: true,
+    /**
+     * `explain` rather than `full`: reading and configuring work anywhere,
+     * because the installations are local Dexie rows, but a shell without
+     * `always-on` never starts a delivery runner, so nothing here will fire.
+     * `BotRuntimeNotice` is the half that says so. See
+     * {@link standaloneBotsRequireRuntime}.
+     */
+    standalone: "explain",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
     id: "devices",
     route: "/devices",
     navigation: true,
@@ -382,6 +397,36 @@ export const standaloneInboxRequiresHost = {
 export const standaloneDevicesRequiresHost = {
   surfaceId: "devices",
   reason: "no-paired-host",
+  remedy: "/pair",
+} as const
+
+/**
+ * `/bots` in standalone: every control works and nothing runs.
+ *
+ * The installations are local Dexie rows, so the list, the triggers and the
+ * credential state are all real and all editable here. What is missing is the
+ * only thing that matters at runtime: `BotRuntimeInitializer` starts a
+ * delivery runner exactly on a shell with `always-on`, which a plain browser
+ * tab is not, so an armed trigger on this device is armed against nothing.
+ *
+ * That failure is invisible without help. Configuration reads identically
+ * whether or not anything acts on it, which is why CLAUDE.md rule 7 wants all
+ * three axes:
+ *
+ *  1. **Type** -- the `bots` contract above is `standalone: "explain"`, and
+ *     this constant carries the reason.
+ *  2. **UI** -- `components/bots/bot-runtime-notice.tsx` renders it whenever
+ *     `resolveBotRuntimeReach()` is not `"local"`, naming which machine (if
+ *     any) is draining instead.
+ *  3. **Test** -- pinned by `components/bots/bot-runtime-notice.test.tsx`,
+ *     `lib/bot/console/runtime-reach.test.ts` and
+ *     `lib/runtime/surface-contract.test.ts`.
+ *
+ * Pairing a Host or running the desktop app lifts it.
+ */
+export const standaloneBotsRequireRuntime = {
+  surfaceId: "bots",
+  reason: "no-delivery-runner",
   remedy: "/pair",
 } as const
 

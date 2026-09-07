@@ -70,6 +70,7 @@
   "jumpFailed": "The matching message could not be opened.",
   "kinds": {
     "action": "Commands",
+    "bot": "Bots",
     "character": "Characters",
     "device": "Devices",
     "git-branch": "Branch",

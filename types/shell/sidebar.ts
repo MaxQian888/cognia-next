@@ -83,6 +83,10 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // list from Settings → Remote hosts, so both retired names have to resolve
   // here in ⌘K — someone who learned "paired devices" will keep typing it.
   { id: "devices", route: "/devices", i18nKey: "devices", group: "auxiliary", aliasKey: "devices" },
+  // The Bot control plane's console. Auxiliary rather than a feature: a Bot is
+  // installed once and then runs unattended, so this is the page you open when
+  // something needs deciding, not one you live in.
+  { id: "bots", route: "/bots", i18nKey: "bots", group: "auxiliary" },
   { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
   {
     id: "performance",

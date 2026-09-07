@@ -186,6 +186,7 @@
       "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
     },
     "auxiliaryGroup": "Profile and logs",
+    "bots": "Bots",
     "browser": "Browser",
     "canvas": "Canvas",
     "createTeam": "Create team",

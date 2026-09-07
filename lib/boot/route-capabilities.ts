@@ -7,6 +7,10 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/scheduler", "workflow-automation"],
   ["/goals", "workflow-automation"],
   ["/a2ui", "workflow-automation"],
+  // Not `integrations`: `BotRuntimeInitializer` ships in the
+  // workflow-automation bundle, and that capability already depends on
+  // `plugin-runtime`, which is where plugin-contributed Bot definitions live.
+  ["/bots", "workflow-automation"],
   ["/integrations", "integrations"],
   ["/inbox", "integrations"],
   ["/lark", "integrations"],

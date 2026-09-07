@@ -7,6 +7,7 @@
 import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
+import { botsProvider } from "./bots"
 import { devicesProvider } from "./devices"
 import { gitBranchesProvider, gitWorktreesProvider } from "./git"
 import { sitesProvider } from "./sites"
@@ -58,6 +59,9 @@ export function builtinGlobalSearchProviders(
     piPackagesProvider,
     issuesProvider,
     devicesProvider,
+    // Beside devices for the same reason: both list things you manage rather
+    // than things you open, and both read cheaply from the local database.
+    botsProvider,
     // Rows exist in every shell — the console renders over whichever local
     // database that shell owns (ADR-0084). Only the privileged actions on
     // `/sites` are host-gated, and the palette does not offer those.

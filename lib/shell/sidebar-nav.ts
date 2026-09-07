@@ -10,6 +10,7 @@
 import {
   ActivityIcon,
   BotIcon,
+  BotMessageSquareIcon,
   BrainIcon,
   CalendarClockIcon,
   CircleDot as CircleDotIcon,
@@ -76,6 +77,9 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   servers: ServerCogIcon,
   integrations: PlugZapIcon,
   devices: SmartphoneIcon,
+  // Not `BotIcon`: that one is Twin's, and two rail entries sharing a glyph
+  // is indistinguishable once the rail is collapsed to icons.
+  bots: BotMessageSquareIcon,
   eval: ClipboardCheckIcon,
   performance: ActivityIcon,
   logs: ScrollTextIcon,
