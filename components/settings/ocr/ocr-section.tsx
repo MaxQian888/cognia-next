@@ -45,7 +45,10 @@ import { OcrCapabilitiesTab } from "./tabs/ocr-capabilities-tab"
 import { OcrTryItTab } from "./tabs/ocr-try-it-tab"
 import { OcrCompareView } from "./ocr-compare-view"
 import { OcrSetupWizard, hasNoCloudCredentials } from "./ocr-setup-wizard"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 
 // Re-export the model-manager API so external consumers (and the existing
 // test suite at the time of the redesign) keep their import paths working.
@@ -478,7 +481,7 @@ export function OcrSection(props: OcrSectionProps): React.ReactElement {
         triggerTestId="ocr-mobile-sheet-trigger"
       >
         {/* Detail panel */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{detailNode}</div>
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>{detailNode}</div>
       </SettingsMasterDetail>
 
       <OcrSetupWizard

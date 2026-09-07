@@ -57,6 +57,20 @@ import { cn } from "@/lib/utils"
 export type SettingsPaneDensity = "sheet" | "icon" | "compact" | "full"
 
 /**
+ * The detail pane's own frame, for the section to put on its detail wrapper.
+ *
+ * Twelve sections had shipped this string byte for byte, which is the same
+ * duplication this component's header already complains about for the rail.
+ * Sharing it also fixes what every copy got wrong: the frame was
+ * unconditional, and below the sheet tier the rail IS a Sheet, so the detail
+ * is the whole pane and the border became a box drawn around the entire
+ * screen. On a 375px phone that costs about 32px of width and contrasts with
+ * nothing.
+ */
+export const SETTINGS_DETAIL_PANE_CLASS =
+  "flex min-h-0 min-w-0 flex-col overflow-hidden @[440px]/settings-pane:rounded-lg @[440px]/settings-pane:border"
+
+/**
  * Pane widths at which each tier takes over, in px. Exported so the nav
  * components and their tests can name the same numbers the CSS below uses —
  * a tier boundary that drifts between the two would show up as a rail that

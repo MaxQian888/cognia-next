@@ -24,7 +24,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useCreateSquad } from "@/hooks/squads/use-create-squad"
@@ -144,7 +147,7 @@ function SquadsSectionInner() {
       triggerTestId="squads-nav-sheet-trigger"
       data-testid="squads-section"
     >
-      <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+      <div className={SETTINGS_DETAIL_PANE_CLASS}>
         {/* Outside PanelTransition on purpose — see the file header. The pane
             header keeps naming the open Squad; the frame's own trigger row —
             which only appears once the pane is too narrow for any rail — is

@@ -32,7 +32,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import { UnsavedBar } from "@/components/settings/common/unsaved-bar"
 import { useTransportHealth } from "@/hooks/logging"
 import {
@@ -179,7 +182,7 @@ export function LogsSection({ onClose }: LogsSectionProps) {
         {/* `@container/settings-stack` is declared by `SettingsStack` inside
             each panel, so every multi-column row measures this pane rather
             than the window. */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <section
             aria-labelledby={`logs-panel-${activePanel}`}
             className="min-h-0 flex-1 overflow-y-auto p-4"

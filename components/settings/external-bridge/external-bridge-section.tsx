@@ -19,7 +19,10 @@ import { WebhookIcon } from "lucide-react"
 
 import { Label } from "@/components/ui/label"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import {
   ALL_BRIDGE_SCOPES,
@@ -125,7 +128,7 @@ export function ExternalBridgeSection() {
         navWidth={320}
         triggerTestId="bridge-mobile-nav-trigger"
       >
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <div
             className="min-h-0 flex-1 overflow-y-auto p-3 @container/bridge-pane"
             data-testid="bridge-panel-body"

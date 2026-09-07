@@ -24,7 +24,10 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { WorkflowIcon } from "lucide-react"
 
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -100,7 +103,7 @@ export function AgentRuntimeSection() {
         {/* The pane is a fraction of the window, so panel internals size off
             `@container/settings-stack` (declared by `SettingsStack`) rather
             than the viewport. */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <div
             className="min-h-0 flex-1 overflow-y-auto p-4"
             data-testid="agent-runtime-panel-body"

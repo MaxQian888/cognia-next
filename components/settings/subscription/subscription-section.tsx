@@ -31,7 +31,10 @@ import {
 import { Label } from "@/components/ui/label"
 
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 
 import { CloudSyncCard } from "./cloud-sync-card"
 import { ImportExportButtons } from "./import-export-buttons"
@@ -126,7 +129,7 @@ export function SubscriptionSection() {
             width regardless of viewport, so any multi-column layout inside them
             must size off this box, not the window (same as the appearance and
             hooks panes). */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <div
             className="@container/subscription-pane min-h-0 flex-1 overflow-y-auto p-3"
             data-testid="subscription-panel-body"

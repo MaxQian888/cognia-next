@@ -25,7 +25,10 @@ import { toast } from "sonner"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Label } from "@/components/ui/label"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import { isTauri } from "@/lib/tauri"
 import {
   gatewayGetConfig,
@@ -308,7 +311,7 @@ export function GatewaySection() {
         {/* `@container/gateway-pane`: the detail pane is a fraction of the
             window, so anything multi-column inside a panel must size off this
             box rather than the viewport. */}
-        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <div
             className="min-h-0 flex-1 overflow-y-auto p-3 @container/gateway-pane"
             data-testid="gateway-panel-body"

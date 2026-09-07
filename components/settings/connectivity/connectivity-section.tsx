@@ -20,7 +20,10 @@ import { useTranslations } from "next-intl"
 import { RadioTowerIcon } from "lucide-react"
 
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 
 import { ConnectivityNav } from "./components/connectivity-nav"
 import {
@@ -103,7 +106,7 @@ export function ConnectivitySection() {
         navWidth={260}
         triggerTestId="connectivity-mobile-nav-trigger"
       >
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <section
             aria-labelledby={`connectivity-panel-${activePanel}`}
             className="min-h-0 flex-1 overflow-y-auto p-4"

@@ -42,7 +42,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import {
   CLAUDE_CODE_RELATED,
   RelatedSectionsStrip,
@@ -288,7 +291,7 @@ function SubagentsSectionInner() {
         navWidth={300}
         triggerTestId="subagent-mobile-nav-trigger"
       >
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           {/* Outside PanelTransition — see the file header. */}
           <div className="flex shrink-0 items-center gap-2 border-b p-3">
             <span

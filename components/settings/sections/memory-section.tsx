@@ -28,7 +28,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveMemoryConfig, type MemoryConfig } from "@/types/memory/memory"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
-import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  SETTINGS_DETAIL_PANE_CLASS,
+  SettingsMasterDetail,
+} from "@/components/settings/common/settings-master-detail"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { MemoryDangerZone } from "@/components/settings/memory/danger-zone"
 import { MemoryToggleRow } from "@/components/settings/memory/memory-controls"
@@ -179,7 +182,7 @@ export function MemorySection() {
         {/* `@container/memory-pane`: the detail pane is a fraction of the
             window, so anything multi-column inside a panel must size off this
             box rather than the viewport. */}
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">
+        <div className={SETTINGS_DETAIL_PANE_CLASS}>
           <section
             aria-labelledby={`memory-panel-${activePanel}`}
             className="@container/memory-pane min-h-0 flex-1 overflow-y-auto p-4"
