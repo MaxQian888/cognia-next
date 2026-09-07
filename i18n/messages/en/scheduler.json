@@ -297,7 +297,7 @@
     "workflow:completed": "Workflow completed"
   },
   "eventTypeRequired": "Event type is required",
-  "every": "Every {minutes}m",
+  "every": "Every {interval}",
   "execution": {
     "input": "Input",
     "logs": "Logs",
@@ -413,10 +413,10 @@
     "label": "Jitter (seconds)"
   },
   "kindFilter": {
-    "all": "All",
     "app": "App",
     "background-command": "Background Command",
     "backup": "Backup",
+    "clear": "Clear",
     "connector": "Connector",
     "plugin": "Plugin",
     "system": "System",

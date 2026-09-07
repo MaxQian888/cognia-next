@@ -124,10 +124,23 @@ describe("UnifiedTaskSidebarItem", () => {
         onClick={() => {}}
       />
     )
-    // Mocked translator returns the template with values interpolated. The
-    // scheduler bundle defines "every" → "Every {minutes} min" or similar.
-    // We just confirm "5" appears in the trigger description line.
-    expect(screen.getByText(/5/)).toBeInTheDocument()
+    // Mocked translator returns the template with values interpolated.
+    expect(screen.getByText(/5m/)).toBeInTheDocument()
+  })
+
+  it("states a weekly interval in days rather than 10080 minutes", () => {
+    render(
+      <UnifiedTaskSidebarItem
+        item={makeItem({
+          triggerSummary: { type: "interval", intervalMs: 7 * 24 * 60 * 60_000 },
+          nextRunAt: undefined,
+        })}
+        isActive={false}
+        onClick={() => {}}
+      />
+    )
+    expect(screen.getByText(/7d/)).toBeInTheDocument()
+    expect(screen.queryByText(/10080/)).toBeNull()
   })
 
   it("renders the multi-select checkbox only when onToggleSelect is supplied", () => {

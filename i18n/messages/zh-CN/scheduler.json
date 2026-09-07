@@ -297,7 +297,7 @@
     "workflow:completed": "工作流完成"
   },
   "eventTypeRequired": "事件类型为必填项",
-  "every": "每 {minutes} 分钟",
+  "every": "每 {interval}",
   "execution": {
     "input": "输入",
     "logs": "日志",
@@ -413,10 +413,10 @@
     "label": "抖动（秒）"
   },
   "kindFilter": {
-    "all": "全部",
     "app": "应用",
     "background-command": "后台命令",
     "backup": "备份",
+    "clear": "清除",
     "connector": "连接器",
     "plugin": "插件",
     "system": "系统",

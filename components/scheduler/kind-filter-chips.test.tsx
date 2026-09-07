@@ -14,7 +14,9 @@ const COUNTS: Record<ScheduledItemKind, number> = {
 }
 
 describe("KindFilterChips", () => {
-  it("marks 'all' active when the selection is empty", () => {
+  it("carries no All chip, because the status row directly above already has one", () => {
+    // The two rows rendered the same word above the same total ("All 4" twice
+    // on a phone), neither saying which axis it filtered.
     render(
       <KindFilterChips
         selected={new Set()}
@@ -23,26 +25,12 @@ describe("KindFilterChips", () => {
         countsByKind={COUNTS}
       />
     )
-    const all = screen.getByRole("button", { name: /All/ })
-    expect(all).toHaveAttribute("data-active", "true")
+    expect(screen.queryByRole("button", { name: /^All/ })).toBeNull()
+    expect(screen.queryByTestId("kind-filter-clear")).toBeNull()
+    expect(screen.getByTestId("kind-filter-app")).toBeInTheDocument()
   })
 
-  it("marks 'all' inactive when at least one kind is selected", () => {
-    render(
-      <KindFilterChips
-        selected={new Set(["app"])}
-        onToggle={() => {}}
-        onClear={() => {}}
-        countsByKind={COUNTS}
-      />
-    )
-    const all = screen.getByRole("button", { name: /All/ })
-    expect(all).toHaveAttribute("data-active", "false")
-    const app = screen.getByTestId("kind-filter-app")
-    expect(app).toHaveAttribute("data-active", "true")
-  })
-
-  it("clicking 'all' fires onClear", () => {
+  it("offers Clear only once there is a selection to clear", () => {
     const onClear = jest.fn()
     render(
       <KindFilterChips
@@ -52,7 +40,8 @@ describe("KindFilterChips", () => {
         countsByKind={COUNTS}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: /All/ }))
+    expect(screen.getByTestId("kind-filter-app")).toHaveAttribute("data-active", "true")
+    fireEvent.click(screen.getByTestId("kind-filter-clear"))
     expect(onClear).toHaveBeenCalledTimes(1)
   })
 
@@ -79,9 +68,7 @@ describe("KindFilterChips", () => {
         countsByKind={COUNTS}
       />
     )
-    // total = 3 + 2 + 1 + 0 + 4 = 10
-    const all = screen.getByRole("button", { name: /All\s*10/ })
-    expect(all).toBeInTheDocument()
+    expect(screen.getByTestId("kind-filter-app").textContent).toMatch(/3/)
     // Plugin shows 0
     const plugin = screen.getByTestId("kind-filter-plugin")
     expect(plugin.textContent).toMatch(/0/)

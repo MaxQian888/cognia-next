@@ -21,6 +21,25 @@ export function formatDuration(ms: number | undefined): string {
 }
 
 /**
+ * Compact interval for a repeating trigger: "5m", "23h", "7d".
+ *
+ * The scheduler used to render every interval in minutes, so a weekly backup
+ * read "Every 10080m" and a daily one "Every 1440m". Same unit vocabulary as
+ * {@link formatRelativeTime}, so a row's interval and its next run agree.
+ *
+ * Only whole units promote. 90 minutes stays "90m" rather than rounding to an
+ * hour and a half it does not run at.
+ */
+export function formatInterval(ms: number | undefined): string {
+  if (!ms || ms <= 0) return "0m"
+  const minutes = Math.round(ms / 60_000)
+  if (minutes === 0) return "0m"
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`
+  if (minutes % 60 === 0) return `${minutes / 60}h`
+  return `${minutes}m`
+}
+
+/**
  * Format a Date as a relative time string (e.g., "3m", "2h", "5d")
  */
 export function formatRelativeTime(

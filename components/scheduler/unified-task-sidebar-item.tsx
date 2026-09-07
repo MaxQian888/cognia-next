@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { formatNextRun } from "@/lib/scheduler/format-utils"
+import { formatInterval, formatNextRun } from "@/lib/scheduler/format-utils"
 import { kindConfig } from "./details/_shared/kind-config"
 import type {
   UnifiedScheduledItem,
@@ -51,11 +51,9 @@ function describeTrigger(t: UnifiedTriggerSummary, translate: TFn): string {
   switch (t.type) {
     case "cron":
       return t.cron ?? translate("triggerTypes.cron")
-    case "interval": {
-      const ms = t.intervalMs ?? 0
-      const minutes = Math.round(ms / 60_000)
-      return translate("every", { minutes })
-    }
+    case "interval":
+      // Minutes only meant a weekly backup read "Every 10080m".
+      return translate("every", { interval: formatInterval(t.intervalMs) })
     case "once":
       return translate("triggerTypes.once")
     case "event":

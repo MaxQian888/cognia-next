@@ -2,7 +2,7 @@
  * Format Utilities Tests
  */
 
-import { formatDuration, formatRelativeTime, formatNextRun } from "./format-utils"
+import { formatDuration, formatInterval, formatNextRun, formatRelativeTime } from "./format-utils"
 
 describe("formatDuration", () => {
   it("should return dash for undefined", () => {
@@ -30,6 +30,29 @@ describe("formatDuration", () => {
   it("should format hours and minutes", () => {
     expect(formatDuration(3600000)).toBe("1h 0m")
     expect(formatDuration(5400000)).toBe("1h 30m")
+  })
+})
+
+describe("formatInterval", () => {
+  it("promotes whole days and hours so a weekly backup is not 10080m", () => {
+    expect(formatInterval(7 * 24 * 60 * 60_000)).toBe("7d")
+    expect(formatInterval(24 * 60 * 60_000)).toBe("1d")
+    expect(formatInterval(23 * 60 * 60_000)).toBe("23h")
+    expect(formatInterval(5 * 60_000)).toBe("5m")
+  })
+
+  it("keeps a partial unit in minutes rather than rounding to a run it never makes", () => {
+    expect(formatInterval(90 * 60_000)).toBe("90m")
+    // Whole hours still promote past a day boundary: 25h is 25h, not 1500m.
+    expect(formatInterval(25 * 60 * 60_000)).toBe("25h")
+    expect(formatInterval(36 * 60 * 60_000 + 30 * 60_000)).toBe("2190m")
+  })
+
+  it("answers 0m for a missing or non-positive interval", () => {
+    expect(formatInterval(undefined)).toBe("0m")
+    expect(formatInterval(0)).toBe("0m")
+    expect(formatInterval(-1)).toBe("0m")
+    expect(formatInterval(100)).toBe("0m")
   })
 })
 

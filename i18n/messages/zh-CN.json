@@ -26505,7 +26505,7 @@
       "workflow:completed": "工作流完成"
     },
     "eventTypeRequired": "事件类型为必填项",
-    "every": "每 {minutes} 分钟",
+    "every": "每 {interval}",
     "execution": {
       "input": "输入",
       "logs": "日志",
@@ -26621,10 +26621,10 @@
       "label": "抖动（秒）"
     },
     "kindFilter": {
-      "all": "全部",
       "app": "应用",
       "background-command": "后台命令",
       "backup": "备份",
+      "clear": "清除",
       "connector": "连接器",
       "plugin": "插件",
       "system": "系统",
@@ -41554,6 +41554,13 @@
         "reset": "恢复默认",
         "save": "保存"
       },
+      "failover": {
+        "description": "当前账号的配额窗口用尽时，把活跃账号切换到你在同一服务商下添加的另一个账号。",
+        "enableHelp": "默认关闭。只有账号级别的配额上限才会触发切换：每分钟级别的短时限流会在同一账号上等待恢复。每个账号在一轮里最多尝试一次，已被阻断或需要重新登录的账号会跳过。请注意，切换会改变实际计费的订阅。",
+        "enableLabel": "配额耗尽时切换账号",
+        "noSiblings": "为该服务商添加第二个账号后才能启用自动切换。",
+        "title": "账号自动切换"
+      },
       "probe": {
         "description": "定期发送一次近乎空的 /v1/messages 请求来读取 rate-limit headers。每次探测约消耗 10 input + 1 output tokens 配额。",
         "enableHelp": "默认关闭。被动收集（真实对话流量）始终在跑，优先级更高。",
@@ -48979,6 +48986,12 @@
             "label": "更新目标内容"
           }
         },
+        "humanInput": {
+          "request": {
+            "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
+            "label": "请求人工输入"
+          }
+        },
         "image": {
           "adjust": {
             "description": "亮度、对比度、曝光、饱和度、自然饱和度、色温、色调、色相、伽马、模糊与锐化。",
@@ -48995,30 +49008,6 @@
           "transform": {
             "description": "在一次解码编码中完成裁剪、缩放、旋转和翻转，避免一串编辑变成四次有损重编码。",
             "label": "变换图像"
-          }
-        },
-        "humanInput": {
-          "request": {
-            "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
-            "label": "请求人工输入"
-          }
-        },
-        "media": {
-          "concat": {
-            "description": "把两个以上的视频首尾相接。产物同样落在媒体临时目录里。",
-            "label": "拼接视频"
-          },
-          "frame": {
-            "description": "按时间点从视频中抽出一帧，返回一个图像节点和 OCR 节点都能读取的引用。",
-            "label": "抽取帧"
-          },
-          "probe": {
-            "description": "读取视频的时长、分辨率、帧率、编码格式，以及是否含音轨。",
-            "label": "读取视频信息"
-          },
-          "trim": {
-            "description": "按起止时间裁剪视频。产物落在媒体临时目录里，因此只能接给另一个媒体节点，接不到文件节点。",
-            "label": "裁剪视频"
           }
         },
         "issue": {
@@ -49055,6 +49044,24 @@
           "invokeTool": {
             "description": "调用已配置的 MCP 服务器上的工具。",
             "label": "调用 MCP 工具"
+          }
+        },
+        "media": {
+          "concat": {
+            "description": "把两个以上的视频首尾相接。产物同样落在媒体临时目录里。",
+            "label": "拼接视频"
+          },
+          "frame": {
+            "description": "按时间点从视频中抽出一帧，返回一个图像节点和 OCR 节点都能读取的引用。",
+            "label": "抽取帧"
+          },
+          "probe": {
+            "description": "读取视频的时长、分辨率、帧率、编码格式，以及是否含音轨。",
+            "label": "读取视频信息"
+          },
+          "trim": {
+            "description": "按起止时间裁剪视频。产物落在媒体临时目录里，因此只能接给另一个媒体节点，接不到文件节点。",
+            "label": "裁剪视频"
           }
         },
         "memory": {
@@ -49645,6 +49652,12 @@
         }
       },
       "trigger": {
+        "capture": {
+          "item": {
+            "description": "当内容捕获保存了一条记录时触发。载荷只带 id 和分类；正文只有在你明确要求时才会带上，并且始终要过脱敏闸。",
+            "label": "捕获到内容时"
+          }
+        },
         "chat": {
           "message": {
             "description": "当用户在绑定角色的会话中发送消息时触发。",
@@ -49671,6 +49684,12 @@
             "label": "UIA 事件触发"
           }
         },
+        "file": {
+          "watch": {
+            "description": "当被监听目录下的文件发生变化时触发。它在自己启动的整个运行期间保持静音，所以写文件的工作流不会把自己再次触发。",
+            "label": "文件变更时"
+          }
+        },
         "goal": {
           "completed": {
             "description": "当 /goal 达到终态（完成、停止、预算/轮次/超时）时触发。",
@@ -49693,40 +49712,28 @@
           "description": "在编辑器中点击「运行」按钮时触发。",
           "label": "手动运行"
         },
-        "pet": {
-          "event": {
-            "description": "当桌面宠物升级、进化、解锁成就或生病时触发。",
-            "label": "宠物事件触发"
-          }
-        },
         "memory": {
           "written": {
             "description": "当一条长期记忆被创建时触发。载荷永远不带记忆正文：需要正文就在下游用「回忆记忆」节点读。",
             "label": "写入长期记忆时"
           }
         },
-        "capture": {
-          "item": {
-            "description": "当内容捕获保存了一条记录时触发。载荷只带 id 和分类；正文只有在你明确要求时才会带上，并且始终要过脱敏闸。",
-            "label": "捕获到内容时"
-          }
-        },
-        "file": {
-          "watch": {
-            "description": "当被监听目录下的文件发生变化时触发。它在自己启动的整个运行期间保持静音，所以写文件的工作流不会把自己再次触发。",
-            "label": "文件变更时"
-          }
-        },
-        "scheduler": {
-          "taskCompleted": {
-            "description": "当一个定时任务结算时触发，包括失败的情况。这与工作流自己的 cron 触发器不同：它响应的是别人的任务。",
-            "label": "定时任务结束时"
+        "pet": {
+          "event": {
+            "description": "当桌面宠物升级、进化、解锁成就或生病时触发。",
+            "label": "宠物事件触发"
           }
         },
         "plan": {
           "event": {
             "description": "当计划被批准、refined、暂停、取消，或某个步骤开始、完成、失败，或计划退出时触发。用 kinds 过滤器收窄范围。",
             "label": "计划事件时"
+          }
+        },
+        "scheduler": {
+          "taskCompleted": {
+            "description": "当一个定时任务结算时触发，包括失败的情况。这与工作流自己的 cron 触发器不同：它响应的是别人的任务。",
+            "label": "定时任务结束时"
           }
         },
         "team": {

@@ -1,11 +1,14 @@
 "use client"
 
 /**
- * KindFilterChips — sidebar-side multi-select filter for kind (App / Workflow
+ * KindFilterChips: sidebar-side multi-select filter for kind (App / Workflow
  * / Backup / Plugin / System). Stacks above the existing status `FilterChips`.
  *
- * "all" is mutually exclusive with any specific selection: clicking "all"
- * clears the selection set; clicking a specific kind clears "all".
+ * No "All" chip. This row sits directly under the status row, which has one of
+ * its own, and on a phone the two rendered as the same word above the same
+ * total: "All 4" twice, neither saying which axis it filtered. The reset it
+ * offered is now a Clear chip that appears only once there is a selection to
+ * clear, which is also the only moment it is actionable.
  */
 
 import { useTranslations } from "next-intl"
@@ -27,21 +30,20 @@ export function KindFilterChips({
   countsByKind,
 }: KindFilterChipsProps) {
   const t = useTranslations("scheduler")
-  const allActive = selected.size === 0
-  const totalCount = SCHEDULED_ITEM_KINDS.reduce((sum, k) => sum + (countsByKind[k] ?? 0), 0)
   return (
     <div data-testid="kind-filter-chips" className="flex flex-wrap gap-1.5 px-3 pb-2">
-      <Toggle
-        variant="outline"
-        size="sm"
-        pressed={allActive}
-        data-active={allActive}
-        onPressedChange={onClear}
-        className={cn(chipClass, allActive ? activeClass : inactiveClass)}
-      >
-        {t("kindFilter.all") || "All"}
-        <span className="ml-1 tabular-nums text-[10px] opacity-70">{totalCount}</span>
-      </Toggle>
+      {selected.size > 0 ? (
+        <Toggle
+          variant="outline"
+          size="sm"
+          pressed={false}
+          data-testid="kind-filter-clear"
+          onPressedChange={onClear}
+          className={cn(chipClass, inactiveClass)}
+        >
+          {t("kindFilter.clear")}
+        </Toggle>
+      ) : null}
       {SCHEDULED_ITEM_KINDS.map((kind) => {
         const isActive = selected.has(kind)
         const count = countsByKind[kind] ?? 0

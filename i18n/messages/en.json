@@ -26505,7 +26505,7 @@
       "workflow:completed": "Workflow completed"
     },
     "eventTypeRequired": "Event type is required",
-    "every": "Every {minutes}m",
+    "every": "Every {interval}",
     "execution": {
       "input": "Input",
       "logs": "Logs",
@@ -26621,10 +26621,10 @@
       "label": "Jitter (seconds)"
     },
     "kindFilter": {
-      "all": "All",
       "app": "App",
       "background-command": "Background Command",
       "backup": "Backup",
+      "clear": "Clear",
       "connector": "Connector",
       "plugin": "Plugin",
       "system": "System",
@@ -41554,6 +41554,13 @@
         "reset": "Reset to defaults",
         "save": "Save"
       },
+      "failover": {
+        "description": "When this account's quota window is spent, switch the active account to another one you have added for the same provider.",
+        "enableHelp": "Off by default. Only an account-level cap triggers a switch: a short per-minute throttle waits it out on the same account. Each account is tried at most once, and one that is already blocked or needs re-authentication is skipped. Note that a switch changes which subscription is billed.",
+        "enableLabel": "Switch accounts on quota exhaustion",
+        "noSiblings": "Add a second account for this provider to enable failover.",
+        "title": "Automatic account failover"
+      },
       "probe": {
         "description": "Periodically send a near-empty /v1/messages request and persist the rate-limit headers. Each probe consumes ~10 input + 1 output tokens of your quota.",
         "enableHelp": "Off by default. Passive collection from your real chat traffic always runs and is preferred.",
@@ -48979,6 +48986,12 @@
             "label": "Update goal objective"
           }
         },
+        "humanInput": {
+          "request": {
+            "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
+            "label": "Request human input"
+          }
+        },
         "image": {
           "adjust": {
             "description": "Brightness, contrast, exposure, saturation, vibrance, temperature, tint, hue, gamma, blur and sharpen.",
@@ -48995,30 +49008,6 @@
           "transform": {
             "description": "Crop, scale, rotate and flip in one pass, so a chain of edits costs one decode and one encode rather than four.",
             "label": "Transform image"
-          }
-        },
-        "humanInput": {
-          "request": {
-            "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
-            "label": "Request human input"
-          }
-        },
-        "media": {
-          "concat": {
-            "description": "Join two or more videos end to end. The result lands in the media temp area, the same as Trim.",
-            "label": "Join videos"
-          },
-          "frame": {
-            "description": "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
-            "label": "Extract frame"
-          },
-          "probe": {
-            "description": "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",
-            "label": "Probe video"
-          },
-          "trim": {
-            "description": "Cut a video between two timestamps. The result lands in the media temp area, so it chains into another media node rather than into a file node.",
-            "label": "Trim video"
           }
         },
         "issue": {
@@ -49055,6 +49044,24 @@
           "invokeTool": {
             "description": "Calls a tool on a configured MCP server.",
             "label": "Invoke MCP tool"
+          }
+        },
+        "media": {
+          "concat": {
+            "description": "Join two or more videos end to end. The result lands in the media temp area, the same as Trim.",
+            "label": "Join videos"
+          },
+          "frame": {
+            "description": "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
+            "label": "Extract frame"
+          },
+          "probe": {
+            "description": "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",
+            "label": "Probe video"
+          },
+          "trim": {
+            "description": "Cut a video between two timestamps. The result lands in the media temp area, so it chains into another media node rather than into a file node.",
+            "label": "Trim video"
           }
         },
         "memory": {
@@ -49645,6 +49652,12 @@
         }
       },
       "trigger": {
+        "capture": {
+          "item": {
+            "description": "Fires when content capture saves an item. Carries ids and classification; the captured text rides only when you ask for it, and always through the redaction gate.",
+            "label": "On captured item"
+          }
+        },
         "chat": {
           "message": {
             "description": "Fires when a user sends a message in a bound character session.",
@@ -49671,6 +49684,12 @@
             "label": "On UIA event"
           }
         },
+        "file": {
+          "watch": {
+            "description": "Fires when a file changes under a watched directory. Stays muted for the whole run it starts, so a workflow that writes files cannot re-trigger itself.",
+            "label": "On file changed"
+          }
+        },
         "goal": {
           "completed": {
             "description": "Fires when a /goal reaches a terminal status (completed, stopped, budget/turn/timeout).",
@@ -49693,40 +49712,28 @@
           "description": "Fires when you click Run in the editor.",
           "label": "Run manually"
         },
-        "pet": {
-          "event": {
-            "description": "Fires when the desktop pet levels up, evolves, unlocks an achievement, or becomes unwell.",
-            "label": "On pet event"
-          }
-        },
         "memory": {
           "written": {
             "description": "Fires when a long-term memory is created. Never carries the memory text: read it downstream with Recall memory if you need it.",
             "label": "On memory written"
           }
         },
-        "capture": {
-          "item": {
-            "description": "Fires when content capture saves an item. Carries ids and classification; the captured text rides only when you ask for it, and always through the redaction gate.",
-            "label": "On captured item"
-          }
-        },
-        "file": {
-          "watch": {
-            "description": "Fires when a file changes under a watched directory. Stays muted for the whole run it starts, so a workflow that writes files cannot re-trigger itself.",
-            "label": "On file changed"
-          }
-        },
-        "scheduler": {
-          "taskCompleted": {
-            "description": "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",
-            "label": "On scheduled task finished"
+        "pet": {
+          "event": {
+            "description": "Fires when the desktop pet levels up, evolves, unlocks an achievement, or becomes unwell.",
+            "label": "On pet event"
           }
         },
         "plan": {
           "event": {
             "description": "Fires when a plan is approved, refined, paused, cancelled, a step starts, completes or fails, or the plan exits. Scope it with the kinds filter.",
             "label": "On plan event"
+          }
+        },
+        "scheduler": {
+          "taskCompleted": {
+            "description": "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",
+            "label": "On scheduled task finished"
           }
         },
         "team": {
