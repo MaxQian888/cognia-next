@@ -1200,6 +1200,37 @@ export class ConnectorBus {
       if (!fanOutQueued && !this.routeHandler) {
         await markConnectorInboundJobHistoryOnly(inboundJob.id, "pending_limit_exceeded")
       }
+
+      // Step 11.5 — Bot fan-out.
+      //
+      // A sibling of the workflow fan-out, not of the route handler: step 10
+      // decides who RUNS this turn, and an `interaction`-trigger Bot is an
+      // observer of a turn that has already been routed.
+      //
+      // It has to sit below the sibling-bot guard (step 9.6), which returns
+      // outright when it suppresses. Dispatching above it would let a bot the
+      // guard just refused drive a Bot loop, and would spend the per-chat
+      // interplay budget on a path the guard had already closed.
+      //
+      // Best-effort and never awaited into the caller's failure path, the same
+      // contract `lib/integrations/events.ts` gives the same plane.
+      void this.dispatchBotFanOut(event)
+    }
+  }
+
+  /**
+   * Hand an admitted inbound message to the Bot control plane.
+   *
+   * Lazily imported so a deployment with no Bot installed does not pay for the
+   * control plane's module graph on every message, and swallowed entirely: the
+   * conversation already has its answer by the time this runs.
+   */
+  private async dispatchBotFanOut(event: NormalizedInboundEvent): Promise<void> {
+    try {
+      const { dispatchConnectorInboundToBots } = await import("@/lib/bot/sources/connector-inbound")
+      await dispatchConnectorInboundToBots({ event })
+    } catch {
+      // A Bot that cannot be routed must not take the conversation down.
     }
   }
 
