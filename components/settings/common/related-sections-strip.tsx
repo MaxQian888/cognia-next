@@ -54,12 +54,17 @@ export function RelatedSectionsStrip({ current, targets }: Props) {
 
   return (
     <div
-      className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5"
+      // Scrolls rather than wraps, the same contract every navigation slot in
+      // `FeaturePageHeader` follows. Ten pills wrapped into three rows inside
+      // a 375px screen, which spent about 110px of the first view on links to
+      // OTHER sections before the reader saw a single control belonging to
+      // this one. Secondary navigation does not get to outrank the page.
+      className="flex items-center gap-1.5 overflow-x-auto rounded-md border bg-muted/30 px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="navigation"
       aria-label={t("ariaLabel")}
       data-testid="related-sections-strip"
     >
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">
         {t("title")}
       </span>
       {visible.map((target) => (
@@ -70,7 +75,10 @@ export function RelatedSectionsStrip({ current, targets }: Props) {
           size="sm"
           onClick={() => goTo(target)}
           className={cn(
-            "h-6 rounded-pill bg-background px-2.5 text-[11px] font-normal",
+            // `shrink-0` so the row scrolls instead of squeezing every pill
+            // into an unreadable sliver, which is what a flex row does to
+            // children that can give way.
+            "h-6 shrink-0 rounded-pill bg-background px-2.5 text-[11px] font-normal",
             "hover:border-primary/40 hover:bg-accent focus-visible:border-primary/40 focus-visible:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           )}

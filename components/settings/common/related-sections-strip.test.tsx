@@ -17,6 +17,17 @@ beforeEach(() => {
 })
 
 describe("RelatedSectionsStrip", () => {
+  it("keeps its pills on one scrolling row instead of wrapping", () => {
+    // Ten pills wrapped into three rows on a 375px screen, spending about
+    // 110px of the first view on links to OTHER sections before the reader
+    // saw a control belonging to this one. Every navigation slot in
+    // FeaturePageHeader scrolls its overflow instead; so does this.
+    render(<RelatedSectionsStrip current="mcp" targets={CLAUDE_CODE_RELATED} />)
+    const strip = screen.getByTestId("related-sections-strip")
+    expect(strip).toHaveClass("overflow-x-auto")
+    expect(strip).not.toHaveClass("flex-wrap")
+  })
+
   it("renders one pill per non-current target", () => {
     render(<RelatedSectionsStrip current="agent-runtime" targets={CLAUDE_CODE_RELATED} />)
     // Both agent-runtime targets (defaults + sessions) should be hidden when
