@@ -125,7 +125,8 @@ pub(super) async fn dispatch(
                 crate::companion_api::browser_access::BrowserAccessConfig {
                     enabled,
                     allowed_origins,
-                    port: port.unwrap_or(crate::companion_api::browser_access::DEFAULT_BROWSER_PORT),
+                    port: port
+                        .unwrap_or(crate::companion_api::browser_access::DEFAULT_BROWSER_PORT),
                 },
             )
             .map_err(RpcError::internal)?;
@@ -136,9 +137,9 @@ pub(super) async fn dispatch(
         }
 
         // ── Push credentials ───────────────────────────────────────────────
-        "companion_push_status" => {
-            to_json(crate::companion_api::commands::companion_push_status().map_err(RpcError::internal)?)
-        }
+        "companion_push_status" => to_json(
+            crate::companion_api::commands::companion_push_status().map_err(RpcError::internal)?,
+        ),
 
         "companion_push_configure_fcm" => {
             let service_account_json: String =
@@ -167,12 +168,14 @@ pub(super) async fn dispatch(
         }
 
         "companion_push_clear_fcm" => {
-            crate::companion_api::commands::companion_push_clear_fcm().map_err(RpcError::internal)?;
+            crate::companion_api::commands::companion_push_clear_fcm()
+                .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
         "companion_push_clear_apns" => {
-            crate::companion_api::commands::companion_push_clear_apns().map_err(RpcError::internal)?;
+            crate::companion_api::commands::companion_push_clear_apns()
+                .map_err(RpcError::internal)?;
             Ok(Value::Null)
         }
 
@@ -202,7 +205,9 @@ pub(super) async fn dispatch(
                     use tauri::Manager as _;
                     let state = app
                         .try_state::<crate::companion_api::CompanionServerState>()
-                        .ok_or_else(|| RpcError::internal("companion server state unavailable".to_string()))?;
+                        .ok_or_else(|| {
+                            RpcError::internal("companion server state unavailable".to_string())
+                        })?;
                     let port = state
                         .bound_port()
                         .unwrap_or(crate::companion_api::server::DEFAULT_PORT);
@@ -334,7 +339,9 @@ mod tests {
     /// not a panic and not an opaque 500.
     #[test]
     fn signaling_arms_report_a_missing_hub_as_unavailable() {
-        let err = hub("companion_signaling_status").err().expect("no hub in tests");
+        let err = hub("companion_signaling_status")
+            .err()
+            .expect("no hub in tests");
         assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(err.1 .0.code, "signaling_unavailable");
     }

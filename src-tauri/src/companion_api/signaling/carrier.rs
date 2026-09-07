@@ -217,7 +217,10 @@ mod tests {
         assert!((10 * 1024 * 1024usize).div_ceil(RELAY_BINARY_RESOURCE_CHUNK_BYTES) <= 512);
         let id = uuid::Uuid::new_v4().to_string();
         let bytes = vec![7u8; RELAY_BINARY_RESOURCE_CHUNK_BYTES * 2 + 1];
-        carrier.send_binary_resource(&id, &bytes).await.expect("send");
+        carrier
+            .send_binary_resource(&id, &bytes)
+            .await
+            .expect("send");
         let mut count = 0;
         while let Ok(frame) = rx.try_recv() {
             assert!(matches!(frame, RelayFrame::Binary(_)));

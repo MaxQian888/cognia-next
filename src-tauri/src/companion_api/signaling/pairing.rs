@@ -288,7 +288,11 @@ mod tests {
             assert_eq!(admit(&request(path, "POST", Some("{}")), 10, 0), Ok(()));
         }
         assert_eq!(
-            admit(&request("/api/_rpc/sessions_list", "POST", Some("{}")), 10, 0),
+            admit(
+                &request("/api/_rpc/sessions_list", "POST", Some("{}")),
+                10,
+                0
+            ),
             Err(PairHttpRefusal::PathNotAllowed)
         );
         assert_eq!(

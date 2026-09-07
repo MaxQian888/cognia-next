@@ -35,7 +35,10 @@ pub fn load(data_dir: Option<&Path>) -> Option<SignalingConfigPatch> {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
-            log::warn!("signaling config: could not read {}: {error}", path.display());
+            log::warn!(
+                "signaling config: could not read {}: {error}",
+                path.display()
+            );
             return None;
         }
     };

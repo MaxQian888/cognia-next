@@ -30,8 +30,8 @@ use std::time::{Duration, Instant};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::{
     proto::{
-        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RelayLane, RoomDescriptor,
-        ServerFrame, SignalingEnvelope, SubscribeProof,
+        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RelayLane, RoomDescriptor, ServerFrame,
+        SignalingEnvelope, SubscribeProof,
     },
     protocol::{validate_room_descriptor, verify_subscribe_proof},
 };
@@ -1528,7 +1528,8 @@ async fn handle_pairing_envelope(
                 }
             };
             let frame = OutboundFrame::Response(response);
-            let bytes = serde_json::to_vec(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
+            let bytes =
+                serde_json::to_vec(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
             let message_id = uuid::Uuid::new_v4().to_string();
             let frames = super::datachannel_framing::encode_message(&bytes, &message_id)
                 .map_err(|e| SessionError::Protocol(e.to_string()))?;
@@ -1700,9 +1701,13 @@ mod tests {
 
     #[test]
     fn hello_relay_flag_is_read_from_the_body() {
-        assert!(hello_wants_relay(&json!({ "deviceId": "d", "relay": true })));
+        assert!(hello_wants_relay(
+            &json!({ "deviceId": "d", "relay": true })
+        ));
         assert!(!hello_wants_relay(&json!({ "deviceId": "d" })));
-        assert!(!hello_wants_relay(&json!({ "deviceId": "d", "relay": "yes" })));
+        assert!(!hello_wants_relay(
+            &json!({ "deviceId": "d", "relay": "yes" })
+        ));
     }
 
     #[test]

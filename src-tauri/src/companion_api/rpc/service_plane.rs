@@ -1294,7 +1294,11 @@ pub(super) async fn dispatch(
                     let bind_lan = server_state
                         .bind_mode()
                         .map(|mode| matches!(mode, super::super::BindMode::Lan));
-                    (tunnel, bind_lan, server_state.data_dir().map(|d| d.to_path_buf()))
+                    (
+                        tunnel,
+                        bind_lan,
+                        server_state.data_dir().map(|d| d.to_path_buf()),
+                    )
                 }
                 // Headless: no tunnel launcher, and the listener is bound
                 // `0.0.0.0`, so leave `bind_lan` unknown (= assume LAN).

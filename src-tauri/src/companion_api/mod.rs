@@ -62,7 +62,6 @@ pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
 pub mod reachability_config;
-pub mod signaling_config;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
@@ -72,6 +71,7 @@ pub mod server;
 pub mod session_media;
 pub mod settings_sync_generated;
 pub mod signaling;
+pub mod signaling_config;
 pub mod skill_transactions;
 pub mod spec_parity;
 pub mod store;
@@ -219,8 +219,7 @@ pub fn advertised_port() -> u16 {
 /// like [`ADVERTISED_PORT`]: the headless binary decides this from a CLI flag
 /// and the host-admin `companion_server_status` arm reports it (ADR-0170).
 /// The desktop keeps its own answer in `CompanionServerState::bind_mode`.
-static BIND_LOOPBACK_ONLY: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(true);
+static BIND_LOOPBACK_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 pub fn set_bind_loopback_only(loopback_only: bool) {
     BIND_LOOPBACK_ONLY.store(loopback_only, std::sync::atomic::Ordering::SeqCst);
@@ -235,8 +234,7 @@ pub fn bind_loopback_only() -> bool {
 /// the headless `serve`), read by the host-admin `companion_browser_access_get`
 /// arm so a browser talking to a headless Host sees "configured" and "bound"
 /// as two facts, exactly as the desktop card does.
-static BROWSER_ADVERTISED_PORT: std::sync::atomic::AtomicU16 =
-    std::sync::atomic::AtomicU16::new(0);
+static BROWSER_ADVERTISED_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 
 pub fn set_browser_advertised_port(port: u16) {
     BROWSER_ADVERTISED_PORT.store(port, std::sync::atomic::Ordering::SeqCst);

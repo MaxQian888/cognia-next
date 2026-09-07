@@ -1468,10 +1468,11 @@ async fn run_serve(
         None => {
             let saved = app_lib::companion_api::browser_access::load(Some(&store_data_dir()));
             if saved.enabled && !saved.allowed_origins.is_empty() {
-                let policy = app_lib::companion_api::web_origin::WebOriginPolicy::from_env_and_config(
-                    &saved,
-                )
-                .allowing_private_network();
+                let policy =
+                    app_lib::companion_api::web_origin::WebOriginPolicy::from_env_and_config(
+                        &saved,
+                    )
+                    .allowing_private_network();
                 if policy.allows_any_origin() {
                     log::info!(
                         "browser listener enabled from the saved browser-access config (port {})",
@@ -1589,7 +1590,10 @@ async fn run_serve(
     // reapplied before the hub binds, so the first client task already dials
     // the configured rendezvous with the configured ICE servers.
     if let Some(patch) = app_lib::companion_api::signaling_config::load(Some(&data_dir)) {
-        log::info!("signaling config restored from disk ({})", patch.signaling_url);
+        log::info!(
+            "signaling config restored from disk ({})",
+            patch.signaling_url
+        );
         signaling_hub.apply_patch(patch);
     }
     signaling::install_hub(Some(&signaling_hub));

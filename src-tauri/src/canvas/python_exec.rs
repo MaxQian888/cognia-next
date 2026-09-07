@@ -343,14 +343,9 @@ mod tests {
             eprintln!("python not available; skipping");
             return;
         }
-        let res = canvas_run_python(
-            "import time\ntime.sleep(5)".into(),
-            Some(150),
-            None,
-            None,
-        )
-        .await
-        .expect("python ran");
+        let res = canvas_run_python("import time\ntime.sleep(5)".into(), Some(150), None, None)
+            .await
+            .expect("python ran");
         assert_eq!(res.exit_code, 124);
     }
 
@@ -379,7 +374,11 @@ mod tests {
 
         // Wait for the run to register rather than sleeping a fixed amount.
         for _ in 0..200 {
-            if live_runs().lock().map(|r| r.contains_key(&run_id)).unwrap_or(false) {
+            if live_runs()
+                .lock()
+                .map(|r| r.contains_key(&run_id))
+                .unwrap_or(false)
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
