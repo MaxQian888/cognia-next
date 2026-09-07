@@ -78,8 +78,6 @@ import {
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import {
   Sheet,
@@ -325,16 +323,17 @@ export function DiagnosticsWorkspace() {
         icon={<ScrollTextIcon />}
         title={t("title")}
         breadcrumb={
+          // Just the way back. The trail's last crumb was `t("title")`, and
+          // the header prints `t("title")` as the heading immediately to its
+          // right, so a wide window read "Home > Logs and diagnostics" and
+          // then "Logs and diagnostics" again. A crumb that repeats the
+          // heading beside it is chrome, not orientation.
           <Breadcrumb className="hidden @3xl/feature-header:block">
             <BreadcrumbList>
               <BreadcrumbItem>
                 <BreadcrumbLink asChild>
                   <Link href="/">{t("breadcrumbHome")}</Link>
                 </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{t("title")}</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
