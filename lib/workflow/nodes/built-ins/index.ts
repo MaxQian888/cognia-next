@@ -59,6 +59,11 @@ import "../sites"
 // most recurrent defect; `executor-coverage.test.ts` fails without this line.
 import "../artifacts"
 import "../issues"
+// Native media nodes (FFmpeg) and the pure image engine. A registry nobody
+// registers into is this repo's most recurrent defect;
+// `executor-coverage.test.ts` fails without these lines.
+import "../media"
+import "../images"
 // Agent-browser nodes. A registry nobody registers into is this repo's most
 // recurrent defect; `executor-coverage.test.ts` fails without this line.
 import "../browser"

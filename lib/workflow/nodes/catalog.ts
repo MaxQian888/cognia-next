@@ -864,6 +864,206 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Native media (FFmpeg) ─────────────────────────────────────────────────
+  "action.media.probe": {
+    label: "Probe video",
+    description: "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",
+    iconName: "FileVideo",
+    keywords: ["video", "media", "probe", "metadata", "duration", "ffprobe"],
+    requires: ["media"],
+    paramsSchema: {
+      type: "object",
+      required: ["sourcePath"],
+      properties: {
+        sourcePath: { type: "string", format: "expression", title: "Video file path" },
+      },
+    },
+  },
+  "action.media.frame": {
+    label: "Extract frame",
+    description:
+      "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
+    iconName: "Film",
+    keywords: ["video", "media", "frame", "thumbnail", "still", "extract"],
+    requires: ["media", "webview"],
+    paramsSchema: {
+      type: "object",
+      required: ["sourcePath", "timeSeconds"],
+      properties: {
+        sourcePath: { type: "string", format: "expression", title: "Video file path" },
+        timeSeconds: { type: "number", title: "Timestamp (seconds)", minimum: 0 },
+      },
+    },
+  },
+  "action.media.trim": {
+    label: "Trim video",
+    description:
+      "Cut a video between two timestamps. The result lands in the media temp area, so it chains into another media node rather than into a file node.",
+    iconName: "Scissors",
+    keywords: ["video", "media", "trim", "cut", "clip", "ffmpeg"],
+    requires: ["media"],
+    paramsSchema: {
+      type: "object",
+      required: ["sourcePath", "endSeconds"],
+      properties: {
+        sourcePath: { type: "string", format: "expression", title: "Video file path" },
+        startSeconds: { type: "number", title: "Start (seconds)", minimum: 0, default: 0 },
+        endSeconds: { type: "number", title: "End (seconds)", minimum: 0 },
+        format: { type: "string", title: "Container", default: "mp4" },
+      },
+    },
+  },
+  "action.media.concat": {
+    label: "Join videos",
+    description:
+      "Join two or more videos end to end. The result lands in the media temp area, the same as Trim.",
+    iconName: "Combine",
+    keywords: ["video", "media", "concat", "join", "merge", "ffmpeg"],
+    requires: ["media"],
+    paramsSchema: {
+      type: "object",
+      required: ["sourcePaths"],
+      properties: {
+        sourcePaths: {
+          type: "array",
+          title: "Video file paths",
+          items: { type: "string" },
+        },
+      },
+    },
+  },
+  // ── Image editing ─────────────────────────────────────────────────────────
+  "action.image.info": {
+    label: "Read image info",
+    description: "Dimensions, aspect ratio and whether the image carries transparency.",
+    iconName: "Image",
+    keywords: ["image", "info", "dimensions", "size", "metadata", "transparency"],
+    requires: ["webview"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        blobRef: {
+          type: "string",
+          format: "expression",
+          title: "Blob reference",
+          description: "From an earlier image or frame node.",
+        },
+        dataUrl: { type: "string", format: "expression", title: "Data URL" },
+        imageBase64: { type: "string", format: "expression", title: "Base64 bytes" },
+        mimeType: { type: "string", title: "Media type for the base64 bytes" },
+        url: { type: "string", format: "expression", title: "Image URL" },
+      },
+    },
+  },
+  "action.image.transform": {
+    label: "Transform image",
+    description:
+      "Crop, scale, rotate and flip in one pass, so a chain of edits costs one decode and one encode rather than four.",
+    iconName: "Crop",
+    keywords: ["image", "resize", "crop", "rotate", "flip", "scale", "transform"],
+    requires: ["webview"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        blobRef: {
+          type: "string",
+          format: "expression",
+          title: "Blob reference",
+          description: "From an earlier image or frame node.",
+        },
+        dataUrl: { type: "string", format: "expression", title: "Data URL" },
+        imageBase64: { type: "string", format: "expression", title: "Base64 bytes" },
+        mimeType: { type: "string", title: "Media type for the base64 bytes" },
+        url: { type: "string", format: "expression", title: "Image URL" },
+        rotate: { type: "number", title: "Rotate (degrees clockwise)" },
+        scale: { type: "number", title: "Scale factor", minimum: 0.01 },
+        flipHorizontal: { type: "boolean", title: "Flip horizontally" },
+        flipVertical: { type: "boolean", title: "Flip vertically" },
+        cropX: { type: "number", title: "Crop x" },
+        cropY: { type: "number", title: "Crop y" },
+        cropWidth: { type: "number", title: "Crop width" },
+        cropHeight: { type: "number", title: "Crop height" },
+        format: {
+          type: "string",
+          title: "Output format",
+          enum: ["png", "jpeg", "webp"],
+          description: "An image with transparency comes back as PNG regardless.",
+        },
+        quality: { type: "integer", title: "Quality (0 to 100)", minimum: 0, maximum: 100 },
+      },
+    },
+  },
+  "action.image.adjust": {
+    label: "Adjust image",
+    description:
+      "Brightness, contrast, exposure, saturation, vibrance, temperature, tint, hue, gamma, blur and sharpen.",
+    iconName: "SlidersHorizontal",
+    keywords: ["image", "adjust", "brightness", "contrast", "saturation", "blur", "sharpen"],
+    requires: ["webview"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        blobRef: {
+          type: "string",
+          format: "expression",
+          title: "Blob reference",
+          description: "From an earlier image or frame node.",
+        },
+        dataUrl: { type: "string", format: "expression", title: "Data URL" },
+        imageBase64: { type: "string", format: "expression", title: "Base64 bytes" },
+        mimeType: { type: "string", title: "Media type for the base64 bytes" },
+        url: { type: "string", format: "expression", title: "Image URL" },
+        brightness: { type: "number", title: "Brightness", minimum: -100, maximum: 100 },
+        contrast: { type: "number", title: "Contrast", minimum: -100, maximum: 100 },
+        exposure: { type: "number", title: "Exposure", minimum: -100, maximum: 100 },
+        saturation: { type: "number", title: "Saturation", minimum: -100, maximum: 100 },
+        vibrance: { type: "number", title: "Vibrance", minimum: -100, maximum: 100 },
+        temperature: { type: "number", title: "Temperature", minimum: -100, maximum: 100 },
+        tint: { type: "number", title: "Tint", minimum: -100, maximum: 100 },
+        hue: { type: "number", title: "Hue (degrees)", minimum: -180, maximum: 180 },
+        gamma: { type: "number", title: "Gamma", minimum: 0.1, maximum: 10 },
+        blur: { type: "number", title: "Blur", minimum: 0, maximum: 100 },
+        sharpen: { type: "number", title: "Sharpen", minimum: 0, maximum: 100 },
+        format: {
+          type: "string",
+          title: "Output format",
+          enum: ["png", "jpeg", "webp"],
+          description: "An image with transparency comes back as PNG regardless.",
+        },
+        quality: { type: "integer", title: "Quality (0 to 100)", minimum: 0, maximum: 100 },
+      },
+    },
+  },
+  "action.image.convert": {
+    label: "Convert image",
+    description:
+      "Re-encode an image. The output reports the format it actually is, which is not always the one requested.",
+    iconName: "FileImage",
+    keywords: ["image", "convert", "encode", "png", "jpeg", "webp", "format"],
+    requires: ["webview"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        blobRef: {
+          type: "string",
+          format: "expression",
+          title: "Blob reference",
+          description: "From an earlier image or frame node.",
+        },
+        dataUrl: { type: "string", format: "expression", title: "Data URL" },
+        imageBase64: { type: "string", format: "expression", title: "Base64 bytes" },
+        mimeType: { type: "string", title: "Media type for the base64 bytes" },
+        url: { type: "string", format: "expression", title: "Image URL" },
+        format: {
+          type: "string",
+          title: "Output format",
+          enum: ["png", "jpeg", "webp"],
+          description: "An image with transparency comes back as PNG regardless.",
+        },
+        quality: { type: "integer", title: "Quality (0 to 100)", minimum: 0, maximum: 100 },
+      },
+    },
+  },
   // ── Agent browser (ADR-0055 / 0072 / 0085) ────────────────────────────────
   "action.browser.open": {
     label: "Open page",

@@ -174,6 +174,22 @@ export type WorkflowNodeKind =
   | "action.approval.request"
   // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
   | "action.humanInput.request"
+  // Native media (`crates/cognia-media`, FFmpeg). Tauri only, and honestly so:
+  // the commands are raw `invoke` with no companion RPC arm and no manifest
+  // descriptor, so they are unreachable from the brain, a companion and a
+  // remote host. `applyEffect` / `addTransition` are absent because they are
+  // no-ops in Rust today, and `export` because it reads up to 128 MiB over IPC.
+  | "action.media.probe"
+  | "action.media.frame"
+  | "action.media.trim"
+  | "action.media.concat"
+  // Image editing (ADR-0168's engine). Resize, crop, rotate and flip collapse
+  // into one `transform`, because the engine already takes all four in one
+  // pass and four nodes would be four lossy re-encodes.
+  | "action.image.info"
+  | "action.image.transform"
+  | "action.image.adjust"
+  | "action.image.convert"
   // Agent browser (ADR-0055 / 0072 / 0085). The engine is run-scoped: a graph
   // does not borrow whichever engine a React pane happened to bind, and never
   // takes over the page a person has open. `evaluate` is deliberately absent,
@@ -495,6 +511,14 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.approval.request",
   "action.humanInput.request",
+  "action.media.probe",
+  "action.media.frame",
+  "action.media.trim",
+  "action.media.concat",
+  "action.image.info",
+  "action.image.transform",
+  "action.image.adjust",
+  "action.image.convert",
   "action.browser.open",
   "action.browser.snapshot",
   "action.browser.readPage",

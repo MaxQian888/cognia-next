@@ -6,6 +6,7 @@ import { pruneExpiredWorkflowWaitEvents } from "@/lib/db/workflow-waitpoints"
 import { pruneWorkflowKnowledgeArtifacts } from "@/lib/workflow/knowledge/artifacts"
 import { pruneExpiredWorkflowFeedback } from "@/lib/workflow/quality/quality-service"
 import { pruneExpiredWorkflowBatches } from "./batch-service"
+import { pruneWorkflowBlobs } from "@/lib/workflow/blobs/store"
 
 /** Runs every row-expiry policy owned by the published Workflow App surface. */
 export async function pruneExpiredWorkflowAppData(now = Date.now()): Promise<number> {
@@ -18,6 +19,7 @@ export async function pruneExpiredWorkflowAppData(now = Date.now()): Promise<num
     pruneWorkflowKnowledgeArtifacts(now),
     pruneExpiredWorkflowFeedback(now),
     pruneExpiredSharedLinks(now),
+    pruneWorkflowBlobs(now),
   ])
   return removed.reduce((total, count) => total + count, 0)
 }

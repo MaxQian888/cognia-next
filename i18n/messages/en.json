@@ -48807,10 +48807,46 @@
             "label": "Update goal objective"
           }
         },
+        "image": {
+          "adjust": {
+            "description": "Brightness, contrast, exposure, saturation, vibrance, temperature, tint, hue, gamma, blur and sharpen.",
+            "label": "Adjust image"
+          },
+          "convert": {
+            "description": "Re-encode an image. The output reports the format it actually is, which is not always the one requested.",
+            "label": "Convert image"
+          },
+          "info": {
+            "description": "Dimensions, aspect ratio and whether the image carries transparency.",
+            "label": "Read image info"
+          },
+          "transform": {
+            "description": "Crop, scale, rotate and flip in one pass, so a chain of edits costs one decode and one encode rather than four.",
+            "label": "Transform image"
+          }
+        },
         "humanInput": {
           "request": {
             "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
             "label": "Request human input"
+          }
+        },
+        "media": {
+          "concat": {
+            "description": "Join two or more videos end to end. The result lands in the media temp area, the same as Trim.",
+            "label": "Join videos"
+          },
+          "frame": {
+            "description": "Pull one frame out of a video at a timestamp and hand back a reference the image and OCR nodes can read.",
+            "label": "Extract frame"
+          },
+          "probe": {
+            "description": "Read a video's duration, dimensions, frame rate, codec and whether it has audio.",
+            "label": "Probe video"
+          },
+          "trim": {
+            "description": "Cut a video between two timestamps. The result lands in the media temp area, so it chains into another media node rather than into a file node.",
+            "label": "Trim video"
           }
         },
         "issue": {

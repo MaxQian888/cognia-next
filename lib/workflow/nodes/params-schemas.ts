@@ -1951,6 +1951,21 @@ function requireExplicitRootPath(
   }
 }
 
+/** The four ways an image node may be handed its input. */
+const ImageSourceParams = {
+  blobRef: optionalString,
+  dataUrl: optionalString,
+  imageBase64: optionalString,
+  mimeType: optionalString,
+  url: optionalString,
+}
+
+/** Encoding controls shared by every image node that returns bytes. */
+const ImageOutputParams = {
+  format: z.enum(["png", "jpeg", "webp"]).optional(),
+  quality: numberRange(0, 100).int().optional(),
+}
+
 export const PARAMS_SCHEMAS = {
   // Triggers
   "trigger.manual": ManualTriggerParams,
@@ -2166,6 +2181,56 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Native media. Paths are plain strings: the media temp root is outside every
+  // workspace root by design, so the `(root, relPath)` discipline the fs nodes
+  // use does not apply and would only refuse the paths these nodes produce.
+  "action.media.probe": z.object({ sourcePath: requiredString("required") }),
+  "action.media.frame": z.object({
+    sourcePath: requiredString("required"),
+    timeSeconds: numberRange(0),
+  }),
+  "action.media.trim": z.object({
+    sourcePath: requiredString("required"),
+    startSeconds: numberRange(0).optional(),
+    endSeconds: numberRange(0),
+    format: optionalString,
+  }),
+  "action.media.concat": z.object({
+    sourcePaths: z.array(z.string().min(1)).min(2, "minItems"),
+  }),
+  // Image editing. The four source fields are optional individually and one of
+  // them is required in effect, which the executor reports by name rather than
+  // the schema by asterisk: an author picking a blob reference should not see
+  // three other fields marked required.
+  "action.image.info": z.object({ ...ImageSourceParams }),
+  "action.image.transform": z.object({
+    ...ImageSourceParams,
+    ...ImageOutputParams,
+    rotate: z.number().optional(),
+    scale: numberRange(0.01).optional(),
+    flipHorizontal: z.boolean().optional(),
+    flipVertical: z.boolean().optional(),
+    cropX: z.number().optional(),
+    cropY: z.number().optional(),
+    cropWidth: numberRange(0).optional(),
+    cropHeight: numberRange(0).optional(),
+  }),
+  "action.image.adjust": z.object({
+    ...ImageSourceParams,
+    ...ImageOutputParams,
+    brightness: numberRange(-100, 100).optional(),
+    contrast: numberRange(-100, 100).optional(),
+    exposure: numberRange(-100, 100).optional(),
+    saturation: numberRange(-100, 100).optional(),
+    vibrance: numberRange(-100, 100).optional(),
+    temperature: numberRange(-100, 100).optional(),
+    tint: numberRange(-100, 100).optional(),
+    hue: numberRange(-180, 180).optional(),
+    gamma: numberRange(0.1, 10).optional(),
+    blur: numberRange(0, 100).optional(),
+    sharpen: numberRange(0, 100).optional(),
+  }),
+  "action.image.convert": z.object({ ...ImageSourceParams, ...ImageOutputParams }),
   // Agent browser. `url` is only on `open` and `replayFlow` resolves its own
   // from the recording: every other node acts on the page the run already has,
   // so carrying a url there would invite two sources of truth for "where am I".

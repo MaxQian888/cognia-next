@@ -182,6 +182,7 @@ import type {
   WorkflowHumanInputSubmissionRow,
 } from "@/types/workflow/human-input"
 import type { WorkflowApp, WorkflowAppRelease } from "@/types/workflow/app"
+import type { WorkflowBlobRow } from "@/types/workflow/blob"
 import type { WorkflowBatchJob, WorkflowBatchRow } from "@/types/workflow/batch"
 import type { WorkflowKnowledgeArtifactRow } from "@/types/workflow/knowledge-pipeline"
 import type {
@@ -402,7 +403,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 223
+export const CURRENT_SCHEMA_VERSION = 224
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -835,6 +836,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   mobileStepReceipts: "&requestId, deviceId, status, [deviceId+status], updatedAt, expiresAt",
   workflowHumanInputFiles:
     "&id, accountId, requestId, responderId, fieldId, expiresAt, [requestId+responderId]",
+  workflowBlobs: "&id, accountId, runId, stepId, expiresAt, [runId+stepId]",
   workflowApps:
     "&id, accountId, workflowId, slug, &[accountId+slug], [accountId+workflowId], currentReleaseId, updatedAt",
   workflowAppReleases:
@@ -1162,6 +1164,7 @@ export class CogniaDB extends Dexie {
   workflowHumanInputRequests!: Table<WorkflowHumanInputRequest, string>
   workflowHumanInputSubmissions!: Table<WorkflowHumanInputSubmissionRow, string>
   workflowHumanInputFiles!: Table<WorkflowHumanInputFileRow, string>
+  workflowBlobs!: Table<WorkflowBlobRow, string>
   workflowApps!: Table<WorkflowApp, string>
   workflowAppReleases!: Table<WorkflowAppRelease, string>
   workflowBatchJobs!: Table<WorkflowBatchJob, string>

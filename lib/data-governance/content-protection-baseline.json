@@ -323,6 +323,7 @@
   "workflowApps": "metadata-only",
   "workflowBatchJobs": "metadata-only",
   "workflowBatchRows": "metadata-only",
+  "workflowBlobs": "encrypted-content",
   "workflowConversationMessages": "encrypted-content",
   "workflowConversationReleaseEvents": "metadata-only",
   "workflowConversationSummaries": "encrypted-content",
