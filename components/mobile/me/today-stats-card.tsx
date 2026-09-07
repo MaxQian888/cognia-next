@@ -3,10 +3,9 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useFormatter, useNow, useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
 import { AlertTriangleIcon, ClockAlertIcon } from "lucide-react"
 
-import { Card, CardContent } from "@/components/ui/card"
+import { Surface } from "@/components/surface/surface"
 import { listSessions } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import { totalsByAllSessions } from "@/lib/db/session-usage"
@@ -14,7 +13,6 @@ import { getLatestSuccessful, listBackupHistory } from "@/lib/db/backup-history"
 import { computeBackupHealth, type BackupHealthResult } from "@/lib/data/backup-health"
 import { formatBytes, getStorageUsage } from "@/lib/storage/usage"
 import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
-import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
@@ -101,7 +99,6 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   const format = useFormatter()
   const now = useNow()
   const [stats, setStats] = useState<Stats>(initial)
-  const reduce = useReducedMotion()
 
   useEffect(() => {
     let cancelled = false
@@ -214,21 +211,28 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
   }>
 
   return (
-    <motion.div
-      className={cn("grid grid-cols-2 gap-2 sm:grid-cols-4", className)}
+    // One surface with hairline-separated cells, not four bordered cards. Four
+    // cards cost 237px of a 375px first screen to show four short numbers, and
+    // three of them read 0 or Never on a fresh install. The `gap-px` over a
+    // border-coloured ground paints the hairlines without nth-child arithmetic,
+    // so it survives the six-tile case and the four-column breakpoint alike.
+    // The page above already staggers this block in, so it carries no reveal of
+    // its own: per-cell variants over a border-coloured ground would have shown
+    // as a solid grey slab for as long as a cell sat at opacity 0.
+    <Surface
+      layer="raised"
+      radius="panel"
+      className={cn("overflow-hidden border", className)}
       data-testid="today-stats-card"
-      initial={reduce ? false : "initial"}
-      animate="animate"
-      variants={STAGGER_CONTAINER}
     >
-      {tiles.map((tile) => {
-        const Icon = tile.icon
-        const card = (
-          <Card className="h-full active:bg-muted/50">
-            <CardContent className="flex h-full flex-col items-start justify-center gap-1 px-3 py-3">
+      <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+        {tiles.map((tile) => {
+          const Icon = tile.icon
+          const body = (
+            <>
               <span
                 className={cn(
-                  "flex items-center gap-1 text-base font-semibold leading-tight tracking-tight",
+                  "flex items-center gap-1 text-base leading-tight font-semibold tracking-tight",
                   tile.accent
                 )}
               >
@@ -237,29 +241,28 @@ export function TodayStatsCard({ loaders, className }: TodayStatsCardProps) {
                 {tile.value}
               </span>
               <span className="text-[11px] text-muted-foreground">{tile.label}</span>
-            </CardContent>
-          </Card>
-        )
-        return (
-          <motion.div key={tile.testId} variants={STAGGER_CHILD}>
-            {tile.href ? (
-              <Link
-                href={tile.href}
-                data-testid={tile.testId}
-                data-status={tile.status}
-                title={tile.statusLabel}
-                className="block"
-              >
-                {card}
-              </Link>
-            ) : (
-              <div data-testid={tile.testId} className="block">
-                {card}
-              </div>
-            )}
-          </motion.div>
-        )
-      })}
-    </motion.div>
+            </>
+          )
+          const cellClass =
+            "flex flex-col items-start justify-center gap-0.5 bg-card px-3 py-2.5 transition-colors active:bg-muted/50"
+          return tile.href ? (
+            <Link
+              key={tile.testId}
+              href={tile.href}
+              data-testid={tile.testId}
+              data-status={tile.status}
+              title={tile.statusLabel}
+              className={cellClass}
+            >
+              {body}
+            </Link>
+          ) : (
+            <div key={tile.testId} data-testid={tile.testId} className={cellClass}>
+              {body}
+            </div>
+          )
+        })}
+      </div>
+    </Surface>
   )
 }

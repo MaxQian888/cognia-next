@@ -109,6 +109,35 @@ describe("<TodayStatsCard />", () => {
     expect(screen.getByTestId("stat-tile-storage")).toHaveAttribute("href", "/me/storage")
   })
 
+  it("packs the tiles into one surface and keeps every cell tappable", async () => {
+    // Four bordered cards cost 237px of a 375px first screen to show four short
+    // numbers, three of which read 0 or Never on a fresh install. One surface
+    // with hairline cells is 120px, and each cell is still its own link.
+    const { container } = render(
+      <TodayStatsCard
+        loaders={{
+          sessionCount: async () => 1,
+          pendingDrafts: async () => 0,
+          lastBackupMs: async () => null,
+          storageBytes: async () => 1024,
+        }}
+      />
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("stat-tile-sessions")).toHaveTextContent("1")
+    })
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    for (const id of ["sessions", "drafts", "backup", "storage"]) {
+      expect(screen.getByTestId(`stat-tile-${id}`).tagName).toBe("A")
+    }
+    // The hairlines come from a border-coloured ground showing through a
+    // one-pixel gap, so they hold for the six-tile case and the sm breakpoint
+    // without any nth-child arithmetic.
+    const grid = container.querySelector('[data-testid="today-stats-card"] > div')
+    expect(grid?.className).toMatch(/gap-px/)
+    expect(grid?.className).toMatch(/bg-border/)
+  })
+
   it("renders token + cost tiles once usage exists, and hides them otherwise", async () => {
     const { rerender } = render(
       <TodayStatsCard
