@@ -44,7 +44,9 @@ export function SkillsSection({ className }: Props) {
           </TabsList>
         </div>
         <TabsContent value="installed" className="mt-0 min-h-0 flex-1 overflow-hidden">
-          <SkillPanel />
+          {/* The shell (Settings, or `/me/skills`) already carries the page
+              title and the way back. */}
+          <SkillPanel embedded />
         </TabsContent>
         <TabsContent value="built-in" className="mt-0 min-h-0 flex-1 overflow-y-auto p-4">
           <BuiltInSkillsSection />

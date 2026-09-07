@@ -15,9 +15,20 @@ interface Props {
   filteredCount: number
   /** Tabs rendered inline in the header row at lg+ (second row below lg). */
   tabsSlot?: ReactNode
+  /**
+   * The panel is inside a host that already owns the page's identity and its
+   * way back: the Settings shell, or `/me/skills` under `SubPageShell`.
+   *
+   * Without it this header put a second back arrow next to the host's, and
+   * that one pointed at `/`, so the control that looked like "up one level"
+   * actually left Settings altogether. It also emitted a second `<h1>` for a
+   * page that already had one, and on a 375px phone the two titles competed
+   * for the same row until this one truncated to "S…".
+   */
+  embedded?: boolean
 }
 
-export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot }: Props) {
+export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot, embedded }: Props) {
   const t = useTranslations("skills")
   const setFilterSheetOpen = useSkillsStore((s) => s.setFilterSheetOpen)
   const setCategorySheetOpen = useSkillsStore((s) => s.setCategorySheetOpen)
@@ -34,13 +45,16 @@ export function SkillPanelHeader({ totalCount, filteredCount, tabsSlot }: Props)
             : `${filteredCount}/${totalCount}`}
         </span>
       }
+      headingLevel={embedded ? 2 : 1}
       breadcrumb={
         <div className="flex items-center gap-1">
-          <Button asChild variant="ghost" size="icon" className="size-8 shrink-0">
-            <Link href="/" aria-label={t("back")}>
-              <ArrowLeftIcon className="size-4" />
-            </Link>
-          </Button>
+          {!embedded && (
+            <Button asChild variant="ghost" size="icon" className="size-8 shrink-0">
+              <Link href="/" aria-label={t("back")}>
+                <ArrowLeftIcon className="size-4" />
+              </Link>
+            </Button>
+          )}
           {activeTab === "my-skills" && (
             <Button
               variant="ghost"

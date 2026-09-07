@@ -43,9 +43,14 @@ import { isTauri } from "@/lib/tauri"
 
 interface Props {
   className?: string
+  /**
+   * Rendered inside a host that already owns the page identity and the way
+   * back (the Settings shell, or `/me/skills`). See `SkillPanelHeader`.
+   */
+  embedded?: boolean
 }
 
-export function SkillPanel({ className }: Props) {
+export function SkillPanel({ className, embedded }: Props) {
   const view = useSkills()
   const activeTab = useSkillsStore((s) => s.activeTab)
   const detailSkillId = useSkillsStore((s) => s.detailSkillId)
@@ -87,6 +92,7 @@ export function SkillPanel({ className }: Props) {
           totalCount={view.all.length}
           filteredCount={view.filtered.length}
           tabsSlot={<SkillPanelTabs className="border-0" />}
+          embedded={embedded}
         />
 
         <div className="flex flex-1 min-h-0 overflow-hidden">

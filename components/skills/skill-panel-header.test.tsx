@@ -48,6 +48,22 @@ beforeEach(() => {
 })
 
 describe("SkillPanelHeader", () => {
+  it("keeps its own way back and its h1 when it is the page", () => {
+    render(<SkillPanelHeader totalCount={5} filteredCount={5} />)
+    expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/")
+    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument()
+  })
+
+  it("drops both when a host already owns the identity and the way back", () => {
+    // Embedded in the Settings shell or /me/skills, that back arrow sat
+    // beside the host's and pointed at `/`, so the control that looked like
+    // "up one level" left Settings altogether, and the page carried two h1s.
+    render(<SkillPanelHeader totalCount={5} filteredCount={5} embedded />)
+    expect(screen.queryByRole("link", { name: "back" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 2 })).toBeInTheDocument()
+  })
+
   it("renders the localized title and subtitle", () => {
     render(<SkillPanelHeader totalCount={5} filteredCount={5} />)
     expect(screen.getByText("panel.headerTitle")).toBeInTheDocument()
