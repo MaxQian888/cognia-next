@@ -65,6 +65,14 @@ export function BotRuntimeInitializer() {
         await recoverStaleBotDeliveries({ owner }).catch(() => 0)
         if (cancelled) return
 
+        // Armed timed triggers become scheduler rows here, and orphans go.
+        // At boot rather than only on edit, so a schedule a crash left
+        // half-written repairs itself.
+        const { reconcileAllBotSchedules } =
+          await import("@/lib/bot/schedule/reconcile-timed-triggers")
+        await reconcileAllBotSchedules().catch(() => undefined)
+        if (cancelled) return
+
         const runner = startBotDeliveryRunner({ owner })
         const releaseOwnership = markBotRunnerOwned()
         stop = () => {

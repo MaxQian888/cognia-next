@@ -79,6 +79,28 @@ export function resolveInstallationStatus(input: {
     : "enabled"
 }
 
+/**
+ * Bring this installation's scheduler rows in line with its armed triggers.
+ *
+ * Lazy and best-effort, both deliberately. Lazy keeps `lib/db` free of the
+ * scheduler's module graph, which is the same trick `bot-executor.ts` uses in
+ * the other direction. Best-effort because a schedule that could not be written
+ * must not fail the install that asked for it: the boot sweep
+ * (`reconcileAllBotSchedules`) repairs it on the next start.
+ */
+async function syncSchedules(row: BotInstallationRow): Promise<void> {
+  try {
+    const [{ resolveInstalledBot }, { syncBotTriggerSchedules }] = await Promise.all([
+      import("@/lib/bot/installed-bot"),
+      import("@/lib/bot/schedule/reconcile-timed-triggers"),
+    ])
+    const resolved = await resolveInstalledBot(row)
+    if (resolved) await syncBotTriggerSchedules(resolved)
+  } catch {
+    // See above: the boot sweep is the backstop.
+  }
+}
+
 export async function installBot(input: InstallBotInput): Promise<BotInstallationRow> {
   const now = input.now ?? Date.now()
   const credentialBindings = input.credentialBindings ?? {}
@@ -104,6 +126,7 @@ export async function installBot(input: InstallBotInput): Promise<BotInstallatio
     ...(input.placementRef ? { placementRef: input.placementRef } : {}),
   }
   await getDb().botInstallations.add(row)
+  await syncSchedules(row)
   return row
 }
 
@@ -142,6 +165,7 @@ export async function updateBotInstallation(
     })
   }
   await db.botInstallations.put(merged)
+  await syncSchedules(merged)
   return merged
 }
 
@@ -182,6 +206,15 @@ export async function listBotInstallations(
 
 export async function uninstallBot(id: string): Promise<void> {
   await getDb().botInstallations.delete(id)
+  // Before the row is gone the reconciler could still resolve it; after, only
+  // the id is left, so removal is by tag prefix rather than by diffing.
+  try {
+    const { removeBotTriggerSchedules } =
+      await import("@/lib/bot/schedule/reconcile-timed-triggers")
+    await removeBotTriggerSchedules(id)
+  } catch {
+    // The boot sweep drops rows whose installation no longer resolves.
+  }
 }
 
 /**

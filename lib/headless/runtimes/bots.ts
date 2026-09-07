@@ -15,6 +15,7 @@
 
 import { recoverStaleBotDeliveries } from "@/lib/db/bot-event-deliveries"
 import { startBotDeliveryRunner } from "@/lib/bot/runtime/delivery-runner"
+import { reconcileAllBotSchedules } from "@/lib/bot/schedule/reconcile-timed-triggers"
 
 import { registerHeadlessRuntime } from "../registry"
 
@@ -28,6 +29,8 @@ registerHeadlessRuntime({
     // Rows this brain was executing when it stopped. Owner-scoped, so a peer
     // host's live work is left alone.
     void recoverStaleBotDeliveries({ owner }).catch(() => 0)
+    // Armed timed triggers become scheduler rows here, and orphans go.
+    void reconcileAllBotSchedules().catch(() => undefined)
     const runner = startBotDeliveryRunner({ owner })
     return () => runner.stop()
   },

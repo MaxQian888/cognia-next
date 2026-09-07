@@ -81,6 +81,11 @@ const TIER_BY_TYPE: Partial<Record<ScheduledTaskType, CatchupTier>> = {
   // the next run covers every window that was missed — replaying them would
   // spend rate-limit budget re-asking for the same answer.
   "github-issue-sync": "never",
+  // Same reasoning, one layer up. A `poll` trigger carries a cursor and a
+  // `derivedState` one carries the last edge value, so the next tick covers
+  // whatever a missed slot would have seen. Replaying them would re-ask the
+  // remote for an answer the cursor already has.
+  bot: "never",
 
   // Operator-visible deliverables: late-but-fresh beats missing.
   "connection:scheduled:digest": "grace",

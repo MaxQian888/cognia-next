@@ -87,6 +87,11 @@ export const CARD_AUTHORED_TASK_TYPES: readonly ScheduledTaskType[] = Object.fre
   // (`lib/connectors/housekeeping-scheduler.ts`).
   "connection:housekeeping:attachment-cache",
   "connection:presence:refresh",
+  // Authored by an installation's armed timed triggers
+  // (`lib/bot/schedule/reconcile-timed-triggers.ts`), never from the task form:
+  // its payload names an installation and a trigger id, and a hand-typed one
+  // would fire against a Bot that does not exist.
+  "bot",
 ] as const)
 
 /** True when the type is authored by its own card / subsystem, not the form. */
