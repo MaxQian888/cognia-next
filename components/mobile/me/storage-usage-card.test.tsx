@@ -154,6 +154,21 @@ describe("<StorageUsageCard />", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
+  it("groups the blocks under headings instead of stacking desktop cards", async () => {
+    // /me/storage used to open on three bordered `Card`s stacked on a 375px
+    // screen, each carrying its own title and description inside the frame.
+    // Every other /me page uses the small-caps heading + one grouped surface.
+    const { container } = render(
+      <StorageUsageCard
+        fetcher={async () => ({ totalBytes: 1, quotaBytes: 10, backupBytes: 0, backups: [] })}
+        persistedChecker={async () => true}
+      />
+    )
+    await waitFor(() => expect(screen.getByTestId("storage-persisted")).toBeInTheDocument())
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2)
+  })
+
   it("re-runs the fetcher when refresh is pressed", async () => {
     const fetcher = jest.fn(async () => ({
       totalBytes: 1,

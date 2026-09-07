@@ -15,7 +15,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { PieChartIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { RefreshCwIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useStorageBreakdown } from "@/hooks/storage/use-storage-breakdown"
 import { useStorageCleanup } from "@/hooks/storage/use-storage-cleanup"
@@ -65,13 +65,11 @@ export function StorageBreakdownCard() {
 
   if (isLoading && !stats) {
     return (
-      <Card data-testid="storage-breakdown-card">
-        <CardContent className="px-4 py-3">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="mt-3 h-2 w-full" />
-          <Skeleton className="mt-2 h-2 w-5/6" />
-        </CardContent>
-      </Card>
+      <div className="px-1 py-2" data-testid="storage-breakdown-card" aria-busy="true">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="mt-3 h-2 w-full" />
+        <Skeleton className="mt-2 h-2 w-5/6" />
+      </div>
     )
   }
 
@@ -80,26 +78,40 @@ export function StorageBreakdownCard() {
   const status = health?.status ?? "healthy"
 
   return (
-    <Card data-testid="storage-breakdown-card">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between gap-2 text-sm">
-          <span className="flex items-center gap-2">
-            <PieChartIcon className="size-4" aria-hidden="true" />
-            {t("breakdownTitle")}
-          </span>
+    <MeSection
+      testid="storage-breakdown-card"
+      title={t("breakdownTitle")}
+      description={
+        health
+          ? t(`health.${status}Hint`, { percent: Math.round(health.usagePercent) })
+          : t("breakdownDescription")
+      }
+      action={
+        <>
           {health ? (
-            <Badge className={cn("text-[10px]", STATUS_BADGE[status])} data-testid="storage-health-badge">
+            <Badge
+              className={cn("text-[10px]", STATUS_BADGE[status])}
+              data-testid="storage-health-badge"
+            >
               {t(`health.${status}`)}
             </Badge>
           ) : null}
-        </CardTitle>
-        <CardDescription className="text-xs">
-          {health
-            ? t(`health.${status}Hint`, { percent: Math.round(health.usagePercent) })
-            : t("breakdownDescription")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2 px-4 pb-3">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-8 text-muted-foreground"
+            disabled={isRunning}
+            aria-label={t("refresh")}
+            onClick={() => void refresh()}
+            data-testid="storage-breakdown-refresh"
+          >
+            <RefreshCwIcon className="size-4" aria-hidden="true" />
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 px-3 py-3">
         {rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("breakdownEmpty")}</p>
         ) : (
@@ -142,19 +154,7 @@ export function StorageBreakdownCard() {
             )
           })
         )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="mt-1 self-start"
-          disabled={isRunning}
-          onClick={() => void refresh()}
-          data-testid="storage-breakdown-refresh"
-        >
-          <RefreshCwIcon className="mr-1 size-3.5" aria-hidden="true" />
-          {t("refresh")}
-        </Button>
-      </CardContent>
+      </div>
 
       <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <AlertDialogContent>
@@ -175,6 +175,6 @@ export function StorageBreakdownCard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Card>
+    </MeSection>
   )
 }

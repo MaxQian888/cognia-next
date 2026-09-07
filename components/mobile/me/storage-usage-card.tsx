@@ -9,12 +9,12 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { HardDriveIcon, RefreshCwIcon, SaveIcon } from "lucide-react"
+import { RefreshCwIcon } from "lucide-react"
 
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes, getStorageUsage, type StorageUsage } from "@/lib/storage/usage"
@@ -95,13 +95,11 @@ export function StorageUsageCard({
 
   if (!usage) {
     return (
-      <Card>
-        <CardContent className="px-4 py-3">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="mt-2 h-2 w-full" />
-          <Skeleton className="mt-3 h-3 w-1/2" />
-        </CardContent>
-      </Card>
+      <div className="px-1 py-2" aria-busy="true">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="mt-2 h-2 w-full" />
+        <Skeleton className="mt-3 h-3 w-1/2" />
+      </div>
     )
   }
 
@@ -112,23 +110,36 @@ export function StorageUsageCard({
       : 0
 
   return (
-    <div className="flex flex-col gap-3" data-testid="storage-usage-card">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <HardDriveIcon className="size-4" aria-hidden="true" />
-            {t("totalTitle")}
-          </CardTitle>
-          <CardDescription className="text-xs">
-            {supported
-              ? t("totalDescription", {
-                  used: formatBytes(usage.totalBytes),
-                  quota: formatBytes(usage.quotaBytes),
-                })
-              : t("totalUnsupported")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 px-4 pb-3">
+    <div className="flex flex-col gap-5" data-testid="storage-usage-card">
+      <MeSection
+        title={t("totalTitle")}
+        description={
+          supported
+            ? t("totalDescription", {
+                used: formatBytes(usage.totalBytes),
+                quota: formatBytes(usage.quotaBytes),
+              })
+            : t("totalUnsupported")
+        }
+        action={
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-8 text-muted-foreground"
+            disabled={refreshing}
+            aria-label={t("refresh")}
+            onClick={() => void load()}
+            data-testid="storage-refresh"
+          >
+            <RefreshCwIcon
+              aria-hidden="true"
+              className={"size-4" + (refreshing ? " animate-spin" : "")}
+            />
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3 px-3 py-3">
           {supported ? <Progress value={pct} aria-label={t("totalTitle")} /> : null}
           {persisted !== null ? (
             <p className="text-[11px] text-muted-foreground" data-testid="storage-persisted">
@@ -136,11 +147,16 @@ export function StorageUsageCard({
               {persisted ? t("persistedYes") : t("persistedNo")}
             </p>
           ) : null}
+          {/* Refresh moved to the section heading. Two full-width buttons
+              stacked under the progress bar cost about 90px of the first
+              screen at 375px, and the page carried two of them reading
+              "Refresh" because each block owned its own reload. */}
           {persisted === false ? (
             <Button
               type="button"
               size="sm"
               variant="secondary"
+              className="self-start"
               disabled={requesting}
               onClick={() => void requestPersistence()}
               data-testid="storage-request-persistence"
@@ -148,40 +164,22 @@ export function StorageUsageCard({
               {t("requestPersistence")}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={refreshing}
-            onClick={() => void load()}
-            data-testid="storage-refresh"
-          >
-            <RefreshCwIcon
-              aria-hidden="true"
-              className={"size-3.5 mr-1" + (refreshing ? " animate-spin" : "")}
-            />
-            {t("refresh")}
-          </Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <SaveIcon className="size-4" aria-hidden="true" />
-            {t("backupsTitle")}
-          </CardTitle>
-          <CardDescription className="text-xs">
-            {t("backupsDescription", {
-              total: formatBytes(usage.backupBytes ?? 0),
-              count: usage.backups.length,
-            })}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 px-4 pb-3">
-          {usage.backups.slice(0, 8).map((row) => (
+        </div>
+      </MeSection>
+      <MeSection
+        title={t("backupsTitle")}
+        description={t("backupsDescription", {
+          total: formatBytes(usage.backupBytes ?? 0),
+          count: usage.backups.length,
+        })}
+      >
+        {usage.backups.length === 0 ? (
+          <p className="px-3 py-3 text-xs text-muted-foreground">{t("backupsEmpty")}</p>
+        ) : (
+          usage.backups.slice(0, 8).map((row) => (
             <div
               key={row.id}
-              className="flex items-center justify-between rounded-md border px-3 py-2 text-xs"
+              className="flex items-center justify-between gap-2 px-3 py-2.5 text-xs not-last:border-b"
               data-testid={`storage-backup-row-${row.id}`}
             >
               <div className="min-w-0 flex-1">
@@ -190,16 +188,13 @@ export function StorageUsageCard({
                   {formatRelative(row.completedAt)} · {row.encryption}
                 </p>
               </div>
-              <span className="ml-2 shrink-0 font-mono text-[11px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                 {formatBytes(row.sizeBytes ?? null)}
               </span>
             </div>
-          ))}
-          {usage.backups.length === 0 ? (
-            <p className="text-xs text-muted-foreground">{t("backupsEmpty")}</p>
-          ) : null}
-        </CardContent>
-      </Card>
+          ))
+        )}
+      </MeSection>
     </div>
   )
 }

@@ -62,6 +62,32 @@ describe("<MeSection />", () => {
     expect(container.querySelectorAll('[data-slot="item-separator"]').length).toBe(1)
   })
 
+  it("renders an action beside the heading rather than inside the group", () => {
+    // A section-level control used to have to live inside the row group as a
+    // full-width button. /me/storage stacked two of those, both reading
+    // "Refresh", in the middle of the reading flow.
+    const { container } = render(
+      <MeSection title="Storage" action={<button data-testid="sec-action">Refresh</button>}>
+        <div>row</div>
+      </MeSection>
+    )
+    const action = screen.getByTestId("sec-action")
+    expect(action).toBeInTheDocument()
+    const group = container.querySelector('[data-slot="item-group"]')
+    expect(group).not.toBeNull()
+    expect(group?.contains(action)).toBe(false)
+  })
+
+  it("renders no action wrapper when none is supplied", () => {
+    const { container } = render(
+      <MeSection title="Storage">
+        <div>row</div>
+      </MeSection>
+    )
+    const header = container.querySelector("section > div")
+    expect(header?.children).toHaveLength(1)
+  })
+
   it("attaches the supplied testid to the section element", () => {
     render(
       <MeSection title="测试" testid="me-section-account">

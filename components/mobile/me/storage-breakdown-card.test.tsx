@@ -137,6 +137,22 @@ describe("<StorageBreakdownCard />", () => {
     expect(clearCategory).not.toHaveBeenCalled()
   })
 
+  it("puts the health badge and reload on the heading line, not in the list", () => {
+    // Both this block and the usage block owned a full-width "Refresh" button
+    // inside their own card, so the page showed the same word twice in the
+    // reading flow with no way to tell which reload it drove.
+    breakdown.stats = makeStats()
+    breakdown.health = healthy
+    breakdown.isLoading = false
+    const { container } = render(<StorageBreakdownCard />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    const group = container.querySelector('[data-slot="item-group"]')
+    expect(group).not.toBeNull()
+    expect(group?.contains(screen.getByTestId("storage-breakdown-refresh"))).toBe(false)
+    expect(group?.contains(screen.getByTestId("storage-health-badge"))).toBe(false)
+    expect(screen.getByTestId("storage-breakdown-refresh")).toHaveAttribute("aria-label")
+  })
+
   it("refreshes on demand", async () => {
     breakdown.stats = makeStats()
     breakdown.health = healthy
