@@ -10,7 +10,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 
-import { queryAccountBalance } from "./runner"
+import { queryAccountBalanceCoalesced } from "./coalesce"
 import { recordBalanceSnapshot } from "./store"
 
 import type { ProviderId, SubscriptionBalanceRow } from "@/types/subscription"
@@ -22,8 +22,13 @@ export interface UseAccountBalanceResult {
   refreshing: boolean
   /** `true` when no adapter matched the account on the last refresh. */
   unavailable: boolean
-  /** Run the query runner + persist the result. No-op outside Tauri. */
-  refresh: () => Promise<void>
+  /**
+   * Run the query runner + persist the result. No-op outside Tauri. Automatic
+   * callers omit `force` so they share the coalescer's throttle; an explicit
+   * user "Refresh" passes `{ force: true }` to bypass it. Neither can bypass a
+   * provider-imposed block.
+   */
+  refresh: (options?: { force?: boolean }) => Promise<void>
 }
 
 /**
@@ -31,7 +36,7 @@ export interface UseAccountBalanceResult {
  *
  * The snapshot is read reactively from the `subscriptionBalance` table so a
  * refresh (or a refresh from another mounted card) updates every consumer.
- * `refresh()` calls `queryAccountBalance`; a `null` result means no adapter
+ * `refresh()` calls the coalesced runner; a `null` result means no adapter
  * matched (`unavailable`), a snapshot with `error` means the query failed.
  */
 export function useAccountBalance(
@@ -49,21 +54,26 @@ export function useAccountBalance(
       return rows.reduce((newest, r) => (r.fetchedAt > newest.fetchedAt ? r : newest))
     }, [accountId]) ?? null
 
-  const refresh = useCallback(async () => {
-    if (!queryEnabled || !isTauri()) return
-    setRefreshing(true)
-    try {
-      const result = await queryAccountBalance(provider, accountId)
-      if (result === null) {
-        setUnavailable(true)
-        return
+  const refresh = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!queryEnabled || !isTauri()) return
+      setRefreshing(true)
+      try {
+        const result = await queryAccountBalanceCoalesced(provider, accountId, {
+          force: options?.force,
+        })
+        if (result === null) {
+          setUnavailable(true)
+          return
+        }
+        setUnavailable(false)
+        await recordBalanceSnapshot(result)
+      } finally {
+        setRefreshing(false)
       }
-      setUnavailable(false)
-      await recordBalanceSnapshot(result)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [provider, accountId, queryEnabled])
+    },
+    [provider, accountId, queryEnabled]
+  )
 
   return { snapshot, refreshing, unavailable, refresh }
 }

@@ -1,6 +1,12 @@
-import { probeCodexUsage } from "./usage-probe"
+import { __resetCodexProbeDedupeForTesting, probeCodexUsage } from "./usage-probe"
 
 import type { LimitsMeter, ProviderLimits } from "@/types/subscription"
+
+// The replay dedupe is module state, so cases sharing a `fetchedAt` fixture
+// would otherwise see the second one skipped as a duplicate.
+beforeEach(() => {
+  __resetCodexProbeDedupeForTesting()
+})
 
 const meter: LimitsMeter = {
   id: "session",
@@ -55,5 +61,44 @@ describe("probeCodexUsage", () => {
     const result = await probeCodexUsage("acc-1", { query: async () => blank, persist })
     expect(result).toEqual(blank)
     expect(persist).not.toHaveBeenCalled()
+  })
+})
+
+describe("replay dedupe", () => {
+  it("does not re-persist a snapshot the coalescer replayed", async () => {
+    // A tick landing inside the throttle window gets the previous reading back.
+    // Writing it again would append a duplicate row on every such tick.
+    const persist = jest.fn(async () => undefined)
+    const replayed = snapshot()
+    const query = jest.fn(async () => replayed)
+
+    await probeCodexUsage("acc-1", { query, persist })
+    await probeCodexUsage("acc-1", { query, persist })
+
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it("persists again once the reading is genuinely new", async () => {
+    const persist = jest.fn(async () => undefined)
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce(snapshot({ fetchedAt: 1_000 }))
+      .mockResolvedValueOnce(snapshot({ fetchedAt: 2_000 }))
+
+    await probeCodexUsage("acc-1", { query, persist })
+    await probeCodexUsage("acc-1", { query, persist })
+
+    expect(persist).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps accounts independent", async () => {
+    const persist = jest.fn(async () => undefined)
+    const query = jest.fn(async () => snapshot())
+
+    await probeCodexUsage("acc-1", { query, persist })
+    await probeCodexUsage("acc-2", { query, persist })
+
+    expect(persist).toHaveBeenCalledTimes(2)
   })
 })

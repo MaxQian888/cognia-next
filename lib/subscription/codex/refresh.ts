@@ -25,6 +25,13 @@ import {
   saveAccount as defaultSaveAccount,
   setActiveAccount as defaultSetActiveAccount,
 } from "@/lib/subscription/core/transport"
+import {
+  BREAKER_SCOPES,
+  credentialKey,
+  getSubscriptionBreaker,
+  type SubscriptionBreaker,
+} from "@/lib/subscription/retry/breaker"
+import { classifyThrownFailure } from "@/lib/subscription/retry/failure-class"
 
 import { isCodexCredentialFresh, toProviderCredential, tokenResponseToCredential } from "./oauth"
 import { discoverCodexAuth, discoveredToCredential } from "./discovery"
@@ -57,6 +64,14 @@ export function normalizeCodexLifecycleError(cause: unknown): unknown {
 }
 
 export interface RefreshCodexDeps {
+  /**
+   * Credential ledger gating the token endpoint. A refresh that fails is
+   * blocked before it can be repeated, and a revoked grant latches until the
+   * user re-authenticates. Defaults to the process-wide ledger.
+   */
+  breaker: SubscriptionBreaker
+  /** Deterministic jitter source for the recorded backoff. */
+  random?: () => number
   refreshCodexToken: (refreshToken: string) => Promise<TokenResponse>
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   saveAccount: (provider: ProviderId, account: Account) => Promise<void>
@@ -75,6 +90,7 @@ export interface RefreshCodexDeps {
 }
 
 const DEFAULT_DEPS: RefreshCodexDeps = {
+  breaker: getSubscriptionBreaker(),
   refreshCodexToken: async () => {
     throw new Error("Direct renderer token refresh is disabled; use the host lifecycle manager")
   },
@@ -122,6 +138,31 @@ function refreshManagedOnce(
 export async function refreshCodexAccountIfStale(
   accountId: string,
   deps: Partial<RefreshCodexDeps> = {}
+): Promise<CodexCredentialData | null> {
+  const breaker = deps.breaker ?? getSubscriptionBreaker()
+  const now = deps.now ?? DEFAULT_DEPS.now
+  const key = credentialKey("codex", accountId, BREAKER_SCOPES.refresh)
+  // A refresh that just failed will fail the same way until something changes,
+  // and the ChatGPT token endpoint is far tighter than the usage endpoint.
+  // Without this, an account whose grant was revoked was re-exchanged on every
+  // spawn and every chat turn for as long as the app stayed open.
+  if (!breaker.shouldAttempt(key, now()).allowed) return null
+
+  try {
+    const fresh = await runRefreshCodexAccountIfStale(accountId, deps)
+    // Only a completed exchange clears the block. The many `null` returns here
+    // mean "nothing to refresh", which is no evidence the endpoint is healthy.
+    if (fresh) breaker.recordSuccess(key)
+    return fresh
+  } catch (error) {
+    breaker.recordFailure(key, classifyThrownFailure(error, now()), now(), deps.random)
+    throw error
+  }
+}
+
+async function runRefreshCodexAccountIfStale(
+  accountId: string,
+  deps: Partial<RefreshCodexDeps>
 ): Promise<CodexCredentialData | null> {
   const useHostLifecycle =
     deps.refreshManagedAccount !== undefined ||

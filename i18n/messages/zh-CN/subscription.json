@@ -174,13 +174,13 @@
       },
       "cardDescription": "该服务商的自动刷新行为。",
       "cardTitle": "连接设置",
+      "failover": {
+        "description": "当前账号的配额窗口用尽时，把活跃账号切换到你添加的另一个 Codex 账号。每分钟级别的短时限流仍会在同一账号上等待恢复。请注意，切换会改变实际计费的订阅。",
+        "title": "配额耗尽时切换账号"
+      },
       "invalidCadence": "轮询间隔必须是至少 60 秒的数字。",
       "invalidThreshold": "预警阈值必须是 0 到 100 之间的数字。",
       "pending": "更改尚未应用。",
-      "save": "应用设置",
-      "saveFailed": "保存设置失败：{error}",
-      "saved": "设置已保存。",
-      "saving": "正在保存…",
       "probe": {
         "cardDescription": "在后台轮询你的 Codex 5 小时与每周额度。",
         "cardTitle": "用量追踪",
@@ -192,7 +192,11 @@
         "visibleLabel": "前台轮询间隔（秒）",
         "warnHelp": "当某个窗口用量达到该百分比时高亮显示。",
         "warnLabel": "预警阈值（%）"
-      }
+      },
+      "save": "应用设置",
+      "saveFailed": "保存设置失败：{error}",
+      "saved": "设置已保存。",
+      "saving": "正在保存…"
     },
     "title": "Codex（OpenAI）",
     "webModeBanner": "Codex 凭证存放在 OS 钥匙串中——仅在桌面版可用。"
@@ -623,6 +627,12 @@
     "actions": {
       "reset": "恢复默认",
       "save": "保存"
+    },
+    "failover": {
+      "description": "当前账号的配额窗口用尽时，把活跃账号切换到你在同一服务商下添加的另一个账号。",
+      "enableHelp": "默认关闭。只有账号级别的配额上限才会触发切换：每分钟级别的短时限流会在同一账号上等待恢复。每个账号在一轮里最多尝试一次，已被阻断或需要重新登录的账号会跳过。请注意，切换会改变实际计费的订阅。",
+      "enableLabel": "配额耗尽时切换账号",
+      "title": "账号自动切换"
     },
     "probe": {
       "description": "定期发送一次近乎空的 /v1/messages 请求来读取 rate-limit headers。每次探测约消耗 10 input + 1 output tokens 配额。",

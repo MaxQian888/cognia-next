@@ -26,6 +26,8 @@ import type {
   ProviderCredential,
 } from "@/types/subscription"
 
+import { clearCredentialBlocks } from "@/lib/subscription/retry/failover"
+
 /**
  * Stamp the vault dirty-marker after a successful mutating command so the
  * WebDAV cloud sync (when enabled) schedules a debounced unattended upload.
@@ -110,6 +112,11 @@ export async function replaceAccountCredential(
     accountId,
     credential,
   })
+  // Re-authenticating is the user action that lifts a permanent block. A
+  // revoked refresh token latches so the app stops re-exchanging it, and
+  // nothing else clears that latch, so without this a re-login would leave the
+  // account looking dead until the next restart.
+  clearCredentialBlocks(provider, accountId)
   vaultMutated()
   return detail
 }

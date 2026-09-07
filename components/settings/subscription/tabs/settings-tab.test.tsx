@@ -68,6 +68,7 @@ it("clamps edited cadence and threshold values before saving", async () => {
 
   expect(saveMock).toHaveBeenCalledWith({
     subscriptionSettings: {
+      autoFailoverEnabled: false,
       probeEnabled: true,
       visibleIntervalMs: 60_000,
       idleIntervalMs: 120_000,
@@ -107,4 +108,30 @@ it("shows the desktop-only notice outside Tauri", () => {
     )
   ).toHaveLength(2)
   expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument()
+})
+
+it("persists the account-failover opt-in, which is off until the user asks for it", () => {
+  // Failover changes which subscription is billed, so it is never on by
+  // default, and a settings row written before the field existed reads as off.
+  settings = {
+    subscriptionSettings: {
+      probeEnabled: true,
+      visibleIntervalMs: 600_000,
+      idleIntervalMs: 900_000,
+      warnThresholdPct: 25,
+    },
+  }
+  render(<SubscriptionSettingsTab />)
+
+  const toggle = screen.getByRole("switch", { name: "Switch accounts on quota exhaustion" })
+  expect(toggle).not.toBeChecked()
+
+  fireEvent.click(toggle)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+  expect(saveMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      subscriptionSettings: expect.objectContaining({ autoFailoverEnabled: true }),
+    })
+  )
 })

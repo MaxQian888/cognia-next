@@ -23,6 +23,9 @@ jest.mock("./store", () => ({
   recordBalanceSnapshot: (...a: unknown[]) => recordBalanceSnapshotMock(...a),
 }))
 
+import { __resetSubscriptionBreakerForTesting } from "@/lib/subscription/retry/breaker"
+
+import { __resetBalanceCoalescerForTesting } from "./coalesce"
 import { useAccountBalance } from "./hooks"
 
 function snap(over: Partial<BalanceSnapshot> = {}): BalanceSnapshot {
@@ -36,6 +39,14 @@ function snap(over: Partial<BalanceSnapshot> = {}): BalanceSnapshot {
     ...over,
   }
 }
+
+// The balance reads now share a process-wide throttle and credential ledger
+// with every other subscription surface, so a case would otherwise replay the
+// previous case's cached snapshot instead of calling the runner.
+beforeEach(() => {
+  __resetBalanceCoalescerForTesting()
+  __resetSubscriptionBreakerForTesting()
+})
 
 beforeEach(() => {
   jest.clearAllMocks()

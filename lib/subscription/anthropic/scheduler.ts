@@ -10,6 +10,26 @@
 // On 401: trigger a refresh callback (the hooks layer wires this into
 // `refreshAccessToken` + `subscription_save_account` + `subscription_set_active`)
 // and retry once. After a successful probe we persist via `recordUsageSnapshot`.
+//
+// Two guards matter more here than anywhere else in the subscription layer,
+// because unlike the free usage endpoint, EVERY probe spends real quota:
+//
+//   * The cadence is jittered. It is a user setting, so it is identical across
+//     every account the user owns and across every window they have open.
+//     Un-jittered, those all realign onto the same tick and arrive as one
+//     burst.
+//   * A failing probe backs off through the shared credential ledger instead of
+//     being repeated on the next tick. A loop that answers a 429 by paying for
+//     another request every five minutes is both the retry storm and the bill.
+
+import {
+  BREAKER_SCOPES,
+  credentialKey,
+  getSubscriptionBreaker,
+  type SubscriptionBreaker,
+} from "@/lib/subscription/retry/breaker"
+import { jitterCadenceMs } from "@/lib/subscription/retry/backoff"
+import { classifySubscriptionFailure } from "@/lib/subscription/retry/failure-class"
 
 import type { AnthropicCredentialData, AnthropicSubscriptionSettings } from "@/types/subscription"
 import { isAnthropicCredentialFresh } from "./oauth"
@@ -25,7 +45,27 @@ export interface SchedulerDeps {
   isVisible?: () => boolean
   /** Hook for tests to skip persistence. */
   persist?: typeof recordUsageSnapshot
+  /**
+   * Account id the probe is spending, used as the ledger key so a block armed
+   * by the quota panel and one armed here refer to the same credential.
+   * Absent resolves to a shared "active account" key, which still keeps the
+   * loop from repeating a failing probe.
+   */
+  getAccountId?: () => Promise<string | null> | string | null
+  /** Injected credential ledger for tests. Defaults to the shared one. */
+  breaker?: SubscriptionBreaker
+  /** Deterministic jitter source for tests. Defaults to `Math.random`. */
+  random?: () => number
+  /** Injected clock for tests. Defaults to `Date.now`. */
+  now?: () => number
 }
+
+/**
+ * Ledger key when the caller cannot name the account. The loop only ever
+ * probes the active account, so one key for "whichever that is" still stops a
+ * failing probe from repeating.
+ */
+const ACTIVE_ACCOUNT_KEY = "active"
 
 export interface SchedulerHandle {
   /** Stop the loop. Idempotent. */
@@ -45,10 +85,16 @@ export function startUsageScheduler(
   let timer: ReturnType<typeof setTimeout> | null = null
   const isVisible = deps.isVisible ?? defaultIsVisible
   const persist = deps.persist ?? recordUsageSnapshot
+  const breaker = deps.breaker ?? getSubscriptionBreaker()
+  const now = deps.now ?? Date.now
+  const random = deps.random ?? Math.random
 
   function nextDelayMs(): number {
     const cfg = settings()
-    return isVisible() ? cfg.visibleIntervalMs : cfg.idleIntervalMs
+    // `clampCadence` lives in this file and was applied only by the Codex
+    // scheduler, so a cadence below the 60s floor was honored verbatim here.
+    const cadence = clampCadence(isVisible() ? cfg.visibleIntervalMs : cfg.idleIntervalMs)
+    return jitterCadenceMs(cadence, PROBE_CADENCE_JITTER_RATIO, random)
   }
 
   async function tick() {
@@ -56,6 +102,11 @@ export function startUsageScheduler(
     try {
       const cfg = settings()
       if (!cfg.probeEnabled) return
+      const accountId = (await deps.getAccountId?.()) ?? ACTIVE_ACCOUNT_KEY
+      const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.probe)
+      // Every probe costs real tokens, so a blocked credential is skipped
+      // before the request is built rather than after it is rejected.
+      if (!breaker.shouldAttempt(key, now()).allowed) return
       const credential = await deps.getCredential()
       if (!credential || !isAnthropicCredentialFresh(credential)) return
       let outcome = await probeOnce(credential)
@@ -64,7 +115,23 @@ export function startUsageScheduler(
         if (refreshed) outcome = await probeOnce(refreshed)
       }
       if (outcome.ok) {
+        breaker.recordSuccess(key)
         await persist(outcome.snapshot)
+      } else {
+        // Only what the SERVER said is classified. `outcome.reason` is our own
+        // vocabulary, and feeding it to a text classifier reads our label as if
+        // it were the provider's: a bodyless 429 would match the throttle
+        // patterns through the word "rate-limited" and take a 30 second wait,
+        // when an information-free 429 is exactly the case that has to be
+        // treated as an account cap. Passing the absent body instead lets the
+        // opaque branch do that, and a headerless 200 falls to the equally
+        // conservative `unknown` ramp.
+        const failure = classifySubscriptionFailure({
+          status: outcome.status,
+          body: outcome.message,
+          now: now(),
+        })
+        breaker.recordFailure(key, failure, now(), random)
       }
     } finally {
       if (!stopped) {
@@ -96,6 +163,19 @@ function defaultIsVisible(): boolean {
 
 /** Floor for active-probe cadence — 60s minimum. */
 export const PROBE_CADENCE_FLOOR_MS = 60_000
+
+/**
+ * Spread applied to the configured cadence. The cadence is a user setting,
+ * identical across every account and every open window, so without this they
+ * all fire together.
+ *
+ * One-sided, not symmetric: `jitterCadenceMs` only ever ADDS, because the
+ * callers treat their cadence as a floor (`clampCadence`) and a floor jitter
+ * can undercut is not a floor. So a configured interval `c` becomes a uniform
+ * `[c, c * 1.2]`, and the mean cadence is 10% above `c` rather than equal
+ * to it.
+ */
+export const PROBE_CADENCE_JITTER_RATIO = 0.2
 
 /** Clamp an arbitrary user-supplied cadence to the floor. */
 export function clampCadence(value: number): number {

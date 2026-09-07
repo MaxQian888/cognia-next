@@ -7,9 +7,15 @@
 //   - visible: page foregrounded (default 5 min)
 //   - idle:    page hidden / no recent interaction (default 30 min)
 // Neither runs faster than the shared 60s floor, so a forgotten tab can't hammer
-// the backend.
+// the backend, and both are jittered so parallel loops do not fire together.
+//
+// The probe itself goes through the shared limits coalescer, so a provider
+// block armed by the quota panel (or by an earlier tick) is honored here too.
+// This loop used to reach the runner directly and was the one caller that saw
+// neither the throttle nor the block.
 
-import { clampCadence } from "@/lib/subscription/anthropic/scheduler"
+import { clampCadence, PROBE_CADENCE_JITTER_RATIO } from "@/lib/subscription/anthropic/scheduler"
+import { jitterCadenceMs } from "@/lib/subscription/retry/backoff"
 import { probeCodexUsage } from "./usage-probe"
 
 import type { CodexSubscriptionSettings, ProviderLimits } from "@/types/subscription"
@@ -21,6 +27,8 @@ export interface CodexSchedulerDeps {
   probe?: (accountId: string) => Promise<ProviderLimits | null>
   /** Visibility helper — defaulted from `document.visibilityState`. */
   isVisible?: () => boolean
+  /** Deterministic jitter source for tests. Defaults to `Math.random`. */
+  random?: () => number
 }
 
 export interface CodexSchedulerHandle {
@@ -41,10 +49,15 @@ export function startCodexUsageScheduler(
   let timer: ReturnType<typeof setTimeout> | null = null
   const isVisible = deps.isVisible ?? defaultIsVisible
   const probe = deps.probe ?? probeCodexUsage
+  const random = deps.random ?? Math.random
 
   function nextDelayMs(): number {
     const cfg = settings()
-    return clampCadence(isVisible() ? cfg.visibleIntervalMs : cfg.idleIntervalMs)
+    // Jittered for the same reason the Anthropic loop is: the cadence is a
+    // user setting, so every account and every open window shares it and they
+    // would otherwise realign onto one tick.
+    const cadence = clampCadence(isVisible() ? cfg.visibleIntervalMs : cfg.idleIntervalMs)
+    return jitterCadenceMs(cadence, PROBE_CADENCE_JITTER_RATIO, random)
   }
 
   async function tick() {

@@ -19,6 +19,13 @@ import {
   saveAccount as defaultSaveAccount,
   setActiveAccount as defaultSetActiveAccount,
 } from "@/lib/subscription/core/transport"
+import {
+  BREAKER_SCOPES,
+  credentialKey,
+  getSubscriptionBreaker,
+  type SubscriptionBreaker,
+} from "@/lib/subscription/retry/breaker"
+import { classifyThrownFailure } from "@/lib/subscription/retry/failure-class"
 
 import { refreshAccessToken as defaultRefreshAccessToken } from "./oauth"
 import { discoverAnthropicAuth, discoveredToCredential } from "./discovery"
@@ -40,6 +47,14 @@ export interface RefreshAnthropicDeps {
    * sidecar.
    */
   reactivate: boolean
+  /**
+   * Credential ledger gating the token endpoint. A refresh that fails is
+   * blocked before it can be repeated, and `invalid_grant` latches until the
+   * user re-authenticates. Defaults to the process-wide ledger.
+   */
+  breaker: SubscriptionBreaker
+  /** Deterministic jitter source for the recorded backoff. */
+  random?: () => number
 }
 
 const DEFAULT_DEPS: RefreshAnthropicDeps = {
@@ -53,6 +68,7 @@ const DEFAULT_DEPS: RefreshAnthropicDeps = {
     return discovered ? discoveredToCredential(discovered) : null
   },
   reactivate: false,
+  breaker: getSubscriptionBreaker(),
 }
 
 interface RefreshInFlight {
@@ -75,6 +91,14 @@ const refreshesInFlight = new Map<string, RefreshInFlight>()
  * that joins in the narrow window *after* the reactivation decision (but before
  * the entry is cleared) still shares the credential result, yet does not
  * trigger a second (redundant) sidecar restart.
+ *
+ * A failed exchange now arms a block on the token endpoint, and a revoked
+ * refresh token latches permanently. Single-flight alone only ever stopped
+ * SIMULTANEOUS refreshes: once the in-flight entry cleared, the next caller
+ * holding a stale credential exchanged the same dead token again, and the
+ * callers that matter here poll on a five minute loop. Re-POSTing a revoked
+ * refresh_token every five minutes for as long as the app is open is the
+ * clearest way there is to get a subscription account flagged.
  */
 export function refreshAndPersistAnthropicAccount(
   accountId: string,
@@ -86,6 +110,13 @@ export function refreshAndPersistAnthropicAccount(
     return existing.promise
   }
 
+  const breaker = deps.breaker ?? getSubscriptionBreaker()
+  const now = deps.now ?? DEFAULT_DEPS.now
+  const key = credentialKey("anthropic", accountId, BREAKER_SCOPES.refresh)
+  // The token endpoint is far more tightly limited than the usage endpoint, and
+  // a refresh that just failed will fail the same way until something changes.
+  if (!breaker.shouldAttempt(key, now()).allowed) return Promise.resolve(null)
+
   const entry: RefreshInFlight = {
     promise: Promise.resolve(null),
     reactivateRequested: deps.reactivate === true,
@@ -94,11 +125,31 @@ export function refreshAndPersistAnthropicAccount(
     accountId,
     deps,
     () => entry.reactivateRequested
-  ).finally(() => {
-    if (refreshesInFlight.get(accountId) === entry) refreshesInFlight.delete(accountId)
-  })
+  )
+    .then((merged) => {
+      // Only a completed exchange clears the block. A `null` return means the
+      // account was missing or not an Anthropic credential, which is not
+      // evidence that the token endpoint is healthy.
+      if (merged) breaker.recordSuccess(key)
+      return merged
+    })
+    .catch((error: unknown) => {
+      breaker.recordFailure(key, classifyThrownFailure(error, now()), now(), deps.random)
+      throw error
+    })
+    .finally(() => {
+      if (refreshesInFlight.get(accountId) === entry) refreshesInFlight.delete(accountId)
+    })
   refreshesInFlight.set(accountId, entry)
   return entry.promise
+}
+
+/**
+ * Test-only: drop the single-flight map so a suite does not inherit a pending
+ * entry from a previous case.
+ */
+export function __resetAnthropicRefreshInFlightForTesting(): void {
+  refreshesInFlight.clear()
 }
 
 async function runRefreshAndPersistAnthropicAccount(

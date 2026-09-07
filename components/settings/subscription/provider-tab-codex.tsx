@@ -130,6 +130,13 @@ export function ProviderTabCodex() {
           checked={draft.autoRefreshNearExpiry}
           onCheckedChange={(value) => updateDraft({ autoRefreshNearExpiry: value })}
         />
+        <SettingsToggle
+          id="codex-auto-failover"
+          label={tSettings("failover.title")}
+          description={tSettings("failover.description")}
+          checked={draft.autoFailoverEnabled ?? false}
+          onCheckedChange={(value) => updateDraft({ autoFailoverEnabled: value })}
+        />
         <DraftActions
           dirty={draftDirty}
           error={draftError}
@@ -272,6 +279,9 @@ function codexSettingsEqual(
     left.probeEnabled === right.probeEnabled &&
     left.visibleIntervalMs === right.visibleIntervalMs &&
     left.idleIntervalMs === right.idleIntervalMs &&
-    left.warnThresholdPct === right.warnThresholdPct
+    left.warnThresholdPct === right.warnThresholdPct &&
+    // Absent and `false` are the same answer, so a settings row written before
+    // the field existed must not read as dirty the moment the tab opens.
+    (left.autoFailoverEnabled ?? false) === (right.autoFailoverEnabled ?? false)
   )
 }

@@ -1,74 +1,124 @@
-import { applyCoalescedResult, isRateLimitError, type CoalesceResultState } from "./coalesce-record"
+import { BACKOFF_POLICIES } from "@/lib/subscription/retry/backoff"
+import { SubscriptionBreaker } from "@/lib/subscription/retry/breaker"
 
-import type { LimitsMeter, ProviderLimits } from "@/types/subscription"
+import {
+  applyCoalescedResult,
+  limitsBreakerKey,
+  recordCoalescedThrow,
+  type CoalesceResultState,
+  type RecordCoalescedOptions,
+} from "./coalesce-record"
 
-const meter: LimitsMeter = { id: "session", kind: "window", usedPct: 40, status: "ok" }
+import type { ProviderLimits } from "@/types/subscription"
 
-function ok(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return { provider: "anthropic", fetchedAt: 1, meters: [meter], ...overrides }
-}
+const NOW = 1_000_000
+const meter = { id: "session", kind: "window" as const, usedPct: 12, status: "ok" as const }
 
-function errored(error: string): ProviderLimits {
-  return { provider: "anthropic", fetchedAt: 2, meters: [], error }
-}
+const ok = (): ProviderLimits => ({
+  provider: "anthropic",
+  accountId: "acc-1",
+  fetchedAt: NOW,
+  meters: [meter],
+})
+const errored = (error: string): ProviderLimits => ({
+  provider: "anthropic",
+  accountId: "acc-1",
+  fetchedAt: NOW,
+  meters: [],
+  error,
+})
 
 function freshState(): CoalesceResultState {
-  return { blockedUntil: 0, lastResult: null, lastSuccessfulResult: null }
+  return { lastResult: null, lastSuccessfulResult: null }
 }
 
-describe("isRateLimitError", () => {
-  it("matches a 429 token wherever it stands as its own word", () => {
-    expect(isRateLimitError("429 Too Many Requests")).toBe(true)
-    expect(isRateLimitError("HTTP 429")).toBe(true) // trailing 429
-    expect(isRateLimitError("429")).toBe(true) // bare
-    expect(isRateLimitError("限额查询失败: 429")).toBe(true)
-    expect(isRateLimitError("429: slow down")).toBe(true)
-  })
+let breaker: SubscriptionBreaker
+let options: RecordCoalescedOptions
+const key = limitsBreakerKey("anthropic", "acc-1")
 
-  it("does not match a 429 lookalike", () => {
-    expect(isRateLimitError("4290 gateway error")).toBe(false)
-    expect(isRateLimitError("not429")).toBe(false)
-    expect(isRateLimitError("500 Internal Server Error")).toBe(false)
-  })
+beforeEach(() => {
+  breaker = new SubscriptionBreaker()
+  options = {
+    provider: "anthropic",
+    accountId: "acc-1",
+    now: () => NOW,
+    breaker,
+    random: () => 0,
+  }
 })
 
 describe("applyCoalescedResult", () => {
-  it("remembers the last successful snapshot and returns it unchanged", () => {
+  it("passes a successful result through and remembers it", () => {
     const state = freshState()
     const result = ok()
-    expect(applyCoalescedResult(state, result, () => 100, 1000)).toBe(result)
+    expect(applyCoalescedResult(state, result, options)).toBe(result)
     expect(state.lastSuccessfulResult).toBe(result)
     expect(state.lastResult).toBe(result)
-    expect(state.blockedUntil).toBe(0)
   })
 
   it("carries the last good meters forward on a later error", () => {
     const state = freshState()
-    applyCoalescedResult(state, ok(), () => 100, 1000)
-    const display = applyCoalescedResult(state, errored("boom"), () => 200, 1000)
-    expect(display?.meters).toEqual([meter])
-    expect(display?.error).toBe("boom")
-    // The successful snapshot is retained, not overwritten by the error.
-    expect(state.lastSuccessfulResult?.meters).toEqual([meter])
+    applyCoalescedResult(state, ok(), options)
+    const display = applyCoalescedResult(state, errored("500: boom"), options)
+    expect(display).toMatchObject({ error: "500: boom", meters: [meter] })
   })
 
-  it("arms the 429 backoff from the injected clock", () => {
-    const state = freshState()
-    applyCoalescedResult(state, errored("429 Too Many Requests"), () => 500, 15_000)
-    expect(state.blockedUntil).toBe(15_500)
+  it("leaves meters empty when there is no earlier success to carry", () => {
+    const display = applyCoalescedResult(freshState(), errored("500: boom"), options)
+    expect(display).toMatchObject({ error: "500: boom", meters: [] })
   })
 
-  it("does not back off on a non-429 error", () => {
-    const state = freshState()
-    applyCoalescedResult(state, errored("500 Internal Server Error"), () => 500, 15_000)
-    expect(state.blockedUntil).toBe(0)
+  it("arms a classified block from the injected clock", () => {
+    applyCoalescedResult(freshState(), errored("429: 5 requests per minute"), options)
+    expect(breaker.peek(key).blockedUntil).toBe(NOW + BACKOFF_POLICIES.throttled.baseMs)
   })
 
-  it("passes a null result through without mutating state", () => {
+  it("arms a block for a non-429 failure, which used to arm nothing", () => {
+    applyCoalescedResult(freshState(), errored("500 Internal Server Error"), options)
+    expect(breaker.shouldAttempt(key, NOW).allowed).toBe(false)
+  })
+
+  it("gives an account quota a much longer block than a throttle", () => {
+    const quotaBreaker = new SubscriptionBreaker()
+    applyCoalescedResult(freshState(), errored("429: usage_limit_reached"), {
+      ...options,
+      breaker: quotaBreaker,
+    })
+    applyCoalescedResult(freshState(), errored("429: 5 requests per minute"), options)
+    expect(quotaBreaker.peek(key).blockedUntil).toBeGreaterThan(breaker.peek(key).blockedUntil)
+  })
+
+  it("clears the block when a reading succeeds", () => {
     const state = freshState()
-    expect(applyCoalescedResult(state, null, () => 100, 1000)).toBeNull()
+    applyCoalescedResult(state, errored("429: 5 requests per minute"), options)
+    expect(breaker.shouldAttempt(key, NOW).allowed).toBe(false)
+    applyCoalescedResult(state, ok(), options)
+    expect(breaker.shouldAttempt(key, NOW).allowed).toBe(true)
+  })
+
+  it("treats a null result as neither success nor failure", () => {
+    const state = freshState()
+    expect(applyCoalescedResult(state, null, options)).toBeNull()
+    expect(breaker.shouldAttempt(key, NOW).allowed).toBe(true)
     expect(state.lastResult).toBeNull()
-    expect(state.lastSuccessfulResult).toBeNull()
-    expect(state.blockedUntil).toBe(0)
+  })
+})
+
+describe("recordCoalescedThrow", () => {
+  it("classifies and blocks on a rejected query", () => {
+    const failure = recordCoalescedThrow(new Error("429: usage_limit_reached"), options)
+    expect(failure.reason).toBe("account-quota")
+    expect(breaker.shouldAttempt(key, NOW).allowed).toBe(false)
+  })
+
+  it("handles a bare string rejection from the Tauri transport", () => {
+    expect(recordCoalescedThrow("503: Service Unavailable", options).reason).toBe("capacity")
+  })
+})
+
+describe("limitsBreakerKey", () => {
+  it("is the usage-scope key, so one block gates every quota surface", () => {
+    expect(limitsBreakerKey("anthropic", "acc-1")).toBe(limitsBreakerKey("anthropic", "acc-1"))
+    expect(limitsBreakerKey("anthropic", "acc-1")).not.toBe(limitsBreakerKey("codex", "acc-1"))
   })
 })

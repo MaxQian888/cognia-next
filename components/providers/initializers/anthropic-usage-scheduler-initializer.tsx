@@ -57,6 +57,9 @@ export function AnthropicUsageSchedulerInitializer() {
     const handle = startUsageScheduler(
       () => resolveSettings(useSettingsStore.getState().settings),
       {
+        // Names the credential the probe spends, so a block armed here and one
+        // armed by the quota panel refer to the same account.
+        getAccountId: resolveProbableAccountId,
         getCredential: async (): Promise<AnthropicCredentialData | null> => {
           const accountId = await resolveProbableAccountId()
           if (!accountId) return null

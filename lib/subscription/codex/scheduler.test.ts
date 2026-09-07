@@ -93,9 +93,11 @@ describe("startCodexUsageScheduler", () => {
 
   it("clamps a too-fast visible cadence to the 60s floor", async () => {
     const probe = jest.fn(async () => null)
+    // `random: () => 0` takes the bottom of the jitter band, which is the
+    // cadence itself. That is the case the floor has to survive.
     const handle = startCodexUsageScheduler(
       () => ({ probeEnabled: true, visibleIntervalMs: 1_000, idleIntervalMs: 1_000 }),
-      { getActiveAccountId: () => "acc-1", probe, isVisible: () => true }
+      { getActiveAccountId: () => "acc-1", probe, isVisible: () => true, random: () => 0 }
     )
     await jest.advanceTimersByTimeAsync(0) // initial tick
     expect(probe).toHaveBeenCalledTimes(1)
@@ -105,5 +107,52 @@ describe("startCodexUsageScheduler", () => {
     await jest.advanceTimersByTimeAsync(1)
     expect(probe).toHaveBeenCalledTimes(2)
     handle.stop()
+  })
+
+  it("never fires earlier than the floor, whatever the jitter rolls", async () => {
+    for (const roll of [0, 0.25, 0.5, 0.75, 1]) {
+      const probe = jest.fn(async () => null)
+      const handle = startCodexUsageScheduler(
+        () => ({ probeEnabled: true, visibleIntervalMs: 1_000, idleIntervalMs: 1_000 }),
+        { getActiveAccountId: () => "acc-1", probe, isVisible: () => true, random: () => roll }
+      )
+      await jest.advanceTimersByTimeAsync(0)
+      await jest.advanceTimersByTimeAsync(PROBE_CADENCE_FLOOR_MS - 1)
+      expect(probe).toHaveBeenCalledTimes(1)
+      handle.stop()
+    }
+  })
+
+  it("spreads the cadence so parallel loops do not realign onto one tick", async () => {
+    const cadence = 5 * 60_000
+    const settings = () => ({
+      probeEnabled: true,
+      visibleIntervalMs: cadence,
+      idleIntervalMs: cadence,
+    })
+    const early = jest.fn(async () => null)
+    const late = jest.fn(async () => null)
+    const earlyHandle = startCodexUsageScheduler(settings, {
+      getActiveAccountId: () => "acc-1",
+      probe: early,
+      isVisible: () => true,
+      random: () => 0,
+    })
+    const lateHandle = startCodexUsageScheduler(settings, {
+      getActiveAccountId: () => "acc-2",
+      probe: late,
+      isVisible: () => true,
+      random: () => 1,
+    })
+
+    await jest.advanceTimersByTimeAsync(0)
+    await jest.advanceTimersByTimeAsync(cadence)
+    // Same configured cadence, different wake-ups: the second loop is still
+    // waiting out its share of the spread.
+    expect(early).toHaveBeenCalledTimes(2)
+    expect(late).toHaveBeenCalledTimes(1)
+
+    earlyHandle.stop()
+    lateHandle.stop()
   })
 })

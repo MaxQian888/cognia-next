@@ -40,6 +40,13 @@ export interface AnthropicSubscriptionSettings {
   visibleIntervalMs: number
   idleIntervalMs: number
   warnThresholdPct: number
+  /**
+   * Move the active account to a healthy sibling when this one's quota window
+   * is spent (ADR-0025 failover). Off by default and absent on settings rows
+   * written before it existed, both of which read as off: switching which
+   * account the user is billed on is never something to start doing silently.
+   */
+  autoFailoverEnabled?: boolean
 }
 
 export const DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS: AnthropicSubscriptionSettings = {
@@ -47,6 +54,7 @@ export const DEFAULT_ANTHROPIC_SUBSCRIPTION_SETTINGS: AnthropicSubscriptionSetti
   visibleIntervalMs: 5 * 60 * 1000,
   idleIntervalMs: 30 * 60 * 1000,
   warnThresholdPct: 90,
+  autoFailoverEnabled: false,
 }
 
 /**
@@ -70,6 +78,12 @@ export interface CodexSubscriptionSettings {
   idleIntervalMs: number
   /** Utilization percent at which a window meter flips to the warn state. */
   warnThresholdPct: number
+  /**
+   * Move the active account to a healthy sibling when this one's quota window
+   * is spent. Off by default, and absent on older settings rows, both of which
+   * read as off. See `AnthropicSubscriptionSettings.autoFailoverEnabled`.
+   */
+  autoFailoverEnabled?: boolean
 }
 
 export const DEFAULT_CODEX_SUBSCRIPTION_SETTINGS: CodexSubscriptionSettings = {
@@ -78,6 +92,7 @@ export const DEFAULT_CODEX_SUBSCRIPTION_SETTINGS: CodexSubscriptionSettings = {
   visibleIntervalMs: 5 * 60 * 1000,
   idleIntervalMs: 30 * 60 * 1000,
   warnThresholdPct: 90,
+  autoFailoverEnabled: false,
 }
 
 // ---------------------------------------------------------------------------

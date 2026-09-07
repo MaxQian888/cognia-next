@@ -1,7 +1,15 @@
+import { __resetSubscriptionBreakerForTesting } from "@/lib/subscription/retry/breaker"
+
 import { CodexReauthenticationRequiredError, refreshCodexAccountIfStale } from "./refresh"
 import { discoverCodexAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, CodexCredentialData } from "@/types/subscription"
+
+// The token-endpoint block is process-wide by design, so a case that makes a
+// refresh fail would otherwise gate every later case for the same account id.
+beforeEach(() => {
+  __resetSubscriptionBreakerForTesting()
+})
 
 jest.mock("./discovery", () => ({
   discoverCodexAuth: jest.fn(),
@@ -260,5 +268,69 @@ describe("refreshCodexAccountIfStale", () => {
     const fresh = credential({ accessToken: "fresh", expiresAtMs: NOW + 3_600_000 })
     resolveRefresh(fresh)
     await expect(Promise.all([first, second])).resolves.toEqual([fresh, fresh])
+  })
+})
+
+describe("the token-endpoint block", () => {
+  it("does not exchange the same dead token again after a failure", async () => {
+    // Both callers here run on hot paths: every external-agent spawn and every
+    // chat turn. Without a block, a revoked grant was re-exchanged on each one.
+    const d = deps({
+      refreshCodexToken: jest.fn().mockRejectedValue(new Error("500: token service down")),
+      random: () => 0,
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow()
+    expect(d.refreshCodexToken).toHaveBeenCalledTimes(1)
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toBeNull()
+    expect(d.refreshCodexToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("latches a revoked grant until the user re-authenticates", async () => {
+    const d = deps({
+      refreshCodexToken: jest.fn().mockRejectedValue(new Error('400: {"error":"invalid_grant"}')),
+      random: () => 0,
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow()
+
+    const muchLater = { ...d, now: () => NOW + 30 * 24 * 60 * 60_000 }
+    await expect(refreshCodexAccountIfStale("acc-1", muchLater)).resolves.toBeNull()
+    expect(d.refreshCodexToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not block a still-fresh credential that never touched the endpoint", async () => {
+    const d = deps({
+      refreshCodexToken: jest.fn().mockRejectedValue(new Error("500: token service down")),
+      random: () => 0,
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow()
+
+    // A different account is untouched by the first one's block.
+    const sibling = deps({
+      getAccount: jest.fn().mockResolvedValue({ ...account(), id: "acc-2" }),
+      random: () => 0,
+    })
+    await expect(refreshCodexAccountIfStale("acc-2", sibling)).resolves.toMatchObject({
+      accessToken: "fresh-bearer",
+    })
+  })
+
+  it("clears the block after a successful exchange", async () => {
+    const refreshCodexToken = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("500: token service down"))
+      .mockResolvedValue({ access_token: "fresh-bearer", refresh_token: "r2", expires_in: 3600 })
+    let clock = NOW
+    const d = deps({ refreshCodexToken, now: () => clock, random: () => 0 })
+
+    await expect(refreshCodexAccountIfStale("acc-1", d)).rejects.toThrow()
+    clock += 60 * 60_000
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toMatchObject({
+      accessToken: "fresh-bearer",
+    })
+    await expect(refreshCodexAccountIfStale("acc-1", d)).resolves.toMatchObject({
+      accessToken: "fresh-bearer",
+    })
+    expect(refreshCodexToken).toHaveBeenCalledTimes(3)
   })
 })

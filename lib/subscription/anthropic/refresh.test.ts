@@ -1,4 +1,9 @@
-import { refreshAndPersistAnthropicAccount } from "./refresh"
+import { __resetSubscriptionBreakerForTesting } from "@/lib/subscription/retry/breaker"
+
+import {
+  __resetAnthropicRefreshInFlightForTesting,
+  refreshAndPersistAnthropicAccount,
+} from "./refresh"
 import { discoverAnthropicAuth, discoveredToCredential } from "./discovery"
 
 import type { Account, AnthropicCredentialData, ProviderId } from "@/types/subscription"
@@ -38,6 +43,14 @@ function refreshedCredential(over: Partial<AnthropicCredentialData> = {}): Anthr
     ...over,
   }
 }
+
+// Both the token-endpoint block and the single-flight map are process-wide by
+// design, so a case that makes a refresh fail would otherwise gate every later
+// case for the same account id.
+beforeEach(() => {
+  __resetSubscriptionBreakerForTesting()
+  __resetAnthropicRefreshInFlightForTesting()
+})
 
 describe("refreshAndPersistAnthropicAccount", () => {
   it("coalesces concurrent refreshes for the same account", async () => {
@@ -211,5 +224,101 @@ describe("refreshAndPersistAnthropicAccount", () => {
       refreshAccessToken: async () => refreshedCredential(),
     })
     expect(out).toBeNull()
+  })
+})
+
+describe("the token-endpoint block", () => {
+  const failing = (error: Error) => ({
+    getAccount: async () => anthropicAccount(),
+    saveAccount: async () => {},
+    setActiveAccount: async () => {},
+    refreshAccessToken: jest.fn(async () => {
+      throw error
+    }),
+    now: () => 1_000_000,
+    random: () => 0,
+  })
+
+  it("does not exchange the same dead token again after a failure", async () => {
+    // Single-flight alone only ever stopped SIMULTANEOUS refreshes. The quota
+    // loop calls this every five minutes, so without a block a revoked grant
+    // was re-POSTed for as long as the app stayed open.
+    const deps = failing(new Error("500: token service unavailable"))
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).rejects.toThrow()
+    expect(deps.refreshAccessToken).toHaveBeenCalledTimes(1)
+
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).resolves.toBeNull()
+    expect(deps.refreshAccessToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("latches a revoked refresh token so it is never retried on its own", async () => {
+    const deps = failing(new Error('400: {"error":"invalid_grant"}'))
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).rejects.toThrow()
+
+    const muchLater = { ...deps, now: () => 1_000_000 + 30 * 24 * 60 * 60_000 }
+    await expect(refreshAndPersistAnthropicAccount("acc-1", muchLater)).resolves.toBeNull()
+    expect(deps.refreshAccessToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets the exchange through again once the block expires", async () => {
+    const deps = failing(new Error("500: token service unavailable"))
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).rejects.toThrow()
+
+    const later = { ...deps, now: () => 1_000_000 + 60 * 60_000 }
+    await expect(refreshAndPersistAnthropicAccount("acc-1", later)).rejects.toThrow()
+    expect(deps.refreshAccessToken).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps accounts independent", async () => {
+    const deps = failing(new Error("500: token service unavailable"))
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).rejects.toThrow()
+
+    const sibling = {
+      ...deps,
+      getAccount: async () => ({ ...anthropicAccount(), id: "acc-2" }),
+    }
+    await expect(refreshAndPersistAnthropicAccount("acc-2", sibling)).rejects.toThrow()
+    expect(deps.refreshAccessToken).toHaveBeenCalledTimes(2)
+  })
+
+  it("clears the block after a successful exchange", async () => {
+    const refreshAccessToken = jest
+      .fn<Promise<AnthropicCredentialData>, [unknown]>()
+      .mockRejectedValueOnce(new Error("500: token service unavailable"))
+      .mockResolvedValueOnce(refreshedCredential())
+      .mockResolvedValueOnce(refreshedCredential())
+    let clock = 1_000_000
+    const deps = {
+      getAccount: async () => anthropicAccount(),
+      saveAccount: async () => {},
+      setActiveAccount: async () => {},
+      refreshAccessToken,
+      now: () => clock,
+      random: () => 0,
+    }
+
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).rejects.toThrow()
+    clock += 60 * 60_000
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).resolves.toMatchObject({
+      accessToken: "new-access",
+    })
+    // The success reset the counter, so the very next call is not gated.
+    await expect(refreshAndPersistAnthropicAccount("acc-1", deps)).resolves.toMatchObject({
+      accessToken: "new-access",
+    })
+    expect(refreshAccessToken).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not treat a missing account as evidence the endpoint is healthy", async () => {
+    const refreshAccessToken = jest.fn(async () => refreshedCredential())
+    const deps = {
+      getAccount: async () => null,
+      saveAccount: async () => {},
+      setActiveAccount: async () => {},
+      refreshAccessToken,
+      now: () => 1_000_000,
+    }
+    await expect(refreshAndPersistAnthropicAccount("missing", deps)).resolves.toBeNull()
+    expect(refreshAccessToken).not.toHaveBeenCalled()
   })
 })

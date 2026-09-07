@@ -47,7 +47,8 @@ export function SubscriptionSettingsTab() {
     draft.probeEnabled !== settings.probeEnabled ||
     draft.visibleIntervalMs !== settings.visibleIntervalMs ||
     draft.idleIntervalMs !== settings.idleIntervalMs ||
-    draft.warnThresholdPct !== settings.warnThresholdPct
+    draft.warnThresholdPct !== settings.warnThresholdPct ||
+    (draft.autoFailoverEnabled ?? false) !== (settings.autoFailoverEnabled ?? false)
 
   if (!tabReady) {
     return <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
@@ -60,6 +61,7 @@ export function SubscriptionSettingsTab() {
         visibleIntervalMs: clampCadence(draft.visibleIntervalMs),
         idleIntervalMs: clampCadence(draft.idleIntervalMs),
         warnThresholdPct: Math.max(0, Math.min(100, Math.round(draft.warnThresholdPct))),
+        autoFailoverEnabled: draft.autoFailoverEnabled ?? false,
       },
     })
   }
@@ -117,6 +119,23 @@ export function SubscriptionSettingsTab() {
             />
             <p className="text-xs text-muted-foreground">{t("settings.probe.idleHelp")}</p>
           </div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title={t("settings.failover.title")}
+        description={t("settings.failover.description")}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="auto-failover">{t("settings.failover.enableLabel")}</Label>
+            <p className="text-xs text-muted-foreground">{t("settings.failover.enableHelp")}</p>
+          </div>
+          <Switch
+            id="auto-failover"
+            checked={draft.autoFailoverEnabled ?? false}
+            onCheckedChange={(v) => setDraft({ ...draft, autoFailoverEnabled: v })}
+          />
         </div>
       </SettingsCard>
 
