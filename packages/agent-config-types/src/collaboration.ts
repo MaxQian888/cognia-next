@@ -197,6 +197,8 @@ export interface AuthorizationAuditEvent {
 }
 
 export interface ChatCollaborationBinding {
+  /** Collaboration service that owns this identity; absent on legacy imports. */
+  endpoint?: string
   orgId: string
   workspaceId: string
   sessionId: string
@@ -205,6 +207,8 @@ export interface ChatCollaborationBinding {
 }
 
 export interface MessageCollaborationMetadata {
+  /** Server message identity, independent of the local projection key. */
+  remoteMessageId?: string
   author: AuthorRef
   sourceEventId: string
   eventSequence: number

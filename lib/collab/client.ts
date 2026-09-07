@@ -501,7 +501,7 @@ function reasonHeaders(reason?: string): Record<string, string> {
 }
 
 export class CollabClient {
-  private readonly baseUrl: string
+  readonly baseUrl: string
   private readonly accessToken: () => Promise<string | null>
   private readonly fetchImpl: CollabFetch
   private readonly now: () => number
@@ -1117,6 +1117,25 @@ export class CollabClient {
     )
   }
 
+  async claimSessionRunQueue(
+    orgId: string,
+    sessionId: string,
+    input: {
+      runId: string
+      deviceId: string
+      operationId: string
+      queueItemId: string
+      token: string
+      takeover?: boolean
+    }
+  ): Promise<{ lease: RunLease; item: RunQueueItem; token: string }> {
+    return this.json(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/queue/claim`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
   async getActiveSessionRunLease(orgId: string, sessionId: string): Promise<RunLease | null> {
     return this.json<RunLease | null>(
       orgId,
@@ -1235,7 +1254,13 @@ export class CollabClient {
     runId: string,
     token: string,
     input: {
-      kind: "message.created" | "run.started" | "run.paused" | "run.completed" | "run.failed"
+      kind:
+        | "message.created"
+        | "message.corrected"
+        | "run.started"
+        | "run.paused"
+        | "run.completed"
+        | "run.failed"
       payload: Record<string, unknown>
       operationId: string
     }

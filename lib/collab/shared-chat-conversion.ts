@@ -6,13 +6,15 @@ import type {
   StoredMessage,
 } from "@cognia/agent-config-types"
 import { assertSessionWritable } from "@/lib/chat/session-write-guard"
-import { appendCollabChatEvents } from "@/lib/db/collab-chat-mirror"
+import { appendCollabChatEvents, sharedChatCacheKey } from "@/lib/db/collab-chat-mirror"
 import { getDb } from "@/lib/db/schema"
 import { assertFetchTargetAllowed } from "@/lib/web/fetch-guard"
+import { bytesToBase64 } from "@/lib/ocr/image-prep"
+import { getMessageMedia, parseMediaRef } from "@/lib/db/message-media"
 import type { CollabClient } from "./client"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
-type SharedChatConversionClient = Pick<
+type SharedChatConversionClient = { readonly baseUrl?: string } & Pick<
   CollabClient,
   "identity" | "createSharedSession" | "appendSessionEvent" | "updateSharedSession"
 > &
@@ -22,6 +24,48 @@ type SharedChatConversionClient = Pick<
       "initializeSessionAttachment" | "uploadSessionAttachment" | "commitSessionAttachment"
     >
   >
+
+export async function resolveSharedAttachmentParts(
+  client: Pick<CollabClient, "createSessionAttachmentDownloadTicket" | "downloadSessionAttachment">,
+  orgId: string,
+  sessionId: string,
+  parts: StoredMessage["parts"]
+): Promise<StoredMessage["parts"]> {
+  return Promise.all(
+    parts.map(async (part) => {
+      if (
+        part.type !== "file" ||
+        typeof part.url !== "string" ||
+        !part.url.startsWith("cognia://shared-attachment/")
+      )
+        return part
+      const id = part.url.slice("cognia://shared-attachment/".length)
+      const grant = await client.createSessionAttachmentDownloadTicket(orgId, sessionId, id)
+      const attachment = grant.attachment
+      if (
+        attachment.id !== id ||
+        attachment.sessionId !== sessionId ||
+        ("orgId" in attachment && attachment.orgId !== orgId) ||
+        attachment.status !== "available"
+      ) {
+        throw new Error("Shared attachment scope mismatch")
+      }
+      const blob = await client.downloadSessionAttachment(orgId, id, grant.ticket)
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      if (
+        bytes.byteLength !== attachment.byteLength ||
+        (await sha256Hex(bytes)) !== attachment.sha256
+      ) {
+        throw new Error("Shared attachment integrity mismatch")
+      }
+      return {
+        ...part,
+        mediaType: attachment.mediaType,
+        url: `data:${attachment.mediaType};base64,${bytesToBase64(bytes)}`,
+      }
+    })
+  )
+}
 
 export interface SharedChatConversionInput {
   localSessionId: string
@@ -99,6 +143,11 @@ const LOCAL_ATTACHMENT_SCHEMES = ["data:", "blob:"]
  */
 async function defaultReadAttachment(part: StoredMessage["parts"][number]): Promise<Uint8Array> {
   if (part.type !== "file") throw new Error("Only file parts can be uploaded")
+  if (parseMediaRef(part.url)) {
+    const media = await getMessageMedia(part.url)
+    if (!media) throw new Error("Local attachment could not be read")
+    return new Uint8Array(await media.blob.arrayBuffer())
+  }
   if (!LOCAL_ATTACHMENT_SCHEMES.some((scheme) => part.url.startsWith(scheme))) {
     assertFetchTargetAllowed(part.url)
   }
@@ -107,15 +156,22 @@ async function defaultReadAttachment(part: StoredMessage["parts"][number]): Prom
   return new Uint8Array(await response.arrayBuffer())
 }
 
-async function uploadMessageAttachments(
+export async function uploadMessageAttachments(
   client: SharedChatConversionClient,
   input: SharedChatConversionInput,
   remote: SharedSession,
   message: StoredMessage
 ): Promise<{ parts: StoredMessage["parts"]; attachmentIds: string[] }> {
+  const sourceDb = getDb()
+  const assertCurrentAccount = () => {
+    if (getDb() !== sourceDb)
+      throw new DOMException("Shared attachment upload cancelled", "AbortError")
+  }
   if (input.prepareAttachmentParts) {
+    const parts = await input.prepareAttachmentParts(message, remote)
+    assertCurrentAccount()
     return {
-      parts: await input.prepareAttachmentParts(message, remote),
+      parts,
       attachmentIds: [],
     }
   }
@@ -130,23 +186,31 @@ async function uploadMessageAttachments(
   const attachmentIds: string[] = []
   const parts: StoredMessage["parts"] = []
   for (const part of message.parts) {
-    if (part.type !== "file") {
+    assertCurrentAccount()
+    if (
+      part.type !== "file" ||
+      typeof (part as { text?: unknown }).text === "string" ||
+      part.url?.startsWith("cognia://shared-attachment/")
+    ) {
       parts.push(part)
       continue
     }
     const bytes = await readAttachment(part)
+    assertCurrentAccount()
     const initialized = await client.initializeSessionAttachment(input.orgId, remote.id, {
       fileName: part.filename ?? "attachment",
       mediaType: part.mediaType,
       byteLength: bytes.byteLength,
       sha256: await sha256Hex(bytes),
     })
+    assertCurrentAccount()
     await client.uploadSessionAttachment(
       input.orgId,
       initialized.attachment.id,
       initialized.ticket,
       bytes
     )
+    assertCurrentAccount()
     attachmentIds.push(initialized.attachment.id)
     parts.push({ ...part, url: `cognia://shared-attachment/${initialized.attachment.id}` })
   }
@@ -174,6 +238,7 @@ export async function convertLocalSessionToShared(
   input: SharedChatConversionInput
 ): Promise<SharedChatConversionResult> {
   assertSharedChatClientEnabled()
+  const db = getDb()
   const { session: local, messages } = await readSource(input.localSessionId)
   const files = attachmentCount(messages)
   if (
@@ -187,6 +252,7 @@ export async function convertLocalSessionToShared(
   }
 
   const identity = await client.identity(input.orgId)
+  if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
   const prefix = operationPrefix(local.id)
   const remoteDraft = await client.createSharedSession(input.orgId, input.workspaceId, {
     title: local.title,
@@ -200,10 +266,12 @@ export async function convertLocalSessionToShared(
     parts: StoredMessage["parts"]
   }> = []
   for (const message of messages) {
+    if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
     const uploaded = hasFilePart(message)
       ? await uploadMessageAttachments(client, input, remoteDraft, message)
       : { parts: message.parts, attachmentIds: [] }
     const parts = uploaded.parts
+    if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
     const author = authorFor(message, identity.userId)
     const event = await client.appendSessionEvent(input.orgId, remoteDraft.id, {
       kind: "message.created",
@@ -218,6 +286,7 @@ export async function convertLocalSessionToShared(
         imported: true,
       },
     })
+    if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
     await Promise.all(
       uploaded.attachmentIds.map((attachmentId) =>
         client.commitSessionAttachment!(input.orgId, remoteDraft.id, attachmentId, event.id)
@@ -226,6 +295,7 @@ export async function convertLocalSessionToShared(
     imported.push({ source: message, event, parts })
   }
 
+  if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
   const active = await client.updateSharedSession(input.orgId, remoteDraft.id, {
     status: "active",
     operationId: `${prefix}:activate`,
@@ -233,8 +303,8 @@ export async function convertLocalSessionToShared(
   })
   const cursor = imported.at(-1)?.event.sequence ?? 0
 
-  const db = getDb()
-  await db.transaction("rw", db.sessions, db.messages, async () => {
+  if (getDb() !== db) throw new DOMException("Shared conversion cancelled", "AbortError")
+  await db.transaction("rw", db.sessions, db.messages, db.collabChatEvents, async () => {
     const current = await db.sessions.get(local.id)
     if (!current) throw new Error(`Local session ${local.id} disappeared during conversion`)
     assertSessionWritable(current, "metadata")
@@ -242,8 +312,11 @@ export async function convertLocalSessionToShared(
 
     for (const row of imported) {
       await db.messages.update(row.source.id, {
-        parts: row.parts,
+        // Keep the importing device's verified local media references renderable.
+        // Other participants resolve the server references when projecting events.
+        parts: row.source.parts,
         collaboration: {
+          remoteMessageId: row.source.id,
           author: authorFor(row.source, identity.userId),
           sourceEventId: row.event.id,
           eventSequence: row.event.sequence,
@@ -253,6 +326,7 @@ export async function convertLocalSessionToShared(
     }
     await db.sessions.update(local.id, {
       collaboration: {
+        ...(client.baseUrl ? { endpoint: client.baseUrl } : {}),
         orgId: active.orgId,
         workspaceId: active.workspaceId,
         sessionId: active.id,
@@ -261,10 +335,17 @@ export async function convertLocalSessionToShared(
       },
       updatedAt: Date.now(),
     })
+    const cacheKey = sharedChatCacheKey(input.orgId, active.id, client.baseUrl)
+    await appendCollabChatEvents(
+      imported.map(({ event }) => ({
+        ...event,
+        id: `${cacheKey}:event:${event.id}`,
+        sessionId: cacheKey,
+        orgId: input.orgId,
+        fetchedAt: Date.now(),
+      }))
+    )
   })
-  await appendCollabChatEvents(
-    imported.map(({ event }) => ({ ...event, orgId: input.orgId, fetchedAt: Date.now() }))
-  )
 
   return {
     session: active,

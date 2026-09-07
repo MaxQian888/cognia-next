@@ -18,6 +18,7 @@
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { cn } from "@/lib/utils"
 import { SidebarUserCard } from "./sidebar-user-card"
+import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 
 export function SidebarFooter({ className }: { className?: string }) {
   return (
@@ -32,6 +33,7 @@ export function SidebarFooter({ className }: { className?: string }) {
         className="flex flex-wrap items-center gap-1 pb-1 empty:hidden"
       />
       <SidebarUserCard />
+      <SharedSessionJoin />
     </div>
   )
 }

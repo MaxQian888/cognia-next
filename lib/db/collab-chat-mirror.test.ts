@@ -6,6 +6,8 @@ import {
   listCollabChatSessions,
   purgeCollabChatSession,
   replaceCollabChatSessions,
+  putCollabChatAttachment,
+  removeCollabChatAttachment,
 } from "./collab-chat-mirror"
 
 const dbFixture = createDbTestFixture()
@@ -22,6 +24,31 @@ describe("collab chat mirror", () => {
     ])
   })
   afterAll(dbFixture.dispose)
+
+  it("handles empty event receipt without creating sync state", async () => {
+    await appendCollabChatEvents([])
+    expect(await getDb().collabChatSyncStates.count()).toBe(0)
+  })
+
+  it("updates and removes attachment metadata", async () => {
+    await putCollabChatAttachment({
+      id: "a",
+      sessionId: "s",
+      orgId: "o",
+      fileName: "a.txt",
+      mediaType: "text/plain",
+      byteLength: 1,
+      sha256: "0".repeat(64),
+      status: "available",
+      createdByUserId: "u",
+      createdAt: 1,
+      updatedAt: 1,
+      fetchedAt: 1,
+    })
+    expect(await getDb().collabChatAttachments.get("a")).toBeDefined()
+    await removeCollabChatAttachment("a")
+    expect(await getDb().collabChatAttachments.get("a")).toBeUndefined()
+  })
 
   it("replaces only one workspace slice", async () => {
     const row = (id: string, workspaceId: string) => ({
@@ -44,7 +71,7 @@ describe("collab chat mirror", () => {
     expect(await getDb().collabChatSessions.get("ses_2")).toBeDefined()
   })
 
-  it("deduplicates events by id and advances the cursor monotonically", async () => {
+  it("deduplicates received events without advancing the applied cursor", async () => {
     const base = {
       id: "evt_1",
       orgId: "org_1",
@@ -59,9 +86,9 @@ describe("collab chat mirror", () => {
     }
     await appendCollabChatEvents([base, { ...base, payload: { text: "same event" } }])
     expect(await listCollabChatEvents("ses_1")).toHaveLength(1)
-    expect((await getDb().collabChatSyncStates.get("ses_1"))?.lastSequence).toBe(4)
+    expect(await getDb().collabChatSyncStates.get("ses_1")).toBeUndefined()
     await appendCollabChatEvents([{ ...base, id: "evt_2", sequence: 2, operationId: "op_2" }])
-    expect((await getDb().collabChatSyncStates.get("ses_1"))?.lastSequence).toBe(4)
+    expect(await getDb().collabChatSyncStates.get("ses_1")).toBeUndefined()
   })
 
   it("purges every cached resource immediately after access is revoked", async () => {

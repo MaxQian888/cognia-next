@@ -1,3 +1,5 @@
+import { isCanonicalSession } from "@cognia/agent-config-types/canonical-session"
+import { invalidateSessionHistory } from "@/lib/sync/session-history"
 import type {
   CanonicalSession,
   SessionFidelity,
@@ -36,6 +38,8 @@ export async function offerThreadHandoff(
     }
     const session = await db.sessions.get(proposed.source.sessionId)
     if (!session) throw new Error("thread_handoff_source_session_not_found")
+    if (session.collaboration)
+      throw new Error("thread_handoff_shared_session_requires_executor_transfer")
     if (session.handoffLock && session.handoffLock.ticketId !== proposed.ticketId) {
       throw new Error("thread_handoff_source_already_locked")
     }
@@ -137,7 +141,7 @@ export function preflightThreadHandoff(
   }
   for (const attachment of ticket.attachments) {
     const ref = attachment.ref ?? attachment.attachmentId
-    if (attachment.carriage === "by-ref" && !environment.attachmentRefs.includes(ref)) {
+    if (!environment.attachmentRefs.includes(ref)) {
       blockers.push({ kind: "attachment-unresolvable", ref, severity: "blocking" })
     }
   }
@@ -185,6 +189,30 @@ export async function acceptThreadHandoff(
   }
 ): Promise<{ ticket: ThreadHandoffTicket; proof: AcceptedThreadHandoffProof }> {
   assertTicket(input.ticket)
+  if (
+    !isCanonicalSession(input.envelope) ||
+    input.envelope.header.sequenceDigest !== input.ticket.continuation.sequenceDigest
+  ) {
+    throw new Error("thread_handoff_envelope_integrity_failed")
+  }
+  const files = input.envelope.turns
+    .flatMap((turn) => [
+      ...(turn.parts ?? []),
+      ...(turn.toolCalls ?? []).flatMap((call) => call.attachments ?? []),
+    ])
+    .filter((part) => part.type === "file")
+  for (const file of files) {
+    if (
+      !input.ticket.attachments.some(
+        (attachment) =>
+          (attachment.ref === file.uri || attachment.attachmentId === file.uri) &&
+          attachment.digest === file.digest &&
+          attachment.byteLength === file.size
+      )
+    ) {
+      throw new Error("thread_handoff_attachment_manifest_mismatch")
+    }
+  }
   if (input.ticket.role !== "target") throw new Error("thread_handoff_accept requires target role")
   if (!input.ticket.preflight?.ok) throw new Error("thread_handoff_preflight_blocked")
   const at = deps.now ?? Date.now()
@@ -213,6 +241,13 @@ export async function acceptThreadHandoff(
     await db.threadHandoffTickets.add(preparing)
     return preparing
   })
+  if (
+    existing.continuation.sequenceDigest !== input.ticket.continuation.sequenceDigest ||
+    existing.target.hostRef !== input.ticket.target.hostRef ||
+    existing.source.sessionId !== input.ticket.source.sessionId
+  ) {
+    throw new Error("thread_handoff_ticket_identity_mismatch")
+  }
   if (existing.state === "accepted" || existing.state === "committed") {
     return {
       ticket: existing,
@@ -220,6 +255,9 @@ export async function acceptThreadHandoff(
     }
   }
 
+  if (existing.state !== "preparing" && existing.state !== "frozen") {
+    throw new ThreadHandoffConflictError(existing, "accepted")
+  }
   await deps.importSession(input.envelope, sessionId)
   const accepted = await db.transaction("rw", db.threadHandoffTickets, db.sessions, async () => {
     const current = await db.threadHandoffTickets.get([input.ticket.ticketId, "target"])
@@ -294,7 +332,7 @@ export async function commitThreadHandoff(
 ): Promise<{ ticket: ThreadHandoffTicket; proof: SourceCommitProof | { state: "committed" } }> {
   const at = input.at ?? Date.now()
   const db = getDb()
-  return db.transaction("rw", db.threadHandoffTickets, db.sessions, async () => {
+  const result = await db.transaction("rw", db.threadHandoffTickets, db.sessions, async () => {
     const current = await db.threadHandoffTickets.get([input.ticketId, input.role])
     if (!current) throw new Error("thread_handoff_ticket_not_found")
     if (current.state === "committed") {
@@ -311,6 +349,8 @@ export async function commitThreadHandoff(
         proof.ticketId !== current.ticketId ||
         proof.state !== "accepted" ||
         proof.targetHostRef !== current.target.hostRef ||
+        (current.target.sessionId !== undefined &&
+          proof.targetSessionId !== current.target.sessionId) ||
         proof.sequenceDigest !== current.continuation.sequenceDigest
       ) {
         throw new Error("thread_handoff_accepted_proof_invalid")
@@ -363,6 +403,9 @@ export async function commitThreadHandoff(
     await db.threadHandoffTickets.put(committed)
     return { ticket: committed, proof: { state: "committed" as const } }
   })
+  invalidateSessionHistory(result.ticket.source.sessionId)
+  if (result.ticket.target.sessionId) invalidateSessionHistory(result.ticket.target.sessionId)
+  return result
 }
 
 function sourceProof(ticket: ThreadHandoffTicket): SourceCommitProof {

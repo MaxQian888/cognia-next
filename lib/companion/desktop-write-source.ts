@@ -166,7 +166,7 @@ import type {
   HostStateSubmitCaller,
   HostStateSubmitRequest,
 } from "@cognia/agent-config-types/host-state"
-import { sessionIndexChannel } from "@cognia/agent-config-types/host-state"
+import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
 import type { CanonicalSession } from "@cognia/agent-config-types/canonical-session"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
@@ -628,8 +628,13 @@ async function importThreadHandoffSession(
   sessionId: string,
   bridge?: TauriBridge
 ): Promise<void> {
-  const service = await resolveHostStateService(payload, bridge)
   const active = getActiveRuntimeTargetContext()
+  // Handoff is addressed to this Host; its closed wire body has no runtimeTargetId.
+  // Account, Host and device still come exclusively from the Rust authority binding.
+  const service = await resolveHostStateService(
+    { ...payload, runtimeTargetId: active?.targetId },
+    bridge
+  )
   const accountId = payload.callerAccountId
   const hostId = payload.authoritativeHostId
   const deviceId = payload.callerDeviceId
@@ -646,7 +651,7 @@ async function importThreadHandoffSession(
   const status = await service.status()
   const now = Date.now()
   const action: HostStateAction = {
-    channel: sessionIndexChannel(active.targetId),
+    channel: sessionStateChannel(active.targetId, sessionId),
     accountId,
     runtimeTargetId: active.targetId,
     hostId,

@@ -296,6 +296,12 @@ pub trait ChatStore: Send + Sync {
         &self,
         input: NewSessionEvent,
     ) -> Result<SessionEvent, StoreError>;
+    async fn append_session_run_event(
+        &self,
+        input: NewSessionEvent,
+        run_id: &str,
+        token_hash: &str,
+    ) -> Result<SessionEvent, StoreError>;
     async fn list_session_events(
         &self,
         org_id: &str,
@@ -315,6 +321,12 @@ pub trait ChatStore: Send + Sync {
         message_id: &str,
     ) -> Result<SessionEvent, StoreError>;
     async fn acquire_run_lease(&self, input: NewChatRunLease) -> Result<ChatRunLease, StoreError>;
+    async fn claim_run_queue(
+        &self,
+        input: NewChatRunLease,
+        item_id: &str,
+        takeover: bool,
+    ) -> Result<(ChatRunLease, ChatRunQueueItem), StoreError>;
     async fn heartbeat_run_lease(
         &self,
         org_id: &str,
@@ -915,6 +927,69 @@ impl ChatStore for InMemoryChatStore {
         Ok(event)
     }
 
+    async fn append_session_run_event(
+        &self,
+        input: NewSessionEvent,
+        run_id: &str,
+        token_hash: &str,
+    ) -> Result<SessionEvent, StoreError> {
+        let mut tables = self.tables.write();
+        let holder = tables
+            .leases
+            .values()
+            .find(|(lease, org, token, _)| {
+                org == &input.org_id
+                    && lease.session_id == input.session_id
+                    && lease.run_id == run_id
+                    && token == token_hash
+                    && lease.status == "active"
+                    && lease.token_expires_at > input.now
+                    && lease.heartbeat_expires_at > input.now
+            })
+            .map(|(lease, _, _, _)| lease.holder_user_id.clone())
+            .ok_or(StoreError::NotFound)?;
+        if !tables
+            .memberships
+            .get(&(input.session_id.clone(), holder))
+            .is_some_and(|member| {
+                matches!(
+                    member.role,
+                    SessionRole::Owner | SessionRole::Maintainer | SessionRole::Member
+                )
+            })
+        {
+            return Err(StoreError::NotFound);
+        }
+        tables
+            .sessions
+            .get(&input.session_id)
+            .filter(|session| {
+                session.org_id == input.org_id && session.workspace_id == input.workspace_id
+            })
+            .ok_or(StoreError::NotFound)?;
+        let events = tables.events.entry(input.session_id.clone()).or_default();
+        if let Some(existing) = events
+            .iter()
+            .find(|event| event.operation_id == input.operation_id)
+        {
+            return Ok(existing.clone());
+        }
+        let event = SessionEvent {
+            id: input.id,
+            session_id: input.session_id.clone(),
+            sequence: events.last().map_or(1, |event| event.sequence + 1),
+            kind: input.kind,
+            actor_kind: input.actor_kind,
+            actor_id: input.actor_id,
+            actor_label: input.actor_label,
+            payload: input.payload,
+            created_at: input.now,
+            operation_id: input.operation_id,
+        };
+        events.push(event.clone());
+        Ok(event)
+    }
+
     async fn list_session_events(
         &self,
         org_id: &str,
@@ -1044,6 +1119,112 @@ impl ChatStore for InMemoryChatStore {
         Ok(lease)
     }
 
+    async fn claim_run_queue(
+        &self,
+        input: NewChatRunLease,
+        item_id: &str,
+        takeover: bool,
+    ) -> Result<(ChatRunLease, ChatRunQueueItem), StoreError> {
+        let mut tables = self.tables.write();
+        let item = tables
+            .queue
+            .get(item_id)
+            .filter(|(item, org, _)| org == &input.org_id && item.session_id == input.session_id)
+            .map(|(item, _, _)| item.clone())
+            .ok_or(StoreError::NotFound)?;
+        if let Some((lease, _, token, _)) = tables.leases.values().find(|(lease, org, _, op)| {
+            org == &input.org_id
+                && lease.session_id == input.session_id
+                && op == &input.operation_id
+        }) {
+            if token != &input.token_hash
+                || lease.holder_user_id != input.holder_user_id
+                || lease.holder_device_id != input.holder_device_id
+            {
+                return Err(StoreError::NotFound);
+            }
+            return Ok((lease.clone(), item));
+        }
+        let first = tables
+            .queue
+            .values()
+            .filter(|(item, org, _)| {
+                org == &input.org_id
+                    && item.session_id == input.session_id
+                    && item.status == "queued"
+            })
+            .min_by_key(|(item, _, _)| item.position);
+        if first.is_none_or(|(first, _, _)| first.id != item_id) {
+            return Err(StoreError::Conflict(
+                serde_json::json!({"reason":"not_queue_head"}),
+            ));
+        }
+        if let Some((lease, _, _, _)) = tables.leases.values().find(|(lease, org, _, _)| {
+            org == &input.org_id
+                && lease.session_id == input.session_id
+                && matches!(lease.status.as_str(), "active" | "paused")
+                && lease.heartbeat_expires_at > input.now
+        }) {
+            return Err(conflict(lease.clone()));
+        }
+        if let Some((last, _, _, _)) = tables
+            .leases
+            .values()
+            .filter(|(lease, org, _, _)| {
+                org == &input.org_id && lease.session_id == input.session_id
+            })
+            .max_by_key(|(lease, _, _, _)| lease.created_at)
+        {
+            if matches!(last.status.as_str(), "active" | "paused")
+                && last.heartbeat_expires_at > input.now
+            {
+                return Err(conflict(last.clone()));
+            }
+            if !takeover
+                && (last.status != "released"
+                    || last.holder_user_id != input.holder_user_id
+                    || last.holder_device_id != input.holder_device_id)
+            {
+                return Err(StoreError::Conflict(
+                    serde_json::json!({"reason":"takeover_required"}),
+                ));
+            }
+        }
+        for (lease, org, _, _) in tables.leases.values_mut() {
+            if org == &input.org_id
+                && lease.session_id == input.session_id
+                && matches!(lease.status.as_str(), "active" | "paused")
+            {
+                lease.status = "expired".into();
+                lease.updated_at = input.now;
+            }
+        }
+        let lease = ChatRunLease {
+            id: input.id.clone(),
+            session_id: input.session_id,
+            run_id: input.run_id,
+            holder_user_id: input.holder_user_id,
+            holder_device_id: input.holder_device_id,
+            status: "active".into(),
+            token_expires_at: input.token_expires_at,
+            heartbeat_expires_at: input.heartbeat_expires_at,
+            created_at: input.now,
+            updated_at: input.now,
+        };
+        tables.leases.insert(
+            input.id,
+            (
+                lease.clone(),
+                input.org_id,
+                input.token_hash,
+                input.operation_id,
+            ),
+        );
+        let item = &mut tables.queue.get_mut(item_id).ok_or(StoreError::NotFound)?.0;
+        item.status = "claimed".into();
+        Ok((lease, item.clone()))
+    }
+
     async fn heartbeat_run_lease(
         &self,
         org_id: &str,
@@ -1149,13 +1330,23 @@ impl ChatStore for InMemoryChatStore {
 
     async fn enqueue_run_input(
         &self,
-        input: NewChatRunQueueItem,
+        mut input: NewChatRunQueueItem,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut tables = self.tables.write();
-        if let Some((item, _, _)) = tables.queue.values().find(|(_, stored_org, operation)| {
-            stored_org == &input.org_id && operation == &input.operation_id
+        if let Some((item, _, _)) = tables.queue.values().find(|(item, stored_org, operation)| {
+            stored_org == &input.org_id
+                && item.session_id == input.session_id
+                && operation == &input.operation_id
         }) {
             return Ok(item.clone());
+        }
+        let boundary = tables
+            .events
+            .get(&input.session_id)
+            .and_then(|events| events.last())
+            .map_or(0, |event| event.sequence);
+        if let Some(payload) = input.payload.as_object_mut() {
+            payload.insert("contextSequence".into(), serde_json::json!(boundary));
         }
         let position = tables
             .queue
@@ -1586,6 +1777,14 @@ fn lease_from_row(row: &Row) -> ChatRunLease {
     }
 }
 
+fn qualified_session_columns() -> String {
+    SESSION_COLUMNS
+        .split(',')
+        .map(|column| format!("s.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 const SESSION_COLUMNS: &str = "id, org_id, workspace_id, title, status, created_by_user_id, created_at, updated_at, revision, policy_revision";
 const MEMBER_COLUMNS: &str = "m.session_id, m.user_id, m.role, m.approver, m.guest, u.display_name, m.created_at, m.updated_at";
 const EVENT_COLUMNS: &str = "id, session_id, sequence, kind, actor_kind, actor_id, actor_label, payload, created_at, operation_id";
@@ -1718,7 +1917,7 @@ impl ChatStore for PgStore {
     ) -> Result<Vec<SharedSession>, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, org_id).await?;
-        let rows = tx.query(&format!("SELECT {} FROM chat_sessions s JOIN chat_session_memberships m ON m.session_id=s.id AND m.user_id=$2 WHERE s.org_id=$1 AND ($3::text IS NULL OR s.workspace_id=$3) ORDER BY s.updated_at DESC", SESSION_COLUMNS.replace("id", "s.id").replace("org_id", "s.org_id").replace("workspace_id", "s.workspace_id").replace("title", "s.title").replace("status", "s.status").replace("created_by_user_id", "s.created_by_user_id").replace("created_at", "s.created_at").replace("updated_at", "s.updated_at").replace("revision", "s.revision").replace("policy_revision", "s.policy_revision")), &[&org_id,&user_id,&workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let rows = tx.query(&format!("SELECT {} FROM chat_sessions s JOIN chat_session_memberships m ON m.session_id=s.id AND m.user_id=$2 WHERE s.org_id=$1 AND ($3::text IS NULL OR s.workspace_id=$3) ORDER BY s.updated_at DESC", qualified_session_columns()), &[&org_id,&user_id,&workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
         rows.iter().map(session_from_row).collect()
     }
 
@@ -2001,6 +2200,38 @@ impl ChatStore for PgStore {
     ) -> Result<SessionEvent, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        tx.query_opt(
+            "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
+            &[&input.org_id, &input.session_id],
+        )
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?
+        .ok_or(StoreError::NotFound)?;
+        if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return Ok(event_from_row(&row)); }
+        let sequence:i64=tx.query_one("UPDATE chat_sessions SET next_sequence=next_sequence+1,updated_at=$3 WHERE org_id=$1 AND id=$2 AND workspace_id=$4 RETURNING next_sequence-1", &[&input.org_id,&input.session_id,&input.now,&input.workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.get(0);
+        let row=tx.query_one(&format!("INSERT INTO chat_session_events (id,org_id,workspace_id,session_id,sequence,kind,actor_kind,actor_id,actor_label,payload,created_at,operation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING {EVENT_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&sequence,&input.kind,&input.actor_kind,&input.actor_id,&input.actor_label,&input.payload,&input.now,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+        Ok(event_from_row(&row))
+    }
+
+    async fn append_session_run_event(
+        &self,
+        input: NewSessionEvent,
+        run_id: &str,
+        token_hash: &str,
+    ) -> Result<SessionEvent, StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, &input.org_id).await?;
+        tx.query_opt(
+            "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
+            &[&input.org_id, &input.session_id],
+        )
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?
+        .ok_or(StoreError::NotFound)?;
+        tx.query_opt("SELECT l.id FROM chat_run_leases l JOIN chat_session_memberships m ON m.org_id=l.org_id AND m.session_id=l.session_id AND m.user_id=l.holder_user_id WHERE l.org_id=$1 AND l.session_id=$2 AND l.run_id=$3 AND l.token_hash=$4 AND l.status='active' AND l.token_expires_at>$5 AND l.heartbeat_expires_at>$5 AND m.role IN ('owner','maintainer','member') FOR UPDATE OF l,m", &[&input.org_id,&input.session_id,&run_id,&token_hash,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
         if let Some(row)=tx.query_opt(&format!("SELECT {EVENT_COLUMNS} FROM chat_session_events WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? { return Ok(event_from_row(&row)); }
         let sequence:i64=tx.query_one("UPDATE chat_sessions SET next_sequence=next_sequence+1,updated_at=$3 WHERE org_id=$1 AND id=$2 AND workspace_id=$4 RETURNING next_sequence-1", &[&input.org_id,&input.session_id,&input.now,&input.workspace_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.get(0);
         let row=tx.query_one(&format!("INSERT INTO chat_session_events (id,org_id,workspace_id,session_id,sequence,kind,actor_kind,actor_id,actor_label,payload,created_at,operation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING {EVENT_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&sequence,&input.kind,&input.actor_kind,&input.actor_id,&input.actor_label,&input.payload,&input.now,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
@@ -2081,6 +2312,48 @@ impl ChatStore for PgStore {
         Ok(lease_from_row(&row))
     }
 
+    async fn claim_run_queue(
+        &self,
+        input: NewChatRunLease,
+        item_id: &str,
+        takeover: bool,
+    ) -> Result<(ChatRunLease, ChatRunQueueItem), StoreError> {
+        let mut client = self.client().await?;
+        let tx = self.scoped(&mut client, &input.org_id).await?;
+        tx.query_opt(
+            "SELECT id FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
+            &[&input.org_id, &input.session_id],
+        )
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?
+        .ok_or(StoreError::NotFound)?;
+        let item = tx.query_opt(&format!("SELECT {QUEUE_COLUMNS} FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND id=$3 FOR UPDATE"), &[&input.org_id,&input.session_id,&item_id]).await.map_err(|e| StoreError::Database(e.to_string()))?.ok_or(StoreError::NotFound)?;
+        if let Some(row) = tx.query_opt(&format!("SELECT {LEASE_COLUMNS},token_hash FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))? {
+            let lease = lease_from_row(&row);
+            if row.get::<_, String>("token_hash") != input.token_hash || lease.holder_user_id != input.holder_user_id || lease.holder_device_id != input.holder_device_id { return Err(StoreError::NotFound); }
+            return Ok((lease, queue_from_row(&item)));
+        }
+        let head = tx.query_opt("SELECT id FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND status='queued' ORDER BY position LIMIT 1", &[&input.org_id,&input.session_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        if head.is_none_or(|row| row.get::<_, String>("id") != item_id) {
+            return Err(StoreError::Conflict(
+                serde_json::json!({"reason":"not_queue_head"}),
+            ));
+        }
+        if let Some(row) = tx.query_opt(&format!("SELECT {LEASE_COLUMNS} FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 AND status IN ('active','paused') AND heartbeat_expires_at>$3"), &[&input.org_id,&input.session_id,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))? { return Err(conflict(lease_from_row(&row))); }
+        if let Some(row) = tx.query_opt(&format!("SELECT {LEASE_COLUMNS} FROM chat_run_leases WHERE org_id=$1 AND session_id=$2 ORDER BY created_at DESC LIMIT 1 FOR UPDATE"), &[&input.org_id,&input.session_id]).await.map_err(|e| StoreError::Database(e.to_string()))? {
+            let last = lease_from_row(&row);
+            if matches!(last.status.as_str(), "active" | "paused") && last.heartbeat_expires_at > input.now { return Err(conflict(last)); }
+            if !takeover && (last.status != "released" || last.holder_user_id != input.holder_user_id || last.holder_device_id != input.holder_device_id) { return Err(StoreError::Conflict(serde_json::json!({"reason":"takeover_required"}))); }
+        }
+        tx.execute("UPDATE chat_run_leases SET status='expired',updated_at=$3 WHERE org_id=$1 AND session_id=$2 AND status IN ('active','paused')", &[&input.org_id,&input.session_id,&input.now]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let row = tx.query_one(&format!("INSERT INTO chat_run_leases (id,org_id,workspace_id,session_id,run_id,holder_user_id,holder_device_id,status,token_hash,token_expires_at,heartbeat_expires_at,created_at,updated_at,operation_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9,$10,$11,$11,$12) RETURNING {LEASE_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&input.run_id,&input.holder_user_id,&input.holder_device_id,&input.token_hash,&input.token_expires_at,&input.heartbeat_expires_at,&input.now,&input.operation_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        let item = tx.query_one(&format!("UPDATE chat_run_queue SET status='claimed' WHERE id=$1 RETURNING {QUEUE_COLUMNS}"), &[&item_id]).await.map_err(|e| StoreError::Database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+        Ok((lease_from_row(&row), queue_from_row(&item)))
+    }
+
     async fn heartbeat_run_lease(
         &self,
         org_id: &str,
@@ -2148,12 +2421,22 @@ impl ChatStore for PgStore {
 
     async fn enqueue_run_input(
         &self,
-        input: NewChatRunQueueItem,
+        mut input: NewChatRunQueueItem,
     ) -> Result<ChatRunQueueItem, StoreError> {
         let mut client = self.client().await?;
         let tx = self.scoped(&mut client, &input.org_id).await?;
+        let boundary: i64 = tx.query_opt(
+            "SELECT next_sequence-1 AS context_sequence FROM chat_sessions WHERE org_id=$1 AND id=$2 FOR UPDATE",
+            &[&input.org_id, &input.session_id],
+        )
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?
+        .ok_or(StoreError::NotFound)?.get("context_sequence");
         if let Some(row) = tx.query_opt(&format!("SELECT {QUEUE_COLUMNS} FROM chat_run_queue WHERE org_id=$1 AND session_id=$2 AND operation_id=$3"), &[&input.org_id,&input.session_id,&input.operation_id]).await.map_err(|error| StoreError::Database(error.to_string()))? {
             return Ok(queue_from_row(&row));
+        }
+        if let Some(payload) = input.payload.as_object_mut() {
+            payload.insert("contextSequence".into(), serde_json::json!(boundary));
         }
         let position: i64 = tx.query_one("SELECT COALESCE(max(position),0)+1 FROM chat_run_queue WHERE org_id=$1 AND session_id=$2", &[&input.org_id,&input.session_id]).await.map_err(|error| StoreError::Database(error.to_string()))?.get(0);
         let row = tx.query_one(&format!("INSERT INTO chat_run_queue (id,org_id,workspace_id,session_id,requested_by_user_id,payload,status,position,created_at,operation_id) VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9) RETURNING {QUEUE_COLUMNS}"), &[&input.id,&input.org_id,&input.workspace_id,&input.session_id,&input.requested_by_user_id,&input.payload,&position,&input.now,&input.operation_id]).await.map_err(|error| StoreError::Database(error.to_string()))?;
@@ -2413,6 +2696,11 @@ impl ChatStore for PgStore {
 mod tests {
     use super::*;
 
+    #[test]
+    fn session_discovery_qualifies_whole_columns_without_corrupting_identifiers() {
+        assert_eq!(qualified_session_columns(), "s.id, s.org_id, s.workspace_id, s.title, s.status, s.created_by_user_id, s.created_at, s.updated_at, s.revision, s.policy_revision");
+    }
+
     fn session(operation_id: &str) -> NewSharedSession {
         NewSharedSession {
             id: "ses_1".into(),
@@ -2642,6 +2930,116 @@ mod tests {
                 .await,
             Err(StoreError::Conflict(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn queue_claim_is_fifo_idempotent_and_requires_explicit_takeover() {
+        let store = InMemoryChatStore::new();
+        store.create_session(session("op")).await.unwrap();
+        store
+            .append_session_event(NewSessionEvent {
+                id: "context".into(),
+                org_id: "org_1".into(),
+                workspace_id: "ws_1".into(),
+                session_id: "ses_1".into(),
+                kind: "message.created".into(),
+                actor_kind: "human".into(),
+                actor_id: "usr_owner".into(),
+                actor_label: None,
+                payload: serde_json::json!({"messageId":"m","role":"user","parts":[]}),
+                now: 1,
+                operation_id: "context".into(),
+            })
+            .await
+            .unwrap();
+        for index in 1..=2 {
+            store
+                .enqueue_run_input(NewChatRunQueueItem {
+                    id: format!("q{index}"),
+                    org_id: "org_1".into(),
+                    workspace_id: "ws_1".into(),
+                    session_id: "ses_1".into(),
+                    requested_by_user_id: "usr_owner".into(),
+                    payload: serde_json::json!({"messageId":"m"}),
+                    now: index,
+                    operation_id: format!("qop{index}"),
+                })
+                .await
+                .unwrap();
+        }
+        let lease = NewChatRunLease {
+            id: "l1".into(),
+            org_id: "org_1".into(),
+            workspace_id: "ws_1".into(),
+            session_id: "ses_1".into(),
+            run_id: "r1".into(),
+            holder_user_id: "usr_owner".into(),
+            holder_device_id: "d1".into(),
+            token_hash: "secret".into(),
+            token_expires_at: 100,
+            heartbeat_expires_at: 100,
+            now: 3,
+            operation_id: "claim1".into(),
+        };
+        assert!(matches!(
+            store.claim_run_queue(lease.clone(), "q2", false).await,
+            Err(StoreError::Conflict(_))
+        ));
+        let (claimed, item) = store
+            .claim_run_queue(lease.clone(), "q1", false)
+            .await
+            .unwrap();
+        assert_eq!(item.status, "claimed");
+        assert_eq!(item.payload["contextSequence"], 1);
+        assert_eq!(
+            store
+                .claim_run_queue(lease.clone(), "q1", false)
+                .await
+                .unwrap()
+                .0,
+            claimed
+        );
+        let mut next = lease.clone();
+        next.id = "l2".into();
+        next.run_id = "r2".into();
+        next.operation_id = "claim2".into();
+        next.now = 101;
+        next.token_expires_at = 200;
+        next.heartbeat_expires_at = 200;
+        assert!(matches!(
+            store.claim_run_queue(next.clone(), "q2", false).await,
+            Err(StoreError::Conflict(_))
+        ));
+        store.claim_run_queue(next, "q2", true).await.unwrap();
+        assert!(store
+            .validate_run_token("org_1", "ses_1", "r1", "secret", 102)
+            .await
+            .is_err());
+        assert!(store
+            .append_session_run_event(
+                NewSessionEvent {
+                    id: "late".into(),
+                    org_id: "org_1".into(),
+                    workspace_id: "ws_1".into(),
+                    session_id: "ses_1".into(),
+                    kind: "message.created".into(),
+                    actor_kind: "agent".into(),
+                    actor_id: "run:r1".into(),
+                    actor_label: None,
+                    payload: serde_json::json!({}),
+                    now: 102,
+                    operation_id: "late".into()
+                },
+                "r1",
+                "secret"
+            )
+            .await
+            .is_err());
+        assert!(store
+            .list_run_queue("org_1", "ses_1")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

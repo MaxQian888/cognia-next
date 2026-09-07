@@ -194,6 +194,26 @@ describe("persistMessages + listMessages", () => {
     expect(out.metadata?.senderKind).toBe("assistant")
   })
 
+  it("surfaces the authoritative shared author in UI metadata", async () => {
+    await getDb().messages.put({
+      id: "shared-author",
+      sessionId: "shared-session",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+      createdAt: 1,
+      collaboration: {
+        author: { kind: "human", id: "usr_1", displayName: "Ada" },
+        sourceEventId: "event",
+        eventSequence: 1,
+        version: 1,
+      },
+    })
+    const messages = await listMessages("shared-session")
+    expect(messages[0].metadata).toMatchObject({
+      collaboration: { author: { id: "usr_1", displayName: "Ada" } },
+    })
+  })
+
   it("drops metadata when only routing keys were present", async () => {
     await persistMessages("s1", [
       msg("only-route", "assistant", "hi", { senderId: "c1", senderKind: "assistant" }),

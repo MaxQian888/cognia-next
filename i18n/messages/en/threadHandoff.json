@@ -3,11 +3,11 @@
     "available": "Available for standalone handoff",
     "committedReadonly": "Ownership moved successfully. This source copy is permanently read-only.",
     "continue": "Freeze and continue there",
-    "description": "Choose a paired standalone device. This source freezes before the transcript leaves the host.",
+    "description": "Choose a paired standalone device or configured Host. This source freezes before ownership moves.",
     "failed": "The handoff could not be started or resumed.",
     "frozenReadonly": "The source is frozen while the target verifies and accepts the transcript. Zero writable copies are allowed during recovery.",
     "lossDisclosure": "The target checks provider, model, credential, Workspace, protocol, and attachments. If a native runtime cannot be restored, it will disclose transcript-seeded continuation before accepting.",
-    "noDevices": "No paired devices are available. Pair a standalone mobile device and let it report thread-handoff-v1 first.",
+    "noDevices": "No eligible devices or Hosts are configured. Pair a standalone device or add a remote Host first.",
     "retry": "Retry delivery",
     "retryQueued": "Handoff delivery queued again.",
     "started": "The source is frozen and the handoff offer is queued.",
@@ -21,7 +21,10 @@
       "paused": "Pairing is paused.",
       "revoked": "Pairing was revoked.",
       "standalone-required": "Open standalone BYOK mode and reconnect so the device can report thread-handoff-v1."
-    }
+    },
+    "remoteAvailable": "Transfer ownership to this Host after preflight",
+    "remoteUnavailable": "Host authorization or protocol upgrade required",
+    "remoteCompleted": "Ownership transferred to the selected Host."
   },
   "inbound": {
     "accept": "Continue on this device",

@@ -38,7 +38,11 @@ import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import { dedupeSessionsById } from "@/lib/chat/conversation-list-model"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
-import { hydrateSessionHistory } from "@/lib/sync/session-history"
+import {
+  hydrateSessionHistory,
+  getSessionHistoryMode,
+  subscribeSessionHistoryMode,
+} from "@/lib/sync/session-history"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
 
 /**
@@ -198,6 +202,20 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     return listFolders(activeProjectId)
   }, [activeProjectId, projectStoreLoaded])
 
+  const [historyInvalidationNonce, setHistoryInvalidationNonce] = useState(0)
+  useEffect(() => {
+    if (!activeSessionId) return
+    return subscribeSessionHistoryMode(activeSessionId, () => {
+      if (getSessionHistoryMode(activeSessionId) === null)
+        setHistoryInvalidationNonce((value) => value + 1)
+    })
+  }, [activeSessionId])
+
+  // Shared projections commit their messages and cursor together. Subscribe to
+  // that cursor so incoming events refresh the currently visible transcript.
+  const sharedProjectionCursor = exposedSessions.find((row) => row.id === activeSessionId)
+    ?.collaboration?.syncCursor
+
   // When the active session changes, hydrate its messages from Dexie. For an
   // empty session bound to a character with a persona opening message
   // (ADR-0030), seed + persist that greeting as the first assistant turn so
@@ -294,6 +312,8 @@ export function useSessions({ crossWorkspace = false, enabled = true }: UseSessi
     setSessionMessagesLoading,
     setMessagesLoadError,
     messagesReloadNonce,
+    historyInvalidationNonce,
+    sharedProjectionCursor,
   ])
 
   const select = useCallback(

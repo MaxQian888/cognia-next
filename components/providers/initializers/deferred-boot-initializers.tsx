@@ -1,5 +1,7 @@
 "use client"
 
+import { SharedChatLifecycleInitializer } from "./shared-chat-lifecycle-initializer"
+
 import dynamic from "next/dynamic"
 import { useSyncExternalStore } from "react"
 
@@ -106,6 +108,7 @@ export function DeferredBootInitializers() {
 
   return (
     <>
+      <SharedChatLifecycleInitializer />
       {core ? <DeferredBootInitializersImpl /> : null}
       {workflow ? <WorkflowAutomationBootInitializers /> : null}
       {integrations ? <IntegrationBootInitializers /> : null}

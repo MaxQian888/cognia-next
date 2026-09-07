@@ -4,6 +4,10 @@
 
 import { render, screen } from "@testing-library/react"
 
+jest.mock("@/components/chat/shared-session-join", () => ({
+  SharedSessionJoin: () => <div data-testid="shared-session-join" />,
+}))
+
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: ({ point }: { point: string }) => <div data-testid={`slot-${point}`} />,
 }))
@@ -21,6 +25,7 @@ describe("SidebarFooter", () => {
     const footer = screen.getByTestId("sidebar-footer")
     expect(footer).toContainElement(screen.getByTestId("slot-sidebar.left.bottom"))
     expect(footer).toContainElement(screen.getByTestId("sidebar-user-card"))
+    expect(footer).toContainElement(screen.getByTestId("shared-session-join"))
   })
 
   it("no longer carries a Settings row of its own", () => {

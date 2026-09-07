@@ -403,7 +403,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 224
+export const CURRENT_SCHEMA_VERSION = 225
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -429,6 +429,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   // lacks this store, which is how a pre-collapse database is kept from being
   // opened and silently misread.
   storageLayout: "id",
+  // v225 — encrypted, device-local shared execution recovery; never exported.
+  sharedRunJournals: "&id",
   sessions:
     "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], [projectId+createdAt+id], surfaceBindingKey, squadId",
   messages:
@@ -955,6 +957,7 @@ export class CogniaDB extends Dexie {
   readonly connectionId: string
   private readonly connectionCreatedAt: number
   sessions!: Table<ChatSession, string>
+  sharedRunJournals!: Table<import("./shared-run-journal").SharedRunJournalRow, string>
   messages!: Table<StoredMessage, string>
   // v155 — independent-session messages and their durable delivery receipts.
   sessionPeerMessages!: Table<import("./session-peer-messages").SessionPeerMessageRow, string>

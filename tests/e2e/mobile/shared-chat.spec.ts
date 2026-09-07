@@ -1,20 +1,19 @@
 import { expect, test } from "@/tests/e2e/fixtures/test"
-import { resetCogniaDb } from "../helpers/db-reset"
+import { bootstrapCogniaMobile } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
+import { installCollabScenario } from "../helpers/shared-chat"
 
 test.describe("mobile — shared AI chat", () => {
   test("@critical keeps conversion explicit and blocked while offline", async ({ page, context }) => {
     await injectCapacitor(page, { platform: "android" })
-    await page.addInitScript(() => {
-      window.__cogniaCollabE2EContext = {
-        orgId: "org_mobilee2e0000000000000",
-        userId: "usr_mobilee2e0000000000000",
-        baseUrl: "https://collab-mobile-e2e.test",
-        accessToken: "ephemeral-mobile-token",
-      }
-    })
+    await installCollabScenario(page)
     await page.goto("/")
-    await resetCogniaDb(page)
+    await bootstrapCogniaMobile(page, "standalone", { onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-07T00:00:00.000Z" } })
+    await page.goto("/")
+    await page.getByTestId("mobile-quick-action-newChat").click()
+    const picker = page.getByRole("dialog", { name: /pick a character/i })
+    await expect(picker).toBeVisible()
+    await picker.getByRole("option").first().click()
 
     const privateControls = page.getByRole("button", {
       name: "Open private conversation controls",
@@ -30,5 +29,8 @@ test.describe("mobile — shared AI chat", () => {
       )
     ).toBeVisible()
     await expect(page.getByRole("button", { name: "Convert and share full history" })).toBeDisabled()
+    await context.setOffline(false)
+    await expect(page.getByRole("button", { name: "Convert and share full history" })).toBeEnabled()
+    await expect(page.getByRole("button", { name: "Open shared conversation controls" })).toHaveCount(0)
   })
 })

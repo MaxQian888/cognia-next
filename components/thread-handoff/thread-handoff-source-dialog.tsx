@@ -1,7 +1,7 @@
 "use client"
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { AlertTriangleIcon, CheckIcon, SmartphoneIcon } from "lucide-react"
+import { AlertTriangleIcon, CheckIcon, SmartphoneIcon, MonitorIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -20,8 +20,13 @@ import { Surface } from "@/components/surface/surface"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getThreadHandoffTicket } from "@/lib/db/thread-handoff-tickets"
 import { getDb } from "@/lib/db/schema"
-import { recoverThreadHandoffOffer, startThreadHandoff } from "@/lib/thread-handoff/orchestrator"
+import {
+  recoverThreadHandoffOffer,
+  startThreadHandoff,
+  startRemoteThreadHandoff,
+} from "@/lib/thread-handoff/orchestrator"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 
 export type ThreadHandoffTargetUnavailableReason =
   "revoked" | "paused" | "not-mobile" | "standalone-required"
@@ -48,8 +53,12 @@ export function ThreadHandoffSourceDialog({
   onOpenChange,
 }: ThreadHandoffSourceDialogProps) {
   const t = useTranslations("threadHandoff.source")
+  const tPreflight = useTranslations("threadHandoff.inbound")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const hosts = useRemoteHostStore((state) => state.hosts)
+  const activeHostId = useRemoteHostStore((state) => state.activeHostId)
+  const remoteHosts = hosts.filter((host) => host.id !== activeHostId)
   const snapshot = useLiveQuery(async () => {
     const devices = await listPairedDevices()
     const ticket = session.handoffLock
@@ -65,19 +74,30 @@ export function ThreadHandoffSourceDialog({
     () => devices.filter((device) => threadHandoffTargetUnavailableReason(device) === null),
     [devices]
   )
-  const selected = eligible.find((device) => device.deviceId === selectedId) ?? eligible[0]
+  const selectedRemote = remoteHosts.find((host) => `host:${host.id}` === selectedId)
+  const selected = selectedRemote
+    ? undefined
+    : (eligible.find((device) => device.deviceId === selectedId) ?? eligible[0])
   const locked = Boolean(session.handoffLock)
 
   const start = async () => {
-    if (!selected) return
+    if (!selected && !selectedRemote) return
     setBusy(true)
     try {
-      await startThreadHandoff(session, {
-        hostRef: selected.deviceId,
-        kind: "mobile",
-        label: selected.label,
-      })
-      toast.success(t("started"))
+      if (selectedRemote) {
+        const manifest = selectedRemote.featureManifest
+        await startRemoteThreadHandoff(session, {
+          hostRef: selectedRemote.id,
+          kind: manifest && "hostIdentity" in manifest ? manifest.hostIdentity.kind : "desktop",
+          label: selectedRemote.label,
+        })
+      } else if (selected)
+        await startThreadHandoff(session, {
+          hostRef: selected.deviceId,
+          kind: "mobile",
+          label: selected.label,
+        })
+      toast.success(t(selectedRemote ? "remoteCompleted" : "started"))
       onOpenChange(false)
     } catch {
       toast.error(t("failed"))
@@ -90,7 +110,9 @@ export function ThreadHandoffSourceDialog({
     if (!session.handoffLock || !snapshot?.ticket) return
     setBusy(true)
     try {
-      if (snapshot.dispatch) {
+      if (snapshot.ticket.target.kind !== "mobile") {
+        await startRemoteThreadHandoff(session, snapshot.ticket.target)
+      } else if (snapshot.dispatch) {
         await getDb().hostDispatchQueue.update(snapshot.dispatch.id, {
           status: "pending",
           attempts: 0,
@@ -131,9 +153,24 @@ export function ThreadHandoffSourceDialog({
                   : t("frozenReadonly")}
               </p>
             </Surface>
-            {!snapshot?.dispatch ||
-            snapshot.dispatch.status === "deadletter" ||
-            snapshot?.dispatch?.status === "failed" ? (
+            {snapshot?.ticket?.preflight?.blockers.length ? (
+              <ul aria-label={tPreflight("blockersLabel")} className="space-y-1">
+                {snapshot.ticket.preflight.blockers.map((blocker, index) => (
+                  <li
+                    key={`${blocker.kind}:${index}`}
+                    className={
+                      blocker.severity === "blocking" ? "text-destructive" : "text-muted-foreground"
+                    }
+                  >
+                    {tPreflight(`blocker.${blocker.kind}`, { ref: blocker.ref })}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {session.handoffLock?.state === "frozen" &&
+            (!snapshot?.dispatch ||
+              snapshot.dispatch.status === "deadletter" ||
+              snapshot?.dispatch?.status === "failed") ? (
               <p className="flex gap-2 text-destructive">
                 <AlertTriangleIcon className="mt-0.5 size-4" aria-hidden />
                 {t("stranded")}
@@ -142,7 +179,7 @@ export function ThreadHandoffSourceDialog({
           </div>
         ) : (
           <div className="space-y-2">
-            {devices.length === 0 ? (
+            {devices.length === 0 && remoteHosts.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("noDevices")}</p>
             ) : (
               devices.map((device) => {
@@ -168,20 +205,47 @@ export function ThreadHandoffSourceDialog({
                 )
               })
             )}
+            {remoteHosts.map((host) => (
+              <button
+                key={host.id}
+                type="button"
+                disabled={
+                  host.connectionState === "revoked" || host.connectionState === "versionMismatch"
+                }
+                onClick={() => setSelectedId(`host:${host.id}`)}
+                className="flex w-full items-start gap-3 rounded-md border p-3 text-left disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                <MonitorIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{host.label}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t(
+                      host.connectionState === "revoked" ||
+                        host.connectionState === "versionMismatch"
+                        ? "remoteUnavailable"
+                        : "remoteAvailable"
+                    )}
+                  </span>
+                </span>
+                {selectedRemote?.id === host.id ? (
+                  <CheckIcon className="size-4" aria-hidden />
+                ) : null}
+              </button>
+            ))}
             <p className="text-xs text-muted-foreground">{t("lossDisclosure")}</p>
           </div>
         )}
 
         <DialogFooter>
           {locked &&
-          session.handoffLock?.state === "frozen" &&
+          (session.handoffLock?.state === "frozen" || snapshot?.ticket?.target.kind !== "mobile") &&
           snapshot?.ticket &&
           snapshot?.dispatch?.status !== "succeeded" ? (
             <Button disabled={busy} onClick={() => void retry()}>
               {t("retry")}
             </Button>
           ) : !locked ? (
-            <Button disabled={busy || !selected} onClick={() => void start()}>
+            <Button disabled={busy || (!selected && !selectedRemote)} onClick={() => void start()}>
               {busy ? t("starting") : t("continue")}
             </Button>
           ) : null}

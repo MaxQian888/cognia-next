@@ -15,6 +15,15 @@ import {
 import CONTENT_PROTECTION_BASELINE from "./content-protection-baseline.json"
 
 describe("DataTableCatalog", () => {
+  it("keeps shared execution credentials encrypted and device-local", () => {
+    expect(policyForTable("sharedRunJournals")).toMatchObject({
+      contentProtection: "encrypted-content",
+      backupPolicy: { mode: "device-local" },
+      syncPolicy: { mode: "none" },
+    })
+    expect(PORTABLE_BACKUP_TABLES.has("sharedRunJournals")).toBe(false)
+    expect(COMPANION_SYNC_TABLES.has("sharedRunJournals")).toBe(false)
+  })
   /**
    * Whether a table's rows are encrypted at rest must be a DECLARED answer.
    *
@@ -46,7 +55,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(352)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(353)
     db.close()
   })
 

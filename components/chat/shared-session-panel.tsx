@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { liveQuery } from "dexie"
+import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, LockIcon, Share2Icon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
@@ -54,11 +56,7 @@ import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
 import { isSharedChatClientEnabled } from "@/lib/collab/shared-chat-feature"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
-import {
-  connectSharedSessionStream,
-  syncSharedSession,
-  type SharedChatStreamController,
-} from "@/lib/collab/shared-chat-sync"
+import { syncSharedSession, sharedChatCacheKey } from "@/lib/collab/shared-chat-sync"
 import { getDb } from "@/lib/db/schema"
 import { deleteSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
@@ -76,6 +74,8 @@ interface HistorySummary {
 
 export function SharedSessionPanel({ session }: Props) {
   const t = useTranslations("chatCollaboration")
+  const [loadedAt, setLoadedAt] = useState(0)
+  const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [context, setContext] = useState<CurrentCollabContext | null>(null)
@@ -95,29 +95,40 @@ export function SharedSessionPanel({ session }: Props) {
   const [inviteGuest, setInviteGuest] = useState(false)
   const [lastInviteToken, setLastInviteToken] = useState<string | null>(null)
   const [receivedInviteToken, setReceivedInviteToken] = useState("")
+  const syncKey = session.collaboration
+    ? sharedChatCacheKey(
+        session.collaboration.orgId,
+        session.collaboration.sessionId,
+        session.collaboration.endpoint
+      )
+    : null
+  const syncState = useLiveQuery(
+    () => (syncKey ? getDb().collabChatSyncStates.get(syncKey) : undefined),
+    [syncKey]
+  )
+  const latestUserMessage = useLiveQuery(async () => {
+    if (!session.collaboration) return undefined
+    const messages = await getDb().messages.where("sessionId").equals(session.id).toArray()
+    return messages
+      .filter(
+        (message) =>
+          message.role === "user" && message.collaboration && !message.collaboration.redactedAt
+      )
+      .sort(
+        (a, b) =>
+          (b.collaboration?.eventSequence ?? 0) - (a.collaboration?.eventSequence ?? 0) ||
+          b.createdAt - a.createdAt
+      )[0]
+  }, [session.id, Boolean(session.collaboration)])
 
-  useEffect(() => {
-    const binding = session.collaboration
-    if (!binding || !isSharedChatClientEnabled()) return
-    let disposed = false
-    let stream: SharedChatStreamController | null = null
-    void resolveCurrentCollabContext()
-      .then(async (resolved) => {
-        if (!resolved || resolved.orgId !== binding.orgId) return
-        const connected = await connectSharedSessionStream(
-          resolved.client,
-          binding.orgId,
-          binding.sessionId
-        )
-        if (disposed) connected.close()
-        else stream = connected
+  const requestAI = (takeover = false) => {
+    if (!latestUserMessage || !navigator.onLine) return
+    window.dispatchEvent(
+      new CustomEvent("cognia:shared-request-ai", {
+        detail: { sessionId: session.id, messageId: latestUserMessage.id, takeover },
       })
-      .catch((error) => console.warn("shared chat stream unavailable", error))
-    return () => {
-      disposed = true
-      stream?.close()
-    }
-  }, [session.collaboration])
+    )
+  }
 
   const myMembership = useMemo(
     () => members.find((member) => member.userId === context?.userId) ?? null,
@@ -134,60 +145,139 @@ export function SharedSessionPanel({ session }: Props) {
     remote?.policyRevision ?? 0
   ).allowed
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const resolved = await resolveCurrentCollabContext()
-      setContext(resolved)
-      if (!resolved) return
-      if (!session.collaboration) {
-        const rows = await getDb().messages.where("sessionId").equals(session.id).toArray()
-        setSummary({
-          messages: rows.length,
-          attachments: rows.reduce(
-            (count, message) => count + message.parts.filter((part) => part.type === "file").length,
-            0
-          ),
-        })
-        return
+  const load = useCallback(
+    async (background = false) => {
+      if (!background) setLoading(true)
+      try {
+        const resolved = await resolveCurrentCollabContext()
+        setLoadedAt(Date.now())
+        if (
+          !resolved ||
+          (session.collaboration &&
+            (resolved.orgId !== session.collaboration.orgId ||
+              (session.collaboration.endpoint &&
+                resolved.client.baseUrl !== session.collaboration.endpoint)))
+        ) {
+          setContext(null)
+          return
+        }
+        setContext(resolved)
+        if (!session.collaboration) {
+          const rows = await getDb().messages.where("sessionId").equals(session.id).toArray()
+          setSummary({
+            messages: rows.length,
+            attachments: rows.reduce(
+              (count, message) =>
+                count + message.parts.filter((part) => part.type === "file").length,
+              0
+            ),
+          })
+          return
+        }
+        const { orgId, sessionId } = session.collaboration
+        const [nextRemote, nextMembers, nextApprovals, nextLease, nextQueue, standing] =
+          await Promise.all([
+            resolved.client.getSharedSession(orgId, sessionId),
+            resolved.client.listSessionMembers(orgId, sessionId),
+            resolved.client.listSessionApprovals(orgId, sessionId),
+            resolved.client.getActiveSessionRunLease(orgId, sessionId),
+            resolved.client.listSessionRunQueue(orgId, sessionId),
+            resolved.client.myMemberships(orgId),
+          ])
+        setRemote(nextRemote)
+        setMembers(nextMembers)
+        const mine = nextMembers.find((member) => member.userId === resolved.userId) ?? null
+        const mayManage = authorizeSessionAction(
+          mine,
+          "session.manageMembers",
+          nextRemote.policyRevision
+        ).allowed
+        const mayAudit = authorizeSessionAction(
+          mine,
+          "session.auditMetadata",
+          nextRemote.policyRevision
+        ).allowed
+        setInvites(mayManage ? await resolved.client.listSessionInvites(orgId, sessionId) : [])
+        setApprovals(nextApprovals)
+        setActiveLease(nextLease)
+        setQueue(nextQueue)
+        setAudit(
+          mayAudit ? await resolved.client.listSessionAuthorizationAudit(orgId, sessionId) : []
+        )
+        setIsOrgAdmin(standing.orgRole === "owner" || standing.orgRole === "admin")
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : t("loadFailed"))
+      } finally {
+        if (!background) setLoading(false)
       }
-      const { orgId, sessionId } = session.collaboration
-      const [nextRemote, nextMembers, nextApprovals, nextLease, nextQueue, standing] =
-        await Promise.all([
-          resolved.client.getSharedSession(orgId, sessionId),
-          resolved.client.listSessionMembers(orgId, sessionId),
-          resolved.client.listSessionApprovals(orgId, sessionId),
-          resolved.client.getActiveSessionRunLease(orgId, sessionId),
-          resolved.client.listSessionRunQueue(orgId, sessionId),
-          resolved.client.myMemberships(orgId),
-        ])
-      setRemote(nextRemote)
-      setMembers(nextMembers)
-      const mine = nextMembers.find((member) => member.userId === resolved.userId) ?? null
-      const mayManage = authorizeSessionAction(
-        mine,
-        "session.manageMembers",
-        nextRemote.policyRevision
-      ).allowed
-      const mayAudit = authorizeSessionAction(
-        mine,
-        "session.auditMetadata",
-        nextRemote.policyRevision
-      ).allowed
-      setInvites(mayManage ? await resolved.client.listSessionInvites(orgId, sessionId) : [])
-      setApprovals(nextApprovals)
-      setActiveLease(nextLease)
-      setQueue(nextQueue)
-      setAudit(
-        mayAudit ? await resolved.client.listSessionAuthorizationAudit(orgId, sessionId) : []
-      )
-      setIsOrgAdmin(standing.orgRole === "owner" || standing.orgRole === "admin")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("loadFailed"))
-    } finally {
-      setLoading(false)
+    },
+    [session, t]
+  )
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
+
+  const cacheKey =
+    session.collaboration && context
+      ? sharedChatCacheKey(
+          session.collaboration.orgId,
+          session.collaboration.sessionId,
+          context.client.baseUrl
+        )
+      : null
+  useEffect(() => {
+    const updateOnline = () => setOnline(navigator.onLine)
+    window.addEventListener("online", updateOnline)
+    window.addEventListener("offline", updateOnline)
+    return () => {
+      window.removeEventListener("online", updateOnline)
+      window.removeEventListener("offline", updateOnline)
     }
-  }, [session, t])
+  }, [])
+
+  useEffect(() => {
+    if (!open || !cacheKey) return
+    const sessionId = cacheKey
+    const subscription = liveQuery(() => getDb().collabChatSyncStates.get(sessionId)).subscribe({
+      next: () => {
+        void loadRef.current(true)
+      },
+      error: (error) => console.warn("shared controls refresh unavailable", error),
+    })
+    return () => subscription.unsubscribe()
+  }, [open, cacheKey])
+
+  const revokeInvite = async (inviteId: string) => {
+    if (!context || !session.collaboration) return
+    try {
+      await context.client.revokeSessionInvite(
+        session.collaboration.orgId,
+        session.collaboration.sessionId,
+        inviteId
+      )
+      await load()
+    } catch {
+      toast.error(t("inviteFailed"))
+    }
+  }
+
+  const leaveConversation = async () => {
+    if (!context || !session.collaboration) return
+    try {
+      await context.client.removeSessionMember(
+        session.collaboration.orgId,
+        session.collaboration.sessionId,
+        context.userId
+      )
+      await deleteSession(session.id)
+      useChatStore.getState().closeSession(session.id)
+      setOpen(false)
+      toast.success(t("leftConversation"))
+    } catch {
+      toast.error(t("leaveFailed"))
+    }
+  }
 
   const shareHistory = async () => {
     if (!context || !session.projectId || !navigator.onLine) return
@@ -357,7 +447,6 @@ export function SharedSessionPanel({ session }: Props) {
 
   const isShared = Boolean(session.collaboration)
   const featureEnabled = isSharedChatClientEnabled()
-  const online = typeof navigator === "undefined" || navigator.onLine
   return (
     <Sheet
       open={open}
@@ -367,6 +456,21 @@ export function SharedSessionPanel({ session }: Props) {
         if (nextOpen) void load()
       }}
     >
+      {isShared && featureEnabled ? (
+        <>
+          <Badge variant={online && syncState?.connected ? "secondary" : "outline"} role="status">
+            {online && syncState?.connected ? t("connected") : t("connectionStale")}
+          </Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!online || !latestUserMessage}
+            onClick={() => requestAI()}
+          >
+            {t("requestAI")}
+          </Button>
+        </>
+      ) : null}
       <SheetTrigger asChild>
         {/* Icon-only. This trigger sits in the conversation header, which on
             desktop is projected into the title bar next to the workspace pill
@@ -488,6 +592,17 @@ export function SharedSessionPanel({ session }: Props) {
                     ))}
                   </div>
                 ) : null}
+                {myMembership &&
+                myMembership.role !== "viewer" &&
+                queue.some((item) => item.status === "queued") ? (
+                  <Button
+                    variant="outline"
+                    disabled={!online || !latestUserMessage}
+                    onClick={() => requestAI(true)}
+                  >
+                    {t("takeoverExecution")}
+                  </Button>
+                ) : null}
               </section>
 
               <section className="space-y-3" aria-labelledby="shared-members-heading">
@@ -512,6 +627,7 @@ export function SharedSessionPanel({ session }: Props) {
                       <>
                         <Select
                           value={member.role}
+                          disabled={member.role === "owner" && myMembership?.role !== "owner"}
                           onValueChange={(value) =>
                             void updateMember(member, { role: value as SessionRole })
                           }
@@ -524,7 +640,9 @@ export function SharedSessionPanel({ session }: Props) {
                           </SelectTrigger>
                           <SelectContent>
                             {ROLES.filter(
-                              (role) => !member.guest || role === "viewer" || role === "member"
+                              (role) =>
+                                (myMembership?.role === "owner" || role !== "owner") &&
+                                (!member.guest || role === "viewer" || role === "member")
                             ).map((role) => (
                               <SelectItem key={role} value={role}>
                                 {t(`roles.${role}`)}
@@ -542,7 +660,8 @@ export function SharedSessionPanel({ session }: Props) {
                             void updateMember(member, { approver: checked === true })
                           }
                         />
-                        {member.userId !== context.userId ? (
+                        {member.userId !== context.userId &&
+                        (member.role !== "owner" || myMembership?.role === "owner") ? (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -593,7 +712,11 @@ export function SharedSessionPanel({ session }: Props) {
                       <Label className="flex items-center gap-2 text-sm">
                         <Checkbox
                           checked={inviteGuest}
-                          onCheckedChange={(value) => setInviteGuest(value === true)}
+                          onCheckedChange={(value) => {
+                            setInviteGuest(value === true)
+                            if (value === true && inviteRole === "maintainer")
+                              setInviteRole("member")
+                          }}
                         />
                         {t("guest")}
                       </Label>
@@ -617,6 +740,27 @@ export function SharedSessionPanel({ session }: Props) {
                         <CopyIcon className="size-4" /> {t("copyInvite")}
                       </Button>
                     ) : null}
+                    {invites
+                      .filter((invite) => invite.status === "pending")
+                      .map((invite) => (
+                        <div key={invite.id} className="flex items-center gap-2 text-xs">
+                          <span className="flex-1">{invite.targetUserId || t("guest")}</span>
+                          <span>
+                            {invite.expiresAt <= loadedAt
+                              ? t("inviteExpired")
+                              : t("inviteExpires", {
+                                  date: new Date(invite.expiresAt).toLocaleString(),
+                                })}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void revokeInvite(invite.id)}
+                          >
+                            {t("revokeInvite")}
+                          </Button>
+                        </div>
+                      ))}
                     {invites.length ? (
                       <p className="text-xs text-muted-foreground">
                         {t("pendingInvites", {
@@ -737,6 +881,25 @@ export function SharedSessionPanel({ session }: Props) {
                 </section>
               ) : null}
 
+              {myMembership ? (
+                <div className="space-y-2">
+                  {myMembership.role === "owner" &&
+                  members.filter((member) => member.role === "owner").length === 1 ? (
+                    <p className="text-sm text-muted-foreground">{t("transferBeforeLeaving")}</p>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={
+                      myMembership.role === "owner" &&
+                      members.filter((member) => member.role === "owner").length === 1
+                    }
+                    onClick={() => void leaveConversation()}
+                  >
+                    {t("leaveConversation")}
+                  </Button>
+                </div>
+              ) : null}
               {canDelete ? (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>

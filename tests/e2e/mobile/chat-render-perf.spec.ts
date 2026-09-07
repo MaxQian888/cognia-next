@@ -9,14 +9,9 @@
  *   CHAT_PERF_BENCH=1 pnpm test:e2e -- --project=mobile-pixel-7 chat-render-perf
  *   CHAT_PERF_BENCH=1 CHAT_PERF_TIER=robust pnpm test:e2e -- --project=mobile-pixel-7 chat-render-perf
  *
- * Why the mobile shell: `DesktopChatWorkspace` renders `DesktopOnlyBanner`
- * whenever `platform !== "tauri"` (`components/desktop/desktop-chat-workspace.tsx:577`),
- * so a plain browser has exactly one reachable chat surface — the Capacitor
- * one. `MessageList`, `MessageRenderer` and `MarkdownRenderer` are shared
- * between the two shells, so the renderer cost measured here is the real
- * thing; only the desktop-only timeline minimap goes unexercised. The tighter
- * mobile memory envelope is a feature for a memory benchmark, not a
- * limitation.
+ * The default exercises the mobile shell with Capacitor boundaries mocked.
+ * CHAT_PERF_SHELL=web instead exercises the desktop web shell without native
+ * mocks. Keep shell and viewport identical for before/after comparisons.
  *
  * What it records, and why each one:
  *   - `imageBytes`      the payload the seeder actually embedded, so heap
@@ -41,7 +36,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
-import { bootstrapCogniaMobile } from "../helpers/db-reset"
+import { bootstrapCogniaMobile, waitForPluginRuntimeReady } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 
 /** The message list's scroll container. */
@@ -211,9 +206,13 @@ interface ScrollMeasurement {
  * changes the virtual total, so a fraction-based sweep would silently cover
  * more content per step and report the extra work as a regression.
  */
-async function measureScroll(page: Page, maxScreens: number): Promise<ScrollMeasurement> {
+async function measureScroll(
+  page: Page,
+  maxScreens: number,
+  messageIds: string[]
+): Promise<ScrollMeasurement> {
   return page.evaluate(
-    async ({ selector, maxScreens }) => {
+    async ({ selector, maxScreens, messageIds }) => {
       const el = document.querySelector(selector) as HTMLElement | null
       if (!el) {
         return {
@@ -229,6 +228,7 @@ async function measureScroll(page: Page, maxScreens: number): Promise<ScrollMeas
       let minHeight = el.scrollHeight
       let maxHeight = el.scrollHeight
       let screens = 0
+      const messageOrder = new Map(messageIds.map((id, index) => [id, index]))
 
       const step = Math.max(1, el.clientHeight)
       for (let i = 0; i <= maxScreens; i++) {
@@ -250,6 +250,17 @@ async function measureScroll(page: Page, maxScreens: number): Promise<ScrollMeas
             })
           )
         }
+        const rows = [...el.querySelectorAll<HTMLElement>("[data-msg-id]")]
+        const indices = rows.map((row) => messageOrder.get(row.dataset.msgId!))
+        if (
+          indices.length === 0 ||
+          indices.some(
+            (index, position) =>
+              index === undefined || (position > 0 && index <= indices[position - 1]!)
+          )
+        ) {
+          throw new Error(`Missing, duplicate, or out-of-order messages at screen ${i}`)
+        }
       }
 
       const sorted = [...gaps].sort((a, b) => a - b)
@@ -261,7 +272,7 @@ async function measureScroll(page: Page, maxScreens: number): Promise<ScrollMeas
         scrollHeightDriftPx: Math.round(maxHeight - minHeight),
       }
     },
-    { selector: LOG, maxScreens }
+    { selector: LOG, maxScreens, messageIds }
   )
 }
 
@@ -280,19 +291,35 @@ test.describe("chat render performance", () => {
     test.setTimeout(600_000)
 
     await observeLongTasks(page)
-    await injectCapacitor(page, { platform: "android" })
+    if (process.env.CHAT_PERF_SHELL !== "web") {
+      await injectCapacitor(page, { platform: "android" })
+    }
     await page.goto("/")
-    await bootstrapCogniaMobile(page, "standalone")
+    await bootstrapCogniaMobile(page, "standalone", {
+      onboardingProgress: {
+        version: 1,
+        path: "completed",
+        completedAt: "2026-09-07T00:00:00.000Z",
+      },
+    })
+    // Plugin startup is demand-driven. Open its real route so schema setup is
+    // complete before seeding; waiting on the chat page alone can wait forever.
+    await page.goto("/plugins", { waitUntil: "domcontentloaded" })
+    await waitForPluginRuntimeReady(page, 60_000)
 
     await page.waitForFunction(() => typeof window.__cogniaSeedConversation === "function", null, {
       timeout: 60_000,
     })
 
     const seedStart = Date.now()
-    const seeded = await page.evaluate(
-      async ({ turns, ...media }) => window.__cogniaSeedConversation!({ turns, media }),
-      tier
-    )
+    const seeded = await page.evaluate(async ({ turns, ...media }) => {
+      try {
+        return await window.__cogniaSeedConversation!({ turns, media })
+      } catch (error) {
+        const cause = error as { name?: string; message?: string }
+        throw new Error(`Conversation fixture failed: ${cause.name}: ${cause.message}`)
+      }
+    }, tier)
     const seedMs = Date.now() - seedStart
 
     const openStart = Date.now()
@@ -308,11 +335,13 @@ test.describe("chat render performance", () => {
 
     // 40 screens: enough to traverse the perf tier end to end and to get well
     // into the robustness tier, at a fixed cost per step.
-    const scroll = await measureScroll(page, 40)
+    const scroll = await measureScroll(page, 40, seeded.messageIds)
     const longTasks = await readLongTasks(page)
     const snapshot = {
       tier: TIER_NAME,
       project: testInfo.project.name,
+      shell: process.env.CHAT_PERF_SHELL === "web" ? "web" : "capacitor-mock",
+      repeat: testInfo.repeatEachIndex,
       config: tier,
       messages: seeded.messageIds.length,
       imageBytes: seeded.imageBytes,
@@ -330,7 +359,7 @@ test.describe("chat render performance", () => {
 
     const out = resolve(
       process.cwd(),
-      `test-results/chat-render-perf-${TIER_NAME}-${testInfo.project.name}.json`
+      `test-results/chat-render-perf-${TIER_NAME}-${testInfo.project.name}-${testInfo.repeatEachIndex}.json`
     )
     mkdirSync(dirname(out), { recursive: true })
     writeFileSync(out, JSON.stringify(snapshot, null, 2))
@@ -348,6 +377,20 @@ test.describe("chat render performance", () => {
     expect(scroll.samples).toBeGreaterThan(0)
     // Survived the sweep: the list is still mounted and still has rows.
     await expect(page.locator(`${LOG} [data-msg-id]`).first()).toBeVisible()
+    // Check both ends through the real deep-link path after recording timings.
+    // This also exercises virtualizer remeasurement across fresh navigations.
+    for (const messageId of [seeded.messageIds.at(-1)!, seeded.messageIds[0]]) {
+      await page.goto(`/?session=${seeded.sessionId}&message=${messageId}`)
+      await expect(page.locator(`${LOG} [data-msg-id="${messageId}"]`)).toBeInViewport({
+        timeout: 30_000,
+      })
+    }
+    const screenshotPath = testInfo.outputPath("conversation.png")
+    await page.screenshot({ path: screenshotPath })
+    await testInfo.attach("conversation-web", {
+      path: screenshotPath,
+      contentType: "image/png",
+    })
 
     // ADR-0127 §5 bars — opt-in (`CHAT_PERF_GATE=1`) so a laptop can gate a
     // local run without turning CI-machine variance into red builds.

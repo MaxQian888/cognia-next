@@ -697,3 +697,39 @@ left as it was: two Users for one human is a migration a person confirms, as
 the Batch 5 note says. Server-side `external_identities` rows for GitHub and
 Feishu are not written yet: nothing on the server reads them.
 
+
+
+## Implementation update — conversation recovery (2026-09-07)
+
+Ordinary shared messages and explicit AI requests are separate operations. An AI
+request refers to a durable human message and its server context boundary. The
+`shared-chat-execution-v2` capability gates atomic FIFO claiming with the execution
+lease. A normal completion permits the designated executor to drain the next
+request; changing executor or recovering an interrupted executor requires an
+explicit takeover. Recovery never replays uncertain tool side effects.
+
+Shared session discovery and active subscriptions belong to the application
+lifecycle, independent of the controls drawer. Reconnection drains paged events
+and catches up after subscribing. Event cache, projection and applied cursor commit
+in one transaction. Local projections distinguish endpoint, organization, session
+and message identities; corrections cannot address another session. Workspace-list
+replacement and single-session updates are separate operations. Offline input
+remains a draft until explicitly submitted.
+
+Schema v225 adds `sharedRunJournals`, an account-encrypted, device-local store for
+execution recovery and pending message identities. It is excluded from portable
+backups and Companion sync. Lease credentials are nested encrypted content rather
+than indexed metadata. Finalization removes its journal only after server
+reconciliation; account deletion removes the database.
+
+Stream notifications invalidate the applied cursor rather than enqueue one pull
+per notification. One running pull and one pending invalidation bound the work;
+notifications received during a pull still trigger catch-up. Metadata-only events
+advance the cursor without scanning messages. Message changes replace only their
+own media references in the same transaction, preserving references for unchanged
+messages and rolling back all projection writes together on storage failure.
+
+The deterministic regression workload uses ten samples: a burst of 50
+notifications requires two history pulls rather than 50, and correcting one of
+20 attachment-bearing messages writes one media-reference row rather than 20.
+These are operation-count budgets, not production latency or battery measurements.

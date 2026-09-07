@@ -98,7 +98,13 @@ import {
   projectDirectChatCaptureEvent,
   startDirectChatExecutionRun,
 } from "@/lib/execution/direct-chat-run"
-import { beginSharedSessionRun } from "@/lib/collab/shared-run-coordinator"
+import {
+  beginSharedSessionRun,
+  authorizeSharedSessionApproval,
+  sendSharedSessionMessage,
+  sharedRequestTranscript,
+  canAutomaticallyDrainSharedQueue,
+} from "@/lib/collab/shared-run-coordinator"
 import {
   acceptChatTurn,
   bindChatTurnContext,
@@ -312,6 +318,9 @@ export function useClaudeChat() {
    * ref kept fresh by the effect below.
    */
   const sendRef = useRef<SendFn | null>(null)
+  const sharedApprovalResponseRef = useRef<
+    ((approval: PendingApproval, decision: ApprovalDecision) => Promise<void>) | null
+  >(null)
 
   /**
    * Live Squad-run settlement watchers, one per session.
@@ -577,6 +586,7 @@ export function useClaudeChat() {
       callOptions?: {
         /** Skip the optimistic user-message append. Used by `regenerate` so we
          *  don't duplicate the user turn when re-issuing the SDK request. */
+        sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
         skipUserAppend?: boolean
         /** Skip Thread-B delegation routing. Set on the built-in fallback
          *  re-entry so a failed external delegation runs the SDK path without
@@ -636,6 +646,46 @@ export function useClaudeChat() {
       }
       if (typeof content === "string" && !content.trim()) return
       if (Array.isArray(content) && content.length === 0) return
+
+      const sharedTarget = await getSession(sessionId)
+      // Only a NEW user turn is published to the shared transcript. The
+      // internal re-entries (regenerate / routing fallback pass
+      // `skipUserAppend`, the queue's replay passes `steerDrain`) already have
+      // their user message on the server, so routing them here would append a
+      // duplicate `message.created` and never run the turn they asked for.
+      if (
+        sharedTarget?.collaboration &&
+        !callOptions?.sharedRequest &&
+        !callOptions?.skipUserAppend &&
+        !callOptions?.steerDrain
+      ) {
+        const message = makeUserMessage(
+          content,
+          crypto.randomUUID(),
+          callOptions?.attachmentManifest
+        )
+        if (Array.isArray(content)) {
+          message.parts = content.flatMap((block, index) =>
+            block.type === "document"
+              ? [
+                  {
+                    type: "file" as const,
+                    mediaType: block.source.media_type,
+                    url: `data:${block.source.media_type};base64,${block.source.data}`,
+                  },
+                ]
+              : makeUserMessage(
+                  [block],
+                  undefined,
+                  callOptions?.attachmentManifest?.[index]
+                    ? [callOptions.attachmentManifest[index]]
+                    : undefined
+                ).parts
+          )
+        }
+        await sendSharedSessionMessage(sharedTarget, message)
+        return
+      }
 
       // Concurrency cap backstop: never start a turn over the global execution
       // ceiling. The composer already disables send + shows the inline over-cap
@@ -1120,6 +1170,16 @@ export function useClaudeChat() {
             callOptions?.resourceContext
           )
         : { content: displayContent, sendOptions, messages: next }
+      if (callOptions?.sharedRequest) {
+        providerPayload.messages = [makeUserMessage(content)]
+        providerPayload.content = content
+        providerPayload.sendOptions = {
+          ...providerPayload.sendOptions,
+          resumeSessionId: undefined,
+          forkFromSessionId: undefined,
+          initialConversation: undefined,
+        }
+      }
       effectiveContent = providerPayload.content
       sendOptions = providerPayload.sendOptions
       const providerText =
@@ -1668,8 +1728,9 @@ export function useClaudeChat() {
         : undefined
       try {
         const sharedRun = await beginSharedSessionRun(session, executionRunId, {
-          messageId: userMsg.id,
+          messageId: callOptions?.sharedRequest?.messageId ?? userMsg.id,
           parts: userMsg.parts,
+          ...callOptions?.sharedRequest,
         })
         if (sharedRun.kind === "queued") {
           store.getState().setSessionStatus(sessionId, "idle")
@@ -1678,6 +1739,11 @@ export function useClaudeChat() {
           return
         }
         if (sharedRun.kind === "acquired") {
+          sharedRun.setApprovalDecisionHandler(async (approval, decision) => {
+            if (!sharedApprovalResponseRef.current)
+              throw new Error("Shared approval response handler is unavailable")
+            await sharedApprovalResponseRef.current(approval, decision)
+          })
           sharedRun.setLeaseLostHandler(() => {
             durableLeaseLost = true
             abortStaleLocalRuntime()
@@ -2735,6 +2801,143 @@ export function useClaudeChat() {
     }
   }, [send])
 
+  useEffect(() => {
+    const inFlight = new Set<string>()
+    const pendingDrains = new Set<string>()
+    const pendingPulses = new Set<string>()
+    let disposed = false
+    const request = async (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ sessionId: string; messageId?: string; takeover?: boolean }>
+      ).detail
+      if (!detail?.sessionId || disposed) return
+      if (inFlight.has(detail.sessionId)) {
+        if (event.type === "cognia:shared-queue-updated") pendingPulses.add(detail.sessionId)
+        return
+      }
+      inFlight.add(detail.sessionId)
+      try {
+        const target = await getSession(detail.sessionId)
+        if (!target?.collaboration) return
+        const { resolveCurrentCollabContext } = await import("@/lib/collab/runtime-client")
+        const context = await resolveCurrentCollabContext()
+        if (
+          !context ||
+          context.orgId !== target.collaboration.orgId ||
+          (target.collaboration.endpoint &&
+            target.collaboration.endpoint !== context.client.baseUrl)
+        )
+          return
+        const { syncSharedSession } = await import("@/lib/collab/shared-chat-sync")
+        const synced = await syncSharedSession(
+          context.client,
+          context.orgId,
+          target.collaboration.sessionId
+        )
+        const { getDb } = await import("@/lib/db/schema")
+        const messages = await getDb()
+          .messages.where("sessionId")
+          .equals(detail.sessionId)
+          .toArray()
+        if (detail.messageId) {
+          const message = messages.find((candidate) => candidate.id === detail.messageId)
+          if (!message || message.role !== "user") return
+          const remoteId = message.collaboration?.remoteMessageId ?? message.id
+          await context.client.enqueueSessionRunInput(
+            context.orgId,
+            target.collaboration.sessionId,
+            {
+              payload: { messageId: remoteId },
+              operationId: `ai-request:${crypto.randomUUID()}`,
+            }
+          )
+        }
+        const slice = useChatStore.getState().sessions[detail.sessionId]
+        if (slice?.status === "streaming" || slice?.status === "awaiting_approval") {
+          if (!detail.messageId) pendingDrains.add(detail.sessionId)
+          return
+        }
+        const [next] = await context.client.listSessionRunQueue(
+          context.orgId,
+          target.collaboration.sessionId
+        )
+        if (!next) return
+        if (event.type === "cognia:shared-queue-updated") {
+          const { getDeviceId } = await import("@/lib/device/device-identity")
+          if (
+            !(await canAutomaticallyDrainSharedQueue(
+              context,
+              target.collaboration.sessionId,
+              Math.max(
+                synced?.cursor ?? target.collaboration.lastSequence,
+                Number(next.payload.contextSequence)
+              ),
+              await getDeviceId()
+            ))
+          )
+            return
+        }
+        const messageId = String(next.payload.messageId)
+        const message = messages.find(
+          (candidate) => (candidate.collaboration?.remoteMessageId ?? candidate.id) === messageId
+        )
+        if (!message) return
+        const content = await sharedRequestTranscript(
+          context.client,
+          context.orgId,
+          target.collaboration.sessionId,
+          Number(next.payload.contextSequence)
+        )
+        if (!isStandaloneChatMode()) await closeSession(detail.sessionId)
+        await sendRef.current?.(content, undefined, {
+          sessionId: detail.sessionId,
+          skipUserAppend: true,
+          sharedRequest: { messageId, queueItemId: next.id, takeover: detail.takeover },
+        })
+      } catch (error) {
+        useChatStore
+          .getState()
+          .setSessionDiagnostic(
+            detail.sessionId,
+            toDiagnostic(error, { source: "chat", meta: { sessionId: detail.sessionId } })
+          )
+      } finally {
+        inFlight.delete(detail.sessionId)
+        if (pendingPulses.delete(detail.sessionId) && !disposed) {
+          queueMicrotask(() =>
+            listener(
+              new CustomEvent("cognia:shared-queue-updated", {
+                detail: { sessionId: detail.sessionId },
+              })
+            )
+          )
+        }
+      }
+    }
+    const listener = (event: Event) => {
+      void request(event)
+    }
+    const unsubscribe = useChatStore.subscribe((state) => {
+      for (const sessionId of pendingDrains) {
+        if (state.sessions[sessionId]?.status !== "idle") continue
+        pendingDrains.delete(sessionId)
+        queueMicrotask(() =>
+          listener(new CustomEvent("cognia:shared-queue-updated", { detail: { sessionId } }))
+        )
+      }
+    })
+    window.addEventListener("cognia:shared-queue-updated", listener)
+    window.addEventListener("cognia:shared-request-ai", listener)
+    window.addEventListener("cognia:shared-run-completed", listener)
+    return () => {
+      unsubscribe()
+      disposed = true
+      window.removeEventListener("cognia:shared-queue-updated", listener)
+      window.removeEventListener("cognia:shared-request-ai", listener)
+      window.removeEventListener("cognia:shared-run-completed", listener)
+    }
+  }, [])
+
   // Background-run result delivery: register the hook's send as the replay
   // channel, and drain pending results whenever a session (re)opens idle —
   // covers relaunches (journaled pending rows) and panes closed at settle.
@@ -2913,6 +3116,9 @@ export function useClaudeChat() {
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
+      const authorized = await authorizeSharedSessionApproval(approval, decision)
+      if (authorized === null) return
+      decision = authorized
       // Built-in-skill desktop consent (W2 dual-channel HITL): synthetic
       // approvals are resolved IN-RENDERER via the approval registry — there
       // is no sidecar-side permission waiting, so `approveTool` must never
@@ -3128,6 +3334,13 @@ export function useClaudeChat() {
     },
     [store, getExecutionHandle]
   )
+
+  useEffect(() => {
+    sharedApprovalResponseRef.current = respondToApproval
+    return () => {
+      sharedApprovalResponseRef.current = null
+    }
+  }, [respondToApproval])
 
   const close = useCallback(
     async (sessionId: string) => {

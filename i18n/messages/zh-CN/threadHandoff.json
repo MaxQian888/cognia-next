@@ -3,11 +3,11 @@
     "available": "可用于 standalone 接力",
     "committedReadonly": "所有权已成功转移；此源副本永久只读。",
     "continue": "冻结并在该设备继续",
-    "description": "选择已配对的 standalone 设备。会话记录离开宿主前，源端会先冻结。",
+    "description": "选择已配对的独立设备或已配置的 Host。所有权转移前会冻结当前副本。",
     "failed": "无法启动或恢复接力。",
     "frozenReadonly": "目标端校验并接收会话记录期间，源端保持冻结。恢复过程中允许暂时零份可写。",
     "lossDisclosure": "目标端会检查服务商、模型、凭证、工作区、协议和附件。若无法恢复原生运行时，会在接收前说明将降级为会话记录续接。",
-    "noDevices": "没有可用的配对设备。请先配对 standalone 手机，并等待其上报 thread-handoff-v1。",
+    "noDevices": "暂无可用设备或 Host。请先配对独立设备或添加远程 Host。",
     "retry": "重试投递",
     "retryQueued": "接力投递已重新入队。",
     "started": "源端已冻结，接力请求已入队。",
@@ -21,7 +21,10 @@
       "paused": "配对已暂停。",
       "revoked": "配对已撤销。",
       "standalone-required": "请打开 standalone BYOK 模式并重新连接，以便设备上报 thread-handoff-v1。"
-    }
+    },
+    "remoteAvailable": "预检通过后将所有权转移到此 Host",
+    "remoteUnavailable": "需要重新授权 Host 或升级协议",
+    "remoteCompleted": "所有权已转移至所选 Host。"
   },
   "inbound": {
     "accept": "在此设备继续",

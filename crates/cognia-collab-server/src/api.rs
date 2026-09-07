@@ -251,6 +251,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let mut features = vec!["issue-writes", "plan-writes", "run-writes"];
     if state.shared_chat_enabled {
         features.push("shared-chat");
+        features.push("shared-chat-execution-v2");
     }
     if state.canvas_enabled {
         features.push("canvas");

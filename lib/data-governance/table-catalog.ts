@@ -311,6 +311,7 @@ export const CORE_TABLE_NAMES = [
   "sessions",
   "settings",
   "sharedLinks",
+  "sharedRunJournals",
   "siteArtifacts",
   "siteBuildLogs",
   "siteDeployments",
@@ -1072,6 +1073,12 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  sharedRunJournals: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason:
+      "Local execution recovery is removed after terminal reconciliation or with its account; pending proof must survive restarts.",
+  },
   // Both pet append tables were claiming permanent retention while the domain
   // code trimmed them on every write. A policy that overstates what the code
   // keeps is a policy that lies, in the other direction from the usual one.
@@ -1365,6 +1372,7 @@ function retentionFor(name: CoreTableName, role: DataTableRole): DataRetentionPo
  * than inferred.
  */
 const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentProtection>> = {
+  sharedRunJournals: "encrypted-content",
   // Bookkeeping for the encryption migration itself: an id, an account id, a
   // status, a table-name list and a timestamp. It matches `/Content/` purely by
   // spelling. Encrypting it would also mean the resume path could not read its

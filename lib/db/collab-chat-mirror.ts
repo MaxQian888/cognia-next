@@ -1,4 +1,9 @@
 import { getDb } from "./schema"
+
+/** Opaque local key: remote identifiers are never used as global Dexie keys. */
+export function sharedChatCacheKey(orgId: string, sessionId: string, endpoint?: string): string {
+  return endpoint ? JSON.stringify([endpoint.replace(/\/+$/, ""), orgId, sessionId]) : sessionId
+}
 import type {
   CollabChatApprovalMirrorRow,
   CollabChatAttachmentMirrorRow,
@@ -53,19 +58,9 @@ export async function appendCollabChatEvents(
 ): Promise<void> {
   if (!rows.length) return
   const db = getDb()
-  await db.transaction("rw", db.collabChatEvents, db.collabChatSyncStates, async () => {
-    await db.collabChatEvents.bulkPut([...rows])
-    const newest = rows.reduce((left, right) => (right.sequence > left.sequence ? right : left))
-    const current = await db.collabChatSyncStates.get(newest.sessionId)
-    await db.collabChatSyncStates.put({
-      sessionId: newest.sessionId,
-      orgId: newest.orgId,
-      lastSequence: Math.max(current?.lastSequence ?? 0, newest.sequence),
-      policyRevision: current?.policyRevision ?? 0,
-      connected: current?.connected ?? false,
-      updatedAt: newest.fetchedAt,
-    })
-  })
+  // Receipt is not application. Only the transaction that updates the message
+  // projection may advance the durable sync cursor.
+  await db.collabChatEvents.bulkPut([...rows])
 }
 
 export async function listCollabChatEvents(sessionId: string): Promise<CollabChatEventMirrorRow[]> {

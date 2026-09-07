@@ -1,3 +1,5 @@
+import { messageMediaRefRows } from "@/lib/db/message-media-refs"
+import { canonicalTurnToHandoffMessage } from "@/lib/chat/import-handoff-session"
 import {
   canonicalHostStateJson,
   createEmptyHostStateSession,
@@ -289,6 +291,7 @@ export async function commitHostStateAction(
       db.messages,
       db.messageMediaRefs,
       db.agentCanonicalSessions,
+      db.threadHandoffTickets,
     ],
     async () => {
       const meta = await db.hostStateMeta.get(HOST_STATE_META_ID)
@@ -649,7 +652,7 @@ async function persistBusinessProjection(
         id: `${action.sessionId}:${turn.turnId}`,
         sessionId: action.sessionId!,
         role: turn.role,
-        parts: [{ type: "text", text: turn.text }],
+        parts: canonicalTurnToHandoffMessage(turn).parts!,
         createdAt: now + index,
       }))
       const seedTranscript = canonical.turns
@@ -658,8 +661,34 @@ async function persistBusinessProjection(
             `${turn.role === "assistant" ? "Assistant" : turn.role === "user" ? "User" : "System"}: ${turn.text}`
         )
         .join("\n\n")
+      const handoff =
+        action.actionId.startsWith("thread-handoff:") && action.actionId.endsWith(":import")
+          ? await db.threadHandoffTickets.get([
+              action.actionId.slice("thread-handoff:".length, -":import".length),
+              "target",
+            ])
+          : undefined
+      if (
+        handoff &&
+        (handoff.target.sessionId !== action.sessionId ||
+          handoff.continuation.sequenceDigest !== canonical.header.sequenceDigest ||
+          handoff.state !== "preparing")
+      ) {
+        throw new HostStateStoreError("host_state_invalid_action")
+      }
       await db.sessions.add({
         id: action.sessionId,
+        ...(handoff
+          ? {
+              handoffLock: {
+                ticketId: handoff.ticketId,
+                state: "frozen" as const,
+                targetHostRef: handoff.target.hostRef,
+                targetSessionId: action.sessionId,
+                at: now,
+              },
+            }
+          : {}),
         title,
         titleAuto: false,
         kind: "direct",
@@ -674,7 +703,13 @@ async function persistBusinessProjection(
         createdAt: now,
         updatedAt: now,
       })
-      if (messages.length > 0) await db.messages.bulkAdd(messages)
+      if (messages.length > 0) {
+        await db.messages.bulkAdd(messages)
+        const refs = messages.flatMap((message) =>
+          messageMediaRefRows(message.id, message.sessionId, message.parts)
+        )
+        if (refs.length > 0) await db.messageMediaRefs.bulkPut(refs)
+      }
       if (messages.length > 0) markSessionDirty(messages[0].sessionId)
       await db.agentCanonicalSessions.put({
         canonicalSessionId: canonical.header.canonicalSessionId,

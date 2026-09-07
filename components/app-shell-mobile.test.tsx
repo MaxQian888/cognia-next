@@ -9,6 +9,14 @@ import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
+jest.mock("@/components/chat/shared-session-panel", () => ({
+  SharedSessionPanel: ({ session }: { session: { id: string } }) => (
+    <div data-testid="shared-mobile-controls">{session.id}</div>
+  ),
+}))
+jest.mock("@/components/chat/shared-session-join", () => ({
+  SharedSessionJoin: () => <div data-testid="shared-mobile-join" />,
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, opts?: { default?: string }) => opts?.default ?? key,
@@ -495,6 +503,7 @@ describe("<AppShellMobile />", () => {
     activeSessionId = "s-1"
     render(<AppShellMobile />)
     expect(screen.getByTestId("mobile-active-title")).toHaveTextContent("Greetings")
+    expect(screen.getByTestId("shared-mobile-controls")).toHaveTextContent("s-1")
   })
 
   it("resumes the turn after plan approval on a direct session (P0 dock wiring)", async () => {

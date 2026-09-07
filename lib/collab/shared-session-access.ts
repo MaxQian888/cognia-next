@@ -18,7 +18,11 @@ export async function assertSharedSessionRead(
   const binding = session.collaboration
   if (!binding) return
   const context = await resolveContext()
-  if (!context || context.orgId !== binding.orgId) {
+  if (
+    !context ||
+    context.orgId !== binding.orgId ||
+    (binding.endpoint && binding.endpoint !== context.client.baseUrl)
+  ) {
     throw new SharedSessionAccessError("not_found")
   }
   try {

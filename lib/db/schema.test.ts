@@ -10,6 +10,8 @@ import Dexie from "dexie"
 
 import {
   CogniaDB,
+  CURRENT_SCHEMA,
+  CURRENT_SCHEMA_VERSION,
   LEGACY_COGNIA_DB_NAME,
   __resetDbForTesting,
   activateAccountDatabase,
@@ -56,6 +58,31 @@ jest.mock("@/lib/platform/detect", () => {
 function schemaIt(name: string, run: () => Promise<void>, timeout = 30_000): void {
   it(name, run, timeout)
 }
+
+schemaIt(
+  "v225 adds device-local shared run recovery without changing existing transcripts",
+  async () => {
+    const name = "shared-run-schema-upgrade"
+    await Dexie.delete(name)
+    const previous = new Dexie(name)
+    const previousSchema = { ...CURRENT_SCHEMA }
+    delete previousSchema.sharedRunJournals
+    previous.version(224).stores(previousSchema)
+    await previous.open()
+    await previous.table("sessions").put({ id: "private", title: "Existing private conversation" })
+    previous.close()
+    const upgraded = new CogniaDB(name)
+    try {
+      await upgraded.open()
+      expect(upgraded.verno).toBe(CURRENT_SCHEMA_VERSION)
+      expect(upgraded.sharedRunJournals.schema.primKey.keyPath).toBe("id")
+      expect(upgraded.sharedRunJournals.schema.indexes).toHaveLength(0)
+      expect((await upgraded.sessions.get("private"))?.title).toBe("Existing private conversation")
+    } finally {
+      await upgraded.delete()
+    }
+  }
+)
 
 /** Minimal valid `outboundQueue` row for index-behaviour tests. */
 function makeOutboundRow(

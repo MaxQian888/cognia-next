@@ -139,6 +139,17 @@ export default defineConfig({
         },
 
   projects: [
+    ...(process.env.CHAT_PERF_SHELL === "web"
+      ? [
+          {
+            name: "web-chat-perf",
+            testDir: "./tests/e2e/mobile",
+            testMatch: ["chat-render-perf.spec.ts", "remote-session-control.spec.ts"],
+            grep: /@perf/,
+            use: { ...devices["Desktop Chrome"], trace: "off" as const, video: "off" as const },
+          },
+        ]
+      : []),
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },

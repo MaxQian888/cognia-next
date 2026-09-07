@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
+import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import { sessionStateChannel, type HostStateAction } from "@cognia/agent-config-types/host-state"
 import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
@@ -43,6 +45,9 @@ describe("HostState durable store", () => {
     await getDb().delete()
     __resetDbForTesting()
     activateAccountDatabase(scope.accountId, scope.targetId)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(scope.accountId, getDb().name)
+    )
     await getDb().sessions.put({
       id: "session-1",
       title: "Session",
@@ -55,6 +60,103 @@ describe("HostState durable store", () => {
   afterEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
+  })
+
+  it("preserves structured handoff content and pins media references on the host", async () => {
+    await acquireWritableLease()
+    const turns = [
+      {
+        turnId: "turn",
+        role: "assistant" as const,
+        text: "Result",
+        reasoning: "Reason",
+        parts: [
+          {
+            type: "file" as const,
+            uri: "cognia-media:hash",
+            name: "image.png",
+            mediaType: "image/png",
+          },
+        ],
+        toolCalls: [
+          { callId: "call", toolName: "read", status: "completed" as const, resultText: "found" },
+        ],
+      },
+    ]
+    await getDb().threadHandoffTickets.put({
+      ticketVersion: 1,
+      ticketId: "imported-ticket",
+      role: "target",
+      state: "preparing",
+      source: {
+        hostRef: "source-host",
+        kind: "desktop",
+        sessionId: "source-session",
+        title: "Thread",
+        messageCount: 1,
+      },
+      target: { hostRef: "target", kind: "cloud", sessionId: "imported" },
+      transport: "remote-host",
+      project: {},
+      requirements: {
+        capabilities: [],
+        hostOperations: [],
+        providerRefs: [],
+        models: [],
+        credentialProfileRefs: [],
+      },
+      continuation: {
+        sourceRuntime: "cognia",
+        fidelity: "contextual",
+        sequenceDigest: computeSequenceDigest(turns),
+      },
+      attachments: [],
+      pendingApprovals: [],
+      history: [{ state: "preparing", at: 1 }],
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: 1000,
+    })
+    await commitHostStateAction({
+      action: draftAction({
+        actionId: "thread-handoff:imported-ticket:import",
+        channel: sessionStateChannel(scope.targetId, "imported"),
+        sessionId: "imported",
+        action: {
+          kind: "session.import",
+          envelope: {
+            header: {
+              canonicalVersion: 1,
+              canonicalSessionId: "canonical",
+              sourceRuntime: "cognia",
+              importFidelity: "structured",
+              createdAt: new Date(0).toISOString(),
+              updatedAt: new Date(0).toISOString(),
+              turnCount: 1,
+              sequenceDigest: computeSequenceDigest(turns),
+            },
+            turns,
+          },
+        },
+      }),
+      now: 1,
+    })
+    const message = await getDb().messages.get("imported:turn")
+    expect(message?.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "reasoning", text: "Reason" }),
+        expect.objectContaining({ type: "file", url: "cognia-media:hash" }),
+        expect.objectContaining({ toolCallId: "call", output: "found" }),
+      ])
+    )
+    expect(await getDb().messageMediaRefs.get(["imported:turn", "hash"])).toMatchObject({
+      sessionId: "imported",
+    })
+    expect((await getDb().sessions.get("imported"))?.handoffLock).toMatchObject({
+      state: "frozen",
+      ticketId: "imported-ticket",
+    })
+    expect((await getDb().sessions.get("imported"))?.sdkSessionId).toBeUndefined()
   })
 
   it("commits state and the semantic receipt in one ordered transaction", async () => {
@@ -299,6 +401,9 @@ describe("HostState draft replacement and template bindings", () => {
     await getDb().delete()
     __resetDbForTesting()
     activateAccountDatabase(scope.accountId, scope.targetId)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(scope.accountId, getDb().name)
+    )
     await getDb().sessions.put({
       id: "session-1",
       title: "Session",

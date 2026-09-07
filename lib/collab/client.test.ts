@@ -57,6 +57,30 @@ function grantHeader(call: Call): string | undefined {
 }
 
 describe("CollabClient", () => {
+  it("claims FIFO queue input with an explicit stable token and takeover flag", async () => {
+    const { calls, fetchImpl } = harness()
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+      now: () => 0,
+    })
+    const input = {
+      runId: "run",
+      deviceId: "device",
+      operationId: "claim",
+      queueItemId: "queue",
+      token: "stable-client-token",
+      takeover: true,
+    }
+    await client.claimSessionRunQueue(ORG, "session", input)
+    expect(calls[1].url).toBe(
+      `https://collab.test/v1/orgs/${ORG}/chat-sessions/session/queue/claim`
+    )
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual(input)
+    expect(client.baseUrl).toBe("https://collab.test")
+  })
+
   it("exchanges the access token for a grant, then uses the grant", async () => {
     const { calls, fetchImpl } = harness()
     const client = new CollabClient({

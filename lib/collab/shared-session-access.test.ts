@@ -41,3 +41,31 @@ it("never lets a local companion or connector write bypass the shared server", (
     "SHARED_SESSION_SERVER_REQUIRED"
   )
 })
+
+it("does not authorize an identically named session on another endpoint", async () => {
+  const client = { baseUrl: "https://other.example", getSharedSession: jest.fn() }
+  await expect(
+    assertSharedSessionRead(
+      { collaboration: { ...binding, endpoint: "https://original.example" } },
+      async () => ({ orgId: "org", userId: "user", localAccountId: "local", client }) as never
+    )
+  ).rejects.toThrow("SESSION_NOT_FOUND")
+  expect(client.getSharedSession).not.toHaveBeenCalled()
+})
+
+it("hides missing identities and transient authorization failures", async () => {
+  await expect(
+    assertSharedSessionRead({ collaboration: binding }, async () => null)
+  ).rejects.toThrow("SESSION_NOT_FOUND")
+  const client = {
+    getSharedSession: jest.fn().mockRejectedValue(new Error("offline")),
+    listSessionMembers: jest.fn().mockResolvedValue([]),
+  }
+  await expect(
+    assertSharedSessionRead(
+      { collaboration: binding },
+      async () => ({ orgId: "org", userId: "user", localAccountId: "local", client }) as never
+    )
+  ).rejects.toThrow("SESSION_NOT_FOUND")
+  expect(() => assertLocalMutationAllowed({}, "session.post")).not.toThrow()
+})

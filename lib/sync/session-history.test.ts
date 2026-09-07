@@ -5,10 +5,19 @@
 import "fake-indexeddb/auto"
 
 import { getDb } from "@/lib/db/schema"
+import {
+  setActiveRuntimeTargetContext,
+  clearActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { isMediaRef, parseMediaRef } from "@/lib/db/message-media"
 import type { Transport } from "@/lib/tauri/transport-types"
 
-import { __resetHydratedSessionHistoryForTests, hydrateSessionHistory } from "./session-history"
+import {
+  __resetHydratedSessionHistoryForTests,
+  hydrateSessionHistory,
+  invalidateSessionHistory,
+  getSessionHistoryMode,
+} from "./session-history"
 
 function createTransport(call: jest.Mock, capabilities?: { version: number }): Transport {
   return {
@@ -26,7 +35,75 @@ function createTransport(call: jest.Mock, capabilities?: { version: number }): T
 describe("hydrateSessionHistory", () => {
   beforeEach(async () => {
     __resetHydratedSessionHistoryForTests()
+    clearActiveRuntimeTargetContext()
     await getDb().messages.clear()
+  })
+
+  it("does not reuse another Host's ownership result for the same session id", async () => {
+    const firstHost = createTransport(jest.fn().mockRejectedValue({ code: "SESSION_NOT_FOUND" }), {
+      version: 1,
+    })
+    const secondCall = jest.fn().mockResolvedValue({ items: [] })
+    const secondHost = createTransport(secondCall, { version: 1 })
+    await hydrateSessionHistory(firstHost, "s1")
+    await expect(hydrateSessionHistory(secondHost, "s1")).resolves.toMatchObject({
+      mode: "timeline",
+    })
+    expect(secondCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("invalidates completed and pending ownership without accepting stale responses", async () => {
+    let resolve: (value: unknown) => void = () => {}
+    const call = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done
+          })
+      )
+      .mockResolvedValue({ items: [] })
+    const transport = createTransport(call, { version: 1 })
+    const pending = hydrateSessionHistory(transport, "s1")
+    await Promise.resolve()
+    invalidateSessionHistory("s1")
+    resolve({ items: [] })
+    await expect(pending).rejects.toThrow("session_history_scope_changed")
+    expect(getSessionHistoryMode("s1")).toBeNull()
+    await expect(hydrateSessionHistory(transport, "s1")).resolves.toMatchObject({
+      mode: "timeline",
+    })
+  })
+
+  it("scopes ownership by account and routing generation", async () => {
+    const call = jest.fn().mockResolvedValue({ items: [] })
+    const transport = createTransport(call, { version: 1 })
+    setActiveRuntimeTargetContext("acct-history", "host-one", 1)
+    await hydrateSessionHistory(transport, "same")
+    setActiveRuntimeTargetContext("acct-history", "host-one", 2)
+    expect(getSessionHistoryMode("same")).toBeNull()
+    await hydrateSessionHistory(transport, "same")
+    setActiveRuntimeTargetContext("acct-second", "host-one", 3)
+    await hydrateSessionHistory(transport, "same")
+    expect(call).toHaveBeenCalledTimes(3)
+  })
+
+  it("invalidates remote ownership on reconnect and re-negotiates", async () => {
+    const call = jest.fn().mockResolvedValue({ items: [] })
+    let connectionChanged: (state: string) => void = () => {}
+    const transport = {
+      ...createTransport(call, { version: 1 }),
+      onConnectionStateChange: (listener: (state: string) => void) => {
+        connectionChanged = listener
+        return jest.fn()
+      },
+    }
+    await hydrateSessionHistory(transport, "s1")
+    connectionChanged("reconnecting")
+    expect(getSessionHistoryMode("s1")).toBeNull()
+    connectionChanged("connected")
+    await hydrateSessionHistory(transport, "s1")
+    expect(call).toHaveBeenCalledTimes(2)
   })
 
   it("drains one selected session in bounded pages and caches completion", async () => {

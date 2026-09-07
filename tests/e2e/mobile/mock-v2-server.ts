@@ -30,7 +30,11 @@ export const MOCK_OWNER_INVITATION_PREFIX = "e2e-owner-invitation-"
 const ACCESS_TOKEN_TTL_SECONDS = 5 * 60
 const SOCKET_TICKET_TTL_SECONDS = 60
 const PROOF_CLOCK_SKEW_SECONDS = 60
-const DEFAULT_ALLOWED_ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"])
+const DEFAULT_ALLOWED_ORIGINS = new Set([
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  ...(process.env.PLAYWRIGHT_BASE_URL ? [new URL(process.env.PLAYWRIGHT_BASE_URL).origin] : []),
+])
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "DELETE"])
 const ALLOWED_HEADERS = new Set([
   "accept",

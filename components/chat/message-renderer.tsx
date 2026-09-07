@@ -304,6 +304,14 @@ function MessageRendererInner({
 
   // For team-session assistant messages, resolve which character spoke.
   const senderId = (message as { metadata?: { senderId?: string } }).metadata?.senderId
+  const sharedAuthor = (
+    message.metadata as
+      | {
+          collaboration?: { author?: { displayName?: string; id: string } }
+        }
+      | undefined
+  )?.collaboration?.author
+  const sharedAuthorName = sharedAuthor?.displayName || sharedAuthor?.id
   const speaker = useMemo(() => {
     if (!senderId || !characterById) return null
     return characterById.get(senderId) ?? null
@@ -616,7 +624,7 @@ function MessageRendererInner({
         <MessageShell
           message={message}
           display={display}
-          speakerName={speaker?.name}
+          speakerName={sharedAuthorName ?? speaker?.name}
           speakerColor={speaker ? avatarColor(speaker) : undefined}
           isStreaming={isStreaming}
         >
@@ -1270,7 +1278,7 @@ function MessageRendererInner({
             open={cardOpen}
             onOpenChange={setCardOpen}
             role={message.role}
-            authorName={speaker?.name}
+            authorName={sharedAuthorName ?? speaker?.name}
             text={messageShareContent.plainText}
             model={(message as { metadata?: { model?: string } }).metadata?.model}
             timestamp={((): Date => {

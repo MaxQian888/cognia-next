@@ -235,6 +235,7 @@ export type SendFn = (
   content: SendContent,
   opts?: SendOptions,
   callOptions?: {
+    sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
     skipUserAppend?: boolean
     bypassDelegation?: boolean
     sessionId?: string

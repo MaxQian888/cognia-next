@@ -263,6 +263,7 @@
   "sessions": "encrypted-content",
   "settings": "metadata-only",
   "sftpTransfers": "encrypted-content",
+  "sharedRunJournals": "encrypted-content",
   "sharedLinks": "metadata-only",
   "siteArtifacts": "encrypted-content",
   "siteBuildLogs": "encrypted-content",

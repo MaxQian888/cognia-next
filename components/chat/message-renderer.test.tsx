@@ -1352,6 +1352,19 @@ describe("edit flow", () => {
 // ── speaker display ───────────────────────────────────────────────────────────
 
 describe("team speaker display", () => {
+  it.each([
+    [{ id: "usr_1", displayName: "Shared author" }, "Shared author"],
+    [{ id: "usr_1" }, "usr_1"],
+  ])("shows a shared author independently of local characters", (author, label) => {
+    const message = {
+      id: "shared-message",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+      metadata: { collaboration: { author } },
+    } as UIMessage
+    render(<MessageRenderer message={message} />)
+    expect(screen.getByText(label)).toBeInTheDocument()
+  })
   it("shows speaker name when characterById resolves senderId", () => {
     const characterById = new Map([
       ["char_1", { id: "char_1", name: "Alice", systemPrompt: "" }],

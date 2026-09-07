@@ -16,6 +16,7 @@
  */
 
 import { downscaleImage, measureImage, decodeDataUrl } from "@/lib/ocr/image-prep"
+import { getDb } from "@/lib/db/schema"
 import { mediaRef, putMessageMedia, hasMessageMedia } from "@/lib/db/message-media"
 
 /**
@@ -76,14 +77,19 @@ export async function ingestImage({
   keepOriginal = false,
   now = Date.now,
 }: IngestImageInput): Promise<IngestedMedia> {
+  const databaseName = getDb().name
+  const assertScope = () => {
+    if (getDb().name !== databaseName) throw new Error("media_ingest_scope_changed")
+  }
   if (bytes.byteLength > MAX_IMAGE_INPUT_BYTES) {
     throw new Error("Chat image exceeds the 10 MiB persistence limit")
   }
   const hash = await sha256Hex(bytes)
+  assertScope()
 
   // Same source seen before: skip the decode, the re-encode and the write.
   if (await hasMessageMedia(hash)) {
-    const known = await describeStored(hash)
+    const known = await describeStored(hash, assertScope)
     if (known) return known
   }
 
@@ -105,6 +111,7 @@ export async function ingestImage({
   const thumbIsDistinct = thumb !== null && thumb.bytes.byteLength < canonical.bytes.byteLength
   const thumbSize = thumbIsDistinct ? await measureImage(thumb.bytes, thumb.mimeType) : null
 
+  assertScope()
   const stamp = now()
   await putMessageMedia({
     hash,
@@ -175,9 +182,14 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 /** Describe an already-stored hash without re-reading its blob payloads. */
-async function describeStored(hash: string): Promise<IngestedMedia | null> {
+async function describeStored(
+  hash: string,
+  assertScope: () => void
+): Promise<IngestedMedia | null> {
   const { getMessageMedia } = await import("@/lib/db/message-media")
+  assertScope()
   const row = await getMessageMedia(hash)
+  assertScope()
   if (!row) return null
   return {
     ref: mediaRef(row.hash),

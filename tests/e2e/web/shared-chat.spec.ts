@@ -1,223 +1,31 @@
-import { expect, test, type Page, type Route } from "@/tests/e2e/fixtures/test"
-
-const ORG_ID = "org_e2e000000000000000000"
-const USER_ID = "usr_e2e000000000000000000"
-const GUEST_ID = "usr_guest00000000000000000"
-const WORKSPACE_ID = "default"
-const BASE_URL = "https://collab-e2e.test"
-
-interface CollabScenario {
-  session: Record<string, unknown> | null
-  sequence: number
-  invites: Array<Record<string, unknown>>
-  members: Array<Record<string, unknown>>
-  approvals: Array<Record<string, unknown>>
-  queue: Array<Record<string, unknown>>
-  requests: Array<{ method: string; pathname: string; body: unknown }>
-}
-
-function json(route: Route, body: unknown, status = 200) {
-  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
-}
-
-async function installCollabScenario(page: Page): Promise<CollabScenario> {
-  const now = Date.now()
-  const scenario: CollabScenario = {
-    session: null,
-    sequence: 0,
-    invites: [],
-    members: [
-      {
-        sessionId: "shared-e2e",
-        userId: USER_ID,
-        displayName: "E2E Owner",
-        role: "owner",
-        approver: true,
-        guest: false,
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        sessionId: "shared-e2e",
-        userId: GUEST_ID,
-        displayName: "External Reviewer",
-        role: "member",
-        approver: false,
-        guest: true,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ],
-    approvals: [
-      {
-        id: "approval-e2e",
-        sessionId: "shared-e2e",
-        runId: "run-e2e",
-        action: "delete production artifact",
-        risk: "high",
-        requestedByUserId: GUEST_ID,
-        status: "pending",
-        expiresAt: now + 60_000,
-        createdAt: now,
-        revision: 1,
-      },
-    ],
-    queue: [
-      {
-        id: "queue-e2e",
-        sessionId: "shared-e2e",
-        requestedByUserId: GUEST_ID,
-        payload: { text: "queued follow-up" },
-        status: "queued",
-        position: 1,
-        createdAt: now,
-      },
-    ],
-    requests: [],
-  }
-
-  await page.addInitScript(
-    ({ orgId, userId, baseUrl }) => {
-      window.__cogniaCollabE2EContext = {
-        orgId,
-        userId,
-        baseUrl,
-        accessToken: "e2e-access-token",
-      }
-    },
-    { orgId: ORG_ID, userId: USER_ID, baseUrl: BASE_URL }
-  )
-
-  await page.route(`${BASE_URL}/**`, async (route) => {
-    const request = route.request()
-    const url = new URL(request.url())
-    const method = request.method()
-    const body = request.postData() ? request.postDataJSON() : null
-    scenario.requests.push({ method, pathname: url.pathname, body })
-
-    if (url.pathname.endsWith("/grants")) {
-      return json(route, {
-        grant: "e2e-grant",
-        userId: USER_ID,
-        orgId: ORG_ID,
-        expiresAt: Math.floor(Date.now() / 1000) + 3600,
-      })
-    }
-    if (url.pathname.endsWith("/memberships/me")) {
-      return json(route, {
-        userId: USER_ID,
-        orgId: ORG_ID,
-        orgRole: "owner",
-        workspaces: [{ workspaceId: WORKSPACE_ID, role: "owner" }],
-      })
-    }
-    if (method === "POST" && url.pathname.endsWith("/chat-sessions")) {
-      scenario.session = {
-        id: "shared-e2e",
-        orgId: ORG_ID,
-        workspaceId: WORKSPACE_ID,
-        title: (body as { title: string }).title,
-        status: "importing",
-        createdBy: { kind: "human", id: USER_ID, displayName: "E2E Owner" },
-        createdAt: now,
-        updatedAt: now,
-        revision: 1,
-        policyRevision: 1,
-      }
-      return json(route, scenario.session, 201)
-    }
-    if (method === "PATCH" && /\/chat-sessions\/shared-e2e$/.test(url.pathname)) {
-      scenario.session = {
-        ...scenario.session,
-        status: (body as { status?: string }).status ?? "active",
-        revision: 2,
-        updatedAt: Date.now(),
-      }
-      return json(route, scenario.session)
-    }
-    if (method === "GET" && /\/chat-sessions\/shared-e2e$/.test(url.pathname)) {
-      return json(route, scenario.session)
-    }
-    if (url.pathname.endsWith("/events") && method === "POST") {
-      scenario.sequence += 1
-      const input = body as { kind: string; payload: Record<string, unknown>; operationId: string }
-      return json(
-        route,
-        {
-          id: `event-${scenario.sequence}`,
-          sessionId: "shared-e2e",
-          sequence: scenario.sequence,
-          kind: input.kind,
-          actor: { kind: "human", id: USER_ID },
-          payload: input.payload,
-          createdAt: Date.now(),
-          operationId: input.operationId,
-        },
-        201
-      )
-    }
-    if (url.pathname.endsWith("/members") && method === "GET") {
-      return json(route, scenario.members)
-    }
-    if (/\/members\/[^/]+$/.test(url.pathname) && method === "DELETE") {
-      const userId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "")
-      scenario.members = scenario.members.filter((member) => member.userId !== userId)
-      return json(route, {})
-    }
-    if (url.pathname.endsWith("/invites") && method === "GET") {
-      return json(route, scenario.invites)
-    }
-    if (url.pathname.endsWith("/invites") && method === "POST") {
-      const input = body as { role: string; guest?: boolean; expiresAt: number }
-      const invite = {
-        id: "invite-e2e",
-        sessionId: "shared-e2e",
-        role: input.role,
-        approver: false,
-        guest: Boolean(input.guest),
-        expiresAt: input.expiresAt,
-        status: "pending",
-        createdByUserId: USER_ID,
-        createdAt: Date.now(),
-      }
-      scenario.invites = [invite]
-      return json(route, { invite, token: "invite-secret-visible-once" }, 201)
-    }
-    if (url.pathname.endsWith("/approvals") && method === "GET") {
-      return json(route, scenario.approvals)
-    }
-    if (/\/approvals\/[^/]+$/.test(url.pathname) && method === "PATCH") {
-      scenario.approvals = []
-      return json(route, { ...(scenario.approvals[0] ?? {}), status: "approved", revision: 2 })
-    }
-    if (url.pathname.endsWith("/run-leases") && method === "GET") return json(route, null)
-    if (url.pathname.endsWith("/queue") && method === "GET") return json(route, scenario.queue)
-    if (/\/queue\/[^/]+$/.test(url.pathname) && method === "DELETE") {
-      scenario.queue = []
-      return json(route, { id: "queue-e2e", status: "cancelled" })
-    }
-    if (url.pathname.endsWith("/audit") && method === "GET") return json(route, [])
-    return json(route, { error: `Unhandled E2E route ${method} ${url.pathname}` }, 500)
-  })
-
-  return scenario
-}
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
+import { installCollabScenario, GUEST_ID } from "../helpers/shared-chat"
+import { ensureCogniaAccount, waitForTestGlobals, setCogniaSettings } from "../helpers/db-reset"
 
 async function configureStandaloneChat(page: Page) {
   await page.goto("/")
-  const createAccount = page.getByRole("form", { name: "Create local account" })
-  const needsAccount = await createAccount
-    .waitFor({ state: "visible", timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false)
-  if (needsAccount) {
-    await createAccount.getByRole("textbox", { name: "Account name" }).fill("Shared Chat E2E")
-    await createAccount.getByLabel("Password").fill("Shared-chat-E2E-2026!")
-    await createAccount.getByRole("button", { name: "Create account" }).click()
-  }
-  await expect(page.getByRole("textbox", { name: /message/i }).first()).toBeVisible({
-    timeout: 30_000,
+  await ensureCogniaAccount(page)
+  await page.goto("about:blank")
+  await page.goto("/", { waitUntil: "domcontentloaded" })
+  await waitForTestGlobals(page, 30_000)
+  await setCogniaSettings(page, {
+    onboardingProgress: { version: 2, path: "completed", completedAt: "2026-09-07T00:00:00.000Z" },
+    defaultProvider: "anthropic",
+    providerSettings: {
+      anthropic: {
+        enabled: true,
+        apiKey: "test-e2e-key",
+        baseURL: `${process.env.E2E_ANTHROPIC_BASE_URL}/v1`,
+      },
+    },
   })
+  await page.goto("about:blank")
+  await page.goto("/", { waitUntil: "domcontentloaded" })
+  await page.getByRole("button", { name: "New chat" }).first().click()
+  const picker = page.getByRole("dialog", { name: /pick a character/i })
+  await expect(picker).toBeVisible()
+  await picker.getByRole("option").first().click()
+  await expect(page.getByRole("textbox", { name: /message/i }).first()).toBeVisible()
 }
 
 test.describe("web — shared AI chat", () => {
@@ -229,7 +37,7 @@ test.describe("web — shared AI chat", () => {
   test("@critical imports full history only after explicit confirmation", async ({ page }) => {
     await page.getByRole("button", { name: "Open private conversation controls" }).click()
     await expect(page.getByText(/0 messages and 0 attachments/i)).toBeVisible()
-    await expect(page.getByText(/invitees can read the complete history/i)).toBeVisible()
+    await expect(page.getByText(/Everyone invited later can read the full history/i)).toBeVisible()
     await page.getByRole("button", { name: /convert and share/i }).click()
     await expect(page.getByText(/conversation is now shared/i)).toBeVisible()
 
@@ -248,19 +56,135 @@ test.describe("web — shared AI chat", () => {
 
     await page.getByRole("button", { name: "Open shared conversation controls" }).click()
     await expect(page.getByText("External Reviewer")).toBeVisible()
-    await expect(page.getByText("External guest")).toBeVisible()
+    await expect(
+      page.getByRole("region", { name: "Members (2)" }).getByText("External guest")
+    ).toBeVisible()
     await expect(page.getByText(/#1 queued by/)).toBeVisible()
     await expect(page.getByText("delete production artifact")).toBeVisible()
 
-    await page.getByRole("button", { name: "Approve" }).click()
+    await page.getByRole("button", { name: "Approve", exact: true }).click()
     await expect(page.getByText("delete production artifact")).toHaveCount(0)
 
     await page.getByRole("checkbox", { name: "External guest" }).check()
     await page.getByRole("button", { name: /create invite/i }).click()
     await expect(page.getByRole("button", { name: "Copy one-time invite token" })).toBeVisible()
 
-    const guestRow = page.getByText("External Reviewer").locator("../..")
-    await guestRow.getByRole("button", { name: "Remove" }).click()
+    await page
+      .getByRole("region", { name: "Members (2)" })
+      .getByRole("button", { name: "Remove", exact: true })
+      .click()
     await expect(page.getByText("External Reviewer")).toHaveCount(0)
   })
+})
+
+test("@critical ordinary Send persists once and Request AI references that message", async ({
+  page,
+}) => {
+  const scenario = await installCollabScenario(page)
+  await configureStandaloneChat(page)
+  await page.getByRole("button", { name: "Open private conversation controls" }).click()
+  await page.getByRole("button", { name: /convert and share/i }).click()
+  await expect(
+    page.getByRole("button", { name: "Open shared conversation controls" })
+  ).toBeVisible()
+  const composer = page.getByRole("textbox", { name: /message/i }).first()
+  await composer.fill("Discuss before asking AI")
+  await composer.press("Enter")
+  await expect
+    .poll(() => scenario.events.filter((event) => event.kind === "message.created").length)
+    .toBe(1)
+  expect(
+    scenario.requests.filter(
+      (request) => request.method === "POST" && request.pathname.endsWith("/queue")
+    )
+  ).toHaveLength(0)
+  await page.getByRole("button", { name: "Request AI", exact: true }).click()
+  await expect
+    .poll(
+      () =>
+        scenario.requests.filter(
+          (request) => request.method === "POST" && request.pathname.endsWith("/queue")
+        ).length
+    )
+    .toBe(1)
+  const message = scenario.events[0].payload as { messageId: string }
+  expect(scenario.queue.at(-1)?.payload).toMatchObject({ messageId: message.messageId })
+  expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(1)
+})
+
+test("@critical a second participant joins by invitation and receives the first participant's messages", async ({
+  page,
+  browser,
+}) => {
+  const scenario = await installCollabScenario(page)
+  await configureStandaloneChat(page)
+  await page.getByRole("button", { name: "Open private conversation controls" }).click()
+  await page.getByRole("button", { name: /convert and share/i }).click()
+  await expect(
+    page.getByRole("button", { name: "Open shared conversation controls" })
+  ).toBeVisible()
+  const otherContext = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    locale: "en-US",
+  })
+  try {
+    const other = await otherContext.newPage()
+    await installCollabScenario(other, scenario, GUEST_ID)
+    await configureStandaloneChat(other)
+    await other.getByRole("button", { name: "Join shared conversation", exact: true }).click()
+    const join = other.getByRole("dialog", { name: "Join shared conversation", exact: true })
+    await join.getByLabel("Invitation token").fill("invite-secret-visible-once")
+    await join.getByRole("button", { name: "Join shared conversation", exact: true }).click()
+    await expect(
+      other.getByRole("button", { name: "Open shared conversation controls" })
+    ).toBeVisible()
+    await expect(other.getByRole("status").filter({ hasText: /^Connected$/ })).toBeVisible()
+    const composer = page.getByRole("textbox", { name: /message/i }).first()
+    await composer.fill("Shared message from the first participant")
+    await composer.press("Enter")
+    await expect
+      .poll(() => scenario.events.filter((event) => event.kind === "message.created").length)
+      .toBe(1)
+    await expect(
+      other.getByText("Shared message from the first participant", { exact: true }).first()
+    ).toBeVisible()
+    expect(scenario.events.filter((event) => event.kind === "message.created")).toHaveLength(1)
+  } finally {
+    if (test.info().status !== test.info().expectedStatus) {
+      const other = otherContext.pages()[0]
+      const diagnostic = await other?.evaluate(async () => {
+        const databases = await indexedDB.databases()
+        return Promise.all(
+          databases
+            .filter((entry) => entry.name?.startsWith("cognia"))
+            .map(async (entry) => {
+              const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                const request = indexedDB.open(entry.name!)
+                request.onsuccess = () => resolve(request.result)
+                request.onerror = () => reject(request.error)
+              })
+              try {
+                const rows: Record<string, unknown> = { name: db.name }
+                for (const table of ["collabChatSyncStates", "sessions", "messages"]) {
+                  if (!db.objectStoreNames.contains(table)) continue
+                  rows[table] = await new Promise((resolve, reject) => {
+                    const request = db.transaction(table).objectStore(table).getAll()
+                    request.onsuccess = () => resolve(request.result)
+                    request.onerror = () => reject(request.error)
+                  })
+                }
+                return rows
+              } finally {
+                db.close()
+              }
+            })
+        )
+      })
+      await test.info().attach("shared-projection-state", {
+        body: JSON.stringify(diagnostic),
+        contentType: "application/json",
+      })
+    }
+    await otherContext.close()
+  }
 })

@@ -4,7 +4,12 @@ import type {
   ThreadHandoffTicket,
 } from "@cognia/agent-config-types/thread-handoff"
 
-import { importHandoffSession } from "@/lib/chat/import-handoff-session"
+import { receiveThreadHandoffAttachments } from "./attachments"
+import { transport } from "@/lib/tauri/transport-instance"
+import {
+  importHandoffSession,
+  canonicalTurnToHandoffMessage,
+} from "@/lib/chat/import-handoff-session"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 
 import { ThreadHandoffClient } from "./client"
@@ -40,6 +45,7 @@ export async function prepareInboundThreadHandoff(
   ) {
     return null
   }
+  if (!dependencies.environment) await receiveThreadHandoffAttachments(frame.ticket, transport)
   const environment = await (dependencies.environment ?? buildThreadHandoffPreflightEnvironment)(
     frame.ticket
   )
@@ -57,7 +63,8 @@ export async function prepareInboundThreadHandoff(
 
 async function importCanonicalSession(
   envelope: CanonicalSession,
-  sessionId: string
+  sessionId: string,
+  handoffLock: import("@cognia/agent-config-types").ChatSession["handoffLock"]
 ): Promise<void> {
   // The marker is written by the import itself, not patched on afterwards:
   // a retry (the first accept crashed between the import and the ticket
@@ -66,8 +73,9 @@ async function importCanonicalSession(
   const imported = await importHandoffSession({
     sessionId,
     title: envelope.header.title,
-    messages: envelope.turns.map((turn) => ({ role: turn.role, content: turn.text })),
+    messages: envelope.turns.map(canonicalTurnToHandoffMessage),
     handoffSource: "thread-handoff",
+    handoffLock,
   })
   if (imported.id !== sessionId) throw new Error("thread_handoff_target_session_collision")
 }
@@ -92,7 +100,19 @@ export async function completeInboundThreadHandoff(
   const now = dependencies.now?.() ?? Date.now()
   const accepted = await acceptThreadHandoff(
     { ticket: prepared.ticket, envelope: prepared.frame.envelope },
-    { now, importSession: dependencies.importSession ?? importCanonicalSession }
+    {
+      now,
+      importSession:
+        dependencies.importSession ??
+        ((envelope, sessionId) =>
+          importCanonicalSession(envelope, sessionId, {
+            ticketId: prepared.ticket.ticketId,
+            state: "frozen",
+            targetHostRef: prepared.ticket.target.hostRef,
+            targetSessionId: sessionId,
+            at: now,
+          })),
+    }
   )
   const lease = await (dependencies.issueLease ?? ((ops) => issueHostAdminLease(ops)))([
     "thread_handoff_commit",

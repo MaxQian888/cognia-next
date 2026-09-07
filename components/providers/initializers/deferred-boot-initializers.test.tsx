@@ -2,6 +2,10 @@ import { render, act } from "@testing-library/react"
 
 import { DeferredBootInitializers } from "./deferred-boot-initializers"
 
+jest.mock("./shared-chat-lifecycle-initializer", () => ({
+  SharedChatLifecycleInitializer: () => <span data-shared-chat-lifecycle />,
+}))
+
 // Replace the `next/dynamic(...)` boundary with a lightweight stub so we can
 // assert the gating without pulling the impl chunk's subsystem graphs into
 // the test. The impl's own composition is covered by
@@ -48,6 +52,13 @@ describe("DeferredBootInitializers", () => {
         node.getAttribute("data-boot-bundle")
       )
     ).toEqual(["core"])
+  })
+
+  it("starts shared discovery before any lazy capability is requested", async () => {
+    mockRequested = new Set()
+    const { container } = render(<DeferredBootInitializers />)
+    expect(container.querySelector("[data-shared-chat-lifecycle]")).toBeInTheDocument()
+    expect(container.querySelectorAll("[data-boot-bundle]")).toHaveLength(0)
   })
 
   it("mounts every requested capability bundle in eager mode", async () => {

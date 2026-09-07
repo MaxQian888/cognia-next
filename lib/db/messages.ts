@@ -82,7 +82,14 @@ export function invalidatePersistSnapshot(sessionId: string): void {
  * threading props; the column is the source of truth, so `persistMessages`
  * strips them back out rather than duplicating them into the metadata blob.
  */
-const HOISTED_META_KEYS = ["senderId", "senderKind", "sessionId", "createdAt", "turnKey"] as const
+const HOISTED_META_KEYS = [
+  "senderId",
+  "senderKind",
+  "sessionId",
+  "createdAt",
+  "turnKey",
+  "collaboration",
+] as const
 
 /**
  * Drop the hoisted keys from a message's metadata ahead of a write. Returns
@@ -96,6 +103,45 @@ export function stripHoistedMeta(
   const copy = { ...meta }
   for (const key of HOISTED_META_KEYS) delete copy[key]
   return Object.keys(copy).length > 0 ? copy : undefined
+}
+
+/**
+ * One `UIMessage` as the row shape every writer of `messages` must produce.
+ *
+ * Exported because `replaceSessionTranscript` is not the only writer: the
+ * thread-handoff import replaces a whole transcript inside its OWN transaction,
+ * because it has to stamp the session's ownership lock atomically with the
+ * history and the write guard would refuse the locked row. Sharing the builder
+ * keeps the hoisted columns and `stripHoistedMeta` in one place, so a second
+ * writer cannot quietly store a differently shaped row.
+ */
+export function toStoredMessageRow(
+  message: UIMessage,
+  fields: {
+    id: string
+    sessionId: string
+    projectId?: string
+    parts: StoredMessage["parts"]
+    createdAt: number
+  }
+): StoredMessage {
+  const meta = (message as { metadata?: Record<string, unknown> }).metadata
+  const senderKindRaw = meta?.senderKind
+  return {
+    id: fields.id,
+    sessionId: fields.sessionId,
+    projectId: fields.projectId,
+    role: message.role,
+    parts: fields.parts,
+    turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
+    senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
+    senderKind:
+      senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+        ? senderKindRaw
+        : undefined,
+    metadata: stripHoistedMeta(meta),
+    createdAt: fields.createdAt,
+  }
 }
 
 /**
@@ -116,6 +162,7 @@ function rowToUIMessage(r: StoredMessage): UIMessage {
   if (r.senderId !== undefined) metadata.senderId = r.senderId
   if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
   if (r.turnKey !== undefined) metadata.turnKey = r.turnKey
+  if (r.collaboration !== undefined) metadata.collaboration = r.collaboration
   metadata.sessionId = r.sessionId
   metadata.createdAt = r.createdAt
   return {
@@ -281,26 +328,15 @@ export async function replaceSessionTranscript(
                 }
 
                 const meta = (message as { metadata?: Record<string, unknown> }).metadata
-                const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
-                const senderKindRaw = meta?.senderKind
-                const senderKind =
-                  senderKindRaw === "user" ||
-                  senderKindRaw === "assistant" ||
-                  senderKindRaw === "system"
-                    ? senderKindRaw
-                    : undefined
-                rows.push({
-                  id,
-                  sessionId,
-                  projectId,
-                  role: message.role,
-                  parts: normalizedMessage.parts,
-                  turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
-                  senderId,
-                  senderKind,
-                  metadata: stripHoistedMeta(meta),
-                  createdAt,
-                })
+                rows.push(
+                  toStoredMessageRow(message, {
+                    id,
+                    sessionId,
+                    projectId,
+                    parts: normalizedMessage.parts,
+                    createdAt,
+                  })
+                )
                 // `triggerWorkflows: false` opts a message out of the
                 // `trigger.chat.message` fan-out. Live-voice turns set it: the
                 // user spoke to the assistant directly and never went through the

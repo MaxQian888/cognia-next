@@ -1,8 +1,74 @@
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { convertLocalSessionToShared } from "./shared-chat-conversion"
+import { convertLocalSessionToShared, resolveSharedAttachmentParts } from "./shared-chat-conversion"
+
+jest.mock("@/lib/db/schema", () => {
+  const actual = jest.requireActual("@/lib/db/schema")
+  return { ...actual, getDb: jest.fn(actual.getDb) }
+})
 
 const dbFixture = createDbTestFixture()
+
+describe("shared attachment downloads", () => {
+  const parts = [
+    { type: "file" as const, mediaType: "text/plain", url: "cognia://shared-attachment/file" },
+  ]
+  function clientFor(patch = {}) {
+    return {
+      createSessionAttachmentDownloadTicket: jest.fn().mockResolvedValue({
+        attachment: {
+          id: "file",
+          sessionId: "session",
+          status: "available",
+          mediaType: "text/plain",
+          byteLength: 5,
+          sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+          ...patch,
+        },
+        ticket: "single-use-header",
+      }),
+      downloadSessionAttachment: jest.fn().mockResolvedValue(new Blob(["hello"])),
+    }
+  }
+  it("uses an authenticated ticket and checks bytes before returning renderable parts", async () => {
+    const client = clientFor()
+    expect(await resolveSharedAttachmentParts(client, "org", "session", parts)).toEqual([
+      { ...parts[0], url: "data:text/plain;base64,aGVsbG8=" },
+    ])
+    expect(client.downloadSessionAttachment).toHaveBeenCalledWith(
+      "org",
+      "file",
+      "single-use-header"
+    )
+  })
+  it.each([{ id: "other" }, { sessionId: "other" }, { orgId: "other" }, { status: "deleted" }])(
+    "rejects mismatched attachment scope %j",
+    async (patch) => {
+      const client = clientFor(patch)
+      await expect(resolveSharedAttachmentParts(client, "org", "session", parts)).rejects.toThrow(
+        "scope mismatch"
+      )
+      expect(client.downloadSessionAttachment).not.toHaveBeenCalled()
+    }
+  )
+  it.each([{ byteLength: 9 }, { sha256: "0".repeat(64) }])(
+    "rejects corrupt attachment bytes %j",
+    async (patch) => {
+      await expect(
+        resolveSharedAttachmentParts(clientFor(patch), "org", "session", parts)
+      ).rejects.toThrow("integrity mismatch")
+    }
+  )
+  it("preserves ordinary text and inline files without issuing tickets", async () => {
+    const client = clientFor()
+    const normal = [
+      { type: "text" as const, text: "hello" },
+      { ...parts[0], url: "data:text/plain;base64,aA==" },
+    ]
+    expect(await resolveSharedAttachmentParts(client, "org", "session", normal)).toEqual(normal)
+    expect(client.createSessionAttachmentDownloadTicket).not.toHaveBeenCalled()
+  })
+})
 
 describe("local-to-shared chat conversion", () => {
   beforeAll(dbFixture.initialize)
@@ -236,4 +302,280 @@ describe("attachment reads are guarded", () => {
 
     expect(readAttachment).toHaveBeenCalled()
   })
+
+  it("keeps local media renderable and atomically caches namespaced server events", async () => {
+    const url = "data:image/png;base64,AQID"
+    await putFileMessage(url)
+    const client = { ...clientWithAttachments(), baseUrl: "https://collab.example/" }
+    const result = await convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+      readAttachment: async () => new Uint8Array([1, 2, 3]),
+    })
+    expect(result.importedAttachmentCount).toBe(1)
+    expect(client.appendSessionEvent.mock.calls[0][2].payload.parts[0].url).toBe(
+      "cognia://shared-attachment/att_1"
+    )
+    expect((await getDb().messages.get("message_1"))?.parts[0]).toMatchObject({ url })
+    expect(client.commitSessionAttachment).toHaveBeenCalledWith(
+      "org_1",
+      "shared_1",
+      "att_1",
+      "event_1"
+    )
+    expect(await getDb().collabChatEvents.toArray()).toEqual([
+      expect.objectContaining({
+        id: '["https://collab.example","org_1","shared_1"]:event:event_1',
+        sessionId: '["https://collab.example","org_1","shared_1"]',
+      }),
+    ])
+  })
+
+  it("retains extracted text and already shared attachments without reading bytes", async () => {
+    const parts = [
+      { type: "file", filename: "notes.txt", mediaType: "text/plain", text: "extracted text" },
+      { type: "file", mediaType: "image/png", url: "cognia://shared-attachment/existing" },
+    ] as unknown as import("@cognia/agent-config-types").StoredMessage["parts"]
+    await getDb().messages.put({
+      id: "message_1",
+      sessionId: "local_1",
+      projectId: "workspace_1",
+      role: "user",
+      parts,
+      createdAt: 3,
+    })
+    const client = clientWithAttachments()
+    const readAttachment = jest.fn()
+    await convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+      readAttachment,
+    })
+    expect(readAttachment).not.toHaveBeenCalled()
+    expect(client.initializeSessionAttachment).not.toHaveBeenCalled()
+    expect(client.appendSessionEvent.mock.calls[0][2].payload.parts).toEqual(parts)
+  })
+
+  it("does not bind or cache events when attachment commit is uncertain", async () => {
+    await putFileMessage("data:image/png;base64,AQID")
+    const client = clientWithAttachments()
+    client.commitSessionAttachment.mockRejectedValue(new Error("connection lost"))
+    await expect(
+      convertLocalSessionToShared(client, {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+        readAttachment: async () => new Uint8Array([1, 2, 3]),
+      })
+    ).rejects.toThrow("connection lost")
+    expect((await getDb().sessions.get("local_1"))?.collaboration).toBeUndefined()
+    expect(await getDb().collabChatEvents.count()).toBe(0)
+    expect(client.updateSharedSession).not.toHaveBeenCalled()
+  })
+
+  it.each(["missing", "shared"])(
+    "rejects a %s source before creating a remote session",
+    async (state) => {
+      if (state === "missing") await getDb().sessions.delete("local_1")
+      else
+        await getDb().sessions.update("local_1", {
+          collaboration: {
+            orgId: "org_1",
+            workspaceId: "workspace_1",
+            sessionId: "existing",
+            policyRevision: 1,
+            syncCursor: 0,
+          },
+        })
+      const client = clientWithAttachments()
+      await expect(
+        convertLocalSessionToShared(client, {
+          localSessionId: "local_1",
+          orgId: "org_1",
+          workspaceId: "workspace_1",
+        })
+      ).rejects.toThrow(state === "missing" ? "does not exist" : "already shared")
+      expect(client.createSharedSession).not.toHaveBeenCalled()
+    }
+  )
+
+  it("requires an attachment transport before creating an import", async () => {
+    await putFileMessage("data:image/png;base64,AQID")
+    const client = { ...clientWithAttachments(), initializeSessionAttachment: undefined }
+    await expect(
+      convertLocalSessionToShared(client, {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+      })
+    ).rejects.toThrow("attachment importer")
+    expect(client.createSharedSession).not.toHaveBeenCalled()
+  })
+
+  it("supports an explicit attachment importer", async () => {
+    await putFileMessage("data:image/png;base64,AQID")
+    const client = clientWithAttachments()
+    const parts = [{ type: "text" as const, text: "verified extracted attachment" }]
+    await convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+      prepareAttachmentParts: async () => parts,
+    })
+    expect(client.appendSessionEvent.mock.calls[0][2].payload.parts).toEqual(parts)
+    expect(client.initializeSessionAttachment).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])("resolves local media only when its bytes exist: %s", async (exists) => {
+    await putFileMessage("cognia-media:hash")
+    if (exists)
+      await getDb().messageMedia.put({
+        hash: "hash",
+        mediaType: "image/png",
+        width: 1,
+        height: 1,
+        byteSize: 3,
+        blob: new Blob([new Uint8Array([1, 2, 3])]),
+        createdAt: 1,
+        lastUsedAt: 1,
+      })
+    const client = clientWithAttachments()
+    const result = convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+    })
+    if (exists) {
+      await expect(result).resolves.toMatchObject({ importedAttachmentCount: 1 })
+      expect(client.uploadSessionAttachment).toHaveBeenCalledWith(
+        "org_1",
+        "att_1",
+        "ticket",
+        new Uint8Array([1, 2, 3])
+      )
+    } else await expect(result).rejects.toThrow("could not be read")
+  })
+
+  it.each([true, false])("validates attachment fetch success: %s", async (ok) => {
+    await putFileMessage("https://example.com/image.png")
+    const fetchSpy = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { status: ok ? 200 : 404 }))
+    try {
+      const result = convertLocalSessionToShared(clientWithAttachments(), {
+        localSessionId: "local_1",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+      })
+      if (ok) await expect(result).resolves.toMatchObject({ importedAttachmentCount: 1 })
+      else await expect(result).rejects.toThrow("could not be read")
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  })
+
+  it("preserves existing author identity and system provenance", async () => {
+    await getDb().messages.bulkPut([
+      {
+        id: "system",
+        sessionId: "local_1",
+        projectId: "workspace_1",
+        role: "system",
+        parts: [],
+        createdAt: 1,
+      },
+      {
+        id: "agent",
+        sessionId: "local_1",
+        projectId: "workspace_1",
+        role: "assistant",
+        senderId: "named-agent",
+        parts: [],
+        createdAt: 2,
+      },
+      {
+        id: "human",
+        sessionId: "local_1",
+        projectId: "workspace_1",
+        role: "user",
+        senderId: "named-human",
+        parts: [],
+        createdAt: 3,
+      },
+      {
+        id: "attributed",
+        sessionId: "local_1",
+        projectId: "workspace_1",
+        role: "user",
+        parts: [],
+        createdAt: 4,
+        collaboration: {
+          author: { kind: "human", id: "original", displayName: "Original" },
+          sourceEventId: "old",
+          eventSequence: 1,
+          version: 1,
+        },
+      },
+    ])
+    const client = clientWithAttachments()
+    await convertLocalSessionToShared(client, {
+      localSessionId: "local_1",
+      orgId: "org_1",
+      workspaceId: "workspace_1",
+    })
+    expect(client.appendSessionEvent.mock.calls.map((call) => call[2].payload.author.id)).toEqual([
+      "system",
+      "named-agent",
+      "named-human",
+      "original",
+    ])
+  })
+
+  it.each(["identity", "attachment", "upload", "event"])(
+    "fences account changes during %s before the next remote write",
+    async (stage) => {
+      await putFileMessage("data:image/png;base64,AQID")
+      const sourceDb = getDb()
+      const switchAccount = () => jest.mocked(getDb).mockReturnValue({} as typeof sourceDb)
+      const client = clientWithAttachments()
+      const readAttachment = async () => {
+        if (stage === "attachment") switchAccount()
+        return new Uint8Array([1, 2, 3])
+      }
+      if (stage === "identity")
+        client.identity.mockImplementation(async () => {
+          switchAccount()
+          return { userId: "user_1", orgId: "org_1" }
+        })
+      if (stage === "upload")
+        client.uploadSessionAttachment.mockImplementation(async () => {
+          switchAccount()
+        })
+      if (stage === "event")
+        client.appendSessionEvent.mockImplementation(async () => {
+          switchAccount()
+          return { id: "event_1", sequence: 1, createdAt: 11 }
+        })
+      try {
+        await expect(
+          convertLocalSessionToShared(client, {
+            localSessionId: "local_1",
+            orgId: "org_1",
+            workspaceId: "workspace_1",
+            readAttachment,
+          })
+        ).rejects.toMatchObject({ name: "AbortError" })
+        expect(client.updateSharedSession).not.toHaveBeenCalled()
+        expect(client.commitSessionAttachment).not.toHaveBeenCalled()
+        if (stage === "identity") expect(client.createSharedSession).not.toHaveBeenCalled()
+        if (stage === "attachment")
+          expect(client.initializeSessionAttachment).not.toHaveBeenCalled()
+      } finally {
+        jest.mocked(getDb).mockImplementation(jest.requireActual("@/lib/db/schema").getDb)
+      }
+      expect((await sourceDb.sessions.get("local_1"))?.collaboration).toBeUndefined()
+    }
+  )
 })

@@ -569,6 +569,7 @@ async fn direct_session_timeline(
         .clamp(1, TRANSCRIPT_TIMELINE_PAGE_MAX);
     let mut descending = Vec::new();
     let mut user_boundaries = 0_u32;
+    let mut complete_row_count = 0;
 
     while user_boundaries < limit && descending.len() < TRANSCRIPT_MAX_SCANNED_MESSAGES {
         let page = store
@@ -584,10 +585,14 @@ async fn direct_session_timeline(
         }
         let page_len = page.rows.len();
         for message in page.rows {
-            if message.role == "user" {
+            let is_user = message.role == "user";
+            if is_user {
                 user_boundaries += 1;
             }
             descending.push(message);
+            if is_user {
+                complete_row_count = descending.len();
+            }
             if user_boundaries >= limit || descending.len() >= TRANSCRIPT_MAX_SCANNED_MESSAGES {
                 break;
             }
@@ -597,17 +602,41 @@ async fn direct_session_timeline(
         }
     }
 
-    let next_position = position.saturating_add(descending.len() as u32);
-    let has_more = !store
-        .get_messages_by_session_reverse(&session_id, 1, next_position)
+    let scanned_position = position.saturating_add(descending.len() as u32);
+    let mut has_more = !store
+        .get_messages_by_session_reverse(&session_id, 1, scanned_position)
         .await
         .map_err(|_| "TRANSCRIPT_STORE_ERROR".to_string())?
         .rows
         .is_empty();
+    if has_more && descending.len() >= TRANSCRIPT_MAX_SCANNED_MESSAGES {
+        if descending.iter().all(|message| message.role == "system") {
+            complete_row_count = descending.len();
+        }
+        // A partial oldest turn must not share its itemKey with a later page.
+        // Retain only the newer suffix whose user boundaries were reached.
+        if complete_row_count == 0 {
+            return Err("INVALID_PARAMS".to_string());
+        }
+        descending.truncate(complete_row_count);
+    }
     descending.reverse();
     let projected = project_direct_timeline(&descending, revision);
     let start = projected.len().saturating_sub(limit as usize);
     let items = projected[start..].to_vec();
+    let first_id = items
+        .first()
+        .and_then(|item| item["itemKey"].as_str())
+        .and_then(|key| {
+            key.strip_prefix("system:")
+                .or_else(|| key.strip_prefix("turn:"))
+        });
+    let skipped_rows = first_id
+        .and_then(|id| descending.iter().position(|message| message.id == id))
+        .unwrap_or(0);
+    // System rows excluded by the item budget remain available to the cursor.
+    has_more |= skipped_rows > 0;
+    let next_position = position.saturating_add((descending.len() - skipped_rows) as u32);
     let next_cursor = if has_more {
         Some(encode_cursor(&DirectTimelineCursor {
             version: 1,
@@ -933,6 +962,146 @@ mod tests {
             .unwrap();
         assert_eq!(older["items"][0]["finalResponse"]["text"], "answer");
         assert_eq!(older["hasMore"], false);
+    }
+
+    #[tokio::test]
+    async fn direct_timeline_keeps_system_rows_for_older_pages() {
+        let store = SqliteAppStore::in_memory().unwrap();
+        store
+            .upsert_session("s1", "Transcript", "direct")
+            .await
+            .unwrap();
+        let first = store
+            .create_message("s1", "first system", "system")
+            .await
+            .unwrap();
+        let second = store
+            .create_message("s1", "second system", "system")
+            .await
+            .unwrap();
+        store
+            .create_message("s1", "question", "user")
+            .await
+            .unwrap();
+        let dp = DataPlane::Direct(store as Arc<dyn AppStore>);
+        let newest = dp
+            .session_timeline("s1".into(), None, None, Some(1))
+            .await
+            .unwrap();
+        let middle = dp
+            .session_timeline(
+                "s1".into(),
+                None,
+                Some(newest["nextCursor"].as_str().unwrap().into()),
+                Some(1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            middle["items"][0]["itemKey"],
+            format!("system:{}", second.id)
+        );
+        assert_eq!(middle["hasMore"], true);
+        let oldest = dp
+            .session_timeline(
+                "s1".into(),
+                None,
+                Some(middle["nextCursor"].as_str().unwrap().into()),
+                Some(1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            oldest["items"][0]["itemKey"],
+            format!("system:{}", first.id)
+        );
+        assert_eq!(oldest["hasMore"], false);
+    }
+
+    #[tokio::test]
+    async fn direct_timeline_pages_system_only_history_beyond_scan_cap() {
+        let store = SqliteAppStore::in_memory().unwrap();
+        store
+            .upsert_session("s1", "Systems", "direct")
+            .await
+            .unwrap();
+        let mut expected = Vec::new();
+        for _ in 0..=TRANSCRIPT_MAX_SCANNED_MESSAGES {
+            let message = store
+                .create_message("s1", "system entry", "system")
+                .await
+                .unwrap();
+            expected.push(format!("system:{}", message.id));
+        }
+        let dp = DataPlane::Direct(store as Arc<dyn AppStore>);
+        let mut cursor = None;
+        let mut seen = Vec::new();
+        loop {
+            let page = dp
+                .session_timeline("s1".into(), None, cursor, Some(100))
+                .await
+                .unwrap();
+            let items = page["items"].as_array().unwrap();
+            assert!(items.len() <= 100);
+            seen.splice(
+                0..0,
+                items
+                    .iter()
+                    .map(|item| item["itemKey"].as_str().unwrap().to_string()),
+            );
+            cursor = page["nextCursor"].as_str().map(str::to_string);
+            assert_eq!(page["hasMore"], cursor.is_some());
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(seen, expected);
+    }
+
+    #[tokio::test]
+    async fn direct_timeline_does_not_publish_partial_turns_at_scan_cap() {
+        let store = SqliteAppStore::in_memory().unwrap();
+        store
+            .upsert_session("s1", "Transcript", "direct")
+            .await
+            .unwrap();
+        store
+            .create_message("s1", "large question", "user")
+            .await
+            .unwrap();
+        for _ in 0..TRANSCRIPT_MAX_SCANNED_MESSAGES {
+            store
+                .create_message("s1", "step", "assistant")
+                .await
+                .unwrap();
+        }
+        let newest = store
+            .create_message("s1", "latest question", "user")
+            .await
+            .unwrap();
+        store
+            .create_message("s1", "latest answer", "assistant")
+            .await
+            .unwrap();
+        let dp = DataPlane::Direct(store as Arc<dyn AppStore>);
+        let page = dp
+            .session_timeline("s1".into(), None, None, Some(2))
+            .await
+            .unwrap();
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["itemKey"], format!("turn:{}", newest.id));
+        assert_eq!(page["items"][0]["collapsed"]["messageCount"], 2);
+        assert_eq!(
+            dp.session_timeline(
+                "s1".into(),
+                None,
+                Some(page["nextCursor"].as_str().unwrap().into()),
+                Some(2)
+            )
+            .await
+            .unwrap_err(),
+            "INVALID_PARAMS"
+        );
     }
 
     #[tokio::test]

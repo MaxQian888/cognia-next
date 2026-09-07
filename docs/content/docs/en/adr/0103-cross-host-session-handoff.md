@@ -42,3 +42,13 @@ The six Companion operations are `offer`, `preflight`, `accept`, `commit`, `abor
 
 Removing `thread-handoff-v1` from the negotiated capability disables new offers and ownership changes while leaving status and recovery data readable. This is both the protocol version signal and the rollout kill switch.
 
+
+## Structured continuation and recovery (2026-09-07)
+
+New offers additionally require `thread-handoff-structured-v1`. This prevents an older target that flattens canonical messages into text from acknowledging a structured handoff. The existing canonical codec preserves reasoning, files, and tool results; an unsupported part blocks export rather than disappearing. Native handles remain provenance, while cross-host continuation is explicitly contextual. Incomplete historical tool calls become interrupted history and do not execute automatically.
+
+A manifest is computed from actual canonical attachment bytes. Paired standalone devices fetch missing media through the authenticated source-session binary route. Remote Hosts receive the same bytes through the existing resumable attachment uploader; target-side preflight verifies SHA-256, length, and media type and materializes permanent media references. Canonical URIs and the sequence digest remain stable across staging. Every carriage mode must be locally verifiable before acceptance.
+
+Remote Host handoff is an explicit action over an isolated configured Host transport, without changing active routing. It obtains the destination's own admin consent, accepts a locked target, commits the source, and then unlocks the target. If the last response is lost, retry completes the target commit without importing another conversation. Both import paths write the target lock atomically with the transcript; canonical digest and attachment-manifest mismatches are refused before import.
+
+Server-authoritative shared conversations cannot use portable-copy handoff: changing their executor must keep the existing collaboration identity and use its authorized execution lease. History ownership caches are scoped to the account database, runtime target, and routing generation, and invalidated on connection changes and committed handoffs. In-flight responses from an obsolete scope cannot publish ownership or persist history into a newly selected account.

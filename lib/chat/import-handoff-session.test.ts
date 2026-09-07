@@ -1,4 +1,4 @@
-import { importHandoffSession } from "./import-handoff-session"
+import { importHandoffSession, canonicalTurnToHandoffMessage } from "./import-handoff-session"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSession } from "@/lib/db/sessions"
@@ -16,6 +16,63 @@ beforeEach(async () => {
 afterAll(dbFixture.dispose)
 
 describe("importHandoffSession", () => {
+  it("imports structured turns and the target lock atomically, with stable scoped message ids", async () => {
+    const message = canonicalTurnToHandoffMessage({
+      turnId: "turn",
+      role: "assistant",
+      text: "Answer",
+      reasoning: "Why",
+      parts: [
+        { type: "file", uri: "cognia-media:hash", name: "image.png", mediaType: "image/png" },
+      ],
+      toolCalls: [
+        { callId: "complete", toolName: "read", status: "completed", resultText: "contents" },
+        { callId: "pending", toolName: "write", status: "running" },
+      ],
+    })
+    const params = {
+      sessionId: "handoff",
+      handoffSource: "thread-handoff" as const,
+      messages: [message],
+      handoffLock: { ticketId: "ticket", state: "frozen" as const, targetHostRef: "phone", at: 1 },
+      now: 1,
+    }
+    await importHandoffSession(params)
+    await importHandoffSession(params)
+    const rows = await listMessages("handoff")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toBe("handoff:turn")
+    expect(rows[0].parts).toEqual(
+      expect.arrayContaining([
+        { type: "reasoning", text: "Why", state: "done" },
+        expect.objectContaining({ type: "file", url: "cognia-media:hash" }),
+        expect.objectContaining({
+          toolCallId: "complete",
+          state: "output-available",
+          output: "contents",
+        }),
+        expect.objectContaining({ toolCallId: "pending", state: "output-error" }),
+      ])
+    )
+    expect((await getSession("handoff"))?.handoffLock?.ticketId).toBe("ticket")
+    expect(await getDb().messageMediaRefs.get(["handoff:turn", "hash"])).toBeDefined()
+  })
+
+  it("refuses a locked handoff target collision without making a second writable copy", async () => {
+    await getDb().sessions.put({ id: "native", title: "Original", createdAt: 1, updatedAt: 1 })
+    const before = await getDb().sessions.count()
+    await expect(
+      importHandoffSession({
+        sessionId: "native",
+        handoffSource: "thread-handoff",
+        messages: [],
+        handoffLock: { ticketId: "ticket", state: "frozen", targetHostRef: "target", at: 1 },
+      })
+    ).rejects.toThrow("thread_handoff_target_session_collision")
+    expect(await getDb().sessions.count()).toBe(before)
+    expect((await getSession("native"))?.title).toBe("Original")
+  })
+
   it("creates a continuable session from a CLI transcript", async () => {
     const session = await importHandoffSession({
       sessionId: "s_cli_1",

@@ -77,5 +77,17 @@
   "toggleApprover": "Toggle high-risk approver for {user}",
   "updateFailed": "The membership changed elsewhere or could not be updated.",
   "userId": "User ID",
-  "userIdPlaceholder": "usr_…"
+  "userIdPlaceholder": "usr_…",
+  "joinDescription": "Paste the invitation token from a conversation member.",
+  "revokeInvite": "Revoke",
+  "inviteExpired": "Expired",
+  "inviteExpires": "Expires {date}",
+  "leaveConversation": "Leave conversation",
+  "leftConversation": "You left the shared conversation.",
+  "leaveFailed": "Could not leave the conversation. Refresh membership and retry.",
+  "transferBeforeLeaving": "Promote another member to Owner before leaving. The last owner cannot leave.",
+  "requestAI": "Request AI",
+  "takeoverExecution": "Take over execution",
+  "connected": "Connected",
+  "connectionStale": "Reconnecting · draft stays local"
 }

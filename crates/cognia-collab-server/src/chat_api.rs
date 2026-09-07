@@ -203,6 +203,7 @@ pub fn routes() -> Router<AppState> {
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/queue",
             get(list_run_queue).post(enqueue_run_input),
         )
+        .route("/v1/orgs/{org_id}/chat-sessions/{session_id}/queue/claim", post(claim_run_queue))
         .route(
             "/v1/orgs/{org_id}/chat-sessions/{session_id}/queue/{item_id}",
             delete(cancel_run_queue_item),
@@ -778,19 +779,22 @@ async fn patch_member(
             .send(policy_event(&session_id, &user_id, (state.now)()));
     Ok(Json(member))
 }
+fn member_removal_action(actor_user_id: &str, target_user_id: &str) -> SessionAction {
+    if actor_user_id == target_user_id {
+        SessionAction::Read
+    } else {
+        SessionAction::ManageMembers
+    }
+}
+
 async fn remove_member(
     State(state): State<AppState>,
     Path((org_id, session_id, user_id)): Path<(String, String, String)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, ChatFailure> {
-    let (_, actor) = visible(
-        &state,
-        &headers,
-        &org_id,
-        &session_id,
-        SessionAction::ManageMembers,
-    )
-    .await?;
+    let grant = claims(&state, &headers, &org_id).await?;
+    let action = member_removal_action(grant.user_id.as_str(), &user_id);
+    let (_, actor) = visible(&state, &headers, &org_id, &session_id, action).await?;
     let existing = state
         .chat_store
         .list_members(&org_id, &session_id)
@@ -1578,6 +1582,79 @@ async fn acquire_run_lease(
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ClaimQueueBody {
+    run_id: String,
+    device_id: String,
+    operation_id: String,
+    queue_item_id: String,
+    token: String,
+    #[serde(default)]
+    takeover: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaimQueueResponse {
+    lease: crate::chat_store::ChatRunLease,
+    item: crate::chat_store::ChatRunQueueItem,
+    token: String,
+}
+async fn claim_run_queue(
+    State(state): State<AppState>,
+    Path((org_id, session_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<ClaimQueueBody>,
+) -> Result<Json<ClaimQueueResponse>, ChatFailure> {
+    let (session, member) = visible(
+        &state,
+        &headers,
+        &org_id,
+        &session_id,
+        SessionAction::StartRun,
+    )
+    .await?;
+    if session.status != SessionStatus::Active {
+        return Err(ChatFailure::Forbidden);
+    }
+    if body.token.len() < 32
+        || body.token.len() > 256
+        || body.run_id.trim().is_empty()
+        || body.device_id.trim().is_empty()
+        || body.operation_id.trim().is_empty()
+    {
+        return Err(ChatFailure::BadRequest("invalid queue claim".into()));
+    }
+    let now = (state.now)();
+    let (lease, item) = state
+        .chat_store
+        .claim_run_queue(
+            NewChatRunLease {
+                id: format!("lease_{}", Uuid::new_v4().simple()),
+                org_id,
+                workspace_id: session.workspace_id,
+                session_id,
+                run_id: body.run_id,
+                holder_user_id: member.user_id,
+                holder_device_id: body.device_id,
+                token_hash: token_hash(&body.token),
+                token_expires_at: now + LEASE_TOKEN_TTL_MS,
+                heartbeat_expires_at: now + LEASE_HEARTBEAT_TTL_MS,
+                now,
+                operation_id: body.operation_id,
+            },
+            &body.queue_item_id,
+            body.takeover,
+        )
+        .await
+        .map_err(ChatFailure::Store)?;
+    Ok(Json(ClaimQueueResponse {
+        lease,
+        item,
+        token: body.token,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct HeartbeatBody {
     device_id: String,
     token: String,
@@ -1679,17 +1756,37 @@ async fn enqueue_run_input(
     if body.payload.is_null() || body.operation_id.trim().is_empty() {
         return Err(ChatFailure::BadRequest("queue input is incomplete".into()));
     }
-    if state
+    let message_id = body
+        .payload
+        .get("messageId")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| ChatFailure::BadRequest("AI request requires a durable messageId".into()))?;
+    let message = state
         .chat_store
-        .active_run_lease(&org_id, &session_id, (state.now)())
+        .get_message_event(&org_id, &session_id, message_id)
         .await
-        .map_err(ChatFailure::Store)?
-        .is_none()
+        .map_err(ChatFailure::Store)?;
+    if message
+        .payload
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        != Some("user")
     {
-        return Err(ChatFailure::Store(StoreError::Conflict(
-            serde_json::json!({"reason":"no_active_run"}),
-        )));
+        return Err(ChatFailure::BadRequest(
+            "AI request must reference a user message".into(),
+        ));
     }
+    let redacted = state
+        .chat_store
+        .redacted_message_ids(&org_id, &session_id)
+        .await
+        .map_err(ChatFailure::Store)?;
+    if redacted.iter().any(|id| id == message_id) {
+        return Err(ChatFailure::BadRequest(
+            "AI request references a redacted message".into(),
+        ));
+    }
+    let payload = serde_json::json!({"messageId": message_id, "parts": message.payload.get("parts"), "contextSequence": message.sequence});
     let item = state
         .chat_store
         .enqueue_run_input(NewChatRunQueueItem {
@@ -1698,7 +1795,7 @@ async fn enqueue_run_input(
             workspace_id: session.workspace_id.clone(),
             session_id: session_id.clone(),
             requested_by_user_id: member.user_id.clone(),
-            payload: body.payload,
+            payload,
             now: (state.now)(),
             operation_id: body.operation_id.clone(),
         })
@@ -1811,7 +1908,12 @@ async fn append_run_event(
     require_shared_chat_protocol(&headers)?;
     if !matches!(
         body.kind.as_str(),
-        "message.created" | "run.started" | "run.paused" | "run.completed" | "run.failed"
+        "message.created"
+            | "message.corrected"
+            | "run.started"
+            | "run.paused"
+            | "run.completed"
+            | "run.failed"
     ) {
         return Err(ChatFailure::BadRequest(
             "run event kind is not writable".into(),
@@ -1832,27 +1934,55 @@ async fn append_run_event(
         )
         .await
         .map_err(|_| ChatFailure::Unauthorized)?;
-    let (session, _) = state
+    let (session, member) = state
         .chat_store
         .visible_session(&org_id, &session_id, &lease.holder_user_id)
         .await
         .map_err(ChatFailure::Store)?
         .ok_or(ChatFailure::Hidden)?;
+    if !authorize_session_action(
+        Some(&member),
+        SessionAction::StartRun,
+        session.policy_revision,
+    )
+    .allowed
+    {
+        return Err(ChatFailure::Forbidden);
+    }
+    if body.kind == "message.corrected" {
+        let target = body
+            .payload
+            .get("targetMessageId")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| ChatFailure::BadRequest("missing correction target".into()))?;
+        let original = state
+            .chat_store
+            .get_message_event(&org_id, &session_id, target)
+            .await
+            .map_err(ChatFailure::Store)?;
+        if original.actor_id != format!("run:{run_id}") {
+            return Err(ChatFailure::Forbidden);
+        }
+    }
     let event = state
         .chat_store
-        .append_session_event(NewSessionEvent {
-            id: format!("evt_{}", Uuid::new_v4().simple()),
-            org_id,
-            workspace_id: session.workspace_id,
-            session_id: session_id.clone(),
-            kind: body.kind,
-            actor_kind: "agent".into(),
-            actor_id: format!("run:{run_id}"),
-            actor_label: None,
-            payload: body.payload,
-            now: (state.now)(),
-            operation_id: body.operation_id,
-        })
+        .append_session_run_event(
+            NewSessionEvent {
+                id: format!("evt_{}", Uuid::new_v4().simple()),
+                org_id,
+                workspace_id: session.workspace_id,
+                session_id: session_id.clone(),
+                kind: body.kind,
+                actor_kind: "agent".into(),
+                actor_id: format!("run:{run_id}"),
+                actor_label: None,
+                payload: body.payload,
+                now: (state.now)(),
+                operation_id: body.operation_id,
+            },
+            &run_id,
+            &token_hash(token),
+        )
         .await
         .map_err(ChatFailure::Store)?;
     let _ = state.chat_hub.sender(&session_id).send(event.clone());
@@ -1898,6 +2028,15 @@ async fn create_approval(
         SessionAction::StartRun,
     )
     .await?;
+    let lease = state
+        .chat_store
+        .active_run_lease(&org_id, &session_id, (state.now)())
+        .await
+        .map_err(ChatFailure::Store)?
+        .ok_or(ChatFailure::Gone)?;
+    if lease.run_id != body.run_id || lease.holder_user_id != member.user_id {
+        return Err(ChatFailure::Forbidden);
+    }
     let now = (state.now)();
     if body.action.trim().is_empty()
         || !matches!(body.risk.as_str(), "ordinary" | "high")
@@ -1977,6 +2116,15 @@ async fn resolve_approval(
         .get_approval(&org_id, &session_id, &approval_id)
         .await
         .map_err(ChatFailure::Store)?;
+    let lease = state
+        .chat_store
+        .active_run_lease(&org_id, &session_id, (state.now)())
+        .await
+        .map_err(ChatFailure::Store)?
+        .ok_or(ChatFailure::Gone)?;
+    if lease.run_id != approval.run_id {
+        return Err(ChatFailure::Gone);
+    }
     if approval.expires_at <= (state.now)() {
         state.chat_metrics.approval_expired();
         return Err(ChatFailure::Gone);
@@ -2391,6 +2539,21 @@ async fn delete_attachment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leaving_requires_membership_but_removing_others_requires_management() {
+        assert_eq!(
+            member_removal_action("member", "member").as_str(),
+            "session.read"
+        );
+        assert_eq!(
+            member_removal_action("member", "other").as_str(),
+            "session.manageMembers"
+        );
+        assert!(
+            !authorize_session_action(None, member_removal_action("member", "member"), 1).allowed
+        );
+    }
 
     #[test]
     fn socket_tickets_are_single_use_and_expire() {

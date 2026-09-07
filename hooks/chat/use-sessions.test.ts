@@ -109,6 +109,8 @@ jest.mock("@/lib/platform/web-companion", () => ({
 const hydrateSessionHistoryMock = jest.fn()
 jest.mock("@/lib/sync/session-history", () => ({
   hydrateSessionHistory: (...args: unknown[]) => hydrateSessionHistoryMock(...args),
+  getSessionHistoryMode: jest.fn(() => null),
+  subscribeSessionHistoryMode: jest.fn(() => () => {}),
 }))
 
 const enqueueHostStateIntentMock = jest.fn().mockResolvedValue(null)
@@ -354,6 +356,29 @@ describe("useSessions", () => {
     renderHook(() => useSessions())
     await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "m1" }]))
     expect(chatStoreState.hydrateSessionActiveBranches).toHaveBeenCalledWith("s1", {})
+  })
+
+  it("refreshes the visible shared transcript when its applied cursor advances", async () => {
+    chatStoreState.activeSessionId = "s1"
+    chatStoreState.sessions.s1 = { messages: [] }
+    liveQueryMock.mockReturnValue([{ id: "s1", collaboration: { syncCursor: 0 } }])
+    listMessagesMock.mockResolvedValue([])
+    const { rerender } = renderHook(() => useSessions())
+    await waitFor(() => expect(chatStoreState.setMessages).toHaveBeenCalledWith([]))
+    chatStoreState.setMessages.mockClear()
+    listMessagesMock.mockResolvedValue([{ id: "incoming" }])
+    liveQueryMock.mockReturnValue([{ id: "s1", collaboration: { syncCursor: 1 } }])
+    rerender()
+    await waitFor(() =>
+      expect(chatStoreState.setMessages).toHaveBeenCalledWith([{ id: "incoming" }])
+    )
+    chatStoreState.setMessages.mockClear()
+    liveQueryMock.mockReturnValue([
+      { id: "s1", collaboration: { syncCursor: 1 } },
+      { id: "other", collaboration: { syncCursor: 2 } },
+    ])
+    rerender()
+    expect(chatStoreState.setMessages).not.toHaveBeenCalled()
   })
 
   it("does not replace a newer live first turn with a stale hydration order", async () => {

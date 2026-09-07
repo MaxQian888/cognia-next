@@ -7,6 +7,11 @@ import "fake-indexeddb/auto"
 import { getDb } from "@/lib/db/schema"
 import { isConnectorRuntimeOwnedHere } from "@/lib/connectors/bootstrap/install-connector-runtime"
 
+jest.mock("@/lib/thread-handoff/host-dispatch", () => {
+  const actual = jest.requireActual("@/lib/thread-handoff/host-dispatch")
+  return { ...actual, dispatchThreadHandoffCommand: jest.fn(actual.dispatchThreadHandoffCommand) }
+})
+
 const mockActiveRuntimeTarget = jest.fn()
 // ADR-0131 §2.7 — relayed Inbox writes only run on the process that owns the
 // connector runtime. These tests exercise the host arms, so model an owner;
@@ -2273,4 +2278,39 @@ describe("relayed Bot writes on a process with no delivery runner", () => {
     )
     expect(isRetryable(error)).toBe(true)
   })
+})
+
+it("routes the handoff import to its authoritative session channel", async () => {
+  const handoff = await import("@/lib/thread-handoff/host-dispatch")
+  const spy = jest
+    .mocked(handoff.dispatchThreadHandoffCommand)
+    .mockImplementationOnce(async (_command, _payload, deps) => {
+      await deps.importSession({} as never, "target-session")
+      return { ok: true }
+    })
+  mockHostStateService.submit.mockResolvedValueOnce({ results: [{ outcome: "applied" }] } as never)
+  try {
+    await dispatchCommand("thread_handoff_accept", {
+      callerAccountId: "local-default",
+      authoritativeHostId: "host-1",
+      callerDeviceId: "device",
+      ticket: { ticketId: "ticket" },
+    })
+    expect(mockHostStateService.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actions: [
+          expect.objectContaining({
+            channel: "cognia://target/target-a/sessions/target-session",
+            sessionId: "target-session",
+            action: { kind: "session.import", envelope: {} },
+          }),
+        ],
+      }),
+      expect.anything()
+    )
+  } finally {
+    spy.mockImplementation(
+      jest.requireActual("@/lib/thread-handoff/host-dispatch").dispatchThreadHandoffCommand
+    )
+  }
 })

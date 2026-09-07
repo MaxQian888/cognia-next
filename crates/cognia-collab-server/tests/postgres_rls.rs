@@ -4,6 +4,184 @@ use tokio_postgres::{Client, NoTls};
 const APP_ROLE: &str = "cognia_rls_app";
 
 #[tokio::test]
+#[ignore = "requires an isolated PostgreSQL instance"]
+async fn shared_chat_claim_is_atomic_and_survives_pool_reconnect() {
+    use cognia_collab_server::chat::{SessionRole, SessionStatus};
+    use cognia_collab_server::chat_store::{
+        ChatStore, NewChatRunLease, NewChatRunQueueItem, NewSessionEvent, NewSharedSession,
+    };
+    let url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL").unwrap();
+    let store = PgStore::connect(&url, 4).await.unwrap();
+    let scope = bootstrap("shared_queue");
+    store.bootstrap_operator(&scope).await.unwrap();
+    let mut participant = bootstrap("shared_participant");
+    participant.org_id = scope.org_id.clone();
+    participant.logto_organization_id = scope.logto_organization_id.clone();
+    participant.workspace_id = scope.workspace_id.clone();
+    store.bootstrap_operator(&participant).await.unwrap();
+    let session_id = format!("session_{}", uuid::Uuid::new_v4());
+    store
+        .create_session(NewSharedSession {
+            id: session_id.clone(),
+            org_id: scope.org_id.clone(),
+            workspace_id: scope.workspace_id.clone(),
+            title: "Queue integration".into(),
+            status: SessionStatus::Active,
+            created_by_user_id: scope.user_id.clone(),
+            now: 1,
+            operation_id: session_id.clone(),
+        })
+        .await
+        .unwrap();
+    store
+        .put_member(
+            &scope.org_id,
+            &session_id,
+            &scope.workspace_id,
+            &participant.user_id,
+            SessionRole::Member,
+            false,
+            false,
+            2,
+        )
+        .await
+        .unwrap();
+    // This executes the qualified-column discovery SQL, not an in-memory stand-in.
+    assert!(store
+        .list_sessions(&scope.org_id, &scope.user_id, Some(&scope.workspace_id))
+        .await
+        .unwrap()
+        .iter()
+        .any(|session| session.id == session_id));
+    let event = NewSessionEvent {
+        id: format!("event_{session_id}"),
+        org_id: scope.org_id.clone(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: session_id.clone(),
+        kind: "message.created".into(),
+        actor_kind: "human".into(),
+        actor_id: scope.user_id.clone(),
+        actor_label: None,
+        payload: serde_json::json!({"messageId":"question","role":"user","parts":[{"type":"text","text":"hello"}]}),
+        now: 2,
+        operation_id: format!("message_{session_id}"),
+    };
+    let durable = store.append_session_event(event.clone()).await.unwrap();
+    assert_eq!(store.append_session_event(event).await.unwrap(), durable);
+    let q1 = format!("q1_{session_id}");
+    let q2 = format!("q2_{session_id}");
+    for (id, now) in [(&q1, 3), (&q2, 4)] {
+        store
+            .enqueue_run_input(NewChatRunQueueItem {
+                id: id.clone(),
+                org_id: scope.org_id.clone(),
+                workspace_id: scope.workspace_id.clone(),
+                session_id: session_id.clone(),
+                requested_by_user_id: if id == &q1 {
+                    scope.user_id.clone()
+                } else {
+                    participant.user_id.clone()
+                },
+                payload: serde_json::json!({"messageId":"question"}),
+                now,
+                operation_id: id.clone(),
+            })
+            .await
+            .unwrap();
+    }
+    let lease = |device: &str| NewChatRunLease {
+        id: format!("lease_{device}_{session_id}"),
+        org_id: scope.org_id.clone(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: session_id.clone(),
+        run_id: format!("run_{device}_{session_id}"),
+        holder_user_id: scope.user_id.clone(),
+        holder_device_id: device.into(),
+        token_hash: format!("hash_{device}"),
+        token_expires_at: 100,
+        heartbeat_expires_at: 100,
+        now: 5,
+        operation_id: format!("claim_{device}_{session_id}"),
+    };
+    assert!(store
+        .claim_run_queue(lease("later"), &q2, false)
+        .await
+        .is_err());
+    let (first, second) = tokio::join!(
+        store.claim_run_queue(lease("desktop"), &q1, false),
+        store.claim_run_queue(lease("browser"), &q1, false),
+    );
+    assert_ne!(
+        first.is_ok(),
+        second.is_ok(),
+        "exactly one device must acquire the writer lease"
+    );
+    let (winner, item) = first.or(second).unwrap();
+    assert_eq!(item.payload["contextSequence"], durable.sequence);
+    drop(store);
+    let store = PgStore::connect(&url, 2).await.unwrap();
+    let replay = store
+        .claim_run_queue(lease(&winner.holder_device_id), &q1, false)
+        .await
+        .unwrap();
+    assert_eq!(replay.0, winner);
+    let mut takeover = lease("replacement");
+    takeover.holder_user_id = participant.user_id.clone();
+    takeover.now = 101;
+    takeover.token_expires_at = 200;
+    takeover.heartbeat_expires_at = 200;
+    assert!(store
+        .claim_run_queue(takeover.clone(), &q2, false)
+        .await
+        .is_err());
+    let (replacement, requested) = store.claim_run_queue(takeover, &q2, true).await.unwrap();
+    assert_eq!(requested.requested_by_user_id, participant.user_id);
+    store
+        .remove_member(&scope.org_id, &session_id, &participant.user_id, 102)
+        .await
+        .unwrap();
+    assert!(store
+        .validate_run_token(
+            &scope.org_id,
+            &session_id,
+            &replacement.run_id,
+            "hash_replacement",
+            103
+        )
+        .await
+        .is_err());
+    let stale = NewSessionEvent {
+        id: format!("late_{session_id}"),
+        org_id: scope.org_id.clone(),
+        workspace_id: scope.workspace_id.clone(),
+        session_id: session_id.clone(),
+        kind: "message.created".into(),
+        actor_kind: "agent".into(),
+        actor_id: format!("run:{}", winner.run_id),
+        actor_label: None,
+        payload: serde_json::json!({"messageId":"late","role":"assistant","parts":[]}),
+        now: 102,
+        operation_id: format!("late_{session_id}"),
+    };
+    assert!(store
+        .append_session_run_event(
+            stale,
+            &winner.run_id,
+            &format!("hash_{}", winner.holder_device_id)
+        )
+        .await
+        .is_err());
+    assert_eq!(
+        store
+            .list_session_events(&scope.org_id, &session_id, 0, 100)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires a real PostgreSQL instance and two database roles"]
 async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
     let admin_url = std::env::var("COLLAB_RLS_ADMIN_DATABASE_URL")
@@ -417,9 +595,9 @@ async fn assert_crud_and_cross_tenant_writes(client: &mut Client) {
     transaction
         .execute(
             "INSERT INTO issues (id, org_id, workspace_id, issue_project_id, title, status, \
-             priority, created_by_kind, created_by_id, created_at, updated_at) \
+             priority, created_by_kind, created_by_id, created_at, updated_at, created_operation_id, last_operation_id) \
              VALUES ('issue_rls', 'org_a', 'workspace_a', 'project_a', 'safe', 'open', \
-             'medium', 'human', 'usr_a', 10, 10)",
+             'medium', 'human', 'usr_a', 10, 10, 'rls_operation', 'rls_operation')",
             &[],
         )
         .await
@@ -465,9 +643,9 @@ async fn assert_crud_and_cross_tenant_writes(client: &mut Client) {
     let cross_tenant = transaction
         .execute(
             "INSERT INTO issues (id, org_id, workspace_id, issue_project_id, title, status, \
-             priority, created_by_kind, created_by_id, created_at, updated_at) \
+             priority, created_by_kind, created_by_id, created_at, updated_at, created_operation_id, last_operation_id) \
              VALUES ('issue_cross', 'org_b', 'workspace_b', 'project_b', 'blocked', 'open', \
-             'medium', 'human', 'usr_b', 10, 10)",
+             'medium', 'human', 'usr_b', 10, 10, 'rls_cross_operation', 'rls_cross_operation')",
             &[],
         )
         .await;
@@ -485,9 +663,9 @@ async fn assert_crud_and_cross_tenant_writes(client: &mut Client) {
     let mismatched_workspace = transaction
         .execute(
             "INSERT INTO issues (id, org_id, workspace_id, issue_project_id, title, status, \
-             priority, created_by_kind, created_by_id, created_at, updated_at) \
+             priority, created_by_kind, created_by_id, created_at, updated_at, created_operation_id, last_operation_id) \
              VALUES ('issue_fk', 'org_a', 'workspace_b', 'project_a', 'blocked', 'open', \
-             'medium', 'human', 'usr_a', 10, 10)",
+             'medium', 'human', 'usr_a', 10, 10, 'rls_operation', 'rls_operation')",
             &[],
         )
         .await;

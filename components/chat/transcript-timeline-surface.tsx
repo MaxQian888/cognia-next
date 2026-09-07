@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { UIMessage } from "ai"
 import type {
@@ -139,9 +139,14 @@ function collapsedMessages(item: Extract<TranscriptTimelineItem, { kind: "comple
 export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowCount = props.items.length + (props.liveMessages.length > 0 ? 1 : 0)
+  const getItemKey = useCallback(
+    (index: number) => `${props.sessionId}:${props.items[index]?.itemKey ?? "active-live-turn"}`,
+    [props.items, props.sessionId]
+  )
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual exposes imperative measurement methods
   const virtualizer = useVirtualizer({
     count: rowCount,
+    getItemKey,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 280,
     overscan: 4,
@@ -153,54 +158,6 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
   const newestCompletedItemKey = [...props.items]
     .reverse()
     .find((item) => item.kind === "completed-turn")?.itemKey
-
-  const renderItem = (item: TranscriptTimelineItem) => {
-    if (item.kind === "active-turn") {
-      return renderMessages(item.messages.map(fullMessage), true, props.renderAdapters)
-    }
-    if (item.kind === "system") {
-      return renderMessages(
-        [previewMessage(item.message, props.sessionId)],
-        false,
-        props.renderAdapters
-      )
-    }
-
-    const expanded = props.expandedTurnKeys.has(item.turnKey)
-    const detail = expanded ? props.getDetail(item.turnKey) : undefined
-    const messages =
-      detail?.messages.map(fullMessage) ??
-      collapsedMessages(item).map((message) => previewMessage(message, props.sessionId))
-    return (
-      <div data-turn-key={item.turnKey}>
-        {renderMessages(
-          messages,
-          false,
-          props.renderAdapters,
-          item.itemKey === newestCompletedItemKey && props.liveMessages.length === 0
-        )}
-        {expanded && !detail ? (
-          <p className="px-3 py-2 text-xs text-muted-foreground">{props.labels.loading}</p>
-        ) : null}
-        {item.collapsed.exists || detail ? (
-          <div className="px-3 pb-3 sm:px-5">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                expanded
-                  ? props.onCollapse(item.turnKey)
-                  : props.onExpand(item.turnKey, item.revision, item.detailRevision)
-              }
-            >
-              {expanded ? props.labels.collapse : props.labels.expand}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    )
-  }
 
   return (
     <PerfBoundary id="chat:transcript-timeline">
@@ -238,22 +195,40 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
               const isLive = virtualItem.index === props.items.length
               return (
                 <div
-                  key={isLive ? "active-live-turn" : item?.itemKey}
+                  key={virtualItem.key}
                   ref={virtualizer.measureElement}
                   data-index={virtualItem.index}
                   className="absolute left-0 top-0 w-full"
                   style={{ transform: `translateY(${virtualItem.start}px)` }}
                 >
-                  {isLive
-                    ? renderMessages(
-                        props.liveMessages,
-                        props.liveStatus === "streaming",
-                        props.renderAdapters,
-                        true
-                      )
-                    : item
-                      ? renderItem(item)
-                      : null}
+                  {isLive ? (
+                    renderMessages(
+                      props.liveMessages,
+                      props.liveStatus === "streaming",
+                      props.renderAdapters,
+                      true
+                    )
+                  ) : item ? (
+                    <TranscriptTimelineRow
+                      item={item}
+                      sessionId={props.sessionId}
+                      expanded={
+                        item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
+                      }
+                      detail={
+                        item.kind === "completed-turn" && props.expandedTurnKeys.has(item.turnKey)
+                          ? props.getDetail(item.turnKey)
+                          : undefined
+                      }
+                      adapters={props.renderAdapters}
+                      allowRegenerate={
+                        item.itemKey === newestCompletedItemKey && props.liveMessages.length === 0
+                      }
+                      labels={props.labels}
+                      onExpand={props.onExpand}
+                      onCollapse={props.onCollapse}
+                    />
+                  ) : null}
                 </div>
               )
             })}
@@ -261,5 +236,65 @@ export function TranscriptTimelineSurface(props: TranscriptTimelineSurfaceProps)
         </div>
       </div>
     </PerfBoundary>
+  )
+}
+
+/** Keep canonical message identities stable while adjacent rows stream or scroll. */
+function TranscriptTimelineRow({
+  item,
+  sessionId,
+  expanded,
+  detail,
+  adapters,
+  allowRegenerate,
+  labels,
+  onExpand,
+  onCollapse,
+}: {
+  item: TranscriptTimelineItem
+  sessionId: string
+  expanded: boolean
+  detail?: SessionTurnMessagesPage
+  adapters: TranscriptTimelineSurfaceProps["renderAdapters"]
+  allowRegenerate: boolean
+  labels: TranscriptTimelineLabels
+  onExpand: TranscriptTimelineSurfaceProps["onExpand"]
+  onCollapse: TranscriptTimelineSurfaceProps["onCollapse"]
+}) {
+  const messages = useMemo(() => {
+    if (item.kind === "active-turn") return item.messages.map(fullMessage)
+    if (item.kind === "system") return [previewMessage(item.message, sessionId)]
+    return (
+      detail?.messages.map(fullMessage) ??
+      collapsedMessages(item).map((message) => previewMessage(message, sessionId))
+    )
+  }, [item, detail, sessionId])
+
+  if (item.kind !== "completed-turn") {
+    return renderMessages(messages, item.kind === "active-turn", adapters)
+  }
+  return (
+    <div data-turn-key={item.turnKey}>
+      {renderMessages(messages, false, adapters, allowRegenerate)}
+      {expanded && !detail ? (
+        <p className="px-3 py-2 text-xs text-muted-foreground">{labels.loading}</p>
+      ) : null}
+      {item.collapsed.exists || detail ? (
+        <div className="px-3 pb-3 sm:px-5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              expanded
+                ? onCollapse(item.turnKey)
+                : onExpand(item.turnKey, item.revision, item.detailRevision)
+            }
+          >
+            {expanded ? labels.collapse : labels.expand}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   )
 }

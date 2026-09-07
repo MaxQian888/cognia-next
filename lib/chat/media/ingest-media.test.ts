@@ -1,3 +1,4 @@
+import { activateAccountDatabase, __resetDbForTesting } from "@/lib/db/schema"
 // Coverage for the single minting point of chat media. jsdom has no canvas, so
 // `downscaleImage` / `measureImage` return their input unchanged — that is the
 // documented degradation, and it lets these tests pin the policy (hashing,
@@ -184,4 +185,14 @@ describe("ingestImageDataUrl", () => {
 
     expect((await getMessageMedia(result!.ref))?.createdAt).toBe(99)
   })
+})
+
+it("does not persist a pending image into an account selected during hashing", async () => {
+  const task = ingestImage({ bytes: bytesOf("scope"), mediaType: "image/png" })
+  activateAccountDatabase("acct-other-media")
+  try {
+    await expect(task).rejects.toThrow("media_ingest_scope_changed")
+  } finally {
+    __resetDbForTesting()
+  }
 })

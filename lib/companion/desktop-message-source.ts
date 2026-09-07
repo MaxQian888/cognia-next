@@ -646,8 +646,8 @@ async function transcriptRevision(sessionId: string): Promise<{
 
 /**
  * Read the newest completed turns without materializing the full session.
- * The cursor position counts raw rows from the newest edge; scanning stops as
- * soon as the requested number of user turn boundaries has been collected.
+ * The cursor position counts raw rows from the newest edge; scanning stops
+ * at complete turn boundaries, including explicitly keyed multi-message turns.
  */
 export async function readTranscriptTimeline(
   request: SessionTimelineRequest
@@ -671,8 +671,8 @@ export async function readTranscriptTimeline(
   }
 
   const rowsDescending: StoredMessage[] = []
-  const explicitTurns = new Set<string>()
-  let implicitTurns = 0
+  let completedTurns = 0
+  let completeRowCount = 0
   let reachedLimit = false
   const collection = () =>
     getDb()
@@ -687,23 +687,45 @@ export async function readTranscriptTimeline(
       .toArray()
     if (chunk.length === 0) break
     for (const row of chunk) {
-      rowsDescending.push(row)
-      if (row.turnKey) {
-        explicitTurns.add(row.turnKey)
-      } else if (row.role === "user") {
-        implicitTurns += 1
+      const newer = rowsDescending.at(-1)
+      if (newer?.turnKey && newer.turnKey !== row.turnKey) {
+        completedTurns += 1
+        completeRowCount = rowsDescending.length
+        if (completedTurns >= limit) {
+          reachedLimit = true
+          break
+        }
       }
-      if (explicitTurns.size + implicitTurns >= limit) {
-        reachedLimit = true
-        break
+      rowsDescending.push(row)
+      if (!row.turnKey && row.role === "user") {
+        completedTurns += 1
+        completeRowCount = rowsDescending.length
+        if (completedTurns >= limit) {
+          reachedLimit = true
+          break
+        }
       }
       if (rowsDescending.length >= TRANSCRIPT_MAX_SCANNED_MESSAGES) break
     }
     if (chunk.length < TRANSCRIPT_SCAN_CHUNK) break
   }
 
-  const nextPosition = position + rowsDescending.length
-  const hasMore = (await collection().offset(nextPosition).limit(1).count()) > 0
+  const following = await collection()
+    .offset(position + rowsDescending.length)
+    .first()
+  if (!reachedLimit && following && rowsDescending.length >= TRANSCRIPT_MAX_SCANNED_MESSAGES) {
+    const oldest = rowsDescending.at(-1)
+    if (oldest?.turnKey && oldest.turnKey !== following.turnKey) {
+      completeRowCount = rowsDescending.length
+    }
+    if (rowsDescending.every((row) => row.role === "system" && !row.turnKey)) {
+      completeRowCount = rowsDescending.length
+    }
+    // Never publish a fragment under a complete turn's itemKey: subsequent
+    // pages would reuse that key and the client would discard part of it.
+    if (completeRowCount === 0) throw transcriptError("INVALID_PARAMS")
+    rowsDescending.length = completeRowCount
+  }
   const rows = rowsDescending.reverse()
   const projected = projectTranscriptTimeline({
     sessionId: request.sessionId,
@@ -712,6 +734,19 @@ export async function readTranscriptTimeline(
     activeBranchByGroup: session.activeBranchByGroup,
   })
   const items = projected.slice(-limit)
+  // A leading system row is a timeline item too. If the page budget excludes
+  // it, leave its raw position for the next request instead of skipping it.
+  const first = items[0]
+  const firstRow = first
+    ? rows.findIndex((row) =>
+        first.kind === "system"
+          ? row.id === first.message.id
+          : row.turnKey === first.turnKey || `turn:${row.id}` === first.turnKey
+      )
+    : 0
+  const consumedRows = rows.length - Math.max(0, firstRow)
+  const nextPosition = position + consumedRows
+  const hasMore = Boolean(following) || consumedRows < rows.length
   // The summary index is a resumable cache, never a prerequisite for showing
   // the bounded page that was already read successfully. Quota/private-mode
   // failures must not turn a valid transcript response into a server error.
@@ -756,17 +791,21 @@ async function readImplicitTurn(sessionId: string, turnKey: string): Promise<Sto
   const anchorId = turnKey.startsWith("turn:") ? turnKey.slice("turn:".length) : ""
   const anchor = anchorId ? await getDb().messages.get(anchorId) : undefined
   if (!anchor || anchor.sessionId !== sessionId) throw transcriptError("TURN_NOT_FOUND")
-  const candidates = await getDb()
-    .messages.where("[sessionId+createdAt]")
-    .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
-    .toArray()
-  const rows: StoredMessage[] = []
-  for (const row of candidates) {
-    if (rows.length > 0 && row.role === "user" && !row.turnKey) break
-    if (row.turnKey && row.turnKey !== turnKey) break
-    rows.push(row)
-  }
-  return rows
+  return (
+    getDb()
+      .messages.where("[sessionId+createdAt]")
+      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
+      // IndexedDB orders equal index keys by primary key. A timestamp alone
+      // includes earlier messages and can stop at the requested user as though
+      // it were the next turn.
+      .filter((row) => row.createdAt !== anchor.createdAt || row.id >= anchor.id)
+      .until(
+        (row) =>
+          row.id !== anchor.id &&
+          ((!row.turnKey && row.role === "user") || Boolean(row.turnKey && row.turnKey !== turnKey))
+      )
+      .toArray()
+  )
 }
 
 /** Read one completed turn with both count and serialized-byte page budgets. */

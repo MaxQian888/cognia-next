@@ -4,10 +4,10 @@ import type { CredentialReference } from "@cognia/provider-types/provider-profil
 
 import { getThreadHandoffTicket } from "@/lib/db/thread-handoff-tickets"
 import { completeHostDispatch } from "@/lib/db/host-dispatch-queue"
-import { getDb } from "@/lib/db/schema"
 import { getAllProjects } from "@/lib/db/projects"
+import { allRootPaths } from "@/lib/workspace/roots"
 import { listDeploymentProfiles, listProviderProfiles } from "@/lib/db/provider-profiles"
-import { parseUploadRef } from "@/lib/db/session-attachment-uploads"
+import { verifiedThreadHandoffAttachmentRefs } from "./attachments"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
 import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
@@ -61,18 +61,12 @@ export async function buildThreadHandoffPreflightEnvironment(
     getAllProjects(),
   ])
   const manifest = buildLocalHostFeatureManifest({ platform })
-  const attachmentRefs: string[] = []
-  for (const attachment of ticket.attachments) {
-    const uploadId = parseUploadRef(attachment.ref)
-    if (!uploadId) continue
-    const row = await getDb().sessionAttachmentUploads.get(uploadId)
-    if (row?.status === "committed" && attachment.ref) attachmentRefs.push(attachment.ref)
-  }
+  const attachmentRefs = await verifiedThreadHandoffAttachmentRefs(ticket)
 
   // One detection, three reads: three calls could disagree if detection ever
   // stops being pure, and a preflight that reports capabilities inconsistent
   // with its own `nativeRuntimeAvailable` is worse than a slow one.
-  const capabilities = [...detectLocalCapabilities()]
+  const capabilities = [...detectLocalCapabilities(), "thread-handoff-structured-v1"]
 
   return {
     capabilities,
@@ -97,12 +91,11 @@ export async function buildThreadHandoffPreflightEnvironment(
     credentialProfileRefs: deployments.flatMap((deployment) =>
       deployment.credentialProfileRef ? [credentialRefId(deployment.credentialProfileRef)] : []
     ),
-    workspaceRefs: projects.flatMap((project) =>
-      [project.id, project.path].filter((value): value is string => typeof value === "string")
-    ),
+    workspaceRefs: projects.flatMap((project) => [project.id, ...allRootPaths(project)]),
     attachmentRefs,
     protocolVersion: manifest.protocol.max,
-    nativeRuntimeAvailable: capabilities.includes("sidecar") || capabilities.includes("shell"),
+    // Shell availability does not establish that this host holds the source native session.
+    nativeRuntimeAvailable: false,
   }
 }
 

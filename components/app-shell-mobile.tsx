@@ -62,6 +62,8 @@ import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
+import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
+import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
@@ -468,6 +470,7 @@ export function AppShellMobile() {
             <SheetHeader className="sr-only">
               <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
             </SheetHeader>
+            <SharedSessionJoin />
             <div className="flex flex-1 overflow-hidden">
               {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
                   phone viewport never reaches `md`, so the default rail variant
@@ -661,6 +664,11 @@ export function AppShellMobile() {
           </DropdownMenu>
         </div>
       </header>
+      {activeSession ? (
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b px-3 py-1">
+          <SharedSessionPanel session={activeSession} />
+        </div>
+      ) : null}
 
       <PerfCaptureShellStatus className="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-destructive/5 px-3 text-xs" />
 
