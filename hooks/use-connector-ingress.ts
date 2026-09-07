@@ -29,11 +29,12 @@
  * tunnel.
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
+import { getTunnelInfo } from "@/lib/connectivity/tunnel-resolver"
 import { resolveLarkApiBase } from "@/lib/connectors/lark-web/entry-client"
 import { resolveConnectorsIngressBase } from "@/lib/connectors/server-transport"
 
@@ -87,7 +88,18 @@ function defaultPublicOrigin(): string | null {
 
 export function useConnectorIngress(options: UseConnectorIngressOptions = {}): ConnectorIngress {
   const profile = useHostProfile()
-  const tunnel = useTunnelStatus(options.tunnelLoader)
+
+  // Only the desktop has a cloudflared bridge to ask. `useTunnelStatus` polls
+  // on an interval for as long as it is mounted, so calling it unconditionally
+  // would have every cloud and mobile shell invoking a desktop-only Tauri
+  // command every three seconds, forever, for an answer it never reads. A hook
+  // cannot be called conditionally, so the loader is what gets swapped.
+  const { tunnelLoader } = options
+  const loadTunnel = useCallback(
+    () => (profile === "desktop" ? (tunnelLoader ?? getTunnelInfo)() : Promise.resolve(null)),
+    [profile, tunnelLoader]
+  )
+  const tunnel = useTunnelStatus(loadTunnel)
   const loadEndpoints = options.loadCompanionEndpoints ?? refreshCompanionEndpoints
   const readOrigin = options.publicOrigin ?? defaultPublicOrigin
 

@@ -48,7 +48,8 @@ import {
 } from "@/lib/connectivity/tunnel-resolver"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
+import { CONNECTORS_SERVER_PORT, connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { useConnectorIngress, type ConnectorIngressReason } from "@/hooks/use-connector-ingress"
 import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 
 // The Rust axum connectors server binds plain HTTP on the loopback interface,
@@ -57,20 +58,20 @@ import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 // server fails the TLS handshake (cloudflared → 502).
 const DEFAULT_LOCAL_URL = `http://127.0.0.1:${CONNECTORS_SERVER_PORT}`
 
-// Paths MUST match the Rust axum routes (axum_app.rs) and each adapter's own
-// config form (`/webhook/<type>/<id>`). The previous `/connectors/...` prefix
-// 404'd, so every URL this card surfaced was wrong.
-const ADAPTER_WEBHOOK_PATH: Record<string, (id: string) => string | null> = {
-  lark: (id) => `/webhook/lark/${id}`,
-  slack: (id) => `/webhook/slack/${id}`,
-  telegram: (id) => `/webhook/telegram/${id}`,
-  "wechat-oa": (id) => `/webhook/wechat-oa/${id}`,
-  "qq-official": (id) => `/webhook/qq-official/${id}`,
-  // Discord is gateway-only until the adapter starts an Interactions webhook
-  // transport and handles Discord PING callbacks.
-  discord: () => null,
-  // OneBot uses reverse-WS, not webhook — no public URL.
-  onebot: () => null,
+/**
+ * Which empty-state string a missing ingress base earns.
+ *
+ * `loading` cannot reach here: the row only renders this branch once
+ * `ingress.base` is known to be absent, and a probe still out reports
+ * `loading` with no base, so it maps to the same wording as tunnel-off rather
+ * than being unreachable-by-assertion.
+ */
+const INGRESS_EMPTY_KEY: Record<ConnectorIngressReason, string> = {
+  ready: "tunnelOff",
+  loading: "tunnelOff",
+  "tunnel-off": "tunnelOff",
+  "origin-missing": "originMissing",
+  unsupported: "unsupported",
 }
 
 export interface TunnelTabProps {
@@ -85,6 +86,12 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
   // desktop" is wrong for a server deployment that does not use a tunnel at
   // all. The block decides which sentence, the gate stays the same.
   const reach = useConnectorControlReach("desktop-shell")
+  // The status card above keeps reading `info`, which is a read-only
+  // projection of the paired companion's tunnel and is the right source for
+  // "is a tunnel running". The webhook list below is answering a different
+  // question, which address a platform must be given, and a cloud host
+  // answers it from its own origin with no tunnel in the picture.
+  const ingress = useConnectorIngress()
   const desktop = reach.available
   const [info, setInfo] = useState<TunnelInfo | null>(null)
   const [config, setConfig] = useState<{
@@ -352,10 +359,20 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
           ) : (
             <ul className="space-y-2">
               {(adapters ?? []).map((adapter) => {
-                const builder = ADAPTER_WEBHOOK_PATH[adapter.type]
+                // Derived, not looked up. The Rust route is a single wildcard
+                // `/webhook/{adapter_type}/{adapter_id}` whose handler reads
+                // the type from `registered_adapters` and treats the path
+                // segment as informational, so a per-kind table encoded
+                // nothing the row does not already carry. It did encode a
+                // stale claim that Discord was gateway-only, which stopped
+                // Discord webhook rows getting a URL long after that transport
+                // shipped, and it silently answered "not applicable" for every
+                // plugin-contributed connector kind.
                 const path =
-                  adapter.transportMode === "webhook" && builder ? builder(adapter.id) : null
-                const url = path && info?.publicUrl ? `${info.publicUrl}${path}` : null
+                  adapter.transportMode === "webhook"
+                    ? connectorWebhookPath(adapter.type, adapter.id)
+                    : null
+                const url = path && ingress.base ? `${ingress.base}${path}` : null
                 return (
                   <li
                     key={adapter.id}
@@ -372,9 +389,12 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {t("webhookUrls.notApplicable")}
                       </p>
-                    ) : !info?.publicUrl ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {t("webhookUrls.tunnelOff")}
+                    ) : !ingress.base ? (
+                      <p
+                        className="mt-1 text-[11px] text-muted-foreground"
+                        data-testid={`tunnel-adapter-empty-${adapter.id}`}
+                      >
+                        {t(`webhookUrls.${INGRESS_EMPTY_KEY[ingress.reason]}`)}
                       </p>
                     ) : (
                       <div className="mt-1 flex items-center gap-2">

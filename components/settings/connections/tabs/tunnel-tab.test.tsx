@@ -217,7 +217,90 @@ describe("TunnelTab", () => {
     expect(screen.queryByTestId("tunnel-adapter-url-onebot-1")).not.toBeInTheDocument()
   })
 
-  it("does not advertise Discord interaction URLs while Discord is gateway-only", async () => {
+  it("gives a Discord row in webhook mode its interactions URL", async () => {
+    // A per-kind lookup table used to answer `null` for Discord with the
+    // comment "gateway-only until the adapter starts an Interactions webhook
+    // transport". That transport shipped, in the adapter and in Rust, and the
+    // table was never updated, so a Discord bot configured for webhook could
+    // not be told the one address it needed.
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "discord-2",
+        type: "discord",
+        displayName: "Discord Hook",
+        transportMode: "webhook",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-url-discord-2")).toHaveTextContent(
+        "https://abc.trycloudflare.com/webhook/discord/discord-2"
+      )
+    )
+  })
+
+  it("gives a plugin-contributed connector kind a URL too", async () => {
+    // The table listed six built-in kinds, so every kind a plugin contributes
+    // fell through to "not applicable" no matter how it was configured. The
+    // Rust route is one wildcard over `{adapter_type}`, so nothing about the
+    // kind was ever special.
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "plug-1",
+        type: "acme-chat",
+        displayName: "Acme Chat",
+        transportMode: "webhook",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-url-plug-1")).toHaveTextContent(
+        "https://abc.trycloudflare.com/webhook/acme-chat/plug-1"
+      )
+    )
+  })
+
+  it("builds the URL from its own origin on a cloud host, with no tunnel", async () => {
+    // This card only ever read the tunnel's public URL, so a headless
+    // deployment saw "start the tunnel above" against a tunnel it does not
+    // have, for adapters whose callback address it already knows.
+    mockIsTauri.mockReturnValue(false)
+    hostProfile = "headless"
+    setAdapters([
+      baseAdapter({
+        id: "lark-2",
+        type: "lark",
+        displayName: "Lark Cloud",
+        transportMode: "webhook",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-url-lark-2")).toHaveTextContent(
+        `${window.location.origin}/connectors/webhook/lark/lark-2`
+      )
+    )
+    expect(screen.queryByTestId("tunnel-adapter-empty-lark-2")).not.toBeInTheDocument()
+    hostProfile = "cloud-companion"
+  })
+
+  it("shows no URL for a Discord row that dials out", async () => {
     mockIsTauri.mockReturnValue(true)
     mockCurrent.mockResolvedValue({
       publicUrl: "https://abc.trycloudflare.com",

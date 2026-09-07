@@ -32891,11 +32891,13 @@
         "title": "Cloudflared 隧道",
         "webhookUrls": {
           "copy": "复制 {name} 的 webhook 地址",
-          "description": "隧道启动后，把对应地址粘贴到每个平台的管理后台。",
+          "description": "把这些地址填入各平台的管理后台。只有选择 webhook 传输的适配器才有。",
           "noAdapters": "尚未配置任何适配器。在「适配器」标签页中添加一个。",
-          "notApplicable": "反向 WebSocket 通道，无需公网地址。",
+          "notApplicable": "该适配器主动外连，不需要公网地址。",
+          "originMissing": "当前部署尚未配置公网来源，无法生成任何回调地址。",
           "title": "各适配器的 webhook 地址",
-          "tunnelOff": "请先启动隧道以生成公网地址。"
+          "tunnelOff": "请先启动隧道以生成公网地址。",
+          "unsupported": "当前浏览器背后没有宿主，这里的任何地址都无法接收入站请求。"
         }
       },
       "usagePresence": {

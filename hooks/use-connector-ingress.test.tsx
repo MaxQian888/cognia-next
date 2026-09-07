@@ -8,9 +8,24 @@ let hostProfile = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfile }))
 
 const tunnel = { running: false, url: null as string | null, loading: false }
-jest.mock("@/hooks/use-tunnel-status", () => ({ useTunnelStatus: () => tunnel }))
+// The loader is captured rather than ignored. Whether the desktop tunnel
+// bridge gets polled at all is a property of what this hook HANDS to
+// `useTunnelStatus`, so a mock that drops the argument would make every
+// assertion about it pass for free.
+let capturedTunnelLoader: (() => Promise<unknown>) | undefined
+jest.mock("@/hooks/use-tunnel-status", () => ({
+  useTunnelStatus: (loader?: () => Promise<unknown>) => {
+    capturedTunnelLoader = loader
+    return tunnel
+  },
+}))
 
 jest.mock("@/lib/connectors/lark-web/entry-client", () => ({ resolveLarkApiBase: () => "" }))
+
+const mockGetTunnelInfo = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/connectivity/tunnel-resolver", () => ({
+  getTunnelInfo: () => mockGetTunnelInfo(),
+}))
 
 import { useConnectorIngress } from "./use-connector-ingress"
 
@@ -19,6 +34,7 @@ beforeEach(() => {
   tunnel.running = false
   tunnel.url = null
   tunnel.loading = false
+  mockGetTunnelInfo.mockClear()
 })
 
 describe("useConnectorIngress — desktop", () => {
@@ -127,6 +143,33 @@ describe("useConnectorIngress — mobile companion", () => {
     )
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.base).toBeNull()
+  })
+})
+
+describe("useConnectorIngress — the desktop tunnel bridge", () => {
+  it.each(["cloud-companion", "headless", "mobile-companion", "web-standalone"])(
+    "is never asked on %s",
+    async (profile) => {
+      // `useTunnelStatus` polls every three seconds for as long as it is
+      // mounted. Handing it the real loader unconditionally had every
+      // non-desktop shell invoke a desktop-only Tauri command forever, for an
+      // answer it never reads.
+      hostProfile = profile
+      renderHook(() => useConnectorIngress({ loadCompanionEndpoints: async () => null as never }))
+      // A loader IS handed over on every profile. Without this the assertion
+      // below would also pass for a hook that stopped calling
+      // `useTunnelStatus` at all, which is a different thing.
+      expect(capturedTunnelLoader).toBeDefined()
+      await capturedTunnelLoader?.()
+      expect(mockGetTunnelInfo).not.toHaveBeenCalled()
+    }
+  )
+
+  it("is asked on the desktop, which is the only host that has one", async () => {
+    hostProfile = "desktop"
+    renderHook(() => useConnectorIngress())
+    await capturedTunnelLoader?.()
+    expect(mockGetTunnelInfo).toHaveBeenCalled()
   })
 })
 

@@ -32891,11 +32891,13 @@
         "title": "Cloudflared tunnel",
         "webhookUrls": {
           "copy": "Copy {name} webhook URL",
-          "description": "Copy these into each platform's admin console once the tunnel is up.",
+          "description": "Copy these into each platform's admin console. Only adapters set to webhook transport have one.",
           "noAdapters": "No adapters configured yet. Add one in the Adapters tab.",
-          "notApplicable": "Reverse-WebSocket transport — no public URL needed.",
+          "notApplicable": "This adapter dials out, so it needs no public URL.",
+          "originMissing": "This deployment has no public origin yet, so no callback URL can be built.",
           "title": "Adapter webhook URLs",
-          "tunnelOff": "Start the tunnel above to surface a public URL."
+          "tunnelOff": "Start the tunnel above to surface a public URL.",
+          "unsupported": "This browser has no host behind it, so nothing here can receive an inbound request."
         }
       },
       "usagePresence": {
