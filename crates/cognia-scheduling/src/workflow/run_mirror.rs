@@ -94,6 +94,12 @@ impl RunMirror {
                 resolution_json TEXT, notification_sent_at INTEGER,
                 resolution_notification_sent_at INTEGER, updated_at INTEGER NOT NULL
             );
+            CREATE TABLE file_watch_cursor (
+                trigger_id  TEXT PRIMARY KEY,
+                workflow_id TEXT NOT NULL,
+                root        TEXT NOT NULL,
+                last_seen_ms INTEGER NOT NULL
+            );
             CREATE TABLE workflow_wait_event (
                 id TEXT PRIMARY KEY, event_key TEXT NOT NULL, correlation_id TEXT,
                 source TEXT NOT NULL, data_json TEXT, emitted_at INTEGER NOT NULL,
@@ -154,6 +160,19 @@ impl RunMirror {
                 CREATE INDEX IF NOT EXISTS idx_workflow_waitpoint_event
                     ON workflow_waitpoint(event_key, status, not_before);
 
+                -- `trigger.file.watch` catch-up. A file change leaves no
+                -- schedule to recompute from the way cron does, so the only
+                -- way to know what happened while the process was down is to
+                -- remember when it was last awake. Same DB and same open as
+                -- the run mirror: the daemon owns the arm/re-arm decision and
+                -- must not need the renderer alive to make it.
+                CREATE TABLE IF NOT EXISTS file_watch_cursor (
+                    trigger_id  TEXT PRIMARY KEY,
+                    workflow_id TEXT NOT NULL,
+                    root        TEXT NOT NULL,
+                    last_seen_ms INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS workflow_wait_event (
                     id TEXT PRIMARY KEY, event_key TEXT NOT NULL, correlation_id TEXT,
                     source TEXT NOT NULL, data_json TEXT, emitted_at INTEGER NOT NULL,
@@ -167,6 +186,58 @@ impl RunMirror {
             )?;
             Ok(Mutex::new(conn))
         })
+    }
+
+    /// The root and last-awake instant recorded for a file watch, if any.
+    ///
+    /// The root travels with the cursor because a changed root invalidates it:
+    /// comparing one tree's mtimes against another tree's cursor is
+    /// meaningless, and silently doing so would report a whole repository as
+    /// "changed while you were away".
+    pub fn file_watch_cursor(&self, trigger_id: &str) -> Result<Option<(String, i64)>> {
+        let conn = self.conn()?.lock();
+        let mut stmt =
+            conn.prepare("SELECT root, last_seen_ms FROM file_watch_cursor WHERE trigger_id = ?1")?;
+        let mut rows = stmt.query([trigger_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+            None => Ok(None),
+        }
+    }
+
+    pub fn set_file_watch_cursor(
+        &self,
+        trigger_id: &str,
+        workflow_id: &str,
+        root: &str,
+        last_seen_ms: i64,
+    ) -> Result<()> {
+        let conn = self.conn()?.lock();
+        conn.execute(
+            r#"INSERT INTO file_watch_cursor (trigger_id, workflow_id, root, last_seen_ms)
+               VALUES (?1, ?2, ?3, ?4)
+               ON CONFLICT(trigger_id) DO UPDATE SET
+                 workflow_id = excluded.workflow_id,
+                 root = excluded.root,
+                 last_seen_ms = excluded.last_seen_ms"#,
+            rusqlite::params![trigger_id, workflow_id, root, last_seen_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Move a cursor to now without touching its root. Called on every ack, so
+    /// a long-running app keeps the catch-up window short.
+    pub fn touch_file_watch_cursor(&self, trigger_id: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let conn = self.conn()?.lock();
+        conn.execute(
+            "UPDATE file_watch_cursor SET last_seen_ms = ?2 WHERE trigger_id = ?1",
+            rusqlite::params![trigger_id, now],
+        )?;
+        Ok(())
     }
 
     /// Upsert (insert-or-update) a mirror row from a persist call. The first

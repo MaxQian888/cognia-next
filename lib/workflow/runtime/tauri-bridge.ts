@@ -70,6 +70,19 @@ export async function unregisterTrigger(workflowId: string, triggerId: string): 
 }
 
 /**
+ * Tell the file-watch daemon the run it started has finished.
+ *
+ * Half of what the mute needs; the daemon also waits for `settleMs` of quiet,
+ * so a run whose writes are still landing keeps its own watch muted even after
+ * this returns. `safeInvoke` no-ops off Tauri, and the daemon's mute timeout
+ * covers a lost ack, so a failure here costs a late re-arm rather than a
+ * stuck trigger.
+ */
+export async function ackFileWatch(workflowId: string, triggerId: string): Promise<void> {
+  await safeInvoke("workflow_file_watch_ack", { workflowId, triggerId })
+}
+
+/**
  * Called once on app boot — Rust returns rows whose status is still "running",
  * so the TS orchestrator can resume them from the durable Dexie event log.
  */

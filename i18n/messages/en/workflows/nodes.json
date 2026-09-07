@@ -1032,6 +1032,12 @@
         "label": "On captured item"
       }
     },
+    "file": {
+      "watch": {
+        "description": "Fires when a file changes under a watched directory. Stays muted for the whole run it starts, so a workflow that writes files cannot re-trigger itself.",
+        "label": "On file changed"
+      }
+    },
     "scheduler": {
       "taskCompleted": {
         "description": "Fires when a scheduled task settles, including when it fails. Distinct from a workflow's own cron trigger: this reacts to somebody else's task.",

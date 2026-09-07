@@ -83,6 +83,7 @@ export const PASSTHROUGH_TRIGGER_KINDS = [
   "trigger.scheduler.taskCompleted",
   "trigger.capture.item",
   "trigger.memory.written",
+  "trigger.file.watch",
 ] as const satisfies readonly WorkflowNodeKind[]
 
 export async function runTriggerPassthrough(ctx: StepExecutionContext) {

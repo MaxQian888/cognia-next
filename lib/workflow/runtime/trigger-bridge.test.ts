@@ -1,4 +1,13 @@
 import "fake-indexeddb/auto"
+const mockAckFileWatch = jest.fn(async (_w: string, _t: string) => undefined)
+jest.mock("./tauri-bridge", () => {
+  const actual = jest.requireActual("./tauri-bridge")
+  return {
+    ...actual,
+    ackFileWatch: (w: string, t: string) => mockAckFileWatch(w, t),
+  }
+})
+
 import { dispatchTrigger, installTriggerBridge, isTriggerEvent } from "./trigger-bridge"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
@@ -37,6 +46,75 @@ describe("isTriggerEvent", () => {
     ["non-string triggerId", { workflowId: "wf", kind: "trigger.cron", triggerId: 7, originAt: 0 }],
   ])("rejects %s", (_label, value) => {
     expect(isTriggerEvent(value as unknown)).toBe(false)
+  })
+})
+
+describe("installTriggerBridge file-watch ack", () => {
+  async function driveFileWatch(dispatch: jest.Mock) {
+    let subscriber: ((raw: unknown) => Promise<void>) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+      subscriber = handler
+      return () => undefined
+    })
+    const off = await installTriggerBridge({
+      listen: listen as never,
+      dispatch: dispatch as never,
+    })
+    await subscriber?.({
+      workflowId: "wf1",
+      kind: "trigger.file.watch",
+      triggerId: "t1",
+      payload: {},
+      originAt: 1,
+    } satisfies TriggerEvent)
+    off()
+  }
+
+  beforeEach(() => mockAckFileWatch.mockClear())
+
+  it("acks after the run finishes, which is what lifts the daemon's mute", async () => {
+    // The mute holds from the fire until this lands, and `dispatch` awaits the
+    // whole run, so the mute window strictly contains the run's execution
+    // window. That is the self-feed guarantee.
+    const order: string[] = []
+    const dispatch = jest.fn(async () => {
+      order.push("run")
+    })
+    mockAckFileWatch.mockImplementation(async () => {
+      order.push("ack")
+    })
+    await driveFileWatch(dispatch)
+    expect(order).toEqual(["run", "ack"])
+    expect(mockAckFileWatch).toHaveBeenCalledWith("wf1", "t1")
+  })
+
+  it("acks even when the run fails, so a failure does not strand the watch", async () => {
+    const dispatch = jest.fn(async () => {
+      throw new Error("the run blew up")
+    })
+    await driveFileWatch(dispatch)
+    expect(mockAckFileWatch).toHaveBeenCalledWith("wf1", "t1")
+  })
+
+  it("does not ack for any other trigger kind", async () => {
+    let subscriber: ((raw: unknown) => Promise<void>) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+      subscriber = handler
+      return () => undefined
+    })
+    const off = await installTriggerBridge({
+      listen: listen as never,
+      dispatch: (async () => undefined) as never,
+    })
+    await subscriber?.({
+      workflowId: "wf1",
+      kind: "trigger.cron",
+      triggerId: "t1",
+      payload: {},
+      originAt: 1,
+    } satisfies TriggerEvent)
+    off()
+    expect(mockAckFileWatch).not.toHaveBeenCalled()
   })
 })
 

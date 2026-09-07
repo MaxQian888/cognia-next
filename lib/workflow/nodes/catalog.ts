@@ -261,6 +261,69 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
       },
     },
   },
+  "trigger.file.watch": {
+    label: "On file changed",
+    description:
+      "Fires when a file changes under a watched directory. Stays muted for the whole run it starts, so a workflow that writes files cannot re-trigger itself.",
+    iconName: "FolderSync",
+    keywords: ["file", "watch", "changed", "directory", "folder", "fs", "monitor"],
+    desktopOnly: true,
+    requires: ["always-on"],
+    paramsSchema: {
+      type: "object",
+      required: ["root"],
+      properties: {
+        root: {
+          type: "string",
+          format: "expression",
+          title: "Directory to watch",
+          description: "An absolute path. The filesystem root and your home directory are refused.",
+        },
+        globs: {
+          type: "array",
+          title: "Only these paths",
+          items: { type: "string" },
+          description: "Globs relative to the root, such as src/**/*.ts. Empty watches everything.",
+        },
+        ignoreGlobs: { type: "array", title: "Ignore these paths", items: { type: "string" } },
+        respectGitignore: { type: "boolean", title: "Honour .gitignore", default: true },
+        events: {
+          type: "array",
+          title: "Only these events",
+          items: { type: "string" },
+          description: "created, modified, removed or renamed. Empty means any.",
+        },
+        recursive: { type: "boolean", title: "Include subdirectories", default: true },
+        debounceMs: {
+          type: "integer",
+          title: "Debounce (ms)",
+          minimum: 50,
+          maximum: 60000,
+          default: 250,
+        },
+        settleMs: {
+          type: "integer",
+          title: "Quiet needed before re-arming (ms)",
+          minimum: 0,
+          maximum: 600000,
+          default: 2000,
+        },
+        catchUpOnStart: {
+          type: "boolean",
+          title: "Report changes made while the app was closed",
+          description: "One summary event with a count, never a replay. Off by default.",
+          default: false,
+        },
+        maxFiresPerMinute: {
+          type: "integer",
+          title: "Fires per minute",
+          minimum: 1,
+          maximum: 600,
+          default: 30,
+        },
+      },
+    },
+  },
   "trigger.pet.event": {
     label: "On pet event",
     description:

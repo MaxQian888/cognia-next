@@ -812,6 +812,9 @@ pub fn run() {
             pet_window::pet_window_get_work_area,
             pet_window::pet_window_get_surfaces,
             pet_window::is_pet_window_open,
+            // Per-conversation "keep the screen on while this runs" holds
+            // (`lib/power/screen-wake-lock.ts`).
+            power_assertion::power_screen_holds_set,
             capture::get_foreground_app,
             media::commands::video_get_info,
             media::commands::plugin_media_get_video_frame,
@@ -1384,6 +1387,7 @@ pub fn run() {
             gateway::commands::gateway_probe_upstream,
             workflow::commands::workflow_register_trigger,
             workflow::commands::workflow_unregister_trigger,
+            workflow::commands::workflow_file_watch_ack,
             workflow::commands::workflow_persist_run_state,
             workflow::commands::workflow_reload_in_flight_runs,
             workflow::commands::workflow_ack_completed,

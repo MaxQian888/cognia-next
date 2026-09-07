@@ -1083,6 +1083,7 @@ commands.allow = [
   "webview_heartbeat",
   "webview_take_recovery_notice",
   "workflow_ack_completed",
+  "workflow_file_watch_ack",
   "workflow_get_webhook_url",
   "workflow_persist_run_state",
   "workflow_register_trigger",

@@ -338,6 +338,11 @@ export type WorkflowNodeKind =
   | "trigger.capture.item"
   // A long-term memory was created (ADR-0069). Never carries the memory text.
   | "trigger.memory.written"
+  // A watched path changed. The only one of the five backed by a Rust daemon,
+  // because a `notify` watcher cannot survive a webview reload and this
+  // trigger's whole point is to fire while the app sits in the tray. Its mute
+  // window is what stops a workflow's own writes re-triggering it.
+  | "trigger.file.watch"
   | "action.pet.interact"
   // Chained workflows (ADR-0081): fires when another workflow's run reaches a
   // terminal status (succeeded/failed). Emitted by the orchestrator through
@@ -619,6 +624,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.scheduler.taskCompleted",
   "trigger.capture.item",
   "trigger.memory.written",
+  "trigger.file.watch",
   "action.pet.interact",
   "trigger.workflow.completed",
   "ai.prompt",
@@ -1396,6 +1402,22 @@ export interface RegisterTriggerInput {
   workflowId: string
   triggerId: string
   kind: WorkflowNodeKind
+  /** Absolute directory for `trigger.file.watch`. */
+  fileWatchRoot?: string
+  /** Include globs relative to the root. Empty watches everything under it. */
+  fileWatchGlobs?: string[]
+  fileWatchIgnoreGlobs?: string[]
+  /** Honour the root's `.gitignore`. Defaults to true. */
+  fileWatchRespectGitignore?: boolean
+  /** created / modified / removed / renamed. Empty means any. */
+  fileWatchEvents?: string[]
+  fileWatchRecursive?: boolean
+  fileWatchDebounceMs?: number
+  /** Quiet required after the run acks before the watch re-arms. */
+  fileWatchSettleMs?: number
+  /** Emit one summary event for changes made while the process was down. */
+  fileWatchCatchUpOnStart?: boolean
+  fileWatchMaxFiresPerMinute?: number
   cron?: string
   /** IANA timezone used by the Rust cron daemon; absent means host local. */
   timezone?: string

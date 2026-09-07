@@ -14,7 +14,7 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { WorkflowAdmissionError } from "./execution-authority"
 import { dispatchPlacedWorkflowTrigger } from "./placed-trigger"
 import { deterministicTriggerIdempotencyKey } from "./trigger-idempotency"
-import { listenTriggerEvents } from "./tauri-bridge"
+import { ackFileWatch, listenTriggerEvents } from "./tauri-bridge"
 
 export type TriggerBridgeDisposer = () => void
 
@@ -48,6 +48,17 @@ export async function installTriggerBridge(
         kind: raw.kind,
         error: err instanceof Error ? err.message : String(err),
       })
+    } finally {
+      // A file watch stays muted from the moment it fires until this lands,
+      // and `dispatch` above awaits the entire run. That is what makes the
+      // mute window strictly contain the run's execution window: every file
+      // the run wrote under the watched root was observed while muted and
+      // dropped. In a `finally` because a failed run must re-arm the watch
+      // just as a successful one does, and the daemon's own timeout is a
+      // fail-safe rather than the mechanism.
+      if (raw.kind === "trigger.file.watch" && raw.triggerId) {
+        await ackFileWatch(raw.workflowId, raw.triggerId)
+      }
     }
   })
 }

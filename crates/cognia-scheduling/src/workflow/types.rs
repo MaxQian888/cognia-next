@@ -90,7 +90,7 @@ pub struct TriggerBinding {
 
 /// Input for `workflow_register_trigger`. Sent from TS when a workflow is
 /// saved (or its triggers change).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegisterTriggerInput {
     pub trigger_id: String,
@@ -126,6 +126,33 @@ pub struct RegisterTriggerInput {
     pub webhook_response_timeout_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<TriggerBinding>,
+    // ── trigger.file.watch ────────────────────────────────────────────────
+    /// Absolute directory to watch. Required for `trigger.file.watch`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_root: Option<String>,
+    /// Include globs, relative to the root. Empty watches everything under it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_globs: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_ignore_globs: Option<Vec<String>>,
+    /// Honour the root's `.gitignore`. Defaults to true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_respect_gitignore: Option<bool>,
+    /// created / modified / removed / renamed. Empty means any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_events: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_recursive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_debounce_ms: Option<u64>,
+    /// Quiet required after the run acks before the watch re-arms.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_settle_ms: Option<u64>,
+    /// Emit one summary event for changes made while the process was down.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_catch_up_on_start: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_watch_max_fires_per_minute: Option<u32>,
 }
 
 /// The TriggerEvent envelope emitted from Rust to TS via the
@@ -316,6 +343,9 @@ mod tests {
                 adapter_id: Some("telegram_main".into()),
                 ..Default::default()
             }),
+            // Rest defaulted, so a new trigger's fields never break a test
+            // about a different trigger's wire shape.
+            ..Default::default()
         };
         let s = serde_json::to_string(&input).unwrap();
         // camelCase must hold for the IPC contract.

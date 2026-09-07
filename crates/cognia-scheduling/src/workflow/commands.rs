@@ -75,6 +75,25 @@ pub async fn workflow_register_trigger(
         // the renderer can sync every first-class trigger kind uniformly.
         // We accept the call as a no-op so the TS bridge can register all
         // trigger kinds uniformly.
+        // A real registration: the daemon owns a notify watcher per trigger.
+        "trigger.file.watch" => {
+            state
+                .file_watch
+                .upsert(&input, state.emitter.clone())
+                .map_err(|e| e.to_string())?;
+            let cursor = state.mirror.file_watch_cursor(&input.trigger_id).ok().flatten();
+            if let Some(at) = state
+                .file_watch
+                .catch_up(&input.trigger_id, cursor, state.emitter.clone())
+            {
+                if let Some(root) = input.file_watch_root.as_deref() {
+                    let _ = state
+                        .mirror
+                        .set_file_watch_cursor(&input.trigger_id, &input.workflow_id, root, at);
+                }
+            }
+            Ok(())
+        }
         "trigger.connector.inbound"
         // `trigger.connector.system` and `trigger.issue.event` were missing
         // here while `SYNCED_TRIGGER_KINDS` on the TS side registers the
@@ -114,6 +133,30 @@ pub async fn workflow_unregister_trigger(
 ) -> Result<(), String> {
     state.cron.remove(&workflow_id, &trigger_id);
     state.webhook.unregister(&workflow_id, &trigger_id);
+    state.file_watch.remove(&trigger_id);
+    Ok(())
+}
+
+/// `workflow_file_watch_ack` — the run this trigger started has finished.
+///
+/// Half of what the mute needs. The other half is `settleMs` of filesystem
+/// quiet, so a run whose writes are still landing keeps the mute alive even
+/// after it acks. The TS bridge calls this in a `finally` around the dispatch,
+/// and `dispatchTrigger` awaits the whole run, so the mute window strictly
+/// contains the run's execution window: every file the run wrote under the
+/// watched root was observed while muted and dropped.
+///
+/// A lost ack is not fatal. The daemon's `mute_timeout_ms` lifts the mute with
+/// a warning, so a crashed webview costs a late re-arm rather than a dead
+/// trigger.
+#[tauri::command]
+pub async fn workflow_file_watch_ack(
+    state: State<'_, WorkflowState>,
+    workflow_id: String,
+    trigger_id: String,
+) -> Result<(), String> {
+    state.file_watch.ack(&workflow_id, &trigger_id);
+    let _ = state.mirror.touch_file_watch_cursor(&trigger_id);
     Ok(())
 }
 

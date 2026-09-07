@@ -267,6 +267,92 @@ describe("syncWorkflowTriggers", () => {
   })
 })
 
+describe("trigger.file.watch", () => {
+  it("registers the authored watch config, not a bare no-op", async () => {
+    // The only Rust-backed trigger of the five added alongside it, so unlike
+    // its siblings its params actually have to reach the daemon.
+    await syncWorkflowTriggers(
+      workflow([
+        node("t1", "trigger.file.watch", {
+          root: "/Users/me/project",
+          globs: ["src/**/*.ts"],
+          ignoreGlobs: ["**/*.test.ts"],
+          events: ["created", "modified"],
+          respectGitignore: false,
+          recursive: true,
+          debounceMs: 400,
+          settleMs: 3000,
+          catchUpOnStart: true,
+          maxFiresPerMinute: 12,
+        }),
+      ])
+    )
+    expect(mockRegister).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "trigger.file.watch",
+        fileWatchRoot: "/Users/me/project",
+        fileWatchGlobs: ["src/**/*.ts"],
+        fileWatchIgnoreGlobs: ["**/*.test.ts"],
+        fileWatchEvents: ["created", "modified"],
+        fileWatchRespectGitignore: false,
+        fileWatchRecursive: true,
+        fileWatchDebounceMs: 400,
+        fileWatchSettleMs: 3000,
+        fileWatchCatchUpOnStart: true,
+        fileWatchMaxFiresPerMinute: 12,
+      })
+    )
+  })
+
+  it("refuses a relative or empty root where the author can see it", async () => {
+    // Rust refuses these too and stays the authority. Failing here means the
+    // author finds out at save time rather than from a daemon nobody watches.
+    await expect(
+      syncWorkflowTriggers(workflow([node("t1", "trigger.file.watch", { root: "relative/dir" })]))
+    ).rejects.toThrow(/absolute path/)
+    await expect(
+      syncWorkflowTriggers(workflow([node("t1", "trigger.file.watch", { root: "  " })]))
+    ).rejects.toThrow(/no root directory/)
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it("accepts a Windows root", async () => {
+    await syncWorkflowTriggers(
+      workflow([node("t1", "trigger.file.watch", { root: "C:\\Users\\me\\project" })])
+    )
+    expect(mockRegister).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not watch this disk for a workflow pinned to another Host", async () => {
+    // A pinned run happens elsewhere, so a watch registered here would fire on
+    // this machine's churn for a run that never touches it. The pinned Host
+    // installs its own from its own boot sync.
+    const wf = workflow([node("t1", "trigger.file.watch", { root: "/Users/me/project" })])
+    await syncWorkflowTriggers({
+      ...wf,
+      settings: { ...wf.settings, runOn: { mode: "pinned", ref: "host_other" } },
+    })
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
+
+  it("still watches for colocate and auto, which both mean wherever this runs", async () => {
+    const wf = workflow([node("t1", "trigger.file.watch", { root: "/Users/me/project" })])
+    await syncWorkflowTriggers({
+      ...wf,
+      settings: { ...wf.settings, runOn: { mode: "auto" } },
+    })
+    expect(mockRegister).toHaveBeenCalledTimes(1)
+  })
+
+  it("unregisters a watch whose node was deleted", async () => {
+    const wf = workflow([node("t1", "trigger.file.watch", { root: "/Users/me/project" })])
+    await syncWorkflowTriggers(wf)
+    mockUnregister.mockClear()
+    await syncWorkflowTriggers({ ...wf, nodes: [] })
+    expect(mockUnregister).toHaveBeenCalledWith(wf.id, "t1")
+  })
+})
+
 describe("unsyncWorkflowTriggers", () => {
   it("unregisters every trigger node by id", async () => {
     const wf = workflow([

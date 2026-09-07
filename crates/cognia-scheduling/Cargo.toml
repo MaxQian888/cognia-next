@@ -33,6 +33,11 @@ parking_lot = "0.12"
 once_cell = "1"
 regex = "1"
 log = "0.4"
+# `trigger.file.watch`: the native watcher, and the gitignore matcher that
+# keeps build output from firing it. Both are already workspace-wide (cognia-git
+# pairs them the same way).
+notify = "8"
+ignore = "0.4"
 async-trait = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart"] }
 # Workflow webhook-trigger HTTP surface + HMAC signature verification.

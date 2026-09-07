@@ -2412,6 +2412,21 @@ export const PARAMS_SCHEMAS = {
     includeText: z.boolean().optional(),
     cooldownMs: numberRange(0).int().optional(),
   }),
+  // The one Rust-backed trigger of the five. `root` is a plain string rather
+  // than a path-shaped regex: an expression has to be allowed through, and
+  // `validateTriggerForSync` plus the daemon both check the resolved value.
+  "trigger.file.watch": z.object({
+    root: requiredString("required"),
+    globs: z.array(z.string().min(1)).optional(),
+    ignoreGlobs: z.array(z.string().min(1)).optional(),
+    respectGitignore: z.boolean().optional(),
+    events: z.array(z.enum(["created", "modified", "removed", "renamed"])).optional(),
+    recursive: z.boolean().optional(),
+    debounceMs: numberRange(50, 60_000).int().optional(),
+    settleMs: numberRange(0, 600_000).int().optional(),
+    catchUpOnStart: z.boolean().optional(),
+    maxFiresPerMinute: numberRange(1, 600).int().optional(),
+  }),
   "trigger.memory.written": z.object({
     types: z.array(z.enum(["semantic", "episodic", "procedural"])).optional(),
     scopes: z.array(z.enum(["global", "workspace", "character", "agent"])).optional(),

@@ -10,13 +10,20 @@ use std::sync::Arc;
 use crate::workflow::integration_spool::IntegrationSpool;
 use crate::workflow::run_mirror::{self, RunMirror};
 use crate::workflow::triggers::cron_daemon::{CronDaemon, TriggerEmitter};
+use crate::workflow::triggers::file_watch::FileWatchDaemon;
 use crate::workflow::triggers::webhook_router::WebhookRouter;
 
 pub struct WorkflowState {
     pub mirror: RunMirror,
     pub cron: CronDaemon,
     pub webhook: WebhookRouter,
+    pub file_watch: FileWatchDaemon,
     pub integration_spool: std::sync::Arc<IntegrationSpool>,
+    /// Kept so `workflow_register_trigger` can hand it to a new file watch.
+    /// The cron daemon and the webhook router each captured their own copy at
+    /// construction; a file watch is built per registration, so the state has
+    /// to hold one.
+    pub emitter: Arc<dyn TriggerEmitter>,
 }
 
 impl WorkflowState {
@@ -30,13 +37,15 @@ impl WorkflowState {
     ) -> Result<Self, run_mirror::MirrorError> {
         let integration_spool = std::sync::Arc::new(IntegrationSpool::open(mirror_path.clone()));
         let mirror = RunMirror::open(mirror_path)?;
-        let cron = CronDaemon::new(emitter);
+        let cron = CronDaemon::new(emitter.clone());
         let webhook = WebhookRouter::with_integration_spool(integration_spool.clone());
         Ok(Self {
             mirror,
             cron,
             webhook,
+            file_watch: FileWatchDaemon::new(),
             integration_spool,
+            emitter,
         })
     }
 
@@ -50,7 +59,8 @@ impl WorkflowState {
     ) {
         let recorder = crate::workflow::triggers::cron_daemon::RecordingEmitter::default();
         let mirror = RunMirror::open_in_memory().expect("in-memory mirror");
-        let cron = CronDaemon::new(Arc::new(recorder.clone()));
+        let emitter: Arc<dyn TriggerEmitter> = Arc::new(recorder.clone());
+        let cron = CronDaemon::new(emitter.clone());
         let integration_spool = std::sync::Arc::new(IntegrationSpool::open_in_memory());
         let webhook = WebhookRouter::with_integration_spool(integration_spool.clone());
         (
@@ -58,7 +68,9 @@ impl WorkflowState {
                 mirror,
                 cron,
                 webhook,
+                file_watch: FileWatchDaemon::new(),
                 integration_spool,
+                emitter,
             },
             recorder,
         )

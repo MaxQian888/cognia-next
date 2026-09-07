@@ -16,6 +16,19 @@ import {
 } from "@/lib/workflow/triggers/lifecycle"
 import { registerTrigger, unregisterTrigger, getWebhookUrl } from "./tauri-bridge"
 
+interface FileWatchParams {
+  root?: string
+  globs?: string[]
+  ignoreGlobs?: string[]
+  respectGitignore?: boolean
+  events?: string[]
+  recursive?: boolean
+  debounceMs?: number
+  settleMs?: number
+  catchUpOnStart?: boolean
+  maxFiresPerMinute?: number
+}
+
 interface WebhookParams {
   path?: string
   method?: string
@@ -47,6 +60,7 @@ const SYNCED_TRIGGER_KINDS = new Set<WorkflowNode["type"]>([
   "trigger.scheduler.taskCompleted",
   "trigger.capture.item",
   "trigger.memory.written",
+  "trigger.file.watch",
 ])
 
 const syncedTriggersByWorkflow = new Map<string, Map<string, WorkflowNode["type"]>>()
@@ -94,13 +108,31 @@ export async function syncWorkflowTriggers(
   // the inbound request open for a dynamic reply. Computed once and threaded
   // into every webhook trigger so the opt-in is implicit (no extra config).
   const awaitResponse = workflow.nodes.some((n) => n.type === "io.webhook.respond")
-  await Promise.all(triggers.map((node) => syncOneTrigger(workflow.id, node, awaitResponse)))
+  await Promise.all(
+    triggers.map((node) => syncOneTrigger(workflow.id, node, awaitResponse, workflow))
+  )
   syncedTriggersByWorkflow.set(workflow.id, desired)
   if (options.signal?.aborted) return
   await syncPluginTriggerInstances(workflow)
 }
 
 function validateTriggerForSync(node: WorkflowNode): void {
+  if (node.type === "trigger.file.watch") {
+    // Checked here as well as in Rust, for the same reason the cron
+    // expression is: a registration that will be refused should fail where the
+    // author is standing, not later in a daemon nobody is looking at. Rust
+    // remains the authority, and refuses the overbroad roots this cannot see.
+    const root = ((node.data.params ?? {}) as FileWatchParams).root?.trim() ?? ""
+    if (!root) {
+      throw new Error("Cannot register a file watch with no root directory")
+    }
+    if (!root.startsWith("/") && !/^[a-zA-Z]:[\\/]/.test(root)) {
+      throw new Error(
+        `Cannot register a file watch on '${root}': the root has to be an absolute path`
+      )
+    }
+    return
+  }
   if (node.type !== "trigger.cron") return
   const expression = ((node.data.params ?? {}) as CronParams).cron ?? ""
   const validation = validateWorkflowCronExpression(expression)
@@ -114,10 +146,24 @@ function validateTriggerForSync(node: WorkflowNode): void {
   }
 }
 
+/**
+ * A file watch registers on the machine whose daemon answers, which is this
+ * one. A workflow pinned to a different Host would therefore watch the WRONG
+ * disk and fire on churn that has nothing to do with its own run.
+ *
+ * Only `pinned` is refused. `colocate` and `auto` both mean "wherever this
+ * runs", and this is where it is running.
+ */
+function watchesTheWrongDisk(workflow: VisualWorkflow): boolean {
+  const runOn = workflow.settings?.runOn
+  return runOn?.mode === "pinned"
+}
+
 async function syncOneTrigger(
   workflowId: string,
   node: WorkflowNode,
-  awaitResponse: boolean
+  awaitResponse: boolean,
+  workflow: VisualWorkflow
 ): Promise<void> {
   const baseInput = {
     workflowId,
@@ -151,6 +197,29 @@ async function syncOneTrigger(
           typeof webhookParams.responseTimeoutMs === "number"
             ? webhookParams.responseTimeoutMs
             : undefined,
+      })
+      return
+    }
+    case "trigger.file.watch": {
+      if (watchesTheWrongDisk(workflow)) {
+        // The Host the run is pinned to installs its own watch from its own
+        // boot sync. Registering here would watch this machine's disk for a
+        // run that happens somewhere else.
+        return
+      }
+      const watchParams = params as FileWatchParams
+      await registerTrigger({
+        ...baseInput,
+        fileWatchRoot: watchParams.root,
+        fileWatchGlobs: watchParams.globs,
+        fileWatchIgnoreGlobs: watchParams.ignoreGlobs,
+        fileWatchRespectGitignore: watchParams.respectGitignore,
+        fileWatchEvents: watchParams.events,
+        fileWatchRecursive: watchParams.recursive,
+        fileWatchDebounceMs: watchParams.debounceMs,
+        fileWatchSettleMs: watchParams.settleMs,
+        fileWatchCatchUpOnStart: watchParams.catchUpOnStart,
+        fileWatchMaxFiresPerMinute: watchParams.maxFiresPerMinute,
       })
       return
     }
