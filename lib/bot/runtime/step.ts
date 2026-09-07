@@ -34,14 +34,48 @@ import type {
 } from "@/types/bot/run"
 import type { ExecutionRunInterrupt } from "@/types/execution/run"
 
-/** How often a parked run re-reads the row it is waiting on. */
+/** How often a BLOCKING wait re-reads the row it is waiting on. */
 export const BOT_WAIT_POLL_MS = 1_000
+
+/**
+ * How long a parked run stays out of the queue before it is re-entered.
+ *
+ * Generous on purpose. A re-entry replays memoized steps but re-runs
+ * everything the author left OUTSIDE a step, so a one-second park would charge
+ * that cost sixty times a minute for a question a person may take an hour to
+ * answer.
+ */
+export const BOT_PARK_INTERVAL_MS = 20_000
 
 /** Thrown when a run is cancelled while a handler is between steps. */
 export class BotRunCancelledError extends Error {
   constructor(readonly runId: string) {
     super(`Bot run ${runId} was cancelled`)
     this.name = "BotRunCancelledError"
+  }
+}
+
+/**
+ * Thrown when a wait cannot be answered yet and the run should leave the queue.
+ *
+ * The alternative was what this replaces: an in-process poll that held the
+ * runner's pass open for the whole life of the wait. `drainBotDeliveries` walks
+ * its batch in order, so one Bot waiting on a human stalled every other Bot on
+ * that host until the approval TTL expired.
+ *
+ * Unparking needs no new machinery. The run id is derived from the delivery id
+ * and completed steps are memoized, so re-entering the handler from the top
+ * lands back on the same question with the same deadline.
+ */
+export class BotRunParkedError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly stepName: string,
+    readonly resumeAt: number,
+    readonly waitingFor?: string
+  ) {
+    super(`Bot run ${runId} parked at step ${stepName}`)
+    this.name = "BotRunParkedError"
   }
 }
 
@@ -60,6 +94,17 @@ export interface BotStepDeps {
   now?: () => number
   sleep?: (ms: number) => Promise<void>
   pollIntervalMs?: number
+  parkIntervalMs?: number
+  /**
+   * What an unanswered wait does.
+   *
+   * `park` (the default) leaves the queue so the runner can serve other Bots.
+   * `block` polls in place, and exists for ONE caller: the Squad executor's
+   * plan-approval delegate, which `startSquadRun` invokes from a
+   * fire-and-forget lifecycle after the executor has already returned. A park
+   * thrown there would unwind into a detached promise and vanish.
+   */
+  waitMode?: "park" | "block"
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -85,6 +130,13 @@ export function createBotStepApi(input: {
   const now = input.deps?.now ?? Date.now
   const sleep = input.deps?.sleep ?? defaultSleep
   const pollIntervalMs = input.deps?.pollIntervalMs ?? BOT_WAIT_POLL_MS
+  const parkIntervalMs = input.deps?.parkIntervalMs ?? BOT_PARK_INTERVAL_MS
+  const waitMode = input.deps?.waitMode ?? "park"
+
+  /** When to come back, never later than the wait's own deadline. */
+  function resumeAt(deadline: number): number {
+    return Math.min(now() + parkIntervalMs, deadline)
+  }
 
   async function journal(
     type: "step.started" | "step.completed" | "step.failed",
@@ -155,45 +207,62 @@ export function createBotStepApi(input: {
       return existing
     })
 
-    await journal("step.started", name, { interruptId, waiting: "approval" })
+    if (!begun.memoized) {
+      await journal("step.started", name, { interruptId, waiting: "approval" })
+    }
 
-    const decision = await pollInterrupt(interruptId, expiresAt)
+    const decision =
+      waitMode === "block"
+        ? await pollInterrupt(interruptId, expiresAt)
+        : await probeInterrupt(interruptId, expiresAt)
+    if (!decision) throw new BotRunParkedError(runId, name, resumeAt(expiresAt), interruptId)
+
     await completeBotRunStep(runId, name, decision, now())
     await journal("step.completed", name, { outcome: decision.outcome })
     return decision
   }
 
+  /** Read the decision once. `null` means nobody has answered yet. */
+  async function probeInterrupt(
+    interruptId: string,
+    expiresAt: number
+  ): Promise<BotApprovalDecisionV1 | null> {
+    const row = await getDb().executionRunInterrupts.get(interruptId)
+    const settled = row && row.status !== "pending" ? decisionFromInterrupt(row) : null
+    if (settled) return settled
+    if (now() >= expiresAt) {
+      // Nobody answered. An expiry is not a quiet approval, and the outcome
+      // union exists so a handler cannot accidentally treat it as one.
+      return { outcome: "expired", decidedAt: now() }
+    }
+    return null
+  }
+
+  function decisionFromInterrupt(row: ExecutionRunInterrupt): BotApprovalDecisionV1 {
+    return {
+      outcome:
+        row.status === "approved" ? "approved" : row.status === "denied" ? "denied" : "expired",
+      decidedAt: row.resolvedAt ?? now(),
+      ...(row.resolvedBy
+        ? {
+            decidedBy: {
+              ...(row.resolvedBy.principalId ? { principalId: row.resolvedBy.principalId } : {}),
+              ...(row.resolvedBy.displayName ? { displayName: row.resolvedBy.displayName } : {}),
+            },
+          }
+        : {}),
+    }
+  }
+
+  /** Block until the decision lands. Only the detached Squad delegate uses this. */
   async function pollInterrupt(
     interruptId: string,
     expiresAt: number
   ): Promise<BotApprovalDecisionV1> {
     for (;;) {
       assertLive(signal, runId)
-      const row = await getDb().executionRunInterrupts.get(interruptId)
-      if (row && row.status !== "pending") {
-        return {
-          outcome:
-            row.status === "approved" ? "approved" : row.status === "denied" ? "denied" : "expired",
-          decidedAt: row.resolvedAt ?? now(),
-          ...(row.resolvedBy
-            ? {
-                decidedBy: {
-                  ...(row.resolvedBy.principalId
-                    ? { principalId: row.resolvedBy.principalId }
-                    : {}),
-                  ...(row.resolvedBy.displayName
-                    ? { displayName: row.resolvedBy.displayName }
-                    : {}),
-                },
-              }
-            : {}),
-        }
-      }
-      if (now() >= expiresAt) {
-        // Nobody answered. An expiry is not a quiet approval, and the outcome
-        // union exists so a handler cannot accidentally treat it as one.
-        return { outcome: "expired", decidedAt: now() }
-      }
+      const decision = await probeInterrupt(interruptId, expiresAt)
+      if (decision) return decision
       await sleep(pollIntervalMs)
     }
   }
@@ -208,7 +277,9 @@ export function createBotStepApi(input: {
 
     const step = await getBotRunStep(runId, name)
     const deadline = (step?.startedAt ?? now()) + waitInput.timeoutMs
-    await journal("step.started", name, { waiting: "event", key: waitInput.key })
+    if (!begun.memoized) {
+      await journal("step.started", name, { waiting: "event", key: waitInput.key })
+    }
 
     for (;;) {
       assertLive(signal, runId)
@@ -224,6 +295,9 @@ export function createBotStepApi(input: {
         await completeBotRunStep(runId, name, null, now())
         await journal("step.completed", name, { timedOut: true })
         return null
+      }
+      if (waitMode === "park") {
+        throw new BotRunParkedError(runId, name, resumeAt(deadline), waitInput.key)
       }
       await sleep(pollIntervalMs)
     }

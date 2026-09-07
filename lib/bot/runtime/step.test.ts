@@ -9,7 +9,12 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 import type { ExecutionRun } from "@/types/execution/run"
 
-import { BotRunCancelledError, botApprovalInterruptId, createBotStepApi } from "./step"
+import {
+  BotRunCancelledError,
+  BotRunParkedError,
+  botApprovalInterruptId,
+  createBotStepApi,
+} from "./step"
 
 const NOW = 1_700_000_000_000
 const RUN_ID = "run_bot_1"
@@ -22,11 +27,25 @@ const sleep = async () => {
   clock += 500
 }
 
+/**
+ * The blocking wait, which after parking landed has exactly one caller: the
+ * Squad executor's plan-approval delegate, invoked from a detached lifecycle
+ * where a thrown park would have nowhere to unwind to.
+ */
 function api(signal = new AbortController().signal) {
   return createBotStepApi({
     runId: RUN_ID,
     signal,
-    deps: { now, sleep, pollIntervalMs: 1 },
+    deps: { now, sleep, pollIntervalMs: 1, waitMode: "block" },
+  })
+}
+
+/** The default: an unanswered wait leaves the queue. */
+function parkingApi(signal = new AbortController().signal) {
+  return createBotStepApi({
+    runId: RUN_ID,
+    signal,
+    deps: { now, sleep, parkIntervalMs: 20_000 },
   })
 }
 
@@ -244,5 +263,110 @@ describe("step.waitForEvent", () => {
     await expect(
       api(controller.signal).waitForEvent("ci", { key: "k", timeoutMs: 1_000 })
     ).rejects.toThrow(BotRunCancelledError)
+  })
+})
+
+/**
+ * `drainBotDeliveries` walks its batch in order, so a wait that polls in place
+ * holds the pass open for its whole life. One Bot waiting on a human used to
+ * stall every other Bot on the host until the approval TTL expired.
+ */
+describe("step waits park rather than holding the runner's pass", () => {
+  it("parks an approval nobody has answered yet", async () => {
+    const parked = await parkingApi()
+      .waitForApproval("send", { title: "Post the digest?", timeoutMs: 60_000 })
+      .catch((error: unknown) => error)
+
+    expect(parked).toBeInstanceOf(BotRunParkedError)
+    const error = parked as BotRunParkedError
+    expect(error.stepName).toBe("send")
+    expect(error.waitingFor).toBe(botApprovalInterruptId(RUN_ID, "send"))
+    expect(error.resumeAt).toBe(NOW + 20_000)
+  })
+
+  it("leaves the interrupt on somebody's screen while it is parked", async () => {
+    await parkingApi()
+      .waitForApproval("send", { title: "Post?", timeoutMs: 60_000 })
+      .catch(() => undefined)
+
+    const row = await getDb().executionRunInterrupts.get(botApprovalInterruptId(RUN_ID, "send"))
+    expect(row?.status).toBe("pending")
+  })
+
+  it("resumes on the decision when the handler is re-entered", async () => {
+    await parkingApi()
+      .waitForApproval("send", { title: "Post?", timeoutMs: 60_000 })
+      .catch(() => undefined)
+
+    const interruptId = botApprovalInterruptId(RUN_ID, "send")
+    const row = await getDb().executionRunInterrupts.get(interruptId)
+    await getDb().executionRunInterrupts.put({
+      ...row!,
+      status: "approved",
+      resolvedAt: NOW + 10,
+      resolvedBy: { displayName: "Ada" },
+    })
+
+    const decision = await parkingApi().waitForApproval("send", {
+      title: "Post?",
+      timeoutMs: 60_000,
+    })
+    expect(decision.outcome).toBe("approved")
+    expect(decision.decidedBy?.displayName).toBe("Ada")
+  })
+
+  it("never parks past its own deadline", async () => {
+    // The wait expires sooner than the park interval, so coming back on the
+    // interval would answer a question that had already timed out.
+    const parked = await parkingApi()
+      .waitForApproval("send", { title: "Post?", timeoutMs: 5_000 })
+      .catch((error: unknown) => error as BotRunParkedError)
+
+    expect((parked as BotRunParkedError).resumeAt).toBe(NOW + 5_000)
+  })
+
+  it("still reports an expiry rather than parking forever", async () => {
+    await parkingApi()
+      .waitForApproval("send", { title: "Post?", timeoutMs: 1_000 })
+      .catch(() => undefined)
+    clock = NOW + 5_000
+
+    const decision = await parkingApi().waitForApproval("send", {
+      title: "Post?",
+      timeoutMs: 1_000,
+    })
+    expect(decision.outcome).toBe("expired")
+    expect(decision.decidedBy).toBeUndefined()
+  })
+
+  it("parks a wait for an event that has not arrived", async () => {
+    const parked = await parkingApi()
+      .waitForEvent("ci", { key: "ci:run-42", timeoutMs: 60_000 })
+      .catch((error: unknown) => error)
+
+    expect(parked).toBeInstanceOf(BotRunParkedError)
+    expect((parked as BotRunParkedError).waitingFor).toBe("ci:run-42")
+  })
+
+  it("returns the envelope on re-entry once the event lands", async () => {
+    await parkingApi()
+      .waitForEvent("ci", { key: "ci:run-42", timeoutMs: 60_000 })
+      .catch(() => undefined)
+    await enqueueBotDelivery({ envelope: envelope("ci:run-42"), now: NOW })
+
+    const result = await parkingApi().waitForEvent("ci", {
+      key: "ci:run-42",
+      timeoutMs: 60_000,
+    })
+    expect(result?.eventId).toBe("bev_ci")
+  })
+
+  it("resolves to null once the event's own deadline passes", async () => {
+    await parkingApi()
+      .waitForEvent("ci", { key: "ci:run-42", timeoutMs: 1_000 })
+      .catch(() => undefined)
+    clock = NOW + 5_000
+
+    expect(await parkingApi().waitForEvent("ci", { key: "ci:run-42", timeoutMs: 1_000 })).toBeNull()
   })
 })

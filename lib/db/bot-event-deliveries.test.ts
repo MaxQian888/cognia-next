@@ -19,6 +19,8 @@ import {
   listBotDeliveries,
   listDueBotDeliveries,
   markBotDeliveryRunning,
+  findParkedBotDeliveryWaitingFor,
+  parkBotDelivery,
   pruneSettledBotDeliveries,
   recoverAbandonedBotDelivery,
   recoverStaleBotDeliveries,
@@ -422,5 +424,72 @@ describe("botEventDeliveries mirrored from a Host", () => {
 
     await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)
     expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("running")
+  })
+})
+
+/**
+ * A run waiting on a person is not failing. It leaves the queue so the runner
+ * can serve other Bots, and comes back on its own clock.
+ */
+describe("botEventDeliveries parked on a question", () => {
+  beforeEach(async () => {
+    __resetDbForTesting()
+    await getDb().botEventDeliveries.clear()
+  }, 15_000)
+
+  it("is due again at its resume time, and not before", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await claimBotDelivery("del_1", "runner-a", NOW)
+    await parkBotDelivery("del_1", NOW + 20_000, "bot-approval:run_1:send", NOW)
+
+    expect(await listDueBotDeliveries(10, NOW + 1_000)).toEqual([])
+    expect((await listDueBotDeliveries(10, NOW + 20_000)).map((r) => r.id)).toEqual(["del_1"])
+  })
+
+  it("spends no attempt, because thinking time is not a failure", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await failBotDelivery("del_1", new Error("transient"), NOW)
+    const before = (await getDb().botEventDeliveries.get("del_1"))?.attempts
+
+    await parkBotDelivery("del_1", NOW + 20_000, undefined, NOW)
+
+    expect((await getDb().botEventDeliveries.get("del_1"))?.attempts).toBe(before)
+  })
+
+  it("clears the lease, so any host can resume the run", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await claimBotDelivery("del_1", "runner-a", NOW)
+    await parkBotDelivery("del_1", NOW + 20_000, undefined, NOW)
+
+    const row = await getDb().botEventDeliveries.get("del_1")
+    expect("leaseOwner" in (row ?? {})).toBe(false)
+    expect(await claimBotDelivery("del_1", "runner-b", NOW + 20_000)).toBeDefined()
+  })
+
+  it("still holds its concurrency key while the question is open", async () => {
+    // A sibling push must not start while the first one is waiting for a
+    // decision. That is the whole reason parked is not a flavour of pending.
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo#1", now: NOW })
+    await parkBotDelivery("del_1", NOW + 20_000, undefined, NOW)
+
+    expect(await countActiveBotDeliveriesForKey("repo#1", NOW + 60_000)).toBe(1)
+  })
+
+  it("finds the run already waiting on a correlation key", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await parkBotDelivery("del_1", NOW + 20_000, "ci:run-42", NOW)
+
+    expect((await findParkedBotDeliveryWaitingFor("boti_1", "ci:run-42"))?.id).toBe("del_1")
+    expect(await findParkedBotDeliveryWaitingFor("boti_1", "ci:run-99")).toBeUndefined()
+    expect(await findParkedBotDeliveryWaitingFor("boti_other", "ci:run-42")).toBeUndefined()
+  })
+
+  it("is retired if it is still parked past the retention window", async () => {
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await parkBotDelivery("del_1", NOW + 20_000, "ci:never", NOW)
+
+    await pruneSettledBotDeliveries(NOW + BOT_DELIVERY_RETENTION_MS + 1)
+
+    expect((await getDb().botEventDeliveries.get("del_1"))?.status).toBe("dismissed")
   })
 })

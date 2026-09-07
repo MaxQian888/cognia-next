@@ -169,6 +169,71 @@ describe("drainBotDeliveries", () => {
     expect(row?.attempts).toBe(1)
   })
 
+  it("does not let a Bot waiting on a human hold up the others", async () => {
+    // The whole point of parking. `drainBotDeliveries` walks its batch, so an
+    // in-place poll used to stall every other Bot until the approval expired.
+    const { BotRunParkedError } = await import("./step")
+    await seedInstallation(
+      jest.fn(() => {
+        throw new BotRunParkedError("run_bot_bdl_1", "send", NOW + 20_000, "interrupt-1")
+      })
+    )
+    const second = jest.fn()
+    registerBot(
+      "other",
+      {
+        id: "acme:other",
+        definition: {
+          id: "other",
+          name: "Other",
+          version: "1.0.0",
+          executor: "handler",
+          triggers: [{ id: "opened", kind: "manual" }],
+        } as PluginBotDef,
+        handler: second,
+      },
+      { pluginId: "acme" }
+    )
+    await installBot({
+      id: "boti_2",
+      definitionId: "acme:other",
+      definitionSource: "plugin",
+      pinnedVersion: "1.0.0",
+      scope: { kind: "account" },
+      now: NOW,
+    })
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2", installationId: "boti_2" }),
+      now: NOW,
+    })
+
+    const attempts = await drainBotDeliveries({ owner: "host-a", now })
+
+    expect(attempts.find((a) => a.deliveryId === "bdl_1")?.outcome).toMatchObject({
+      status: "parked",
+    })
+    expect(second).toHaveBeenCalled()
+  })
+
+  it("takes only one delivery per concurrency key in a pass", async () => {
+    // The serialisation check reads the database BEFORE the claim, so two
+    // siblings started together would both see nothing in flight.
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope(), concurrencyKey: "repo#1", now: NOW })
+    await enqueueBotDelivery({
+      envelope: envelope({ eventId: "bev_2", deliveryId: "bdl_2" }),
+      concurrencyKey: "repo#1",
+      now: NOW,
+    })
+
+    const attempts = await drainBotDeliveries({ owner: "host-a", now })
+
+    expect(attempts).toHaveLength(1)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
   it("bounds one pass, so one Bot cannot starve the others", async () => {
     await seedInstallation()
     for (let i = 0; i < 4; i++) {

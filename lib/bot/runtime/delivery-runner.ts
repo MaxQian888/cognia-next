@@ -84,15 +84,29 @@ export async function drainBotDeliveries(
 ): Promise<BotDeliveryAttempt[]> {
   const now = options.now ?? Date.now
   const due = await listDueBotDeliveries(options.batch ?? BOT_RUNNER_BATCH, now())
-  const attempts: BotDeliveryAttempt[] = []
 
+  // At most one delivery per concurrency key per pass, and the rest of the
+  // batch runs in parallel. The serialisation check reads the database BEFORE
+  // the claim, so two siblings started together would both see nothing in
+  // flight and both run. Dropping the siblings here keeps that check sound
+  // without giving up concurrency between unrelated Bots: they are still due,
+  // and the next pass takes them once the leader settles.
+  const leaders: BotEventDeliveryRow[] = []
+  const claimedKeys = new Set<string>()
   for (const delivery of due) {
-    attempts.push({
+    if (delivery.concurrencyKey) {
+      if (claimedKeys.has(delivery.concurrencyKey)) continue
+      claimedKeys.add(delivery.concurrencyKey)
+    }
+    leaders.push(delivery)
+  }
+
+  return Promise.all(
+    leaders.map(async (delivery) => ({
       deliveryId: delivery.id,
       outcome: await attemptDelivery(delivery, options, now),
-    })
-  }
-  return attempts
+    }))
+  )
 }
 
 async function attemptDelivery(

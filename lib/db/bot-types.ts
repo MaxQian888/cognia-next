@@ -165,8 +165,17 @@ export interface BotInstallationRow {
  * was disabled while it waited, and it is kept apart from `failed` so a
  * quiet queue does not read as a broken one.
  */
+/**
+ * `parked` is a real state, not a flavour of `pending`.
+ *
+ * A run waiting on a human is not backing off from a failure, and the two must
+ * not share a lane: a parked delivery still HOLDS its concurrency key (nothing
+ * else on that key may start while the question is open), where a backed-off
+ * one does not. Collapsing them would silently let a second push run while the
+ * first was waiting for approval.
+ */
 export type BotDeliveryStatus =
-  "pending" | "leased" | "running" | "succeeded" | "failed" | "deadletter" | "dismissed"
+  "pending" | "leased" | "running" | "parked" | "succeeded" | "failed" | "deadletter" | "dismissed"
 
 export interface BotEventDeliveryRow {
   /**
@@ -180,6 +189,12 @@ export interface BotEventDeliveryRow {
    * every claim path flows through rather than in the runner.
    */
   syncedFromHost?: true
+  /**
+   * What a `parked` run is waiting on: an interrupt id, or a correlation key.
+   * Recorded so a delivery carrying the answer can tell that a run is already
+   * waiting for it rather than starting a second one.
+   */
+  waitingFor?: string
   /** The delivery id. Also `envelope.deliveryId`. */
   id: string
   eventId: string

@@ -12,6 +12,7 @@ import type { InstalledBot } from "@/lib/bot/installed-bot"
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
 import { BotExecutorUnavailableError } from "./executors/types"
+import { BotRunParkedError } from "./step"
 import { __resetLiveBotRunsForTesting, botRunId, cancelLiveBotRun, runBotDelivery } from "./run"
 
 const NOW = 1_700_000_000_000
@@ -300,5 +301,63 @@ describe("runBotDelivery", () => {
 
   it("cancelLiveBotRun reports whether the run was running here", async () => {
     expect(cancelLiveBotRun("run_bot_nope")).toBe(false)
+  })
+})
+
+/**
+ * A parked run has not settled. Treating it as a failure would spend an
+ * attempt on somebody's thinking time, and closing the journal would leave the
+ * resumption unable to write to it.
+ */
+describe("runBotDelivery when a handler parks", () => {
+  it("reports parked, leaves the run open, and sets the delivery aside", async () => {
+    const { delivery, resolved } = await seed()
+    const executor = jest.fn(() => {
+      throw new BotRunParkedError(botRunId(delivery.id), "send", NOW + 20_000, "interrupt-1")
+    })
+
+    const outcome = await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: executor },
+    })
+
+    expect(outcome).toEqual({
+      status: "parked",
+      runId: botRunId(delivery.id),
+      resumeAt: NOW + 20_000,
+      waitingFor: "interrupt-1",
+    })
+
+    const run = await getExecutionRun(botRunId(delivery.id))
+    expect(run?.status).toBe("waiting")
+    // Never ended: the resumption still has to journal into it.
+    expect(run?.endedAt).toBeUndefined()
+
+    const [row] = await listBotDeliveries({ installationId: "boti_1" })
+    expect(row).toMatchObject({
+      status: "parked",
+      nextAttemptAt: NOW + 20_000,
+      waitingFor: "interrupt-1",
+      attempts: 0,
+    })
+  })
+
+  it("journals that it is waiting, so the card says so", async () => {
+    const { delivery, resolved } = await seed()
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: {
+        handler: () => {
+          throw new BotRunParkedError(botRunId(delivery.id), "send", NOW + 20_000)
+        },
+      },
+    })
+
+    const events = await runEventJournal.replay(botRunId(delivery.id))
+    expect(events.map((event) => event.type)).toContain("run.waiting")
   })
 })

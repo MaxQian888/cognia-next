@@ -259,7 +259,14 @@ async function reject(
   return { accepted: false, reason, currentRevision }
 }
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"])
+/** A run in one of these has stopped for good. Exported so no caller re-lists them. */
+export const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+])
+
+const TERMINAL_STATUSES = TERMINAL_RUN_STATUSES
 
 /**
  * Re-dispatch a settled run as a NEW run linked back to it.

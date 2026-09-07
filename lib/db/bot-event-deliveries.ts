@@ -188,7 +188,10 @@ export async function listDueBotDeliveries(
   return rows
     .filter((row) => {
       if (!isLocallyOwned(row)) return false
-      if (row.status === "pending") return row.nextAttemptAt <= now
+      // A parked row is due on its own clock. It can never strand: whichever
+      // host reaches it next re-enters the handler, which replays its completed
+      // steps and asks the same question again.
+      if (row.status === "pending" || row.status === "parked") return row.nextAttemptAt <= now
       return isAbandonedAttempt(row, now)
     })
     .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.receivedAt - b.receivedAt)
@@ -315,6 +318,46 @@ export async function failBotDelivery(
 }
 
 /**
+ * Set a delivery aside until `resumeAt`, without spending an attempt.
+ *
+ * A run waiting on a person is not failing, so charging it would burn the
+ * budget on somebody's thinking time. The lease is cleared because this host is
+ * no longer executing it, which is what lets any host resume the run.
+ */
+export async function parkBotDelivery(
+  id: string,
+  resumeAt: number,
+  waitingFor?: string,
+  now = Date.now()
+): Promise<void> {
+  const db = getDb()
+  const row = await db.botEventDeliveries.get(id)
+  if (!row) return
+  const next: BotEventDeliveryRow = {
+    ...row,
+    status: "parked",
+    nextAttemptAt: resumeAt,
+    updatedAt: now,
+    ...(waitingFor ? { waitingFor } : {}),
+  }
+  delete next.leaseOwner
+  delete next.leaseExpiresAt
+  await db.botEventDeliveries.put(next)
+}
+
+/** A run parked on this correlation key, if one is already waiting for it. */
+export async function findParkedBotDeliveryWaitingFor(
+  installationId: string,
+  waitingFor: string
+): Promise<BotEventDeliveryRow | undefined> {
+  const rows = await getDb()
+    .botEventDeliveries.where("installationId")
+    .equals(installationId)
+    .toArray()
+  return rows.find((row) => row.status === "parked" && row.waitingFor === waitingFor)
+}
+
+/**
  * Retire a delivery that was correctly never run.
  *
  * Kept apart from `failed` so a coalesced burst or a disabled installation
@@ -437,7 +480,12 @@ export async function countActiveBotDeliveriesForKey(
   // crash left a row nothing could clear, and every later delivery on that key
   // was skipped as serialised forever after.
   return rows.filter(
-    (row) => isLocallyOwned(row) && !isAbandonedAttempt(row, now) && isMidAttempt(row.status)
+    (row) =>
+      isLocallyOwned(row) &&
+      // A parked run holds its key unconditionally. It is bounded by its own
+      // re-entry, and letting a sibling start while a human is answering is
+      // exactly what the key exists to prevent.
+      (row.status === "parked" || (!isAbandonedAttempt(row, now) && isMidAttempt(row.status)))
   ).length
 }
 

@@ -22,6 +22,7 @@ import {
   dismissBotDelivery,
   failBotDelivery,
   markBotDeliveryRunning,
+  parkBotDelivery,
 } from "@/lib/db/bot-event-deliveries"
 import type { BotEventDeliveryRow } from "@/lib/db/bot-types"
 import {
@@ -45,7 +46,7 @@ import {
   type BotExecutorContext,
   type BotExecutorFn,
 } from "./executors/types"
-import { BotRunCancelledError, createBotStepApi, type BotStepDeps } from "./step"
+import { BotRunCancelledError, BotRunParkedError, createBotStepApi, type BotStepDeps } from "./step"
 
 /** The run a delivery maps to. Derived, so a re-entry finds its own state. */
 export function botRunId(deliveryId: string): string {
@@ -70,6 +71,8 @@ export function __resetLiveBotRunsForTesting(): void {
 
 export type BotRunOutcome =
   | { status: "completed"; runId: string; result?: BotHandlerResultV1 }
+  /** Waiting on a person or an event. Not settled, and not an attempt spent. */
+  | { status: "parked"; runId: string; resumeAt: number; waitingFor?: string }
   | { status: "failed"; runId: string; error: string }
   | { status: "unavailable"; runId: string; error: string }
   | { status: "cancelled"; runId: string }
@@ -90,6 +93,20 @@ async function settleRun(runId: string, status: ExecutionRunStatus, ts: number):
   const run = await db.executionRuns.get(runId)
   if (!run) return
   await db.executionRuns.put({ ...run, status, updatedAt: ts, endedAt: ts })
+}
+
+/**
+ * Mark a run as waiting WITHOUT ending it.
+ *
+ * A sibling of `settleRun` rather than a parameter on it: that one always
+ * writes `endedAt`, and a run that has ended cannot accept the events its own
+ * resumption will journal.
+ */
+async function markRunWaiting(runId: string, ts: number): Promise<void> {
+  const db = getDb()
+  const run = await db.executionRuns.get(runId)
+  if (!run) return
+  await db.executionRuns.put({ ...run, status: "waiting", updatedAt: ts })
 }
 
 /**
@@ -257,6 +274,30 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
         .catch(() => undefined)
       await dismissBotDelivery(delivery.id, "cancelled", endedAt)
       return { status: "cancelled", runId }
+    }
+
+    if (error instanceof BotRunParkedError) {
+      // Not a failure, so no attempt is charged: a person's thinking time must
+      // not spend the retry budget an intermittent error will need. The run
+      // stays open, and re-entry replays its completed steps.
+      await markRunWaiting(runId, endedAt)
+      await runEventJournal
+        .append(
+          runId,
+          semanticRunEvent(
+            "run.waiting",
+            { stepId: error.stepName },
+            { ts: endedAt, sourceEventId: `run.waiting:${error.stepName}` }
+          )
+        )
+        .catch(() => undefined)
+      await parkBotDelivery(delivery.id, error.resumeAt, error.waitingFor, endedAt)
+      return {
+        status: "parked",
+        runId,
+        resumeAt: error.resumeAt,
+        ...(error.waitingFor ? { waitingFor: error.waitingFor } : {}),
+      }
     }
 
     const message = error instanceof Error ? error.message : String(error)

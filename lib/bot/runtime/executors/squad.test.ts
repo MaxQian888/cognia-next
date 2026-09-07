@@ -1,5 +1,6 @@
 import type { BotEventEnvelopeV1 } from "@/types/bot/event"
 
+import { BotRunParkedError } from "../step"
 import { BotExecutorUnavailableError, type BotExecutorContext } from "./types"
 import { createSquadBotExecutor, squadObjective } from "./squad"
 
@@ -28,7 +29,13 @@ function ctx(overrides: Partial<BotExecutorContext> = {}): BotExecutorContext {
     event: envelope(),
     config: {},
     signal: new AbortController().signal,
-    step: { run: jest.fn(), waitForApproval: jest.fn(), waitForEvent: jest.fn() },
+    // `run` invokes its function. A stub that returns undefined would let a
+    // step-wrapped executor pass while doing nothing.
+    step: {
+      run: (_name: string, fn: () => unknown) => Promise.resolve(fn()),
+      waitForApproval: jest.fn(),
+      waitForEvent: jest.fn(),
+    } as unknown as BotExecutorContext["step"],
     log: jest.fn(),
     progress: jest.fn(),
     installation: { id: "boti_1" } as BotExecutorContext["installation"],
@@ -72,7 +79,7 @@ describe("squadObjective", () => {
 describe("createSquadBotExecutor", () => {
   it("starts the Squad with a bot origin", async () => {
     const start = jest.fn().mockResolvedValue({ started: true, runId: "sq_1" })
-    const result = await createSquadBotExecutor({ start })(ctx())
+    const result = await createSquadBotExecutor({ start, isSquadRunSettled: () => true })(ctx())
 
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({ squadId: "team_1", origin: "bot" })
@@ -83,11 +90,13 @@ describe("createSquadBotExecutor", () => {
   it("supplies a plan-approval delegate, which is the proof a channel exists", async () => {
     const waitForApproval = jest.fn().mockResolvedValue({ outcome: "approved", decidedAt: 1 })
     const start = jest.fn().mockResolvedValue({ started: true })
-    const context = ctx({
-      step: { run: jest.fn(), waitForApproval, waitForEvent: jest.fn() },
-    })
+    const blockingStep = jest.fn(() => ({
+      run: jest.fn(),
+      waitForApproval,
+      waitForEvent: jest.fn(),
+    }))
 
-    await createSquadBotExecutor({ start })(context)
+    await createSquadBotExecutor({ start, blockingStep, isSquadRunSettled: () => true })(ctx())
     const delegate = start.mock.calls[0][0].planApprovalDelegate
     expect(await delegate({ planText: "1. read 2. write", revision: 1 })).toBe(true)
     expect(waitForApproval).toHaveBeenCalledWith(
@@ -103,34 +112,96 @@ describe("createSquadBotExecutor", () => {
   it("treats a denied plan as a refusal", async () => {
     const waitForApproval = jest.fn().mockResolvedValue({ outcome: "denied", decidedAt: 1 })
     const start = jest.fn().mockResolvedValue({ started: true })
-    await createSquadBotExecutor({ start })(
-      ctx({ step: { run: jest.fn(), waitForApproval, waitForEvent: jest.fn() } })
-    )
+    const blockingStep = () => ({ run: jest.fn(), waitForApproval, waitForEvent: jest.fn() })
+
+    await createSquadBotExecutor({ start, blockingStep, isSquadRunSettled: () => true })(ctx())
     expect(await start.mock.calls[0][0].planApprovalDelegate({ planText: "x", revision: 1 })).toBe(
       false
     )
   })
 
+  it("asks through a BLOCKING step, because the delegate runs detached", async () => {
+    // `startSquadRun` invokes the delegate from a fire-and-forget lifecycle,
+    // after this executor has returned and its delivery is already parked. A
+    // park thrown there would unwind into a detached promise and be lost.
+    const parkingStep = jest.fn()
+    const waitForApproval = jest.fn().mockResolvedValue({ outcome: "approved", decidedAt: 1 })
+    const blockingStep = jest.fn(() => ({
+      run: jest.fn(),
+      waitForApproval,
+      waitForEvent: jest.fn(),
+    }))
+    const start = jest.fn().mockResolvedValue({ started: true })
+
+    await createSquadBotExecutor({ start, blockingStep, isSquadRunSettled: () => true })(
+      ctx({
+        step: {
+          run: (_name: string, fn: () => unknown) => Promise.resolve(fn()),
+          waitForApproval: parkingStep,
+          waitForEvent: jest.fn(),
+        } as unknown as BotExecutorContext["step"],
+      })
+    )
+    await start.mock.calls[0][0].planApprovalDelegate({ planText: "x", revision: 1 })
+
+    expect(waitForApproval).toHaveBeenCalled()
+    expect(parkingStep).not.toHaveBeenCalled()
+  })
+
   it("launches under the run id, so a re-entry rejoins instead of forking", async () => {
     const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
-    await createSquadBotExecutor({ start })(ctx())
+    await createSquadBotExecutor({ start, isSquadRunSettled: () => true })(ctx())
 
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_1" }))
   })
 
-  it("reports a replay as a duplicate rather than a fresh start", async () => {
-    const start = jest.fn(async () => ({ started: true, runId: "sq_1", duplicate: true }))
-    const result = await createSquadBotExecutor({ start })(ctx())
+  it("completes only once the Squad itself has settled", async () => {
+    const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
+    const result = await createSquadBotExecutor({ start, isSquadRunSettled: () => true })(ctx())
 
     expect(result).toEqual({
-      summary: expect.stringContaining("already running"),
-      output: { squadRunId: "sq_1", duplicate: true },
+      summary: expect.stringContaining("finished"),
+      output: { squadRunId: "sq_1" },
     })
+  })
+
+  it("parks while the Squad is still working, so the card is not closed early", async () => {
+    // `startSquadRun` returns as soon as the run id is reserved. Settling here
+    // would mark the Bot run complete while the Squad was still going, and the
+    // plan-approval delegate would then ask a question on a closed run.
+    const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
+    const parked = await createSquadBotExecutor({
+      start,
+      isSquadRunSettled: () => false,
+      now: () => 1_000,
+    })(ctx()).catch((error: unknown) => error)
+
+    expect(parked).toBeInstanceOf(BotRunParkedError)
+    expect((parked as BotRunParkedError).waitingFor).toBe("squad:sq_1")
+  })
+
+  it("does not re-dispatch the Squad on a re-entry", async () => {
+    const start = jest.fn(async () => ({ started: true, runId: "sq_1" }))
+    const memoized = { started: true, runId: "sq_1" }
+    const context = ctx({
+      step: {
+        run: jest.fn().mockResolvedValue(memoized),
+        waitForApproval: jest.fn(),
+        waitForEvent: jest.fn(),
+      } as unknown as BotExecutorContext["step"],
+    })
+
+    await createSquadBotExecutor({ start, isSquadRunSettled: () => true })(context)
+
+    expect(context.step.run).toHaveBeenCalledWith("squad-start", expect.any(Function))
+    expect(start).not.toHaveBeenCalled()
   })
 
   it("fails when the Squad did not start", async () => {
     const start = jest.fn().mockResolvedValue({ started: false, reason: "squad_not_found" })
-    await expect(createSquadBotExecutor({ start })(ctx())).rejects.toThrow(/squad_not_found/)
+    await expect(
+      createSquadBotExecutor({ start, isSquadRunSettled: () => true })(ctx())
+    ).rejects.toThrow(/squad_not_found/)
   })
 
   it("reports unavailable when the definition names no team", async () => {
