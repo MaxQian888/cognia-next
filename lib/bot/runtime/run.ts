@@ -261,6 +261,24 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
       )
       .catch(() => undefined)
     await completeBotDelivery(delivery.id, endedAt)
+
+    // A settled run is itself an event. Off by default at the router: the loop
+    // guard refuses a self-produced envelope unless the receiving
+    // installation's own ceiling says `allowSelfTriggering`, and refuses it
+    // regardless past the depth cap. Emitted unconditionally so that decision
+    // stays in one place instead of being half-made here.
+    void (async () => {
+      const { dispatchBotRunToBots } = await import("@/lib/bot/sources/bot-run")
+      await dispatchBotRunToBots({
+        runId,
+        installationId: resolved.installation.id,
+        botId: resolved.definition.id,
+        status: "completed",
+        cause: delivery.envelope,
+        ...(result?.summary ? { summary: result.summary } : {}),
+      })
+    })().catch(() => undefined)
+
     return { status: "completed", runId, ...(result ? { result } : {}) }
   } catch (error) {
     const endedAt = now()

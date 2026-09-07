@@ -213,6 +213,18 @@ async function onUiaEvent(payload: DesktopUiaEvent): Promise<void> {
     const safeName = payload.name && hasNoLeakingPii(payload.name) ? payload.name : undefined
     const now = s.deps.now()
 
+    // Bots are a second consumer. Handed the ALREADY REDACTED name, never the
+    // raw one, so this fan-out cannot become the place a window title leaks.
+    void (async () => {
+      const { dispatchDesktopEventToBots } = await import("@/lib/bot/sources/desktop-event")
+      await dispatchDesktopEventToBots({
+        type: `desktop.${payload.kind}`,
+        sourceRecordId: `uia:${payload.kind}:${now}`,
+        payload: { kind: payload.kind, ...(safeName ? { name: safeName } : {}) },
+        occurredAt: now,
+      })
+    })().catch(() => undefined)
+
     await Promise.all(
       matches.map(async (match) => {
         // Loop guard 1 — a run this trigger started is still executing.

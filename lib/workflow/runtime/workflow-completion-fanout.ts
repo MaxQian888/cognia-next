@@ -86,6 +86,21 @@ export async function emitWorkflowCompletedFanout(
       return
     }
 
+    // Bots are a second consumer of the same terminal state, and the weakest
+    // of the two: routed best-effort, never able to fail the run that finished
+    // or the workflow fan-out beside it.
+    void (async () => {
+      const { dispatchWorkflowCompletedToBots } =
+        await import("@/lib/bot/sources/workflow-completed")
+      await dispatchWorkflowCompletedToBots({
+        workflowId: input.workflow.id,
+        workflowName: input.workflow.name,
+        runId: input.runId,
+        status: input.status,
+        ...(input.output !== undefined ? { output: input.output } : {}),
+      })
+    })().catch(() => undefined)
+
     const [{ findMatchingWorkflows }, { dispatchTrigger }] = await Promise.all([
       import("./trigger-subscriptions"),
       import("./trigger-bridge"),
