@@ -411,7 +411,7 @@ export function extractOAuthExchangeResult(
 export async function exchangeCodeForApiKey(
   providerId: string,
   payload: { code: string; codeVerifier?: string }
-): Promise<{ apiKey: string; expiresAt?: number } | null> {
+): Promise<OAuthCredential | null> {
   try {
     const request = buildOAuthExchangeRequest(providerId, payload)
     if (!request) return null
@@ -433,11 +433,33 @@ export async function exchangeCodeForApiKey(
     }
 
     const extracted = extractOAuthExchangeResult(providerId, body)
-    if (extracted) return { apiKey: extracted.apiKey, expiresAt: extracted.expiresAt }
+    if (extracted) {
+      return {
+        apiKey: extracted.apiKey,
+        expiresAt: extracted.expiresAt,
+        // Carried through so a short-lived credential can be renewed. Dropping
+        // it here used to mean any provider issuing a one-hour token worked
+        // until its first expiry and then had no recovery but a fresh login.
+        refreshToken:
+          typeof extracted.refreshToken === "string" ? extracted.refreshToken : undefined,
+      }
+    }
     // Lenient fallbacks for providers whose response mapping is not spelled out.
-    const loose = (body ?? {}) as { apiKey?: string; key?: string; access_token?: string }
+    const loose = (body ?? {}) as {
+      apiKey?: string
+      key?: string
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+    }
     const apiKey = loose.apiKey ?? loose.key ?? loose.access_token
-    return apiKey ? { apiKey } : null
+    if (!apiKey) return null
+    return {
+      apiKey,
+      refreshToken: loose.refresh_token,
+      expiresAt:
+        typeof loose.expires_in === "number" ? Date.now() + loose.expires_in * 1000 : undefined,
+    }
   } catch (error) {
     log.error("OAuth exchange failed", error as Error)
     return null
@@ -452,123 +474,166 @@ export function verifyOAuthState(returnedState: string): OAuthState | null {
   return storedState
 }
 
-// Token expiration constants
-const TOKEN_REFRESH_BUFFER = 5 * 60 * 1000
-const TOKEN_EXPIRY_STORAGE_KEY = "cognia-oauth-token-expiry"
-
-interface TokenExpiryInfo {
-  providerId: string
-  expiresAt: number
+/**
+ * A credential obtained from an OAuth login.
+ *
+ * `apiKey` is what every provider call actually sends. `refreshToken` and
+ * `expiresAt` are present only for providers that issue short-lived tokens.
+ */
+export interface OAuthCredential {
+  apiKey: string
+  expiresAt?: number
   refreshToken?: string
 }
 
-export function saveTokenExpiry(
+/** Renew this far ahead of the stated expiry rather than waiting for a 401. */
+export const OAUTH_REFRESH_BUFFER_MS = 5 * 60 * 1000
+
+/**
+ * Whether a credential is close enough to expiry to be worth renewing.
+ * A credential with no stated expiry never expires as far as we know.
+ */
+export function isOAuthCredentialExpiring(
+  expiresAt: number | undefined,
+  now: number = Date.now(),
+  bufferMs: number = OAUTH_REFRESH_BUFFER_MS
+): boolean {
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return false
+  return expiresAt - now <= bufferMs
+}
+
+function getDefaultRefreshBody(config: ProviderOAuthConfig): Record<string, OAuthRuleValue> {
+  const body: Record<string, OAuthRuleValue> = {
+    grant_type: { literal: "refresh_token" },
+    refresh_token: { from: "input.refreshToken" },
+  }
+  if (config.clientId) body.client_id = { literal: config.clientId }
+  return body
+}
+
+/**
+ * Trade a refresh token for a fresh credential, against the PROVIDER's own
+ * endpoint.
+ *
+ * The previous implementation posted to `/api/oauth/:id/refresh`. The app is a
+ * static export, so `app/api/` does not exist at runtime and that request
+ * 404'd on every shell. It was also unreachable: it read its refresh token
+ * from a localStorage key that nothing ever wrote.
+ *
+ * Returns `null` when the provider declares no refresh spec, or when the
+ * exchange fails. Callers decide whether that means "re-login" or "retry
+ * later" and are expected to back off rather than loop.
+ */
+export async function refreshOAuthCredential(
   providerId: string,
-  expiresAt: number,
-  refreshToken?: string
-): void {
-  if (typeof window === "undefined") return
-  const key = `${TOKEN_EXPIRY_STORAGE_KEY}-${providerId}`
-  const info: TokenExpiryInfo = { providerId, expiresAt, refreshToken }
-  localStorage.setItem(key, JSON.stringify(info))
-}
+  payload: { refreshToken: string }
+): Promise<OAuthCredential | null> {
+  const config = getProviderOAuthConfig(providerId)
+  if (!config?.refresh) return null
+  if (!payload.refreshToken) return null
 
-export function getTokenExpiry(providerId: string): TokenExpiryInfo | null {
-  if (typeof window === "undefined") return null
-  const key = `${TOKEN_EXPIRY_STORAGE_KEY}-${providerId}`
-  const stored = localStorage.getItem(key)
-  if (!stored) return null
-
-  try {
-    return JSON.parse(stored) as TokenExpiryInfo
-  } catch {
-    return null
-  }
-}
-
-export function clearTokenExpiry(providerId: string): void {
-  if (typeof window === "undefined") return
-  const key = `${TOKEN_EXPIRY_STORAGE_KEY}-${providerId}`
-  localStorage.removeItem(key)
-}
-
-export function isTokenExpiringSoon(providerId: string): boolean {
-  const expiryInfo = getTokenExpiry(providerId)
-  if (!expiryInfo?.expiresAt) return false
-  return expiryInfo.expiresAt - Date.now() <= TOKEN_REFRESH_BUFFER
-}
-
-export function isTokenExpired(providerId: string): boolean {
-  const expiryInfo = getTokenExpiry(providerId)
-  if (!expiryInfo?.expiresAt) return false
-  return Date.now() >= expiryInfo.expiresAt
-}
-
-export function getTokenTimeToExpiry(providerId: string): number | null {
-  const expiryInfo = getTokenExpiry(providerId)
-  if (!expiryInfo?.expiresAt) return null
-  const remaining = expiryInfo.expiresAt - Date.now()
-  return remaining > 0 ? remaining : 0
-}
-
-export async function refreshOAuthToken(
-  providerId: string
-): Promise<{ apiKey: string; expiresAt?: number } | null> {
-  const expiryInfo = getTokenExpiry(providerId)
-  if (!expiryInfo?.refreshToken) {
-    log.warn("No refresh token available for provider", { providerId })
-    return null
-  }
-
-  try {
-    const response = await fetch(`/api/oauth/${providerId}/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: expiryInfo.refreshToken }),
+  const spec = config.refresh
+  const url = spec.url ?? config.tokenUrl
+  const headers = coerceStringRecord(
+    resolveRuleMap(spec.headers ?? { "Content-Type": { literal: "application/json" } }, {
+      input: payload,
     })
+  )
+  const body = resolveRuleMap(spec.body ?? getDefaultRefreshBody(config), { input: payload })
+  const method = spec.method ?? "POST"
 
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || "Failed to refresh token")
-    }
-
-    const data = await response.json()
-
-    if (data.expiresAt) {
-      saveTokenExpiry(providerId, data.expiresAt, data.refreshToken || expiryInfo.refreshToken)
-    }
-
-    return {
-      apiKey: data.apiKey || data.key,
-      expiresAt: data.expiresAt,
-    }
-  } catch (error) {
-    log.error("OAuth token refresh failed", error as Error)
-    return null
+  const init: RequestInit = { method, headers }
+  if (method !== "GET") {
+    init.body = isFormEncoded(headers)
+      ? new URLSearchParams(coerceStringRecord(body)).toString()
+      : JSON.stringify(body)
   }
+
+  const response = await proxyFetch(url, init)
+  let parsed: unknown = null
+  try {
+    parsed = await response.json()
+  } catch {
+    parsed = null
+  }
+  if (!response.ok) {
+    throw new Error(`${response.status}: ${describeOAuthError(parsed)}`)
+  }
+
+  const mapping = spec.response ?? config.exchange?.response
+  const extracted = mapping
+    ? Object.fromEntries(
+        Object.entries(mapping).map(([key, path]) => [key, getByPath({ body: parsed }, path)])
+      )
+    : {}
+  const loose = (parsed ?? {}) as {
+    access_token?: string
+    key?: string
+    apiKey?: string
+    refresh_token?: string
+    expires_in?: number
+  }
+
+  const apiKey =
+    typeof extracted.apiKey === "string" && extracted.apiKey
+      ? extracted.apiKey
+      : (loose.access_token ?? loose.key ?? loose.apiKey)
+  if (!apiKey) return null
+
+  const refreshToken =
+    typeof extracted.refreshToken === "string" && extracted.refreshToken
+      ? extracted.refreshToken
+      : // A provider that does not rotate its refresh token simply omits it,
+        // and the caller must keep spending the one it already holds.
+        (loose.refresh_token ?? payload.refreshToken)
+
+  // `expiresAt` means the same thing on both halves of the flow: the ABSOLUTE
+  // epoch-ms stamp `extractOAuthExchangeResult` reads out of the very same
+  // `exchange.response` mapping. Guessing a unit from the magnitude here would
+  // give one declared field two meanings. A mapping onto an epoch-SECONDS
+  // field would then be stored as 1970 by the login and as 2082 by the
+  // renewal, so the credential would either look permanently expired or never
+  // expire. Only the unmapped RFC 6749 `expires_in` fallback is a relative
+  // delta, and it is read as one here.
+  const mappedExpiresAt =
+    extracted.expiresAt == null
+      ? undefined
+      : typeof extracted.expiresAt === "number"
+        ? extracted.expiresAt
+        : Number(extracted.expiresAt)
+  const expiresAt =
+    mappedExpiresAt !== undefined && Number.isFinite(mappedExpiresAt)
+      ? mappedExpiresAt
+      : typeof loose.expires_in === "number" && Number.isFinite(loose.expires_in)
+        ? Date.now() + loose.expires_in * 1000
+        : undefined
+
+  return { apiKey, refreshToken, expiresAt }
 }
 
-export async function ensureValidToken(
-  providerId: string,
-  onRefresh?: (newApiKey: string) => void
-): Promise<boolean> {
-  if (!isTokenExpiringSoon(providerId)) {
-    return true
+/** True when the resolved headers ask for a form-encoded body. */
+export function isFormEncoded(headers: Record<string, string>): boolean {
+  for (const [name, value] of Object.entries(headers)) {
+    if (name.toLowerCase() === "content-type") {
+      return value.toLowerCase().includes("application/x-www-form-urlencoded")
+    }
   }
-
-  if (isTokenExpired(providerId)) {
-    log.info("Token expired, attempting refresh", { providerId })
-  } else {
-    log.info("Token expiring soon, proactively refreshing", { providerId })
-  }
-
-  const result = await refreshOAuthToken(providerId)
-  if (result) {
-    log.info("Token refreshed successfully", { providerId })
-    onRefresh?.(result.apiKey)
-    return true
-  }
-
-  log.warn("Token refresh failed", { providerId })
   return false
+}
+
+/** Pull the most human-readable message out of an OAuth error body. */
+export function describeOAuthError(body: unknown): string {
+  if (!body || typeof body !== "object") return "unknown error"
+  const record = body as {
+    error?: string | { message?: string }
+    error_description?: string
+    message?: string
+  }
+  if (typeof record.error_description === "string") return record.error_description
+  if (typeof record.error === "string") return record.error
+  if (record.error && typeof record.error === "object" && record.error.message) {
+    return record.error.message
+  }
+  if (typeof record.message === "string") return record.message
+  return "unknown error"
 }

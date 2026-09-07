@@ -38,6 +38,10 @@ function gateText(...values: Array<string | readonly string[] | undefined>): voi
   }
 }
 
+// The return types are written out rather than inferred. Inferring them
+// reaches into AI SDK internals that a declaration file cannot name, which
+// fails the standalone package build even though the app's own type-check,
+// compiling this from source, never has to name anything.
 export type GenerateTextArgs = Parameters<typeof generateText>[0]
 export type StreamTextArgs = Parameters<typeof streamText>[0]
 export type GenerateObjectArgs = Parameters<typeof generateObject>[0]
@@ -117,12 +121,12 @@ function promptTexts(args: { prompt?: unknown; system?: unknown; messages?: unkn
   return out
 }
 
-export function generateTextGated(args: GenerateTextArgs) {
+export function generateTextGated(args: GenerateTextArgs): ReturnType<typeof generateText> {
   gateText(promptTexts(args))
   return generateText(args)
 }
 
-export function streamTextGated(args: StreamTextArgs) {
+export function streamTextGated(args: StreamTextArgs): ReturnType<typeof streamText> {
   gateText(promptTexts(args))
   return streamText(args)
 }
@@ -136,7 +140,7 @@ export function generateObjectGated(args: GenerateObjectArgs) {
 export function jsonSchemaTool(definition: {
   description?: string
   inputSchema: Record<string, unknown>
-}) {
+}): ReturnType<typeof tool> {
   return tool({
     ...(definition.description ? { description: definition.description } : {}),
     inputSchema: jsonSchema(definition.inputSchema),

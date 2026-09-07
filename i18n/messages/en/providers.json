@@ -43,12 +43,10 @@
   "backToList": "Back",
   "baseURL": "Base URL",
   "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
+  "baseURLPlaceholder": "https://api.example.com/v1",
   "baseURLPlaceholderAnthropic": "https://api.anthropic.com/v1",
   "baseURLPlaceholderGemini": "https://generativelanguage.googleapis.com/v1beta",
   "baseURLPlaceholderOpenAI": "https://api.example.com/v1",
-  "hideApiKey": "Hide API key",
-  "invalidBaseURL": "Enter a valid HTTP or HTTPS base URL.",
-  "baseURLPlaceholder": "https://api.example.com/v1",
   "baseUrl": "Base URL",
   "batchApiPrice": "Batch API price",
   "batchNoEligibleProviders": "No visible and eligible providers are available for this operation.",
@@ -599,6 +597,7 @@
     "timeline": "Check Timeline",
     "unknown": "Unknown"
   },
+  "hideApiKey": "Hide API key",
   "host": "Host",
   "hostNotice": {
     "companionBody": "Keys and endpoints entered here stay on this device and are never sent to the paired host. The host uses its own provider configuration.",
@@ -639,12 +638,21 @@
   "inputPricing": "Input Pricing",
   "installed": "Installed",
   "installedModels": "Installed Models",
+  "invalidBaseURL": "Enter a valid HTTP or HTTPS base URL.",
   "invalidBaseUrl": "Invalid base URL.",
   "invalidKeyFormat": "API key format may be invalid",
   "jan": "Jan",
   "janDescription": "Open-source ChatGPT alternative",
   "justNow": "Just now",
   "keepaliveInterval": "Keepalive Interval (s)",
+  "keyLogin": {
+    "getKey": "Get a key",
+    "invalid": "Key rejected",
+    "openConsole": "Open console",
+    "unverified": "Could not verify",
+    "valid": "Key works",
+    "verify": "Verify"
+  },
   "keyManagement": {
     "createKey": "Create API Key",
     "createKeyDesc": "Create a new API key for use with OpenRouter",
@@ -723,6 +731,7 @@
   "modelCapabilityTools": "Tools",
   "modelCapabilityVision": "Vision",
   "modelCount": "{count} models",
+  "modelDiscoveryFailed": "Could not fetch models from this endpoint.",
   "modelManagement": "Model Management",
   "modelManager": {
     "autoDetectProxy": "Auto-detect Proxy",
@@ -747,8 +756,6 @@
   "modelSelectionDescription": "Search, filter, and enable the models available for this provider.",
   "modelSettings": "Model Settings",
   "modelSettingsFor": "Settings for {model}",
-  "modelDiscoveryFailed": "Could not fetch models from this endpoint.",
-  "showApiKey": "Show API key",
   "models": "Models",
   "modelsAvailableThrough": "Models available through this provider",
   "modelsCount": "models",
@@ -986,7 +993,6 @@
   "routing": "Routing Strategy",
   "routingHint": "How credentials are selected for requests",
   "routingStrategy": "Routing Strategy",
-  "routingWorkspaceDescription": "Configure global aliases, fallback order, constraints, and provider policy in one place.",
   "routingView": {
     "addAlias": "Add alias",
     "addConstraint": "Add constraint",
@@ -1203,6 +1209,7 @@
     "testTitle": "Routing Workbench",
     "timeoutMs": "Request timeout (ms)"
   },
+  "routingWorkspaceDescription": "Configure global aliases, fallback order, constraints, and provider policy in one place.",
   "running": "Running",
   "sambanova": "SambaNova",
   "sambanovaDescription": "Enterprise AI with free tier",
@@ -1256,6 +1263,7 @@
     "verifyConnectionDesc": "Make sure {provider} is running and accessible",
     "verifyStep": "Verify"
   },
+  "showApiKey": "Show API key",
   "sidebar": {
     "addButton": "Add",
     "clearFilters": "Clear filters",

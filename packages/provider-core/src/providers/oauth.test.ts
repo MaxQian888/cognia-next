@@ -1,11 +1,15 @@
 /** @jest-environment jsdom */
 import {
+  catalogEntryToProviderConfig,
+  getAllProviders,
+  getBuiltInProviderCatalog,
+} from "@cognia/provider-types"
+
+import {
   OAUTH_PROVIDERS,
   buildOAuthUrl,
   buildOAuthExchangeRequest,
   clearOAuthState,
-  clearTokenExpiry,
-  ensureValidToken,
   exchangeCodeForApiKey,
   extractOAuthExchangeResult,
   generateCodeChallenge,
@@ -13,14 +17,10 @@ import {
   getOAuthCallbackQueryKeys,
   getOAuthState,
   getProviderOAuthConfig,
-  getTokenExpiry,
-  getTokenTimeToExpiry,
-  isTokenExpired,
-  isTokenExpiringSoon,
+  isOAuthCredentialExpiring,
   parseOAuthCallback,
-  refreshOAuthToken,
+  refreshOAuthCredential,
   saveOAuthState,
-  saveTokenExpiry,
   verifyOAuthState,
   type OAuthState,
   buildNativeOAuthRedirectUri,
@@ -299,82 +299,58 @@ describe("OAuth provider helpers", () => {
     await expect(exchangeCodeForApiKey("openrouter", { code: "bad" })).resolves.toBeNull()
   })
 
-  it("tracks token expiry and refreshes when a token is near expiry", async () => {
-    const farFuture = Date.now() + 60 * 60 * 1000
-    saveTokenExpiry("openrouter", farFuture, "refresh-token")
-    expect(getTokenExpiry("openrouter")).toMatchObject({ providerId: "openrouter" })
-    expect(isTokenExpired("openrouter")).toBe(false)
-    expect(isTokenExpiringSoon("openrouter")).toBe(false)
-    expect(getTokenTimeToExpiry("openrouter")).toBeGreaterThan(0)
-    await expect(ensureValidToken("openrouter")).resolves.toBe(true)
+  it("reports a credential as expiring only inside the buffer", () => {
+    const now = 1_000_000
+    expect(isOAuthCredentialExpiring(now + 60 * 60_000, now)).toBe(false)
+    expect(isOAuthCredentialExpiring(now + 60_000, now)).toBe(true)
+    expect(isOAuthCredentialExpiring(now - 1, now)).toBe(true)
+  })
+
+  it("treats a credential with no stated expiry as non-expiring", () => {
+    // OpenRouter mints a long-lived key with no expiry. Renewing it on a
+    // schedule would be churn against a credential that never goes stale.
+    expect(isOAuthCredentialExpiring(undefined, 1_000_000)).toBe(false)
+    expect(isOAuthCredentialExpiring(Number.NaN, 1_000_000)).toBe(false)
+  })
+
+  it("returns null for a provider that declares no refresh spec", async () => {
+    // OpenRouter has no `refresh` block, so there is nothing to spend a token
+    // on. The caller must treat this as "re-login", never as "retry".
+    await expect(refreshOAuthCredential("openrouter", { refreshToken: "rt-1" })).resolves.toBeNull()
     expect(fetchMock).not.toHaveBeenCalled()
-
-    saveTokenExpiry("openrouter", Date.now() + 60 * 1000, "refresh-token")
-    fetchMock.mockResolvedValueOnce(response({ apiKey: "sk-refreshed", expiresAt: farFuture }))
-    const onRefresh = jest.fn()
-    await expect(ensureValidToken("openrouter", onRefresh)).resolves.toBe(true)
-    expect(onRefresh).toHaveBeenCalledWith("sk-refreshed")
-
-    clearTokenExpiry("openrouter")
-    expect(getTokenExpiry("openrouter")).toBeNull()
   })
 
-  it("handles malformed, missing, expired, and zero-remaining token expiry records", () => {
-    localStorage.setItem("cognia-oauth-token-expiry-openrouter", "{bad json")
-    expect(getTokenExpiry("openrouter")).toBeNull()
-    expect(isTokenExpiringSoon("missing")).toBe(false)
-    expect(isTokenExpired("missing")).toBe(false)
-    expect(getTokenTimeToExpiry("missing")).toBeNull()
-
-    saveTokenExpiry("openrouter", Date.now() - 1)
-    expect(isTokenExpiringSoon("openrouter")).toBe(true)
-    expect(isTokenExpired("openrouter")).toBe(true)
-    expect(getTokenTimeToExpiry("openrouter")).toBe(0)
+  it("returns null when there is no refresh token to spend", async () => {
+    await expect(refreshOAuthCredential("openrouter", { refreshToken: "" })).resolves.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("refreshes OAuth tokens directly and preserves refresh tokens when the response omits one", async () => {
-    const farFuture = Date.now() + 60 * 60 * 1000
-    saveTokenExpiry("openrouter", Date.now() + 60 * 1000, "refresh-token")
-    fetchMock.mockResolvedValueOnce(response({ key: "sk-refreshed" }))
-    await expect(refreshOAuthToken("openrouter")).resolves.toEqual({
-      apiKey: "sk-refreshed",
-      expiresAt: undefined,
-    })
+  it("returns null for an unknown provider", async () => {
+    await expect(refreshOAuthCredential("nope", { refreshToken: "rt-1" })).resolves.toBeNull()
+  })
+})
 
-    fetchMock.mockResolvedValueOnce(
-      response({ apiKey: "sk-refreshed-again", expiresAt: farFuture }, 200)
-    )
-    await expect(refreshOAuthToken("openrouter")).resolves.toEqual({
-      apiKey: "sk-refreshed-again",
-      expiresAt: farFuture,
-    })
-    expect(getTokenExpiry("openrouter")).toMatchObject({
-      expiresAt: farFuture,
-      refreshToken: "refresh-token",
-    })
+describe("the OAuth wiring a catalog entry has to survive", () => {
+  it("never routes a callback through a path the static export deletes", () => {
+    // `app/api/` does not exist at runtime. A callback pointing there answers
+    // 404 after the user has already approved, which reads as the provider
+    // rejecting them. The openrouter catalog entry shipped exactly that, and
+    // was saved only by an inline duplicate that happened to shadow it.
+    const routed = Object.values(getAllProviders())
+      .filter((provider) => provider.oauthConfig)
+      .map((provider) => ({ id: provider.id, path: provider.oauthConfig?.callbackPath ?? "" }))
+      .filter((entry) => entry.path.startsWith("/api/"))
+    expect(routed).toEqual([])
   })
 
-  it("returns null when refresh tokens are missing or refresh requests fail", async () => {
-    saveTokenExpiry("openrouter", Date.now() + 60 * 1000)
-    await expect(refreshOAuthToken("openrouter")).resolves.toBeNull()
-
-    saveTokenExpiry("openrouter", Date.now() + 60 * 1000, "refresh-token")
-    fetchMock.mockResolvedValueOnce(response({ message: "denied" }, 401))
-    await expect(refreshOAuthToken("openrouter")).resolves.toBeNull()
-
-    fetchMock.mockRejectedValueOnce(new Error("offline"))
-    await expect(refreshOAuthToken("openrouter")).resolves.toBeNull()
-  })
-
-  it("logs the expired-token path and returns false when proactive refresh fails", async () => {
-    saveTokenExpiry("openrouter", Date.now() - 1000, "refresh-token")
-    fetchMock.mockResolvedValueOnce(
-      response({ apiKey: "sk-expired", expiresAt: Date.now() + 60 * 60 * 1000 })
-    )
-    await expect(ensureValidToken("openrouter")).resolves.toBe(true)
-
-    saveTokenExpiry("openrouter", Date.now() + 60 * 1000, "refresh-token")
-    fetchMock.mockRejectedValueOnce(new Error("offline"))
-    await expect(ensureValidToken("openrouter")).resolves.toBe(false)
+  it("carries both OAuth fields through the catalog converter", () => {
+    // The login button gates on `supportsOAuth` and the flow gates on
+    // `oauthConfig`. The converter copies field by name, so a field nobody
+    // listed is dropped in silence and the provider simply renders no login.
+    const entry = getBuiltInProviderCatalog().find((candidate) => candidate.oauthConfig)
+    expect(entry).toBeDefined()
+    const converted = catalogEntryToProviderConfig(entry!)
+    expect(converted.supportsOAuth).toBe(entry!.supportsOAuth)
+    expect(converted.oauthConfig).toEqual(entry!.oauthConfig)
   })
 })

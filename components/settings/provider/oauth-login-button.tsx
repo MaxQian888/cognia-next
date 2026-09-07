@@ -126,6 +126,9 @@ export function OAuthLoginButton({
           enabled: true,
           oauthConnected: true,
           oauthExpiresAt: data.expiresAt,
+          // Kept so a short-lived credential can be renewed without sending
+          // the user back through the whole login.
+          oauthRefreshToken: data.refreshToken,
         })
 
         clearOAuthState()
@@ -275,6 +278,7 @@ export function OAuthLoginButton({
   const handleDisconnect = useCallback(() => {
     updateProviderSettings(providerId, {
       apiKey: "",
+      oauthRefreshToken: undefined,
       oauthConnected: false,
       oauthExpiresAt: undefined,
     })

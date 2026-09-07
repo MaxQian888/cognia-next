@@ -83,6 +83,7 @@ import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
 import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
 import { OAuthLoginButton } from "./oauth-login-button"
+import { KeyLoginRow } from "./key-login-row"
 import { useSettingsStore } from "@/stores/settings"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
@@ -1596,6 +1597,11 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                         `oauthConnected` / `oauthExpiresAt` unreachable from the
                         UI even though both are persisted on the settings row. */}
                         <OAuthLoginButton providerId={selectedId} />
+                        {/* Guided key login. Self-gates on whether the provider
+                        has a console page or a validation probe, so mounting it
+                        for every built-in is safe and every provider that grows
+                        one picks it up for free. */}
+                        <KeyLoginRow providerId={selectedId} apiKey={selectedSettings?.apiKey} />
                         {/* Provider-specific panels. Both shipped with a catalog
                         entry and a full settings schema but were never mounted,
                         so every field they expose was unreachable. */}

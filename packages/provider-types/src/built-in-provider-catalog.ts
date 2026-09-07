@@ -19,6 +19,31 @@ export type BuiltInProviderAdapterId =
   | "local-openai-compatible"
   | "cliproxyapi"
   | "bedrock"
+/**
+ * Guided paste-a-key login. Structurally the `ApiKeyLoginConfig` in
+ * `provider.ts`, declared here so the catalog does not have to import the
+ * module that imports it. Mirrors how `BuiltInProviderOAuthConfig` is handled.
+ */
+export interface BuiltInProviderKeyLogin {
+  authUrl?: string
+  placeholder?: string
+  normalize?: "strip-bearer"
+  validate?: BuiltInProviderKeyValidation
+}
+
+export type BuiltInProviderKeyAuthHeader = "bearer" | "x-api-key" | "x-goog-api-key"
+
+export type BuiltInProviderKeyValidation =
+  | { kind: "models-endpoint"; url: string; auth?: BuiltInProviderKeyAuthHeader }
+  | {
+      kind: "chat-completions"
+      baseUrl: string
+      model: string
+      maxTokensField?: "max_tokens" | "max_completion_tokens"
+      tolerateModelDenied?: boolean
+    }
+  | { kind: "anthropic-messages"; baseUrl: string; model: string }
+
 export type BuiltInProviderQuickAddMode = "shortcut" | "promoted"
 export type BuiltInProviderQuickAddCategory = "china" | "global" | "proxy"
 
@@ -110,7 +135,21 @@ export interface BuiltInProviderOAuthConfig {
   clientId?: string
   scope?: string
   pkceRequired?: boolean
+  /**
+   * Where the IdP sends the user back. There is no `/api/*` at runtime — the
+   * app is a static export — so this is a real exported route or a deep link,
+   * never a Next route handler.
+   */
   callbackPath: string
+  /** Query parameter the IdP expects the redirect URI under. OpenRouter uses `callback_url`. */
+  redirectUriParam?: string
+  /**
+   * How to read the credential out of the token response. Only the response
+   * mapping is mirrored here, which is what a provider that hands back an API
+   * key needs. A flow that also has to shape the request headers or body
+   * declares the full `oauthConfig` inline instead.
+   */
+  exchange?: { response?: Record<string, string> }
 }
 
 export interface BuiltInProviderCompatibilityRule {
@@ -153,6 +192,7 @@ export interface BuiltInProviderCatalogEntry {
   pricingUrl?: string
   supportsOAuth?: boolean
   oauthConfig?: BuiltInProviderOAuthConfig
+  keyLogin?: BuiltInProviderKeyLogin
   models?: BuiltInProviderModelEntry[]
   quickAdd?: BuiltInProviderQuickAddMetadata
   codingPackage?: BuiltInProviderCodingPackage
@@ -286,6 +326,15 @@ export function isBuiltInProviderId(providerId: string): providerId is BuiltInPr
 const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = {
   openai: {
     id: "openai",
+    // The OpenAI SDK defaults the base URL, so the catalog has none to derive
+    // a probe from. `GET /v1/models` is the cheapest proof a key is accepted.
+    keyLogin: {
+      validate: {
+        kind: "models-endpoint",
+        url: "https://api.openai.com/v1/models",
+        auth: "bearer",
+      },
+    },
     name: "OpenAI",
     type: "cloud",
     protocol: "openai",
@@ -346,6 +395,14 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   anthropic: {
     id: "anthropic",
+    // Anthropic authenticates with `x-api-key`, not a bearer.
+    keyLogin: {
+      validate: {
+        kind: "models-endpoint",
+        url: "https://api.anthropic.com/v1/models",
+        auth: "x-api-key",
+      },
+    },
     name: "Anthropic",
     type: "cloud",
     protocol: "anthropic",
@@ -435,6 +492,14 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   google: {
     id: "google",
+    // AI Studio keys go in `x-goog-api-key`.
+    keyLogin: {
+      validate: {
+        kind: "models-endpoint",
+        url: "https://generativelanguage.googleapis.com/v1beta/models",
+        auth: "x-goog-api-key",
+      },
+    },
     name: "Google AI",
     type: "cloud",
     protocol: "gemini",
@@ -694,6 +759,13 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
   },
   mistral: {
     id: "mistral",
+    keyLogin: {
+      validate: {
+        kind: "models-endpoint",
+        url: "https://api.mistral.ai/v1/models",
+        auth: "bearer",
+      },
+    },
     name: "Mistral AI",
     type: "cloud",
     protocol: "openai",
@@ -952,7 +1024,11 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
       authorizationUrl: "https://openrouter.ai/auth",
       tokenUrl: "https://openrouter.ai/api/v1/auth/keys",
       pkceRequired: true,
-      callbackPath: "/api/oauth/openrouter/callback",
+      // Not `/api/oauth/...`: that route is stripped by the static export and
+      // answered 404, which is where this flow used to land.
+      callbackPath: "/settings?section=providers&oauthProvider=openrouter",
+      redirectUriParam: "callback_url",
+      exchange: { response: { apiKey: "body.key" } },
       scope: "openid profile",
     },
   },

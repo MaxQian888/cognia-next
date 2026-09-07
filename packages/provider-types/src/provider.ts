@@ -127,10 +127,26 @@ export interface ProviderConfig {
   // OAuth support
   supportsOAuth?: boolean
   oauthConfig?: OAuthConfig
+  /**
+   * Guided paste-a-key login. Many providers, including most of the Chinese
+   * coding plans, publish no OAuth client at all: the sanctioned flow is
+   * "open the console, mint a key, paste it back". Declaring this turns that
+   * into a real login rather than an unlabelled text box, and lets the key be
+   * verified against the provider before it is saved.
+   */
+  keyLogin?: ApiKeyLoginConfig
   // Provider metadata
   description?: string
   website?: string
   dashboardUrl?: string
+  /**
+   * For relay entries (`glm-anthropic`, `kimi-coding`, ...): the vendor this
+   * entry is a deployment of. Mirrors the catalog's own `relayOf`. A deployment
+   * is billed to the vendor's account and authenticated with the vendor's key,
+   * so anything that resolves "where does this key come from" follows this
+   * pointer when the deployment itself declares no console of its own.
+   */
+  relayOf?: string
   docsUrl?: string
   pricingUrl?: string
   category?: "flagship" | "aggregator" | "specialized" | "local" | "enterprise"
@@ -158,7 +174,118 @@ export interface OAuthConfig {
   authorizationParams?: Record<string, OAuthRuleValue>
   callback?: OAuthCallbackConfig
   exchange?: OAuthExchangeConfig
+  /**
+   * How to trade a stored refresh token for a fresh credential.
+   *
+   * Without this a provider whose OAuth issues a short-lived access token
+   * works until its first expiry and then simply stops, with re-login as the
+   * only recovery. Declare it for any provider whose exchange response carries
+   * a `refresh_token`, and map that token in `exchange.response` so there is
+   * something to spend here.
+   *
+   * `url` defaults to {@link OAuthConfig.tokenUrl}. The request body may read
+   * `input.refreshToken` and `input.clientId`.
+   */
+  refresh?: OAuthRefreshConfig
+  /**
+   * RFC 8628 device-code login, for providers that cannot use a browser
+   * redirect (or that only publish this flow). The user is shown a code and a
+   * URL, and the client polls until they finish in their browser.
+   */
+  deviceCode?: OAuthDeviceCodeConfig
 }
+
+export interface OAuthRefreshConfig extends OAuthExchangeConfig {
+  /** Defaults to the provider's `tokenUrl`. */
+  url?: string
+}
+
+/**
+ * An RFC 8628 device-code login.
+ *
+ * `pollUrl` defaults to the provider's `tokenUrl`. Both response maps use the
+ * same dot-path form as {@link OAuthExchangeConfig.response}, rooted at
+ * `body`.
+ */
+export interface OAuthDeviceCodeConfig {
+  /** Endpoint that mints a device code and the user-facing verification URL. */
+  deviceCodeUrl: string
+  /** Endpoint polled until the user finishes. Defaults to `tokenUrl`. */
+  pollUrl?: string
+  scope?: string
+  /**
+   * Grant type sent on each poll. Defaults to the RFC 8628 value
+   * `urn:ietf:params:oauth:grant-type:device_code`.
+   */
+  grantType?: string
+  headers?: Record<string, OAuthRuleValue>
+  /** Extra body fields on the device-code request, beyond `client_id`/`scope`. */
+  deviceCodeParams?: Record<string, OAuthRuleValue>
+  /**
+   * Where to read the device-code response fields. Defaults to the RFC names:
+   * `device_code`, `user_code`, `verification_uri`, `interval`, `expires_in`.
+   */
+  deviceCodeResponse?: OAuthDeviceCodeResponseMap
+}
+
+export interface OAuthDeviceCodeResponseMap {
+  deviceCode?: string
+  userCode?: string
+  verificationUri?: string
+  verificationUriComplete?: string
+  intervalSeconds?: string
+  expiresInSeconds?: string
+}
+
+/**
+ * Guided paste-a-key login for a provider with no OAuth client.
+ */
+export interface ApiKeyLoginConfig {
+  /** Console page opened for the user so they can mint a key. */
+  authUrl?: string
+  /** Placeholder shown in the key field, e.g. a recognizable key prefix. */
+  placeholder?: string
+  /** Strip a leading `Bearer ` the user pasted along with the key. */
+  normalize?: "strip-bearer"
+  /**
+   * Probe run against the provider before the key is saved. A key that does
+   * not work is worth catching at paste time rather than at the first chat
+   * turn, where it surfaces as an opaque failure far from its cause.
+   */
+  validate?: ApiKeyValidation
+}
+
+/**
+ * Where a provider expects the key on a plain request. Mirrors the header
+ * choice the request handlers already make per protocol.
+ */
+export type ApiKeyAuthHeader = "bearer" | "x-api-key" | "x-goog-api-key"
+
+/**
+ * One validation probe. Each shape names the cheapest call that proves a key
+ * is accepted by that provider.
+ */
+export type ApiKeyValidation =
+  /**
+   * `GET {url}` with the key. The cheapest probe there is when a provider
+   * offers a model list, because it spends no tokens.
+   */
+  | { kind: "models-endpoint"; url: string; auth?: ApiKeyAuthHeader }
+  /** A one-token OpenAI-compatible completion. */
+  | {
+      kind: "chat-completions"
+      baseUrl: string
+      model: string
+      /** Newer OpenAI-compatible endpoints renamed this field. */
+      maxTokensField?: "max_tokens" | "max_completion_tokens"
+      /**
+       * Treat "this key may not use that model" as a PASS. The key is valid,
+       * it simply lacks access to the probe model.
+       */
+      tolerateModelDenied?: boolean
+    }
+  /** A one-token Anthropic-protocol message. */
+  | { kind: "anthropic-messages"; baseUrl: string; model: string }
 
 export type OAuthRuleTransform = "to-string" | "to-number" | "to-boolean"
 
@@ -297,6 +424,13 @@ export interface UserProviderSettings {
   // OAuth state
   oauthConnected?: boolean
   oauthExpiresAt?: number
+  /**
+   * Refresh token from an OAuth login, for providers that issue a short-lived
+   * access token. Absent for providers whose login mints a long-lived key
+   * (OpenRouter), and absent on rows written before the exchange kept it, both
+   * of which mean the credential can only be renewed by logging in again.
+   */
+  oauthRefreshToken?: string
   // Verification lifecycle
   verificationStatus?: ProviderVerificationStatus
   lastVerifiedAt?: number
@@ -2184,10 +2318,17 @@ export function catalogEntryToProviderConfig(entry: BuiltInProviderCatalogEntry)
     description: entry.description,
     website: entry.website,
     dashboardUrl: entry.dashboardUrl,
+    relayOf: entry.relayOf,
+    // Both, or neither works: the login button gates on `supportsOAuth` and
+    // the flow gates on `oauthConfig`. Dropping either here is what made a
+    // catalog-declared OAuth provider silently render no login at all.
+    supportsOAuth: entry.supportsOAuth,
+    oauthConfig: entry.oauthConfig,
     docsUrl: entry.docsUrl,
     pricingUrl: entry.pricingUrl,
     category: entry.category ? CATALOG_CATEGORY_TO_CONFIG[entry.category] : undefined,
     defaultModel: entry.defaultModel,
+    keyLogin: entry.keyLogin,
     models: (entry.models ?? []).map(catalogModelToModelConfig),
   }
 }
