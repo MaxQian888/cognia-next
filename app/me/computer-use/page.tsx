@@ -22,11 +22,12 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, MonitorIcon } from "lucide-react"
+import { Loader2Icon } from "lucide-react"
 
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { HostAutomationPanel } from "@/components/mobile/automation/host-automation-panel"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MeSection } from "@/components/mobile/me/me-section"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
 import { useSettingsPatch } from "@/hooks/use-settings-patch"
 import { useSettingsStore } from "@/stores/settings"
@@ -57,20 +58,23 @@ export default function MobileComputerUsePage() {
       backAria={t("appearanceBackAria")}
       testid="mobile-computer-use-page"
     >
-      <div className="flex flex-col gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <MonitorIcon className="size-4" aria-hidden="true" />
-              {tCu("masterToggleTitle")}
-            </CardTitle>
-            <CardDescription className="text-xs">{tCu("masterToggleDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4 px-4 pb-3">
-            <div className="min-w-0 text-xs text-muted-foreground">
-              {enabled ? tCu("masterStateOn") : tCu("masterStateOff")}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
+      <div className="flex flex-col gap-5">
+        {/* One row with the switch on it, rather than a card whose body was a
+            sentence restating what the switch already showed. */}
+        <MeSection title={tCu("masterToggleTitle")}>
+          <Item size="sm" className="px-3 py-2.5">
+            <ItemContent className="min-w-0 flex-[1_1_12rem]">
+              <ItemTitle className="text-sm">
+                {enabled ? tCu("masterStateOn") : tCu("masterStateOff")}
+              </ItemTitle>
+              {/* `line-clamp-none`: the primitive clamps to two lines, which cut
+                  this sentence at "regardless of pe..." and hid the exception
+                  the setting exists to explain. */}
+              <ItemDescription className="line-clamp-none text-xs">
+                {tCu("masterToggleDescription")}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions className="ml-auto gap-2">
               {pending && (
                 <Loader2Icon
                   className="size-4 animate-spin text-muted-foreground"
@@ -85,9 +89,9 @@ export default function MobileComputerUsePage() {
                 aria-label={tCu("masterToggleAria")}
                 data-testid="computer-use-master-switch"
               />
-            </div>
-          </CardContent>
-        </Card>
+            </ItemActions>
+          </Item>
+        </MeSection>
 
         <HostAutomationPanel />
       </div>

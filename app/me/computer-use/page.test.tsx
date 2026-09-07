@@ -53,6 +53,17 @@ describe("MobileComputerUsePage", () => {
     expect(screen.getByTestId("stub-host-automation-panel")).toBeInTheDocument()
   })
 
+  it("shows the whole explanation and drops the desktop card frame", () => {
+    // The page was a card whose body restated what the switch already showed.
+    // Collapsed to a row, the description then hit the primitive's two-line
+    // clamp and cut off at "regardless of pe...", hiding the exception the
+    // setting exists to explain.
+    const { container } = render(<Page />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    const description = container.querySelector('[data-slot="item-description"]')
+    expect(description?.className).toMatch(/line-clamp-none/)
+  })
+
   it("flipping the master switch writes mobileComputerUseEnabled + enqueues an RPC", async () => {
     render(<Page />)
     fireEvent.click(screen.getByTestId("computer-use-master-switch"))
