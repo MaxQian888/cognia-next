@@ -429,9 +429,13 @@ export async function buildMatrixAdapter(row: AdapterInstanceRow): Promise<Platf
  * needed — the bot's id arrives on the gateway READY event (webhook mode has
  * no READY; selfId stays empty there).
  *
- * `transportMode` is the only transport source. Dexie v161 migrates and
- * removes the former `settings.transport` field before runtime construction,
- * keeping the adapter, inbound server, fingerprint, and UI in agreement.
+ * `transportMode` is the only transport source FOR THIS PLATFORM. That is not
+ * true repo-wide: `buildSlackAdapter` and `buildLarkAdapter` above still read
+ * `settings.transport`, which is a separate persisted field carrying the
+ * platform-specific spelling (`socket-mode` / `events-api-webhook`,
+ * `long-connection` / `webhook`) that those factories need. There is no
+ * migration reconciling the two, so `adapterNeedsInboundServer` deliberately
+ * trusts the adapter's declared `transportModes` over the row.
  */
 export async function buildQQOfficialAdapter(row: AdapterInstanceRow): Promise<PlatformAdapter> {
   const credentials = async () => ({

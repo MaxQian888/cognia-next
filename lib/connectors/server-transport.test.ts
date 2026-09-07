@@ -18,7 +18,7 @@ function adapter(modes: TransportMode[]) {
     typeof adapterNeedsInboundServer
   >[0]
 }
-function row(transportMode: TransportMode) {
+function row(transportMode: TransportMode | undefined) {
   return { transportMode } as Parameters<typeof adapterNeedsInboundServer>[1]
 }
 
@@ -29,7 +29,7 @@ describe("CONNECTORS_SERVER_PORT", () => {
 })
 
 describe("adapterNeedsInboundServer", () => {
-  it.each<[string, TransportMode[], TransportMode, boolean]>([
+  it.each<[string, TransportMode[], TransportMode | undefined, boolean]>([
     // Webhook transports need the axum receiver.
     ["lark webhook", ["webhook"], "webhook", true],
     ["lark long-connection (gateway)", ["gateway"], "gateway", false],
@@ -49,8 +49,36 @@ describe("adapterNeedsInboundServer", () => {
     ["qq-official gateway", ["gateway"], "gateway", false],
     ["dingtalk gateway", ["gateway"], "gateway", false],
     ["matrix longpoll", ["longpoll"], "longpoll", false],
+    // A single declared transport is unambiguous, so the row cannot contradict
+    // it. wechat-oa speaks webhook and nothing else: a row that reads as any
+    // other mode still needs the receiver, or the adapter has no way to hear
+    // anything at all. Both of these used to return false.
+    ["wechat-oa, row has no transportMode", ["webhook"], undefined, true],
+    ["wechat-oa, row drifted to longpoll", ["webhook"], "longpoll", true],
+    // lark and slack declare ONE mode computed from `settings.transport`, a
+    // different persisted field from `row.transportMode`. When they disagree
+    // the declaration wins, in both directions.
+    ["lark built as gateway, row says webhook", ["gateway"], "webhook", false],
+    ["lark built as webhook, row says gateway", ["webhook"], "gateway", true],
+    // Genuinely dual-mode adapters have nothing to fall back to, so the row
+    // stays the only disambiguator and an unset one is not guessed at.
+    ["discord, row has no transportMode", ["gateway", "webhook"], undefined, false],
+    ["qq-official, row has no transportMode", ["gateway", "webhook"], undefined, false],
+    // OneBot keeps its defensive default: reverse-ws is the mode that needs a
+    // listener, and only an explicit forward-ws opts out.
+    ["onebot, row has no transportMode", ["reverse-ws", "forward-ws"], undefined, true],
   ])("%s → %s", (_label, modes, transportMode, expected) => {
     expect(adapterNeedsInboundServer(adapter(modes), row(transportMode))).toBe(expected)
+  })
+
+  it("treats a null transportMode the same as an absent one", () => {
+    // Dexie hands back whatever was written. The interface says required, but
+    // this predicate is the one place a wrong answer silently starves a bot.
+    expect(
+      adapterNeedsInboundServer(adapter(["webhook"]), {
+        transportMode: null,
+      })
+    ).toBe(true)
   })
 })
 

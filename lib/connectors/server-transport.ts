@@ -14,8 +14,7 @@
  * iff at least one enabled adapter satisfies the predicate.
  */
 
-import type { PlatformAdapter } from "@/types/connectors/adapter"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { PlatformAdapter, TransportMode } from "@/types/connectors/adapter"
 
 /**
  * Loopback port the Rust axum connectors server binds. Shared with the tunnel
@@ -26,25 +25,65 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 export const CONNECTORS_SERVER_PORT = 7842
 
 /**
- * True when an enabled adapter needs the inbound axum server running:
- *   - it exposes a `webhook` transport AND the row is configured for `webhook`
- *     (Rust verifies the signature and emits `connectors://webhook/<id>`), OR
- *   - it exposes a `reverse-ws` transport AND is not configured as
- *     `forward-ws` (OneBot narrows to both modes at build time, so the row's
- *     active `transportMode` disambiguates: reverse-ws dials in → needs the
- *     `/ws/onebot/<id>` server; forward-ws dials out → does not).
+ * The transport a built adapter actually runs.
  *
- * Both branches key off the row's active `transportMode` so a dual-mode adapter
- * (Discord: gateway + webhook) only starts the server when actually in webhook
- * mode; gateway/long-poll/forward-ws rows all dial outbound and return false.
+ * The adapter's declared `transportModes` is the authority whenever it names
+ * exactly one transport, and the row only disambiguates a genuinely dual-mode
+ * adapter. That order matters because the two are independent fields with
+ * nothing keeping them in agreement:
+ *
+ *   - `lark`, `slack` and `telegram` declare a SINGLE mode computed from
+ *     `settings.transport` (`adapters/lark/index.ts`, `slack/index.ts`,
+ *     `telegram/index.ts`), which is a different persisted field from
+ *     `row.transportMode`. The config forms happen to write both from one
+ *     variable, but `patchAdapterInstanceSettings` merges into `settings`
+ *     without touching `transportMode`, and no migration or invariant ties
+ *     them together. A row whose two halves disagree used to build a webhook
+ *     adapter while the receiver stayed down, which reads as a healthy bot
+ *     that answers nothing.
+ *   - `wechat-oa` declares webhook as its ONLY transport. Any row value other
+ *     than `"webhook"` used to mean the server never started, even though the
+ *     adapter has no other way to receive.
+ *
+ * Reading the row first also let a lark row that says `"webhook"` start the
+ * receiver for an adapter built as a long connection, so deferring to the
+ * declaration is the more correct answer in both directions.
+ */
+function effectiveTransportMode(
+  modes: readonly TransportMode[],
+  rowMode: TransportMode | undefined
+): TransportMode | undefined {
+  return modes.length === 1 ? modes[0] : rowMode
+}
+
+/**
+ * True when an enabled adapter needs the inbound axum server running:
+ *   - it exposes a `webhook` transport AND runs in `webhook` mode (Rust
+ *     verifies the signature and emits `connectors://webhook/<id>`), OR
+ *   - it exposes a `reverse-ws` transport AND is not running as `forward-ws`
+ *     (OneBot narrows to both modes at build time, so the row disambiguates:
+ *     reverse-ws dials in and needs the `/ws/onebot/<id>` server, forward-ws
+ *     dials out and does not).
+ *
+ * A dual-mode adapter (Discord, QQ Official: gateway + webhook) only starts the
+ * server when the row puts it in webhook mode. Gateway, long-poll and
+ * forward-ws all dial outbound and return false.
+ *
+ * `transportMode` is widened to optional against the Dexie interface, which
+ * declares it required. Nothing enforces that at runtime: the field is absent
+ * from rows this predicate is handed in `install-connector-runtime`, whose own
+ * fixtures already type it optional. Typing it required here would make the
+ * unresolved branch unreachable to the type checker while staying reachable in
+ * production, which is how the wechat-oa case stayed invisible.
  */
 export function adapterNeedsInboundServer(
   adapter: Pick<PlatformAdapter, "meta">,
-  row: Pick<AdapterInstanceRow, "transportMode">
+  row: { transportMode?: TransportMode | null }
 ): boolean {
   const modes = adapter.meta.transportModes
-  if (modes.includes("webhook") && row.transportMode === "webhook") return true
-  if (modes.includes("reverse-ws") && row.transportMode !== "forward-ws") return true
+  const mode = effectiveTransportMode(modes, row.transportMode ?? undefined)
+  if (modes.includes("webhook") && mode === "webhook") return true
+  if (modes.includes("reverse-ws") && mode !== "forward-ws") return true
   return false
 }
 
@@ -57,7 +96,14 @@ export function adapterNeedsInboundServer(
 export const HEADLESS_CONNECTORS_PREFIX = "/connectors"
 
 export interface ConnectorsIngressInput {
-  /** `isTauri()` — the desktop reaches the public internet via cloudflared. */
+  /**
+   * Whether the ingress takes the DESKTOP shape: an unprefixed cloudflared
+   * tunnel pointed straight at the standalone connectors server. This is a
+   * statement about the shape of the entry point, not about which shell is
+   * asking. A phone or browser paired to a desktop reads the same shape and
+   * passes `true`, because the URL the platform must be given is that
+   * desktop's tunnel origin with no path prefix.
+   */
   isDesktop: boolean
   /** Tunnel origin, when a tunnel is running. Desktop only. */
   tunnelUrl?: string | null
