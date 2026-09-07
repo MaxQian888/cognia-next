@@ -18,6 +18,7 @@ import {
   type ComposerWorkflowMention,
 } from "./composer"
 import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
 import { ChatColumn } from "./chat-column"
@@ -310,6 +311,8 @@ interface ChatPaneProps {
     quickActions?: ReactNode
     header?: ReactNode
     hideSamples?: boolean
+    /** Drop the demoted "New chat" ghost under the hero composer. */
+    hideNewChatAction?: boolean
   }
 }
 
@@ -576,7 +579,13 @@ export function ChatPane({
   // Welcome personalization. Mobile forces `minimal` and omits the inline
   // toggle: the rich hero's two-column illustration has nowhere to go at phone
   // width, so offering the switch there would be a control that does nothing.
-  const isMobileShell = usePlatform() === "mobile"
+  // Layout question, not a runtime one: a 375px browser window renders the same
+  // `AppShellMobile` this branch is written for (`app/page.tsx` picks the shell
+  // off `useCompactLayout`), and asking `usePlatform()` handed it the rich hero
+  // whose two-column artwork this very comment says has nowhere to go at phone
+  // width. See `hooks/ui/use-compact-layout.ts` for the two questions.
+  const compactLayout = useCompactLayout()
+  const isMobileShell = usePlatform() === "mobile" || compactLayout
   const storedWelcomeStyle = useSettingsStore((s) => s.settings?.welcomeStyle)
   const userName = useSettingsStore((s) => s.settings?.userName)
   const welcomeStyle: WelcomeStyle = isMobileShell ? "minimal" : (storedWelcomeStyle ?? "rich")
@@ -598,6 +607,7 @@ export function ChatPane({
         onResumeSession={onResumeSession}
         override={emptyState}
         hideSamples={welcomeExtras?.hideSamples}
+        hideCreateAction={welcomeExtras?.hideNewChatAction}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
         executionControlsSlot={newChatExecutionControls}

@@ -108,6 +108,17 @@ interface Props {
    */
   hideSamples?: boolean
   /**
+   * Drop the demoted "New chat" button under the composer.
+   *
+   * The compact shell already reaches a new conversation three other ways (the
+   * app bar's overflow menu, the quick-action grid, and simply typing into the
+   * composer, which creates the session on send). A fourth control that also
+   * discards the draft cost a whole row on a screen that has none to spare.
+   * The execution-controls slot beside it is untouched: it is a real per-turn
+   * choice with no other home on this surface.
+   */
+  hideCreateAction?: boolean
+  /**
    * Rendered above the greeting — the mobile home injects an active-runs card +
    * search bar here. Hidden when omitted.
    */
@@ -220,6 +231,7 @@ export function EmptyChatState({
   aiSamples,
   override,
   hideSamples,
+  hideCreateAction,
   headerExtraSlot,
   quickActionsSlot,
   statsSlot,
@@ -270,8 +282,11 @@ export function EmptyChatState({
   // button for the same outcome is redundant (and throws away a draft). It is
   // demoted to a ghost under the composer there, and stays the hero's primary
   // action only on surfaces that render no composer at all.
-  const showHeroAction = variant === "fullscreen" && !composerSlot
-  const showDemotedActions = variant === "fullscreen" && !!composerSlot
+  const showHeroAction = variant === "fullscreen" && !composerSlot && !hideCreateAction
+  // The row survives `hideCreateAction` only when the execution picker needs a
+  // home; an empty flex row would still cost its `gap` on the welcome column.
+  const showDemotedCreate = variant === "fullscreen" && !!composerSlot && !hideCreateAction
+  const showDemotedActions = showDemotedCreate || (!!composerSlot && !!executionControlsSlot)
 
   return (
     <div className="@container relative flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-6 @2xl:py-10">
@@ -438,15 +453,17 @@ export function EmptyChatState({
               data-testid="welcome-actions"
             >
               {executionControlsSlot}
-              <Button
-                onClick={onCreate}
-                variant="ghost"
-                size="sm"
-                className="ms-auto h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <PlusIcon className="size-3.5" aria-hidden />
-                {t("newChat")}
-              </Button>
+              {showDemotedCreate ? (
+                <Button
+                  onClick={onCreate}
+                  variant="ghost"
+                  size="sm"
+                  className="ms-auto h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <PlusIcon className="size-3.5" aria-hidden />
+                  {t("newChat")}
+                </Button>
+              ) : null}
             </motion.div>
           ) : null}
         </motion.div>
