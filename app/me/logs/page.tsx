@@ -11,6 +11,7 @@ export default function MobileLogsPage() {
   // enclosing dialog in the `/me` flow, so it is intentionally omitted.
   return (
     <SubPageShell
+      settingsPanel
       title={t("logsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

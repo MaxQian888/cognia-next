@@ -39,6 +39,23 @@ export interface SubPageShellProps {
    * (appearance, subscription, profile) and benefit from the room.
    */
   width?: "default" | "wide"
+  /**
+   * Marks the body as a settings panel, which is what tells a shared desktop
+   * settings section to shed its card chrome.
+   *
+   * The flattening lives in `components/ui/card.tsx` and `globals.css` as
+   * `[data-settings-panel] [data-slot="card"]`, and only `SettingsShell` was
+   * setting the attribute. So the same `<AppearanceSection />` rendered as
+   * hairline-separated blocks on the desktop panel and as a bordered, tinted,
+   * shadowed card on `/me/appearance`, where the frame wraps the entire page
+   * and costs about 32px of a 375px screen.
+   *
+   * Opt-in rather than automatic: most `/me` pages are bespoke phone screens
+   * whose grouped rounded rows are the iOS convention on purpose, and
+   * flattening those would be a downgrade. Pass it only on a page that embeds
+   * a section from `components/settings/`.
+   */
+  settingsPanel?: boolean
   testid?: string
 }
 
@@ -62,6 +79,7 @@ export function SubPageShell({
   bodyClassName,
   fallback,
   width = "default",
+  settingsPanel = false,
   testid,
 }: SubPageShellProps) {
   const widthClass = width === "wide" ? "max-w-2xl lg:max-w-4xl" : "max-w-2xl"
@@ -99,7 +117,10 @@ export function SubPageShell({
           {headerAccessory ? <div className="shrink-0">{headerAccessory}</div> : null}
         </div>
       </header>
-      <section className={cn("mx-auto w-full px-4 py-4", widthClass, bodyClassName)}>
+      <section
+        className={cn("mx-auto w-full px-4 py-4", widthClass, bodyClassName)}
+        {...(settingsPanel ? { "data-settings-panel": "" } : {})}
+      >
         <Suspense fallback={fallback ?? <DefaultFallback />}>{children}</Suspense>
       </section>
     </main>

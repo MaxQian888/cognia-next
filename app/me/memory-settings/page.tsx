@@ -9,6 +9,7 @@ export default function MobileMemorySettingsPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("memorySettingsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

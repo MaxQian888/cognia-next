@@ -9,6 +9,7 @@ export default function MobilePresetsPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("presetsRow")}
       backAria={t("presetsBackAria")}
       testid="mobile-presets-page"

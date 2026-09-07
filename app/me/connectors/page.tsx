@@ -10,6 +10,7 @@ export default function MobileConnectorsPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("connectorsRow")}
       backAria={t("appearanceBackAria")}
       testid="mobile-connectors-page"

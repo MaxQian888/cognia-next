@@ -19,6 +19,7 @@ export default function MobileProfilePage() {
 
   return (
     <SubPageShell
+      settingsPanel
       title={t("profileRow")}
       backAria={t("profileBackAria")}
       width="wide"

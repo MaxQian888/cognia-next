@@ -19,6 +19,7 @@ export default function MobileEvalPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("evalRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

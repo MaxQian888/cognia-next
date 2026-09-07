@@ -19,7 +19,12 @@ import { ChatTemplatesSection } from "@/components/settings/chat-templates-secti
 export default function MobileChatTemplatesPage() {
   const t = useTranslations("mobile.chatTemplates")
   return (
-    <SubPageShell title={t("title")} backAria={t("backAria")} testid="mobile-chat-templates-page">
+    <SubPageShell
+      settingsPanel
+      title={t("title")}
+      backAria={t("backAria")}
+      testid="mobile-chat-templates-page"
+    >
       <ChatTemplatesSection mobile />
     </SubPageShell>
   )

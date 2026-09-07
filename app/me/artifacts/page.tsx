@@ -9,6 +9,7 @@ export default function MobileArtifactsPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("artifactsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

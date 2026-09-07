@@ -12,6 +12,7 @@ export default function MobileDiagnosticsPage() {
   // it has a height to fill under `SubPageShell` (which is not a flex parent).
   return (
     <SubPageShell
+      settingsPanel
       title={t("diagnosticsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

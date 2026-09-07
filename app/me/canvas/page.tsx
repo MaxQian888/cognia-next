@@ -9,6 +9,7 @@ export default function MobileCanvasPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("canvasRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

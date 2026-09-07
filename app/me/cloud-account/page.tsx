@@ -22,6 +22,7 @@ export default function MobileCloudAccountPage() {
 
   return (
     <SubPageShell
+      settingsPanel
       title={t("cloudAccountRow")}
       backAria={t("appearanceBackAria")}
       testid="mobile-cloud-account-page"

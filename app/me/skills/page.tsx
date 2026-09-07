@@ -13,6 +13,7 @@ export default function MobileSkillsPage() {
   // the section fills that frame (the panel's own scroll stays internal).
   return (
     <SubPageShell
+      settingsPanel
       title={t("skillsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

@@ -1,6 +1,9 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
+
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { SubPageShell } from "./sub-page-shell"
@@ -15,6 +18,33 @@ describe("<SubPageShell />", () => {
   beforeEach(() => {
     backMock.mockReset()
     replaceMock.mockReset()
+  })
+
+  it("does not mark itself a settings panel by default", () => {
+    // Most /me pages are bespoke phone screens whose grouped rounded rows are
+    // the iOS convention on purpose. Flattening those would be a downgrade.
+    const { container } = render(
+      <SubPageShell title="Conversation" backAria="Back">
+        <p>body</p>
+      </SubPageShell>
+    )
+    expect(container.querySelector("[data-settings-panel]")).toBeNull()
+  })
+
+  it("marks the body a settings panel on request, so an embedded desktop section flattens", () => {
+    // The flattening is `[data-settings-panel] [data-slot="card"]` in
+    // components/ui/card.tsx and globals.css, and only SettingsShell used to
+    // set the attribute. The same <AppearanceSection /> therefore rendered as
+    // hairline blocks on the desktop panel and as a bordered, tinted card that
+    // framed the whole page on /me/appearance.
+    const { container } = render(
+      <SubPageShell title="Appearance" backAria="Back" settingsPanel>
+        <p>body</p>
+      </SubPageShell>
+    )
+    const panel = container.querySelector("[data-settings-panel]")
+    expect(panel).not.toBeNull()
+    expect(panel).toContainElement(screen.getByText("body"))
   })
 
   it("renders the title, back link, and children", () => {
@@ -116,4 +146,42 @@ describe("<SubPageShell />", () => {
     expect(container.querySelector("section")?.className).toMatch(/lg:max-w-4xl/)
     expect(container.querySelector("header > div")?.className).toMatch(/lg:max-w-4xl/)
   })
+})
+
+describe("/me pages that embed a desktop settings section", () => {
+  // The flattening only fires under `[data-settings-panel]`, so a page that
+  // renders a `components/settings/` section without the prop ships that
+  // section as a bordered card framing the whole phone screen. Nothing in the
+  // type system can catch that, so the catalogue is walked instead.
+  const meDir = join(process.cwd(), "app", "me")
+
+  const pagesEmbeddingSettings = readdirSync(meDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ route: entry.name, file: join(meDir, entry.name, "page.tsx") }))
+    .map((page) => {
+      let source = ""
+      try {
+        source = readFileSync(page.file, "utf8")
+      } catch {
+        return null
+      }
+      return { ...page, source }
+    })
+    .filter(
+      (page): page is { route: string; file: string; source: string } =>
+        page !== null &&
+        page.source.includes('from "@/components/settings/') &&
+        page.source.includes("<SubPageShell")
+    )
+
+  it("found pages to check, so an empty walk cannot pass silently", () => {
+    expect(pagesEmbeddingSettings.length).toBeGreaterThan(15)
+  })
+
+  it.each(pagesEmbeddingSettings.map((page) => [page.route, page.source]))(
+    "/me/%s marks its body a settings panel",
+    (_route, source) => {
+      expect(source).toContain("settingsPanel")
+    }
+  )
 })

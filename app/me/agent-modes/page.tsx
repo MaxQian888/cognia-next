@@ -9,6 +9,7 @@ export default function MobileAgentModesPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("agentModesRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

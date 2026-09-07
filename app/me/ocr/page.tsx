@@ -8,7 +8,12 @@ import { OcrSectionPersisted } from "@/components/settings/ocr/ocr-section-persi
 export default function MobileOcrPage() {
   const t = useTranslations("mobile.me")
   return (
-    <SubPageShell title={t("ocrRow")} backAria={t("appearanceBackAria")} testid="mobile-ocr-page">
+    <SubPageShell
+      settingsPanel
+      title={t("ocrRow")}
+      backAria={t("appearanceBackAria")}
+      testid="mobile-ocr-page"
+    >
       <OcrSectionPersisted />
     </SubPageShell>
   )

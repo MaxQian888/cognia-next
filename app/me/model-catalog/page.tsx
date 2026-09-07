@@ -9,7 +9,12 @@ export default function MobileModelCatalogPage() {
   const t = useTranslations("modelCatalog")
 
   return (
-    <SubPageShell title={t("title")} backAria={t("backAria")} testid="mobile-model-catalog-page">
+    <SubPageShell
+      settingsPanel
+      title={t("title")}
+      backAria={t("backAria")}
+      testid="mobile-model-catalog-page"
+    >
       <div className="flex min-h-[70dvh] flex-1">
         <ModelCatalogSection />
       </div>

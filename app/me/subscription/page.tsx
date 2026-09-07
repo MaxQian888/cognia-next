@@ -9,6 +9,7 @@ export default function MobileSubscriptionPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("subscriptionRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

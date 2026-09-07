@@ -11,6 +11,7 @@ export default function MobileA2uiPage() {
   // already wraps children in a `Suspense` boundary, which that hook requires.
   return (
     <SubPageShell
+      settingsPanel
       title={t("a2uiRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

@@ -35,6 +35,7 @@ export default function MobileAppearancePage() {
 
   return (
     <SubPageShell
+      settingsPanel
       title={t("sectionAppearance")}
       backAria={t("appearanceBackAria")}
       width="wide"

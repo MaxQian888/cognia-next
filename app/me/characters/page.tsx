@@ -9,6 +9,7 @@ export default function MobileCharactersPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("charactersRow")}
       backAria={t("appearanceBackAria")}
       width="wide"

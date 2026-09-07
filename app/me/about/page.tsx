@@ -9,6 +9,7 @@ export default function MobileAboutPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("aboutRow")}
       backAria={t("appearanceBackAria")}
       testid="mobile-about-page"

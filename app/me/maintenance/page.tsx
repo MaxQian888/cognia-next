@@ -9,6 +9,7 @@ export default function MobileMaintenancePage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("dexieMaintenance")}
       backAria={t("appearanceBackAria")}
       testid="mobile-maintenance-page"

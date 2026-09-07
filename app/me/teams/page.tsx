@@ -9,6 +9,7 @@ export default function MobileTeamsPage() {
   const t = useTranslations("mobile.me")
   return (
     <SubPageShell
+      settingsPanel
       title={t("teamsRow")}
       backAria={t("appearanceBackAria")}
       width="wide"
