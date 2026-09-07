@@ -18,17 +18,17 @@ import { RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import {
   Item,
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemSeparator,
   ItemTitle,
 } from "@/components/ui/item"
+import { MeSection } from "./me-section"
 import { TransportTierIndicator } from "./transport-tier-indicator"
+import { humanizeKey } from "@/lib/plugin/convert/secrets"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { formatRelative } from "@cognia/time"
 
@@ -87,73 +87,74 @@ export function SyncStatusPanel({ reader, trigger }: SyncStatusPanelProps = {}) 
   return (
     <div className="flex flex-col gap-4" data-testid="sync-status-panel">
       <TransportTierIndicator />
-      <Card>
-        <CardContent className="flex flex-col gap-3 px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-medium">{t("title")}</h2>
-              <p className="text-xs text-muted-foreground">{t("description")}</p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy !== null}
-              onClick={() => void onSync()}
-              data-testid="sync-status-run-all"
-            >
-              <RefreshCwIcon
-                aria-hidden="true"
-                className={"size-3.5" + (busy === "all" ? " animate-spin" : "")}
-              />
-              {t("syncAll")}
-            </Button>
-          </div>
-          <ItemGroup className="rounded-md border" aria-label={t("title")}>
-            {tables.map((table, idx) => {
-              const state = snapshot[table]
-              const lastSynced = state.lastSyncAt
-                ? formatRelative(state.lastSyncAt)
-                : t("neverSynced")
-              return (
-                <Fragment key={table}>
-                  {idx > 0 ? <ItemSeparator /> : null}
-                  <Item size="sm" className="px-3 py-2" data-testid={`sync-row-${table}`}>
-                    <ItemContent>
-                      <ItemTitle className="text-sm capitalize">{table}</ItemTitle>
-                      {state.lastError ? (
-                        <ItemDescription className="text-xs text-destructive">
-                          {state.lastError}
-                        </ItemDescription>
-                      ) : (
-                        <ItemDescription className="text-xs">
-                          {t("lastSynced", { time: lastSynced })}
-                        </ItemDescription>
-                      )}
-                    </ItemContent>
-                    <ItemActions>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        disabled={busy !== null}
-                        onClick={() => void onSync(table)}
-                        aria-label={t("syncRowAria", { table })}
-                        data-testid={`sync-row-retry-${table}`}
-                      >
-                        <RefreshCwIcon
-                          aria-hidden="true"
-                          className={"size-3.5" + (busy === table ? " animate-spin" : "")}
-                        />
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                </Fragment>
-              )
-            })}
-          </ItemGroup>
-        </CardContent>
-      </Card>
+      <MeSection
+        title={t("title")}
+        description={t("description")}
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => void onSync()}
+            data-testid="sync-status-run-all"
+          >
+            <RefreshCwIcon
+              aria-hidden="true"
+              className={"size-3.5" + (busy === "all" ? " animate-spin" : "")}
+            />
+            {t("syncAll")}
+          </Button>
+        }
+      >
+        {tables.map((table, idx) => {
+          const state = snapshot[table]
+          return (
+            <Fragment key={table}>
+              {idx > 0 ? <ItemSeparator /> : null}
+              <Item size="sm" className="px-3 py-2" data-testid={`sync-row-${table}`}>
+                <ItemContent>
+                  {/* The protocol table name, split into words. Rendered raw it
+                      read "ConversationOverrides" and "AgentTaskAttempts": the
+                      identifier is the useful fact on a diagnostics screen, but
+                      the camel hump is not. */}
+                  <ItemTitle className="text-sm">{humanizeKey(String(table))}</ItemTitle>
+                  {state.lastError ? (
+                    <ItemDescription className="text-xs text-destructive">
+                      {state.lastError}
+                    </ItemDescription>
+                  ) : (
+                    <ItemDescription className="text-xs">
+                      {/* "Last synced {time}" with a "Never synced yet" time
+                          composed into "Last synced Never synced yet". The two
+                          are alternatives, not a template and its value. */}
+                      {state.lastSyncAt
+                        ? t("lastSynced", { time: formatRelative(state.lastSyncAt) })
+                        : t("neverSynced")}
+                    </ItemDescription>
+                  )}
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy !== null}
+                    onClick={() => void onSync(table)}
+                    aria-label={t("syncRowAria", { table })}
+                    data-testid={`sync-row-retry-${table}`}
+                  >
+                    <RefreshCwIcon
+                      aria-hidden="true"
+                      className={"size-3.5" + (busy === table ? " animate-spin" : "")}
+                    />
+                  </Button>
+                </ItemActions>
+              </Item>
+            </Fragment>
+          )
+        })}
+      </MeSection>
     </div>
   )
 }

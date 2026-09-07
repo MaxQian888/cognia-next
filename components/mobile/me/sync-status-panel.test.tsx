@@ -48,6 +48,30 @@ describe("<SyncStatusPanel />", () => {
     expect(screen.getByTestId("sync-row-characters")).toBeInTheDocument()
   })
 
+  it("splits the protocol table name into words and never composes two sentences", () => {
+    // Rendered raw, the rows read "ConversationOverrides" and
+    // "AgentTaskAttempts". The subtitle template "Last synced {time}" was
+    // also handed "Never synced yet" as its time, so an unsynced row read
+    // "Last synced Never synced yet".
+    const reader = () =>
+      ({
+        conversationOverrides: { lastSyncAt: null, since: 0, lastError: null },
+      }) as unknown as ReturnType<typeof import("@/lib/sync/companion-sync").snapshotSyncStates>
+    render(<SyncStatusPanel reader={reader} />)
+    const row = screen.getByTestId("sync-row-conversationOverrides")
+    expect(row).toHaveTextContent("Conversation overrides")
+    expect(row).not.toHaveTextContent("ConversationOverrides")
+    expect(row).toHaveTextContent("Never synced yet")
+    expect(row).not.toHaveTextContent("Last synced Never")
+  })
+
+  it("groups the rows under the section heading rather than a card inside a card", () => {
+    const { container } = render(<SyncStatusPanel />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    // One surface, not a bordered group nested inside a bordered card.
+    expect(container.querySelectorAll('[data-slot="item-group"]')).toHaveLength(1)
+  })
+
   it("shows lastError when the snapshot carries one", () => {
     render(<SyncStatusPanel />)
     expect(screen.getByTestId("sync-row-characters")).toHaveTextContent("oops")
