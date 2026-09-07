@@ -15,6 +15,15 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 20
 const publicJwk = publicKey.export({ format: "jwk" })
 const authorizationCodes = new Map()
 const refreshTokens = new Map()
+// Who a browser context signs in as. One fixture client id used to mean one
+// subject, which cannot exercise an owner inviting a second person. A context
+// picks its subject once through `/e2e/as` and carries it as a cookie; the
+// default keeps the historic `user:<client_id>` for every other lane.
+const SUBJECT_COOKIE = "e2e_sub"
+const profiles = new Map([
+  ["e2e-owner", { name: "Ada Owner", email: "ada@e2e.cognia.localhost" }],
+  ["e2e-bob", { name: "Bob Member", email: "bob@e2e.cognia.localhost" }],
+])
 
 function base64Url(value) {
   return Buffer.from(value).toString("base64url")
@@ -60,17 +69,46 @@ function validPkce(verifier, expectedChallenge) {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function issueToken(response, grant, origin) {
-  const now = Math.floor(Date.now() / 1000)
-  const accessToken = jwt({
+function cookieValue(request, name) {
+  const header = request.headers.cookie ?? ""
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=")
+    if (key === name) return decodeURIComponent(rest.join("="))
+  }
+  return undefined
+}
+
+function subjectFor(grant) {
+  return grant.subject ?? `user:${grant.clientId}`
+}
+
+function accessTokenFor(grant, now) {
+  return jwt({
     iss: issuer,
     aud: grant.resource,
-    sub: `user:${grant.clientId}`,
+    sub: subjectFor(grant),
     organization_id: grant.organizationId,
     scope: grant.scope,
     iat: now,
     exp: now + 300,
   })
+}
+
+function idTokenFor(grant, now) {
+  const profile = profiles.get(grant.subject) ?? {}
+  return jwt({
+    iss: issuer,
+    aud: grant.clientId,
+    sub: subjectFor(grant),
+    iat: now,
+    exp: now + 300,
+    ...profile,
+  })
+}
+
+function issueToken(response, grant, origin) {
+  const now = Math.floor(Date.now() / 1000)
+  const accessToken = accessTokenFor(grant, now)
   const refreshToken = opaque("refresh")
   refreshTokens.set(refreshToken, grant)
   json(
@@ -78,6 +116,7 @@ function issueToken(response, grant, origin) {
     200,
     {
       access_token: accessToken,
+      id_token: idTokenFor(grant, now),
       token_type: "Bearer",
       expires_in: 300,
       refresh_token: refreshToken,
@@ -111,6 +150,66 @@ const server = createServer((request, response) => {
   if (request.method === "GET" && url.pathname === "/healthz") {
     response.writeHead(204)
     response.end()
+    return
+  }
+  // CI-only: choose the subject this browser context will sign in as, then
+  // bounce back to the app. The cookie is read by /oidc/auth below.
+  if (request.method === "GET" && url.pathname === "/e2e/as") {
+    const subject = url.searchParams.get("sub") ?? ""
+    const back = url.searchParams.get("return") ?? allowedOrigin
+    if (!/^[a-z0-9_-]{1,64}$/i.test(subject) || !back.startsWith(allowedOrigin)) {
+      json(response, 400, { error: "invalid_request" }, origin)
+      return
+    }
+    response.writeHead(302, {
+      location: back,
+      "set-cookie": `${SUBJECT_COOKIE}=${encodeURIComponent(subject)}; Path=/; SameSite=Lax`,
+      "cache-control": "no-store",
+    })
+    response.end()
+    return
+  }
+  // CI-only: mint an access token without a browser, so the smoke and the
+  // Playwright lane can act as an owner against collab-server directly.
+  if (request.method === "POST" && url.pathname === "/e2e/token") {
+    let raw = ""
+    request.setEncoding("utf8")
+    request.on("data", (chunk) => {
+      raw += chunk
+    })
+    request.on("end", () => {
+      let body
+      try {
+        body = JSON.parse(raw || "{}")
+      } catch {
+        json(response, 400, { error: "invalid_request" }, origin)
+        return
+      }
+      if (typeof body.sub !== "string" || typeof body.aud !== "string") {
+        json(response, 400, { error: "invalid_request" }, origin)
+        return
+      }
+      const now = Math.floor(Date.now() / 1000)
+      json(
+        response,
+        200,
+        {
+          access_token: accessTokenFor(
+            {
+              subject: body.sub,
+              clientId: body.client_id ?? "e2e",
+              resource: body.aud,
+              organizationId: body.organization_id,
+              scope: body.scope ?? "openid",
+            },
+            now
+          ),
+          token_type: "Bearer",
+          expires_in: 300,
+        },
+        origin
+      )
+    })
     return
   }
   if (request.method === "GET" && url.pathname === "/oidc/.well-known/openid-configuration") {
@@ -150,6 +249,10 @@ const server = createServer((request, response) => {
       json(response, 400, { error: "invalid_request" }, origin)
       return
     }
+    // `direct_sign_in=social:<target>` is accepted and ignored: this fixture has
+    // no social providers, and the client is asserting a preference, not a
+    // requirement. `login_hint` or the context cookie names the subject.
+    const subject = url.searchParams.get("login_hint") ?? cookieValue(request, SUBJECT_COOKIE)
     const code = opaque("code")
     authorizationCodes.set(code, {
       clientId,
@@ -157,6 +260,7 @@ const server = createServer((request, response) => {
       resource,
       scope: url.searchParams.get("scope") ?? "openid",
       challenge,
+      ...(subject ? { subject } : {}),
       expiresAt: Date.now() + 60_000,
     })
     redirect(response, redirectUri, { code, state })

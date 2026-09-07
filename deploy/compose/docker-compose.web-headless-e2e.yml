@@ -158,7 +158,67 @@ services:
       start_period: 15s
     restart: unless-stopped
 
+  # The cloud sign-in gate lane (tests/real-e2e/cloud-sign-in-gate.spec.ts):
+  # a multi-tenant gateway whose identity provider is the OIDC fixture and
+  # whose account plane is the collab profile behind the same Caddy origin.
+  cognia-server-cloud:
+    profiles: [web-headless-e2e]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    depends_on:
+      signaling:
+        condition: service_healthy
+      oidc-fixture:
+        condition: service_healthy
+      collab-server:
+        condition: service_healthy
+    environment:
+      COGNIA_DATA_DIR: /data
+      COGNIA_MASTER_KEY: ${COGNIA_CLOUD_MASTER_KEY:-}
+      COGNIA_PUBLIC_URL: https://127.0.0.1:27894
+      COGNIA_DEPLOYMENT_MODE: multi-tenant
+      COGNIA_SIGNALING_URL: ${COGNIA_SIGNALING_URL:-ws://signaling:7892/signaling}
+      COGNIA_PUBLIC_SIGNALING_URL: ${COGNIA_PUBLIC_SIGNALING_URL:-}
+      COGNIA_ALLOWED_WEB_ORIGINS: ${COGNIA_ALLOWED_WEB_ORIGINS:-}
+      COGNIA_ALLOW_PRIVATE_NETWORK: ${COGNIA_ALLOW_PRIVATE_NETWORK:-false}
+      COGNIA_LOGTO_ISSUER: http://oidc-fixture:4020/oidc
+      COGNIA_LOGTO_AUDIENCE: https://cognia.localhost/api
+      COGNIA_LOGTO_WEB_CLIENT_ID: web-headless-cloud
+      COGNIA_LOGTO_NATIVE_CLIENT_ID: native-headless-cloud
+      COGNIA_LOGTO_SOCIAL_PROVIDERS: github,feishu-web
+      COGNIA_COLLAB_URL: http://collab-server:8080
+      COGNIA_PUBLIC_COLLAB_URL: https://cognia.localhost/collab
+      COGNIA_WEB_ORIGIN: https://cognia.localhost
+    volumes:
+      - cognia_cloud_data:/data
+    ports:
+      - "27894:27890"
+    security_opt:
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  # collab-server verifies the same fixture tokens and lets the first person
+  # claim the deployment. The credential's clear value travels to Playwright
+  # as COGNIA_REAL_BOOTSTRAP_CREDENTIAL. No Logto M2M credential here: the
+  # organization mirror is Unconfigured, and bootstrap tolerates that.
+  collab-server:
+    environment:
+      COLLAB_OIDC_ISSUER: http://oidc-fixture:4020/oidc
+      COLLAB_OIDC_AUDIENCE: https://cognia.localhost/api
+      COLLAB_ACCOUNT_BOOTSTRAP_ENABLED: "true"
+      COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256: ${COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256:-}
+      COLLAB_ALLOWED_ORIGINS: https://cognia.localhost
+    depends_on:
+      oidc-fixture:
+        condition: service_healthy
+
 volumes:
   cognia_secondary_data:
   cognia_oidc_member_data:
   cognia_oidc_owner_data:
+  cognia_cloud_data:

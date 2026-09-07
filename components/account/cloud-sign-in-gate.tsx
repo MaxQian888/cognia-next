@@ -43,6 +43,7 @@ import { LogtoSignInCancelled, createLogtoCapacitorDrivers } from "@/lib/logto/c
 import { signOutFromLogto } from "@/lib/logto/app-session"
 import { CollabError, type CollabAccountMembership } from "@/lib/collab/client"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
+import { readLogtoIdentity } from "@/lib/identity/logto-claims"
 import { completeSignOut } from "@/lib/identity/complete-sign-in"
 import { UserBindingError } from "@/lib/identity/user-binding"
 import { configureHostDeployment } from "@/lib/identity/host-person"
@@ -168,8 +169,10 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
   const pendingState = useRef("")
   const deepLinkWait = useRef<AbortController | null>(null)
 
+  // The E2E build walks past the gate, except in the lane that exists to test
+  // it: `NEXT_PUBLIC_E2E_CLOUD_GATE=1` keeps the gate live under E2E.
   const ungated =
-    process.env.NEXT_PUBLIC_E2E === "1" ||
+    (process.env.NEXT_PUBLIC_E2E === "1" && process.env.NEXT_PUBLIC_E2E_CLOUD_GATE !== "1") ||
     (pathname ? UNGATED_PATHS.some((prefix) => pathname.startsWith(prefix)) : false) ||
     isSecondaryOverlayRole(getPetWindowRole())
 
@@ -199,6 +202,13 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
       const deployment = deploymentRef.current
       if (!deployment) return
       sessionRef.current = session
+      // Name the person on the screens that follow. Before this only a
+      // session found at boot had a name, and a fresh sign-in asked "redeem an
+      // invitation" without saying who was asking.
+      const identity = readLogtoIdentity(session)
+      if (identity) {
+        setPersonName(identity.profile.name ?? identity.profile.email ?? null)
+      }
       setView({ kind: "settling" })
       setPhase("screen")
       try {

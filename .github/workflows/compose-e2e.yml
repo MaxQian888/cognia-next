@@ -189,7 +189,13 @@ jobs:
       COGNIA_DOMAIN: "cognia.localhost"
       COGNIA_WEB_IMAGE: "cognia-web:ci"
       NEXT_PUBLIC_E2E: "1"
+      NEXT_PUBLIC_E2E_CLOUD_GATE: "1"
       NEXT_PUBLIC_ACCOUNT_GATE: "1"
+      # The cloud sign-in lane. The clear credential is not a secret here: it
+      # claims a throwaway deployment inside this job's compose network.
+      COLLAB_GRANT_KEY: "web-headless-e2e-grant-key-web-headless-e2e-grant-key-0123456789abcdef"
+      COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256: "2e11ed0eec31d3443c6854b0c090da6fd23abd2eacb5e702f50ce162d4ef3d15"
+      COGNIA_REAL_BOOTSTRAP_CREDENTIAL: "web-headless-e2e-bootstrap-credential"
       COMPOSE_FILE: "docker-compose.yml:docker-compose.web-headless-e2e.yml"
     steps:
       - uses: actions/checkout@v6
@@ -236,7 +242,7 @@ jobs:
           SIGNALING_IMAGE: cognia-signaling:ci
           SHARE_IMAGE: cognia-share:ci
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server --profile tls --profile web-headless-e2e up -d --wait
+        run: docker compose --profile server --profile tls --profile collab --profile web-headless-e2e up -d --wait
 
       # No explicit pnpm version: action-setup@v6 reads the root
       # `packageManager` pin, so this lane installs with the same pnpm the
@@ -314,11 +320,11 @@ jobs:
         working-directory: deploy/compose
         env:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server --profile tls --profile web-headless-e2e logs --no-color
+        run: docker compose --profile server --profile tls --profile collab --profile web-headless-e2e logs --no-color
 
       - name: Down
         if: always()
         working-directory: deploy/compose
         env:
           COGNIA_SERVER_IMAGE: cognia-server:ci-full
-        run: docker compose --profile server --profile tls --profile web-headless-e2e down -v
+        run: docker compose --profile server --profile tls --profile collab --profile web-headless-e2e down -v

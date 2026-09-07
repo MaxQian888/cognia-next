@@ -14,6 +14,15 @@
  *                               Added by ADR-0059 W6 (D6).
  *   --tier tls                  + Caddy front door. Added by F2 (D7).
  *   --tier im                   + a configured OneBot reverse-WS event → brain
+ *   --tier cloud               a multi-tenant gateway + collab-server: the
+ *                              account plane (claim, invite, accept). Needs
+ *                              COGNIA_CLOUD_SERVER_URL (default
+ *                              https://localhost:27894), COLLAB_URL (default
+ *                              http://localhost:8080) and either the OIDC
+ *                              fixture (COGNIA_SMOKE_OIDC_E2E_TOKEN_URL) or two
+ *                              pre-minted tokens (COGNIA_SMOKE_OWNER_TOKEN,
+ *                              COGNIA_SMOKE_MEMBER_TOKEN). Bootstrap needs
+ *                              COGNIA_SMOKE_BOOTSTRAP_CREDENTIAL once.
  *                               AI turn → outbound action. Added by F6/H8.
  *
  * Env knobs:
@@ -52,7 +61,7 @@ if (typeof globalThis.WebSocket !== "function") {
 // CLI + helpers
 // ---------------------------------------------------------------------------
 
-const TIERS = ["services", "server", "tls", "im"]
+const TIERS = ["services", "server", "tls", "im", "cloud"]
 function parseTier() {
   const i = process.argv.indexOf("--tier")
   const t = i >= 0 ? process.argv[i + 1] : "services"
@@ -1034,8 +1043,178 @@ async function tierTls() {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Tier cloud: the account plane (ADR-0149 unified sign-in)
+// ---------------------------------------------------------------------------
+
+const CLOUD_SERVER_URL = process.env.COGNIA_CLOUD_SERVER_URL ?? "https://localhost:27894"
+const COLLAB_URL = (process.env.COLLAB_URL ?? "http://localhost:8080").replace(/\/+$/, "")
+
+async function cloudJson(url, init = {}) {
+  const response = await fetch(url, init)
+  const text = await response.text()
+  let body = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = text
+  }
+  return { status: response.status, body }
+}
+
+/** A token for `subject`: the CI fixture mints one, a real Logto needs it pre-minted. */
+async function cloudToken(role, subject, audience) {
+  const preminted =
+    process.env[role === "owner" ? "COGNIA_SMOKE_OWNER_TOKEN" : "COGNIA_SMOKE_MEMBER_TOKEN"]
+  if (preminted) return preminted
+  const mint = process.env.COGNIA_SMOKE_OIDC_E2E_TOKEN_URL
+  if (!mint) return null
+  const { status, body } = await cloudJson(mint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sub: subject, aud: audience, scope: "openid" }),
+  })
+  check(status === 200 && body?.access_token, `fixture mints a token for ${subject}`)
+  return body?.access_token ?? null
+}
+
+async function cloudMemberships(token) {
+  const { status, body } = await cloudJson(`${COLLAB_URL}/v1/account/memberships`, {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  check(status === 200 && Array.isArray(body?.memberships), "GET /v1/account/memberships answers")
+  return body?.memberships ?? []
+}
+
+async function cloudGrant(token, orgId) {
+  const { status, body } = await cloudJson(
+    `${COLLAB_URL}/v1/orgs/${encodeURIComponent(orgId)}/grants`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    }
+  )
+  check(status === 200 && body?.grant, "POST /v1/orgs/{org}/grants exchanges the token for a grant")
+  return body?.grant
+}
+
+async function tierCloud() {
+  log("tier: cloud")
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+  // 1. The gateway announces a deployment a browser can join.
+  const config = await cloudJson(`${CLOUD_SERVER_URL}/api/auth/config`)
+  check(config.status === 200, `GET ${CLOUD_SERVER_URL}/api/auth/config answers 200`)
+  const auth = config.body ?? {}
+  check(auth.deploymentMode === "multi-tenant", "deploymentMode is multi-tenant")
+  check(typeof auth.oidc?.issuer === "string", "oidc.issuer is announced")
+  check(typeof auth.oidc?.webClientId === "string", "oidc.webClientId is announced")
+  check(
+    typeof auth.oidc?.nativeClientId === "string",
+    "oidc.nativeClientId is announced (desktop + phone)"
+  )
+  check(
+    Array.isArray(auth.oidc?.socialProviders) && auth.oidc.socialProviders.length > 0,
+    "at least one social provider is offered"
+  )
+  check(typeof auth.collaboration?.serviceUrl === "string", "collaboration.serviceUrl is announced")
+  check(
+    typeof auth.collaboration?.webOrigin === "string",
+    "collaboration.webOrigin is announced (invitation links)"
+  )
+  const audience = auth.oidc?.audience
+
+  // 2. The collaboration server is up.
+  const health = await cloudJson(`${COLLAB_URL}/health`)
+  check(health.status === 200, `GET ${COLLAB_URL}/health answers 200`)
+
+  // 3. The account plane: claim once, then invite and accept.
+  const ownerToken = await cloudToken("owner", "smoke-owner", audience)
+  const memberToken = await cloudToken("member", "smoke-member", audience)
+  if (!ownerToken || !memberToken) {
+    skip(
+      "no tokens: set COGNIA_SMOKE_OIDC_E2E_TOKEN_URL (fixture) or COGNIA_SMOKE_OWNER_TOKEN + COGNIA_SMOKE_MEMBER_TOKEN"
+    )
+    return
+  }
+  let owned = await cloudMemberships(ownerToken)
+  if (owned.length === 0) {
+    const credential = process.env.COGNIA_SMOKE_BOOTSTRAP_CREDENTIAL
+    if (!credential) {
+      skip("deployment unclaimed and COGNIA_SMOKE_BOOTSTRAP_CREDENTIAL unset: claim not exercised")
+      return
+    }
+    const claimed = await cloudJson(`${COLLAB_URL}/v1/account/bootstrap`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        operationId: `smoke-${Date.now()}`,
+        credential,
+        orgName: "Smoke Org",
+        displayName: "Smoke Owner",
+      }),
+    })
+    check(
+      claimed.status === 200 && /^org_/.test(claimed.body?.orgId ?? ""),
+      "POST /v1/account/bootstrap claims the deployment"
+    )
+    owned = await cloudMemberships(ownerToken)
+  } else {
+    log("deployment already claimed: bootstrap skipped")
+  }
+  check(owned.length >= 1, "the owner holds a membership")
+  const orgId = owned[0]?.orgId
+  if (!orgId) return
+
+  const grant = await cloudGrant(ownerToken, orgId)
+  if (!grant) return
+  const invited = await cloudJson(
+    `${COLLAB_URL}/v1/orgs/${encodeURIComponent(orgId)}/invitations`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${grant}`, "content-type": "application/json" },
+      body: JSON.stringify({ orgRole: "member", reason: "compose smoke" }),
+    }
+  )
+  check(
+    invited.status === 200 && typeof invited.body?.token === "string",
+    "the owner mints an invitation"
+  )
+  if (typeof invited.body?.token !== "string") return
+
+  const accepted = await cloudJson(`${COLLAB_URL}/v1/invitations/accept`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${memberToken}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      operationId: `smoke-accept-${Date.now()}`,
+      token: invited.body.token,
+      displayName: "Smoke Member",
+    }),
+  })
+  check(
+    accepted.status === 200 && accepted.body?.orgId === orgId,
+    "a second person accepts the invitation into the same org"
+  )
+  const memberOf = await cloudMemberships(memberToken)
+  check(
+    memberOf.some((row) => row.orgId === orgId),
+    "the member now holds a membership in that org"
+  )
+  check(
+    memberOf.every((row) => row.userId !== owned[0].userId),
+    "the member is a different person from the owner"
+  )
+}
+
 async function main() {
   const tier = parseTier()
+  if (tier === "cloud") {
+    await tierCloud()
+    if (failures > 0) fatal(`${failures} check(s) failed`)
+    log("OK — all checks passed")
+    return
+  }
   await tierServices()
   if (tier === "server" || tier === "tls" || tier === "im") await tierServer()
   if (tier === "tls") await tierTls()

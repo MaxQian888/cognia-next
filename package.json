@@ -331,6 +331,7 @@
     "version:sync:test": "node --test scripts/sync/version-sync.test.mjs",
     "// 15 ─── Live smoke & manual harnesses (need real credentials or a running app) ───": "",
     "smoke:acp-live": "node scripts/smoke/acp-live.mjs",
+    "logto:seed": "node scripts/smoke/logto-seed.mjs",
     "smoke:external-parity": "node scripts/smoke/build-and-run-smoke.mjs",
     "webrtc:crypto-vector": "pnpm exec jest lib/signaling/crypto.test.ts --runInBand && cargo test --manifest-path services/signaling-server/core/Cargo.toml room_id_matches_the_typescript_vector && cargo test --manifest-path src-tauri/Cargo.toml companion_api::signaling::envelope --lib",
     "webrtc:pair": "node scripts/smoke/webrtc-pair-smoke.mjs",

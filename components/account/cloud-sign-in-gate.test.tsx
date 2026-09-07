@@ -194,6 +194,20 @@ describe("CloudSignInGate", () => {
     expect(await screen.findByTestId("app")).toBeInTheDocument()
   })
 
+  it("names the person who just signed in on the unaffiliated screen", async () => {
+    const idToken = `h.${Buffer.from(JSON.stringify({ sub: "s", name: "Ada Lovelace" })).toString("base64url")}.s`
+    const accessToken = `h.${Buffer.from(JSON.stringify({ sub: "s" })).toString("base64url")}.s`
+    renderGate(
+      deps({
+        signIn: jest.fn(async () => ({ ...session, accessToken, idToken })),
+        settle: jest.fn(async () => ({ outcome: "unaffiliated" as const, memberships: [] })),
+      })
+    )
+    fireEvent.click(await screen.findByTestId("cloud-sign-in-social-github"))
+    expect(await screen.findByTestId("cloud-sign-in-unaffiliated")).toBeInTheDocument()
+    expect(screen.getByTestId("cloud-sign-in-person")).toHaveTextContent("Ada Lovelace")
+  })
+
   it("asks for an invitation or the credential when the person is in no organization", async () => {
     const d = deps({ settle: jest.fn(async () => ({ outcome: "unaffiliated" as const })) })
     renderGate(d)
@@ -402,6 +416,32 @@ describe("CloudSignInGate", () => {
     renderGate(deps({ profile: "cloud-companion", configureHost }))
     expect(await screen.findByTestId("cloud-sign-in")).toBeInTheDocument()
     expect(configureHost).not.toHaveBeenCalled()
+  })
+
+  it("stays live under the E2E build only when the cloud-gate lane asks for it", async () => {
+    const previous = {
+      e2e: process.env.NEXT_PUBLIC_E2E,
+      gate: process.env.NEXT_PUBLIC_E2E_CLOUD_GATE,
+    }
+    try {
+      process.env.NEXT_PUBLIC_E2E = "1"
+      delete process.env.NEXT_PUBLIC_E2E_CLOUD_GATE
+      const discover = jest.fn(async () => deployment)
+      const first = renderGate(deps({ discover }))
+      expect(await screen.findByTestId("app")).toBeInTheDocument()
+      expect(discover).not.toHaveBeenCalled()
+      first.unmount()
+
+      process.env.NEXT_PUBLIC_E2E_CLOUD_GATE = "1"
+      renderGate(deps({ discover }))
+      expect(await screen.findByTestId("cloud-sign-in")).toBeInTheDocument()
+      expect(discover).toHaveBeenCalledTimes(1)
+    } finally {
+      if (previous.e2e === undefined) delete process.env.NEXT_PUBLIC_E2E
+      else process.env.NEXT_PUBLIC_E2E = previous.e2e
+      if (previous.gate === undefined) delete process.env.NEXT_PUBLIC_E2E_CLOUD_GATE
+      else process.env.NEXT_PUBLIC_E2E_CLOUD_GATE = previous.gate
+    }
   })
 
   it("forgets the tab's offline choice on request", () => {

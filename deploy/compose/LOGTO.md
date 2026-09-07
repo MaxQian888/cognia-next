@@ -210,3 +210,76 @@ The gateway's own unit tests cover the validation matrix (signature, `iss`,
 `aud`, `exp`, scope, org mapping) in
 `src-tauri/src/companion_api/oidc.rs`; the client + refresh + persistence are
 covered under `lib/logto/`.
+
+`node scripts/smoke/compose-smoke.mjs --tier cloud` checks the whole account
+plane against a running stack: `/api/auth/config` announces a multi-tenant
+deployment with a native client id and a collaboration service, collab-server
+is healthy, and (given two tokens) a first person claims the deployment, mints
+an invitation, and a second person accepts it into the same organization. The
+CI lane's `tests/real-e2e/cloud-sign-in-gate.spec.ts` drives the same path
+through the real browser gate.
+
+## 8. Local real run (colima + compose)
+
+A full stack on one Mac, with real GitHub and Feishu sign-in. Everything the
+Admin Console used to ask for is done by `pnpm logto:seed`, except creating
+the machine-to-machine application it authenticates with.
+
+1. **Start Docker.** `colima start --cpu 4 --memory 8`, then confirm
+   `docker compose version` answers.
+2. **Give Logto one name the browser and the containers share.** Caddy does
+   not front Logto, so the issuer must be reachable from both sides under the
+   same string (section 3). Add `127.0.0.1 logto` to `/etc/hosts` and set
+   `LOGTO_ENDPOINT=http://logto:3001` in `.env` (from `.env.example`, with
+   `LOGTO_DB_PASSWORD` set). Then `docker compose --profile logto up -d --wait`.
+3. **Create the M2M application** at <http://logto:3002>: Applications →
+   Machine-to-machine, name `cognia-seed`, grant it the Logto Management API
+   resource with the `all` scope. Note its App ID and App Secret.
+4. **Seed everything else:**
+
+   ```bash
+   LOGTO_ENDPOINT=http://logto:3001 \
+   LOGTO_M2M_CLIENT_ID=<m2m id> LOGTO_M2M_CLIENT_SECRET=<m2m secret> \
+   COGNIA_LOGTO_AUDIENCE=https://localhost/api COGNIA_WEB_ORIGIN=https://localhost \
+   LOGTO_GITHUB_CLIENT_ID=<GitHub OAuth App id> LOGTO_GITHUB_CLIENT_SECRET=<secret> \
+   LOGTO_FEISHU_APP_ID=<Feishu app id> LOGTO_FEISHU_APP_SECRET=<secret> \
+   pnpm logto:seed
+   ```
+
+   The script reads connector targets from Logto itself (the Feishu connector
+   is `feishu-web`), prints the `COGNIA_LOGTO_*` and `COLLAB_*` lines for
+   `.env`, and prints the callback URL to register at each provider:
+   `${LOGTO_ENDPOINT}/callback/github` on the GitHub OAuth App and
+   `${LOGTO_ENDPOINT}/callback/feishu-web` on the Feishu app's redirect list.
+
+5. **Finish `.env`:** paste the printed lines, add
+   `COGNIA_DEPLOYMENT_MODE=multi-tenant`, `COGNIA_COLLAB_URL=http://collab-server:8080`,
+   `COGNIA_PUBLIC_COLLAB_URL=https://localhost/collab`,
+   `COGNIA_WEB_ORIGIN=https://localhost`, `COLLAB_GRANT_KEY=$(openssl rand -hex 32)`,
+   and the bootstrap credential hash from section 6. Use the same M2M app
+   for `COLLAB_LOGTO_M2M_CLIENT_ID` / `_SECRET`, or create a second one.
+6. **Bring the stack up:**
+
+   ```bash
+   docker compose --profile logto --profile server --profile collab --profile tls up -d --wait
+   node scripts/smoke/compose-smoke.mjs --tier cloud
+   ```
+
+   Tier `cloud` verifies discovery and the collaboration server. The claim,
+   invite and accept legs need tokens: mint two through the Admin Console
+   (or the CI fixture) and pass `COGNIA_SMOKE_OWNER_TOKEN`,
+   `COGNIA_SMOKE_MEMBER_TOKEN` and `COGNIA_SMOKE_BOOTSTRAP_CREDENTIAL`.
+
+7. **Web:** open <https://localhost>, create the local profile, and the
+   sign-in screen offers GitHub and Feishu. Sign in, claim with the bootstrap
+   credential, and invite a colleague from the workspace members panel. The
+   link starts with `https://localhost/invite?token=`.
+8. **Desktop:** `pnpm tauri dev`, Settings → Cloud deployment, enter
+   `https://localhost` (and the Caddy certificate's SPKI fingerprint if it is
+   not trusted by the machine), Check, Use. The gate appears, GitHub opens
+   in the system browser, and `cognia://logto/callback` returns to the app
+   without pasting. `host_bindings.user_id` in the security database is set
+   afterwards, and `/devices` shows who the machine belongs to.
+9. **Phone:** `pnpm build && pnpm mobile:sync`, open the iOS simulator, Me →
+   Cloud account, enter the same address. The gate signs in through the
+   in-app browser and the same deep link.
