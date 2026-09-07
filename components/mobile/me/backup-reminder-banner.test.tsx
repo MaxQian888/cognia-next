@@ -44,6 +44,18 @@ describe("<BackupReminderBanner />", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it("announces itself as a status alert rather than a bare bordered box", () => {
+    // An icon, a title, a reason and two actions tinted amber IS the alert
+    // shape, and the primitive brings the announcement semantics a plain frame
+    // never had. `status` rather than the assertive default, because a backup
+    // nudge should not interrupt whatever a screen reader is already saying.
+    const { container } = render(<BackupReminderBanner />)
+    const banner = screen.getByTestId("backup-reminder-banner")
+    expect(banner).toHaveAttribute("role", "status")
+    expect(banner).toHaveAttribute("data-slot", "alert")
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+  })
+
   it("links the CTA to /me/backup", () => {
     render(<BackupReminderBanner />)
     expect(screen.getByTestId("backup-reminder-cta")).toHaveAttribute("href", "/me/backup")

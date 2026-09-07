@@ -11,7 +11,7 @@ import { useTranslations } from "next-intl"
 import { CalendarClockIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useBackupReminder } from "@/hooks/data/use-backup-reminder"
 import { useLatestSuccessfulBackup } from "@/hooks/data/use-backup-history"
 
@@ -34,31 +34,42 @@ export function BackupReminderBanner() {
   const days = latest && nowMs > 0 ? Math.floor((nowMs - latest.completedAt) / DAY_MS) : null
 
   return (
-    <Card
-      className="flex items-start gap-2 border-amber-500/40 bg-amber-50/50 p-3 text-sm dark:bg-amber-500/10"
+    // An Alert, not a bordered box. This is an icon, a title, a reason and two
+    // actions tinted amber, which is the alert shape exactly, and the primitive
+    // brings the announcement semantics a bare frame never had. `status` rather
+    // than the default assertive role, because a backup nudge should not
+    // interrupt whatever a screen reader is already saying.
+    <Alert
+      role="status"
+      className="border-amber-500/40 bg-amber-50/50 dark:bg-amber-500/10"
       data-testid="backup-reminder-banner"
     >
-      <CalendarClockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600" />
-      <div className="flex-1">
-        <p className="font-medium">{t("title")}</p>
-        <p className="text-xs text-muted-foreground">
+      <CalendarClockIcon aria-hidden="true" className="text-amber-600" />
+      <AlertTitle>{t("title")}</AlertTitle>
+      <AlertDescription>
+        <p className="text-xs">
           {days !== null ? t("bodyKnownLast", { days }) : t("bodyNeverBackedUp")}
         </p>
-        <Button asChild variant="link" size="sm" className="mt-1 h-auto px-0 text-xs">
-          <Link href="/me/backup" data-testid="backup-reminder-cta">
-            {t("cta")}
-          </Link>
-        </Button>
-      </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 text-xs"
-        onClick={dismiss}
-        data-testid="backup-reminder-dismiss"
-      >
-        {t("dismiss")}
-      </Button>
-    </Card>
+        {/* Both actions on one row under the text. Dismiss used to sit in the
+            far right of the banner, where it took width from the sentence
+            explaining why the banner was there. */}
+        <div className="flex flex-wrap items-center gap-1">
+          <Button asChild variant="link" size="sm" className="h-auto px-0 text-xs">
+            <Link href="/me/backup" data-testid="backup-reminder-cta">
+              {t("cta")}
+            </Link>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={dismiss}
+            data-testid="backup-reminder-dismiss"
+          >
+            {t("dismiss")}
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>
   )
 }
