@@ -9,7 +9,7 @@ import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
+import { Surface } from "@/components/surface/surface"
 import { EmptyState } from "@/components/mobile/empty-state"
 import { LongPress } from "@/components/interactions/long-press"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
@@ -188,50 +188,55 @@ export function WorkflowList({ className }: WorkflowListProps) {
 
           {/* Child folders (tap to enter). */}
           {folders.length > 0 ? (
-            <ul className="flex flex-col gap-2" data-testid="mobile-workflow-folders">
-              {folders.map((folder) => (
-                <li key={folder.id}>
-                  <Card
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => enterFolder(folder.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        enterFolder(folder.id)
-                      }
-                    }}
-                    data-testid={`mobile-workflow-folder-${folder.id}`}
-                    className={cn(
-                      "flex cursor-pointer flex-row items-center gap-3 rounded-md shadow-none transition-colors active:bg-muted/50",
-                      compact ? "p-2" : "p-3"
-                    )}
-                  >
-                    <FolderIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {folder.name}
-                    </span>
-                    <ChevronRightIcon
-                      className="size-4 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                  </Card>
-                </li>
-              ))}
-            </ul>
+            <Surface layer="raised" radius="panel" className="overflow-hidden border">
+              <ul className="flex flex-col" data-testid="mobile-workflow-folders">
+                {folders.map((folder) => (
+                  <li key={folder.id} className="not-last:border-b">
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => enterFolder(folder.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          enterFolder(folder.id)
+                        }
+                      }}
+                      data-testid={`mobile-workflow-folder-${folder.id}`}
+                      className={cn(
+                        "flex cursor-pointer flex-row items-center gap-3 transition-colors active:bg-muted/50",
+                        compact ? "p-2" : "p-3"
+                      )}
+                    >
+                      <FolderIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {folder.name}
+                      </span>
+                      <ChevronRightIcon
+                        className="size-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Surface>
           ) : null}
 
           {isEmpty ? (
             <EmptyState spotIcon="workflows" title={t("empty")} />
           ) : (
+            // One surface with hairline rows, not a frame per workflow. Three
+            // workflows meant three boxes floating on the page, which is the
+            // shape /me stopped using and the shape a phone list is not.
             <motion.ul
-              className="flex flex-col gap-2"
+              className="flex flex-col overflow-hidden rounded-panel border bg-card"
               initial={reduce ? false : "initial"}
               animate="animate"
               variants={STAGGER_CONTAINER}
             >
               {rows.map((wf) => (
-                <motion.li key={wf.id} variants={STAGGER_CHILD}>
+                <motion.li key={wf.id} variants={STAGGER_CHILD} className="not-last:border-b">
                   <SwipeRow
                     rightActions={[
                       {
@@ -254,9 +259,9 @@ export function WorkflowList({ className }: WorkflowListProps) {
                     ]}
                   >
                     <LongPress onLongPress={() => setActionSheetWorkflow(wf)}>
-                      <Card
+                      <div
                         className={cn(
-                          "flex flex-row items-center gap-3 rounded-md shadow-none transition-colors active:bg-muted/50",
+                          "flex flex-row items-center gap-3 bg-card transition-colors active:bg-muted/50",
                           compact ? "p-2" : "p-3 py-3"
                         )}
                         data-testid={`workflow-row-${wf.id}`}
@@ -307,7 +312,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
                           />
                         </Link>
                         <TriggerButton workflowId={wf.id} workflowName={wf.name} />
-                      </Card>
+                      </div>
                     </LongPress>
                   </SwipeRow>
                 </motion.li>

@@ -193,6 +193,22 @@ describe("<WorkflowList />", () => {
     expect(screen.getByTestId("pending-approvals-stub")).toBeInTheDocument()
   })
 
+  it("joins the rows into one surface instead of a frame per workflow", () => {
+    // Three workflows used to be three bordered boxes floating on the page,
+    // with an eight-pixel gap between each. A phone list is one object with
+    // hairline rows, which is the shape /me settled on.
+    pushQueries({ workflows: [wf("a", "Alpha", "Daily snap"), wf("b", "Beta")] })
+    const { container } = render(<WorkflowList />)
+    expect(container.querySelector('[data-slot="card"]')).toBeNull()
+    const list = screen.getByTestId("workflow-row-a").closest("ul")
+    expect(list?.className).toMatch(/border/)
+    expect(list?.className).not.toMatch(/gap-2/)
+    // Every row but the last carries the separator.
+    expect(screen.getByTestId("workflow-row-a").closest("li")?.className).toMatch(
+      /not-last:border-b/
+    )
+  })
+
   it("shows the Active badge for a running workflow", () => {
     pushQueries({ workflows: [wf("a", "Alpha")], runs: [{ workflowId: "a" }] })
     render(<WorkflowList />)
