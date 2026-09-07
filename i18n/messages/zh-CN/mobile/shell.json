@@ -1,8 +1,10 @@
 {
+  "artifacts": "制品",
   "clearSearch": "清空搜索",
   "deleteSession": "删除此会话",
   "directSessionTitle": "与 {name} 的聊天",
   "exportConversation": "导出 / 分享",
+  "homeLayout": "自定义首页",
   "inbox": "收件箱",
   "memberSheetTitle": "团队成员",
   "navSheetTitle": "导航",

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { MobileActiveRunsCard } from "./mobile-active-runs-card"
 import { useSettingsStore } from "@/stores/settings/settings-store"
@@ -27,10 +27,12 @@ jest.mock("dexie-react-hooks", () => ({
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn(() => ({})) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn() }))
 
+const saveMock = jest.fn(async () => {})
+
 function setLayout(layout: MobileHomeLayout) {
   useSettingsStore.setState({
     settings: { mobileHomeLayout: layout } as never,
-    save: jest.fn() as never,
+    save: saveMock as never,
   })
 }
 
@@ -41,6 +43,7 @@ function run(id: string, workflowId: string, startedAt: number): WorkflowRunRow 
 beforeEach(() => {
   runsRef.current = []
   workflowsRef.current = []
+  saveMock.mockClear()
   setLayout({ quickActions: ["newChat"], hiddenSections: [] })
 })
 
@@ -79,5 +82,25 @@ describe("MobileActiveRunsCard", () => {
     runsRef.current = [run("r1", "wf-unknown", 100)]
     render(<MobileActiveRunsCard />)
     expect(screen.getByText("wf-unknown")).toBeInTheDocument()
+  })
+
+  // The section had no dismiss at all, which is what made the mobile home read
+  // as a wall: every other welcome block can be turned off in place.
+  it("hides the section from the dismiss control", () => {
+    runsRef.current = [run("r1", "wf-1", 100)]
+    render(<MobileActiveRunsCard />)
+    fireEvent.click(screen.getByTestId("mobile-active-runs-dismiss"))
+    expect(saveMock).toHaveBeenCalledWith({
+      mobileHomeLayout: { quickActions: ["newChat"], hiddenSections: ["activeRuns"] },
+    })
+  })
+
+  // A <button> nested inside an <a> is invalid markup and the tap would race
+  // the link's own navigation.
+  it("keeps the dismiss outside the navigating link", () => {
+    runsRef.current = [run("r1", "wf-1", 100)]
+    render(<MobileActiveRunsCard />)
+    const link = screen.getByTestId("mobile-active-runs-card")
+    expect(link.contains(screen.getByTestId("mobile-active-runs-dismiss"))).toBe(false)
   })
 })

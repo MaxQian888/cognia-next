@@ -3,36 +3,30 @@
 /**
  * Customizable quick-action grid on the mobile home (chat welcome). Renders the
  * user's chosen actions (`useMobileHomeLayout`) and dispatches taps by kind:
- * `newChat` / `search` fire the supplied callbacks, `route` navigates. The
- * "Edit" affordance opens `MobileQuickActionsEditor` in a bottom sheet.
+ * `newChat` / `search` fire the supplied callbacks, `route` navigates.
+ *
+ * Two affordances sit on the section header: "Edit" asks the shell to open the
+ * shared `MobileHomeLayoutSheet`, and the dismiss control hides the whole
+ * section. The sheet is NOT owned here on purpose: this component renders
+ * `null` once its section is hidden, so a sheet mounted inside it would be
+ * unreachable exactly when the user needs it to undo the dismissal.
  *
  * Returns `null` when the `quickActions` section is hidden or empty, keeping the
  * welcome screen minimal by default.
  */
 
-import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { SlidersHorizontalIcon } from "lucide-react"
+import { SlidersHorizontalIcon, XIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { MOBILE_SPRING, STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { MobileSpotIcon } from "@/components/mobile/mobile-spot-icon"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import type { MobileQuickActionItem } from "@/lib/shell/mobile-home-nav"
 import { useMobileHomeLayout } from "./use-mobile-home-layout"
-import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
-
-import { MobileQuickActionsEditor } from "./mobile-quick-actions-editor"
 
 /** `Card` forwards its ref, so motion can drive it directly (no wrapper div). */
 const MotionCard = motion.create(Card)
@@ -42,19 +36,23 @@ export interface MobileQuickActionsProps {
   onNewChat: () => void
   /** Open the global search / command palette. */
   onSearch: () => void
+  /** Ask the shell to open the shared home-layout sheet. */
+  onEditLayout: () => void
   className?: string
 }
 
-export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQuickActionsProps) {
+export function MobileQuickActions({
+  onNewChat,
+  onSearch,
+  onEditLayout,
+  className,
+}: MobileQuickActionsProps) {
   const t = useTranslations("mobile.home")
   const tActions = useTranslations("mobile.home.actions")
+  const tSections = useTranslations("mobile.home.sections")
   const router = useRouter()
-  const { resolved, isSectionHidden } = useMobileHomeLayout()
+  const { resolved, isSectionHidden, hideSection } = useMobileHomeLayout()
   const reduce = useReducedMotion()
-  const [editorOpen, setEditorOpen] = useState(false)
-  // Android hardware / browser back closes the editor sheet instead of
-  // navigating. (Must run before the section-hidden early return below.)
-  useBackDismiss(editorOpen, () => setEditorOpen(false))
 
   const dispatch = (item: MobileQuickActionItem) => {
     void selectionFeedback()
@@ -63,8 +61,9 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
     else if (item.kind === "route" && item.route) router.push(item.route)
   }
 
-  // Section hidden → render nothing (but keep the editor reachable elsewhere via
-  // the explicit edit entry rendered only when there are actions to show).
+  // Section hidden, or no actions left on the grid, means render nothing. The
+  // editor stays reachable from the app bar overflow menu, which is the only
+  // door that survives this branch.
   if (isSectionHidden("quickActions") || resolved.active.length === 0) return null
 
   return (
@@ -73,17 +72,34 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
         <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {t("quickActions")}
         </h3>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-2 text-xs"
-          onClick={() => setEditorOpen(true)}
-          data-testid="mobile-quick-actions-edit"
-        >
-          <SlidersHorizontalIcon className="size-3.5" />
-          {t("edit")}
-        </Button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={() => onEditLayout()}
+            data-testid="mobile-quick-actions-edit"
+          >
+            <SlidersHorizontalIcon className="size-3.5" />
+            {t("edit")}
+          </Button>
+          {/* Every other welcome section carries a dismiss. These two did not,
+              which is why the home read as a wall the user could not turn off.
+              Undo lives in the same editor the button beside this one opens,
+              plus the app bar overflow menu. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground/70 hover:text-foreground"
+            aria-label={t("hideSection", { section: tSections("quickActions") })}
+            onClick={() => void hideSection("quickActions")}
+            data-testid="mobile-quick-actions-dismiss"
+          >
+            <XIcon className="size-3.5" aria-hidden />
+          </Button>
+        </div>
       </div>
 
       {/* The grid is the welcome screen's centrepiece — the one thing on an
@@ -118,22 +134,6 @@ export function MobileQuickActions({ onNewChat, onSearch, className }: MobileQui
           </MotionCard>
         ))}
       </motion.div>
-
-      <Sheet open={editorOpen} onOpenChange={setEditorOpen}>
-        <SheetContent
-          side="bottom"
-          className="max-h-[85vh] overflow-y-auto"
-          data-testid="mobile-quick-actions-editor-sheet"
-        >
-          <SheetHeader>
-            <SheetTitle>{t("customize.title")}</SheetTitle>
-            <SheetDescription>{t("customize.description")}</SheetDescription>
-          </SheetHeader>
-          <div className="px-4 pb-6">
-            <MobileQuickActionsEditor />
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }

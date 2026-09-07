@@ -18270,6 +18270,7 @@
       "emptyChats": "还没有聊天，点击 + 新建一个。",
       "emptyFiltered": "没有与「{query}」匹配的聊天。",
       "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
+      "hideSection": "隐藏{section}",
       "pinned": "置顶",
       "presenceStreaming": "回复中",
       "quickActions": "快捷操作",
@@ -18281,6 +18282,7 @@
       "searchingMessages": "正在搜索消息内容…",
       "sections": {
         "activeRuns": "运行中",
+        "quickActions": "快捷操作",
         "recents": "最近会话"
       },
       "swipeArchive": "归档",
@@ -19306,10 +19308,12 @@
       "title": "通过 cognia 分享"
     },
     "shell": {
+      "artifacts": "制品",
       "clearSearch": "清空搜索",
       "deleteSession": "删除此会话",
       "directSessionTitle": "与 {name} 的聊天",
       "exportConversation": "导出 / 分享",
+      "homeLayout": "自定义首页",
       "inbox": "收件箱",
       "memberSheetTitle": "团队成员",
       "navSheetTitle": "导航",

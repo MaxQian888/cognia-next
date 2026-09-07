@@ -1,8 +1,10 @@
 {
+  "artifacts": "Artifacts",
   "clearSearch": "Clear search",
   "deleteSession": "Delete this session",
   "directSessionTitle": "Chat with {name}",
   "exportConversation": "Export / share",
+  "homeLayout": "Customize home",
   "inbox": "Inbox",
   "memberSheetTitle": "Team members",
   "navSheetTitle": "Navigation",

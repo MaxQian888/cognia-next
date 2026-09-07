@@ -18270,6 +18270,7 @@
       "emptyChats": "No chats yet. Tap + to start one.",
       "emptyFiltered": "No chats match “{query}”.",
       "emptyFilters": "{count, plural, one {No conversations match the active filter.} other {No conversations match the active filters.}}",
+      "hideSection": "Hide {section}",
       "pinned": "Pinned",
       "presenceStreaming": "Streaming",
       "quickActions": "Quick actions",
@@ -18281,6 +18282,7 @@
       "searchingMessages": "Searching messages…",
       "sections": {
         "activeRuns": "Active runs",
+        "quickActions": "Quick actions",
         "recents": "Recent chats"
       },
       "swipeArchive": "Archive",
@@ -19306,10 +19308,12 @@
       "title": "Share via cognia"
     },
     "shell": {
+      "artifacts": "Artifacts",
       "clearSearch": "Clear search",
       "deleteSession": "Delete this session",
       "directSessionTitle": "Chat with {name}",
       "exportConversation": "Export / share",
+      "homeLayout": "Customize home",
       "inbox": "Inbox",
       "memberSheetTitle": "Team members",
       "navSheetTitle": "Navigation",

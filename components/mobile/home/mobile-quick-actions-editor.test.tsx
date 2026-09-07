@@ -5,7 +5,11 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { MobileQuickActionsEditor } from "./mobile-quick-actions-editor"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_MOBILE_HOME_LAYOUT, type MobileHomeLayout } from "@/types/shell/mobile-home"
+import {
+  DEFAULT_MOBILE_HOME_LAYOUT,
+  MOBILE_HOME_SECTION_IDS,
+  type MobileHomeLayout,
+} from "@/types/shell/mobile-home"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -56,6 +60,28 @@ describe("MobileQuickActionsEditor", () => {
 
     act(() => setLayout({ quickActions: ["newChat"], hiddenSections: ["recents"] }))
     fireEvent.click(screen.getByTestId("mobile-home-editor-section-toggle-recents"))
+    expect(lastSaved().hiddenSections).toEqual([])
+  })
+
+  /**
+   * The `quickActions` switch is the ONLY undo for the grid's own dismiss:
+   * `MobileQuickActions` writes `hideSection("quickActions")` and then renders
+   * `null`, taking its "Edit" button with it. The editor used to omit this id
+   * from its toggle list entirely, so the state was reachable and permanent.
+   */
+  it("offers a switch for every section id, quickActions included", () => {
+    render(<MobileQuickActionsEditor />)
+    for (const id of MOBILE_HOME_SECTION_IDS) {
+      expect(screen.getByTestId(`mobile-home-editor-section-toggle-${id}`)).toBeInTheDocument()
+    }
+  })
+
+  it("turns the quick-action grid back on after the grid dismissed itself", () => {
+    setLayout({ quickActions: ["newChat"], hiddenSections: ["quickActions"] })
+    render(<MobileQuickActionsEditor />)
+    const toggle = screen.getByTestId("mobile-home-editor-section-toggle-quickActions")
+    expect(toggle).toHaveAttribute("data-state", "unchecked")
+    fireEvent.click(toggle)
     expect(lastSaved().hiddenSections).toEqual([])
   })
 

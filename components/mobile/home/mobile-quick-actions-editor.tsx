@@ -34,11 +34,25 @@ import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { applyDragReorder } from "@/lib/shell/sidebar-nav"
 import type { MobileQuickActionItem } from "@/lib/shell/mobile-home-nav"
-import { DEFAULT_MOBILE_HOME_LAYOUT, type MobileHomeSectionId } from "@/types/shell/mobile-home"
+import {
+  DEFAULT_MOBILE_HOME_LAYOUT,
+  MOBILE_HOME_SECTION_IDS,
+  type MobileHomeSectionId,
+} from "@/types/shell/mobile-home"
 import { useMobileHomeLayout } from "./use-mobile-home-layout"
 
-/** Sections the user can toggle off (quickActions is implicit — empty = hidden). */
-const TOGGLEABLE_SECTIONS: readonly MobileHomeSectionId[] = ["recents", "activeRuns"]
+/**
+ * Sections the user can toggle: all of them.
+ *
+ * This was a second hand-kept list holding `["recents", "activeRuns"]`, on the
+ * theory that an empty grid IS the hidden state for `quickActions`. That was
+ * only half true. `hideSection("quickActions")` is a reachable state (the
+ * grid's own dismiss writes it), nothing here could clear it, and the grid
+ * renders `null` in that state, so the dismiss had no undo. Reading the ids off
+ * the type instead also gives `MOBILE_HOME_SECTION_IDS` its first consumer, and
+ * a section added there can no longer ship without a switch.
+ */
+const TOGGLEABLE_SECTIONS: readonly MobileHomeSectionId[] = MOBILE_HOME_SECTION_IDS
 
 export function MobileQuickActionsEditor(): React.ReactElement {
   const t = useTranslations("mobile.home.customize")

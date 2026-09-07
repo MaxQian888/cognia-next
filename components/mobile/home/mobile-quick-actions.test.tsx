@@ -37,14 +37,14 @@ beforeEach(() => {
 
 describe("MobileQuickActions", () => {
   it("renders a tile per active action", () => {
-    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={jest.fn()} />)
     expect(screen.getByTestId("mobile-quick-action-newChat")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-quick-action-search")).toBeInTheDocument()
     expect(screen.getByTestId("mobile-quick-action-workflows")).toBeInTheDocument()
   })
 
   it("uses the matching Cognia companion illustration on spacious action cards", () => {
-    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={jest.fn()} />)
 
     expect(screen.getByTestId("mobile-spot-icon-chat")).toHaveAttribute(
       "src",
@@ -62,20 +62,20 @@ describe("MobileQuickActions", () => {
 
   it("returns null when the section is hidden", () => {
     setLayout({ quickActions: ["newChat"], hiddenSections: ["quickActions"] })
-    const { container } = render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+    const { container } = render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={jest.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
   it("returns null when there are no active actions", () => {
     setLayout({ quickActions: [], hiddenSections: [] })
-    const { container } = render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+    const { container } = render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={jest.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
   it("dispatches newChat / search / route taps", () => {
     const onNewChat = jest.fn()
     const onSearch = jest.fn()
-    render(<MobileQuickActions onNewChat={onNewChat} onSearch={onSearch} />)
+    render(<MobileQuickActions onNewChat={onNewChat} onSearch={onSearch} onEditLayout={jest.fn()} />)
 
     fireEvent.click(screen.getByTestId("mobile-quick-action-newChat"))
     expect(onNewChat).toHaveBeenCalled()
@@ -89,14 +89,34 @@ describe("MobileQuickActions", () => {
 
   it("activates a tile via keyboard", () => {
     const onNewChat = jest.fn()
-    render(<MobileQuickActions onNewChat={onNewChat} onSearch={jest.fn()} />)
+    render(<MobileQuickActions onNewChat={onNewChat} onSearch={jest.fn()} onEditLayout={jest.fn()} />)
     fireEvent.keyDown(screen.getByTestId("mobile-quick-action-newChat"), { key: "Enter" })
     expect(onNewChat).toHaveBeenCalled()
   })
 
-  it("opens the customizer sheet on Edit", () => {
-    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+  // The sheet is the SHELL's, not this component's: the grid returns null once
+  // its own section is hidden, so an editor mounted here would disappear
+  // exactly when it is needed to undo that. All this button may do is ask.
+  it("asks the shell to open the layout editor on Edit", () => {
+    const onEditLayout = jest.fn()
+    render(
+      <MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={onEditLayout} />
+    )
     fireEvent.click(screen.getByTestId("mobile-quick-actions-edit"))
-    expect(screen.getByTestId("mobile-quick-actions-editor")).toBeInTheDocument()
+    expect(onEditLayout).toHaveBeenCalled()
+    expect(screen.queryByTestId("mobile-quick-actions-editor")).toBeNull()
+  })
+
+  it("hides the whole section from the dismiss control", () => {
+    render(
+      <MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} onEditLayout={jest.fn()} />
+    )
+    fireEvent.click(screen.getByTestId("mobile-quick-actions-dismiss"))
+    expect(saveMock).toHaveBeenCalledWith({
+      mobileHomeLayout: {
+        quickActions: ["newChat", "search", "workflows"],
+        hiddenSections: ["quickActions"],
+      },
+    })
   })
 })

@@ -41,6 +41,7 @@
   "emptyChats": "还没有聊天，点击 + 新建一个。",
   "emptyFiltered": "没有与「{query}」匹配的聊天。",
   "emptyFilters": "没有会话符合当前的 {count} 项筛选条件。",
+  "hideSection": "隐藏{section}",
   "pinned": "置顶",
   "presenceStreaming": "回复中",
   "quickActions": "快捷操作",
@@ -52,6 +53,7 @@
   "searchingMessages": "正在搜索消息内容…",
   "sections": {
     "activeRuns": "运行中",
+    "quickActions": "快捷操作",
     "recents": "最近会话"
   },
   "swipeArchive": "归档",

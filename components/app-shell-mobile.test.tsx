@@ -176,19 +176,31 @@ jest.mock("@/lib/db/teams", () => ({
   getTeam: () => Promise.resolve(undefined),
 }))
 
+const inboxUnreadRef = { current: 0 }
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: <T,>(_query: () => Promise<T>, _deps: unknown, fallback: T): T => fallback,
+  useClientLiveQuery: <T,>(query: () => Promise<T>, _deps: unknown, fallback: T): T =>
+    query.toString().includes("loadMobileUnread") ? (inboxUnreadRef.current as T) : fallback,
 }))
 
 // Stub heavy children — the shell test verifies structural wiring, not
 // child internals.
+const welcomeExtrasRef: {
+  current: {
+    hideSamples?: boolean
+    hideNewChatAction?: boolean
+    quickActions?: React.ReactNode
+    header?: React.ReactNode
+  } | null
+} = { current: null }
 jest.mock("@/components/chat/chat-view", () => ({
   ChatPane: ({
     showHeader,
     onSend,
     onResumeAfterPlanApproval,
+    welcomeExtras,
   }: {
     showHeader?: boolean
+    welcomeExtras?: typeof welcomeExtrasRef.current
     onSend?: (
       content: unknown,
       manifest?: readonly [{ filename: string; mediaType: string; kind: "document" }],
@@ -196,39 +208,42 @@ jest.mock("@/components/chat/chat-view", () => ({
       turnMetadata?: unknown
     ) => Promise<void>
     onResumeAfterPlanApproval?: (prompt: string, mode: string) => void | Promise<void>
-  }) => (
-    <div
-      data-testid="chat-pane"
-      data-show-header={showHeader === false ? "false" : "true"}
-      data-has-plan-resume={onResumeAfterPlanApproval ? "true" : "false"}
-    >
-      <button
-        data-testid="chat-send-stub"
-        onClick={() => {
-          void onSend?.("hi", [
-            { filename: "report.txt", mediaType: "text/plain", kind: "document" },
-          ]).catch(() => {})
-        }}
-      />
-      <button
-        data-testid="chat-send-web-stub"
-        onClick={() => {
-          void onSend?.("web", undefined, null, {
-            webSearchContext: {
-              provider: "tavily",
-              results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
-            },
-          }).catch(() => {})
-        }}
-      />
-      <button
-        data-testid="chat-plan-resume-stub"
-        onClick={() => {
-          void onResumeAfterPlanApproval?.("go", "acceptEdits")
-        }}
-      />
-    </div>
-  ),
+  }) => {
+    welcomeExtrasRef.current = welcomeExtras ?? null
+    return (
+      <div
+        data-testid="chat-pane"
+        data-show-header={showHeader === false ? "false" : "true"}
+        data-has-plan-resume={onResumeAfterPlanApproval ? "true" : "false"}
+      >
+        <button
+          data-testid="chat-send-stub"
+          onClick={() => {
+            void onSend?.("hi", [
+              { filename: "report.txt", mediaType: "text/plain", kind: "document" },
+            ]).catch(() => {})
+          }}
+        />
+        <button
+          data-testid="chat-send-web-stub"
+          onClick={() => {
+            void onSend?.("web", undefined, null, {
+              webSearchContext: {
+                provider: "tavily",
+                results: [{ title: "A", url: "https://a.test", content: "a", score: 1 }],
+              },
+            }).catch(() => {})
+          }}
+        />
+        <button
+          data-testid="chat-plan-resume-stub"
+          onClick={() => {
+            void onResumeAfterPlanApproval?.("go", "acceptEdits")
+          }}
+        />
+      </div>
+    )
+  },
 }))
 
 const hapterImpact = jest.fn()
@@ -329,6 +344,55 @@ jest.mock("@/components/performance/perf-capture-shell-status", () => ({
   PerfCaptureShellStatus: () => null,
 }))
 
+// App-bar width tiers. The default (nothing matches) is the narrow phone bar,
+// which is the shape every existing test in this file was written against.
+const mediaMatches: Record<string, boolean> = {}
+jest.mock("@/hooks/ui/use-media-query", () => ({
+  useMediaQuery: (query: string) => mediaMatches[query] ?? false,
+}))
+const APPBAR_INBOX_QUERY = "(min-width: 26rem)"
+const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
+
+// Header children that reach Dexie / native polling on mount. Stubbed so the
+// bar's own layout contract is what these tests measure.
+jest.mock("@/components/mobile/shell/mobile-workspace-chip", () => ({
+  MobileWorkspaceChip: ({ className }: { className?: string }) => (
+    <span data-testid="mobile-workspace-chip-stub" className={className} />
+  ),
+}))
+jest.mock("@/components/chat/background-runs-chip", () => ({
+  BackgroundRunsChip: ({ className }: { className?: string }) => (
+    <span data-testid="background-runs-chip-stub" className={className} />
+  ),
+}))
+jest.mock("@/components/desktop/job-center-panel", () => ({
+  JobCenterPanel: () => <button type="button" data-testid="status-job-center" />,
+}))
+jest.mock("@/components/mobile/home/mobile-home-layout-sheet", () => ({
+  MobileHomeLayoutSheet: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="mobile-quick-actions-editor-sheet" /> : null,
+}))
+// The real grid reads the settings store through a different module path than
+// this suite mocks, and the ChatPane stub never renders the welcome slots
+// anyway. The seam under test is the ELEMENT the shell builds, so the stub only
+// has to keep the real component out of the graph.
+jest.mock("@/components/mobile/home/mobile-quick-actions", () => ({
+  MobileQuickActions: () => <div data-testid="mobile-quick-actions-stub" />,
+}))
+jest.mock("@/components/mobile/home/mobile-active-runs-card", () => ({
+  MobileActiveRunsCard: () => null,
+}))
+
+const toggleArtifactDock = jest.fn()
+let artifactDockState = {
+  dockCollapsed: true,
+  unreadArtifact: false,
+  toggleDock: toggleArtifactDock,
+}
+jest.mock("@/stores/artifact/artifact-dock-layout-store", () => ({
+  useArtifactDockLayoutStore: (selector: (s: unknown) => unknown) => selector(artifactDockState),
+}))
+
 import { AppShellMobile } from "./app-shell-mobile"
 
 beforeEach(() => {
@@ -357,7 +421,19 @@ beforeEach(() => {
   errorMessageRef.current = null
   pendingSettingsRequestRef.current = null
   credentialStatusRef.current = { keyOk: true, plan: null }
+  for (const key of Object.keys(mediaMatches)) delete mediaMatches[key]
+  toggleArtifactDock.mockReset()
+  artifactDockState = { dockCollapsed: true, unreadArtifact: false, toggleDock: toggleArtifactDock }
+  inboxUnreadRef.current = 0
+  welcomeExtrasRef.current = null
 })
+
+/** The `welcomeExtras` bundle the shell handed the chat pane on this render. */
+function lastWelcomeExtras(): NonNullable<typeof welcomeExtrasRef.current> {
+  const extras = welcomeExtrasRef.current
+  if (!extras) throw new Error("ChatPane rendered without welcomeExtras")
+  return extras
+}
 
 describe("<AppShellMobile />", () => {
   it("renders top bar, hamburger, and chat pane", () => {
@@ -383,14 +459,140 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("app-shell-mobile")).toHaveClass("safe-area-px")
   })
 
-  it("reserves the fixed tab-bar footprint so the composer isn't hidden behind it", () => {
-    // The shell root is h-[100dvh], which overrides the MobileShellWrapper's
-    // bottom-padding reservation; the chat <main> must re-assert the tab-bar
-    // height (h-14 + safe-area inset) or the composer's toolbar row clips
-    // behind the fixed <MobileTabBar />.
+  /**
+   * The tab-bar reserve is made EXACTLY once, by `MobileShellWrapper`.
+   *
+   * This shell used to be `h-[100dvh]` and re-assert the same
+   * `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]` on its <main>,
+   * on the grounds that a viewport-tall root escapes the wrapper's padding. It
+   * did, and the two reserves then stacked: the wrapper's box came out 56px +
+   * inset TALLER than the screen, hidden on `/` by
+   * `body[data-app-shell]{overflow:hidden}` and surfacing as a bare strip under
+   * every other route the moment that attribute was cleared. `/` is a
+   * full-viewport route now, so the wrapper's definite-height column has
+   * already subtracted the bar and this shell just fills it.
+   */
+  it("makes the tab-bar reserve exactly once, in the wrapper, not again here", () => {
     const { container } = render(<AppShellMobile />)
+    const root = screen.getByTestId("app-shell-mobile")
+    expect(root.className).toContain("h-full")
+    expect(root.className).not.toContain("h-[100dvh]")
+    // The wrapper puts the offline banner and the first-run setup bar in the
+    // same column above this shell. Height alone would claim the whole column
+    // and overflow it by however tall those rows are on the day they appear.
+    expect(root.className).toContain("flex-1")
+    expect(root.className).toContain("min-h-0")
     const main = container.querySelector("main")
-    expect(main?.className).toContain("pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]")
+    expect(main?.className).not.toContain("env(safe-area-inset-bottom)")
+  })
+
+  /**
+   * The bar packs 303px of fixed chrome at 375px before the session title gets
+   * a pixel, so anything past that has to earn its place by width. Measured at
+   * 403px in a 375px shell, the ⋮ menu (the only route to new chat / settings /
+   * export / delete) sat off-screen and the document gained a horizontal
+   * scroll that dragged every fixed layer, the tab bar included, with it.
+   */
+  it("clips the app bar and pins its action group so nothing can be pushed off-screen", () => {
+    render(<AppShellMobile />)
+    const header = document.querySelector("[data-app-chrome]") as HTMLElement
+    expect(header.className).toContain("overflow-hidden")
+    const actions = screen.getByTestId("mobile-actions-trigger").parentElement as HTMLElement
+    expect(actions.className).toContain("shrink-0")
+    // The things that grow must be the things that give up width.
+    expect(screen.getByTestId("mobile-workspace-chip-stub").className).toContain("shrink")
+  })
+
+  it("folds inbox and artifacts into the overflow menu on a narrow bar", async () => {
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("mobile-inbox-trigger")).toBeNull()
+    expect(screen.queryByTestId("chat-artifact-dock-toggle")).toBeNull()
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-action-inbox")).toBeInTheDocument())
+    expect(screen.getByTestId("mobile-action-artifacts")).toBeInTheDocument()
+  })
+
+  it("puts them back in the bar once it is wide enough, and never in both places", async () => {
+    mediaMatches[APPBAR_INBOX_QUERY] = true
+    mediaMatches[APPBAR_ARTIFACTS_QUERY] = true
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("mobile-inbox-trigger")).toBeInTheDocument()
+    expect(screen.getByTestId("chat-artifact-dock-toggle")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
+    expect(screen.queryByTestId("mobile-action-inbox")).toBeNull()
+    expect(screen.queryByTestId("mobile-action-artifacts")).toBeNull()
+  })
+
+  // Folding a control must move its attention signal, not delete it.
+  it("carries a folded control's unread onto the overflow trigger", () => {
+    artifactDockState = { ...artifactDockState, unreadArtifact: true }
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("mobile-actions-unread-dot")).toBeInTheDocument()
+  })
+
+  it("carries a folded inbox's unread onto the overflow trigger too", () => {
+    inboxUnreadRef.current = 3
+    render(<AppShellMobile />)
+    expect(screen.getByTestId("mobile-actions-unread-dot")).toBeInTheDocument()
+  })
+
+  it("puts the dot on the menu row itself, not only on the trigger", async () => {
+    inboxUnreadRef.current = 3
+    artifactDockState = { ...artifactDockState, unreadArtifact: true }
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    expect(await screen.findByTestId("mobile-action-inbox-unread-dot")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-action-artifacts-unread-dot")).toBeInTheDocument()
+  })
+
+  it("drops the folded dot once the control is back in the bar", () => {
+    mediaMatches[APPBAR_ARTIFACTS_QUERY] = true
+    mediaMatches[APPBAR_INBOX_QUERY] = true
+    artifactDockState = { ...artifactDockState, unreadArtifact: true }
+    inboxUnreadRef.current = 3
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("mobile-actions-unread-dot")).toBeNull()
+  })
+
+  // An open dock is not an unread one: the artifact store raises the flag when
+  // something arrives while the panel is dismissed, and the in-bar toggle reads
+  // it the same way.
+  it("suppresses the artifact dot while the dock is already open", () => {
+    artifactDockState = { ...artifactDockState, unreadArtifact: true, dockCollapsed: false }
+    render(<AppShellMobile />)
+    expect(screen.queryByTestId("mobile-actions-unread-dot")).toBeNull()
+  })
+
+  // The other door to the same sheet: the grid's "Edit" asks the shell, which
+  // owns the state. That seam is the whole reason the sheet moved up here.
+  it("opens the home-layout editor from the quick-action grid's Edit", () => {
+    render(<AppShellMobile />)
+    const extras = lastWelcomeExtras()
+    expect(extras.hideNewChatAction).toBe(true)
+    const grid = extras.quickActions as React.ReactElement<{ onEditLayout: () => void }>
+    expect(screen.queryByTestId("mobile-quick-actions-editor-sheet")).toBeNull()
+    act(() => {
+      grid.props.onEditLayout()
+    })
+    expect(screen.getByTestId("mobile-quick-actions-editor-sheet")).toBeInTheDocument()
+  })
+
+  // The grid that hosts the other "Edit" entry renders null once its section is
+  // hidden, so this is the editor's only unconditional door.
+  it("opens the home-layout editor from the overflow menu", async () => {
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-home-layout"))
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-quick-actions-editor-sheet")).toBeInTheDocument()
+    )
   })
 
   it("opens the navigation drawer when hamburger is pressed", async () => {
@@ -615,11 +817,32 @@ describe("<AppShellMobile />", () => {
   })
 
   it("routes to /inbox/all via the top-bar inbox button", async () => {
+    // Wide enough for the bar to hold the inbox control itself; the narrow
+    // shape reaches the same route through the overflow entry below.
+    mediaMatches[APPBAR_INBOX_QUERY] = true
     const user = userEvent.setup()
     render(<AppShellMobile />)
 
     await user.click(screen.getByTestId("mobile-inbox-trigger"))
     await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/inbox/all"))
+  })
+
+  it("routes to /inbox/all from the overflow entry when the bar folded it", async () => {
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-inbox"))
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/inbox/all"))
+  })
+
+  it("toggles the artifact dock from the overflow entry when the bar folded it", async () => {
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await user.click(await screen.findByTestId("mobile-action-artifacts"))
+    expect(toggleArtifactDock).toHaveBeenCalled()
   })
 
   it("delete action invokes remove(activeSessionId) and toasts on failure", async () => {

@@ -7,7 +7,7 @@ import { useSettingsStore } from "@/stores/settings"
 
 // Customizable quick-action grid on the mobile home. Reads the layout from
 // `useSettingsStore` (defaults to the factory action set), so the reset store
-// renders the default tiles. Tapping the Edit affordance opens the editor sheet.
+// renders the default tiles. Edit asks the shell to open the shared editor sheet.
 const meta = {
   title: "Mobile/Home/MobileQuickActions",
   component: MobileQuickActions,
@@ -15,6 +15,7 @@ const meta = {
   args: {
     onNewChat: fn(),
     onSearch: fn(),
+    onEditLayout: fn(),
   },
   beforeEach: () => {
     resetStore(useSettingsStore)

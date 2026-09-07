@@ -31,8 +31,10 @@ import { useTranslations } from "next-intl"
 import {
   InboxIcon,
   KeyRoundIcon,
+  LayoutGridIcon,
   MenuIcon,
   MoreVerticalIcon,
+  PanelRightOpenIcon,
   SearchIcon,
   SettingsIcon,
   Settings2Icon,
@@ -60,6 +62,8 @@ import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
+import { useMediaQuery } from "@/hooks/ui/use-media-query"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
@@ -67,6 +71,7 @@ import { SharedSessionJoin } from "@/components/chat/shared-session-join"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
+import { MobileHomeLayoutSheet } from "@/components/mobile/home/mobile-home-layout-sheet"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
@@ -114,6 +119,23 @@ import { PerfCaptureShellStatus } from "@/components/performance/perf-capture-sh
 
 const log = loggers.shell
 
+/**
+ * Width tiers for the app bar's secondary controls.
+ *
+ * The bar's fixed cost at 375px is 303px — burger, workspace chip, job centre,
+ * search, ⋮, their gaps and the row's own padding — which leaves 72px for the
+ * session title and nothing else. Every control beyond that has to earn its
+ * place by width, so the two with a cheap menu equivalent (a route push and a
+ * store toggle) are the ones that fold.
+ *
+ * Viewport queries rather than a container query on the header: the ⋮ menu is
+ * portaled to `document.body`, so a container ancestor cannot reach the folded
+ * copies and the two halves of the decision would drift apart. The header spans
+ * the viewport on this shell, which makes the two measurements the same number.
+ */
+const APPBAR_INBOX_QUERY = "(min-width: 26rem)"
+const APPBAR_ARTIFACTS_QUERY = "(min-width: 30rem)"
+
 export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
@@ -150,7 +172,18 @@ export function AppShellMobile() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
+  const [homeLayoutOpen, setHomeLayoutOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
+
+  // App-bar width tiers (see the query constants above). `useMediaQuery`
+  // answers `false` before hydration, so the first paint is the narrow bar and
+  // a wider device widens it on mount — never the other way round, which is the
+  // direction that would flash an overflowing row.
+  const inboxInBar = useMediaQuery(APPBAR_INBOX_QUERY)
+  const artifactsInBar = useMediaQuery(APPBAR_ARTIFACTS_QUERY)
+  const toggleArtifactDock = useArtifactDockLayoutStore((s) => s.toggleDock)
+  const dockCollapsed = useArtifactDockLayoutStore((s) => s.dockCollapsed)
+  const unreadArtifact = useArtifactDockLayoutStore((s) => s.unreadArtifact) && dockCollapsed
 
   const composerRef = useRef<ComposerHandle | null>(null)
   // The members sheet asks for an `@mention` over the shared seam (it renders
@@ -266,6 +299,12 @@ export function AppShellMobile() {
     [],
     0
   )
+
+  // Attention carried by whichever controls the current width folded into ⋮.
+  // Computed from the same two signals their in-bar dots read, so folding a
+  // control moves its dot rather than deleting it.
+  const foldedAttention =
+    (!inboxInBar && (inboxUnread ?? 0) > 0) || (!artifactsInBar && unreadArtifact)
 
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const activeCharacter = useMemo(() => {
@@ -440,12 +479,29 @@ export function AppShellMobile() {
 
   return (
     <div
-      className="relative flex h-[100dvh] w-full flex-col bg-background text-foreground safe-area-pt safe-area-px"
+      // `h-full min-h-0 flex-1`, not `h-[100dvh]`. `MobileShellWrapper` now
+      // gives `/` the full-viewport branch, a definite-height flex column that
+      // has ALREADY subtracted the tab-bar reserve, so re-asserting a whole
+      // viewport here would add that reserve back and push the last 56px of the
+      // shell under the bar again. `flex-1` rather than height alone because
+      // the wrapper puts the offline banner and the first-run setup bar in that
+      // same column above us: a plain `h-full` would claim the WHOLE column and
+      // overflow it by however tall those rows are on the day they appear.
+      // Same three-class idiom as `FeaturePageShell`'"'"'s compact branch.
+      className="relative flex h-full min-h-0 w-full flex-1 flex-col bg-background text-foreground safe-area-pt safe-area-px"
       data-testid="app-shell-mobile"
     >
       {/* ── Top bar ────────────────────────────────────────────────────── */}
       <header
-        className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2"
+        // `overflow-hidden` + shrinkable middle items is the whole horizontal
+        // contract: the action group on the right is `shrink-0`, so anything
+        // that grows (session title, workspace name, credential warning) gives
+        // up width instead of pushing the row past the viewport. Without it the
+        // bar measured 403px inside a 375px shell, the ⋮ menu — the only way to
+        // reach new chat / settings / export / delete — sat off-screen, and the
+        // document gained a horizontal scroll that dragged every `position:
+        // fixed` layer (the tab bar included) out of alignment with it.
+        className="flex h-14 shrink-0 items-center gap-2 overflow-hidden border-b border-border px-2"
         data-app-chrome
       >
         <Sheet open={navOpen} onOpenChange={setNavOpen}>
@@ -512,12 +568,12 @@ export function AppShellMobile() {
           streaming={chatStatus === "streaming"}
         />
 
-        <MobileWorkspaceChip className="ml-2 shrink-0" />
+        <MobileWorkspaceChip className="ml-2 min-w-0 shrink" />
 
         {/* A phone shows one conversation, so turns started and navigated away
             from had no representation at all here. Tapping goes to one. */}
         <BackgroundRunsChip
-          className="ml-2"
+          className="ml-2 min-w-0 shrink"
           onSelect={(id) => {
             setNavOpen(false)
             void select(id)
@@ -530,7 +586,7 @@ export function AppShellMobile() {
         {keyOk === false && activeSession ? (
           <Badge
             variant="destructive"
-            className="ml-2 shrink-0 cursor-pointer gap-1"
+            className="ml-2 min-w-0 shrink cursor-pointer gap-1"
             onClick={() => setSessionSettingsOpen(true)}
             data-testid="mobile-no-api-key"
           >
@@ -539,35 +595,40 @@ export function AppShellMobile() {
           </Badge>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
           {/* The artifact dock's only standing affordance on a phone. The copy
               in `chat-header` never mounts here (the chat pane below is given
               `showHeader={false}`), so without this the Sheet could only be
               reached by tapping an artifact card that happened to be in the
               thread — and once closed there was no way back to the session
               panels (artifact library, browser, workspace) at all. It also
-              carries the unread dot, which had no host on this breakpoint. */}
-          <ArtifactDockToggle className="touch-target" />
+              carries the unread dot, which had no host on this breakpoint.
+
+              Folded into the ⋮ menu below the width tier — see
+              `APPBAR_ARTIFACTS_QUERY`. */}
+          {artifactsInBar ? <ArtifactDockToggle className="touch-target" /> : null}
           <JobCenterPanel compact />
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="relative touch-target"
-            aria-label={tShell("inbox")}
-            onClick={() => router.push("/inbox/all")}
-            data-testid="mobile-inbox-trigger"
-          >
-            <InboxIcon className="size-5" />
-            {(inboxUnread ?? 0) > 0 ? (
-              <span
-                className="absolute right-1 top-1 size-2 rounded-full bg-primary"
-                aria-hidden="true"
-                data-testid="mobile-inbox-unread-dot"
-              />
-            ) : null}
-          </Button>
+          {inboxInBar ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative touch-target"
+              aria-label={tShell("inbox")}
+              onClick={() => router.push("/inbox/all")}
+              data-testid="mobile-inbox-trigger"
+            >
+              <InboxIcon className="size-5" />
+              {(inboxUnread ?? 0) > 0 ? (
+                <span
+                  className="absolute right-1 top-1 size-2 rounded-full bg-primary"
+                  aria-hidden="true"
+                  data-testid="mobile-inbox-unread-dot"
+                />
+              ) : null}
+            </Button>
+          ) : null}
 
           <Button
             type="button"
@@ -601,11 +662,21 @@ export function AppShellMobile() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="touch-target"
+                className="relative touch-target"
                 aria-label={tShell("sessionMenu")}
                 data-testid="mobile-actions-trigger"
               >
                 <MoreVerticalIcon className="size-5" />
+                {/* A folded control keeps its attention signal. Without this the
+                    inbox / artifact dots simply vanished at phone width, which
+                    is a worse outcome than the crowded bar they came from. */}
+                {foldedAttention ? (
+                  <span
+                    className="absolute right-1 top-1 size-2 rounded-full bg-primary"
+                    aria-hidden="true"
+                    data-testid="mobile-actions-unread-dot"
+                  />
+                ) : null}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -613,7 +684,56 @@ export function AppShellMobile() {
                 <UserPlusIcon className="size-4" />
                 <span>{tShell("newChat")}</span>
               </DropdownMenuItem>
+              {/* The width-folded halves of the app bar. Rendered here ONLY when
+                  the bar could not hold them, so neither control is ever
+                  reachable twice on the same screen. */}
+              {inboxInBar ? null : (
+                <DropdownMenuItem
+                  onSelect={() => router.push("/inbox/all")}
+                  data-testid="mobile-action-inbox"
+                >
+                  <InboxIcon className="size-4" />
+                  <span>{tShell("inbox")}</span>
+                  {(inboxUnread ?? 0) > 0 ? (
+                    <span
+                      className="ms-auto size-2 rounded-full bg-primary"
+                      aria-hidden="true"
+                      data-testid="mobile-action-inbox-unread-dot"
+                    />
+                  ) : null}
+                </DropdownMenuItem>
+              )}
+              {artifactsInBar ? null : (
+                <DropdownMenuItem
+                  onSelect={() => toggleArtifactDock()}
+                  data-testid="mobile-action-artifacts"
+                >
+                  <PanelRightOpenIcon className="size-4" />
+                  <span>{tShell("artifacts")}</span>
+                  {unreadArtifact ? (
+                    <span
+                      className="ms-auto size-2 rounded-full bg-primary"
+                      aria-hidden="true"
+                      data-testid="mobile-action-artifacts-unread-dot"
+                    />
+                  ) : null}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
+              {/* The home layout editor's ONLY always-reachable entry. Its other
+                  door is the "Edit" button inside the quick-action grid, and
+                  that grid renders nothing once its own section is hidden — so
+                  turning it off used to be a one-way trip. */}
+              <DropdownMenuItem
+                onSelect={() => {
+                  // Defer so the menu can close before the sheet grabs focus.
+                  setTimeout(() => setHomeLayoutOpen(true), 0)
+                }}
+                data-testid="mobile-action-home-layout"
+              >
+                <LayoutGridIcon className="size-4" />
+                <span>{tShell("homeLayout")}</span>
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => openSettings()}
                 data-testid="mobile-action-settings"
@@ -697,13 +817,13 @@ export function AppShellMobile() {
 
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main
-        // Reserve the fixed <MobileTabBar /> footprint (h-14 + its own
-        // safe-area inset) so the composer's bottom toolbar row isn't hidden
-        // behind it. The shell root is `h-[100dvh]`, which overrides the
-        // MobileShellWrapper's `pb` reservation, so we re-assert it here. This
-        // calc already includes env(safe-area-inset-bottom), superseding the
-        // bare `safe-area-pb` that only cleared the home indicator.
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
+        // No bottom reserve here. `MobileShellWrapper` owns the one and only
+        // <MobileTabBar /> reservation; this used to re-assert it because the
+        // shell root was `h-[100dvh]` and escaped the wrapper's padding. The
+        // root is `h-full` now, so the padding above already applies and a
+        // second copy showed up as a 56px band of bare background between the
+        // composer and the bar.
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
         data-bg-target="chat"
       >
         {!mounted ? null : (
@@ -753,11 +873,17 @@ export function AppShellMobile() {
               }
               welcomeExtras={{
                 hideSamples: true,
+                // Three other doors to a new conversation on this shell: the ⋮
+                // menu, the quick-action grid, and the composer right above it
+                // (the first send creates the session). The fourth also threw
+                // away whatever had been typed.
+                hideNewChatAction: true,
                 header: <MobileActiveRunsCard />,
                 quickActions: (
                   <MobileQuickActions
                     onNewChat={handleNewDirect}
                     onSearch={() => setSearchOpen(true)}
+                    onEditLayout={() => setHomeLayoutOpen(true)}
                   />
                 ),
               }}
@@ -841,6 +967,11 @@ export function AppShellMobile() {
         onSelectSession={handleSwitchToSession}
         onOpenSettings={openSettings}
       />
+
+      {/* Home-layout editor. Mounted by the shell rather than by the grid it
+          edits, so the ⋮ entry can still reach it after every home section has
+          been dismissed. */}
+      <MobileHomeLayoutSheet open={homeLayoutOpen} onOpenChange={setHomeLayoutOpen} />
     </div>
   )
 }
