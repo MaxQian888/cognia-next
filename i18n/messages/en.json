@@ -4642,6 +4642,175 @@
       "unknownSquad": "Squad"
     }
   },
+  "bots": {
+    "actions": {
+      "refresh": "Refresh"
+    },
+    "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
+    "credentials": {
+      "boundTo": "Bound to {target}",
+      "description": "Slots the definition declares. A binding names an account, never a secret.",
+      "emptyBody": "This Bot reaches nothing outside Cognia, so it asks for no credentials.",
+      "emptyTitle": "No credentials needed",
+      "notBound": "Not bound",
+      "optional": "Optional",
+      "orphanBody": "Credential slots are read from the definition, and this one has none to read.",
+      "orphanTitle": "Definition missing",
+      "title": "Credentials",
+      "unbound": "Needs binding"
+    },
+    "description": "Installed Bots: what wakes each one up, what runs it, and what it is allowed to do.",
+    "detail": {
+      "noSelectionBody": "Pick a Bot from the list to see its triggers, credentials and policy.",
+      "noSelectionTitle": "No Bot selected"
+    },
+    "executor": {
+      "agent-turn": "Agent turn",
+      "handler": "Plugin handler",
+      "squad": "Squad",
+      "workflow": "Workflow"
+    },
+    "listPane": {
+      "emptyBody": "Bots arrive with the plugins that declare them. Install a plugin that contributes one to get started.",
+      "emptyFiltered": "No Bot matches this search and filter.",
+      "emptyTitle": "No Bots",
+      "filter": {
+        "all": "All Bots",
+        "attention": "Needs attention",
+        "disabled": "Disabled",
+        "enabled": "Enabled",
+        "needs_setup": "Needs setup"
+      },
+      "filterAria": "Filter Bots by status",
+      "label": "Bot list",
+      "searchAria": "Search Bots",
+      "searchPlaceholder": "Search Bots"
+    },
+    "never": "Never",
+    "notAvailable": "Not available",
+    "orphan": {
+      "body": "The plugin that defines this Bot is disabled or uninstalled, so there is nothing left to run. The installation is kept so you can see it and remove it. Re-enabling the plugin restores it exactly as it was.",
+      "title": "This Bot has no definition"
+    },
+    "overview": {
+      "definition": "Definition",
+      "executor": "Executor",
+      "identity": "Identity",
+      "installation": "Installation",
+      "scope": "Scope",
+      "source": "Source",
+      "status": "Status",
+      "updated": "Updated"
+    },
+    "policy": {
+      "cost": "${usd} per run",
+      "description": "The strictest ceiling every layer agreed on. A lower layer can only narrow.",
+      "duration": "{seconds}s per run",
+      "no": "No",
+      "orphanBody": "A ceiling is folded from the definition and the installation together, and there is no definition left to fold.",
+      "orphanTitle": "Definition missing",
+      "refusal": "{layer} asked to widen {field} and was overruled.",
+      "refusalsHint": "A layer can only narrow. These asked for more than the layer above allowed.",
+      "title": "Policy ceiling",
+      "unconstrainedBody": "No layer set a limit, so this Bot runs under the same defaults as any other run.",
+      "unconstrainedTitle": "No ceiling set",
+      "yes": "Yes"
+    },
+    "policyField": {
+      "allowSelfTriggering": "Answer its own events",
+      "maxAuthority": "Maximum authority",
+      "maxAutonomy": "Maximum autonomy",
+      "maxConcurrentRuns": "Concurrent runs",
+      "maxRunCostUsd": "Cost ceiling",
+      "maxRunDurationMs": "Time ceiling",
+      "requireApprovalForWrites": "Approve every write"
+    },
+    "policyLayer": {
+      "definition": "Definition",
+      "installation": "Installation",
+      "organization": "Organisation",
+      "plugin": "Plugin",
+      "request": "Run request"
+    },
+    "problem": {
+      "definition_missing": {
+        "badge": "Definition missing",
+        "body": "Nothing defines this Bot on this device any more.",
+        "title": "Definition missing"
+      },
+      "handler_missing": {
+        "body": "This Bot runs a plugin handler, and the module never resolved. It cannot run until the plugin is reinstalled or fixed.",
+        "title": "Handler did not load"
+      },
+      "version_drift": {
+        "body": "This installation pinned {pinned} and the plugin now ships {available}. The Bot keeps running on the version that exists, so nothing has stopped.",
+        "title": "Running a different version"
+      }
+    },
+    "row": {
+      "armedOfTotal": "{armed}/{total}",
+      "deadLetters": "{count, plural, =1 {1 dead letter} other {# dead letters}}",
+      "needsAttention": "Needs attention"
+    },
+    "runtime": {
+      "none": {
+        "body": "This browser has no long-lived runtime and no paired Host, so nothing will pick up a Bot's work. Pair a Host or use the desktop app to make these Bots run.",
+        "title": "Nothing is running these Bots"
+      },
+      "paired": {
+        "body": "The Host you are paired with runs these Bots. This device reads their state and relays changes to it.",
+        "title": "A paired Host runs these Bots"
+      },
+      "remote": {
+        "body": "This window is driving a remote Host, and that Host runs its own Bots. Nothing is executed here while the remote connection is active.",
+        "title": "The remote Host runs these Bots"
+      }
+    },
+    "scope": {
+      "account": "Account-wide",
+      "project": "Project",
+      "workspace": "Workspace"
+    },
+    "source": {
+      "local": "Authored here",
+      "plugin": "Plugin"
+    },
+    "stat": {
+      "credentials": "Credentials bound",
+      "deadLetters": "Dead letters",
+      "triggers": "Triggers armed"
+    },
+    "status": {
+      "disabled": "Disabled",
+      "enabled": "Enabled",
+      "needs_setup": "Needs setup"
+    },
+    "summary": "{armed} of {total} armed",
+    "title": "Bots",
+    "trigger": {
+      "armed": "Armed",
+      "disarmed": "Off",
+      "everyHours": "Every {value}h",
+      "everyMinutes": "Every {value}m",
+      "everySeconds": "Every {value}s",
+      "kind": {
+        "derivedState": "State change",
+        "event": "Event",
+        "interaction": "Mentioned in chat",
+        "manual": "Run by hand",
+        "poll": "Poll",
+        "schedule": "Schedule"
+      }
+    },
+    "triggers": {
+      "description": "What wakes this Bot up. A trigger that is off stays listed, so an absent schedule and a switched-off one never look alike.",
+      "emptyBody": "This Bot declares no triggers, so only a manual run can start it.",
+      "emptyTitle": "No triggers",
+      "orphanBody": "Triggers are read from the definition, and this one has none to read.",
+      "orphanTitle": "Definition missing",
+      "title": "Triggers"
+    }
+  },
   "browser": {
     "actions": {
       "back": "Back",
@@ -9036,6 +9205,7 @@
         "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
       },
       "auxiliaryGroup": "Profile and logs",
+      "bots": "Bots",
       "browser": "Browser",
       "canvas": "Canvas",
       "createTeam": "Create team",
@@ -12796,6 +12966,7 @@
     "jumpFailed": "The matching message could not be opened.",
     "kinds": {
       "action": "Commands",
+      "bot": "Bots",
       "character": "Characters",
       "device": "Devices",
       "git-branch": "Branch",

@@ -4642,6 +4642,175 @@
       "unknownSquad": "小队"
     }
   },
+  "bots": {
+    "actions": {
+      "refresh": "刷新"
+    },
+    "attentionCount": "{count, plural, =1 {1 项需要处理} other {# 项需要处理}}",
+    "credentials": {
+      "boundTo": "绑定到 {target}",
+      "description": "定义声明的凭据槽。绑定记的是账号，不是密钥。",
+      "emptyBody": "这个 Bot 不访问 Cognia 之外的任何东西，因此不需要凭据。",
+      "emptyTitle": "不需要凭据",
+      "notBound": "未绑定",
+      "optional": "可选",
+      "orphanBody": "凭据槽读自定义，而这条安装记录已经没有定义可读。",
+      "orphanTitle": "定义缺失",
+      "title": "凭据",
+      "unbound": "待绑定"
+    },
+    "description": "已安装的 Bot：各自被什么唤醒、由什么执行、被允许做什么。",
+    "detail": {
+      "noSelectionBody": "从左侧选一个 Bot，查看它的触发器、凭据与策略。",
+      "noSelectionTitle": "未选择 Bot"
+    },
+    "executor": {
+      "agent-turn": "单次 Agent 回合",
+      "handler": "插件处理器",
+      "squad": "Squad",
+      "workflow": "工作流"
+    },
+    "listPane": {
+      "emptyBody": "Bot 随声明它的插件一起到来。安装一个贡献了 Bot 的插件即可开始。",
+      "emptyFiltered": "没有 Bot 同时符合当前搜索与筛选。",
+      "emptyTitle": "还没有 Bot",
+      "filter": {
+        "all": "全部 Bot",
+        "attention": "需要处理",
+        "disabled": "已停用",
+        "enabled": "已启用",
+        "needs_setup": "待配置"
+      },
+      "filterAria": "按状态筛选 Bot",
+      "label": "Bot 列表",
+      "searchAria": "搜索 Bot",
+      "searchPlaceholder": "搜索 Bot"
+    },
+    "never": "从未",
+    "notAvailable": "不适用",
+    "orphan": {
+      "body": "定义这个 Bot 的插件已停用或卸载，没有任何东西可以运行了。安装记录被保留，好让你看得见也删得掉。重新启用该插件即可原样恢复。",
+      "title": "这个 Bot 没有定义"
+    },
+    "overview": {
+      "definition": "定义",
+      "executor": "执行器",
+      "identity": "身份",
+      "installation": "安装记录",
+      "scope": "作用域",
+      "source": "来源",
+      "status": "状态",
+      "updated": "更新于"
+    },
+    "policy": {
+      "cost": "每次运行 {usd} 美元",
+      "description": "各层求交之后最严的那个上限。下层只能收窄。",
+      "duration": "每次运行 {seconds} 秒",
+      "no": "否",
+      "orphanBody": "上限由定义和安装记录一起折叠得出，而现在已经没有定义可折叠。",
+      "orphanTitle": "定义缺失",
+      "refusal": "{layer} 试图放宽「{field}」，已被驳回。",
+      "refusalsHint": "每一层都只能收窄。下面这些要的比上层允许的更多。",
+      "title": "策略上限",
+      "unconstrainedBody": "没有任何一层设过限制，因此这个 Bot 与其他运行使用同一套默认值。",
+      "unconstrainedTitle": "未设上限",
+      "yes": "是"
+    },
+    "policyField": {
+      "allowSelfTriggering": "响应自己产生的事件",
+      "maxAuthority": "最高权限",
+      "maxAutonomy": "最高自主度",
+      "maxConcurrentRuns": "并发运行数",
+      "maxRunCostUsd": "花费上限",
+      "maxRunDurationMs": "时长上限",
+      "requireApprovalForWrites": "每次写入都需审批"
+    },
+    "policyLayer": {
+      "definition": "定义",
+      "installation": "安装记录",
+      "organization": "组织",
+      "plugin": "插件",
+      "request": "本次运行请求"
+    },
+    "problem": {
+      "definition_missing": {
+        "badge": "定义缺失",
+        "body": "本机上已经没有任何东西定义这个 Bot。",
+        "title": "定义缺失"
+      },
+      "handler_missing": {
+        "body": "这个 Bot 由插件处理器执行，而该模块没有解析成功。在插件被重装或修复之前它无法运行。",
+        "title": "处理器未加载"
+      },
+      "version_drift": {
+        "body": "这条安装记录钉的是 {pinned}，而插件现在提供的是 {available}。Bot 会继续以现存的版本运行，没有中断。",
+        "title": "运行的是另一个版本"
+      }
+    },
+    "row": {
+      "armedOfTotal": "{armed}/{total}",
+      "deadLetters": "{count, plural, =1 {1 条死信} other {# 条死信}}",
+      "needsAttention": "需要处理"
+    },
+    "runtime": {
+      "none": {
+        "body": "这个浏览器既没有常驻运行时，也没有配对的宿主，因此没有任何东西会接手 Bot 的工作。配对一台宿主或使用桌面应用，这些 Bot 才会运行。",
+        "title": "没有任何东西在运行这些 Bot"
+      },
+      "paired": {
+        "body": "运行这些 Bot 的是你配对的那台宿主。本设备只读取它们的状态，并把改动中继过去。",
+        "title": "由配对的宿主运行"
+      },
+      "remote": {
+        "body": "这个窗口正在驱动一台远端宿主，而那台宿主运行它自己的 Bot。远端连接处于活动状态时，本机不执行任何投递。",
+        "title": "由远端宿主运行"
+      }
+    },
+    "scope": {
+      "account": "账户级",
+      "project": "项目",
+      "workspace": "工作区"
+    },
+    "source": {
+      "local": "本地编写",
+      "plugin": "插件"
+    },
+    "stat": {
+      "credentials": "已绑定凭据",
+      "deadLetters": "死信",
+      "triggers": "已武装触发器"
+    },
+    "status": {
+      "disabled": "已停用",
+      "enabled": "已启用",
+      "needs_setup": "待配置"
+    },
+    "summary": "{total} 个中有 {armed} 个已武装",
+    "title": "Bot",
+    "trigger": {
+      "armed": "已武装",
+      "disarmed": "已关闭",
+      "everyHours": "每 {value} 小时",
+      "everyMinutes": "每 {value} 分钟",
+      "everySeconds": "每 {value} 秒",
+      "kind": {
+        "derivedState": "状态变化",
+        "event": "事件",
+        "interaction": "会话中被点名",
+        "manual": "手动运行",
+        "poll": "轮询",
+        "schedule": "定时"
+      }
+    },
+    "triggers": {
+      "description": "什么会唤醒这个 Bot。关闭的触发器同样列出，好让「没有定时」和「定时被关了」不会看起来一样。",
+      "emptyBody": "这个 Bot 没有声明任何触发器，只能由手动运行启动。",
+      "emptyTitle": "没有触发器",
+      "orphanBody": "触发器读自定义，而这条安装记录已经没有定义可读。",
+      "orphanTitle": "定义缺失",
+      "title": "触发器"
+    }
+  },
   "browser": {
     "actions": {
       "back": "后退",
@@ -9036,6 +9205,7 @@
         "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
       },
       "auxiliaryGroup": "个人与日志",
+      "bots": "Bot",
       "browser": "浏览器",
       "canvas": "画布",
       "createTeam": "创建团队",
@@ -12796,6 +12966,7 @@
     "jumpFailed": "无法打开匹配的消息。",
     "kinds": {
       "action": "命令",
+      "bot": "Bot",
       "character": "角色",
       "device": "设备",
       "git-branch": "分支",
