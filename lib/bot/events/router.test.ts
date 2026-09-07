@@ -55,16 +55,36 @@ describe("triggerMatches", () => {
     expect(triggerMatches(binding(trigger), { source: "integration", type: "message" })).toBe(false)
   })
 
-  it("narrows an interaction trigger to the adapter types it names", () => {
+  it("narrows an interaction trigger to the PLATFORMS it names", () => {
+    const trigger: PluginBotTriggerDef = { id: "ask", kind: "interaction", adapterTypes: ["lark"] }
+    expect(
+      triggerMatches(binding(trigger), {
+        source: "connector",
+        type: "message",
+        adapterType: "lark",
+        adapterId: "adp_1",
+      })
+    ).toBe(true)
+    expect(
+      triggerMatches(binding(trigger), {
+        source: "connector",
+        type: "message",
+        adapterType: "slack",
+        adapterId: "adp_2",
+      })
+    ).toBe(false)
+    // No platform on the event cannot satisfy a trigger that names some.
+    expect(triggerMatches(binding(trigger), { source: "connector", type: "message" })).toBe(false)
+  })
+
+  it("does not accept an instance id where a platform was asked for", () => {
+    // `adapterTypes` lists platforms and `adapterId` names one instance. They
+    // were being compared to each other, so a trigger that narrowed by
+    // platform could never fire.
     const trigger: PluginBotTriggerDef = { id: "ask", kind: "interaction", adapterTypes: ["lark"] }
     expect(
       triggerMatches(binding(trigger), { source: "connector", type: "message", adapterId: "lark" })
-    ).toBe(true)
-    expect(
-      triggerMatches(binding(trigger), { source: "connector", type: "message", adapterId: "slack" })
     ).toBe(false)
-    // No adapter on the event cannot satisfy a trigger that names some.
-    expect(triggerMatches(binding(trigger), { source: "connector", type: "message" })).toBe(false)
   })
 
   it("never matches a trigger its own producer fires", () => {
@@ -222,5 +242,55 @@ describe("routeBotEvent", () => {
     })
 
     expect(result.deliveries.map((d) => d.triggerId)).toEqual(["opened", "also-opened"])
+  })
+})
+
+describe("routeBotEvent correlation", () => {
+  it("stamps a per-installation correlation key from the trigger's template", () => {
+    const result = routeBotEvent({
+      envelope: envelope(),
+      bindings: [
+        binding({
+          id: "checks",
+          kind: "event",
+          source: "integration",
+          types: ["x"],
+          correlationKey: "checks:{{resource.id}}",
+        }),
+      ],
+      query: { source: "integration", type: "x" },
+    })
+
+    expect(result.deliveries[0]?.envelope.correlation).toBe("boti_1::checks:42")
+  })
+
+  it("leaves the envelope alone when the trigger declares none", () => {
+    const result = routeBotEvent({
+      envelope: envelope(),
+      bindings: [binding({ id: "checks", kind: "event", source: "integration", types: ["x"] })],
+      query: { source: "integration", type: "x" },
+    })
+
+    expect(result.deliveries[0]?.envelope.correlation).toBeUndefined()
+  })
+
+  it("scopes the key per installation, so two Bots cannot eat each other's answer", () => {
+    const trigger: PluginBotTriggerDef = {
+      id: "checks",
+      kind: "event",
+      source: "integration",
+      types: ["x"],
+      correlationKey: "checks:{{resource.id}}",
+    }
+    const result = routeBotEvent({
+      envelope: envelope(),
+      bindings: [binding(trigger), { ...binding(trigger), installationId: "boti_2" }],
+      query: { source: "integration", type: "x" },
+    })
+
+    expect(result.deliveries.map((d) => d.envelope.correlation)).toEqual([
+      "boti_1::checks:42",
+      "boti_2::checks:42",
+    ])
   })
 })

@@ -75,6 +75,19 @@ interface PluginBotTriggerBase {
    * drops the earlier ones, `all` hands the handler every envelope.
    */
   coalesce?: "latest" | "all"
+  /**
+   * Serialisation key's twin: the name a run parked in `step.waitForEvent`
+   * matches on. Interpolated against the envelope the same way
+   * `concurrencyKey` is (for example `"{{resource.id}}"`).
+   *
+   * Set it on the trigger that carries the ANSWER, not the one that asks. A
+   * Bot that opens a pull request and then waits for its checks declares this
+   * on its `check_run.completed` trigger, so the arriving event wakes the
+   * waiting run instead of starting a second one. Scoped per installation by
+   * the router, so two Bots watching one resource cannot consume each other's
+   * answers.
+   */
+  correlationKey?: string
 }
 
 /** A human addressed the Bot in a conversation it is bound to. */

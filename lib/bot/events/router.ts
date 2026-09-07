@@ -34,7 +34,18 @@ export interface BotTriggerBinding {
 export interface BotRouteQuery {
   source: BotEventSource
   type: string
+  /** The connector INSTANCE the event arrived on, for binding narrowing. */
   adapterId?: string
+  /**
+   * The connector's PLATFORM (`slack`, `lark`, …), for an `interaction`
+   * trigger that narrows by platform.
+   *
+   * Separate from `adapterId` because they are different things and were being
+   * compared to each other: `PluginBotInteractionTrigger.adapterTypes` lists
+   * platforms, and matching it against an instance id meant a trigger that
+   * narrowed by platform could never fire.
+   */
+  adapterType?: string
   integrationAccountId?: string
 }
 
@@ -66,7 +77,7 @@ export function triggerMatches(binding: BotTriggerBinding, query: BotRouteQuery)
     case "interaction":
       if (query.source !== "connector") return false
       if (!trigger.adapterTypes || trigger.adapterTypes.length === 0) return true
-      return query.adapterId !== undefined && trigger.adapterTypes.includes(query.adapterId)
+      return query.adapterType !== undefined && trigger.adapterTypes.includes(query.adapterType)
     case "manual":
       return query.source === "manual"
     case "schedule":
@@ -151,6 +162,16 @@ export function routeBotEvent(input: RouteBotEventInput): BotRouteResult {
     const concurrencyKey = rawKey
       ? `${binding.installationId}::${interpolateEnvelopeTemplate(rawKey, envelope)}`
       : undefined
+
+    // Interpolated exactly where `concurrencyKey` is, because they are twins:
+    // one says "do not run these two at once", the other says "this run is
+    // waiting for that event". Both are per-installation, so a second Bot
+    // watching the same resource cannot consume the first one's answer.
+    const rawCorrelation = binding.trigger.correlationKey
+    if (rawCorrelation) {
+      envelope.correlation = `${binding.installationId}::${interpolateEnvelopeTemplate(rawCorrelation, envelope)}`
+    }
+
     const debounce = binding.trigger.debounceMs
 
     deliveries.push({

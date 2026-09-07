@@ -16,6 +16,7 @@ import {
   claimBotDelivery,
   countActiveBotDeliveriesForKey,
   dismissBotDelivery,
+  findParkedBotDeliveryWaitingFor,
   listDueBotDeliveries,
   pruneSettledBotDeliveries,
   recoverAbandonedBotDelivery,
@@ -74,6 +75,12 @@ export type BotSkipReason =
   | "not_runnable"
   /** Another delivery with the same concurrency key is in flight. */
   | "serialised"
+  /**
+   * A run is already parked on this event's correlation key. The row stays so
+   * that run can read its envelope on re-entry, but starting a second run for
+   * the answer the first one asked for would be a duplicate.
+   */
+  | "consumed_by_wait"
 
 /**
  * Run one pass. Exported so a Host can drive the loop on its own schedule and
@@ -114,6 +121,20 @@ async function attemptDelivery(
   options: BotDeliveryRunnerOptions,
   now: () => number
 ): Promise<BotRunOutcome | { status: "skipped"; reason: BotSkipReason }> {
+  // A run parked on this correlation is the intended recipient. Checked before
+  // the claim so the row is left exactly as `findBotDeliveryByCorrelation`
+  // expects to find it.
+  if (delivery.correlation) {
+    const waiting = await findParkedBotDeliveryWaitingFor(
+      delivery.installationId,
+      delivery.correlation
+    )
+    if (waiting && waiting.id !== delivery.id) {
+      await dismissBotDelivery(delivery.id, "consumed by a waiting run", now())
+      return { status: "skipped", reason: "consumed_by_wait" }
+    }
+  }
+
   // Recovery runs BEFORE the claim, for the same reason serialisation does: the
   // claim rewrites the row, so afterwards nothing can tell an attempt that was
   // abandoned from one that is simply starting.

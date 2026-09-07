@@ -234,6 +234,32 @@ describe("drainBotDeliveries", () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it("hands a correlated event to the run already waiting for it", async () => {
+    const { parkBotDelivery } = await import("@/lib/db/bot-event-deliveries")
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await enqueueBotDelivery({ envelope: envelope({ correlation: "boti_1::ci:42" }), now: NOW })
+    await parkBotDelivery("bdl_1", NOW + 20_000, "boti_1::ci:42", NOW)
+    await enqueueBotDelivery({
+      envelope: envelope({
+        eventId: "bev_2",
+        deliveryId: "bdl_2",
+        correlation: "boti_1::ci:42",
+      }),
+      now: NOW,
+    })
+
+    const attempts = await drainBotDeliveries({ owner: "host-a", now })
+
+    expect(attempts.find((a) => a.deliveryId === "bdl_2")?.outcome).toEqual({
+      status: "skipped",
+      reason: "consumed_by_wait",
+    })
+    // The row survives, because the waiting run reads its envelope on re-entry.
+    expect(await getDb().botEventDeliveries.get("bdl_2")).toBeDefined()
+    expect(handler).not.toHaveBeenCalled()
+  })
+
   it("bounds one pass, so one Bot cannot starve the others", async () => {
     await seedInstallation()
     for (let i = 0; i < 4; i++) {
