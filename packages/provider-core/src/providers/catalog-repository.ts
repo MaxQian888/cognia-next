@@ -119,7 +119,41 @@ function buildIndex(snapshot: CatalogSnapshot): CatalogIndex {
   }
 }
 
-function supportsModality(model: ModelDefinition, modality: CatalogModality): boolean {
+/**
+ * Endpoint types that serve a modality outright.
+ *
+ * Schema v2 (ADR-0163) added these three modalities together with the endpoint
+ * types that answer them, and the offering is the only place the answer lives:
+ * nothing on a model definition marks it as a moderation model, and a
+ * transcription model and a speech model have the same audio modality.
+ */
+const ENDPOINT_TYPES_BY_MODALITY: Partial<
+  Record<CatalogModality, readonly ProviderOffering["endpointType"][]>
+> = {
+  video: ["video"],
+  transcription: ["transcription"],
+  moderation: ["moderation"],
+}
+
+/**
+ * Whether a model, as served by these offerings, answers a modality.
+ *
+ * Every arm must return. A modality that falls through reads as `undefined`
+ * at the call site, which is falsy, so the filter silently matches nothing
+ * rather than failing — which is exactly what `video`, `transcription` and
+ * `moderation` did between schema v2 widening the enum and this function
+ * catching up.
+ */
+function supportsModality(
+  model: ModelDefinition,
+  offerings: readonly ProviderOffering[],
+  modality: CatalogModality
+): boolean {
+  const endpointTypes = ENDPOINT_TYPES_BY_MODALITY[modality]
+  if (endpointTypes?.some((type) => offerings.some((offering) => offering.endpointType === type))) {
+    return true
+  }
+
   switch (modality) {
     case "language":
       return model.modalities.output.includes("text")
@@ -139,6 +173,16 @@ function supportsModality(model: ModelDefinition, modality: CatalogModality): bo
         model.modalities.output.includes("audio") ||
         model.capabilities.speechGeneration === true
       )
+    case "video":
+      return model.modalities.input.includes("video") || model.modalities.output.includes("video")
+    case "transcription":
+      // Audio in, text out. Sharing the `speech` test would make every
+      // text-to-speech model answer to transcription as well.
+      return model.modalities.input.includes("audio") && model.modalities.output.includes("text")
+    case "moderation":
+      // Nothing on a model definition marks one. The offering's endpoint type
+      // checked above is the whole signal.
+      return false
   }
 }
 
@@ -205,7 +249,10 @@ export class InMemoryCatalogRepository implements CatalogRepository {
       })
       if (eligibleOfferings.length === 0) continue
       if (text && !this.active.searchableTextByModel.get(model.id)?.includes(text)) continue
-      if (query.modalities && !query.modalities.every((item) => supportsModality(model, item))) {
+      if (
+        query.modalities &&
+        !query.modalities.every((item) => supportsModality(model, eligibleOfferings, item))
+      ) {
         continue
       }
       if (

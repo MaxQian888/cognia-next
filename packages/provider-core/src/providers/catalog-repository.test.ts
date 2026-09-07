@@ -185,3 +185,129 @@ describe("InMemoryCatalogRepository", () => {
     ).toThrow(/cannot declare certified/)
   })
 })
+
+describe("the modalities schema v2 added", () => {
+  // `video`, `transcription` and `moderation` widened the enum in ADR-0163 and
+  // this filter was never taught about them, so it returned `undefined` for
+  // each. `undefined` is falsy at the call site, so a search for any of the
+  // three quietly matched nothing at all rather than failing loudly.
+  function v2Snapshot(): CatalogSnapshot {
+    const base = revision("v2")
+    return {
+      ...base,
+      models: [
+        ...base.models,
+        {
+          id: "openai:sora-test",
+          name: "Sora Test",
+          creator: "openai",
+          modalities: { input: ["text"], output: ["video"] },
+          capabilities: {},
+          lifecycle: "active",
+          provenance: {},
+        },
+        {
+          id: "openai:whisper-test",
+          name: "Whisper Test",
+          creator: "openai",
+          modalities: { input: ["audio"], output: ["text"] },
+          capabilities: {},
+          lifecycle: "active",
+          provenance: {},
+        },
+        {
+          id: "openai:omni-moderation-test",
+          name: "Omni Moderation Test",
+          creator: "openai",
+          modalities: { input: ["text"], output: ["text"] },
+          capabilities: {},
+          lifecycle: "active",
+          provenance: {},
+        },
+      ],
+      offerings: [
+        ...base.offerings,
+        {
+          id: "openai:sora-test",
+          providerRef: "openai",
+          modelRef: "openai:sora-test",
+          upstreamId: "sora-test",
+          endpointType: "video",
+          lifecycle: "active",
+          available: true,
+          source: { kind: "bundled", id: "v2" },
+        },
+        {
+          id: "openai:whisper-test",
+          providerRef: "openai",
+          modelRef: "openai:whisper-test",
+          upstreamId: "whisper-test",
+          endpointType: "transcription",
+          lifecycle: "active",
+          available: true,
+          source: { kind: "bundled", id: "v2" },
+        },
+        {
+          id: "openai:omni-moderation-test",
+          providerRef: "openai",
+          modelRef: "openai:omni-moderation-test",
+          upstreamId: "omni-moderation-test",
+          endpointType: "moderation",
+          lifecycle: "active",
+          available: true,
+          source: { kind: "bundled", id: "v2" },
+        },
+      ],
+    }
+  }
+
+  async function loaded() {
+    const repository = new InMemoryCatalogRepository()
+    await repository.stageRevision(v2Snapshot())
+    await repository.activateRevision("v2")
+    return repository
+  }
+
+  const ids = (results: { model: { id: string } }[]) => results.map((result) => result.model.id)
+
+  it("finds a video model instead of returning nothing", async () => {
+    const repository = await loaded()
+    expect(ids(repository.searchModels({ modalities: ["video"] }))).toEqual(["openai:sora-test"])
+  })
+
+  it("finds a transcription model without also claiming the text-only one", async () => {
+    const repository = await loaded()
+    expect(ids(repository.searchModels({ modalities: ["transcription"] }))).toEqual([
+      "openai:whisper-test",
+    ])
+  })
+
+  it("finds a moderation model, which only its offering can identify", async () => {
+    // Nothing on the model definition distinguishes it from any other
+    // text-in/text-out model, so the endpoint type is the entire signal.
+    const repository = await loaded()
+    expect(ids(repository.searchModels({ modalities: ["moderation"] }))).toEqual([
+      "openai:omni-moderation-test",
+    ])
+  })
+
+  it("does not let a speech-capable model answer for transcription", async () => {
+    const repository = await loaded()
+    const speech = repository.searchModels({ modalities: ["speech"] })
+    expect(ids(speech)).toEqual(["openai:whisper-test"])
+    expect(ids(repository.searchModels({ modalities: ["language"] }))).not.toContain(
+      "openai:sora-test"
+    )
+  })
+
+  it("leaves the modalities that already worked exactly as they were", async () => {
+    const repository = await loaded()
+    // Every text-emitting model still answers, the two new ones included.
+    // Ordering is the search ranking's business, not this filter's.
+    expect(ids(repository.searchModels({ modalities: ["language"] })).sort()).toEqual([
+      "openai:gpt-test",
+      "openai:omni-moderation-test",
+      "openai:whisper-test",
+    ])
+  })
+})
