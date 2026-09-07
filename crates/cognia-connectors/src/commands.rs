@@ -13,11 +13,32 @@ use super::types::{AdapterRegistration, ConnectorsHealth, TauriHttpRequest, Taur
 // Task 19 — basic adapter registry commands
 // ---------------------------------------------------------------------------
 
+/// Register an adapter with the inbound server.
+///
+/// A declared verification spec is checked HERE rather than on the first
+/// inbound request. A malformed spec found at request time is one discovered
+/// after the endpoint has been publicly reachable for however long it took
+/// someone to send something to it, and the operator would see it as a
+/// mysterious 401 rather than as a refused install.
+///
+/// A registration with no spec is still accepted. Every non-native kind fails
+/// closed in `verify_webhook` without one, so it is a connector that receives
+/// nothing rather than one that accepts anything, and reverse-WebSocket
+/// adapters register through this same command while never passing through
+/// webhook verification at all.
 #[tauri::command]
 pub async fn connectors_register_adapter(
     state: State<'_, ConnectorsState>,
     reg: AdapterRegistration,
 ) -> Result<(), String> {
+    if let Some(spec) = reg.verification.as_ref() {
+        spec.validate().map_err(|reason| {
+            format!(
+                "adapter {} declares an unusable webhook verification: {reason}",
+                reg.adapter_id
+            )
+        })?;
+    }
     let mut inner = state.inner.lock();
     inner
         .registered_adapters

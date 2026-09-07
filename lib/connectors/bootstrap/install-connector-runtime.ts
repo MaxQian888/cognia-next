@@ -388,7 +388,23 @@ export function installConnectorRuntime(
       registerRust: async (adapter) => {
         const currentRow = runtimeRows.get(row.id) ?? row
         if (!adapterNeedsInboundServer(adapter, currentRow)) return
-        await connectorsRegisterAdapter({ adapterId: row.id, adapterType: adapter.meta.type })
+        // A plugin kind has no hand-written verifier in Rust, so its declared
+        // scheme travels with the registration. Without it every inbound POST
+        // for that adapter is refused, which is safe but means the connector
+        // receives nothing at all.
+        // Imported lazily, like the other heavy edges in this file. A static
+        // import puts the plugin registry in this module's boot graph and
+        // closes a cycle back through it, which took the whole runtime down
+        // with a bare `start_failed`.
+        const { getPluginConnector } = await import("@/lib/connectors/plugin-connector-registry")
+        const contributed = getPluginConnector(adapter.meta.type)
+        await connectorsRegisterAdapter({
+          adapterId: row.id,
+          adapterType: adapter.meta.type,
+          ...(contributed?.def.webhookVerification
+            ? { verification: contributed.def.webhookVerification }
+            : {}),
+        })
         serverAdapterIds.add(row.id)
       },
       unregisterRust: async (adapterId) => {

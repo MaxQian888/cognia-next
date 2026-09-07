@@ -22,6 +22,7 @@ import {
   isDevicePlaneConnectorCommand,
 } from "@/lib/connectors/device-plane"
 import type { MatrixEncryptedFile } from "@/types/connectors/segment"
+import type { PluginWebhookVerification } from "@/types/plugin/plugin"
 import type { RuntimeLeaseAcquireResult } from "@/lib/connectors/runtime-lease"
 
 /**
@@ -81,6 +82,13 @@ export interface AdapterRegistration {
   adapterId: string
   adapterType: string
   webhookPath?: string
+  /**
+   * Verification scheme for a kind Rust has no hand-written arm for, which
+   * means every plugin-contributed connector. Optional on the wire so a paired
+   * desktop on an older build still accepts a registration, and absent for the
+   * four native webhook platforms, which verify through their own arms.
+   */
+  verification?: PluginWebhookVerification
 }
 
 export interface ConnectorsHealth {

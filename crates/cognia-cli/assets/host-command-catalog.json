@@ -12929,12 +12929,84 @@
           },
           "adapter_type": {
             "type": "string",
-            "enum": [
-              "telegram",
-              "slack",
-              "discord",
-              "lark",
-              "wechat-oa"
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+          },
+          "verification": {
+            "type": "object",
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "secretKey",
+                  "signatureHeader"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "hmacSha256"
+                  },
+                  "secretKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "signatureHeader": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "signaturePrefix": {
+                    "type": "string"
+                  },
+                  "digest": {
+                    "type": "string",
+                    "enum": [
+                      "sha256",
+                      "sha1"
+                    ]
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "enum": [
+                      "hex",
+                      "base64"
+                    ]
+                  },
+                  "basestring": {
+                    "type": "string"
+                  },
+                  "timestampHeader": {
+                    "type": "string"
+                  },
+                  "toleranceSecs": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "secretKey",
+                  "header"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "sharedSecretHeader"
+                  },
+                  "secretKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "header": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
             ]
           }
         },
@@ -48847,5 +48919,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "bad5259cda5cf7e67a830c513d64d4c6e0937d76d986bfc1459cfe1e99c7d5e9"
+  "catalogHash": "5f20faa428c19d577d34318a997eca5e7005b81495f06c035974a8f1c3b90995"
 }

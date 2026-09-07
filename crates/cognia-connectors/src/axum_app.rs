@@ -31,6 +31,7 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::sigverify::declarative::{DeclarativeRequest, WebhookVerificationSpec};
 use super::state::ConnectorsState;
 use super::ws_server;
 
@@ -733,10 +734,10 @@ pub async fn verify_webhook(
     headers: &HeaderMap,
     body: &[u8],
 ) -> Result<serde_json::Value, (StatusCode, &'static str)> {
-    let adapter_type = {
+    let (adapter_type, declared) = {
         let inner = state.inner.lock();
         match inner.registered_adapters.get(adapter_id) {
-            Some(reg) => reg.adapter_type.clone(),
+            Some(reg) => (reg.adapter_type.clone(), reg.verification.clone()),
             None => return Err((StatusCode::NOT_FOUND, "adapter not registered")),
         }
     };
@@ -746,8 +747,56 @@ pub async fn verify_webhook(
         "slack" => verify_slack(adapter_id, headers, body).await,
         "discord" => verify_discord(adapter_id, headers, body).await,
         "lark" => verify_lark(adapter_id, body).await,
-        _ => Err((StatusCode::BAD_REQUEST, "unsupported adapter type")),
+        // Any other kind is a plugin connector. It has no hand-written arm
+        // here, so it verifies through the scheme its manifest declared. With
+        // no declaration this still refuses, which is the safe direction: an
+        // endpoint that answers nothing is a broken connector, while one that
+        // emits an unverified body is an open relay into the event bus.
+        _ => verify_declared(adapter_id, declared.as_ref(), headers, body).await,
     }
+}
+
+/// Verify one inbound request against a plugin connector's declared scheme.
+///
+/// The secret is read from THIS adapter's keyring entry, named by the spec.
+/// A manifest never carries the key itself: it is world-readable inside the
+/// install directory, so a spec that could hold one would be a spec that
+/// leaks one.
+async fn verify_declared(
+    adapter_id: &str,
+    spec: Option<&WebhookVerificationSpec>,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Result<serde_json::Value, (StatusCode, &'static str)> {
+    let spec = spec.ok_or((
+        StatusCode::BAD_REQUEST,
+        "adapter type declares no webhook verification",
+    ))?;
+
+    let secret = super::keyring::get(adapter_id, spec.secret_key())
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"))?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "verification secret not configured",
+        ))?;
+
+    let lookup = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    let request = DeclarativeRequest {
+        body,
+        header: &lookup,
+        secret: &secret,
+        now_unix_secs: chrono::Utc::now().timestamp(),
+    };
+
+    spec.verify(&request)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
+
+    serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))
 }
 
 async fn verify_telegram(
@@ -996,12 +1045,22 @@ mod tests {
     }
 
     fn register(state: &ConnectorsState, adapter_id: &str, adapter_type: &str) {
+        register_with(state, adapter_id, adapter_type, None)
+    }
+
+    fn register_with(
+        state: &ConnectorsState,
+        adapter_id: &str,
+        adapter_type: &str,
+        verification: Option<WebhookVerificationSpec>,
+    ) {
         state.inner.lock().registered_adapters.insert(
             adapter_id.into(),
             AdapterRegistration {
                 adapter_id: adapter_id.into(),
                 adapter_type: adapter_type.into(),
                 webhook_path: None,
+                verification,
             },
         );
     }
@@ -1299,13 +1358,130 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_returns_400_for_unknown_adapter_type() {
+    async fn verify_refuses_a_plugin_kind_that_declared_no_verification() {
+        // Fails CLOSED. A connector that receives nothing is a broken
+        // connector, and one that emitted an unverified body would be an open
+        // relay into the event bus.
         let state = ConnectorsState::new();
         register(&state, "weird-1", "yahoo");
         let err = verify_webhook(&state, "weird-1", &HeaderMap::new(), b"{}")
             .await
             .unwrap_err();
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.1, "adapter type declares no webhook verification");
+    }
+
+    fn plugin_hmac_spec() -> WebhookVerificationSpec {
+        WebhookVerificationSpec::HmacSha256 {
+            secret_key: "signingSecret".into(),
+            signature_header: "X-Acme-Signature".into(),
+            signature_prefix: None,
+            digest: super::super::sigverify::declarative::SignatureDigest::Sha256,
+            encoding: super::super::sigverify::declarative::SignatureEncoding::Hex,
+            basestring: "{body}".into(),
+            timestamp_header: None,
+            tolerance_secs: 300,
+        }
+    }
+
+    fn acme_signature(secret: &str, body: &[u8]) -> String {
+        use hmac::{Hmac, KeyInit, Mac};
+        use sha2::Sha256;
+        let mut mac =
+            <Hmac<Sha256> as KeyInit>::new_from_slice(secret.as_bytes()).expect("any key size");
+        mac.update(body);
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    #[tokio::test]
+    async fn verify_accepts_a_plugin_kind_through_its_declared_scheme() {
+        // The whole point of C4: before this, a plugin connector declaring
+        // `transportModes: ["webhook"]` got 400 on every inbound POST and
+        // could not receive at all.
+        let adapter_id = "acme-ok";
+        super::super::keyring::set(adapter_id, "signingSecret", "sk_live").unwrap();
+
+        let state = ConnectorsState::new();
+        register_with(&state, adapter_id, "acme-chat", Some(plugin_hmac_spec()));
+
+        let body = br#"{"type":"message","text":"hi"}"#;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Acme-Signature",
+            acme_signature("sk_live", body).parse().unwrap(),
+        );
+
+        let payload = verify_webhook(&state, adapter_id, &headers, body)
+            .await
+            .expect("declared scheme verifies");
+        assert_eq!(payload["text"], "hi");
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_a_plugin_kind_whose_signature_does_not_match() {
+        let adapter_id = "acme-bad";
+        super::super::keyring::set(adapter_id, "signingSecret", "sk_live").unwrap();
+
+        let state = ConnectorsState::new();
+        register_with(&state, adapter_id, "acme-chat", Some(plugin_hmac_spec()));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Acme-Signature",
+            acme_signature("sk_live", b"a different body")
+                .parse()
+                .unwrap(),
+        );
+
+        let err = verify_webhook(&state, adapter_id, &headers, b"{}")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn verify_reports_a_plugin_secret_that_was_never_stored() {
+        // Distinct from a mismatch: nothing was configured, so the operator's
+        // next step is to set the credential rather than to check the platform.
+        let state = ConnectorsState::new();
+        register_with(&state, "acme-unset", "acme-chat", Some(plugin_hmac_spec()));
+        let err = verify_webhook(&state, "acme-unset", &HeaderMap::new(), b"{}")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(err.1, "verification secret not configured");
+    }
+
+    #[tokio::test]
+    async fn declared_verification_reaches_the_bus_through_the_real_route() {
+        // End to end over the router, so the emit half is covered too and not
+        // just the predicate.
+        let adapter_id = "acme-routed";
+        super::super::keyring::set(adapter_id, "signingSecret", "sk_live").unwrap();
+
+        let state = ConnectorsState::new();
+        register_with(&state, adapter_id, "acme-chat", Some(plugin_hmac_spec()));
+        let (app, emitter) = test_router_with(state);
+
+        let body = br#"{"type":"message","text":"routed"}"#;
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/webhook/acme-chat/{adapter_id}"))
+                    .header("X-Acme-Signature", acme_signature("sk_live", body))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_vec()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let seen = emitter.events.lock().clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, format!("connectors://webhook/{adapter_id}"));
+        assert_eq!(seen[0].1["text"], "routed");
     }
 
     #[tokio::test]

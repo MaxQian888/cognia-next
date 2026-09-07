@@ -41,6 +41,14 @@ export type PluginConnectorRejection =
   | "schema_unsupported"
   /** The named factory export is missing or is not callable. */
   | "factory_missing"
+  /**
+   * The declared webhook verification cannot verify anything. Refused here
+   * rather than on the first inbound request, because a scheme discovered to
+   * be unusable at request time is one found after the endpoint has been
+   * publicly reachable, and the operator sees it as an unexplained 401 rather
+   * than as a refused install.
+   */
+  | "verification_invalid"
 
 export interface PluginConnectorRegistration {
   pluginId: string
@@ -133,6 +141,15 @@ export function registerPluginConnector(
     }
   }
 
+  const verificationError = webhookVerificationError(def)
+  if (verificationError) {
+    return {
+      ok: false,
+      reason: "verification_invalid",
+      message: `connector type "${type}" declares an unusable webhook verification: ${verificationError}`,
+    }
+  }
+
   if (typeof input.factory !== "function") {
     return {
       ok: false,
@@ -184,6 +201,48 @@ const SHIPPED_KINDS: ReadonlySet<string> = new Set([
  * Falls back to `type` for definitions written before the field existed, which
  * is correct: a plugin could only ever contribute one connector per kind.
  */
+/**
+ * Why a declared verification cannot verify anything, or null when it can.
+ *
+ * Mirrors `WebhookVerificationSpec::validate` in
+ * `crates/cognia-connectors/src/sigverify/declarative.rs`, which is the side
+ * that actually executes the scheme. Checking here as well means an author
+ * sees the reason when the plugin loads instead of discovering it as a 401
+ * from a platform console, and Rust still refuses independently so a
+ * registration arriving from anywhere else is not taken on trust.
+ */
+export function webhookVerificationError(def: PluginConnectorDef): string | null {
+  const spec = def.webhookVerification
+  if (!spec) {
+    // Absent is allowed. Rust fails closed without one, so the connector
+    // receives nothing rather than accepting anything, and a connector that
+    // declares only outbound transports has nothing to verify.
+    return null
+  }
+  const nonEmpty = (value: unknown) => typeof value === "string" && value.trim().length > 0
+  if (!nonEmpty(spec.secretKey)) return "secretKey must not be empty"
+
+  if (spec.kind === "sharedSecretHeader") {
+    return nonEmpty(spec.header) ? null : "header must not be empty"
+  }
+
+  if (!nonEmpty(spec.signatureHeader)) return "signatureHeader must not be empty"
+  const basestring = spec.basestring ?? "{body}"
+  if (!basestring.includes("{body}")) {
+    // A signature over anything but the body authenticates the sender of some
+    // request rather than this one, so a captured header would carry an
+    // attacker's payload.
+    return "basestring must include {body}"
+  }
+  if (basestring.includes("{timestamp}") && !nonEmpty(spec.timestampHeader)) {
+    return "timestampHeader is required by this basestring"
+  }
+  if (spec.timestampHeader !== undefined && (spec.toleranceSecs ?? 300) <= 0) {
+    return "toleranceSecs must be positive"
+  }
+  return null
+}
+
 export function contributionIdOf(def: PluginConnectorDef): string {
   const explicit = (def as { contributionId?: unknown }).contributionId
   return typeof explicit === "string" && explicit.trim().length > 0

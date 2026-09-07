@@ -23156,12 +23156,61 @@ paths:
                   type: string
                 adapter_type:
                   type: string
-                  enum:
-                    - telegram
-                    - slack
-                    - discord
-                    - lark
-                    - wechat-oa
+                  pattern: ^[a-z0-9][a-z0-9-]{1,63}$
+                verification:
+                  type: object
+                  oneOf:
+                    - type: object
+                      required:
+                        - kind
+                        - secretKey
+                        - signatureHeader
+                      properties:
+                        kind:
+                          type: string
+                          const: hmacSha256
+                        secretKey:
+                          type: string
+                          minLength: 1
+                        signatureHeader:
+                          type: string
+                          minLength: 1
+                        signaturePrefix:
+                          type: string
+                        digest:
+                          type: string
+                          enum:
+                            - sha256
+                            - sha1
+                        encoding:
+                          type: string
+                          enum:
+                            - hex
+                            - base64
+                        basestring:
+                          type: string
+                        timestampHeader:
+                          type: string
+                        toleranceSecs:
+                          type: integer
+                          minimum: 1
+                      additionalProperties: false
+                    - type: object
+                      required:
+                        - kind
+                        - secretKey
+                        - header
+                      properties:
+                        kind:
+                          type: string
+                          const: sharedSecretHeader
+                        secretKey:
+                          type: string
+                          minLength: 1
+                        header:
+                          type: string
+                          minLength: 1
+                      additionalProperties: false
               additionalProperties: false
       responses:
         "200":

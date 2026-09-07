@@ -13,6 +13,19 @@ pub struct AdapterRegistration {
     pub adapter_id: String,
     pub adapter_type: String,
     pub webhook_path: Option<String>,
+    /// How to prove an inbound webhook really came from this adapter's
+    /// platform, for kinds this crate has no built-in verifier for.
+    ///
+    /// The four native webhook platforms (telegram, slack, discord, lark) are
+    /// verified by their own hand-written arms and leave this `None`. A plugin
+    /// connector has no arm, so before this existed every inbound POST for one
+    /// was answered `400 unsupported adapter type` and a plugin could not
+    /// receive over webhook at all.
+    ///
+    /// `serde(default)` keeps the wire shape backward compatible: a paired
+    /// desktop on an older build sends a registration without this field.
+    #[serde(default)]
+    pub verification: Option<crate::sigverify::declarative::WebhookVerificationSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

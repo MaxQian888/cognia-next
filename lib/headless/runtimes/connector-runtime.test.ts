@@ -148,6 +148,43 @@ describe("connector-runtime (headless)", () => {
     await stop()
   })
 
+  it("forwards a plugin connector's declared verification instead of dropping it", async () => {
+    // This arm reshapes the desktop call into the frozen R12 wire names and
+    // silently loses anything it does not name, so a plugin connector
+    // registered through the brain used to arrive with no scheme and refuse
+    // every inbound request that reached it.
+    const { stop } = await bootConnectorRuntime()
+    mockCall.mockResolvedValue(null)
+
+    const verification = {
+      kind: "hmacSha256" as const,
+      secretKey: "signingSecret",
+      signatureHeader: "X-Acme-Signature",
+    }
+    const { connectorsRegisterAdapter } = await import("@/lib/connectors/tauri/commands")
+    await connectorsRegisterAdapter({
+      adapterId: "acme-1",
+      adapterType: "acme-chat",
+      verification,
+    })
+
+    expect(mockCall).toHaveBeenCalledWith("connectors_register", {
+      adapter_id: "acme-1",
+      adapter_type: "acme-chat",
+      verification,
+    })
+    await stop()
+  })
+
+  it("sends no verification key for a native platform that has none", async () => {
+    const { stop } = await bootConnectorRuntime()
+    mockCall.mockResolvedValue(null)
+    const { connectorsRegisterAdapter } = await import("@/lib/connectors/tauri/commands")
+    await connectorsRegisterAdapter({ adapterId: "tg-2", adapterType: "telegram" })
+    expect(mockCall.mock.calls.at(-1)?.[1]).not.toHaveProperty("verification")
+    await stop()
+  })
+
   it("keeps server lifecycle local but resets server-owned sockets over RPC", async () => {
     const { stop } = await bootConnectorRuntime()
     mockCall.mockResolvedValue(3)

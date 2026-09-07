@@ -341,6 +341,7 @@ mod tests {
                 adapter_id: "a".into(),
                 adapter_type: "telegram".into(),
                 webhook_path: None,
+                verification: None,
             },
         );
         assert_eq!(s.inner.lock().registered_adapters.len(), 1);

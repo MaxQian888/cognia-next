@@ -229,3 +229,94 @@ describe("pluginConnectorSecretFields", () => {
     expect(pluginConnectorSecretFields({ type: "object" })).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Declared webhook verification. Rust has hand-written verifiers only for the
+// four native webhook platforms, so a plugin kind's scheme has to travel with
+// its registration or the endpoint refuses everything that reaches it.
+// ---------------------------------------------------------------------------
+
+describe("webhook verification", () => {
+  const hmac = {
+    kind: "hmacSha256" as const,
+    secretKey: "signingSecret",
+    signatureHeader: "X-Acme-Signature",
+    basestring: "v0:{timestamp}:{body}",
+    timestampHeader: "X-Acme-Timestamp",
+  }
+
+  it("accepts a connector that declares a usable scheme", () => {
+    const result = register({ transportModes: ["webhook"], webhookVerification: hmac })
+    expect(result.ok).toBe(true)
+    expect(getPluginConnector("mastodon")?.def.webhookVerification).toEqual(hmac)
+  })
+
+  it("allows a connector to declare none", () => {
+    // Rust fails closed without one, so the connector receives nothing rather
+    // than accepting anything, and an outbound-only connector has nothing to
+    // verify in the first place.
+    expect(register({ transportModes: ["longpoll"] }).ok).toBe(true)
+  })
+
+  it("refuses a basestring that does not cover the body", () => {
+    // Such a signature authenticates the sender of some request rather than
+    // this one, so a captured header would carry an attacker's payload.
+    const result = register({
+      transportModes: ["webhook"],
+      webhookVerification: { ...hmac, basestring: "v0:{timestamp}" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.reason).toBe("verification_invalid")
+    expect(result.message).toContain("{body}")
+  })
+
+  it("refuses a timestamped basestring with no timestamp header", () => {
+    const result = register({
+      transportModes: ["webhook"],
+      webhookVerification: { ...hmac, timestampHeader: undefined },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.reason).toBe("verification_invalid")
+  })
+
+  it.each([
+    ["an empty secret key", { ...hmac, secretKey: "  " }],
+    ["an empty signature header", { ...hmac, signatureHeader: "" }],
+    ["a non-positive replay window", { ...hmac, toleranceSecs: 0 }],
+  ])("refuses %s", (_label, verification) => {
+    const result = register({ transportModes: ["webhook"], webhookVerification: verification })
+    expect(result.ok).toBe(false)
+  })
+
+  it("refuses a shared-secret scheme with no header to read", () => {
+    const result = register({
+      transportModes: ["webhook"],
+      webhookVerification: { kind: "sharedSecretHeader", secretKey: "tok", header: "" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.reason).toBe("verification_invalid")
+  })
+
+  it("accepts the shared-secret scheme Telegram uses", () => {
+    const result = register({
+      transportModes: ["webhook"],
+      webhookVerification: {
+        kind: "sharedSecretHeader",
+        secretKey: "secretToken",
+        header: "X-Acme-Secret",
+      },
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it("leaves the kind registered to nobody when the scheme is refused", () => {
+    // A rejected contribution must not take the kind, or a later plugin that
+    // declares it correctly would collide with a registration that never
+    // happened.
+    register({ transportModes: ["webhook"], webhookVerification: { ...hmac, secretKey: "" } })
+    expect(getPluginConnector("mastodon")).toBeUndefined()
+  })
+})

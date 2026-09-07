@@ -1409,7 +1409,69 @@ export interface PluginConnectorDef {
   defaultTrigger?: Record<string, unknown>
   /** Transport modes this adapter supports. */
   transportModes: string[]
+  /**
+   * How the Rust receiver proves an inbound webhook really came from this
+   * platform. Required in practice for a connector that declares the
+   * `webhook` transport: `verify_webhook` has hand-written arms only for the
+   * four native webhook platforms, and every other kind fails closed without
+   * a declaration here, so the endpoint exists and refuses everything.
+   *
+   * Declared rather than implemented on purpose. A plugin's code is TypeScript
+   * in the renderer or the brain and there is no host-to-plugin request
+   * primitive to call back through. Even with one, the platforms that matter
+   * demand a handshake answer inside about three seconds, and a callback would
+   * hand an unauthenticated public POST body to plugin code BEFORE anything
+   * established where it came from.
+   *
+   * `secretKey` names a keyring entry on the adapter instance. It is never the
+   * secret itself: a manifest is world-readable inside the install directory.
+   */
+  webhookVerification?: PluginWebhookVerification
 }
+
+/** Digest a platform signs with. Mirrors the Rust `SignatureDigest`. */
+export type PluginWebhookDigest = "sha256" | "sha1"
+
+/** How the digest is rendered in the header. Mirrors Rust `SignatureEncoding`. */
+export type PluginWebhookEncoding = "hex" | "base64"
+
+/**
+ * A connector's declared inbound verification scheme.
+ *
+ * Kept structurally identical to `WebhookVerificationSpec` in
+ * `crates/cognia-connectors/src/sigverify/declarative.rs`, which is the only
+ * thing that executes it. The Rust side validates the same invariants at
+ * registration, so a shape that passes here and not there is refused with a
+ * reason rather than silently accepting traffic.
+ */
+export type PluginWebhookVerification =
+  | {
+      kind: "hmacSha256"
+      /** Keyring entry on the adapter holding the signing secret. */
+      secretKey: string
+      /** Header carrying the signature, e.g. `X-Slack-Signature`. */
+      signatureHeader: string
+      /** Literal prefix on the header value, e.g. `v0=`. Compared, not stripped. */
+      signaturePrefix?: string
+      digest?: PluginWebhookDigest
+      encoding?: PluginWebhookEncoding
+      /**
+       * `{timestamp}` and `{body}` are substituted, everything else is
+       * literal. Must include `{body}`: a signature that does not cover the
+       * body authenticates the sender of SOME request, not this one.
+       */
+      basestring?: string
+      /** Header carrying unix seconds. Required when `basestring` uses `{timestamp}`. */
+      timestampHeader?: string
+      /** Replay window in seconds. Defaults to 300. */
+      toleranceSecs?: number
+    }
+  | {
+      kind: "sharedSecretHeader"
+      secretKey: string
+      /** e.g. `X-Telegram-Bot-Api-Secret-Token`. */
+      header: string
+    }
 
 /**
  * One external-agent preset definition inside `PluginManifest.externalAgentPresets`.

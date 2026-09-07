@@ -1,3 +1,4 @@
+pub mod declarative;
 pub mod discord;
 pub mod lark;
 pub mod qq;

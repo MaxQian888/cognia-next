@@ -206,10 +206,20 @@ export const headlessConnectorInvoker: ConnectorCommandInvoker = async <T>(
   switch (name) {
     // Legacy R12 arm names + snake_case params (frozen wire shape).
     case "connectors_register_adapter": {
-      const reg = args?.reg as { adapterId: string; adapterType: string }
+      const reg = args?.reg as {
+        adapterId: string
+        adapterType: string
+        verification?: unknown
+      }
       return transport.call<T>("connectors_register", {
         adapter_id: reg.adapterId,
         adapter_type: reg.adapterType,
+        // Forwarded rather than dropped. This arm reshapes the desktop call
+        // into the frozen R12 wire names, and anything it does not name is
+        // silently lost, so a plugin connector registered through the brain
+        // used to arrive with no verification scheme and refuse every request
+        // that reached it.
+        ...(reg.verification === undefined ? {} : { verification: reg.verification }),
       })
     }
     case "connectors_unregister_adapter":

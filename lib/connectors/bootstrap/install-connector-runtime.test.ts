@@ -1164,6 +1164,64 @@ describe("installConnectorRuntime", () => {
     expect(registerOrder).toBeLessThan(startOrder)
   })
 
+  it("carries a plugin connector's declared verification into the registration", async () => {
+    // Rust has hand-written verifiers only for telegram, slack, discord and
+    // lark. Every plugin kind falls through to the declared scheme, so a
+    // registration that drops it leaves an endpoint that refuses everything.
+    const { registerPluginConnector, __resetPluginConnectorRegistryForTesting } =
+      await import("@/lib/connectors/plugin-connector-registry")
+    __resetPluginConnectorRegistryForTesting()
+    const verification = {
+      kind: "sharedSecretHeader" as const,
+      secretKey: "secretToken",
+      header: "X-Acme-Secret",
+    }
+    registerPluginConnector({
+      pluginId: "acme",
+      pluginRelease: "1.0.0",
+      def: {
+        type: "acme-chat",
+        factory: "makeAcme",
+        configSchema: { type: "object", properties: {} },
+        transportModes: ["webhook"],
+        webhookVerification: verification,
+      } as never,
+      factory: jest.fn(),
+    })
+
+    mockedIsTauri.mockReturnValue(true)
+    const row = { ...makeWebhookRow("cai_plugin_wh"), type: "acme-chat" as never }
+    const adapter = makeWebhookAdapter(row.id)
+    adapter.meta.type = "acme-chat" as never
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    install()
+
+    await waitFor(() =>
+      expect(mockRegisterAdapterCmd).toHaveBeenCalledWith({
+        adapterId: row.id,
+        adapterType: "acme-chat",
+        verification,
+      })
+    )
+    __resetPluginConnectorRegistryForTesting()
+  })
+
+  it("omits the verification field entirely for a native platform", async () => {
+    // The four native kinds verify through their own Rust arms, so sending a
+    // key they do not use would only invite drift between the two.
+    mockedIsTauri.mockReturnValue(true)
+    const row = makeWebhookRow("cai_native_wh")
+    const adapter = makeWebhookAdapter(row.id)
+    mockListEnabled.mockResolvedValue([row])
+    mockBuildAdapterFromRow.mockResolvedValue(adapter)
+    mockListAdapters.mockReturnValue([adapter])
+    install()
+    await waitFor(() => expect(mockRegisterAdapterCmd).toHaveBeenCalled())
+    expect(mockRegisterAdapterCmd.mock.calls[0][0]).not.toHaveProperty("verification")
+  })
+
   it("does not register outbound-only (longpoll) adapters with the Rust server", async () => {
     mockedIsTauri.mockReturnValue(true)
     const row = makeTelegramRow("cai_lp_noregister")
