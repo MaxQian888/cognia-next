@@ -29,6 +29,8 @@ import { enqueue as enqueueOutbound } from "@/lib/db/mobile-outbound-queue"
 import { applyMirroredMemoryMutation } from "@/lib/memory/api/mirror-memory"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { cn } from "@/lib/utils"
+import { COMPACT_PAGE_MIN_H } from "@/lib/shell/compact-shell"
 
 export interface MemoryMobileBodyProps {
   /** Scroll the deep-linked memory into view once (`/memory?id=` from chips). */
@@ -121,7 +123,10 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
 
   return (
     <main
-      className="flex min-h-[100dvh] flex-col gap-4 bg-background pt-3 safe-area-pt"
+      className={cn(
+        COMPACT_PAGE_MIN_H,
+        "flex flex-col gap-4 bg-background pt-3 safe-area-pt"
+      )}
       data-testid="mobile-memory-body"
     >
       <header className="flex flex-col gap-3 px-4">

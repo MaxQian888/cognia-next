@@ -61,9 +61,20 @@ const EXEMPT: Record<string, Exemption> = {
   inbox: { reason: "redirect-only route" },
 }
 
-/** The document-scrolling shape. Anything else needs a definite height. */
+/**
+ * The document-scrolling shape. Anything else needs a definite height.
+ *
+ * Two spellings mean the same thing. `min-h-[100dvh]` is the naive one, and
+ * `COMPACT_PAGE_MIN_H` (`lib/shell/compact-shell.ts`) is the same claim with
+ * the wrapper's tab-bar reserve subtracted, which is what a body under the
+ * compact shell should actually ask for. Both grow the document rather than
+ * filling a definite box, so both excuse a route from the sweep. Matching the
+ * exported identifier rather than its expansion keeps this in step with the
+ * constant if the expression is ever retuned.
+ */
 function scrollsWithTheDocument(body: string): boolean {
-  return readFileSync(join(REPO_ROOT, body), "utf8").includes("min-h-[100dvh]")
+  const src = readFileSync(join(REPO_ROOT, body), "utf8")
+  return src.includes("min-h-[100dvh]") || src.includes("COMPACT_PAGE_MIN_H")
 }
 
 describe("needsFullViewport", () => {

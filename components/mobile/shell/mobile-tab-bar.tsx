@@ -191,9 +191,10 @@ export function MobileTabBar({ className, badges, keyboardHidden = false }: Mobi
             whileTap={reduce ? undefined : { scale: 0.9 }}
             className={cn(
               // `min-h-[44px]` enforces the iOS HIG / WCAG touch-target
-              // floor on dense screens; the parent already sets h-14 (56px)
-              // so this is belt-and-braces for landscape orientations where
-              // the nav can otherwise compress.
+              // floor on dense screens. The nav's own content row is already
+              // 56px (its height is that plus the safe-area inset, which is
+              // padding), so this is belt-and-braces for landscape
+              // orientations where the nav can otherwise compress.
               "relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium",
               "transition-colors duration-200",
               active ? "text-primary" : "text-muted-foreground"

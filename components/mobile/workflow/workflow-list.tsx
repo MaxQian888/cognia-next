@@ -30,6 +30,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { cn } from "@/lib/utils"
+import { COMPACT_PAGE_MIN_H } from "@/lib/shell/compact-shell"
 
 import { WorkflowCreateDialog } from "@/components/workflow/library/workflow-create-dialog"
 import { WorkflowCreateFolderDialog } from "@/components/workflow/library/workflow-create-folder-dialog"
@@ -156,7 +157,8 @@ export function WorkflowList({ className }: WorkflowListProps) {
   return (
     <main
       className={cn(
-        "flex min-h-[100dvh] flex-col gap-4 bg-background pt-3 safe-area-pt",
+        COMPACT_PAGE_MIN_H,
+        "flex flex-col gap-4 bg-background pt-3 safe-area-pt",
         className
       )}
       data-testid="mobile-workflow-list"

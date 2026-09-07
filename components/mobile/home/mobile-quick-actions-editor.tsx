@@ -6,7 +6,10 @@
  * defaults" button. dnd-kit setup mirrors
  * `components/shell/sidebar-customizer.tsx`.
  *
- * Rendered inside a bottom `Sheet` by `mobile-quick-actions.tsx`.
+ * Rendered inside a bottom `Sheet` by `mobile-home-layout-sheet.tsx`, which the
+ * shell owns. It is deliberately NOT mounted by `mobile-quick-actions.tsx`: that
+ * grid renders `null` once its own section is hidden, which is exactly when the
+ * user needs this editor to turn it back on.
  */
 
 import * as React from "react"

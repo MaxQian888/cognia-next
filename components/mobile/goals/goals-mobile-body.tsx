@@ -35,6 +35,7 @@ import { runSyncDown } from "@/lib/sync/companion-sync"
 import { isTerminalGoalStatus } from "@/types/goal"
 import type { Goal } from "@/types/goal"
 import { cn } from "@/lib/utils"
+import { COMPACT_PAGE_MIN_H } from "@/lib/shell/compact-shell"
 
 export function GoalsMobileBody() {
   const t = useTranslations("goal")
@@ -68,7 +69,10 @@ export function GoalsMobileBody() {
 
   return (
     <main
-      className="flex min-h-[100dvh] flex-col gap-3 bg-background pt-3 safe-area-pt"
+      className={cn(
+        COMPACT_PAGE_MIN_H,
+        "flex flex-col gap-3 bg-background pt-3 safe-area-pt"
+      )}
       data-testid="mobile-goals-body"
     >
       <header className="px-4">
