@@ -45,7 +45,13 @@ function InviteLanding() {
 
   return (
     <main
-      className="flex min-h-dvh items-center justify-center bg-background px-4 text-foreground"
+      // `w-full flex-1` because this renders in the platform shell's content
+      // slot, which is a flex ROW. Without them the "full screen, centred"
+      // landing page shrank to its own `max-w-sm` content and sat against the
+      // left edge: measured 336px of a 1440px window. `min-h-full` rather than
+      // `min-h-dvh` for the same reason, the slot is already short of the
+      // viewport by the chrome above it, so `dvh` overflowed it by 40px.
+      className="flex min-h-full w-full flex-1 items-center justify-center bg-background px-4 text-foreground"
       data-testid="invite-page"
       data-state={state}
     >

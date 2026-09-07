@@ -28,6 +28,17 @@ beforeEach(() => {
 })
 
 describe("/invite", () => {
+  it("claims the whole content slot rather than shrinking to its card", async () => {
+    // The shell hands routes a flex-ROW slot. Without `flex-1`/`w-full` this
+    // "full screen, centred" landing page shrank to its own `max-w-sm`
+    // content and sat against the left edge, 336px of a 1440px window, and
+    // `min-h-dvh` overflowed the slot by the chrome above it.
+    render(<InvitePage />)
+    const main = await screen.findByTestId("invite-page")
+    expect(main).toHaveClass("w-full", "flex-1", "min-h-full")
+    expect(main).not.toHaveClass("min-h-dvh")
+  })
+
   it("keeps the token for the gate and sends the person to the root", async () => {
     search = `?token=${TOKEN}`
     render(<InvitePage />)

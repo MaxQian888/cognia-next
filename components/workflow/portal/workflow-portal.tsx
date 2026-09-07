@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
+import { cn } from "@/lib/utils"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -767,9 +768,22 @@ export function WorkflowPortal() {
     }
   }
 
-  if (loading) return <main className="grid min-h-dvh place-items-center p-6">{t("loading")}</main>
+  // `w-full flex-1` on all three branches: this renders in the platform
+  // shell's content slot, which is a flex ROW, so a `<main>` that neither
+  // grows nor spans it shrinks to its own content and hugs the left edge.
+  // `place-items-center` then centres inside that sliver, which is why
+  // "Loading application..." sat at the left margin rather than mid-page.
+  // `min-h-full` rather than `min-h-dvh` because the slot is already short of
+  // the viewport by the chrome above it.
+  const PORTAL_MAIN = "min-h-full w-full flex-1"
+  if (loading)
+    return <main className={cn("grid place-items-center p-6", PORTAL_MAIN)}>{t("loading")}</main>
   if (error && !bootstrap) {
-    return <main className="grid min-h-dvh place-items-center p-6 text-destructive">{error}</main>
+    return (
+      <main className={cn("grid place-items-center p-6 text-destructive", PORTAL_MAIN)}>
+        {error}
+      </main>
+    )
   }
   if (!bootstrap || !content) return null
   const color = /^#[0-9a-f]{6}$/i.test(bootstrap.app.theme.primaryColor)
@@ -779,7 +793,7 @@ export function WorkflowPortal() {
 
   return (
     <main
-      className="min-h-dvh bg-muted/30 p-4 sm:p-8"
+      className={cn("bg-muted/30 p-4 sm:p-8", PORTAL_MAIN)}
       style={{ "--portal-primary": color } as React.CSSProperties}
     >
       <div className="mx-auto max-w-2xl space-y-5 rounded-xl border bg-background p-5 shadow-sm">
