@@ -229,12 +229,31 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required(&args, "adapter_id")?;
             let adapter_type: String = required(&args, "adapter_type")?;
+            // A plugin connector has no hand-written verifier in
+            // `verify_webhook`, so its declared scheme has to survive this
+            // arm. Dropping it here would leave the brain, which is the host a
+            // plugin connector is most likely to run on, serving an endpoint
+            // that refuses everything.
+            let verification: Option<
+                crate::connectors::sigverify::declarative::WebhookVerificationSpec,
+            > = optional(&args, "verification")?;
+            if let Some(spec) = verification.as_ref() {
+                // Checked before the row lands, exactly as the Tauri command
+                // does. A spec found unusable on the first inbound request is
+                // one found after the endpoint has been publicly reachable.
+                spec.validate().map_err(|reason| {
+                    RpcError::malformed(format!(
+                        "adapter {adapter_id} declares an unusable webhook verification: {reason}"
+                    ))
+                })?;
+            }
             services.connectors.inner.lock().registered_adapters.insert(
                 adapter_id.clone(),
                 crate::connectors::types::AdapterRegistration {
                     adapter_id,
                     adapter_type,
                     webhook_path: None,
+                    verification,
                 },
             );
             Ok(Value::Null)
