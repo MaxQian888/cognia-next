@@ -172,6 +172,7 @@
     "0170-cognia-relay-and-connectivity-center",
     "0171-the-cli-speaks-the-protocol-not-a-copy-of-it",
     "0172-remote-access-is-verified-not-assumed",
-    "0173-the-tracker-has-one-programmatic-face"
+    "0173-the-tracker-has-one-programmatic-face",
+    "0174-the-bot-control-plane"
   ]
 }
