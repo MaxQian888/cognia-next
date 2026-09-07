@@ -730,7 +730,6 @@ commands.allow = [
   "plugin_window_unmaximize",
   "plugin_workspace_repo_dir",
   "plugin_workspace_repo_remove",
-  "power_screen_holds_set",
   "preview_local_manifest",
   "project_environment_execute",
   "provider_diagnostics_clear_balance_token",
