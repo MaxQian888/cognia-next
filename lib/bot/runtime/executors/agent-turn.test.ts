@@ -27,7 +27,13 @@ function ctx(overrides: Partial<BotExecutorContext> = {}): BotExecutorContext {
     event: envelope(),
     config: {},
     signal: new AbortController().signal,
-    step: {} as BotExecutorContext["step"],
+    // `run` invokes its function. A stub that returns undefined would let a
+    // step-wrapped executor pass while doing nothing.
+    step: {
+      run: (_name: string, fn: () => unknown) => Promise.resolve(fn()),
+      waitForApproval: jest.fn(),
+      waitForEvent: jest.fn(),
+    } as unknown as BotExecutorContext["step"],
     log: jest.fn(),
     progress: jest.fn(),
     installation: { id: "boti_1" } as BotExecutorContext["installation"],
@@ -98,6 +104,25 @@ describe("createAgentTurnBotExecutor", () => {
     const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "" })
     await createAgentTurnBotExecutor({ run })(ctx({ policy: { maxRunDurationMs: 30_000 } }))
     expect(run.mock.calls[0][0].timeoutMs).toBe(30_000)
+  })
+
+  it("runs the turn inside a step, so a re-entry replays instead of re-sending", async () => {
+    const run = jest.fn().mockResolvedValue({ text: "done", sessionId: "s1" })
+    const memoized = { text: "from the first attempt", sessionId: "s0" }
+    const step = {
+      run: jest.fn().mockResolvedValue(memoized),
+      waitForApproval: jest.fn(),
+      waitForEvent: jest.fn(),
+    } as unknown as BotExecutorContext["step"]
+
+    const result = await createAgentTurnBotExecutor({ run })(ctx({ step }))
+
+    expect(step.run).toHaveBeenCalledWith("agent-turn", expect.any(Function))
+    expect(run).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      summary: "from the first attempt",
+      output: { sessionId: "s0" },
+    })
   })
 
   it("refuses rather than guessing when there is no working directory", async () => {

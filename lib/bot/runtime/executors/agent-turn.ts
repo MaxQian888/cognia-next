@@ -62,18 +62,24 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
         return runPluginAgentTurn(input)
       })
 
-    const result = await run({
-      characterId,
-      prompt: agentTurnPrompt(ctx),
-      cwd: ctx.cwd,
-      signal: ctx.signal,
-      ...(ctx.policy.maxRunDurationMs ? { timeoutMs: ctx.policy.maxRunDurationMs } : {}),
-      // The resolved ceiling, never a widened default. `bypassPermissions` is
-      // reachable only when every layer already allowed it.
-      ...(ctx.composition.selection.authority
-        ? { permissionMode: ctx.composition.selection.authority }
-        : {}),
-    })
+    // Inside a step, because a Bot handler is re-entered from the top after a
+    // crash or a resumed wait. An unmemoized turn would be re-sent on every
+    // re-entry, which for a Bot that answers a pull request means answering it
+    // again, and the model call is the most expensive thing here to repeat.
+    const result = await ctx.step.run("agent-turn", () =>
+      run({
+        characterId,
+        prompt: agentTurnPrompt(ctx),
+        cwd: ctx.cwd as string,
+        signal: ctx.signal,
+        ...(ctx.policy.maxRunDurationMs ? { timeoutMs: ctx.policy.maxRunDurationMs } : {}),
+        // The resolved ceiling, never a widened default. `bypassPermissions` is
+        // reachable only when every layer already allowed it.
+        ...(ctx.composition.selection.authority
+          ? { permissionMode: ctx.composition.selection.authority }
+          : {}),
+      })
+    )
 
     return { summary: result.text.slice(0, 200), output: { sessionId: result.sessionId } }
   }

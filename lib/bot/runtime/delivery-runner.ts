@@ -26,6 +26,7 @@ import type { BotEventDeliveryRow } from "@/lib/db/bot-types"
 import { isRunnableBot, resolveInstalledBot } from "@/lib/bot/installed-bot"
 import type { PluginBotPolicyV1 } from "@/types/plugin/plugin-bot"
 
+import { resolveBotInstallationCwd } from "./resolve-cwd"
 import { runBotDelivery, type BotRunOutcome } from "./run"
 
 /** How often the loop looks for due deliveries. */
@@ -43,7 +44,14 @@ export interface BotDeliveryRunnerOptions {
   intervalMs?: number
   batch?: number
   organizationPolicy?: PluginBotPolicyV1
-  /** Resolve the directory a run works in. Absent means the Bot has none. */
+  /**
+   * Resolve the directory a run works in.
+   *
+   * Defaults to `resolveBotInstallationCwd`. It is a default rather than
+   * something each caller passes because there are two call sites (the desktop
+   * initializer and the headless registration) and neither passed one, which is
+   * how `executors/agent-turn.ts` came to refuse every run it was handed.
+   */
   resolveCwd?: (installationId: string) => Promise<string | undefined> | string | undefined
   now?: () => number
 }
@@ -124,7 +132,7 @@ async function attemptDelivery(
     return { status: "skipped", reason: "not_runnable" }
   }
 
-  const cwd = await options.resolveCwd?.(installation.id)
+  const cwd = await (options.resolveCwd ?? resolveBotInstallationCwd)(installation.id)
   const heartbeat = setInterval(() => {
     void renewBotDeliveryLease(claimed.id, options.owner, now())
   }, 30_000)

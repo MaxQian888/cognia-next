@@ -64,6 +64,7 @@ beforeEach(async () => {
   await db.botRunSteps.clear()
   await db.executionRuns.clear()
   await db.executionRunEvents.clear()
+  await db.projects.clear()
 }, 15_000)
 
 describe("drainBotDeliveries", () => {
@@ -191,6 +192,29 @@ describe("drainBotDeliveries", () => {
       resolveCwd: () => "/repo",
     })
     expect(handler.mock.calls[0][0].cwd).toBe("/repo")
+  })
+
+  it("resolves a directory itself when the caller supplies none", async () => {
+    // The bug this pins: both production call sites omitted `resolveCwd`, so
+    // every agent-turn Bot refused before it started.
+    const handler = jest.fn()
+    await seedInstallation(handler)
+    await updateBotInstallation("boti_1", {
+      scope: { kind: "workspace", workspaceId: "proj_1" },
+      now: NOW,
+    })
+    await getDb().projects.add({
+      id: "proj_1",
+      name: "Web",
+      roots: [{ path: "/repos/web", isPrimary: true }],
+      createdAt: NOW,
+      updatedAt: NOW,
+    } as never)
+    await enqueueBotDelivery({ envelope: envelope(), now: NOW })
+
+    await drainBotDeliveries({ owner: "host-a", now })
+
+    expect(handler.mock.calls[0][0].cwd).toBe("/repos/web")
   })
 })
 
