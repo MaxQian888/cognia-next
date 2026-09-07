@@ -125,6 +125,18 @@ describe("SubscriptionOverviewTab", () => {
     expect(screen.queryByTestId("overview-windows")).not.toBeInTheDocument()
   })
 
+  it("does not title the web banner with its own body text", () => {
+    // The same key used to be passed as both title and body. `AlertTitle`
+    // clamps to one line, so a phone read "...stored in your..." and then the
+    // whole sentence again underneath it.
+    isTauriMock.mockReturnValue(false)
+    render(<SubscriptionOverviewTab />)
+    const body =
+      "Subscription credentials are stored in your OS keychain \u2014 only available in the desktop app."
+    expect(screen.getAllByText(body)).toHaveLength(1)
+    expect(screen.getByText("Subscription")).toBeInTheDocument()
+  })
+
   it("signed out → CTA that opens the add-account dialog", async () => {
     credentialResult = { credential: null, activeAccountId: null }
     const onRequestAddAccount = jest.fn()

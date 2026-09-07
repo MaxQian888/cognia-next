@@ -114,7 +114,12 @@ export function SubscriptionOverviewTab({
     return (
       <PanelTransition activeKey={branch}>
         {branch === "web" ? (
-          <SettingsAlert title={t("webModeBanner")}>{t("webModeBanner")}</SettingsAlert>
+          // The same key was passed as both title and body. `AlertTitle`
+          // clamps to one line, so a phone showed the sentence cut at
+          // "stored in your…" and then spelled out again underneath. The four
+          // sibling web-mode banners in this folder all title themselves with
+          // the section name, so this one does too.
+          <SettingsAlert title={t("title")}>{t("webModeBanner")}</SettingsAlert>
         ) : branch === "signedOut" ? (
           <SettingsEmptyState
             title={t("overview.signedOutTitle")}
