@@ -504,7 +504,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
               orgId: membership.orgId,
               logtoOrganizationId: membership.logtoOrganizationId ?? "",
               userId: membership.userId,
-              ...(view.kind === "choose" && view.identities ? { identities: view.identities } : {}),
+              ...(view.kind === "choose" && view.identities && view.identities.length > 0
+                ? { identities: view.identities }
+                : {}),
             },
             { localAccountId }
           )

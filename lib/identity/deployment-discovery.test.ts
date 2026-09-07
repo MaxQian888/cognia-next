@@ -18,7 +18,7 @@ const MULTI: CompanionAuthConfig = {
     registrationPolicy: "bootstrap-then-invite",
     webOrigin: null,
   },
-} as CompanionAuthConfig
+} as unknown as CompanionAuthConfig
 
 describe("resolveDiscoverySource", () => {
   it("asks the desktop's own server on its loopback port, or nothing when stopped", async () => {

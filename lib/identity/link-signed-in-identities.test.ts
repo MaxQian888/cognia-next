@@ -1,3 +1,4 @@
+import type { LinkExternalIdentityInput } from "@/lib/db/identity"
 import type { ExternalIdentity } from "@/types/identity"
 
 import { externalProviderFor, linkSignedInIdentities } from "./link-signed-in-identities"
@@ -18,9 +19,7 @@ describe("externalProviderFor", () => {
 
 describe("linkSignedInIdentities", () => {
   const link = jest.fn(
-    async (
-      input: Parameters<NonNullable<Parameters<typeof linkSignedInIdentities>[1]>["link"]>[0]
-    ) =>
+    async (input: LinkExternalIdentityInput) =>
       ({
         id: `${input.provider}:${input.tenant ?? ""}:${input.subject}`,
         userId: input.userId,

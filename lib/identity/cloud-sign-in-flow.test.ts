@@ -14,6 +14,7 @@ import {
   signInWithDeployment,
 } from "./cloud-sign-in-flow"
 import { rememberPendingInvitation } from "./pending-invitation"
+import type { LinkSignedInIdentitiesReport } from "./link-signed-in-identities"
 
 const deployment: ReadyDeployment = {
   status: "ready",
@@ -107,7 +108,11 @@ function harness(
     makeClient: jest.fn(() => client),
     saveConnection: jest.fn((_: string, connection: { baseUrl: string }) => connection),
     reconcile: jest.fn(async () => ({}) as never),
-    linkIdentities: jest.fn(async () => ({ linked: [], conflicts: [], skipped: [] })),
+    linkIdentities: jest.fn(async (): Promise<LinkSignedInIdentitiesReport> => ({
+      linked: [],
+      conflicts: [],
+      skipped: [],
+    })),
     refreshPlane: jest.fn(async () => null),
     operationId: () => "op_fixed",
     now: () => 99,

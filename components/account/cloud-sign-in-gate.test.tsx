@@ -179,7 +179,9 @@ describe("CloudSignInGate", () => {
         workspaceCount: 0,
       },
     ]
-    const d = deps({ settle: jest.fn(async () => ({ outcome: "choose" as const, memberships })) })
+    const d = deps({
+      settle: jest.fn(async () => ({ outcome: "choose" as const, identities: [], memberships })),
+    })
     renderGate(d)
     fireEvent.click(await screen.findByTestId("cloud-sign-in-logto"))
     fireEvent.click(await screen.findByTestId("cloud-sign-in-choose-org_b"))

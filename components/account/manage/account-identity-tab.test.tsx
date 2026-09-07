@@ -41,6 +41,7 @@ const deployment: ReadyDeployment = {
   social: [],
   collaborationServiceUrl: "https://collab",
   registrationPolicy: null,
+  webOrigin: null,
 }
 const session = {
   issuer: "i",
