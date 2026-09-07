@@ -2166,6 +2166,76 @@ export const PARAMS_SCHEMAS = {
     minScorerPassRate: z.number().min(0).max(1).optional(),
     maxTotalCostUsd: z.number().min(0).optional(),
   }),
+  // Agent browser. `url` is only on `open` and `replayFlow` resolves its own
+  // from the recording: every other node acts on the page the run already has,
+  // so carrying a url there would invite two sources of truth for "where am I".
+  "action.browser.open": z.object({
+    url: requiredString("required").refine(isHttpUrlOrExpression, "httpUrl"),
+    timeoutMs: numberRange(100).int().optional(),
+  }),
+  "action.browser.snapshot": z.object({
+    includeText: z.boolean().optional(),
+    maxNodes: numberRange(1, 2000).int().optional(),
+  }),
+  "action.browser.readPage": z.object({
+    maxNodes: numberRange(1, 2000).int().optional(),
+  }),
+  "action.browser.act": z.object({
+    action: z.enum([
+      "click",
+      "double_click",
+      "type",
+      "fill",
+      "select",
+      "hover",
+      "focus",
+      "key",
+      "scroll",
+    ]),
+    ref: optionalString,
+    value: optionalString,
+    direction: z.enum(["up", "down", "left", "right", "top", "bottom"]).optional(),
+    amount: z.number().int().optional(),
+  }),
+  "action.browser.fillForm": z.object({
+    fields: z
+      .array(
+        z.object({
+          ref: requiredString("required"),
+          value: optionalString,
+          credentialRef: optionalString,
+        })
+      )
+      .min(1, "required"),
+  }),
+  "action.browser.waitFor": z
+    .object({
+      text: optionalString,
+      selector: optionalString,
+      networkIdle: z.boolean().optional(),
+      mode: z.enum(["appear", "disappear"]).optional(),
+      timeoutMs: numberRange(100).int().optional(),
+      failOnTimeout: z.boolean().optional(),
+    })
+    .superRefine((value, ctx) => {
+      const chosen = [value.text, value.selector, value.networkIdle ? "idle" : undefined].filter(
+        Boolean
+      ).length
+      if (chosen !== 1) {
+        ctx.addIssue({ code: "custom", message: "exactlyOne", path: ["text"] })
+      }
+    }),
+  "action.browser.screenshot": z.object({
+    scope: z.enum(["viewport", "fullPage", "element"]).optional(),
+    ref: optionalString,
+    includeImage: z.boolean().optional(),
+  }),
+  "action.browser.diagnostics": z.object({
+    include: z.enum(["both", "console", "network"]).optional(),
+    errorsOnly: z.boolean().optional(),
+    limit: numberRange(1, 500).int().optional(),
+  }),
+  "action.browser.replayFlow": z.object({ recordingId: requiredString("required") }),
   // Search. `kinds` is a plain string array rather than an enum: the engine
   // filters unknown entries out, and pinning the enum here would mean a second
   // list to keep in step with `WORKFLOW_SEARCHABLE_KINDS`.

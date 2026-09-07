@@ -174,6 +174,19 @@ export type WorkflowNodeKind =
   | "action.approval.request"
   // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
   | "action.humanInput.request"
+  // Agent browser (ADR-0055 / 0072 / 0085). The engine is run-scoped: a graph
+  // does not borrow whichever engine a React pane happened to bind, and never
+  // takes over the page a person has open. `evaluate` is deliberately absent,
+  // as are the five ops the embedded engine throws on.
+  | "action.browser.open"
+  | "action.browser.snapshot"
+  | "action.browser.readPage"
+  | "action.browser.act"
+  | "action.browser.fillForm"
+  | "action.browser.waitFor"
+  | "action.browser.screenshot"
+  | "action.browser.diagnostics"
+  | "action.browser.replayFlow"
   // Search (ADR-0129). `query` runs the same engine and providers the command
   // palette does, through a React-free context; `messages` runs the chat
   // history engine, which needs no context at all.
@@ -482,6 +495,15 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.connector.draft",
   "action.approval.request",
   "action.humanInput.request",
+  "action.browser.open",
+  "action.browser.snapshot",
+  "action.browser.readPage",
+  "action.browser.act",
+  "action.browser.fillForm",
+  "action.browser.waitFor",
+  "action.browser.screenshot",
+  "action.browser.diagnostics",
+  "action.browser.replayFlow",
   "action.search.query",
   "action.search.messages",
   "action.session.create",

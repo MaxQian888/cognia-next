@@ -42,6 +42,12 @@ import type { RiskAssessment, RiskTier } from "@/lib/policy/risk/classify-risk"
  *    `.stage` / `.branch` are local and reversible → absent.
  *  - `action.mobile.share` hands content to another app / person →
  *    `external-send`. `.notify` is a local notification → absent.
+ *  - `action.browser.act` / `.fillForm` / `.replayFlow` drive a real page on
+ *    the operator's behalf → `computer-use`. `.open` / `.snapshot` /
+ *    `.readPage` / `.waitFor` / `.diagnostics` are reads and stay absent, the
+ *    same call `.getAppState` forced above. `.screenshot` is a read too, and
+ *    unlike the desktop one it can only see a page this workspace already
+ *    granted.
  *  - `action.fs.write` overwrites a file whose previous contents nothing kept →
  *    `file-write-broad`, the first kind to claim that surface.
  *    `action.fs.delete` and `.move` both unlink something →
@@ -74,6 +80,9 @@ export const RISKY_NODE_KINDS: Record<string, RiskSurfaceId> = {
   // ── Drives the operator's machine ──
   "action.desktop.getAppState": "computer-use",
   "action.desktop.performAction": "computer-use",
+  "action.browser.act": "computer-use",
+  "action.browser.fillForm": "computer-use",
+  "action.browser.replayFlow": "computer-use",
   // ── Executes real shell ──
   "action.system.terminal": "native-command",
   "action.terminal.script": "native-command",

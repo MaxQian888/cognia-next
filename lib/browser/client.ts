@@ -66,6 +66,15 @@ export const browserClient = {
   setEmbedOwnerToken: (token: string | null) => {
     embedOwnerToken = token
   },
+  /**
+   * Whether the embedded preview pane currently holds the owner lease.
+   *
+   * The only other signal is the string `requiredEmbedOwnerToken` throws, and
+   * that arrives three calls deep, after a caller has already navigated. A
+   * caller that has to *choose* a backend has to be able to ask first, which
+   * is what the workflow browser nodes do before they touch an engine.
+   */
+  hasEmbedOwner: (): boolean => embedOwnerToken !== null,
   /** Create or re-navigate the embedded preview at the reserved rect. */
   embedCreate: (url: string, rect: ElementRect) =>
     transport.call<string>("browser_embed_create", {

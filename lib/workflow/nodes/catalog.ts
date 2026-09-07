@@ -864,6 +864,185 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Boxes",
     keywords: ["plugin", "extension", "run", "tool"],
   },
+  // ── Agent browser (ADR-0055 / 0072 / 0085) ────────────────────────────────
+  "action.browser.open": {
+    label: "Open page",
+    description:
+      "Navigate the run's browser to a URL and wait for it to load. A public domain has to be granted for this workspace first, and a redirect off it fails the step.",
+    iconName: "Globe",
+    keywords: ["browser", "open", "navigate", "goto", "url", "web", "page"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      required: ["url"],
+      properties: {
+        url: { type: "string", format: "expression", title: "URL" },
+        timeoutMs: { type: "integer", title: "Load timeout (ms)", minimum: 100 },
+      },
+    },
+  },
+  "action.browser.snapshot": {
+    label: "Snapshot page",
+    description:
+      "Capture the page's accessibility tree with a ref for every element, which is what Act and Fill form address.",
+    iconName: "ScanEye",
+    keywords: ["browser", "snapshot", "tree", "accessibility", "elements", "refs"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        includeText: { type: "boolean", title: "Include non-interactive text", default: false },
+        maxNodes: { type: "integer", title: "Node cap", minimum: 1, maximum: 2000, default: 200 },
+      },
+    },
+  },
+  "action.browser.readPage": {
+    label: "Read page text",
+    description: "Read the page as plain text. The reading counterpart of Snapshot.",
+    iconName: "FileText",
+    keywords: ["browser", "read", "text", "content", "scrape", "extract"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        maxNodes: { type: "integer", title: "Node cap", minimum: 1, maximum: 2000, default: 200 },
+      },
+    },
+  },
+  "action.browser.act": {
+    label: "Act on element",
+    description:
+      "Click, type, select, hover, press a key or scroll, addressing an element by the ref a snapshot gave it.",
+    iconName: "MousePointerClick",
+    keywords: ["browser", "click", "type", "fill", "select", "hover", "key", "scroll", "act"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      required: ["action"],
+      properties: {
+        action: {
+          type: "string",
+          title: "Action",
+          enum: [
+            "click",
+            "double_click",
+            "type",
+            "fill",
+            "select",
+            "hover",
+            "focus",
+            "key",
+            "scroll",
+          ],
+        },
+        ref: { type: "string", format: "expression", title: "Element ref" },
+        value: { type: "string", format: "expression", title: "Value or key chord" },
+        direction: {
+          type: "string",
+          title: "Scroll direction",
+          enum: ["up", "down", "left", "right", "top", "bottom"],
+        },
+        amount: { type: "integer", title: "Scroll amount" },
+      },
+    },
+  },
+  "action.browser.fillForm": {
+    label: "Fill form",
+    description:
+      "Fill several fields in order. A field can name a credential instead of a literal, and a credential that will not resolve fails the step rather than typing an empty string into it.",
+    iconName: "TextCursorInput",
+    keywords: ["browser", "form", "fill", "input", "login", "submit"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      required: ["fields"],
+      properties: {
+        fields: {
+          type: "array",
+          title: "Fields",
+          items: { type: "object" },
+          description: "Each entry is { ref, value } or { ref, credentialRef }.",
+        },
+      },
+    },
+  },
+  "action.browser.waitFor": {
+    label: "Wait for page",
+    description:
+      "Block until text appears, a selector matches, or the network goes idle. Exactly one of the three.",
+    iconName: "Hourglass",
+    keywords: ["browser", "wait", "until", "text", "selector", "idle", "load"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", format: "expression", title: "Text" },
+        selector: { type: "string", format: "expression", title: "CSS selector" },
+        networkIdle: { type: "boolean", title: "Network idle", default: false },
+        mode: { type: "string", title: "Mode", enum: ["appear", "disappear"], default: "appear" },
+        timeoutMs: { type: "integer", title: "Timeout (ms)", minimum: 100 },
+        failOnTimeout: { type: "boolean", title: "Fail on timeout", default: true },
+      },
+    },
+  },
+  "action.browser.screenshot": {
+    label: "Screenshot page",
+    description:
+      "Capture the viewport, the full page, or one element. The bytes ride only when asked for, and the size is always reported.",
+    iconName: "Camera",
+    keywords: ["browser", "screenshot", "capture", "image", "png"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          title: "Scope",
+          enum: ["viewport", "fullPage", "element"],
+          default: "viewport",
+        },
+        ref: { type: "string", format: "expression", title: "Element ref" },
+        includeImage: { type: "boolean", title: "Include the image bytes", default: false },
+      },
+    },
+  },
+  "action.browser.diagnostics": {
+    label: "Read console and network",
+    description:
+      "Read the page's console lines and network requests. The did-the-deploy-break-it node.",
+    iconName: "Bug",
+    keywords: ["browser", "console", "network", "errors", "debug", "diagnostics"],
+    requires: ["browser"],
+    paramsSchema: {
+      type: "object",
+      properties: {
+        include: {
+          type: "string",
+          title: "Include",
+          enum: ["both", "console", "network"],
+          default: "both",
+        },
+        errorsOnly: { type: "boolean", title: "Console errors only", default: false },
+        limit: { type: "integer", title: "Entry cap", minimum: 1, maximum: 500, default: 50 },
+      },
+    },
+  },
+  "action.browser.replayFlow": {
+    label: "Replay recorded flow",
+    description:
+      "Replay a recorded browser flow (ADR-0072). Desktop only: the replayer addresses elements through the embedded pane.",
+    iconName: "Repeat2",
+    keywords: ["browser", "replay", "recording", "flow", "macro", "automation"],
+    desktopOnly: true,
+    requires: ["browser", "webview"],
+    paramsSchema: {
+      type: "object",
+      required: ["recordingId"],
+      properties: {
+        recordingId: { type: "string", format: "expression", title: "Recording id" },
+      },
+    },
+  },
   // ── Search (ADR-0129) ─────────────────────────────────────────────────────
   "action.search.query": {
     label: "Search everything",

@@ -93,6 +93,15 @@ async function releaseRunResources(runId: string): Promise<void> {
   } catch {
     // best-effort cleanup
   }
+  try {
+    // A browser family is multi-step over one page, so its remote session
+    // outlives a step. Without this it would outlive the run too.
+    const { closeRunBrowserSessions } =
+      await import("@/lib/workflow/nodes/browser/session-registry")
+    await closeRunBrowserSessions(runId)
+  } catch {
+    // best-effort cleanup
+  }
   // Lease teardown (ADR 0061 P4) — stop renewing, then free the claim so a
   // resume/replay elsewhere isn't blocked for a full TTL.
   stopLeaseHeartbeat(runId)

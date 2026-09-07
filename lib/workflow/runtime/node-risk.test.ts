@@ -15,6 +15,9 @@ describe("classifyNodeRisk", () => {
       ["action.git.push", "external-send", "high"],
       ["action.desktop.getAppState", "computer-use", "high"],
       ["action.desktop.performAction", "computer-use", "high"],
+      ["action.browser.act", "computer-use", "high"],
+      ["action.browser.fillForm", "computer-use", "high"],
+      ["action.browser.replayFlow", "computer-use", "high"],
       ["action.system.terminal", "native-command", "high"],
       ["action.terminal.script", "native-command", "high"],
       ["action.terminal.session.run", "native-command", "high"],
@@ -56,6 +59,15 @@ describe("classifyNodeRisk", () => {
       // destination, so both either create or fail.
       "action.fs.mkdir",
       "action.fs.copy",
+      // Browser reads. `.screenshot` is here and `action.desktop.getAppState`
+      // is not, because a desktop screenshot sees whatever is on the operator's
+      // screen while this one can only see a page the workspace granted.
+      "action.browser.open",
+      "action.browser.snapshot",
+      "action.browser.readPage",
+      "action.browser.waitFor",
+      "action.browser.diagnostics",
+      "action.browser.screenshot",
       // Reads.
       "action.fs.read",
       "action.fs.list",

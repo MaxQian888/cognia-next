@@ -30,6 +30,44 @@
         "label": "Update artifact"
       }
     },
+    "browser": {
+      "act": {
+        "description": "Click, type, select, hover, press a key or scroll, addressing an element by the ref a snapshot gave it.",
+        "label": "Act on element"
+      },
+      "diagnostics": {
+        "description": "Read the page's console lines and network requests. The did-the-deploy-break-it node.",
+        "label": "Read console and network"
+      },
+      "fillForm": {
+        "description": "Fill several fields in order. A field can name a credential instead of a literal, and a credential that will not resolve fails the step rather than typing an empty string into it.",
+        "label": "Fill form"
+      },
+      "open": {
+        "description": "Navigate the run's browser to a URL and wait for it to load. A public domain has to be granted for this workspace first, and a redirect off it fails the step.",
+        "label": "Open page"
+      },
+      "readPage": {
+        "description": "Read the page as plain text. The reading counterpart of Snapshot.",
+        "label": "Read page text"
+      },
+      "replayFlow": {
+        "description": "Replay a recorded browser flow. Desktop only: the replayer addresses elements through the embedded pane.",
+        "label": "Replay recorded flow"
+      },
+      "screenshot": {
+        "description": "Capture the viewport, the full page, or one element. The bytes ride only when asked for, and the size is always reported.",
+        "label": "Screenshot page"
+      },
+      "snapshot": {
+        "description": "Capture the page's accessibility tree with a ref for every element, which is what Act and Fill form address.",
+        "label": "Snapshot page"
+      },
+      "waitFor": {
+        "description": "Block until text appears, a selector matches, or the network goes idle. Exactly one of the three.",
+        "label": "Wait for page"
+      }
+    },
     "canvas": {
       "create": {
         "description": "Open a new editable Canvas document with the given content.",

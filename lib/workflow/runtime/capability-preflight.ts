@@ -113,7 +113,54 @@ export async function remoteCapabilityUnion(now: number = Date.now()): Promise<C
   } catch {
     // No remote-host store in this runtime (mobile, headless) — nothing to add.
   }
+  if (!union.has("browser")) {
+    for (const cap of await probeRemoteBrowserCapability()) union.add(cap)
+  }
   return [...union]
+}
+
+/** Cached for the process: the runtime's compile-time answer does not change. */
+let remoteBrowserProbe: Promise<CapabilityId[]> | null = null
+
+/**
+ * Ask whether an ADR-0085 remote browser runtime is actually reachable.
+ *
+ * `browser` is absent from the headless baseline, and that is correct as a
+ * static fact: the remote runtime is gated four ways (an env flag off by
+ * default, a compile feature, a user setting, and a health probe), so a brain
+ * usually cannot browse. But when it *can*, a static baseline would reject a
+ * browser node the host would have run perfectly well.
+ *
+ * `browser_runtime_status` is asked first for the same reason the preview pane
+ * asks it first: it is the one RPC the gateway answers when the runtime is not
+ * compiled, and every other one is refused with `browser_disabled`.
+ */
+async function probeRemoteBrowserCapability(): Promise<CapabilityId[]> {
+  remoteBrowserProbe ??= (async (): Promise<CapabilityId[]> => {
+    try {
+      const { transport } = await import("@/lib/tauri")
+      const status = await transport.call<{ compiled?: boolean; healthy?: boolean }>(
+        "browser_runtime_status",
+        {}
+      )
+      if (!status?.compiled || status.healthy === false) return []
+      const readiness = await transport.call<{ capabilities?: string[] }>("browser_capability", {
+        userEnabled: true,
+      })
+      return readiness?.capabilities?.includes("browser") ? ["browser"] : []
+    } catch {
+      // No gateway, no transport, or a refusal. Contributing nothing is the
+      // honest answer, and preflight then fails at t=0 with a named capability
+      // rather than letting the node throw mid-run.
+      return []
+    }
+  })()
+  return remoteBrowserProbe
+}
+
+/** Test-only: forget the cached probe. */
+export function __resetRemoteBrowserProbeForTesting(): void {
+  remoteBrowserProbe = null
 }
 
 /** One-line human summary used as the run failure message. */
