@@ -25,6 +25,7 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
   const pathname = usePathname()
   const snapshot = useRuntimeSnapshot()
   const t = useTranslations("runtime.surfaceBoundary")
+  const tCommon = useTranslations("common")
   const contract = getSurfaceContractForRoute(pathname)
 
   if (!contract || isInternalRouteExempt(pathname) || !snapshot.target) {
@@ -86,9 +87,19 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
               <Link href={recovery.href}>{t(recovery.label)}</Link>
             </Button>
           )}
-          <Button asChild variant="outline">
-            <Link href="/">{t("backToChat")}</Link>
-          </Button>
+          {/* This boundary replaces the whole route, page chrome included, so a
+              blocked /me sub-page lost its back arrow and the only way out was
+              a button that dropped the reader into chat. Under /me the exit
+              goes back to /me. */}
+          {pathname.startsWith("/me/") ? (
+            <Button asChild variant="outline">
+              <Link href="/me">{tCommon("back")}</Link>
+            </Button>
+          ) : (
+            <Button asChild variant="outline">
+              <Link href="/">{t("backToChat")}</Link>
+            </Button>
+          )}
         </EmptyContent>
       </Empty>
     </main>

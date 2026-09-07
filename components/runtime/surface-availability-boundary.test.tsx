@@ -53,6 +53,31 @@ it("lets the recovery page claim the whole content slot", () => {
   expect(main).toHaveClass("flex-1", "w-full")
 })
 
+it("sends a blocked /me sub-page back to /me, not into chat", () => {
+  // The boundary replaces the whole route, page chrome included, so /me/terminal
+  // lost its back arrow. The only exit left was a button that dropped the reader
+  // into chat, one level past where they came from.
+  pathname = "/me/terminal"
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>terminal implementation</div>
+    </SurfaceAvailabilityBoundary>
+  )
+
+  expect(screen.queryByText("terminal implementation")).not.toBeInTheDocument()
+  expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/me")
+  expect(screen.queryByRole("link", { name: "backToChat" })).not.toBeInTheDocument()
+})
+
+it("still offers chat as the exit from a top-level capability route", () => {
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>browser implementation</div>
+    </SurfaceAvailabilityBoundary>
+  )
+  expect(screen.getByRole("link", { name: "backToChat" })).toHaveAttribute("href", "/")
+})
+
 it("keeps the standalone plugin library fully available without a read-only banner", () => {
   pathname = "/plugins"
 
