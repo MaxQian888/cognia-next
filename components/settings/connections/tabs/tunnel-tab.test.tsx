@@ -300,6 +300,52 @@ describe("TunnelTab", () => {
     hostProfile = "cloud-companion"
   })
 
+  it.each([
+    ["matrix", "matrix-1", /no inbound webhook to register/i],
+    ["wecom", "wecom-1", /only the Stream gateway is implemented/i],
+  ])("says WHY %s has no callback URL, not just that it has none", async (type, id, expected) => {
+    // "The protocol has no webhook" and "we have not built this platform's
+    // webhook yet" looked identical on this row. Only the second one has
+    // anything behind it, and an operator whose network blocks the socket
+    // needs to know which one they are looking at.
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([baseAdapter({ id, type, displayName: `${type} Prod`, transportMode: "gateway" })])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() => expect(screen.getByTestId(`tunnel-adapter-row-${id}`)).toBeInTheDocument())
+    expect(screen.getByTestId(`tunnel-adapter-no-url-${id}`)).toHaveTextContent(expected)
+    expect(screen.queryByTestId(`tunnel-adapter-url-${id}`)).not.toBeInTheDocument()
+  })
+
+  it("falls back to the generic wording for a platform that has a transport choice", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "discord-3",
+        type: "discord",
+        displayName: "Discord Gateway",
+        transportMode: "gateway",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-no-url-discord-3")).toHaveTextContent(
+        /dials out, so it needs no public URL/i
+      )
+    )
+  })
+
   it("shows no URL for a Discord row that dials out", async () => {
     mockIsTauri.mockReturnValue(true)
     mockCurrent.mockResolvedValue({

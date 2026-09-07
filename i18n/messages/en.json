@@ -32578,6 +32578,12 @@
         "title": "Send a test message",
         "unsupportedReplyOnly": "This adapter can only reply to inbound messages; it can't send a standalone test message."
       },
+      "singleTransport": {
+        "dingtalk": "DingTalk does publish an HTTP callback, but only Stream mode is implemented here yet.",
+        "matrix": "Matrix delivers events by long-polling /sync. The client-server API has no inbound webhook to register.",
+        "wechatPersonal": "Personal WeChat has no official inbound API. Messages arrive over the bridge this app polls.",
+        "wecom": "WeCom does publish an HTTP callback, but only the Stream gateway is implemented here yet."
+      },
       "slaEscalation": {
         "cancel": "Cancel",
         "description": "Bot-wide defaults. Conversations inherit both values unless their override sets its own SLA minutes or escalation chain.",

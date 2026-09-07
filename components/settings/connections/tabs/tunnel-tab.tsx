@@ -49,6 +49,7 @@ import {
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { CONNECTORS_SERVER_PORT, connectorWebhookPath } from "@/lib/connectors/server-transport"
+import { singleTransportPlatform } from "@/lib/connectors/single-transport-platforms"
 import { useConnectorIngress, type ConnectorIngressReason } from "@/hooks/use-connector-ingress"
 import { refreshCompanionEndpoints } from "@/lib/connectivity/endpoint-refresh"
 
@@ -81,6 +82,7 @@ export interface TunnelTabProps {
 
 export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProps = {}) {
   const t = useTranslations("settings.connections.tunnel")
+  const tSingle = useTranslations("settings.connections.singleTransport")
   // The cloudflared child process is genuinely the desktop's own — but the
   // reason it is unreachable differs by host, and "open Cognia on your
   // desktop" is wrong for a server deployment that does not use a tunnel at
@@ -386,8 +388,20 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
                       <span className="text-sm font-medium">{adapter.displayName}</span>
                     </div>
                     {!path ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {t("webhookUrls.notApplicable")}
+                      <p
+                        className="mt-1 text-[11px] text-muted-foreground"
+                        data-testid={`tunnel-adapter-no-url-${adapter.id}`}
+                      >
+                        {/*
+                          A platform with only one inbound transport says which
+                          kind of "only one" it is. "The protocol has no
+                          webhook" and "we have not built this platform's
+                          webhook yet" look identical on this row otherwise,
+                          and only the second one has anything behind it.
+                        */}
+                        {singleTransportPlatform(adapter.type)
+                          ? tSingle(singleTransportPlatform(adapter.type)!.reasonKey)
+                          : t("webhookUrls.notApplicable")}
                       </p>
                     ) : !ingress.base ? (
                       <p

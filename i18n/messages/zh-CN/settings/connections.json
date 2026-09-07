@@ -1430,6 +1430,12 @@
     "title": "发送测试消息",
     "unsupportedReplyOnly": "该适配器仅支持回复入站消息，无法发送独立的测试消息。"
   },
+  "singleTransport": {
+    "dingtalk": "钉钉确实提供 HTTP 回调，但此处目前只实现了 Stream 模式。",
+    "matrix": "Matrix 通过长轮询 /sync 投递事件，客户端-服务器 API 没有可注册的入站 webhook。",
+    "wechatPersonal": "个人微信没有官方入站 API，消息通过本应用轮询的桥接通道到达。",
+    "wecom": "企业微信确实提供 HTTP 回调，但此处目前只实现了 Stream 网关。"
+  },
   "slaEscalation": {
     "cancel": "取消",
     "description": "机器人级默认值。除非会话覆盖设置了自己的 SLA 分钟数或升级链，否则会话继承这两个值。",
