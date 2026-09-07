@@ -143,6 +143,71 @@ describe("buildExecutionMonitorModel", () => {
     expect(buildExecutionMonitorModel({ brokerLegs: [], executionRuns: runs })).toHaveLength(2)
   })
 
+  it("keeps a team run that names itself as its own source", () => {
+    // No row is its own legacy copy. Collapsing on a bare `sourceIds.has(id)`
+    // did exactly that to a row with `sourceId === id`, and the run vanished
+    // from the cockpit rather than being deduped against anything.
+    const selfReferencing: ExecutionRun = {
+      id: "run_team_self",
+      kind: "team",
+      sourceId: "run_team_self",
+      title: "Self-sourced team run",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 3000,
+      updatedAt: 3000,
+    }
+    expect(supersededTeamRunIds([selfReferencing]).size).toBe(0)
+    const rows = buildExecutionMonitorModel({ brokerLegs: [], executionRuns: [selfReferencing] })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ rowId: "journal:run_team_self", kind: "team" })
+  })
+
+  it("still collapses a legacy/canonical pair once a self-sourced run is in the list", () => {
+    const canonical: ExecutionRun = {
+      id: "execution:team:run_team_1",
+      kind: "team",
+      sourceId: "run_team_1",
+      sessionId: "session-1",
+      title: "Ship the thing",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 3000,
+      updatedAt: 3000,
+    }
+    const legacy: ExecutionRun = {
+      id: "run_team_1",
+      kind: "team",
+      sourceId: "team-9",
+      title: "Agent team run",
+      status: "queued",
+      currentRevision: 0,
+      startedAt: 2900,
+      updatedAt: 2900,
+    }
+    const selfReferencing: ExecutionRun = {
+      id: "run_team_self",
+      kind: "team",
+      sourceId: "run_team_self",
+      title: "Self-sourced team run",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 2800,
+      updatedAt: 2800,
+    }
+    expect(supersededTeamRunIds([canonical, legacy, selfReferencing])).toEqual(
+      new Set(["run_team_1"])
+    )
+    const rows = buildExecutionMonitorModel({
+      brokerLegs: [],
+      executionRuns: [canonical, legacy, selfReferencing],
+    })
+    expect(rows.map((row) => row.rowId).sort()).toEqual([
+      "journal:execution:team:run_team_1",
+      "journal:run_team_self",
+    ])
+  })
+
   it("keeps the cancellable broker projection when it matches a canonical live run", () => {
     const executionRun: ExecutionRun = {
       id: "execution:agent:session-1:turn-1",

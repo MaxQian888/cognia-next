@@ -272,7 +272,11 @@ export function journalSourceKey(run: ExecutionRun): string {
 export function supersededTeamRunIds(runs: readonly ExecutionRun[]): Set<string> {
   const sourceIds = new Set<string>()
   for (const run of runs) {
-    if (run.kind === "team") sourceIds.add(run.sourceId)
+    // A row that names ITSELF as its source contributes nothing: the pair this
+    // collapses is two DISTINCT rows, and no row is its own legacy copy.
+    // Counting the self-reference made every such run supersede itself and
+    // disappear from the cockpit entirely.
+    if (run.kind === "team" && run.sourceId !== run.id) sourceIds.add(run.sourceId)
   }
   const superseded = new Set<string>()
   for (const run of runs) {

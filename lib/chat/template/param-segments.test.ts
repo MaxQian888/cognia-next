@@ -139,4 +139,29 @@ describe("splitParamSegments", () => {
 
     expect(params.map((s) => s.kind === "param" && s.paramId)).toEqual(["live"])
   })
+
+  it("does not read code ranges for reference-separated text without parameters", () => {
+    const start = jest.fn(() => 0)
+    const ranges = [
+      {
+        get start() {
+          return start()
+        },
+        end: 1000,
+      },
+    ]
+    const segments = parseSegments("@a plain @b more @c tail", noCommands, { mentions: true })
+    expect(splitParamSegments(segments, ranges)).toEqual(segments)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it("keeps parameter offsets and code masks ordered after many references", () => {
+    const input = "@a `{{masked}}` {{live}}\n".repeat(100)
+    const segments = overlay(input)
+    expect(segments.filter((s) => s.kind === "param").map((s) => s.paramId)).toEqual(
+      Array(100).fill("live")
+    )
+    expect(segments.map((s) => (s.kind === "text" ? s.value : s.raw)).join("")).toBe(input)
+    expect(segments.every((s, i) => s.start === (i ? segments[i - 1].end : 0))).toBe(true)
+  })
 })

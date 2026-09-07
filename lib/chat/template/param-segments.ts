@@ -50,6 +50,15 @@ export function listParamTokens(
   input: string,
   codeRanges: readonly CodeRange[] = []
 ): ParamSegment[] {
+  return scanParamTokens(input, codeRanges, 0)
+}
+
+/** Compare against absolute code ranges without copying them per text fragment. */
+function scanParamTokens(
+  input: string,
+  codeRanges: readonly CodeRange[],
+  offset: number
+): ParamSegment[] {
   const out: ParamSegment[] = []
   const pattern = paramTokenPattern()
   let match: RegExpExecArray | null
@@ -58,7 +67,7 @@ export function listParamTokens(
     const start = match.index
     const end = start + match[0].length
     if (paramId.length > PARAM_ID_MAX_LENGTH) continue
-    if (isInCodeRange(codeRanges, start, end)) continue
+    if (isInCodeRange(codeRanges, start + offset, end + offset)) continue
     out.push({ kind: "param", paramId, raw: match[0], start, end })
   }
   return out
@@ -95,7 +104,7 @@ export function splitParamSegments(
 
 function splitParams(seg: RichSegment, codeRanges: readonly CodeRange[]): RichSegment[] {
   if (seg.kind !== "text") return [seg]
-  const tokens = listParamTokens(seg.value, shiftRanges(codeRanges, -seg.start))
+  const tokens = scanParamTokens(seg.value, codeRanges, seg.start)
   if (tokens.length === 0) return [seg]
 
   const out: RichSegment[] = []
@@ -125,10 +134,4 @@ function splitParams(seg: RichSegment, codeRanges: readonly CodeRange[]): RichSe
     })
   }
   return out
-}
-
-/** Re-base absolute code ranges onto a segment's local coordinates. */
-function shiftRanges(ranges: readonly CodeRange[], delta: number): CodeRange[] {
-  if (delta === 0 || ranges.length === 0) return ranges as CodeRange[]
-  return ranges.map((range) => ({ start: range.start + delta, end: range.end + delta }))
 }

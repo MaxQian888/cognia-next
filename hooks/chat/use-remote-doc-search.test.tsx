@@ -3,13 +3,14 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 jest.mock("@/lib/docs-providers", () => ({
   ...jest.requireActual("@/lib/docs-providers/types"),
   getDocsProviderByPrefix: jest.fn(),
-  isDocsProviderHostSupported: jest.fn(() => true),
 }))
+
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: jest.fn(() => "desktop") }))
+import { useHostProfile } from "@/hooks/use-host-profile"
 
 import {
   DocsProviderError,
   getDocsProviderByPrefix,
-  isDocsProviderHostSupported,
   type DocsProvider,
   type RemoteDocRef,
 } from "@/lib/docs-providers"
@@ -20,7 +21,7 @@ import {
 } from "./use-remote-doc-search"
 
 const byPrefixMock = getDocsProviderByPrefix as jest.Mock
-const hostSupportedMock = isDocsProviderHostSupported as jest.Mock
+const hostProfileMock = jest.mocked(useHostProfile)
 
 const HIT: RemoteDocRef = { providerId: "lark", kind: "doc", id: "doxcn1", title: "Spec" }
 
@@ -41,7 +42,7 @@ function provider(overrides: Partial<DocsProvider> = {}): DocsProvider {
 beforeEach(() => {
   jest.clearAllMocks()
   jest.useFakeTimers()
-  hostSupportedMock.mockReturnValue(true)
+  hostProfileMock.mockReturnValue("desktop")
 })
 
 afterEach(() => {
@@ -75,7 +76,7 @@ describe("useRemoteDocSearch — host gating", () => {
   it("loads no accounts and runs no search on an unsupported host", async () => {
     const p = provider()
     byPrefixMock.mockReturnValue(p)
-    hostSupportedMock.mockReturnValue(false)
+    hostProfileMock.mockReturnValue("web-standalone")
     const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "spec" }))
     await flushDebounce()
     expect(result.current.hostSupported).toBe(false)
@@ -85,6 +86,54 @@ describe("useRemoteDocSearch — host gating", () => {
 })
 
 describe("useRemoteDocSearch — accounts", () => {
+  it("ignores account responses after the provider is closed", async () => {
+    let resolve!: (accounts: { id: string; label: string }[]) => void
+    const pending = new Promise<{ id: string; label: string }[]>((done) => {
+      resolve = done
+    })
+    byPrefixMock.mockReturnValue(provider({ listAccounts: jest.fn(() => pending) }))
+    const { result, rerender } = renderHook(
+      ({ namespace }: { namespace: string | null }) => useRemoteDocSearch({ namespace, query: "" }),
+      { initialProps: { namespace: "lark:" as string | null } }
+    )
+    rerender({ namespace: null })
+    await act(async () => resolve([{ id: "stale", label: "Stale" }]))
+    expect(result.current.accounts).toBeNull()
+    expect(result.current.accountId).toBeNull()
+  })
+
+  it("ignores account failures after the provider is closed", async () => {
+    let reject!: (error: Error) => void
+    const pending = new Promise<never>((_, fail) => {
+      reject = fail
+    })
+    byPrefixMock.mockReturnValue(provider({ listAccounts: jest.fn(() => pending) }))
+    const { result, rerender } = renderHook(
+      ({ namespace }: { namespace: string | null }) => useRemoteDocSearch({ namespace, query: "" }),
+      { initialProps: { namespace: "lark:" as string | null } }
+    )
+    rerender({ namespace: null })
+    await act(async () => reject(new Error("Stale")))
+    expect(result.current.error).toBeNull()
+  })
+
+  it.each([new Error("Offline"), "Offline"])(
+    "normalizes an unexpected account error %j",
+    async (error) => {
+      byPrefixMock.mockReturnValue(
+        provider({
+          listAccounts: jest.fn(async () => {
+            throw error
+          }),
+        })
+      )
+      const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "" }))
+      await waitFor(() =>
+        expect(result.current.error).toEqual({ code: "network", params: { reason: "Offline" } })
+      )
+    }
+  )
+
   it("auto-selects the first account", async () => {
     byPrefixMock.mockReturnValue(provider())
     const { result } = renderHook(() => useRemoteDocSearch({ namespace: "lark:", query: "" }))
@@ -151,6 +200,53 @@ describe("useRemoteDocSearch — link fast path", () => {
 })
 
 describe("useRemoteDocSearch — keyword search", () => {
+  it.each(["", "https://x/docx/direct"])(
+    "does not let pending search replace the current query %j",
+    async (query) => {
+      let resolve!: (hits: RemoteDocRef[]) => void
+      const pending = new Promise<RemoteDocRef[]>((done) => {
+        resolve = done
+      })
+      const p = provider({
+        search: jest.fn(() => pending),
+        matchRef: jest.fn((value) =>
+          value.startsWith("https:") ? { kind: "doc", id: "direct", url: value } : null
+        ),
+      })
+      byPrefixMock.mockReturnValue(p)
+      const { result, rerender } = renderHook(
+        ({ query }) => useRemoteDocSearch({ namespace: "lark:", query }),
+        { initialProps: { query: "spec" } }
+      )
+      await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
+      await flushDebounce()
+      expect(p.search).toHaveBeenCalledTimes(1)
+      rerender({ query })
+      await act(async () => resolve([HIT]))
+      expect(result.current.items.map((item) => item.id)).toEqual(query ? ["direct"] : [])
+      expect(result.current.loading).toBe(false)
+    }
+  )
+
+  it("ignores a rejected request when the host becomes unsupported", async () => {
+    let reject!: (error: Error) => void
+    const pending = new Promise<RemoteDocRef[]>((_, fail) => {
+      reject = fail
+    })
+    byPrefixMock.mockReturnValue(provider({ search: jest.fn(() => pending) }))
+    const { result, rerender } = renderHook(() =>
+      useRemoteDocSearch({ namespace: "lark:", query: "spec" })
+    )
+    await waitFor(() => expect(result.current.accountId).toBe("cai_1"))
+    await flushDebounce()
+    hostProfileMock.mockReturnValue("web-standalone")
+    rerender()
+    await act(async () => reject(new Error("stale network failure")))
+    expect(result.current.error).toBeNull()
+    expect(result.current.items).toEqual([])
+    expect(result.current.hostSupported).toBe(false)
+  })
+
   it("debounces before the query leaves the device", async () => {
     const p = provider()
     byPrefixMock.mockReturnValue(p)

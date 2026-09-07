@@ -2,13 +2,23 @@
  * @jest-environment jsdom
  */
 
-import { createRef } from "react"
+import { createRef, type ComponentProps } from "react"
 import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { ComposerPopover, type ComposerPopoverHandle } from "./composer-popover"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
 import type { ComposerTrigger, MentionableWorkflowElement } from "./composer-trigger"
 import { useRemoteDocSearch } from "@/hooks/chat/use-remote-doc-search"
 import type { RemoteDocSearchState } from "@/hooks/chat/use-remote-doc-search"
+import { isWorkspaceSearchReachable, searchWorkspace } from "@/lib/files/workspace-search"
+import type { WorkspaceEntry } from "@/lib/files/types"
+import { useEntityMentionSearch } from "@/hooks/chat/use-entity-mention-search"
+
+jest.mock("@/hooks/chat/use-entity-mention-search", () => ({ useEntityMentionSearch: jest.fn() }))
+
+jest.mock("@/lib/files/workspace-search", () => ({
+  isWorkspaceSearchReachable: jest.fn(() => false),
+  searchWorkspace: jest.fn(),
+}))
 
 const useRemoteDocSearchMock = useRemoteDocSearch as jest.MockedFunction<typeof useRemoteDocSearch>
 
@@ -30,6 +40,11 @@ function docSearchState(overrides: Partial<RemoteDocSearchState> = {}): RemoteDo
 
 beforeEach(() => {
   useRemoteDocSearchMock.mockReturnValue(docSearchState())
+  jest.mocked(isWorkspaceSearchReachable).mockReturnValue(false)
+  jest.mocked(searchWorkspace).mockReset()
+  jest
+    .mocked(useEntityMentionSearch)
+    .mockReturnValue({ source: null, items: [], loading: false, error: null })
 })
 
 // Stable `t` per the real next-intl contract (its `t` identity is memoized).
@@ -122,7 +137,306 @@ function rowTexts(): string[] {
   return screen.getAllByRole("listitem").map((li) => li.textContent ?? "")
 }
 
+describe("ComposerPopover — reference modes", () => {
+  function mount(
+    kind: ComposerTrigger["kind"],
+    extra: Partial<ComponentProps<typeof ComposerPopover>> = {},
+    query = ""
+  ) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const onPick = jest.fn()
+    const ref = createRef<ComposerPopoverHandle>()
+    const view = render(
+      <ComposerPopover
+        ref={ref}
+        anchor={anchor}
+        cwd={null}
+        slashCommands={commands}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+        trigger={{ kind, query, tokenStart: 0, tokenEnd: query.length + 1 }}
+        {...extra}
+      />
+    )
+    return { ...view, onPick, ref }
+  }
+
+  it("filters and picks skills without losing the selected payload", () => {
+    const skills = [
+      { id: "one", name: "Review", description: "Inspect code" },
+      { id: "two", name: "Write" },
+    ]
+    const view = mount("skill", { chatSkills: skills })
+    expect(rowTexts()).toHaveLength(2)
+    fireEvent.mouseEnter(screen.getByText("Write").closest("li")!)
+    act(() => {
+      view.ref.current?.confirm()
+    })
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "skill", skill: skills[1] })
+    view.unmount()
+    mount("skill", { chatSkills: skills }, "nomatch")
+    expect(screen.getByText(/noSkillMatches/)).toBeInTheDocument()
+  })
+
+  it("renders preset metadata and picks the intended preset", () => {
+    const presets = [
+      {
+        id: "one",
+        name: "Review",
+        content: "review",
+        createdAt: 0,
+        updatedAt: 0,
+        icon: "R",
+        description: "Inspect code",
+      },
+      { id: "two", name: "Write", content: "write", createdAt: 0, updatedAt: 0 },
+    ]
+    const view = mount("preset", { chatPresets: presets })
+    fireEvent.mouseDown(screen.getByText("Write").closest("li")!)
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "preset", preset: presets[1] })
+    view.unmount()
+    mount("preset", { chatPresets: presets }, "nomatch")
+    expect(screen.getByText(/noPresetMatches/)).toBeInTheDocument()
+  })
+
+  it("filters the explicit agent namespace and confirms the matching subagent", () => {
+    const target = {
+      id: "reviewer",
+      name: "Reviewer",
+      handle: "reviewer",
+      description: "Review code",
+    }
+    const view = mount("subagent", { chatAgents: [target] }, "rev")
+    expect(screen.getByTestId("subagent-mention-row-reviewer")).toBeInTheDocument()
+    act(() => {
+      view.ref.current?.confirm()
+    })
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "subagent", target })
+  })
+
+  it.each(["skill", "preset", "agent", "subagent", "wfNode", "wfEdge"] as const)(
+    "shows an empty state for %s without intercepting confirm",
+    (kind) => {
+      const view = mount(kind)
+      act(() => {
+        expect(view.ref.current?.confirm()).toBe(false)
+        view.ref.current?.navigate(1)
+      })
+      expect(view.onPick).not.toHaveBeenCalled()
+      expect(screen.queryAllByRole("listitem")).toHaveLength(0)
+    }
+  )
+
+  it("keeps saved and repository templates after commands and preserves pick identity", () => {
+    const templates = [
+      {
+        id: "one",
+        name: "Saved review",
+        body: "review",
+        params: [],
+        revision: 1,
+        description: "A saved prompt",
+      },
+      {
+        id: "two",
+        name: "Repository review",
+        body: "review",
+        params: [],
+        revision: 1,
+        source: "repo" as const,
+        sourcePath: ".cognia/review.md",
+      },
+    ]
+    const view = mount("slash", { chatTemplates: templates })
+    const rows = screen.getAllByRole("listitem").filter((row) => row.hasAttribute("data-index"))
+    expect(rows.slice(-2).map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Saved review"),
+      expect.stringContaining("Repository review"),
+    ])
+    fireEvent.mouseDown(screen.getByText("Repository review").closest("li")!)
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "chatTemplate", template: templates[1] })
+  })
+
+  it("renders memory destinations and shell hints", () => {
+    const view = mount("memory", {}, "Remember this")
+    expect(rowTexts()).toHaveLength(4)
+    act(() => {
+      view.ref.current?.confirm()
+    })
+    expect(view.onPick).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "memory", preview: "Remember this" })
+    )
+    view.unmount()
+    mount("bash", { shellEmptyMessage: "No shell host" }, "ls")
+    expect(screen.getByText("$ ls")).toBeInTheDocument()
+    expect(screen.getByText("No shell host")).toBeInTheDocument()
+  })
+
+  it("renders entity results, selects the right reference, and surfaces read errors", () => {
+    const candidate = {
+      entityKind: "issue" as const,
+      id: "one",
+      title: "First issue",
+      subtitle: "Open",
+      searchText: "first issue",
+    }
+    const state = {
+      source: { entityKind: "issue" as const, prefix: "issue:", snapshot: jest.fn() },
+      items: [candidate],
+      loading: false,
+      error: null,
+    }
+    jest.mocked(useEntityMentionSearch).mockReturnValue(state)
+    const view = mount("entity")
+    fireEvent.mouseDown(screen.getByText("First issue").closest("li")!)
+    expect(view.onPick).toHaveBeenCalledWith({ kind: "entity", candidate })
+    view.unmount()
+    jest
+      .mocked(useEntityMentionSearch)
+      .mockReturnValue({ ...state, items: [], error: "Read failed" })
+    mount("entity", {}, "missing")
+    expect(screen.getByText("Read failed")).toBeInTheDocument()
+  })
+})
+
+describe("ComposerPopover — file request lifetime", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.mocked(isWorkspaceSearchReachable).mockReturnValue(true)
+  })
+  afterEach(() => jest.useRealTimers())
+
+  function deferred() {
+    let resolve!: (entries: WorkspaceEntry[]) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<WorkspaceEntry[]>((yes, no) => {
+      resolve = yes
+      reject = no
+    })
+    return { promise, resolve, reject }
+  }
+  function entries(name: string): WorkspaceEntry[] {
+    return [{ relPath: name, absolutePath: `/repo/${name}`, isDir: false, size: 1, mtimeMs: 0 }]
+  }
+  function fileView() {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const props = { anchor, slashCommands: commands, onPick: jest.fn(), onDismiss: jest.fn() }
+    const node = (cwd: string, query = "a", tokenStart = 0) => (
+      <ComposerPopover
+        {...props}
+        cwd={cwd}
+        trigger={{ kind: "file", query, tokenStart, tokenEnd: tokenStart + query.length + 1 }}
+      />
+    )
+    const view = render(node("/first"))
+    return {
+      ...view,
+      close: () => view.rerender(<ComposerPopover {...props} cwd="/first" trigger={null} />),
+      update: (cwd: string, query = "a", start = 0) => view.rerender(node(cwd, query, start)),
+    }
+  }
+  const tick = () => act(() => jest.advanceTimersByTime(200))
+
+  it("shows missing-workspace and current search failures without stale rows", async () => {
+    jest.mocked(searchWorkspace).mockRejectedValue(new Error("Workspace unavailable"))
+    const view = fileView()
+    view.update("")
+    expect(screen.getByText("workspaceMissing")).toBeInTheDocument()
+    expect(searchWorkspace).not.toHaveBeenCalled()
+    view.update("/first")
+    await tick()
+    expect(screen.getByText("Workspace unavailable")).toBeInTheDocument()
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0)
+  })
+
+  it("preserves file order and distinguishes directories from file sizes", async () => {
+    const files = [
+      { ...entries("directory")[0], isDir: true },
+      { ...entries("small.ts")[0], size: 1024 },
+      { ...entries("large.ts")[0], size: 1024 * 1024 },
+    ]
+    jest.mocked(searchWorkspace).mockResolvedValue(files)
+    const view = fileView()
+    view.update("/first", "")
+    await tick()
+    expect(rowTexts()).toEqual(["directory", "small.ts1.0 KB", "large.ts1.0 MB"])
+  })
+
+  it("does not repeat a search when only the token position changes", async () => {
+    jest.mocked(searchWorkspace).mockResolvedValue(entries("a.ts"))
+    const view = fileView()
+    await tick()
+    view.update("/first", "a", 10)
+    await tick()
+    expect(searchWorkspace).toHaveBeenCalledTimes(1)
+    expect(screen.getByText("a.ts")).toBeInTheDocument()
+  })
+
+  it("ignores an older workspace response for the same query", async () => {
+    const old = deferred()
+    const current = deferred()
+    jest
+      .mocked(searchWorkspace)
+      .mockReturnValueOnce(old.promise)
+      .mockReturnValueOnce(current.promise)
+    const view = fileView()
+    await tick()
+    view.update("/second")
+    await tick()
+    await act(async () => current.resolve(entries("current.ts")))
+    await act(async () => old.resolve(entries("stale.ts")))
+    expect(screen.getByText("current.ts")).toBeInTheDocument()
+    expect(screen.queryByText("stale.ts")).not.toBeInTheDocument()
+  })
+
+  it("ignores a rejected request after typing away and back to the same query", async () => {
+    const old = deferred()
+    jest
+      .mocked(searchWorkspace)
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue(entries("current.ts"))
+    const view = fileView()
+    await tick()
+    view.update("/first", "b")
+    view.update("/first", "a")
+    await tick()
+    await act(async () => old.reject(new Error("stale failure")))
+    expect(screen.getByText("current.ts")).toBeInTheDocument()
+    expect(screen.queryByText("stale failure")).not.toBeInTheDocument()
+  })
+
+  it("ignores a pending response after closing and reopening the file picker", async () => {
+    const old = deferred()
+    jest
+      .mocked(searchWorkspace)
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue(entries("current.ts"))
+    const view = fileView()
+    await tick()
+    view.close()
+    view.update("/first")
+    await tick()
+    await act(async () => old.resolve(entries("stale.ts")))
+    expect(screen.getByText("current.ts")).toBeInTheDocument()
+    expect(screen.queryByText("stale.ts")).not.toBeInTheDocument()
+  })
+})
+
 describe("ComposerPopover — slash fuzzy ranking", () => {
+  it("restores the composer query after leaving the popover search field", () => {
+    setup(slashTrigger("co"))
+    const search = screen.getByRole("searchbox")
+    fireEvent.focus(search)
+    fireEvent.change(search, { target: { value: "review" } })
+    expect(search).toHaveValue("review")
+    expect(rowTexts()).toHaveLength(1)
+    fireEvent.blur(search)
+    expect(search).toHaveValue("co")
+    expect(rowTexts()).toHaveLength(2)
+  })
+
   it("renders nothing when there is no trigger", () => {
     setup(null)
     expect(screen.queryAllByRole("listitem")).toHaveLength(0)

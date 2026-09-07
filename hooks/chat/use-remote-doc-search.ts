@@ -17,7 +17,7 @@
  * link", which is a complete answer for a user who has the link.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { loggers } from "@cognia/logging"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { docsProviderReach, type DocsProviderReach } from "@/lib/docs-providers/reach"
@@ -142,7 +142,6 @@ export function useRemoteDocSearch({
 
   const searchable = Boolean(provider?.search) && hostSupported
   const trimmed = query.trim()
-  const requestSeq = useRef(0)
 
   useEffect(() => {
     if (!provider || !hostSupported) {
@@ -163,19 +162,21 @@ export function useRemoteDocSearch({
       setLoading(false)
       return
     }
-    const seq = ++requestSeq.current
+    // Cleanup must invalidate searches even when the next render takes a
+    // synchronous link/empty/unavailable branch and starts no replacement.
+    let cancelled = false
     setLoading(true)
     setError(null)
     const handle = window.setTimeout(() => {
       void provider
         .search?.(trimmed, { accountId, limit: DOC_SEARCH_LIMIT })
         .then((hits) => {
-          if (requestSeq.current !== seq) return
+          if (cancelled) return
           setItems(hits ?? [])
           setLoading(false)
         })
         .catch((err) => {
-          if (requestSeq.current !== seq) return
+          if (cancelled) return
           loggers.chat.warn("remote doc search failed", {
             provider: provider.id,
             err: err instanceof Error ? err.message : String(err),
@@ -185,7 +186,10 @@ export function useRemoteDocSearch({
           setLoading(false)
         })
     }, DOC_SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(handle)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
   }, [provider, hostSupported, matched, searchable, trimmed, accountId])
   /* eslint-enable react-hooks/set-state-in-effect */
 

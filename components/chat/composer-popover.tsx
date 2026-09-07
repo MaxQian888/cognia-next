@@ -342,10 +342,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   // setState calls below are intentional async boundaries — eslint's
   // set-state-in-effect rule guards against using effects to mirror state,
   // which isn't what's happening here.
-  const lastQueryRef = useRef<string>("")
+  const fileQuery = trigger?.kind === "file" ? trigger.query : null
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!trigger || trigger.kind !== "file") {
+    if (fileQuery === null) {
       setFileList(null)
       return
     }
@@ -372,13 +372,15 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       })
       return
     }
-    const q = trigger.query
-    lastQueryRef.current = q
+    const q = fileQuery
+    // A query can recur in a different workspace or after a newer request.
+    // Only this effect lifetime may publish its response, including failures.
+    let cancelled = false
     setFileList({ items: [], loading: true, error: null, emptyMessage: "" })
     const handle = window.setTimeout(() => {
       searchWorkspace(cwd, q, 50)
         .then((entries) => {
-          if (lastQueryRef.current !== q) return
+          if (cancelled) return
           setFileList({
             items: entries.map((entry) => ({ kind: "file" as const, entry })),
             loading: false,
@@ -387,7 +389,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           })
         })
         .catch((err) => {
-          if (lastQueryRef.current !== q) return
+          if (cancelled) return
           loggers.chat.warn("composer file search failed", {
             err: err instanceof Error ? err.message : String(err),
             cwd,
@@ -401,8 +403,11 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
           })
         })
     }, 200)
-    return () => window.clearTimeout(handle)
-  }, [trigger, cwd, t])
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [fileQuery, cwd, t])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const displayList: ItemList = useMemo(() => {
