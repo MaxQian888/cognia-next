@@ -1070,6 +1070,7 @@
             "resource_summary": {},
             "run": {},
             "snapshot": {},
+            "source": {},
             "tool_event": {},
             "watch": {}
           }

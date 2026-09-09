@@ -47,6 +47,19 @@ pub struct TaskWorkspaceService {
     store: Arc<Mutex<WorkspaceStore>>,
     registry: WorkspaceRegistry,
     execution_dir: PathBuf,
+    /// Managed source checkouts supplied from a remote (ADR-0176).
+    ///
+    /// A sibling of `execution_dir`, not a child, because a source checkout is
+    /// not an execution root: `reject_registry_owned_source` refuses anything
+    /// under an execution root, and a supplied source has to be bindable.
+    sources_dir: PathBuf,
+    /// The bare-mirror cache the sources are derived from.
+    ///
+    /// Held here rather than read from `cognia_git_mirror::root()` so the
+    /// service is consistent with its own data directory and testable without
+    /// a process-global. `task_workspace::install` points the global at this
+    /// same path, so the two never disagree in production.
+    mirrors_dir: PathBuf,
     manifest_key: Vec<u8>,
     retention: Duration,
     transfers: TransferRegistry,
@@ -246,6 +259,8 @@ impl TaskWorkspaceService {
         fs::create_dir_all(&execution_dir).map_err(|error| {
             format!("create execution dir {}: {error}", execution_dir.display())
         })?;
+        let sources_dir = service_dir.join("sources");
+        let mirrors_dir = service_dir.join("mirrors");
         let store = Arc::new(Mutex::new(WorkspaceStore::open(
             &service_dir,
             config.max_blob_bytes,
@@ -256,6 +271,8 @@ impl TaskWorkspaceService {
             store,
             registry,
             execution_dir,
+            sources_dir,
+            mirrors_dir,
             manifest_key: load_or_create_manifest_key(&service_dir)?,
             retention: config.retention,
             transfers: TransferRegistry::new(Duration::from_secs(5 * 60)),
@@ -269,6 +286,36 @@ impl TaskWorkspaceService {
         service.recover_workspace_bundle_turns()?;
         service.reconcile_known_worktrees()?;
         Ok(service)
+    }
+
+    /// Supply a managed source checkout from a remote, then hand back a root
+    /// that `acquire_workspace_bundle` can be called on (ADR-0176).
+    ///
+    /// This is the missing half of the workspace story on a host with no
+    /// human at a terminal. Everything after it already worked, and none of it
+    /// changes: a supplied source is an ordinary non-bare git root with
+    /// commits in it.
+    ///
+    /// The per-repository lock is the same one acquisition takes, so two issue
+    /// runs that start on one repository at the same moment queue rather than
+    /// racing on one directory. It is taken on the *source root* because that
+    /// is the git common directory being written, and it is released before
+    /// this returns so the acquisition that follows can take it in turn.
+    pub fn ensure_remote_source(
+        &self,
+        input: &crate::remote_source::EnsureRemoteSource,
+    ) -> Result<crate::remote_source::RemoteSourceCheckout, String> {
+        let planned = cognia_git_mirror::checkout_path(&self.sources_dir, input.remote_url.trim())
+            .map_err(|error| format!("resolve source checkout path: {error}"))?;
+        // The lock keys on the git common directory, which does not exist for a
+        // checkout that has not been supplied yet. Falling back to the planned
+        // path still serialises the two callers that matter: the ones racing to
+        // create it.
+        let lock = self
+            .git_admin_lock(&planned)
+            .unwrap_or_else(|| Arc::new(Mutex::new(())));
+        let _held = lock.lock();
+        crate::remote_source::ensure_remote_source(&self.mirrors_dir, &self.sources_dir, input)
     }
 
     /// Bind a stable repository ref to an explicitly trusted, device-local Git root.
@@ -5680,7 +5727,11 @@ mod tests {
             .insert(
                 crate::WorkspaceOwnerType::Session,
                 Some("session-1".into()),
-                repository.canonicalize().unwrap().to_string_lossy().into_owned(),
+                repository
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
                 git_common_dir(&repository),
                 WorkspaceBaseSpec::WorkingState,
                 IsolationKind::GitWorktree,
@@ -5765,7 +5816,11 @@ mod tests {
         // A `.git` file that points somewhere other than an administrative
         // `worktrees/` entry is a submodule, not a linked worktree.
         let submodule = TempDir::new().unwrap();
-        fs::write(submodule.path().join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+        fs::write(
+            submodule.path().join(".git"),
+            "gitdir: ../.git/modules/sub\n",
+        )
+        .unwrap();
         assert!(!is_linked_worktree_checkout(submodule.path()));
     }
 
@@ -8461,6 +8516,110 @@ mod tests {
             .get_managed_workspace(&workspace_id)
             .unwrap()
             .is_some());
+    }
+
+    /// ADR-0176. The whole point of supplying from a remote: what comes back
+    /// is an ordinary git root, so the acquisition path that already worked
+    /// keeps working on it, unchanged, with a real worktree behind it.
+    #[test]
+    fn a_bundle_over_a_supplied_remote_gets_a_git_worktree() {
+        let data = TempDir::new().unwrap();
+        let upstream = TempDir::new().unwrap();
+        git2::Repository::init(upstream.path()).unwrap();
+        seed_git_repository(upstream.path());
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let supplied = service
+            .ensure_remote_source(&crate::EnsureRemoteSource {
+                remote_url: format!("file://{}", upstream.path().display()),
+                base: WorkspaceBaseSpec::RemoteDefault,
+                credential: Some("ghs_SECRET".into()),
+            })
+            .expect("supply");
+
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-remote".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::LocalHead,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: supplied.source_root.clone(),
+                }],
+            })
+            .expect("acquire over a supplied source");
+
+        let lease = &bundle.leases[0];
+        let execution_root = PathBuf::from(&lease.alias_path);
+        assert!(
+            execution_root.join(".git").exists(),
+            "a supplied source must produce a real git execution root"
+        );
+        assert!(execution_root.join("README.md").exists());
+    }
+
+    /// The credential is used once, by the mirror fetch, and this crate never
+    /// learns it. Scans the store's bytes rather than the typed rows, because a
+    /// leak would most likely arrive through a payload blob nobody typed.
+    #[test]
+    fn no_credential_is_ever_written_into_the_workspace_store() {
+        let data = TempDir::new().unwrap();
+        let upstream = TempDir::new().unwrap();
+        git2::Repository::init(upstream.path()).unwrap();
+        seed_git_repository(upstream.path());
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let supplied = service
+            .ensure_remote_source(&crate::EnsureRemoteSource {
+                remote_url: format!("file://{}", upstream.path().display()),
+                base: WorkspaceBaseSpec::RemoteDefault,
+                credential: Some("ghs_SECRET".into()),
+            })
+            .expect("supply");
+        service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
+                project_id: None,
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-secret".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::LocalHead,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: supplied.source_root.clone(),
+                }],
+            })
+            .expect("acquire");
+
+        for entry in fs::read_dir(data.path().join("task-workspaces")).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.is_file() {
+                continue;
+            }
+            let bytes = fs::read(&path).unwrap();
+            assert!(
+                !contains_bytes(&bytes, b"ghs_SECRET"),
+                "credential reached {}",
+                path.display()
+            );
+        }
+
+        // And not into the checkout's own configuration either, which is what
+        // an agent with shell tools can read.
+        let config = fs::read_to_string(PathBuf::from(&supplied.source_root).join(".git/config"))
+            .unwrap_or_default();
+        assert!(!config.contains("ghs_SECRET"), "{config}");
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     }
 
     #[test]

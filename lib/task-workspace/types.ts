@@ -525,3 +525,40 @@ export interface ApplyOutcome {
   revision: number
   conflicts: Array<{ path: string; reason: string }>
 }
+
+/**
+ * Supply a managed source checkout straight from a remote (ADR-0176).
+ *
+ * The missing half of the workspace story on a host with nobody at a terminal:
+ * everything after it already worked, given a git root on disk, and there was
+ * no way to get one. What comes back is an ordinary non-bare checkout, so
+ * `acquireWorkspaceBundle` is called on it unchanged.
+ */
+export interface EnsureRemoteSource {
+  /** The real remote. https for anything that needs a credential. */
+  remoteUrl: string
+  /**
+   * What the caller intends to build on. Only `pullRequest` changes what is
+   * fetched, because GitHub does not advertise `refs/pull/*` and the ref has to
+   * be asked for by name.
+   */
+  base?: WorkspaceBaseSpec
+  /**
+   * PAT or installation token, used once for the mirror fetch.
+   *
+   * Never comes back: the Rust side declares it write-only, so it cannot appear
+   * in a response, a log line, or a persisted job payload. The command is
+   * registered on the loopback service plane only, so a paired device cannot
+   * reach it even holding a `host.admin` lease.
+   */
+  credential?: string
+}
+
+export interface RemoteSourceCheckout {
+  /** The non-bare git root a bundle can now be acquired over. */
+  sourceRoot: string
+  /** The commit the requested base resolves to, when the base names one. */
+  resolvedRef: string | null
+  /** The bare mirror this checkout was derived from, and still fetches from. */
+  mirrorPath: string
+}

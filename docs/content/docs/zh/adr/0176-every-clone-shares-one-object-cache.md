@@ -158,7 +158,34 @@ App，而一份凭据只能抵达签发它的那个部署。所以这个 URL 是
 侧在 `canonical_host_root` 中独立复验一遍，才让这个值进入 `git clone` 参数，因为那里
 正是决定凭据头按哪个 origin 键控的地方。
 
-### 9. 网络克隆会杀掉自己起的进程
+### 9. 工作区可以从远程供给，而凭据止步于那道接缝
+
+git 根之后的一切本来就能跑。`acquire_workspace_bundle`、`create_execution`、
+`apply_provisioning`、`inspect_bundle_root` 要的都是一个有提交的非裸检出，它们在此
+一行未改。缺的是在没人先手动克隆的情况下**拿到**一个的办法，这正是 issue run 在无头
+服务器上起不来的原因。
+
+`cognia-task-workspace::remote_source` 负责供给：镜像、派生、完事。它刻意是**两个**
+宿主命令而不是一个。把凭据挂到 `task_workspace_bundle_acquire` 上，等于把一个
+`service.internal` 才有资格拿的机密，放到一个持 `host.admin` 租约的手机就能发的
+`workspace.write` 载荷上。所以供给命令住在仅回环的 service plane，而它旁边的获取
+命令可达性一点没变。
+
+凭据进得来出不去（`skip_serializing`，外加一个手写的、会脱敏的 `Debug`），且只被用
+一次——镜像 fetch。`cognia-task-workspace` 从不学到它：有一个测试会扫存储的字节和检出
+自己的 `.git/config` 里有没有这枚 token。
+
+**这里的 `origin` 指向镜像，和工作区克隆恰好相反。** 为推送而存在的工作区不能拿本机
+目录当 `origin`。而受管**源**检出是另一种情况：它从不推送，且下游有两处会对它执行
+完全不带凭据的 `git fetch origin`（`fetch_origin_throttled`、
+`resolve_pull_request_base`）。对私有仓库那两处会失败。把 `origin` 留在镜像上就能跑，
+因为镜像是本机上的一个目录，而它自己是**带着**凭据取回来的。真 remote 记为第二个
+无凭据 remote `upstream`，于是检出依然说得清代码从哪来。
+
+PR base 在做镜像时按名字显式请求，并 fetch 进检出，因为 GitHub 不 advertise
+`refs/pull/*`，而对镜像做一次普通 clone 只会带来 `refs/heads/*`。
+
+### 10. 网络克隆会杀掉自己起的进程
 
 `exec::run_within` 自己 spawn 子进程、持有句柄，并以 `kill` 加 `wait` 结束预算。调用方
 删除半成品目标目录时，删的已经是没人在写的目录。stderr 由独立任务抽干，因为克隆很
@@ -206,4 +233,7 @@ App，而一份凭据只能抵达签发它的那个部署。所以这个 URL 是
 | GitHub 部署 | `lib/github/host.ts` |
 | 按账号的 host | `lib/integrations/github-auth.ts` |
 | host 校验（Rust） | `src-tauri/src/github/workspace.rs::canonical_host_root` |
+| 从远程供给 | `crates/cognia-task-workspace/src/remote_source.rs` |
+| 供给命令（仅回环） | `src-tauri/src/companion_api/rpc/service_plane.rs` |
+| 供给客户端 | `lib/task-workspace/client.ts` |
 | 推送凭据转发 | `lib/github/workspace.ts::commitAndPush` |

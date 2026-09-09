@@ -200,6 +200,23 @@ fn slug(normalized: &str) -> String {
 /// is readable. A raw path fragment as the directory name would let a
 /// repository called `../../etc` escape the cache root.
 pub fn mirror_path(root: &Path, remote_url: &str) -> Result<PathBuf, MirrorError> {
+    Ok(root.join(format!("{}.git", dir_stem(remote_url)?)))
+}
+
+/// Where a *derived checkout* for `remote_url` lives under `root`.
+///
+/// The same stem as [`mirror_path`] without the bare-repository `.git` suffix,
+/// so one repository is one directory name in both trees and a person reading
+/// `sources/` and `mirrors/` can pair them by eye. Two spellings of one remote
+/// share a checkout for the same reason they share a mirror: the stem is
+/// derived from the normalised URL, not from what the caller typed.
+pub fn checkout_path(root: &Path, remote_url: &str) -> Result<PathBuf, MirrorError> {
+    Ok(root.join(dir_stem(remote_url)?))
+}
+
+/// `<slug>-<digest>` for a remote. The digest is what keeps two repositories
+/// whose names end the same from colliding once the slug has been truncated.
+fn dir_stem(remote_url: &str) -> Result<String, MirrorError> {
     let normalized = normalize_remote_url(remote_url)?;
     let digest = Sha256::digest(normalized.as_bytes());
     let hash = digest
@@ -207,7 +224,7 @@ pub fn mirror_path(root: &Path, remote_url: &str) -> Result<PathBuf, MirrorError
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    Ok(root.join(format!("{}-{hash}.git", slug(&normalized))))
+    Ok(format!("{}-{hash}", slug(&normalized)))
 }
 
 /// Whether a mirror's last fetch is still inside `ttl`.
@@ -437,6 +454,33 @@ mod tests {
                 "expected a refusal for {bad:?}"
             );
         }
+    }
+
+    #[test]
+    /// One repository is one directory name in both trees. The checkout and
+    /// the mirror differ only by the bare-repository suffix, so `sources/` and
+    /// `mirrors/` can be paired by eye, and a caller cannot accidentally
+    /// derive two checkouts for one repository by spelling the remote
+    /// differently.
+    #[test]
+    fn a_checkout_shares_the_mirror_stem_without_the_bare_suffix() {
+        let root = Path::new("/cache");
+        let mirror = mirror_path(root, "https://github.com/o/r.git").unwrap();
+        let checkout = checkout_path(root, "https://github.com/o/r.git").unwrap();
+
+        assert_eq!(
+            format!("{}.git", checkout.file_name().unwrap().to_string_lossy()),
+            mirror.file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(
+            checkout,
+            checkout_path(root, "git@github.com:o/r.git").unwrap(),
+            "one repository, however it is spelled, is one checkout"
+        );
+        assert_ne!(
+            checkout,
+            checkout_path(root, "https://github.com/o/other").unwrap()
+        );
     }
 
     #[test]

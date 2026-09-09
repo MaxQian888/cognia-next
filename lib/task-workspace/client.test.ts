@@ -39,6 +39,7 @@ jest.mock("./abandoned-turns", () => ({
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
   acquireWorkspaceBundle,
+  acquireWorkspaceBundleFromRemote,
   archiveManagedWorkspace,
   applyTaskWorkspace,
   applyWorkspaceBundle,
@@ -53,6 +54,7 @@ import {
   getTaskResourceSummary,
   listTaskResourceEvents,
   recordTaskResourceToolEvent,
+  ensureRemoteWorkspaceSource,
   reconcileManagedWorkspaces,
   retryWorkspaceBundleHandoff,
   undoWorkspaceBundleHandoff,
@@ -262,6 +264,64 @@ describe("task workspace client", () => {
     await acquireWorkspaceBundle(input)
 
     expect(call).toHaveBeenCalledWith("task_workspace_bundle_acquire", { input })
+  })
+
+  it("supplies a source checkout from a remote before anything is acquired", async () => {
+    // ADR-0176. The credential rides this command and only this command, which
+    // is registered on the loopback service plane, not the device plane.
+    call.mockResolvedValueOnce({
+      sourceRoot: "/data/task-workspaces/sources/o-r-abcd",
+      resolvedRef: null,
+      mirrorPath: "/data/task-workspaces/mirrors/o-r-abcd.git",
+    })
+
+    const supplied = await ensureRemoteWorkspaceSource({
+      remoteUrl: "https://github.com/o/r.git",
+      base: { kind: "remoteDefault" },
+      credential: "ghs_SECRET",
+    })
+
+    expect(call).toHaveBeenCalledWith("task_workspace_remote_source_ensure", {
+      input: {
+        remoteUrl: "https://github.com/o/r.git",
+        base: { kind: "remoteDefault" },
+        credential: "ghs_SECRET",
+      },
+    })
+    expect(supplied.sourceRoot).toBe("/data/task-workspaces/sources/o-r-abcd")
+  })
+
+  it("supplies and acquires as one call, defaulting to a single primary root", async () => {
+    call.mockResolvedValueOnce({
+      sourceRoot: "/data/sources/o-r",
+      resolvedRef: "abc123",
+      mirrorPath: "/data/mirrors/o-r.git",
+    })
+    call.mockResolvedValueOnce({ bundleId: "bundle-remote", leases: [] })
+
+    const { supplied, bundle } = await acquireWorkspaceBundleFromRemote({
+      remoteUrl: "https://github.com/o/r.git",
+      credential: "ghs_SECRET",
+      bundle: {
+        ownerType: "session",
+        ownerRef: "session-remote",
+        environmentKind: "managed",
+        base: { kind: "localHead" },
+      },
+    })
+
+    expect(supplied.resolvedRef).toBe("abc123")
+    expect(bundle.bundleId).toBe("bundle-remote")
+    // The supplied checkout becomes the primary root without the caller
+    // having to name a path it could not have known in advance.
+    expect(call).toHaveBeenLastCalledWith("task_workspace_bundle_acquire", {
+      input: expect.objectContaining({
+        roots: [{ logicalRootId: "primary", role: "primary", sourceRoot: "/data/sources/o-r" }],
+      }),
+    })
+    // The credential goes to the supply command and nowhere near acquisition.
+    const acquireArgs = JSON.stringify(call.mock.calls.at(-1))
+    expect(acquireArgs).not.toContain("ghs_SECRET")
   })
 
   it("begins tracking inside a Registry bundle lease without reprovisioning", async () => {
@@ -549,14 +609,16 @@ describe("task workspace client", () => {
         reclaimedBytes: 0,
         events: [],
       })
-      .mockResolvedValueOnce([{ eventId: "event-1", kind: "reconciled" }])
+      .mockResolvedValueOnce({ items: [{ eventId: "event-1", kind: "reconciled" }] })
 
     await runWorkspaceMaintenance()
-    await listWorkspaceMaintenanceEvents(100)
+    await expect(listWorkspaceMaintenanceEvents({ pageSize: 100 })).resolves.toEqual({
+      items: [{ eventId: "event-1", kind: "reconciled" }],
+    })
 
     expect(call.mock.calls).toEqual([
       ["task_workspace_maintenance_run", { request: { now: null } }],
-      ["task_workspace_maintenance_events", { limit: 100 }],
+      ["task_workspace_maintenance_events", { pageSize: 100 }],
     ])
   })
 
@@ -661,20 +723,20 @@ describe("task workspace client", () => {
 
   it("exposes durable resource timeline, summary, and manifest commands", async () => {
     call
-      .mockResolvedValueOnce([{ eventId: "event-1", seq: 8 }])
+      .mockResolvedValueOnce({ items: [{ eventId: "event-1", seq: 8 }], nextPageToken: "Yzo4" })
       .mockResolvedValueOnce({ runId: "run:session:1", eventCount: 1 })
       .mockResolvedValueOnce({ schemaVersion: 1, events: [] })
 
-    await expect(listTaskResourceEvents("run:session:1", 7, 25)).resolves.toEqual([
-      { eventId: "event-1", seq: 8 },
-    ])
+    await expect(
+      listTaskResourceEvents("run:session:1", { pageSize: 25, pageToken: "Yzo3" })
+    ).resolves.toEqual({ items: [{ eventId: "event-1", seq: 8 }], nextPageToken: "Yzo4" })
     await getTaskResourceSummary("run:session:1")
     await exportTaskResourceManifest("task:message", "run:session:1")
 
     expect(call).toHaveBeenNthCalledWith(1, "task_workspace_list_resource_events", {
       runId: "run:session:1",
-      cursor: 7,
-      limit: 25,
+      pageSize: 25,
+      pageToken: "Yzo3",
     })
     expect(call).toHaveBeenNthCalledWith(2, "task_workspace_get_resource_summary", {
       runId: "run:session:1",

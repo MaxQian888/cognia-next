@@ -1,3 +1,4 @@
+import type { Page, PageRequest } from "@/lib/tauri/companion-paging"
 import { onTauriEvent } from "@/lib/tauri"
 // Every call in this file goes through the approval-aware transport, reads
 // included. A read carries no pending lease so it is passed through untouched,
@@ -14,6 +15,8 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
   AcquireWorkspaceBundle,
+  EnsureRemoteSource,
+  RemoteSourceCheckout,
   ApplyOutcome,
   BeginTaskWorkspaceTurn,
   BeginWorkspaceBundleTurn,
@@ -419,6 +422,47 @@ export function acquireWorkspaceBundle(input: AcquireWorkspaceBundle): Promise<W
   return transport.call("task_workspace_bundle_acquire", { input })
 }
 
+/**
+ * Supply a managed source checkout from a remote (ADR-0176).
+ *
+ * Loopback service plane only. A paired device cannot reach this even holding a
+ * `host.admin` lease, because it takes a repository credential and the device
+ * plane is not where a credential belongs.
+ */
+export function ensureRemoteWorkspaceSource(
+  input: EnsureRemoteSource
+): Promise<RemoteSourceCheckout> {
+  return transport.call("task_workspace_remote_source_ensure", { input })
+}
+
+/**
+ * Supply from a remote and acquire a bundle over it, as one call.
+ *
+ * Two host commands rather than one, deliberately: putting the credential on
+ * `task_workspace_bundle_acquire` would move a `service.internal` secret onto a
+ * `workspace.write` payload that a paired device can send. The seam is where
+ * the credential stops, and this function is the convenience that hides it from
+ * callers who are on the host anyway.
+ */
+export async function acquireWorkspaceBundleFromRemote(
+  input: EnsureRemoteSource & {
+    bundle: Omit<AcquireWorkspaceBundle, "roots"> & {
+      /** Defaults to a single primary root over the supplied checkout. */
+      roots?: AcquireWorkspaceBundle["roots"]
+    }
+  }
+): Promise<{ supplied: RemoteSourceCheckout; bundle: WorkspaceBundle }> {
+  const { bundle: bundleInput, ...supply } = input
+  const supplied = await ensureRemoteWorkspaceSource(supply)
+  const bundle = await acquireWorkspaceBundle({
+    ...bundleInput,
+    roots: bundleInput.roots ?? [
+      { logicalRootId: "primary", role: "primary", sourceRoot: supplied.sourceRoot },
+    ],
+  })
+  return { supplied, bundle }
+}
+
 export function applyWorkspaceBundle(
   bundleId: string,
   request: BundleHandoffRequest
@@ -466,8 +510,10 @@ export function runWorkspaceMaintenance(): Promise<WorkspaceMaintenanceResult> {
   return transport.call("task_workspace_maintenance_run", { request: { now: null } })
 }
 
-export function listWorkspaceMaintenanceEvents(limit = 100): Promise<WorkspaceMaintenanceEvent[]> {
-  return transport.call("task_workspace_maintenance_events", { limit })
+export function listWorkspaceMaintenanceEvents(
+  page: PageRequest = { pageSize: 100 }
+): Promise<Page<WorkspaceMaintenanceEvent>> {
+  return transport.call("task_workspace_maintenance_events", page)
 }
 
 export function pinManagedWorkspace(
@@ -528,10 +574,9 @@ export function listTaskResources(taskId: string): Promise<ResourceChange[]> {
 
 export function listTaskResourceEvents(
   runId: string,
-  cursor?: number,
-  limit = 200
-): Promise<ResourceEvent[]> {
-  return transport.call("task_workspace_list_resource_events", { runId, cursor, limit })
+  page: PageRequest = { pageSize: 200 }
+): Promise<Page<ResourceEvent>> {
+  return transport.call("task_workspace_list_resource_events", { runId, ...page })
 }
 
 export function getTaskResourceSummary(runId: string): Promise<TaskResourceSummary> {

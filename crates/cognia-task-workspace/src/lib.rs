@@ -8,6 +8,7 @@ mod bundle;
 mod ledger;
 mod lifecycle;
 mod registry;
+mod remote_source;
 mod resource;
 mod sensitive;
 mod service;
@@ -37,6 +38,12 @@ pub use cognia_git_mirror::plan::{
     maintenance_commands as mirror_maintenance_commands, mirror_path, normalize_remote_url,
     reclaim_candidates as mirror_reclaim_candidates, stamp_fetch as mirror_stamp_fetch,
     MirrorError, DEFAULT_MIRROR_TTL,
+};
+// ADR-0176. Supplying a workspace from a remote, for a host with nobody at a
+// terminal to clone it first.
+pub use remote_source::{
+    ensure_remote_source, extra_refspecs_for, EnsureRemoteSource, RemoteSourceCheckout,
+    REMOTE_SUPPLY_BUDGET, UPSTREAM_REMOTE,
 };
 pub use registry::{
     compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,

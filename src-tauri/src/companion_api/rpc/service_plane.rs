@@ -20,6 +20,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "integration_ingress_requeue",
     "github_workspace_clone",
     "github_workspace_commit_and_push",
+    "task_workspace_remote_source_ensure",
     "github_workspace_remove",
     "github_workspace_stat",
     "integration_ingress_ack",
@@ -424,7 +425,9 @@ pub(super) async fn dispatch(
         }
 
         "integration_ingress_deadletters" => {
-            let limit: Option<usize> = optional(&args, "limit")?;
+            let page = page_request(&args)?;
+            // The spool answers its newest 500 at most. The page walks them.
+            let limit = Some(500usize);
             let result = match host {
                 super::super::dispatch_host::DispatchHost::Tauri(app) => {
                     let workflow = app.state::<crate::workflow::WorkflowState>();
@@ -441,7 +444,9 @@ pub(super) async fn dispatch(
                 }
             }
             .map_err(RpcError::internal)?;
-            to_json(result)
+            super::super::paging::Page::slice_all(result, &page, 100)
+                .map_err(paging_error)
+                .and_then(to_json)
         }
 
         "integration_ingress_deadletter" => {
@@ -490,6 +495,24 @@ pub(super) async fn dispatch(
             }
             .map_err(RpcError::internal)?;
             to_json(result)
+        }
+
+        // ADR-0176. Here rather than in `filesystem.rs` with the rest of the
+        // task-workspace surface, because this one carries a credential: the
+        // service plane is loopback-only and service-token gated, while the
+        // device plane is reachable by a paired client holding a `host.admin`
+        // lease. A GitHub installation token must not be addressable from
+        // there, so the command that takes one is not exposed there.
+        "task_workspace_remote_source_ensure" => {
+            // `input`, matching the rest of the task-workspace surface in
+            // `filesystem.rs`, not the `args` the github_workspace_* commands
+            // beside it use. The Tauri handler takes `input` too, so one wire
+            // shape serves the desktop invoke and the loopback RPC.
+            let input: cognia_task_workspace::EnsureRemoteSource = required(&args, "input")?;
+            crate::task_workspace::task_workspace_remote_source_ensure(input)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
 
         "github_workspace_clone" => {

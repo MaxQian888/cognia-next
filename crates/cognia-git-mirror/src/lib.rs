@@ -39,8 +39,9 @@ use std::time::{Duration, SystemTime};
 
 pub use credential::GitCredential;
 pub use plan::{
-    clone_args, derive_args, fetch_args, is_fresh, is_mirror, maintenance_commands, mirror_path,
-    normalize_remote_url, reclaim_candidates, stamp_fetch, MirrorError, DEFAULT_MIRROR_TTL,
+    checkout_path, clone_args, derive_args, fetch_args, is_fresh, is_mirror, maintenance_commands,
+    mirror_path, normalize_remote_url, reclaim_candidates, stamp_fetch, MirrorError,
+    DEFAULT_MIRROR_TTL,
 };
 pub use runner::{run_git, run_git_quietly, GitRun, RunError};
 

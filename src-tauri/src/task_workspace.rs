@@ -3,14 +3,14 @@
 use cognia_task_workspace::{
     AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
     BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConflictResolution,
-    DownloadHandle, PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome, ResourceChange,
-    ResourceEvent, ResourceEventKind, ResourceRead, ResourceTrackingPolicy, RunState,
-    ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
-    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
-    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
-    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord,
-    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+    DownloadHandle, EnsureRemoteSource, PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome,
+    RemoteSourceCheckout, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
+    ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
+    TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
+    TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease,
+    WorkspaceBundleTurnOutcome, WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy,
+    WorkspaceMaintenanceEvent, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult,
+    WorkspaceRecord, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -473,6 +473,22 @@ pub fn task_workspace_bundle_list() -> Result<Vec<WorkspaceBundle>, String> {
     service()?.list_workspace_bundles()
 }
 
+/// Supply a managed source checkout from a remote (ADR-0176).
+///
+/// Deliberately **not** on the device plane. `task_workspace_bundle_acquire`
+/// beside it is `workspace.write`, which a paired client holding a `host.admin`
+/// lease can reach. This one takes a GitHub installation token, and a
+/// credential a `service.internal` caller is trusted with must not become
+/// addressable from a phone. It is registered only in
+/// `companion_api/rpc/service_plane.rs`, which is loopback-only and
+/// service-token gated.
+#[tauri::command]
+pub async fn task_workspace_remote_source_ensure(
+    input: EnsureRemoteSource,
+) -> Result<RemoteSourceCheckout, String> {
+    blocking(move |service| service.ensure_remote_source(&input)).await
+}
+
 #[tauri::command]
 pub async fn task_workspace_bundle_acquire(
     input: AcquireWorkspaceBundle,
@@ -547,11 +563,52 @@ pub async fn task_workspace_maintenance_run(
     .await
 }
 
+/// One page of workspace maintenance events (ADR-0175 B3). The store answers
+/// its newest thousand at most and the page walks them.
+pub fn maintenance_events_page(
+    service: &TaskWorkspaceService,
+    page: &cognia_problem::paging::PageRequest,
+) -> Result<cognia_problem::paging::Page<WorkspaceMaintenanceEvent>, String> {
+    let all = service.list_workspace_maintenance_events(cognia_problem::paging::MAX_PAGE_SIZE)?;
+    cognia_problem::paging::Page::slice_all(all, page, 100).map_err(|error| error.to_string())
+}
+
+/// One page of a run's resource events in sequence order (ADR-0175 B3). The
+/// token carries the last sequence the caller saw.
+pub fn resource_events_page(
+    service: &TaskWorkspaceService,
+    run_id: &str,
+    page: &cognia_problem::paging::PageRequest,
+) -> Result<cognia_problem::paging::Page<ResourceEvent>, String> {
+    let cursor = page
+        .cursor()
+        .map_err(|error| error.to_string())?
+        .map(|cursor| {
+            cursor
+                .parse::<u64>()
+                .map_err(|_| cognia_problem::paging::PagingError::PageToken.to_string())
+        })
+        .transpose()?;
+    let page_size = page.page_size_or(200);
+    let mut events = service.list_resource_events(run_id, cursor, page_size + 1)?;
+    let more = events.len() > page_size as usize;
+    if more {
+        events.truncate(page_size as usize);
+    }
+    let next = more
+        .then(|| events.last().map(|event| event.seq.to_string()))
+        .flatten();
+    Ok(cognia_problem::paging::Page::from_cursor(events, next))
+}
+
 #[tauri::command]
 pub fn task_workspace_maintenance_events(
-    limit: Option<u32>,
-) -> Result<Vec<WorkspaceMaintenanceEvent>, String> {
-    service()?.list_workspace_maintenance_events(limit.unwrap_or(100))
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<cognia_problem::paging::Page<WorkspaceMaintenanceEvent>, String> {
+    let page = cognia_problem::paging::PageRequest::from_parts(page_size, page_token.as_deref())
+        .map_err(|error| error.to_string())?;
+    maintenance_events_page(&*service()?, &page)
 }
 
 #[tauri::command]
@@ -694,10 +751,12 @@ pub fn task_workspace_list_resources(task_id: String) -> Result<Vec<ResourceChan
 #[tauri::command]
 pub fn task_workspace_list_resource_events(
     run_id: String,
-    cursor: Option<u64>,
-    limit: Option<u32>,
-) -> Result<Vec<ResourceEvent>, String> {
-    service()?.list_resource_events(&run_id, cursor, limit.unwrap_or(200))
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<cognia_problem::paging::Page<ResourceEvent>, String> {
+    let page = cognia_problem::paging::PageRequest::from_parts(page_size, page_token.as_deref())
+        .map_err(|error| error.to_string())?;
+    resource_events_page(&*service()?, &run_id, &page)
 }
 
 #[tauri::command]
@@ -1335,7 +1394,7 @@ mod tests {
         )
         .unwrap();
         let events =
-            task_workspace_list_resource_events("run-resource".into(), None, Some(10)).unwrap();
+            task_workspace_list_resource_events("run-resource".into(), Some(10), None).unwrap();
         let summary = task_workspace_get_resource_summary("run-resource".into()).unwrap();
         let manifest = task_workspace_export_resource_manifest(
             "task-test".into(),
@@ -1345,7 +1404,8 @@ mod tests {
 
         assert_eq!(event.path.as_deref(), Some("output/result.txt"));
         assert_eq!(event.tool_call_id.as_deref(), Some("tool-call-1"));
-        assert!(events.iter().any(|candidate| candidate == &event));
+        assert!(events.items.iter().any(|candidate| candidate == &event));
+        assert_eq!(events.next_page_token, None);
         assert_eq!(summary.event_count, 1);
         assert_eq!(summary.counts.created, 1);
         assert_eq!(manifest.events, vec![event]);

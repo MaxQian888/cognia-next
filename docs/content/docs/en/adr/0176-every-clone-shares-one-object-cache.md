@@ -190,7 +190,41 @@ is not a URL. The Rust side re-validates independently in `canonical_host_root`
 before the value reaches a `git clone` argument, because that is where it
 decides which origin a credential header is keyed on.
 
-### 9. The network clone kills what it started
+### 9. A workspace can be supplied from a remote, and the credential stops at the seam
+
+Everything downstream of a git root already worked. `acquire_workspace_bundle`,
+`create_execution`, `apply_provisioning` and `inspect_bundle_root` all want a
+non-bare checkout with commits in it, and none of them changes here. What was
+missing was any way to *get* one without a human cloning the repository first,
+which is why an issue run could not start on a headless server.
+
+`cognia-task-workspace::remote_source` supplies one: mirror, derive, done. It is
+two host commands rather than one, on purpose. Putting the credential on
+`task_workspace_bundle_acquire` would move a `service.internal` secret onto a
+`workspace.write` payload that a paired phone holding a `host.admin` lease can
+send. So the supply command lives on the loopback service plane, and the
+acquisition beside it stays exactly as reachable as it was.
+
+The credential is write-only on the way in (`skip_serializing`, and a hand-written
+`Debug` that redacts) and is used exactly once, by the mirror fetch.
+`cognia-task-workspace` never learns it: a test scans the store's bytes and the
+checkout's own `.git/config` for the token.
+
+**`origin` points at the mirror here, the opposite of the workspace clone.** A
+workspace that exists to push cannot have a local directory as its `origin`. A
+managed *source* checkout is the other case: it never pushes, and two things
+downstream run `git fetch origin` on it with no credential at all
+(`fetch_origin_throttled`, `resolve_pull_request_base`). Against a private
+repository those fail. Leaving `origin` on the mirror makes them work, because
+the mirror is a directory on this machine that was fetched *with* the
+credential. The real remote is recorded as a second credential-free remote named
+`upstream`, so the checkout still says where the code came from.
+
+A pull-request base is asked for by name at mirror time and fetched into the
+checkout, because GitHub does not advertise `refs/pull/*` and a plain clone of
+the mirror brings `refs/heads/*` and nothing else.
+
+### 10. The network clone kills what it started
 
 `exec::run_within` spawns the child, keeps the handle, and ends the budget with
 a `kill` and a `wait`. The caller deleting the half-written destination is now
@@ -250,4 +284,7 @@ messages are unchanged.
 | GitHub deployment | `lib/github/host.ts` |
 | Per-account host | `lib/integrations/github-auth.ts` |
 | Host validation (Rust) | `src-tauri/src/github/workspace.rs::canonical_host_root` |
+| Supply from a remote | `crates/cognia-task-workspace/src/remote_source.rs` |
+| Supply command (loopback only) | `src-tauri/src/companion_api/rpc/service_plane.rs` |
+| Supply client | `lib/task-workspace/client.ts` |
 | Push credential forwarding | `lib/github/workspace.ts::commitAndPush` |

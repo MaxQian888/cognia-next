@@ -4740,7 +4740,22 @@
         "agent-team",
         "goal",
         "plan",
-        "twin"
+        "twin",
+        "bot",
+        "connection:scheduled:digest",
+        "connection:outbound:send",
+        "connection:housekeeping:clock",
+        "connection:housekeeping:outbound-retention",
+        "connection:housekeeping:connector-retention",
+        "connection:housekeeping:callback-bindings",
+        "connection:housekeeping:execution-runs",
+        "connection:housekeeping:attachment-cache",
+        "connection:presence:refresh",
+        "wiki-rebuild",
+        "wiki-lint",
+        "github-issue-sync",
+        "radar-report",
+        "provider-diagnostics-refresh"
       ]
     },
     "SchedulerNotificationChannel": {
@@ -6572,6 +6587,143 @@
           "type": ["integer", "null"]
         }
       },
+      "additionalProperties": false
+    },
+    "NativeVideoInfo": {
+      "type": "object",
+      "properties": {
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fps": {
+          "type": "number"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "fileSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hasAudio": {
+          "type": "boolean"
+        },
+        "sourceToken": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "durationMs",
+        "width",
+        "height",
+        "fps",
+        "codec",
+        "fileSize",
+        "hasAudio",
+        "sourceToken"
+      ],
+      "additionalProperties": false
+    },
+    "MediaTransfer": {
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 134217728
+        }
+      },
+      "required": ["transferId", "byteLength"],
+      "additionalProperties": false
+    },
+    "VideoAnalysisManifest": {
+      "type": "object",
+      "properties": {
+        "sourcePath": {
+          "type": "string"
+        },
+        "outputDirectory": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["keyframes", "scene"]
+        },
+        "range": {
+          "type": "object",
+          "properties": {
+            "startTime": {
+              "type": "number"
+            },
+            "endTime": {
+              "type": "number"
+            }
+          },
+          "required": ["startTime", "endTime"],
+          "additionalProperties": false
+        },
+        "metadata": {
+          "$ref": "#/$defs/NativeVideoInfo"
+        },
+        "candidateCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deduplicatedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["keyframe", "scene-change", "uniform-fallback"]
+              }
+            },
+            "required": ["path", "timestamp", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "sourcePath",
+        "outputDirectory",
+        "mode",
+        "range",
+        "metadata",
+        "candidateCount",
+        "deduplicatedCount",
+        "frames",
+        "warnings"
+      ],
       "additionalProperties": false
     }
   },
@@ -8686,6 +8838,25 @@
     "task_workspace_record_tool_event": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "task_workspace_remote_source_ensure": {
+      "type": "object",
+      "required": ["sourceRoot", "mirrorPath"],
+      "properties": {
+        "sourceRoot": {
+          "type": "string",
+          "description": "Non-bare git root a workspace bundle can now be acquired over."
+        },
+        "resolvedRef": {
+          "type": ["string", "null"],
+          "description": "Commit the requested base resolves to, when the base names one."
+        },
+        "mirrorPath": {
+          "type": "string",
+          "description": "Bare mirror the checkout was derived from and still fetches from."
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_resolve_conflict": {
       "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
     },
@@ -9339,6 +9510,60 @@
         }
       },
       "additionalProperties": false
+    },
+    "video_get_info": {
+      "$ref": "#/$defs/NativeVideoInfo"
+    },
+    "plugin_media_get_video_frame": {
+      "$ref": "#/$defs/MediaTransfer"
+    },
+    "plugin_media_concatenate_videos": {
+      "type": "object",
+      "properties": {
+        "outputPath": {
+          "type": "string"
+        }
+      },
+      "required": ["outputPath"],
+      "additionalProperties": false
+    },
+    "plugin_media_apply_video_effect": {
+      "type": "null"
+    },
+    "plugin_media_add_transition": {
+      "type": "null"
+    },
+    "plugin_media_export_video": {
+      "$ref": "#/$defs/MediaTransfer"
+    },
+    "video_analyze": {
+      "$ref": "#/$defs/VideoAnalysisManifest"
+    },
+    "video_trim": {
+      "type": "object",
+      "properties": {
+        "outputPath": {
+          "type": "string"
+        }
+      },
+      "required": ["outputPath"],
+      "additionalProperties": false
+    },
+    "video_cleanup_analysis": {
+      "type": "null"
+    },
+    "plugin_media_read_analysis_frame": { "$ref": "#/$defs/MediaTransfer" },
+    "plugin_media_read_chunk": {
+      "type": "array",
+      "maxItems": 65536,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255
+      }
+    },
+    "plugin_media_close_transfer": {
+      "type": "null"
     }
   }
 }

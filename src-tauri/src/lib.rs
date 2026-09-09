@@ -953,6 +953,7 @@ pub fn run() {
             task_workspace::task_workspace_environment_list,
             task_workspace::task_workspace_bundle_get,
             task_workspace::task_workspace_bundle_list,
+            task_workspace::task_workspace_remote_source_ensure,
             task_workspace::task_workspace_bundle_acquire,
             task_workspace::task_workspace_bundle_apply,
             task_workspace::task_workspace_bundle_handoff_retry,

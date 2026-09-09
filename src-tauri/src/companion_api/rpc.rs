@@ -46,6 +46,7 @@ mod filesystem;
 mod gateway_plane;
 mod host_admin;
 mod host_state;
+mod media;
 mod native_tools;
 mod plugins;
 mod service_plane;
@@ -415,6 +416,19 @@ async fn ensure_terminal_rpc_authorized(
 /// from the table too.
 #[cfg(test)]
 const KNOWN_COMMANDS: &[&str] = &[
+    // Shared media engine, with caller-owned binary transfers.
+    "video_get_info",
+    "plugin_media_get_video_frame",
+    "plugin_media_read_analysis_frame",
+    "plugin_media_concatenate_videos",
+    "plugin_media_apply_video_effect",
+    "plugin_media_add_transition",
+    "plugin_media_export_video",
+    "video_analyze",
+    "video_trim",
+    "video_cleanup_analysis",
+    "plugin_media_read_chunk",
+    "plugin_media_close_transfer",
     // ADR-0090 canonical names. They share the `claude_*` arms below and are
     // deliberately absent from `CONTROL_COMMANDS` for the same reason those
     // are: this is the paired device's own chat path, not an escalation.
@@ -631,6 +645,10 @@ const KNOWN_COMMANDS: &[&str] = &[
     "github_workspace_commit_and_push",
     "github_workspace_remove",
     "github_workspace_stat",
+    // ADR-0176. Supplying a workspace from a remote takes an installation
+    // token, so it belongs with the commands above rather than with the rest
+    // of the task-workspace surface, which is device-reachable.
+    "task_workspace_remote_source_ensure",
     // ADR-0090 Phase 1 — Provider Profile Store admin plane (service scope;
     // redacted docs only, secrets never transit these arms).
     "provider_profiles_list",
@@ -1302,6 +1320,14 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    // Shared media engine, with caller-owned binary transfers.
+    "video_get_info",
+    "plugin_media_get_video_frame",
+    "plugin_media_read_analysis_frame",
+    "plugin_media_apply_video_effect",
+    "plugin_media_add_transition",
+    "plugin_media_read_chunk",
+    "plugin_media_close_transfer",
     // ADR-0163 gateway reads: status, exposed models, provider view, and the
     // redacted ticket list are pure reads of the gateway's own state.
     "gateway_status",
@@ -1591,6 +1617,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// name as soon as it appears here (it runs before the dispatch `match`).
 #[cfg(test)]
 const CONTROL_COMMANDS: &[&str] = &[
+    // Shared media engine, with caller-owned binary transfers.
+    "plugin_media_concatenate_videos",
+    "plugin_media_export_video",
+    "video_analyze",
+    "video_trim",
+    "video_cleanup_analysis",
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
     "claude_restore",
@@ -2259,6 +2291,7 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "github_workspace_commit_and_push",
     "github_workspace_remove",
     "github_workspace_stat",
+    "task_workspace_remote_source_ensure",
     "fleet_project_managed_session",
     "fleet_project_worker_load",
     "fleet_remove_managed_session",
@@ -2812,7 +2845,12 @@ pub async fn rpc_handler(
     let is_read_only = READ_ONLY_COMMANDS_SET.contains(name.as_str());
 
     if ctx.scope != "service" {
-        let class = if is_read_only {
+        let class = if matches!(
+            name.as_str(),
+            "plugin_media_read_chunk" | "plugin_media_close_transfer"
+        ) {
+            crate::companion_api::rate_limit::RequestClass::MediaTransfer
+        } else if is_read_only {
             crate::companion_api::rate_limit::RequestClass::ReadOnly
         } else {
             crate::companion_api::rate_limit::RequestClass::Mutating
@@ -3060,6 +3098,16 @@ fn authorize_sensitive_resource(
 /// Serialize a command result into the JSON [`Value`] envelope, mapping any
 /// serde failure to a `500 internal_error`. Cuts the repeated
 /// `serde_json::to_value(x).map_err(...)` boilerplate across the native arms.
+/// The paging half of a request (ADR-0175 B3). A legacy spelling or a token
+/// this host did not issue is a 400 that names the parameter.
+fn page_request(args: &Value) -> Result<super::paging::PageRequest, (StatusCode, Json<RpcError>)> {
+    super::paging::PageRequest::from_args(args).map_err(paging_error)
+}
+
+fn paging_error(error: super::paging::PagingError) -> (StatusCode, Json<RpcError>) {
+    RpcError::malformed(error.to_string())
+}
+
 fn to_json<T: serde::Serialize>(value: T) -> Result<Value, (StatusCode, Json<RpcError>)> {
     serde_json::to_value(value).map_err(|e| RpcError::internal(e.to_string()))
 }
@@ -3430,6 +3478,10 @@ pub(super) async fn dispatch(
 
     if codex_app::COMMANDS.contains(&name) {
         return codex_app::dispatch(name, args, state, host, device_id, account_id, scope).await;
+    }
+
+    if media::COMMANDS.contains(&name) {
+        return media::dispatch(name, args, state, host, device_id, account_id, scope).await;
     }
 
     if native_tools::COMMANDS.contains(&name) {
