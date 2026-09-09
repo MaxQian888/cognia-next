@@ -150,12 +150,30 @@ describe("resolveMessageSpeaker", () => {
     expect(speaker?.kind).toBe("human")
   })
 
-  it("ignores a collaboration author whose kind is not a speaker kind", () => {
-    const speaker = resolveMessageSpeaker({
-      role: "user",
-      metadata: { collaboration: { author: { kind: "wizard", id: "usr_1" } } },
-    })
-    expect(speaker).toBeNull()
+  it("treats an author with an unknown or missing kind as a person", () => {
+    // The id is the gate, not the class. Legacy imports and partial writes
+    // carry an author with no `kind`, and dropping it there loses the one
+    // field that names the human.
+    expect(
+      resolveMessageSpeaker({
+        role: "user",
+        metadata: {
+          collaboration: { author: { kind: "wizard", id: "usr_1", displayName: "Zed" } },
+        },
+      })
+    ).toMatchObject({ kind: "human", id: "usr_1", label: "Zed" })
+    expect(
+      resolveMessageSpeaker({
+        role: "user",
+        metadata: { collaboration: { author: { id: "usr_2", displayName: "Ada" } } },
+      })
+    ).toMatchObject({ kind: "human", id: "usr_2", label: "Ada" })
+  })
+
+  it("still ignores a collaboration author with no id at all", () => {
+    expect(
+      resolveMessageSpeaker({ role: "user", metadata: { collaboration: { author: {} } } })
+    ).toBeNull()
   })
 
   it("uses the IM sender the adapter parsed", () => {

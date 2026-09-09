@@ -246,7 +246,15 @@ jest.mock("@/hooks/ui/use-copy", () => ({
 }))
 
 jest.mock("@/lib/ui/avatar", () => ({
-  avatarColor: () => "#aaa",
+  // Honours an explicit subject colour like the real one does, so a test can
+  // prove two same-named speakers still get different hues.
+  avatarColor: (subject?: { avatarColor?: string }) => subject?.avatarColor ?? "#aaa",
+  // Echoes its seed so a test can prove two same-named speakers are still
+  // given different hues, which is the only thing keeping them apart on screen.
+  // Must be a VALID css colour: jsdom silently drops an unparseable one, which
+  // made two differently-seeded avatars render byte-identical markup.
+  deterministicColor: (seed: string) =>
+    `rgb(${[...seed].reduce((n, c) => (n + c.charCodeAt(0)) % 256, 0)}, 0, 0)`,
   avatarGlyph: () => "A",
 }))
 
@@ -1352,19 +1360,73 @@ describe("edit flow", () => {
 // ── speaker display ───────────────────────────────────────────────────────────
 
 describe("team speaker display", () => {
-  it.each([
-    [{ id: "usr_1", displayName: "Shared author" }, "Shared author"],
-    [{ id: "usr_1" }, "usr_1"],
-  ])("shows a shared author independently of local characters", (author, label) => {
-    const message = {
+  function sharedMessage(author: Record<string, unknown>): UIMessage {
+    return {
       id: "shared-message",
       role: "user",
       parts: [{ type: "text", text: "hello" }],
       metadata: { collaboration: { author } },
     } as UIMessage
-    render(<MessageRenderer message={message} />)
-    expect(screen.getByText(label)).toBeInTheDocument()
+  }
+
+  it("shows a shared author independently of local characters", () => {
+    render(
+      <MessageRenderer message={sharedMessage({ id: "usr_1", displayName: "Shared author" })} />
+    )
+    expect(screen.getByText("Shared author")).toBeInTheDocument()
   })
+
+  it("names an author with no kind, which legacy imports and partial writes carry", () => {
+    render(<MessageRenderer message={sharedMessage({ id: "usr_9", displayName: "Kindless" })} />)
+    expect(screen.getByText("Kindless")).toBeInTheDocument()
+  })
+
+  it("gives an unnamed author a stable pseudonym rather than its raw row id", () => {
+    // `usr_1` is a database key, not a name. The pseudonym is derived from the
+    // same id, so it is stable across turns and devices, and it is the token
+    // `lib/chat/speaker.ts` also puts in the transcript the model reads, so the
+    // two surfaces agree on what to call this participant.
+    render(<MessageRenderer message={sharedMessage({ id: "usr_1" })} />)
+    expect(screen.getByText(/^Person-[0-9A-Z]{6}$/)).toBeInTheDocument()
+  })
+  it("names the IM sender behind a group message", () => {
+    // Before, the renderer read only `collaboration.author` and `senderId`, so
+    // in a platform group every human message rendered as "You" no matter who
+    // actually sent it.
+    const message = {
+      id: "im-message",
+      role: "user",
+      parts: [{ type: "text", text: "ship it" }],
+      metadata: { platformMessage: { sender: { id: "tg:1", displayName: "Alice" } } },
+    } as unknown as UIMessage
+    render(<MessageRenderer message={message} />)
+    expect(screen.getByText("Alice")).toBeInTheDocument()
+  })
+
+  it("gives two group senders who share a display name different hues", () => {
+    // The label is identical by construction, so colour is the only thing left
+    // to tell them apart. Seeding it from the display name would have given
+    // them the same one.
+    const seen = ["tg:1", "tg:2"].map((id) => {
+      const { unmount } = render(
+        <MessageRenderer
+          message={
+            {
+              id: `im-${id}`,
+              role: "user",
+              parts: [{ type: "text", text: "hi" }],
+              metadata: { platformMessage: { sender: { id, displayName: "张伟" } } },
+            } as unknown as UIMessage
+          }
+        />
+      )
+      const html = screen.getByTestId("message-shell-header").innerHTML
+      unmount()
+      return html
+    })
+    expect(seen[0]).not.toBe(seen[1])
+  })
+
   it("shows speaker name when characterById resolves senderId", () => {
     const characterById = new Map([
       ["char_1", { id: "char_1", name: "Alice", systemPrompt: "" }],

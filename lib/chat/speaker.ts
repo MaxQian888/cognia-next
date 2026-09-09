@@ -279,10 +279,19 @@ function collaborationAuthorFromMetadata(
   const author = objectField(collaboration, "author")
   if (!author) return undefined
   const id = stringField(author, "id")
+  if (!id) return undefined
+  // The id is the gate, not the kind. `AuthorRef.kind` is required by the type
+  // but absent on legacy imports and partial writes, and discarding an
+  // otherwise-good author over a missing class loses the one thing that names
+  // the person. An unclassified author is a person until something says
+  // otherwise.
   const kind = stringField(author, "kind")
-  if (!id || !isSpeakerKind(kind)) return undefined
   const displayName = stringField(author, "displayName")
-  return { kind, id, ...(displayName ? { displayName } : {}) }
+  return {
+    kind: isSpeakerKind(kind) ? kind : "human",
+    id,
+    ...(displayName ? { displayName } : {}),
+  }
 }
 
 function platformSenderFromMetadata(

@@ -119,4 +119,61 @@ describe("MessageShell", () => {
     expect(screen.getByText("You")).toBeInTheDocument()
     expect(screen.queryByRole("status")).toBeNull()
   })
+
+  describe("rooms", () => {
+    // A named speaker means the message came out of a room: a character team, a
+    // shared session, or an IM group. There the header is the only thing that
+    // says which of several participants is talking.
+    const hidden = resolveMessageDisplayOptions(undefined, {
+      preset: "balanced",
+      overrides: { metadata: { identity: "hidden" } },
+    })
+
+    it("shows the speaker even when the identity placement is hidden", () => {
+      render(
+        <MessageShell message={message} display={hidden} speakerName="Ana">
+          <p>Hello</p>
+        </MessageShell>
+      )
+      expect(screen.getByTestId("message-shell-header")).toHaveTextContent("Ana")
+    })
+
+    it("still honours a hidden identity in a direct chat, where nobody is named", () => {
+      render(
+        <MessageShell message={message} display={hidden}>
+          <p>Hello</p>
+        </MessageShell>
+      )
+      const header = screen.queryByTestId("message-shell-header")
+      expect(header?.textContent ?? "").not.toContain("assistant")
+    })
+
+    it("renders the speaker's own avatar rather than the generic bot glyph", () => {
+      render(
+        <MessageShell
+          message={message}
+          display={resolveMessageDisplayOptions()}
+          speakerName="Ana"
+          speakerAvatar={{ name: "Ana", avatarEmoji: "🦊" }}
+        >
+          <p>Hello</p>
+        </MessageShell>
+      )
+      expect(screen.getByTestId("message-shell-header")).toHaveTextContent("🦊")
+    })
+
+    it("falls back to initials when the speaker has no emoji or portrait", () => {
+      render(
+        <MessageShell
+          message={message}
+          display={resolveMessageDisplayOptions()}
+          speakerName="Ada Lovelace"
+          speakerAvatar={{ name: "Ada Lovelace" }}
+        >
+          <p>Hello</p>
+        </MessageShell>
+      )
+      expect(screen.getByTestId("message-shell-header")).toHaveTextContent("AL")
+    })
+  })
 })

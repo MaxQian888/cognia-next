@@ -14,6 +14,8 @@ import type { MessageDisplayMetadataOptions } from "@/types/appearance"
 import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import { cn } from "@/lib/utils"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
+import type { AvatarSubject } from "@/lib/ui/avatar"
 import type { UIMessage } from "ai"
 import { MessageMotionProvider } from "@/components/chat/motion/motion-reveal"
 
@@ -22,6 +24,12 @@ export interface MessageShellProps {
   display: ResolvedMessageDisplayOptions
   speakerName?: string
   speakerColor?: string
+  /**
+   * The speaker's avatar subject (a character, or a bare name for a person we
+   * only know by display name). Renders the real portrait / emoji / initials
+   * instead of the generic bot glyph.
+   */
+  speakerAvatar?: AvatarSubject
   isStreaming?: boolean
   children: ReactNode
 }
@@ -54,6 +62,7 @@ export function MessageShell({
   display,
   speakerName,
   speakerColor,
+  speakerAvatar,
   isStreaming = false,
   children,
 }: MessageShellProps) {
@@ -66,6 +75,15 @@ export function MessageShell({
   const isAssistant = message.role === "assistant"
   const isError = Boolean(run?.finishReason && /error|fail|abort|cancel/i.test(run.finishReason))
   const identity = speakerName ?? (isAssistant ? t("assistant") : t("you"))
+  /**
+   * A named speaker means this message came out of a ROOM: a character team, a
+   * shared session, or an IM group. There the header is not decoration, it is
+   * the only thing that says which of several participants is talking, so it
+   * overrides the metadata placement preference. A direct chat has no
+   * `speakerName` and keeps honouring the setting exactly as before.
+   */
+  const inRoom = Boolean(speakerName)
+  const showIdentity = inRoom || display.metadata.identity === "header"
   // One formatted value per metadata field, read by BOTH placements. `header`
   // and `details` used to be assembled independently, and the header list
   // simply omitted `usage` and `cost` — so choosing "header" for either
@@ -133,9 +151,7 @@ export function MessageShell({
           isAssistant && assistantBubbleClass(display.layout)
         )}
       >
-        {(display.metadata.identity === "header" ||
-          display.metadata.timestamp === "header" ||
-          headerItems.length > 0) && (
+        {(showIdentity || display.metadata.timestamp === "header" || headerItems.length > 0) && (
           <header
             className={cn(
               "mb-1.5 flex min-h-6 flex-wrap items-center gap-1.5 text-xs text-muted-foreground",
@@ -143,9 +159,11 @@ export function MessageShell({
             )}
             data-testid="message-shell-header"
           >
-            {display.metadata.identity === "header" && (
+            {showIdentity && (
               <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                {isAssistant ? (
+                {speakerAvatar ? (
+                  <AvatarBadge subject={speakerAvatar} size={14} textClassName="text-[8px]" />
+                ) : isAssistant ? (
                   <BotIcon
                     className="size-3.5"
                     style={speakerColor ? { color: speakerColor } : undefined}

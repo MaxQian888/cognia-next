@@ -129,7 +129,8 @@ import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from 
 import { useTranslations } from "next-intl"
 import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
-import { avatarColor } from "@/lib/ui/avatar"
+import { avatarColor, deterministicColor, type AvatarSubject } from "@/lib/ui/avatar"
+import { resolveMessageSpeaker, type SpeakerSource } from "@/lib/chat/speaker"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
@@ -304,18 +305,35 @@ function MessageRendererInner({
 
   // For team-session assistant messages, resolve which character spoke.
   const senderId = (message as { metadata?: { senderId?: string } }).metadata?.senderId
-  const sharedAuthor = (
-    message.metadata as
-      | {
-          collaboration?: { author?: { displayName?: string; id: string } }
-        }
-      | undefined
-  )?.collaboration?.author
-  const sharedAuthorName = sharedAuthor?.displayName || sharedAuthor?.id
   const speaker = useMemo(() => {
     if (!senderId || !characterById) return null
     return characterById.get(senderId) ?? null
   }, [senderId, characterById])
+  // Who authored this, through the one resolver the prompt side also uses
+  // (`lib/chat/speaker.ts`). Two ad-hoc reads used to live here, one for a
+  // shared session's `AuthorRef` and one for `senderId`, and neither knew about
+  // `metadata.platformMessage.sender` — so in an IM group every human message,
+  // whoever sent it, rendered as "You".
+  const resolvedSpeaker = useMemo(() => resolveMessageSpeaker(message as SpeakerSource), [message])
+  // A real name wins (a shared session's author, an IM sender), then the local
+  // character behind a team turn, then the stable pseudonym. The pseudonym is
+  // last but never skipped: an unnamed participant still has to read apart
+  // from the others, and it is the same token the transcript shows the model.
+  const resolvedName =
+    resolvedSpeaker && !resolvedSpeaker.redacted ? resolvedSpeaker.label : undefined
+  const speakerName = resolvedName ?? speaker?.name ?? resolvedSpeaker?.label
+  // The character's own portrait when we have one. Otherwise a colour seeded
+  // from the speaker's stable ID rather than its name, because two people in
+  // one group really can share a display name, and seeding from the name would
+  // hand them the same hue as well as the same label.
+  const speakerAvatar: AvatarSubject | undefined = speaker
+    ? speaker
+    : speakerName
+      ? {
+          name: speakerName,
+          ...(resolvedSpeaker ? { avatarColor: deterministicColor(resolvedSpeaker.id) } : {}),
+        }
+      : undefined
 
   // Segment the parts into tool-activity groups + standalone parts. Memoized on
   // `message.parts` so it doesn't re-run on every token or on unrelated local
@@ -624,8 +642,9 @@ function MessageRendererInner({
         <MessageShell
           message={message}
           display={display}
-          speakerName={sharedAuthorName ?? speaker?.name}
-          speakerColor={speaker ? avatarColor(speaker) : undefined}
+          speakerName={speakerName}
+          speakerColor={speakerAvatar ? avatarColor(speakerAvatar) : undefined}
+          speakerAvatar={speakerAvatar}
           isStreaming={isStreaming}
         >
           <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
@@ -1278,7 +1297,7 @@ function MessageRendererInner({
             open={cardOpen}
             onOpenChange={setCardOpen}
             role={message.role}
-            authorName={sharedAuthorName ?? speaker?.name}
+            authorName={speakerName}
             text={messageShareContent.plainText}
             model={(message as { metadata?: { model?: string } }).metadata?.model}
             timestamp={((): Date => {
