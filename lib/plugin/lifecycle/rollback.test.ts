@@ -168,6 +168,33 @@ describe("PluginRollbackManager", () => {
       expect(result.success).toBe(false)
       expect(result.error).toBeDefined()
     })
+
+    // Regression guard. `plugin_load(plugin_id, manifest)` declares the manifest
+    // required and refuses one whose `id` disagrees with `plugin_id`, so the old
+    // `{ pluginId }` call rejected on a missing argument -- every rollback died
+    // at step 5, AFTER the target version had already been restored to disk,
+    // leaving the plugin unloaded rather than rolled back. The version asserted
+    // here is the target, not the original: the manifest handed to the host has
+    // to be the restored one.
+    it("loads the restored plugin with the manifest the host requires", async () => {
+      mockGetBackups.mockReturnValue([
+        {
+          pluginId: "plugin-a",
+          version: "1.0.0",
+          createdAt: new Date(),
+          size: 1000,
+          path: "/backup/1.0.0",
+        },
+      ])
+
+      const result = await manager.rollback("plugin-a", "1.0.0")
+
+      expect(result.success).toBe(true)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_load", {
+        pluginId: "plugin-a",
+        manifest: expect.objectContaining({ id: "plugin-a", version: "1.0.0" }),
+      })
+    })
   })
 
   describe("rollbackToLatestBackup", () => {

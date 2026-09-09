@@ -219,6 +219,67 @@ describe("PluginBackupManager", () => {
       // Returns 0 when no backups to cleanup
       expect(deleted).toBe(0)
     })
+
+    // Regression guard. `plugin_backup_delete` takes (pluginId, backupId) and
+    // reads no `path`; this loop used to send `{ path }`, so every prune
+    // rejected on two missing arguments and `recordSilentFailure` swallowed the
+    // rejection -- retention silently never pruned and backups grew without
+    // bound. Asserting the ARGUMENT SHAPE is the point: a call-count assertion
+    // passed happily while the call was unusable.
+    it("prunes by the (pluginId, backupId) pair the host actually takes", async () => {
+      // This suite runs in the node environment, where `localStorage` is
+      // undefined and the backup index therefore loads empty. Stub it so the
+      // prune loop has something to prune.
+      const cells = new Map<string, string>()
+      const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+      Object.defineProperty(globalThis, "localStorage", {
+        configurable: true,
+        value: {
+          getItem: (key: string) => cells.get(key) ?? null,
+          setItem: (key: string, value: string) => void cells.set(key, value),
+          removeItem: (key: string) => void cells.delete(key),
+        },
+      })
+
+      try {
+        cells.set(
+          "plugin:backup:index:~/.cognia/backups/plugins",
+          JSON.stringify({
+            "plugin-a": [1, 2, 3].map((n) => ({
+              id: `backup-${n}`,
+              pluginId: "plugin-a",
+              version: "1.0.0",
+              createdAt: new Date(Date.UTC(2026, 0, n)).toISOString(),
+              reason: "manual",
+              size: 10,
+              path: `/backups/backup-${n}`,
+            })),
+          })
+        )
+
+        const seeded = new PluginBackupManager({ autoBackupEnabled: false })
+        await seeded.initialize()
+        mockInvoke.mockResolvedValue(undefined)
+
+        const deleted = await seeded.cleanupOldBackups("plugin-a", 1)
+
+        expect(deleted).toBe(2)
+        const deleteCalls = mockInvoke.mock.calls.filter(
+          ([command]) => command === "plugin_backup_delete"
+        )
+        // Newest-first: the loop pops off the tail.
+        expect(deleteCalls.map(([, args]) => args)).toEqual([
+          { pluginId: "plugin-a", backupId: "backup-3" },
+          { pluginId: "plugin-a", backupId: "backup-2" },
+        ])
+      } finally {
+        if (previous) {
+          Object.defineProperty(globalThis, "localStorage", previous)
+        } else {
+          delete (globalThis as { localStorage?: unknown }).localStorage
+        }
+      }
+    })
   })
 })
 

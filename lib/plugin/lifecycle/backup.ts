@@ -492,7 +492,14 @@ export class PluginBackupManager {
       const oldest = backups.pop()
       if (oldest) {
         try {
-          await invoke("plugin_backup_delete", { path: oldest.path })
+          // The host deletes a backup by identity, never by path:
+          // `plugin_backup_delete(plugin_id, backup_id)` declares both as
+          // required and reads no `path` at all. Sending `{ path }` therefore
+          // failed on BOTH missing arguments, and the `recordSilentFailure`
+          // below swallowed the rejection -- so retention never pruned and a
+          // plugin's backups grew past `maxBackupsPerPlugin` forever.
+          // `deleteBackup` above has always called it with the right pair.
+          await invoke("plugin_backup_delete", { pluginId, backupId: oldest.id })
           deleted++
         } catch (error) {
           recordSilentFailure(

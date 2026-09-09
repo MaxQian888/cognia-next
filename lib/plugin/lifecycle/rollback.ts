@@ -317,7 +317,29 @@ export class PluginRollbackManager {
       }
 
       // Step 5: Load and enable
-      await invoke("plugin_load", { pluginId })
+      // `plugin_load(plugin_id, manifest)` declares the manifest required and
+      // refuses one whose `id` disagrees with `plugin_id`. Sending only the id
+      // rejected on the missing argument, so EVERY rollback died here at step
+      // 5 -- after the target version was already restored to disk, leaving the
+      // plugin unloaded rather than rolled back. The store copy is the one
+      // `refreshRuntimePlugins()` just re-read from disk and
+      // `projectPluginVersion` moved to `targetVersion`. Rust persists only
+      // this subset; anything richer stays on the TS side.
+      const restored = usePluginStore.getState().plugins[pluginId]?.manifest
+      if (!restored) {
+        throw new Error(
+          `Rollback restored ${pluginId}@${targetVersion} but no manifest is registered for it`
+        )
+      }
+      await invoke("plugin_load", {
+        pluginId,
+        manifest: {
+          id: restored.id,
+          version: restored.version,
+          name: restored.name,
+          description: restored.description,
+        },
+      })
       await invoke("plugin_enable", { pluginId })
 
       // Step 6: Verify
