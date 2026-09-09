@@ -3,30 +3,10 @@
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
-import {
-  Plus,
-  ArrowLeft,
-  Settings,
-  Key,
-  PlugZap,
-  Sparkles,
-  Loader2,
-  Route,
-  RotateCcw,
-  SlidersHorizontal,
-  Eye,
-  EyeOff,
-} from "lucide-react"
+import { Plus, ArrowLeft, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import {
-  SettingsStack,
-  SettingsBlock,
-  SettingsField,
-} from "@/components/settings/common/settings-block"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,49 +17,30 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useProviderManager } from "@/hooks/ai/use-provider-manager"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
-import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { PROVIDERS } from "@cognia/provider-types/provider"
-import type { CustomProviderSettings, ProviderUIPreferences } from "@cognia/provider-types/provider"
-import type { LocalProviderName, LocalModelInfo } from "@cognia/provider-types/local-provider"
-import { validateBedrockConnectionSettings } from "@cognia/provider-types"
+import type { ProviderUIPreferences } from "@cognia/provider-types/provider"
+import type { LocalModelInfo } from "@cognia/provider-types/local-provider"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
-import { ProviderDetailPanel } from "./provider-detail-panel"
-import { ProviderConfigTab } from "./provider-config-tab"
+import { ProviderDetailHost } from "./provider-detail-host"
 import type { TestResult } from "./connection-status-card"
-import { ProviderModelsTab } from "./provider-models-tab"
-import { ProviderCostTab } from "./provider-cost-tab"
-import { ProviderParametersTab } from "./provider-parameters-tab"
 import { RoutingTab } from "./routing-tab"
-import { ProviderDiagnosticsTab } from "./provider-diagnostics-tab"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
-import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { cn } from "@/lib/utils"
 import { ProviderSidebar } from "./provider-sidebar"
-import { ProviderSetupChecklist } from "./provider-setup-checklist"
 import { ProviderHostNotice } from "./provider-host-notice"
 import { ProviderEmptyState } from "./provider-empty-state"
 import { ProviderSkeleton } from "./provider-skeleton"
 import { ProviderOnboardingBanner } from "./provider-onboarding-banner"
 import { BatchTestProgress, TestResultsSummary } from "./batch-test-progress"
-import { OAuthLoginButton } from "./oauth-login-button"
-import { KeyLoginRow } from "./key-login-row"
 import { useSettingsStore } from "@/stores/settings"
 import {
-  deriveStatus,
   normalizeCategoryFilter,
   pickInitialProviderId,
   type ProviderSortBy,
@@ -87,8 +48,7 @@ import {
 import { getBuiltInProviderReadiness, getCustomProviderReadiness } from "./provider-readiness"
 import { nextActionKey } from "./provider-setup-checklist"
 import { useProviderBatchVerify } from "./use-provider-batch-verify"
-import { preferLiveHealth, useProviderRows } from "./use-provider-rows"
-import { useSecretReveal } from "@/hooks/use-secret-reveal"
+import { useProviderRows } from "./use-provider-rows"
 
 /** Rail width bounds (px). The default matches the previous fixed column. */
 const RAIL_MIN_WIDTH = 240
@@ -104,28 +64,8 @@ const QuickAddProviderDialog = dynamic(
   () => import("./quick-add-provider-dialog").then((m) => m.QuickAddProviderDialog),
   { ssr: false }
 )
-const LocalProviderSettings = dynamic(
-  () => import("./local-provider-settings").then((m) => m.LocalProviderSettings),
-  { ssr: false }
-)
-const LocalProviderModelManager = dynamic(
-  () => import("./local-provider-model-manager").then((m) => m.LocalProviderModelManager),
-  { ssr: false }
-)
 // Provider-specific config panels — lazy because each is 18-27 KB and only
 // loads for the one provider that needs it.
-const OpenRouterSettings = dynamic(
-  () => import("./openrouter-settings").then((m) => m.OpenRouterSettings),
-  { ssr: false }
-)
-const OpenRouterKeyManagement = dynamic(
-  () => import("./openrouter-key-management").then((m) => m.OpenRouterKeyManagement),
-  { ssr: false }
-)
-const CLIProxyAPISettings = dynamic(
-  () => import("./cliproxyapi-settings").then((m) => m.CLIProxyAPISettings),
-  { ssr: false }
-)
 // Model comparison pane (side-by-side capabilities + pricing, max 4 models).
 // Swaps into the detail column instead of a dialog so the table gets the full
 // pane width; lazy because it is 20+ KB and most sessions never open it.
@@ -140,206 +80,6 @@ const ProviderImportExport = dynamic(
   () => import("./provider-import-export").then((m) => m.ProviderImportExport),
   { ssr: false }
 )
-
-/* ── Custom provider inline config ──────────────────────────────────────────── */
-
-// Custom-provider credentials live on the `customProviders` row itself
-// (written via `updateCustomProvider`), NOT in the `providerSettings` map —
-// read and write the same source or the controlled inputs reset on every
-// keystroke and edits get silently mangled.
-function CustomProviderInlineConfig({
-  cp,
-  onApiKeyChange,
-  onBaseURLChange,
-  onDefaultModelChange,
-  onEditClick,
-  onTestConnection,
-  testResult,
-  testMessage,
-  isTesting = false,
-}: {
-  cp: CustomProviderSettings
-  onApiKeyChange: (key: string) => void
-  onBaseURLChange: (url: string) => void
-  onDefaultModelChange: (model: string) => void
-  onEditClick: () => void
-  onTestConnection: () => void
-  testResult?: "success" | "error" | "limited" | null
-  /** Human-readable detail of the last test (error text / model count). */
-  testMessage?: string | null
-  isTesting?: boolean
-}) {
-  const t = useTranslations("providers")
-  const [showKey, setShowKey] = useState(false)
-  // Settings → Security → "Require biometrics to reveal secrets".
-  const revealSecret = useSecretReveal()
-  // Draft-buffered like the built-in tab: no `customProviders` row rewrite per
-  // keystroke, and no character drops while the async write is in flight.
-  const apiKeyField = useDraftField(cp.apiKey ?? "", onApiKeyChange, { identity: cp.id })
-  const baseURLField = useDraftField(cp.baseURL ?? "", onBaseURLChange, { identity: cp.id })
-
-  // Same block layout the built-in config tab uses — selecting a custom
-  // provider used to swap the whole first tab for a differently-shaped flat
-  // form, so the pane's structure changed under the user with the row.
-  const testStatus = testResult ? (
-    <span
-      data-testid="custom-provider-test-result"
-      title={testMessage ?? undefined}
-      className={
-        testResult === "success"
-          ? "text-xs text-emerald-600 dark:text-emerald-400"
-          : testResult === "limited"
-            ? "text-xs text-amber-600 dark:text-amber-400"
-            : "text-xs text-destructive"
-      }
-    >
-      {testResult === "success"
-        ? t("customTestSuccess")
-        : testResult === "limited"
-          ? t("customTestLimited")
-          : t("customTestError")}
-      {/* The hook has carried the provider's actual error text since the test
-          path was written; it was never rendered, so a failed custom test only
-          ever said "failed". */}
-      {testMessage && testResult !== "success" ? (
-        <span className="ml-1 font-normal opacity-80" data-testid="custom-provider-test-message">
-          · {testMessage}
-        </span>
-      ) : null}
-    </span>
-  ) : (
-    <p className="text-xs text-muted-foreground">{t("configTab.notVerifiedHint")}</p>
-  )
-
-  return (
-    <SettingsStack>
-      <SettingsBlock
-        icon={<Key />}
-        title={t("configTab.credentialsTitle")}
-        description={t("configTab.credentialsDescription")}
-        badge={
-          <Badge variant="secondary" className="text-[10px]">
-            {cp.apiProtocol}
-          </Badge>
-        }
-        action={
-          <div className="flex shrink-0 items-center gap-1.5">
-            {/* `testCustomProvider` was fully implemented but had zero callers,
-                so `customTestResults` stayed empty forever and a custom
-                provider's status badge could never leave "warning". */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={onTestConnection}
-              disabled={isTesting}
-              data-testid="custom-provider-test"
-            >
-              {isTesting ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <PlugZap className="h-3 w-3" />
-              )}
-              {t("testConnection")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={onEditClick}
-              data-testid="custom-provider-edit"
-            >
-              <Settings className="h-3 w-3" />
-              {t("editCustomProvider")}
-            </Button>
-          </div>
-        }
-        testid="custom-provider-credentials"
-      >
-        <SettingsField
-          stacked
-          htmlFor={`custom-${cp.id}-api-key`}
-          label={t("configTab.apiKeyLabel")}
-          description={t("configTab.apiKeyDescription")}
-        >
-          <div className="relative">
-            <Input
-              id={`custom-${cp.id}-api-key`}
-              type={showKey ? "text" : "password"}
-              value={apiKeyField.value}
-              onChange={(e) => apiKeyField.onChange(e.target.value)}
-              onBlur={apiKeyField.onBlur}
-              onKeyDown={apiKeyField.onKeyDown}
-              placeholder={t("configTab.apiKeyPlaceholder")}
-              className="pr-10 font-mono"
-              autoComplete="new-password"
-              data-lpignore="true"
-              data-form-type="other"
-              data-testid="custom-provider-api-key-input"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-              onClick={() =>
-                showKey ? setShowKey(false) : void revealSecret(() => setShowKey(true))
-              }
-              type="button"
-              aria-label={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
-              title={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
-              data-testid="custom-provider-toggle-key"
-            >
-              {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
-        </SettingsField>
-
-        <SettingsField
-          stacked
-          htmlFor={`custom-${cp.id}-base-url`}
-          label={t("baseURL")}
-          description={t("baseURLHint")}
-        >
-          <Input
-            id={`custom-${cp.id}-base-url`}
-            type="text"
-            value={baseURLField.value}
-            onChange={(e) => baseURLField.onChange(e.target.value)}
-            onBlur={baseURLField.onBlur}
-            onKeyDown={baseURLField.onKeyDown}
-            placeholder={cp.baseURL}
-            className="font-mono"
-            data-testid="custom-provider-base-url-input"
-          />
-        </SettingsField>
-
-        {testStatus}
-      </SettingsBlock>
-
-      {cp.customModels && cp.customModels.length > 0 && (
-        <SettingsBlock
-          icon={<Sparkles />}
-          title={t("defaultModel")}
-          description={t("configTab.defaultModelDescription")}
-          testid="custom-provider-default-model"
-        >
-          <Select value={cp.defaultModel ?? ""} onValueChange={onDefaultModelChange}>
-            <SelectTrigger className="w-full text-sm" aria-label={t("defaultModel")}>
-              <SelectValue placeholder={t("selectModel")} />
-            </SelectTrigger>
-            <SelectContent>
-              {cp.customModels.map((modelId: string) => (
-                <SelectItem key={modelId} value={modelId}>
-                  {cp.customModelMetadata?.[modelId]?.name ?? modelId}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsBlock>
-      )}
-    </SettingsStack>
-  )
-}
 
 /* ── Main ───────────────────────────────────────────────────────────────────── */
 
@@ -1061,329 +801,40 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                   </div>
                 </div>
               ) : (
-                <ProviderDetailPanel
+                <ProviderDetailHost
                   // Explicit key: `PanelTransition` only remounts when motion is
                   // enabled, so under reduced motion the active tab / revealed
                   // key state leaked from one provider to the next.
                   key={selectedId}
-                  provider={
-                    selectedBuiltIn
-                      ? {
-                          id: selectedId,
-                          name: selectedBuiltIn.name,
-                          modelCount: selectedBuiltIn.models.length,
-                        }
-                      : selectedCustom
-                        ? {
-                            id: selectedId,
-                            name: selectedCustom.customName,
-                            modelCount: selectedCustom.customModels?.length ?? 0,
-                          }
-                        : null
-                  }
+                  selectedId={selectedId}
+                  selectedBuiltIn={selectedBuiltIn}
+                  selectedCustom={selectedCustom}
+                  selectedSettings={selectedSettings}
+                  selectedName={selectedName}
+                  selectedReadiness={selectedReadiness}
+                  isCustom={isCustom}
+                  isLocalProvider={isLocalProvider}
                   isEnabled={isEnabled}
                   canEnable={canEnable}
                   enableBlockedReason={enableBlockedReason}
-                  isCustom={isCustom}
-                  isDefault={selectedId === defaultProvider}
-                  onSetDefault={
-                    canSetDefault ? () => void s.setDefaultProvider(selectedId) : undefined
-                  }
+                  canSetDefault={canSetDefault}
                   setDefaultBlockedReason={setDefaultBlockedReason}
-                  connectionStatus={
-                    isCustom
-                      ? (() => {
-                          const testOutcome = s.customTestResults[selectedId]
-                          const effectiveTest = preferLiveHealth(
-                            liveProviderHealth[selectedId],
-                            testOutcome === "success"
-                              ? true
-                              : testOutcome === "error"
-                                ? false
-                                : undefined,
-                            testOutcome
-                          )
-                          return deriveStatus(
-                            selectedCustom?.apiKey,
-                            selectedCustom?.baseURL,
-                            effectiveTest.ok,
-                            effectiveTest.outcome
-                          )
-                        })()
-                      : (() => {
-                          const test = s.testResults[selectedId]
-                          const effectiveTest = preferLiveHealth(
-                            liveProviderHealth[selectedId],
-                            test?.success,
-                            test?.outcome
-                          )
-                          return deriveStatus(
-                            selectedSettings?.apiKey,
-                            selectedSettings?.baseURL,
-                            effectiveTest.ok,
-                            effectiveTest.outcome,
-                            selectedId === "bedrock" && !!selectedSettings?.bedrock
-                              ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
-                              : false,
-                            selectedSettings?.verificationStatus ?? null
-                          )
-                        })()
-                  }
-                  onToggleEnabled={(next) => {
-                    if (next && !canEnable) return
-                    if (isCustom && selectedCustom) {
-                      void s.updateCustomProvider(selectedId, { enabled: next })
-                    } else {
-                      void setProviderConfig(selectedId, { enabled: next })
-                    }
-                  }}
-                  onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
+                  isDefault={selectedId === defaultProvider}
+                  settings={s}
+                  liveProviderHealth={liveProviderHealth}
+                  setProviderConfig={setProviderConfig}
+                  configModelOptions={configModelOptions}
+                  enrichedBuiltInModels={enrichedBuiltInModels}
+                  modelsDevLoading={modelsDevLoading}
+                  diagnosticStatusByModel={modelDiagnosticBadges}
+                  configTestResult={configTestResult}
+                  isRefreshingModels={!!testingConnection[selectedId]}
+                  onRefreshModels={handleRefreshModels}
+                  onTestConnection={handleTestConnection}
+                  onEditCustom={handleEditCustom}
+                  onPersistLocalModels={persistLocalProviderModels}
+                  onRequestDelete={() => setPendingDeleteId(selectedId)}
                   onBack={isMobile ? () => setMobileDetailOpen(false) : undefined}
-                  configTab={
-                    // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
-                    // and gets its own dashboard, but it stays INSIDE the shared
-                    // detail shell so it keeps the header, enable switch, default
-                    // badge and status the rest of the list has.
-                    isLocalProvider ? (
-                      <div className="space-y-6">
-                        {selectedReadiness && (
-                          <ProviderSetupChecklist
-                            checklist={selectedReadiness.setupChecklist}
-                            isLocalEngine
-                          />
-                        )}
-                        <LocalProviderSettings providerId={selectedId as LocalProviderName} />
-                      </div>
-                    ) : isCustom && selectedCustom ? (
-                      <div className="space-y-6">
-                        {selectedReadiness && (
-                          <ProviderSetupChecklist
-                            checklist={selectedReadiness.setupChecklist}
-                            onVerify={() => void s.testCustomProvider(selectedId)}
-                            isVerifying={!!s.testingCustomProviders[selectedId]}
-                          />
-                        )}
-                        <CustomProviderInlineConfig
-                          cp={selectedCustom}
-                          onApiKeyChange={(key) =>
-                            void s.updateCustomProvider(selectedId, { apiKey: key })
-                          }
-                          onBaseURLChange={(url) =>
-                            void s.updateCustomProvider(selectedId, { baseURL: url })
-                          }
-                          onDefaultModelChange={(model) =>
-                            void s.updateCustomProvider(selectedId, { defaultModel: model })
-                          }
-                          onEditClick={handleEditCustom}
-                          onTestConnection={() => void s.testCustomProvider(selectedId)}
-                          testResult={s.customTestResults[selectedId] ?? null}
-                          testMessage={s.customTestMessages[selectedId] ?? null}
-                          isTesting={!!s.testingCustomProviders[selectedId]}
-                        />
-                      </div>
-                    ) : selectedBuiltIn ? (
-                      <div className="space-y-6">
-                        {selectedReadiness && (
-                          <ProviderSetupChecklist
-                            checklist={selectedReadiness.setupChecklist}
-                            onVerify={handleTestConnection}
-                            isVerifying={!!s.testingProviders[selectedId]}
-                          />
-                        )}
-                        <ProviderConfigTab
-                          providerId={selectedId}
-                          settings={
-                            selectedSettings ?? {
-                              providerId: selectedId,
-                              enabled: false,
-                              defaultModel: selectedBuiltIn.defaultModel,
-                            }
-                          }
-                          providerModels={configModelOptions}
-                          providerDashboardUrl={selectedBuiltIn.dashboardUrl}
-                          providerDocsUrl={selectedBuiltIn.docsUrl}
-                          onApiKeyChange={(key) =>
-                            void setProviderConfig(selectedId, { apiKey: key })
-                          }
-                          onBaseURLChange={(url) =>
-                            void setProviderConfig(selectedId, { baseURL: url })
-                          }
-                          onBedrockSettingsChange={(bedrock) =>
-                            void setProviderConfig(selectedId, {
-                              bedrock,
-                              apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
-                              baseURL: bedrock.baseURL,
-                            })
-                          }
-                          onApiProtocolChange={(protocol) =>
-                            void setProviderConfig(selectedId, { apiProtocol: protocol })
-                          }
-                          onApiFlavorChange={(apiFlavor) =>
-                            void setProviderConfig(selectedId, { apiFlavor })
-                          }
-                          onCustomHeadersChange={(customHeaders) =>
-                            void setProviderConfig(selectedId, { customHeaders })
-                          }
-                          onDefaultModelChange={(model) =>
-                            void setProviderConfig(selectedId, { defaultModel: model })
-                          }
-                          onTestConnection={async () => {
-                            const result = await s.testProvider(selectedId)
-                            return {
-                              success: !!result?.success,
-                              latency: result?.latency_ms,
-                              error: result?.success ? undefined : result?.message,
-                              outcome: result?.outcome,
-                            }
-                          }}
-                          testResult={configTestResult}
-                          isTesting={!!s.testingProviders[selectedId]}
-                          onAddApiKey={(key) => {
-                            const pool = selectedSettings?.apiKeys ?? []
-                            void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
-                          }}
-                          onRemoveApiKey={(index) => {
-                            const pool = selectedSettings?.apiKeys ?? []
-                            void setProviderConfig(selectedId, {
-                              apiKeys: pool.filter((_, i) => i !== index),
-                            })
-                          }}
-                          onReorderApiKeys={(from, to) => {
-                            const pool = [...(selectedSettings?.apiKeys ?? [])]
-                            const [moved] = pool.splice(from, 1)
-                            if (moved === undefined) return
-                            pool.splice(to, 0, moved)
-                            void setProviderConfig(selectedId, { apiKeys: pool })
-                          }}
-                          onToggleRotation={(enabled) =>
-                            void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
-                          }
-                          onRotationStrategyChange={(strategy) =>
-                            void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
-                          }
-                        />
-                        {/* Self-gates on the catalog's `supportsOAuth` and renders
-                        null otherwise, so mounting it for every built-in is
-                        safe and picks up any future OAuth provider for free.
-                        Until now nothing rendered it, which left
-                        `oauthConnected` / `oauthExpiresAt` unreachable from the
-                        UI even though both are persisted on the settings row. */}
-                        <OAuthLoginButton providerId={selectedId} />
-                        {/* Guided key login. Self-gates on whether the provider
-                        has a console page or a validation probe, so mounting it
-                        for every built-in is safe and every provider that grows
-                        one picks it up for free. */}
-                        <KeyLoginRow providerId={selectedId} apiKey={selectedSettings?.apiKey} />
-                        {/* Provider-specific panels. Both shipped with a catalog
-                        entry and a full settings schema but were never mounted,
-                        so every field they expose was unreachable. */}
-                        {selectedId === "openrouter" && (
-                          <>
-                            <OpenRouterSettings />
-                            <OpenRouterKeyManagement />
-                          </>
-                        )}
-                        {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
-                      </div>
-                    ) : (
-                      <div
-                        className="text-sm text-muted-foreground"
-                        data-testid="unknown-provider-placeholder"
-                      >
-                        {t("unknownProviderType")}
-                      </div>
-                    )
-                  }
-                  modelsTab={
-                    isLocalProvider ? (
-                      <LocalProviderModelManager
-                        providerId={selectedId as LocalProviderName}
-                        baseUrl={selectedSettings?.baseURL || selectedBuiltIn?.defaultBaseURL}
-                        apiKey={selectedSettings?.apiKey}
-                        customHeaders={selectedSettings?.customHeaders}
-                        selectedModel={selectedSettings?.defaultModel}
-                        onModelSelect={(modelId) =>
-                          void setProviderConfig(selectedId, { defaultModel: modelId })
-                        }
-                        onModelsChange={(models) => void persistLocalProviderModels(models)}
-                      />
-                    ) : isCustom ? (
-                      // The Models slot is fill-height (it owns its own scroller),
-                      // so these text fallbacks bring their own padding.
-                      <div className="p-4 text-sm text-muted-foreground">
-                        {t("customProviderModelsManaged")}
-                      </div>
-                    ) : selectedBuiltIn ? (
-                      <ProviderModelsTab
-                        providerId={selectedId}
-                        models={enrichedBuiltInModels}
-                        enabledModels={selectedSettings?.enabledModels ?? []}
-                        onEnabledModelsChange={(ids) =>
-                          void setProviderConfig(selectedId, { enabledModels: ids })
-                        }
-                        onRefreshModels={handleRefreshModels}
-                        isRefreshing={!!testingConnection[selectedId]}
-                        onTestConnection={handleTestConnection}
-                        isTesting={!!s.testingProviders[selectedId]}
-                        metadataLoading={modelsDevLoading}
-                        diagnosticStatusByModel={modelDiagnosticBadges}
-                      />
-                    ) : (
-                      <div className="p-4 text-sm text-muted-foreground">
-                        {t("noModelsAvailable")}
-                      </div>
-                    )
-                  }
-                  costTab={
-                    isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />
-                  }
-                  diagnosticsTab={
-                    <ProviderDiagnosticsTab
-                      providerId={selectedId}
-                      providerName={selectedName ?? selectedId}
-                      modelIds={
-                        isCustom
-                          ? (selectedCustom?.customModels ?? [])
-                          : enrichedBuiltInModels.map((model) => model.id)
-                      }
-                      defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
-                    />
-                  }
-                  advancedTab={
-                    <SettingsStack>
-                      <SettingsBlock
-                        collapsible
-                        icon={<SlidersHorizontal />}
-                        title={t("tabs.parameters")}
-                      >
-                        <ProviderParametersTab
-                          providerId={selectedId}
-                          settings={
-                            (isCustom ? selectedCustom : selectedSettings) ?? {
-                              providerId: selectedId,
-                              enabled: false,
-                              defaultModel:
-                                selectedBuiltIn?.defaultModel ?? selectedCustom?.defaultModel ?? "",
-                            }
-                          }
-                          schema={getSchemaForProvider(
-                            selectedId,
-                            Object.fromEntries(
-                              Object.values(s.customProviders).map((provider) => [
-                                provider.id,
-                                { apiProtocol: provider.apiProtocol, name: provider.name },
-                              ])
-                            )
-                          )}
-                          onSettingsChange={(patch) =>
-                            isCustom
-                              ? s.updateCustomProvider(selectedId, patch)
-                              : setProviderConfig(selectedId, patch)
-                          }
-                        />
-                      </SettingsBlock>
-                    </SettingsStack>
-                  }
                 />
               )}
             </PanelTransition>

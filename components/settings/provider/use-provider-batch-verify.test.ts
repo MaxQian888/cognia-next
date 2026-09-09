@@ -117,7 +117,7 @@ describe("useProviderBatchVerify", () => {
   it("runs the retry set and labels the summary as a retry", async () => {
     eligibleBuiltIn.mockReturnValue(["openai", "anthropic"])
     retryBuiltIn.mockReturnValue(["google"])
-    const testProvider = jest.fn(async () => ({ success: true }))
+    const testProvider = jest.fn(async (_id: string) => ({ success: true }))
     const settings = makeSettings({ testProvider: testProvider as unknown as TestProvider })
 
     const { result } = renderHook(() => useProviderBatchVerify(settings))
