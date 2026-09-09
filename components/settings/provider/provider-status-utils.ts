@@ -2,19 +2,25 @@
 
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderUIPreferences } from "@cognia/provider-types/provider"
+import type { BuiltInProviderCategory } from "@cognia/provider-types/built-in-provider-catalog"
 
 /**
- * Rail category filters, in tab order. Mirrors `BuiltInProviderCategory`
- * (`flagship | aggregator | specialized | local | enterprise`) one-to-one so a
- * tab always means what its label says; `enterprise` (Cohere / Bedrock /
- * Azure) folds into "flagship" because those hosts serve flagship models. The
- * previous strip mapped "AI" → flagship only (4 providers) and "Voice" →
- * specialized (33 providers, incl. DeepSeek / Groq / Mistral) — a Voice tab
- * full of text-only vendors.
+ * Rail category filters, in tab order. Every value of
+ * `BuiltInProviderCategory` now has a filter of its own.
+ *
+ * `enterprise` (Cohere / Bedrock / Azure) used to fold into "flagship" on the
+ * grounds that those hosts serve flagship models. That left a tab whose label
+ * named one thing and whose contents were two, and it made `enterprise` the
+ * only catalog category with no way to ask for it.
+ *
+ * Note this is the catalog's `category`, not the `quickAdd.category` region
+ * tag (`china` / `global` / `proxy`) that lives on the same entries. Those are
+ * a different axis and are read only by the quick-add dialog.
  */
 export const PROVIDER_CATEGORY_FILTERS = [
   "all",
   "flagship",
+  "enterprise",
   "specialized",
   "aggregator",
   "local",
@@ -31,27 +37,39 @@ export function normalizeCategoryFilter(value: string | undefined | null): Provi
 }
 
 /**
- * Maps sidebar category filters to the catalog categories that belong in each.
- * Keep in sync with the `category` field on `BuiltInProviderCatalogEntry`.
+ * Maps a rail category filter to the catalog categories it claims.
+ *
+ * Typed against `BuiltInProviderCategory` rather than `string[]` on purpose. A
+ * sixth catalog category is a compile error here, which is the only thing that
+ * stops it from being silently unreachable through every filter but "all".
  */
-const CATEGORY_MAP: Record<string, string[]> = {
-  flagship: ["flagship", "enterprise"],
+export const CATEGORY_MAP: Record<
+  Exclude<ProviderCategoryFilter, "all" | "custom">,
+  readonly BuiltInProviderCategory[]
+> = {
+  flagship: ["flagship"],
+  enterprise: ["enterprise"],
   specialized: ["specialized"],
   aggregator: ["aggregator"],
   local: ["local"],
 }
 
 /**
- * Decide whether a built-in provider belongs in the given sidebar category.
+ * Decide whether a built-in provider belongs in the given rail category.
+ *
+ * An unrecognised filter matches nothing. It used to match everything, which
+ * reads as "show the whole list" but is the wrong default now that the filter
+ * is about to arrive from a URL: a typo would silently widen the list instead
+ * of showing that the filter did not apply.
  */
 export function providerMatchesCategory(category: string, providerId: string): boolean {
   if (category === "all") return true
   if (category === "custom") return false
-  const categories = CATEGORY_MAP[category]
-  if (!categories) return true
+  const categories = CATEGORY_MAP[category as Exclude<ProviderCategoryFilter, "all" | "custom">]
+  if (!categories) return false
   const cfg = PROVIDERS[providerId]
   if (!cfg) return false
-  return cfg.category !== undefined && categories.includes(cfg.category)
+  return cfg.category !== undefined && categories.includes(cfg.category as BuiltInProviderCategory)
 }
 
 export function deriveStatus(

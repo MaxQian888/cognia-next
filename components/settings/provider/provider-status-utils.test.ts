@@ -1,11 +1,13 @@
 import {
   deriveStatus,
   isLocalEngineConfigured,
+  CATEGORY_MAP,
   normalizeCategoryFilter,
   pickInitialProviderId,
   providerMatchesCategory,
   sortProviderRows,
 } from "./provider-status-utils"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 
 jest.mock("@cognia/provider-types/provider", () => ({
   PROVIDERS: {
@@ -105,9 +107,14 @@ describe("providerMatchesCategory", () => {
     expect(providerMatchesCategory("custom", "flagship")).toBe(false)
   })
 
-  it("matches flagship + enterprise providers under 'flagship'", () => {
+  it("gives flagship and enterprise a filter each", () => {
+    // They used to share the "flagship" tab, so a tab labelled Flagship also
+    // held Cohere / Bedrock / Azure and there was no way to ask for either
+    // group on its own.
     expect(providerMatchesCategory("flagship", "flagship")).toBe(true)
-    expect(providerMatchesCategory("flagship", "enterprise")).toBe(true)
+    expect(providerMatchesCategory("flagship", "enterprise")).toBe(false)
+    expect(providerMatchesCategory("enterprise", "enterprise")).toBe(true)
+    expect(providerMatchesCategory("enterprise", "flagship")).toBe(false)
     expect(providerMatchesCategory("flagship", "specialized")).toBe(false)
   })
 
@@ -123,12 +130,44 @@ describe("providerMatchesCategory", () => {
     expect(providerMatchesCategory("local", "flagship")).toBe(false)
   })
 
-  it("returns true for unknown category keys", () => {
-    expect(providerMatchesCategory("unknown-category", "flagship")).toBe(true)
+  it("matches nothing for an unknown category key", () => {
+    // The filter is about to arrive from a URL. Matching everything reads as
+    // "show the whole list", so a typo would silently widen the result rather
+    // than showing that the filter did not apply.
+    expect(providerMatchesCategory("unknown-category", "flagship")).toBe(false)
   })
 
   it("returns false for unknown provider ids", () => {
     expect(providerMatchesCategory("flagship", "not-a-provider")).toBe(false)
+  })
+})
+
+describe("CATEGORY_MAP", () => {
+  it("claims every category the real catalog actually ships", () => {
+    // The typed Record proves every FILTER names categories. This proves the
+    // other direction: that no catalog category is left without a filter, the
+    // way `enterprise` was. Reads the real catalog, not the mock above, so it
+    // also catches data drift rather than only type drift.
+    const claimed = new Set(Object.values(CATEGORY_MAP).flat())
+    const shipped = new Set(
+      getBuiltInProviderCatalog()
+        .map((entry) => entry.category)
+        .filter((category): category is NonNullable<typeof category> => category != null)
+    )
+    expect(shipped.size).toBeGreaterThan(1)
+    expect([...shipped].filter((category) => !claimed.has(category))).toEqual([])
+  })
+
+  it("gives each category exactly one filter", () => {
+    // Two filters claiming one category would put the same provider under two
+    // tabs, and the counts in the rail's stats line would stop adding up.
+    const seen = new Map<string, string[]>()
+    for (const [filter, categories] of Object.entries(CATEGORY_MAP)) {
+      for (const category of categories) {
+        seen.set(category, [...(seen.get(category) ?? []), filter])
+      }
+    }
+    expect([...seen].filter(([, filters]) => filters.length > 1)).toEqual([])
   })
 })
 

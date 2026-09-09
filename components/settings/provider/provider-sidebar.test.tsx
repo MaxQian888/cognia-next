@@ -23,6 +23,7 @@ jest.mock("next-intl", () => ({
       "sidebar.clearFilters": "Clear filters",
       "categories.all": "All",
       "categories.flagship": "Flagship",
+      "categories.enterprise": "Enterprise",
       "categories.specialized": "Specialized",
       "categories.aggregator": "Aggregators",
       "categories.local": "Local",
@@ -133,7 +134,17 @@ describe("ProviderSidebar", () => {
 
   it("renders i18n-wired category tabs that mirror the catalog categories", () => {
     render(<ProviderSidebar {...defaultProps} />)
-    for (const label of ["All", "Flagship", "Specialized", "Aggregators", "Local", "Custom"]) {
+    for (const label of [
+      "All",
+      "Flagship",
+      // Enterprise used to be folded into the Flagship tab, so its label named
+      // one thing and its contents were two.
+      "Enterprise",
+      "Specialized",
+      "Aggregators",
+      "Local",
+      "Custom",
+    ]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
     // The retired strip's "Voice" (= specialized) / "Vision" tabs are gone.

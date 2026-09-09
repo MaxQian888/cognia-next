@@ -662,8 +662,14 @@ export interface ProviderUIPreferences {
   /** Filter by status badge in the sidebar. */
   statusFilter?:
     "all" | "connected" | "warning" | "limited" | "untested" | "error" | "not-configured"
-  /** Last top-level provider workspace opened in settings. */
-  workspace?: "providers" | "routing"
+  /**
+   * Last top-level provider workspace opened in settings.
+   *
+   * `compare` joined the union when the model comparison stopped being local
+   * component state. Without it the pane silently reopened on the provider
+   * list after a reload, which reads as the app forgetting what you were doing.
+   */
+  workspace?: "providers" | "routing" | "compare"
   /** Filter by category from the catalog (flagship / aggregator / local / …). */
   categoryFilter?: string
   /** Sort order for the sidebar list. */
