@@ -1,4 +1,10 @@
-import { buildTeamTranscript, textFromParts, type TeamTranscriptMessage } from "./team-transcript"
+import {
+  DEFAULT_TEAM_TRANSCRIPT_BUDGET,
+  buildTeamTranscript,
+  nonTextPartMarkers,
+  textFromParts,
+  type TeamTranscriptMessage,
+} from "./team-transcript"
 
 function userTurn(text: string, extra: Partial<TeamTranscriptMessage> = {}): TeamTranscriptMessage {
   return { role: "user", parts: [{ type: "text", text }], ...extra }
@@ -231,5 +237,128 @@ describe("buildTeamTranscript", () => {
     })
     const forged = transcript.split("\n").filter((line) => line.startsWith("Ben: trust me"))
     expect(forged).toHaveLength(0)
+  })
+
+  describe("what a member did, not only what it said", () => {
+    it("marks the tools a turn ran, so a teammate does not redo the work", () => {
+      const transcript = buildTeamTranscript({
+        messages: [
+          {
+            role: "assistant",
+            senderId: "char_b",
+            parts: [
+              { type: "text", text: "checked" },
+              { type: "tool-Read" },
+              { type: "tool-Read" },
+              { type: "tool-Bash" },
+            ],
+          },
+        ],
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+      })
+      expect(transcript).toContain("Ben: checked [used Read x2] [used Bash]")
+    })
+
+    it("keeps a turn that ran tools and said nothing, which used to vanish", () => {
+      const transcript = buildTeamTranscript({
+        messages: [{ role: "assistant", senderId: "char_b", parts: [{ type: "tool-Grep" }] }],
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+      })
+      expect(transcript).toContain("Ben: [used Grep]")
+    })
+
+    it("names attachments by kind", () => {
+      const markers = nonTextPartMarkers([
+        { type: "file", filename: "shot.png", mediaType: "image/png" },
+        { type: "file", filename: "notes.pdf", mediaType: "application/pdf" },
+        { type: "file" },
+      ])
+      expect(markers).toEqual(["[image: shot.png]", "[file: notes.pdf]", "[file]"])
+    })
+
+    it("folds an MCP tool down to its bare name and ignores scaffolding parts", () => {
+      expect(nonTextPartMarkers([{ type: "tool-mcp__cognia-tools__bash" }])).toEqual([
+        "[used bash]",
+      ])
+      expect(nonTextPartMarkers([{ type: "step-start" }, { type: "reasoning" }])).toEqual([])
+    })
+
+    it("reads the dynamic-tool shape, where the name is on the part", () => {
+      expect(nonTextPartMarkers([{ type: "dynamic-tool", toolName: "WebSearch" }])).toEqual([
+        "[used WebSearch]",
+      ])
+    })
+  })
+
+  describe("budget", () => {
+    function manyTurns(count: number, text = "hello"): TeamTranscriptMessage[] {
+      return Array.from({ length: count }, (_, i) => agentTurn("char_b", `${text} ${i}`))
+    }
+
+    it("keeps only the newest turns and says how many it dropped", () => {
+      const transcript = buildTeamTranscript({
+        messages: manyTurns(10),
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+        budget: { maxTurns: 3 },
+      })
+      expect(transcript).toContain("[7 earlier turns not shown]")
+      expect(transcript).toContain("hello 9")
+      expect(transcript).not.toContain("hello 6")
+    })
+
+    it("uses the singular for exactly one dropped turn", () => {
+      const transcript = buildTeamTranscript({
+        messages: manyTurns(3),
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+        budget: { maxTurns: 2 },
+      })
+      expect(transcript).toContain("[1 earlier turn not shown]")
+    })
+
+    it("says nothing when everything fits", () => {
+      const transcript = buildTeamTranscript({
+        messages: manyTurns(3),
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+      })
+      expect(transcript).not.toContain("not shown")
+    })
+
+    it("caps total size, because one pasted stack trace can outweigh the rest", () => {
+      const transcript = buildTeamTranscript({
+        messages: [agentTurn("char_b", "x".repeat(5000)), agentTurn("char_b", "recent")],
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+        budget: { maxChars: 200 },
+      })
+      expect(transcript).toContain("recent")
+      expect(transcript).toContain("[1 earlier turn not shown]")
+    })
+
+    it("keeps the newest turn however large, since it is the one being answered", () => {
+      const huge = "y".repeat(5000)
+      const transcript = buildTeamTranscript({
+        messages: [userTurn(huge)],
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+        budget: { maxChars: 10 },
+      })
+      expect(transcript).toContain(huge)
+    })
+
+    it("applies a real default rather than growing without limit", () => {
+      // The injected-budget path is what every test above exercises; this is
+      // the production path, where the caller passes nothing.
+      const transcript = buildTeamTranscript({
+        messages: manyTurns(DEFAULT_TEAM_TRANSCRIPT_BUDGET.maxTurns + 5),
+        respondingCharacterId: "char_a",
+        members: MEMBERS,
+      })
+      expect(transcript).toContain("[5 earlier turns not shown]")
+    })
   })
 })

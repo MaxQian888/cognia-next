@@ -40,6 +40,7 @@ import {
   mergeRoomParticipants,
   type RoomParticipant,
 } from "./room-roster"
+import { bareToolName } from "./tool-summary"
 import {
   makeSpeaker,
   resolveMessageSpeaker,
@@ -61,12 +62,40 @@ export interface TeamTranscriptMessage extends SpeakerSource {
   parts: readonly unknown[]
 }
 
+/**
+ * How much history a member is allowed to read.
+ *
+ * A team turn costs one rendered transcript PER MEMBER, so the unbounded
+ * version was O(members x whole conversation) every turn, growing forever. The
+ * documented failure mode for the supervisor pattern is exactly this: past
+ * eight to twelve round trips the history crowds the current task out of the
+ * window and routing accuracy falls off. A ceiling is the fix, and saying how
+ * many turns were dropped is what keeps it honest.
+ */
+export interface TeamTranscriptBudget {
+  /** Newest turns kept. Older ones collapse into one elision line. */
+  maxTurns?: number
+  /**
+   * Hard ceiling on the rendered turn block. Applied after `maxTurns`, newest
+   * first, because a single pasted stack trace can be larger than the rest of
+   * the conversation put together.
+   */
+  maxChars?: number
+}
+
+export const DEFAULT_TEAM_TRANSCRIPT_BUDGET: Required<TeamTranscriptBudget> = {
+  maxTurns: 40,
+  maxChars: 24_000,
+}
+
 export interface BuildTeamTranscriptInput {
   messages: readonly TeamTranscriptMessage[]
   /** The member this prompt is being built for. Its own turns render as `You:`. */
   respondingCharacterId: string
   members: readonly TeamTranscriptMember[]
   scratchpad?: string | undefined
+  /** Omitted means {@link DEFAULT_TEAM_TRANSCRIPT_BUDGET}. */
+  budget?: TeamTranscriptBudget | undefined
 }
 
 /** Concatenate the text parts of a message. Non-text parts carry no transcript line. */
@@ -80,6 +109,39 @@ export function textFromParts(parts: readonly unknown[]): string {
   return out.join("")
 }
 
+/**
+ * One-line markers for the parts that are not prose.
+ *
+ * Members could previously only see what their teammates SAID, never what they
+ * DID: a turn that ran three tools and attached a screenshot rendered as an
+ * empty line and was dropped. That is the difference between a room where
+ * agents build on each other's work and one where they repeat it. The markers
+ * are deliberately terse, since a full tool result would blow the budget above
+ * on its own.
+ */
+export function nonTextPartMarkers(parts: readonly unknown[]): string[] {
+  const markers: string[] = []
+  const toolCounts = new Map<string, number>()
+  for (const part of parts) {
+    const type = (part as { type?: string }).type
+    if (!type || type === "text" || type === "step-start" || type === "reasoning") continue
+    if (type.startsWith("tool-") || type === "dynamic-tool") {
+      const name = bareToolName((part as { toolName?: string }).toolName ?? type)
+      toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1)
+      continue
+    }
+    if (type === "file") {
+      const file = part as { filename?: string; mediaType?: string }
+      const kind = file.mediaType?.startsWith("image/") ? "image" : "file"
+      markers.push(file.filename ? `[${kind}: ${file.filename}]` : `[${kind}]`)
+    }
+  }
+  for (const [name, count] of toolCounts) {
+    markers.push(count > 1 ? `[used ${name} x${count}]` : `[used ${name}]`)
+  }
+  return markers
+}
+
 export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
   const { messages, respondingCharacterId, members, scratchpad } = input
   const sections: string[] = []
@@ -91,7 +153,7 @@ export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
   const roster = buildRoomRosterSection(rosterFor(messages, respondingCharacterId, members))
   if (roster) sections.push(roster)
 
-  const lines = transcriptLines(messages, respondingCharacterId, members)
+  const lines = applyBudget(transcriptLines(messages, respondingCharacterId, members), input.budget)
   if (lines.length > 0) {
     sections.push(
       [
@@ -141,24 +203,56 @@ function transcriptLines(
   const lines: string[] = []
 
   for (const message of messages) {
-    const text = textFromParts(message.parts)
-    if (!text.trim()) continue
+    const body = [textFromParts(message.parts).trim(), ...nonTextPartMarkers(message.parts)]
+      .filter(Boolean)
+      .join(" ")
+    // A turn that only ran tools still happened, and a member that cannot see
+    // it will redo the work. Only a genuinely empty turn is skipped.
+    if (!body) continue
 
     if (message.role === "user") {
       const speaker = resolveMessageSpeaker(message)
-      lines.push(`${speaker ? speakerTranscriptName(speaker) : "User"}: ${text}`)
+      lines.push(`${speaker ? speakerTranscriptName(speaker) : "User"}: ${body}`)
       continue
     }
 
     const senderId = senderIdOf(message)
     if (senderId && senderId === respondingCharacterId) {
-      lines.push(`You: ${text}`)
+      lines.push(`You: ${body}`)
       continue
     }
-    lines.push(`${(senderId && nameById.get(senderId)) || senderId || "Assistant"}: ${text}`)
+    lines.push(`${(senderId && nameById.get(senderId)) || senderId || "Assistant"}: ${body}`)
   }
 
   return lines
+}
+
+/**
+ * Trim to the newest turns that fit, and say how many were dropped.
+ *
+ * Silently truncating would leave a member confidently answering from half a
+ * conversation with no way to know it. The elision line is what turns that
+ * into a fact it can account for.
+ */
+function applyBudget(lines: readonly string[], budget: TeamTranscriptBudget | undefined): string[] {
+  const maxTurns = budget?.maxTurns ?? DEFAULT_TEAM_TRANSCRIPT_BUDGET.maxTurns
+  const maxChars = budget?.maxChars ?? DEFAULT_TEAM_TRANSCRIPT_BUDGET.maxChars
+
+  const kept: string[] = []
+  let chars = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (kept.length >= maxTurns) break
+    // Always keep the newest turn, however large: dropping the message being
+    // answered leaves the member with nothing to answer.
+    if (kept.length > 0 && chars + lines[i].length > maxChars) break
+    kept.push(lines[i])
+    chars += lines[i].length
+  }
+  kept.reverse()
+
+  const dropped = lines.length - kept.length
+  if (dropped <= 0) return kept
+  return [`[${dropped} earlier turn${dropped === 1 ? "" : "s"} not shown]`, ...kept]
 }
 
 /** `lib/db/messages.ts` hoists `senderId` into `metadata` for the UI layer, so both are read. */
