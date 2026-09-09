@@ -1,0 +1,5 @@
+{
+  "andMore": "{count, plural, other {# more}}",
+  "listLabel": "In this room",
+  "participants": "{count, plural, other {# in this room}}"
+}

@@ -30,6 +30,7 @@ import { SessionEnvironmentChip } from "@/components/chat/session-environment-ch
 import { SharedSessionPanel } from "@/components/chat/shared-session-panel"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
+import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { inboxConversationHref } from "@/lib/inbox/conversation-href"
@@ -151,6 +152,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           executionContext={session.executionContext}
           onManage={() => setSettingsOpen(true)}
         />
+        {/* Self-hides unless this conversation has more than one participant.
+            The fifth question in this row, and the one the header could not
+            answer at all: a team of agents, a shared session and an IM group
+            all looked exactly like a conversation with one counterpart. */}
+        <RoomParticipantsChip session={session} />
         <SharedSessionPanel session={session} />
       </div>
 

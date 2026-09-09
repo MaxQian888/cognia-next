@@ -1,0 +1,5 @@
+{
+  "andMore": "{count, plural, other {另有 # 人}}",
+  "listLabel": "房间成员",
+  "participants": "{count, plural, other {房间内 # 人}}"
+}
