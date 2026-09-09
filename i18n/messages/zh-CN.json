@@ -25859,7 +25859,9 @@
     "showApiKey": "显示 API 密钥",
     "sidebar": {
       "addButton": "添加",
+      "categoryLabel": "分类",
       "clearFilters": "清除筛选",
+      "filterLabel": "筛选",
       "modelCompare": "模型对比",
       "moreActions": "更多提供商操作",
       "noMatches": "没有提供商符合当前筛选条件。",
@@ -25870,6 +25872,7 @@
       "reasonUnconfigured": "添加 API 密钥以开始使用该提供商",
       "reasonUntested": "凭据已保存，但尚未运行连接测试。",
       "reasonWarning": "已配置但未验证 — 打开以测试连接",
+      "removeFilter": "移除筛选：{name}",
       "resizeHandle": "调整提供商列表宽度",
       "routing": "路由工作区",
       "searchPlaceholder": "搜索提供商...",

@@ -25859,7 +25859,9 @@
     "showApiKey": "Show API key",
     "sidebar": {
       "addButton": "Add",
+      "categoryLabel": "Category",
       "clearFilters": "Clear filters",
+      "filterLabel": "Filters",
       "modelCompare": "Model Compare",
       "moreActions": "More provider actions",
       "noMatches": "No providers match these filters.",
@@ -25870,6 +25872,7 @@
       "reasonUnconfigured": "Add an API key to start using this provider",
       "reasonUntested": "Credentials saved, but no connection test has run yet.",
       "reasonWarning": "Configured but not verified — open to test the connection",
+      "removeFilter": "Remove filter: {name}",
       "resizeHandle": "Resize provider list",
       "routing": "Routing workspace",
       "searchPlaceholder": "Search providers...",

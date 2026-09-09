@@ -117,10 +117,6 @@ jest.mock("@/hooks/settings/use-provider-settings", () => ({
   useProviderSettings: () => mockHookState,
 }))
 
-let mockIsMobile = false
-jest.mock("@/hooks/ui/use-mobile", () => ({
-  useIsMobile: () => mockIsMobile,
-}))
 jest.mock("@/hooks/ai/use-provider-manager", () => ({
   useProviderManager: () => ({ providers: {}, isLoading: false, refresh: jest.fn() }),
 }))
@@ -805,7 +801,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.queryByTestId("batch-strip")).toBeNull()
   })
 
-  it("renders one rail with a resize handle on desktop, and persists the dragged width", () => {
+  it("renders one rail with a resize handle, and persists the dragged width", () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "openai",
@@ -815,33 +811,50 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(screen.getAllByTestId("provider-sidebar")).toHaveLength(1)
     const handle = screen.getByTestId("provider-rail-resize-handle")
     expect(handle).toHaveAttribute("aria-valuenow", "360")
-    expect(screen.getByTestId("provider-layout")).toHaveStyle({
-      gridTemplateColumns: "360px minmax(0, 1fr)",
-    })
     // Keyboard nudge goes through the same persisted preference.
     fireEvent.keyDown(handle, { key: "ArrowRight" })
     expect(handle).toHaveAttribute("aria-valuenow", "376")
   })
 
-  it("uses canonical list-to-detail navigation on mobile", async () => {
-    mockIsMobile = true
-    try {
-      mockHookState = makeHookState({
-        filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
-        selectedProviderId: "openai",
-      })
-      render(<ProviderSettings />)
-      expect(screen.queryAllByTestId("provider-sidebar")).toHaveLength(1)
-      expect(screen.queryByTestId("provider-rail-resize-handle")).toBeNull()
-      expect(screen.queryByTestId("provider-detail-panel")).toBeNull()
-      fireEvent.click(screen.getByTestId("provider-sidebar-item-openai"))
-      expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
-        "data-provider-id",
-        "openai"
-      )
-    } finally {
-      mockIsMobile = false
-    }
+  // The stored width is now an upper bound fed to the shared frame, which
+  // renders `clamp(200px, 30cqi, <width>)`. The old inline
+  // `gridTemplateColumns: 360px minmax(0,1fr)` pinned the rail whatever the
+  // pane could spare, which is how a 1000px window ended up with a 328px
+  // detail column.
+  it("hands the stored rail width to the frame as a ceiling, not a fixed track", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+      uiPreferences: { sidebarWidth: 360 },
+    })
+    const { container } = render(<ProviderSettings />)
+    const layout = screen.getByTestId("provider-layout")
+    expect(layout).not.toHaveStyle({ gridTemplateColumns: "360px minmax(0, 1fr)" })
+    const track = container.querySelector<HTMLElement>("[style*='--settings-rail-w']")
+    expect(track?.style.getPropertyValue("--settings-rail-w")).toBe("360px")
+  })
+
+  // Replaces the old push-navigation test. The pane no longer asks the
+  // viewport anything: the frame measures itself and publishes a density, and
+  // the detail is mounted at both of them. Losing the provider you were
+  // configuring just to look at the list was the bug.
+  it("keeps the detail mounted and never consults the viewport", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    expect(screen.getByTestId("provider-layout")).toHaveAttribute(
+      "data-settings-list-density",
+      "split"
+    )
+    expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+      "data-provider-id",
+      "openai"
+    )
+    // One rail, whichever host it landed in: a CSS-hidden second copy would
+    // duplicate every `id="provider-<id>"` the onboarding banner scrolls to.
+    expect(screen.getAllByTestId("provider-sidebar")).toHaveLength(1)
   })
 
   it("routes the sidebar sort menu to the persisted preference", () => {

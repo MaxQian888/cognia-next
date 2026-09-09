@@ -2,10 +2,9 @@
 
 import React, { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, BarChart3, ArrowUpDown, Check, Route, X } from "lucide-react"
+import { Search, BarChart3, ArrowUpDown, Check, Route } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   DropdownMenu,
@@ -18,10 +17,8 @@ import {
 import { ProviderSidebarItem } from "./provider-sidebar-item"
 import type { ProviderConnectionStatus } from "./provider-sidebar-item"
 import type { ProviderDiagnosticBadgeStatus } from "./provider-sidebar-item"
-import { PROVIDER_CATEGORY_FILTERS, type ProviderSortBy } from "./provider-status-utils"
-
-/** Provider-type categories shown as an equal-width tab strip. */
-const CATEGORY_KEYS = PROVIDER_CATEGORY_FILTERS
+import { type ProviderSortBy } from "./provider-status-utils"
+import { ProviderFilterPopover, type ProviderStatusFilterValue } from "./provider-filter-popover"
 
 const SORT_OPTIONS: ReadonlyArray<{ value: ProviderSortBy; key: string }> = [
   { value: "name", key: "sortName" },
@@ -29,18 +26,8 @@ const SORT_OPTIONS: ReadonlyArray<{ value: ProviderSortBy; key: string }> = [
   { value: "lastUsed", key: "sortLastUsed" },
 ]
 
-/** Connection-status quick filters applied locally to the visible list. */
-const STATUS_FILTERS = [
-  { value: "all", key: "statusAll" },
-  { value: "connected", key: "statusConnected" },
-  { value: "warning", key: "statusWarning" },
-  { value: "limited", key: "statusLimited" },
-  { value: "untested", key: "statusUntested" },
-  { value: "not-configured", key: "statusUnconfigured" },
-  { value: "error", key: "statusError" },
-] as const
-
-type StatusFilter = (typeof STATUS_FILTERS)[number]["value"]
+/** Re-exported so the rail's own props keep naming the same union. */
+type StatusFilter = ProviderStatusFilterValue
 
 interface ProviderSidebarProps {
   providers: Array<{
@@ -181,61 +168,18 @@ export function ProviderSidebar({
           an overflow strip hid the last tab entirely. Wrapping pills keep
           every label legible: they take a second line on a narrow rail instead
           of eating characters, and stay one line once the rail is widened. */}
-      <div className="min-w-0 border-b px-3 py-2">
-        <Tabs value={categoryFilter} onValueChange={onCategoryChange} className="min-w-0">
-          {/* `h-auto!` / `overflow-visible!`: the shared TabsList pins a 36px
-              height for horizontal tabs and the settings panel adds
-              overflow-x-auto — together they clipped the wrapped second row. */}
-          <TabsList className="flex h-auto! w-full min-w-0 flex-wrap justify-start gap-1 overflow-visible! bg-transparent p-0">
-            {CATEGORY_KEYS.map((key) => (
-              <TabsTrigger
-                key={key}
-                value={key}
-                title={t(`categories.${key}`)}
-                className="h-7 flex-none rounded-md border border-transparent px-2 text-xs data-[state=active]:border-border data-[state=active]:bg-muted data-[state=active]:shadow-none"
-              >
-                {t(`categories.${key}`)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </div>
-
-      {/* Status filter — same treatment: wrap, never truncate. */}
-      <div
-        className="min-w-0 border-b px-3 py-2"
-        role="group"
-        aria-label={t("sidebar.statusLabel")}
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {STATUS_FILTERS.map(({ value, key }) => (
-            <Button
-              key={value}
-              type="button"
-              size="sm"
-              variant={statusFilter === value ? "secondary" : "ghost"}
-              aria-pressed={statusFilter === value}
-              title={t(`sidebar.${key}`)}
-              className="h-7 flex-none px-2 text-xs"
-              onClick={() => onStatusFilterChange?.(value)}
-            >
-              {t(`sidebar.${key}`)}
-            </Button>
-          ))}
-          {filtersNarrowTheList && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 flex-none gap-1 px-2 text-xs"
-              onClick={clearFilters}
-            >
-              <X className="h-3 w-3" />
-              {t("sidebar.clearFilters")}
-            </Button>
-          )}
-        </div>
-      </div>
+      {/* One toolbar row instead of two wrapping chip bands. See
+          `provider-filter-popover` for why: the bands cost four rows on a
+          320px rail and seven once the rail started yielding width to the
+          detail column. */}
+      <ProviderFilterPopover
+        categoryFilter={categoryFilter}
+        onCategoryChange={onCategoryChange}
+        statusFilter={statusFilter}
+        onStatusFilterChange={(next) => onStatusFilterChange?.(next)}
+        onClearAll={clearFilters}
+        searchActive={searchQuery.trim().length > 0}
+      />
 
       {/* Provider list (scrollable). Themed `ScrollArea` rather than a native
           `overflow-y-auto`: every dialog in this feature already uses it, so a

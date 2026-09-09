@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { createPortal } from "react-dom"
-import { Plus, ArrowLeft, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
+import { Plus, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -26,13 +26,18 @@ import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { ProviderUIPreferences } from "@cognia/provider-types/provider"
 import type { LocalModelInfo } from "@cognia/provider-types/local-provider"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
+import {
+  ProviderRailHost,
+  RAIL_DEFAULT_WIDTH,
+  RAIL_MAX_WIDTH,
+  RAIL_MIN_WIDTH,
+} from "./provider-rail-host"
 import { ProviderDetailHost } from "./provider-detail-host"
 import type { TestResult } from "./connection-status-card"
 import { RoutingTab } from "./routing-tab"
-import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
-import { cn } from "@/lib/utils"
 import { ProviderSidebar } from "./provider-sidebar"
 import { ProviderHostNotice } from "./provider-host-notice"
 import { ProviderEmptyState } from "./provider-empty-state"
@@ -50,10 +55,6 @@ import { nextActionKey } from "./provider-setup-checklist"
 import { useProviderBatchVerify } from "./use-provider-batch-verify"
 import { useProviderRows } from "./use-provider-rows"
 
-/** Rail width bounds (px). The default matches the previous fixed column. */
-const RAIL_MIN_WIDTH = 240
-const RAIL_MAX_WIDTH = 480
-const RAIL_DEFAULT_WIDTH = 320
 type ProviderStatusFilter = NonNullable<ProviderUIPreferences["statusFilter"]>
 
 const CustomProviderDialog = dynamic(
@@ -99,7 +100,6 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // landed. Show the skeleton until we actually know.
   const settingsLoaded = useSettingsStore((store) => store.loaded)
   const { providers: liveProviderHealth } = useProviderManager()
-  const isMobile = useIsMobile()
 
   const [search, setSearch] = useState("")
   const [categoryFilterOverride, setCategoryFilterOverride] = useState<string | null>(null)
@@ -169,7 +169,8 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // pane. Comparison is a peer of the detail view (it spans providers), so it
   // takes the column over instead of stacking a dialog on top of it.
   const [compareOpen, setCompareOpen] = useState(false)
-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  // The rail drawer, only reachable below the split threshold.
+  const [railSheetOpen, setRailSheetOpen] = useState(false)
   // Optimistic for the duration of the write, and not one render longer.
   // `setProviderUIPreferences` is queued behind every other provider mutation,
   // so reading the persisted value straight through would make the tab switch
@@ -535,16 +536,16 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         void s.setSelectedProviderId(id)
         selectWorkspace("providers")
         setCompareOpen(false)
-        setMobileDetailOpen(true)
+        setRailSheetOpen(false)
       }}
       onCompareClick={() => {
         setCompareOpen(true)
-        setMobileDetailOpen(true)
+        setRailSheetOpen(false)
       }}
       onRoutingClick={() => {
         selectWorkspace("routing")
         setCompareOpen(false)
-        setMobileDetailOpen(true)
+        setRailSheetOpen(false)
       }}
       routingSelected={activeWorkspace === "routing"}
       globalTotal={s.filteredProviders.length + s.visibleCustomProviderIds.length}
@@ -673,174 +674,138 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         </div>
       )}
 
-      {/* One rail instance. It used to be rendered twice — a CSS-hidden desktop
-          column AND the mobile sheet — so both stayed mounted on every
-          viewport (duplicate `provider-*` ids, two import/export toolbars).
-          `useIsMobile` picks the host; the column width is user-resizable and
-          persisted (`ProviderUIPreferences.sidebarWidth`). */}
-      <div
-        className="grid min-h-0 flex-1 grid-cols-1 gap-4"
-        style={isMobile ? undefined : { gridTemplateColumns: `${railWidth}px minmax(0, 1fr)` }}
-        data-testid="provider-layout"
-      >
-        {isMobile ? (
-          !mobileDetailOpen && (
-            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{sidebar}</div>
-          )
-        ) : (
-          /* ── Desktop rail + drag handle ─────────────────────────────── */
-          <div className="relative flex min-h-0 flex-col overflow-hidden rounded-lg border">
-            {sidebar}
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("sidebar.resizeHandle")}
-              aria-valuemin={RAIL_MIN_WIDTH}
-              aria-valuemax={RAIL_MAX_WIDTH}
-              aria-valuenow={Math.round(railWidth)}
-              tabIndex={0}
-              data-testid="provider-rail-resize-handle"
-              className={cn(
-                "group absolute -right-1 bottom-0 top-0 z-10 flex w-2.5 cursor-col-resize items-center justify-center focus-visible:outline-none",
-                railResize.dragging && "select-none"
-              )}
-              onPointerDown={railResize.onPointerDown}
-              onPointerMove={railResize.onPointerMove}
-              onPointerUp={railResize.onPointerUp}
-              onKeyDown={railResize.onKeyDown}
-              onDoubleClick={railResize.onDoubleClick}
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "h-full w-0.5 bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary",
-                  railResize.dragging && "bg-primary"
-                )}
-              />
-            </div>
-          </div>
-        )}
+      {/* Master/detail on the shared container-query frame, not on `useIsMobile`.
+          This pane never gets the viewport: it gets the window minus the app
+          rail, minus the 15rem settings sidebar, minus padding. At a 1000px
+          window the old fixed `320px minmax(0,1fr)` grid left the detail column
+          328px, and at 820px it left 340px, because the 768px viewport
+          breakpoint had not fired yet. A 1024px iPad was worse: the Capacitor
+          shell pins `useIsMobile()` to true, so a tablet got the phone layout.
 
+          The rail column is now `clamp(200px, 30cqi, railWidth)`, so it gives
+          up width proportionally instead of pinning 320px and letting the
+          detail absorb every lost pixel. Below @[560px] the rail moves into a
+          drawer and the detail stays put, rather than the old push-navigation
+          that replaced the whole pane. */}
+      <SettingsListDetail listWidth={railWidth} data-testid="provider-layout">
+        <ProviderRailHost
+          rail={sidebar}
+          railWidth={railWidth}
+          railResize={railResize}
+          selectedName={selectedName}
+          sheetOpen={railSheetOpen}
+          onSheetOpenChange={setRailSheetOpen}
+          onAdd={() => setShowQuickAdd(true)}
+        />
         {/* ── Detail panel ─────────────────────────────────────────────
             `@container/provider-pane`: the pane is pinned beside a fixed 320px
             rail, so its width and the viewport width are different numbers.
             Children that sized themselves with `md:`/`sm:` were reading the
             window and laying out 2- and 4-column grids into a ~430px pane at
             the md breakpoint. Same fix the subscription pane already uses. */}
-        {(!isMobile || mobileDetailOpen) && (
-          <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
-            {/* Selecting a provider swapped this whole subtree instantly, which is
+        {/* Always mounted. The old push-navigation swapped the whole pane for
+            the rail on a narrow viewport, so opening the list meant losing the
+            provider you were configuring. The border is unconditional rather
+            than `SETTINGS_DETAIL_PANE_CLASS`, which drops it below 440px while
+            our split threshold is 560px: between the two you would get a
+            borderless full-bleed detail. */}
+        <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
+          {/* Selecting a provider swapped this whole subtree instantly, which is
               exactly what `PanelTransition` exists for — Appearance and
               Subscription already crossfade their master/detail bodies with it.
               Keyed on the selection (plus the empty state) so the outgoing pane
               fades out before the incoming one settles. It collapses to a plain
               wrapper under reduced motion. */}
-            <PanelTransition
-              activeKey={
-                activeWorkspace === "routing"
-                  ? "__routing__"
-                  : compareOpen
-                    ? "__compare__"
-                    : (selectedId ?? "__empty__")
-              }
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              {activeWorkspace === "routing" ? (
-                <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
-                    {isMobile && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 shrink-0"
-                        onClick={() => setMobileDetailOpen(false)}
-                        aria-label={t("mobile.backToProviders")}
-                      >
-                        <ArrowLeft className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <Route className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <h3 className="text-base font-semibold">{t("sidebar.routing")}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {t("routingWorkspaceDescription")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                    <div className="mx-auto w-full max-w-4xl">
-                      <RoutingTab />
-                    </div>
+          <PanelTransition
+            activeKey={
+              activeWorkspace === "routing"
+                ? "__routing__"
+                : compareOpen
+                  ? "__compare__"
+                  : (selectedId ?? "__empty__")
+            }
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            {activeWorkspace === "routing" ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+                  <Route className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <h3 className="text-base font-semibold">{t("sidebar.routing")}</h3>
+                    <p className="text-xs text-muted-foreground">
+                      {t("routingWorkspaceDescription")}
+                    </p>
                   </div>
                 </div>
-              ) : compareOpen ? (
-                <ProviderComparisonView
-                  onBack={() => {
-                    setCompareOpen(false)
-                    if (isMobile) setMobileDetailOpen(false)
-                  }}
-                  initialSelectedModelKeys={s.uiPreferences.comparisonModelKeys}
-                  onSelectedModelKeysChange={(comparisonModelKeys) => {
-                    void setProviderUIPreferences({ comparisonModelKeys })
-                  }}
-                />
-              ) : selectedId === null ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="flex flex-col items-center gap-4 py-12 text-center">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-                      <Settings className="h-8 w-8 text-muted-foreground/40" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-semibold text-foreground">
-                        {t("detailPanel.emptyTitle")}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {t("detailPanel.emptyDescription")}
-                      </p>
-                    </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <div className="mx-auto w-full max-w-4xl">
+                    <RoutingTab />
                   </div>
                 </div>
-              ) : (
-                <ProviderDetailHost
-                  // Explicit key: `PanelTransition` only remounts when motion is
-                  // enabled, so under reduced motion the active tab / revealed
-                  // key state leaked from one provider to the next.
-                  key={selectedId}
-                  selectedId={selectedId}
-                  selectedBuiltIn={selectedBuiltIn}
-                  selectedCustom={selectedCustom}
-                  selectedSettings={selectedSettings}
-                  selectedName={selectedName}
-                  selectedReadiness={selectedReadiness}
-                  isCustom={isCustom}
-                  isLocalProvider={isLocalProvider}
-                  isEnabled={isEnabled}
-                  canEnable={canEnable}
-                  enableBlockedReason={enableBlockedReason}
-                  canSetDefault={canSetDefault}
-                  setDefaultBlockedReason={setDefaultBlockedReason}
-                  isDefault={selectedId === defaultProvider}
-                  settings={s}
-                  liveProviderHealth={liveProviderHealth}
-                  setProviderConfig={setProviderConfig}
-                  configModelOptions={configModelOptions}
-                  enrichedBuiltInModels={enrichedBuiltInModels}
-                  modelsDevLoading={modelsDevLoading}
-                  diagnosticStatusByModel={modelDiagnosticBadges}
-                  configTestResult={configTestResult}
-                  isRefreshingModels={!!testingConnection[selectedId]}
-                  onRefreshModels={handleRefreshModels}
-                  onTestConnection={handleTestConnection}
-                  onEditCustom={handleEditCustom}
-                  onPersistLocalModels={persistLocalProviderModels}
-                  onRequestDelete={() => setPendingDeleteId(selectedId)}
-                  onBack={isMobile ? () => setMobileDetailOpen(false) : undefined}
-                />
-              )}
-            </PanelTransition>
-          </div>
-        )}
-      </div>
+              </div>
+            ) : compareOpen ? (
+              <ProviderComparisonView
+                onBack={() => setCompareOpen(false)}
+                initialSelectedModelKeys={s.uiPreferences.comparisonModelKeys}
+                onSelectedModelKeysChange={(comparisonModelKeys) => {
+                  void setProviderUIPreferences({ comparisonModelKeys })
+                }}
+              />
+            ) : selectedId === null ? (
+              <div className="flex h-full items-center justify-center">
+                <div className="flex flex-col items-center gap-4 py-12 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                    <Settings className="h-8 w-8 text-muted-foreground/40" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      {t("detailPanel.emptyTitle")}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {t("detailPanel.emptyDescription")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <ProviderDetailHost
+                // Explicit key: `PanelTransition` only remounts when motion is
+                // enabled, so under reduced motion the active tab / revealed
+                // key state leaked from one provider to the next.
+                key={selectedId}
+                selectedId={selectedId}
+                selectedBuiltIn={selectedBuiltIn}
+                selectedCustom={selectedCustom}
+                selectedSettings={selectedSettings}
+                selectedName={selectedName}
+                selectedReadiness={selectedReadiness}
+                isCustom={isCustom}
+                isLocalProvider={isLocalProvider}
+                isEnabled={isEnabled}
+                canEnable={canEnable}
+                enableBlockedReason={enableBlockedReason}
+                canSetDefault={canSetDefault}
+                setDefaultBlockedReason={setDefaultBlockedReason}
+                isDefault={selectedId === defaultProvider}
+                settings={s}
+                liveProviderHealth={liveProviderHealth}
+                setProviderConfig={setProviderConfig}
+                configModelOptions={configModelOptions}
+                enrichedBuiltInModels={enrichedBuiltInModels}
+                modelsDevLoading={modelsDevLoading}
+                diagnosticStatusByModel={modelDiagnosticBadges}
+                configTestResult={configTestResult}
+                isRefreshingModels={!!testingConnection[selectedId]}
+                onRefreshModels={handleRefreshModels}
+                onTestConnection={handleTestConnection}
+                onEditCustom={handleEditCustom}
+                onPersistLocalModels={persistLocalProviderModels}
+                onRequestDelete={() => setPendingDeleteId(selectedId)}
+              />
+            )}
+          </PanelTransition>
+        </div>
+      </SettingsListDetail>
 
       {/* ── Dialogs ────────────────────────────────────────────────────── */}
       {showQuickAdd && (

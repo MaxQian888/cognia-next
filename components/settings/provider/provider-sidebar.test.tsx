@@ -3,7 +3,14 @@
  */
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ProviderSidebar } from "./provider-sidebar"
+
+/** Both filter axes live behind one trigger now, so every pick is two clicks. */
+async function pickStatus(user: ReturnType<typeof userEvent.setup>, value: string) {
+  await user.click(screen.getByTestId("provider-filter-trigger"))
+  await user.click(screen.getByTestId(`provider-filter-status-${value}`))
+}
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) => {
@@ -12,6 +19,9 @@ jest.mock("next-intl", () => ({
       "sidebar.addButton": "Add",
       "sidebar.modelCompare": "Model Compare",
       "sidebar.statusLabel": "Filter by status",
+      "sidebar.filterLabel": "Filters",
+      "sidebar.categoryLabel": "Category",
+      "sidebar.removeFilter": "Remove filter",
       "sidebar.statusAll": "All status",
       "sidebar.statusConnected": "Connected",
       "sidebar.statusWarning": "Warning",
@@ -132,23 +142,25 @@ describe("ProviderSidebar", () => {
     expect(screen.getByText("Model Compare")).toBeInTheDocument()
   })
 
-  it("renders i18n-wired category tabs that mirror the catalog categories", () => {
+  it("offers every catalog category inside the filter popover", async () => {
+    const user = userEvent.setup()
     render(<ProviderSidebar {...defaultProps} />)
-    for (const label of [
-      "All",
-      "Flagship",
+    await user.click(screen.getByTestId("provider-filter-trigger"))
+    for (const key of [
+      "all",
+      "flagship",
+      "enterprise",
+      "specialized",
+      "aggregator",
+      "local",
+      "custom",
+    ]) {
       // Enterprise used to be folded into the Flagship tab, so its label named
       // one thing and its contents were two.
-      "Enterprise",
-      "Specialized",
-      "Aggregators",
-      "Local",
-      "Custom",
-    ]) {
-      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
+      expect(screen.getByTestId(`provider-filter-category-${key}`)).toBeInTheDocument()
     }
     // The retired strip's "Voice" (= specialized) / "Vision" tabs are gone.
-    expect(screen.queryByRole("tab", { name: "Voice" })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("provider-filter-category-voice")).not.toBeInTheDocument()
   })
 
   it("offers a sort menu wired to the persisted preference", async () => {
@@ -167,20 +179,33 @@ describe("ProviderSidebar", () => {
     expect(screen.queryByTestId("provider-sort-trigger")).not.toBeInTheDocument()
   })
 
-  it("wraps the category tabs inside the rail instead of overflowing or truncating them", () => {
+  // The two filter axes used to be `flex-wrap` chip bands above the list: six
+  // category tabs and seven status buttons. On a 320px rail that was four rows
+  // of chrome, and once the rail started giving up width to the detail column
+  // it became seven, taller than the list it filtered.
+  it("spends one row on filters, not two wrapping bands", () => {
     const { container } = render(<ProviderSidebar {...defaultProps} />)
-    const list = container.querySelector('[data-slot="tabs-list"]')
-    // The strip used to be `w-max` inside an `overflow-x-auto` wrapper (last
-    // tab clipped), then an equal-share strip (labels truncated to "Flag…").
-    // Pills now wrap onto a second line on a narrow rail; no label is cut.
-    expect(list).toHaveClass("w-full", "min-w-0", "flex-wrap")
-    expect(list).not.toHaveClass("w-max")
-    const triggers = container.querySelectorAll('[data-slot="tabs-trigger"]')
-    expect(triggers.length).toBeGreaterThan(0)
-    triggers.forEach((trigger) => {
-      expect(trigger).toHaveClass("flex-none")
-      expect(trigger).not.toHaveClass("truncate")
-    })
+    expect(container.querySelector('[data-slot="tabs-list"]')).toBeNull()
+    expect(screen.getByTestId("provider-filter-trigger")).toBeInTheDocument()
+    // Nothing is on screen for either axis until the popover is opened.
+    expect(screen.queryByTestId("provider-filter-category-flagship")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("provider-filter-status-connected")).not.toBeInTheDocument()
+  })
+
+  it("counts the active filters on the trigger and undoes each from its chip", async () => {
+    const onCategoryChange = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <ProviderSidebar
+        {...defaultProps}
+        categoryFilter="flagship"
+        onCategoryChange={onCategoryChange}
+        statusFilter="connected"
+      />
+    )
+    expect(screen.getByTestId("provider-filter-count")).toHaveTextContent("2")
+    await user.click(screen.getByTestId("provider-filter-chip-category"))
+    expect(onCategoryChange).toHaveBeenCalledWith("all")
   })
 
   it("keeps the provider rows inside the rail width", () => {
@@ -235,7 +260,8 @@ describe("ProviderSidebar", () => {
       expect(screen.queryByText("No providers match these filters.")).not.toBeInTheDocument()
     })
 
-    it("treats the status filter as a filter, and clearing resets it", () => {
+    it("treats the status filter as a filter, and clearing resets it", async () => {
+      const user = userEvent.setup()
       render(
         <ControlledSidebar
           {...defaultProps}
@@ -244,17 +270,18 @@ describe("ProviderSidebar", () => {
         />
       )
       // Narrow to "Connected" while only an unconfigured provider exists.
-      fireEvent.click(screen.getByText("Connected"))
+      await pickStatus(user, "connected")
       expect(screen.getByText("No providers match these filters.")).toBeInTheDocument()
 
-      fireEvent.click(screen.getByText("Clear filters"))
+      await user.click(screen.getByTestId("provider-filter-clear"))
       expect(screen.getByText("Google")).toBeInTheDocument()
     })
   })
 
-  it("filters the visible list by connection status", () => {
+  it("filters the visible list by connection status", async () => {
+    const user = userEvent.setup()
     render(<ControlledSidebar {...defaultProps} />)
-    fireEvent.click(screen.getByRole("button", { name: "Connected" }))
+    await pickStatus(user, "connected")
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
     expect(screen.getByText("Anthropic")).toBeInTheDocument()
     expect(screen.queryByText("Google")).not.toBeInTheDocument()
@@ -269,9 +296,10 @@ describe("ProviderSidebar", () => {
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument()
   })
 
-  it("shows only unconfigured providers when that status is chosen", () => {
+  it("shows only unconfigured providers when that status is chosen", async () => {
+    const user = userEvent.setup()
     render(<ControlledSidebar {...defaultProps} />)
-    fireEvent.click(screen.getByRole("button", { name: "Unconfigured" }))
+    await pickStatus(user, "not-configured")
     expect(screen.getByText("Google")).toBeInTheDocument()
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument()
     expect(screen.getByText("1 shown of 3 · 0 connected")).toBeInTheDocument()
