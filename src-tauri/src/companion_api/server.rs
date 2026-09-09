@@ -1322,12 +1322,15 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some(contract.catalog_hash())
         );
+        // One version for the whole contract (ADR-0175): the header carries the
+        // number the manifest declares, not a private schema counter.
+        let contract_version = crate::companion_api::command_manifest::CONTRACT_VERSION.to_string();
         assert_eq!(
             response
                 .headers()
                 .get("x-cognia-headless-contract-version")
                 .and_then(|value| value.to_str().ok()),
-            Some("1")
+            Some(contract_version.as_str())
         );
     }
 

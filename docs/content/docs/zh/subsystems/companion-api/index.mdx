@@ -28,7 +28,8 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | 配对设备 | `/api/*`、`/ws/*` | 移动端与受管设备 | 设备密钥、DPoP access token、socket ticket | `docs/api/mobile-companion-api.openapi.yaml` |
 | Headless service | `/internal/*`、`/ide/content*` | 本机无渲染 Brain 与受管 IDE | loopback service token | `docs/api/headless-service-api.openapi.yaml` |
 
-公开命令是 `KNOWN_COMMANDS` 的子集：descriptor 必须以 `execution` 或 `host-admin` 为 target，
+公开命令是远程可执行命令（target 不为 `client` 的全部 descriptor）的子集：descriptor 必须以
+`execution` 或 `host-admin` 为 target，
 并声明支持 HTTP transport。service 命令不会进入公开 spec。Headless spec 包含全部 dispatcher
 命令，因为 Brain 是本机执行权威。
 

@@ -4625,3 +4625,23 @@ fn command_families_cover_known_non_browser_commands_once() {
     let missing: Vec<_> = expected.difference(&unique).copied().collect();
     assert!(missing.is_empty(), "unrouted known commands: {missing:?}");
 }
+
+// ── Generated allowlist parity (ADR-0175 B2) ─────────────────────────────
+//
+// The runtime allowlist is `command_manifest::remote_command_names()`, rendered
+// from the contract. `KNOWN_COMMANDS` survives as a test-only fixture until the
+// rename cut, and this holds the two equal in both directions so a command
+// added to one and not the other is caught while both exist.
+#[test]
+fn legacy_allowlist_equals_the_generated_remote_set() {
+    let legacy: std::collections::BTreeSet<&str> = KNOWN_COMMANDS.iter().copied().collect();
+    let generated: std::collections::BTreeSet<&str> = known_commands().iter().copied().collect();
+    let only_legacy: Vec<_> = legacy.difference(&generated).collect();
+    let only_generated: Vec<_> = generated.difference(&legacy).collect();
+    assert!(
+        only_legacy.is_empty() && only_generated.is_empty(),
+        "KNOWN_COMMANDS and the contract disagree. Only in KNOWN_COMMANDS: {only_legacy:?}. \
+         Only in the contract (target != client): {only_generated:?}. Fix the contract and \
+         run pnpm companion-api:gen."
+    );
+}

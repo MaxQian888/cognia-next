@@ -1,7 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { compareCommandSets, validateManifest } from "./check-companion-command-manifest.mjs"
+import {
+  checkGeneratedTable,
+  compareCommandSets,
+  validateManifest,
+} from "./check-companion-command-manifest.mjs"
 
 function descriptor(overrides = {}) {
   return {
@@ -58,7 +62,7 @@ test("rejects unclassified mutations and device-transportable service commands",
   assert(errors.some((error) => error.includes("service commands must be internal-only")))
 })
 
-test("requires every remote RPC to have a descriptor", () => {
+test("requires every remote descriptor to have a dispatch arm", () => {
   const manifest = {
     contractVersion: 3,
     commands: [descriptor(), descriptor({ name: "local_only", target: "client" })],
@@ -68,13 +72,44 @@ test("requires every remote RPC to have a descriptor", () => {
     compareCommandSets(manifest, new Set(["git_status", "local_only"]), new Set(["git_status"])),
     []
   )
+  // A remote descriptor whose arm no dispatcher matches is the defect: every
+  // catalog advertises it and dispatch 404s it. Extra registrations and extra
+  // arms with no descriptor are unreachable, not errors.
   const errors = compareCommandSets(
     manifest,
-    new Set(["git_status", "missing_local"]),
-    new Set(["git_status", "missing_rpc"])
+    new Set(["local_only", "extra_registration"]),
+    new Set(["extra_arm"])
   )
-  assert(errors.some((error) => error.includes("missing_rpc")))
-  assert(!errors.some((error) => error.includes("missing_local")))
+  assert(errors.some((error) => error.includes("remote command has no dispatch arm")))
+  assert(errors.some((error) => error.includes("git_status")))
+  assert(!errors.some((error) => error.includes("extra_registration")))
+  assert(!errors.some((error) => error.includes("extra_arm")))
+})
+
+test("a remote descriptor needs a dispatch arm for its arm literal, not its name", () => {
+  // After the ADR-0175 rename cut `name` is dotted and `arm` stays snake, so
+  // the arm scan must key on `arm`. Until then the two are equal.
+  const manifest = {
+    contractVersion: 3,
+    commands: [descriptor({ name: "git.status", arm: "git_status" })],
+  }
+  assert.deepEqual(compareCommandSets(manifest, new Set(), new Set(["git_status"])), [])
+  const errors = compareCommandSets(manifest, new Set(), new Set(["git.status"]))
+  assert(errors.some((error) => error.includes("remote command has no dispatch arm")))
+  assert(errors.some((error) => error.includes("git.status")))
+})
+
+test("the generated Rust table must carry the manifest's contract version and row count", () => {
+  const manifest = { contractVersion: 3, commands: [descriptor(), descriptor({ name: "git_log" })] }
+  const table = (version, rows) =>
+    `pub const CONTRACT_VERSION: u32 = ${version};\n` +
+    Array.from({ length: rows }, (_, i) => `    WireCommand { name: "c${i}", arm: "c${i}" },`).join(
+      "\n"
+    )
+  assert.deepEqual(checkGeneratedTable(manifest, table(3, 2)), [])
+  assert(checkGeneratedTable(manifest, table(2, 2))[0].includes("CONTRACT_VERSION 2 lags manifest 3"))
+  assert(checkGeneratedTable(manifest, table(3, 1))[0].includes("1 rows for 2 descriptors"))
+  assert(checkGeneratedTable(manifest, "")[0].includes("missing CONTRACT_VERSION"))
 })
 
 test("rejects a descriptor whose handler was deleted", () => {

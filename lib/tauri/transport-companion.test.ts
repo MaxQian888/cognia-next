@@ -35,6 +35,12 @@ import {
   type TransportTier,
 } from "./transport-companion"
 import { __setCompanionStorageForTests } from "./companion-storage"
+import {
+  __resetHostContractsForTests,
+  hostContractVerdict,
+  recordHostContract,
+} from "./companion-contract"
+import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
 import {
   clearActiveRuntimeTargetContext,
@@ -2552,5 +2558,144 @@ describe("defensive teardown and frame parsing", () => {
     ws.triggerMessage(JSON.stringify({ payload: "missing type" }))
 
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Host contract verdict (ADR-0175)
+// ---------------------------------------------------------------------------
+
+describe("host contract verdict (ADR-0175)", () => {
+  beforeEach(() => setConfig())
+  afterEach(() => __resetHostContractsForTests())
+
+  it("refuses to dispatch to a Host on another contract version without a round trip", async () => {
+    recordHostContract(MOCK_CONFIG.deviceId, { contractVersion: COMPANION_CONTRACT_VERSION + 1 })
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).rejects.toMatchObject({
+      code: "contract_incompatible",
+      retryable: false,
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(transport.getPlaneHealth().rpc).toBe("incompatible")
+  })
+
+  it("treats a Host that names no contract version as an older, incompatible Host", async () => {
+    recordHostContract(MOCK_CONFIG.deviceId, {})
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).rejects.toMatchObject({
+      code: "contract_incompatible",
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("dispatches as before while the verdict is unknown or compatible", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ ok: true }, 200))
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ ok: true })
+    recordHostContract(MOCK_CONFIG.deviceId, { contractVersion: COMPANION_CONTRACT_VERSION })
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual({ ok: true })
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it("mirrors a verdict change on the RPC plane for its own pairing only, and clears it", () => {
+    transport = new CompanionTransport()
+    const seen: string[] = []
+    transport.onPlaneHealthChange((health) => seen.push(health.rpc))
+    recordHostContract(MOCK_CONFIG.deviceId, { contractVersion: 1 })
+    expect(transport.getPlaneHealth().rpc).toBe("incompatible")
+    recordHostContract("some-other-pairing", { contractVersion: 1 })
+    expect(transport.getPlaneHealth().rpc).toBe("incompatible")
+    recordHostContract(MOCK_CONFIG.deviceId, { contractVersion: COMPANION_CONTRACT_VERSION })
+    expect(transport.getPlaneHealth().rpc).toBe("unknown")
+    // The subscription replays the current state first.
+    expect(seen).toEqual(["unknown", "incompatible", "unknown"])
+  })
+
+  it("reads the device catalog with an authenticated GET and records the contract it names", async () => {
+    const document = {
+      contractVersion: COMPANION_CONTRACT_VERSION,
+      catalogHash: "a".repeat(64),
+      plane: "device",
+      commands: [{ name: "session_list" }],
+    }
+    fetchSpy.mockResolvedValueOnce(mockResponse(document, 200))
+    transport = new CompanionTransport()
+    await expect(transport.catalog()).resolves.toEqual(document)
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe(`${MOCK_CONFIG.baseUrl}/api/catalog`)
+    expect(init.method).toBe("GET")
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test.jwt.token",
+      DPoP: "test-proof",
+    })
+    expect(hostContractVerdict(MOCK_CONFIG.deviceId)).toMatchObject({
+      state: "compatible",
+      catalogHash: "a".repeat(64),
+    })
+    expect(transport.getPlaneHealth().rpc).toBe("ready")
+  })
+
+  it("asks the service plane for /internal/catalog", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse(
+        {
+          contractVersion: COMPANION_CONTRACT_VERSION,
+          catalogHash: "b".repeat(64),
+          plane: "service",
+          commands: [],
+        },
+        200
+      )
+    )
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "http://127.0.0.1:7890",
+        deviceId: "brain-1",
+        serviceToken: "svc",
+        serverVersion: "0.1.0",
+      }),
+      rpcPath: "/internal/_rpc",
+      eventsPath: "/internal/events",
+    })
+    await transport.catalog()
+    expect((fetchSpy.mock.calls[0] as [string])[0]).toBe("http://127.0.0.1:7890/internal/catalog")
+  })
+
+  it("refuses a catalog on another contract, and surfaces a problem refusal by its code", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse(
+        {
+          contractVersion: COMPANION_CONTRACT_VERSION + 1,
+          catalogHash: "c".repeat(64),
+          plane: "device",
+          commands: [],
+        },
+        200
+      )
+    )
+    transport = new CompanionTransport()
+    await expect(transport.catalog()).rejects.toMatchObject({ code: "contract_incompatible" })
+    expect(transport.getPlaneHealth().rpc).toBe("incompatible")
+    fetchSpy.mockResolvedValueOnce(
+      mockResponse(
+        {
+          type: "https://cognia.dev/problems/missing_authorization",
+          title: "Unauthorized",
+          status: 401,
+          detail: "no bearer",
+          code: "missing_authorization",
+          requestId: "r1",
+          retryable: false,
+          details: {},
+        },
+        401
+      )
+    )
+    await expect(transport.catalog()).rejects.toMatchObject({
+      code: "missing_authorization",
+      retryable: false,
+    })
+    expect(transport.getPlaneHealth().rpc).toBe("unauthenticated")
   })
 })

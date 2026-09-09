@@ -37,6 +37,16 @@ export interface CommandManifest {
 }
 
 const manifest = manifestJson as CommandManifest
+
+/**
+ * The command contract this client was built against (ADR-0175). A Host
+ * reports its own number in `GET /api/whoami`; when the two differ the
+ * companion transport refuses to dispatch rather than failing one command at a
+ * time, because a mismatch means the names, the shapes, or the error document
+ * have changed under it.
+ */
+export const COMPANION_CONTRACT_VERSION: number = manifest.contractVersion
+
 const descriptors = new Map<string, CommandDescriptor>()
 
 for (const descriptor of manifest.commands) {

@@ -14,6 +14,7 @@
     { "path": "/api/auth/token", "method": "post", "document": "public" },
     { "path": "/api/auth/socket-ticket", "method": "post", "document": "public" },
     { "path": "/api/whoami", "method": "get", "document": "public" },
+    { "path": "/api/catalog", "method": "get", "document": "public" },
     { "path": "/api/_rpc/{name}", "method": "post", "document": "public" },
     { "path": "/api/operations/{operation_id}", "method": "get", "document": "public" },
     { "path": "/api/sessions/{session_id}/media/{hash}", "method": "get", "document": "public" },
@@ -136,6 +137,11 @@
     { "path": "/internal/_rpc/{name}", "method": "post", "document": "headless" },
     {
       "path": "/internal/operations/{operation_id}",
+      "method": "get",
+      "document": "headless"
+    },
+    {
+      "path": "/internal/catalog",
       "method": "get",
       "document": "headless"
     },

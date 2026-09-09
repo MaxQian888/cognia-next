@@ -29,8 +29,9 @@ description: Current paired-device and renderer-free service contracts, their au
 | Paired device | `/api/*`, `/ws/*` | Mobile and managed device clients | Device key, DPoP access token, socket ticket | `docs/api/mobile-companion-api.openapi.yaml` |
 | Headless service | `/internal/*`, `/ide/content*` | Local renderer-free Brain and managed IDE | Loopback service token | `docs/api/headless-service-api.openapi.yaml` |
 
-The public inventory is a subset of `KNOWN_COMMANDS`: the descriptor must target `execution` or
-`host-admin` and declare HTTP transport support. Service commands cannot leak into the public spec.
+The public inventory is a subset of the remote-executable commands (every descriptor whose target
+is not `client`): the descriptor must target `execution` or `host-admin` and declare HTTP transport
+support. Service commands cannot leak into the public spec.
 The Headless inventory contains every dispatcher command because the Brain is the local execution
 authority.
 

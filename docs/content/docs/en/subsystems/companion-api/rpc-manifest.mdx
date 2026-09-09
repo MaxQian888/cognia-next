@@ -9,14 +9,15 @@ description: How the command manifest, runtime allowlist, route catalog, and gen
 
 <TLDR>
   RPC dispatch is mounted once per trust boundary: `POST /api/_rpc/{name}` for paired devices and
-  `POST /internal/_rpc/{name}` for the local Headless Brain. `KNOWN_COMMANDS` remains the runtime
-  allowlist, while `protocol/companion-commands.json` supplies target, transport, capability, risk,
-  approval, idempotency, and schema metadata. The generator intersects those sources instead of
-  maintaining a third hand-written OpenAPI command list.
+  `POST /internal/_rpc/{name}` for the local Headless Brain. `protocol/companion-commands.json` is
+  the one contract: it supplies target, transport, capability, risk, approval, idempotency, and
+  schema metadata, and the runtime allowlist is rendered from it into
+  `generated/known_commands.rs` (ADR-0175) instead of being typed a second time. A Host lists what
+  a caller may dispatch at `GET /api/catalog` and `GET /internal/catalog`.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Runtime dispatcher" value="generated" hint="KNOWN_COMMANDS" />
+  <Stat label="Runtime allowlist" value="generated" hint="generated/known_commands.rs" />
   <Stat label="Public device subset" value="generated" hint="execution/host-admin + HTTP" />
   <Stat label="Command contract" value="v3" hint="protocol/companion-commands.json (ADR-0175)" />
   <Stat label="Generated specs" value="2" hint="public device + Headless service" />
@@ -28,8 +29,9 @@ description: How the command manifest, runtime allowlist, route catalog, and gen
 flowchart LR
   M["companion-commands.json"] --> G["gen-companion-api.mjs"]
   C["request catalog + Zod contracts"] --> G
-  K["rpc.rs KNOWN_COMMANDS"] --> G
-  D["rpc.rs dispatch arms"] --> G
+  N["companion-command-renames.json"] --> G
+  D["rpc/*.rs dispatch arms"] --> G
+  G --> K["generated/known_commands.rs"]
   R["companion-api-routes.json"] --> G
   G --> P["Public OpenAPI: execution/host-admin + HTTP"]
   G --> H["Headless OpenAPI: every dispatcher command"]

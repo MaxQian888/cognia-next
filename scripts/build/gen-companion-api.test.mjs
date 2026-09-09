@@ -7,7 +7,6 @@ import {
   buildHeadlessAsyncApi,
   buildHostCommandCatalog,
   classifyHostCommand,
-  extractKnownCommands,
   hostResourceForCommand,
   classifyCommands,
   collectRuntimeRoutes,
@@ -19,18 +18,6 @@ import {
   validateCommandCoverage,
   validateRouteContract,
 } from "./gen-companion-api.mjs"
-
-test("rejects duplicate dispatcher catalog entries", () => {
-  assert.throws(
-    () =>
-      extractKnownCommands(`
-const KNOWN_COMMANDS: &[&str] = &[
-  "session_list",
-  "session_list",
-];`),
-    /duplicate KNOWN_COMMANDS entries: session_list/,
-  )
-})
 
 test("classifies host commands into one stable domain", () => {
   assert.equal(classifyHostCommand("session_list"), "sessions")
@@ -506,12 +493,16 @@ test("command coverage rejects missing dispatch, descriptors, and non-durable mu
   invalid.commands[1].idempotency = "forbidden"
   invalid.commands[1].transports = ["internal", "http"]
 
-  const errors = validateCommandCoverage(invalid, new Set(["public_read", "unknown_dispatch"]))
+  // `has(arm)` is all the coverage check asks of the dispatch sources. A Set
+  // answers it for a fixture. The reverse direction (an arm with no
+  // descriptor) is no longer reported: with the allowlist rendered from the
+  // contract such an arm is unreachable, not a defect.
+  const errors = validateCommandCoverage(invalid, new Set(["public_read"]))
 
   assert(errors.includes("mutation must use durable idempotency: service_write"))
   assert(errors.includes("service command must be internal-only: service_write"))
   assert(errors.includes("remote command has no canonical dispatch arm: service_write"))
-  assert(errors.includes("dispatch arm has no command descriptor: unknown_dispatch"))
+  assert(!errors.some((error) => error.includes("dispatch arm has no command descriptor")))
 })
 
 test("classifies every client-only command outside the Headless surface", () => {
@@ -767,10 +758,19 @@ test("documents the canonical RPC completion and running envelopes", () => {
     "#/components/schemas/RpcRunningResponse"
   )
   assert.equal(genericResponses[415].$ref, "#/components/responses/PublicApiError")
-  assert.equal(
-    concreteResponses[422].content["application/json"].schema.$ref,
-    "#/components/schemas/RpcError"
-  )
+  assert.equal(genericResponses[410].$ref, "#/components/responses/PublicApiError")
+  // Every refusal is one RFC 9457 document (ADR-0175), served as problem+json.
+  for (const status of [400, 401, 403, 404, 409, 410, 415, 422, 428, 429, 500, 503]) {
+    const response = concreteResponses[status]
+    assert.ok(response, `concrete RPC documents ${status}`)
+    assert.equal(
+      response.content["application/problem+json"].schema.$ref,
+      "#/components/schemas/Problem",
+      `${status} is a problem document`
+    )
+    assert.equal(response.content["application/json"], undefined, `${status} has no legacy body`)
+    assert.ok(response.headers["x-request-id"], `${status} mirrors the request id`)
+  }
   assert.deepEqual(concreteResponses[200].content["application/json"].schema.required, [
     "requestId",
     "result",
@@ -796,6 +796,9 @@ test("documents canonical identity and owner-management response shapes", () => 
     "accountId",
     "serverVersion",
     "tlsFingerprint",
+    "contractVersion",
+    "catalogHash",
+    "catalogUrl",
   ])
   assert.equal(schemas.WhoamiResponse.properties.device_id, undefined)
   assert.equal(
@@ -855,4 +858,99 @@ test("documents discovery, media, browser, and A2A wire interfaces", () => {
   )
   assert.ok(a2a.responses[401])
   assert.ok(a2a.responses[422])
+})
+
+test("one error document, one discovery shape, on both planes (ADR-0175)", () => {
+  const { desiredPublicSpec, desiredHeadlessSpec, manifest } = inspectCommittedContract()
+  for (const [label, spec] of [
+    ["public", desiredPublicSpec],
+    ["headless", desiredHeadlessSpec],
+  ]) {
+    const problem = spec.components.schemas.Problem
+    assert.ok(problem, `${label}: Problem component`)
+    assert.deepEqual(problem.required, [
+      "type",
+      "title",
+      "status",
+      "detail",
+      "code",
+      "requestId",
+      "retryable",
+      "details",
+    ])
+    assert.equal(problem.additionalProperties, false)
+    // The old name survives only as an alias, so nothing can document the
+    // legacy flat or nested envelope again.
+    assert.deepEqual(spec.components.schemas.RpcError, { $ref: "#/components/schemas/Problem" })
+    assert.equal(spec.components.schemas.CanonicalApiError, undefined)
+    assert.equal(spec.components.schemas.ServiceTokenError, undefined)
+    for (const response of Object.values(spec.components.responses)) {
+      if (!response.content) continue
+      const media = Object.keys(response.content)
+      if (media.includes("application/problem+json")) {
+        assert.equal(response.content["application/problem+json"].schema.$ref, "#/components/schemas/Problem")
+        assert.ok(response.headers?.["x-request-id"])
+      }
+    }
+    assert.equal(
+      spec.components.schemas.CommandCatalog.properties.commands.items.$ref,
+      "#/components/schemas/CommandDescriptor"
+    )
+    assert.deepEqual(
+      Object.keys(spec.components.schemas.CommandDescriptor.properties).sort(),
+      Object.keys(manifest.commands[0]).sort(),
+      `${label}: the descriptor schema names exactly the contract's fields`
+    )
+  }
+  for (const [name, content] of [
+    ["PublicApiError", desiredPublicSpec.components.responses.PublicApiError.content],
+    ["AuthenticationRejected", desiredPublicSpec.components.responses.AuthenticationRejected.content],
+    ["HeadlessRpcError", desiredHeadlessSpec.components.responses.HeadlessRpcError.content],
+    ["ServiceTokenRejected", desiredHeadlessSpec.components.responses.ServiceTokenRejected.content],
+  ]) {
+    assert.deepEqual(Object.keys(content), ["application/problem+json"], name)
+  }
+
+  const device = desiredPublicSpec.paths["/api/catalog"].get
+  const service = desiredHeadlessSpec.paths["/internal/catalog"].get
+  for (const [label, operation] of [
+    ["device", device],
+    ["service", service],
+  ]) {
+    assert.ok(operation, `${label} catalog route`)
+    assert.equal(
+      operation.responses[200].content["application/json"].schema.$ref,
+      "#/components/schemas/CommandCatalog"
+    )
+    assert.ok(operation.responses[200].headers.ETag, `${label}: ETag`)
+    assert.ok(operation.responses[304], `${label}: 304`)
+    assert.ok(operation.parameters.some((parameter) => parameter.name === "If-None-Match"))
+  }
+  assert.deepEqual(device.security, [{ dpopAccess: [] }])
+  assert.equal(device.responses[401].$ref, "#/components/responses/AuthenticationRejected")
+  assert.equal(service.responses[401].$ref, "#/components/responses/ServiceTokenRejected")
+  assert.equal(
+    desiredPublicSpec.components.schemas.WhoamiResponse.properties.catalogUrl.type,
+    "string"
+  )
+})
+
+test("the host catalog and the Rust table carry the manifest's contract version", () => {
+  const inspected = inspectCommittedContract()
+  assert.equal(inspected.desiredHostCommandCatalog.schemaVersion, inspected.manifest.contractVersion)
+  assert.match(
+    inspected.desiredKnownCommandsRustSource,
+    new RegExp(`^pub const CONTRACT_VERSION: u32 = ${inspected.manifest.contractVersion};$`, "m")
+  )
+  assert.match(
+    inspected.desiredKnownCommandsRustSource,
+    new RegExp(`CATALOG_HASH: &str = "${inspected.desiredHostCommandCatalog.catalogHash}"`)
+  )
+  const rows = inspected.desiredKnownCommandsRustSource.match(/^\s+WireCommand \{ name: "/gm).length
+  assert.equal(rows, inspected.manifest.commands.length)
+  // The remote set is a fact of the contract: every non-client descriptor.
+  assert.equal(
+    inspected.remoteNames.size,
+    inspected.manifest.commands.filter((command) => command.target !== "client").length
+  )
 })

@@ -405,6 +405,15 @@ async fn ensure_terminal_rpc_authorized(
 /// surface as 404 rather than 503-in-test-mode. Keep in lockstep with the
 /// `match name` arms in `dispatch()` below — drift means unknown names
 /// silently bypass the 404 path.
+/// The hand-typed allowlist this dispatcher used to read at runtime.
+///
+/// ADR-0175 B2: the runtime allowlist is now `command_manifest::remote_command_names()`,
+/// rendered from the contract, and this array is a test-only parity fixture.
+/// `legacy_allowlist_equals_the_generated_remote_set` holds the two equal so a
+/// command added to one side and not the other is caught while both exist. The
+/// array goes away with the rename cut (B5), when the arms take their literals
+/// from the table too.
+#[cfg(test)]
 const KNOWN_COMMANDS: &[&str] = &[
     // ADR-0090 canonical names. They share the `claude_*` arms below and are
     // deliberately absent from `CONTROL_COMMANDS` for the same reason those
@@ -1283,8 +1292,10 @@ const KNOWN_COMMANDS: &[&str] = &[
 /// `spec_parity` test (Wave 3.6) to assert that every command in this
 /// list has a matching `/internal/_rpc/<name>` path in the OpenAPI spec.
 #[allow(dead_code)] // referenced from `spec_parity::tests` only.
+/// Every name the shared dispatcher accepts. Read from the generated command
+/// table (ADR-0175): the contract's non-client descriptors, in contract order.
 pub fn known_commands() -> &'static [&'static str] {
-    KNOWN_COMMANDS
+    super::command_manifest::remote_command_names()
 }
 
 /// Commands in this list skip the idempotency cache entirely.

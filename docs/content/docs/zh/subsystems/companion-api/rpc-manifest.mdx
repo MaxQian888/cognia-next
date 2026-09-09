@@ -9,13 +9,14 @@ description: 命令 manifest、运行时 allowlist、路由目录与生成器如
 
 <TLDR>
   每个信任边界只挂载一个 RPC dispatcher：配对设备使用 `POST /api/_rpc/{name}`，本机 Headless
-  Brain 使用 `POST /internal/_rpc/{name}`。`KNOWN_COMMANDS` 仍是运行时 allowlist，
-  `protocol/companion-commands.json` 则提供 target、transport、capability、risk、approval、
-  idempotency 与 schema 元数据。生成器对这些来源取交集，不再维护第三份手写 OpenAPI 命令表。
+  Brain 使用 `POST /internal/_rpc/{name}`。`protocol/companion-commands.json` 是唯一的契约：
+  它提供 target、transport、capability、risk、approval、idempotency 与 schema 元数据，运行时
+  allowlist 由它渲染成 `generated/known_commands.rs`（ADR-0175），不再手写第二份。宿主在
+  `GET /api/catalog` 与 `GET /internal/catalog` 列出调用方可以派发的命令。
 </TLDR>
 
 <StatGrid>
-  <Stat label="运行时 dispatcher" value="自动生成" hint="KNOWN_COMMANDS" />
+  <Stat label="运行时 allowlist" value="自动生成" hint="generated/known_commands.rs" />
   <Stat label="公开设备子集" value="自动生成" hint="execution/host-admin + HTTP" />
   <Stat label="命令契约" value="v3" hint="protocol/companion-commands.json（ADR-0175）" />
   <Stat label="生成 spec" value="2" hint="公开设备 + Headless service" />
@@ -27,8 +28,9 @@ description: 命令 manifest、运行时 allowlist、路由目录与生成器如
 flowchart LR
   M["companion-commands.json"] --> G["gen-companion-api.mjs"]
   C["request catalog + Zod contracts"] --> G
-  K["rpc.rs KNOWN_COMMANDS"] --> G
-  D["rpc.rs dispatch arms"] --> G
+  N["companion-command-renames.json"] --> G
+  D["rpc/*.rs dispatch arms"] --> G
+  G --> K["generated/known_commands.rs"]
   R["companion-api-routes.json"] --> G
   G --> P["公开 OpenAPI：execution/host-admin + HTTP"]
   G --> H["Headless OpenAPI：全部 dispatcher 命令"]

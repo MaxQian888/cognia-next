@@ -404,8 +404,11 @@ pub async fn require_owner_access(
     }
 }
 
-/// Return the authenticated device identity and the currently pinned host
-/// identity. Authentication is performed by [`require_device_access`].
+/// Return the authenticated device identity, the currently pinned host
+/// identity, and the command contract this host serves (ADR-0175): a device
+/// built against another `contractVersion` refuses to dispatch, and
+/// `catalogUrl` is where it reads what it may dispatch. Authentication is
+/// performed by [`require_device_access`].
 pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>) -> Response {
     (
         StatusCode::OK,
@@ -414,6 +417,9 @@ pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>)
             "accountId": context.account_id,
             "serverVersion": env!("CARGO_PKG_VERSION"),
             "tlsFingerprint": super::tls_fingerprint(),
+            "contractVersion": super::command_manifest::CONTRACT_VERSION,
+            "catalogHash": super::command_manifest::CATALOG_HASH,
+            "catalogUrl": "/api/catalog",
         })),
     )
         .into_response()
@@ -3144,5 +3150,35 @@ mod tests {
             serde_json::json!(["web-popup", "native-loopback", "deep-link"])
         );
         assert!(value.get("collaboration").is_none());
+    }
+
+    /// The device handshake reads the contract identity from here (ADR-0175):
+    /// the version it refuses on, the hash it may compare, and where the
+    /// admitted command list lives.
+    #[tokio::test]
+    async fn whoami_names_the_command_contract() {
+        let context = DeviceContext {
+            device_id: "device-a".to_string(),
+            account_id: "local_acct_a".to_string(),
+            scope: "device".to_string(),
+            granted_scopes: Vec::new(),
+            authorization_capabilities: None,
+        };
+        let response = whoami_handler(Extension(context)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["deviceId"], "device-a");
+        assert_eq!(
+            body["contractVersion"],
+            super::super::command_manifest::CONTRACT_VERSION
+        );
+        assert_eq!(
+            body["catalogHash"],
+            super::super::command_manifest::CATALOG_HASH
+        );
+        assert_eq!(body["catalogUrl"], "/api/catalog");
     }
 }

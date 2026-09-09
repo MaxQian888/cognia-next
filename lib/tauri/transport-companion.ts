@@ -4,7 +4,17 @@ import { toWebSocketBase } from "@/lib/network/ws-url"
 import { classifyWsHost } from "@/lib/connectivity/lan-classify"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
-import { getCommandDescriptor, isLocalOnlyCommand } from "./command-descriptors"
+import {
+  getCommandDescriptor,
+  isLocalOnlyCommand,
+  type CommandDescriptor,
+} from "./command-descriptors"
+import {
+  contractIncompatibleError,
+  hostContractVerdict,
+  onHostContractChange,
+  recordHostContract,
+} from "./companion-contract"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
 import type {
   Transport,
@@ -13,6 +23,7 @@ import type {
   TransportCallOptions,
 } from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
+import { parseProblem } from "./companion-problem"
 import {
   companionAuthorizationHeaders,
   invalidateCompanionAccessToken,
@@ -289,8 +300,25 @@ export class CompanionError extends Error {
 export type ConnectionState = "connected" | "reconnecting" | "offline" | "unauthenticated"
 
 export interface CompanionPlaneHealth {
-  rpc: "unknown" | "ready" | "unavailable" | "unauthenticated"
+  /**
+   * `incompatible`: the paired Host serves another command contract version
+   * (ADR-0175). Nothing will be dispatched to it until the verdict clears,
+   * which takes matching host and app versions, not a reconnect.
+   */
+  rpc: "unknown" | "ready" | "unavailable" | "unauthenticated" | "incompatible"
   events: "idle" | "connecting" | "replaying" | "ready"
+}
+
+/**
+ * What a Host lists at `GET /api/catalog` (device plane) or
+ * `GET /internal/catalog` (service plane): the commands this caller may
+ * dispatch, as `protocol/companion-commands.json` describes them (ADR-0175).
+ */
+export interface CompanionCommandCatalog {
+  contractVersion: number
+  catalogHash: string
+  plane: "device" | "service"
+  commands: CommandDescriptor[]
 }
 
 // ---------------------------------------------------------------------------
@@ -494,6 +522,8 @@ export class CompanionTransport implements Transport {
   private connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set()
   private planeHealth: CompanionPlaneHealth = { rpc: "unknown", events: "idle" }
   private planeHealthHandlers: Set<(health: CompanionPlaneHealth) => void> = new Set()
+  /** Unsubscribe from host-contract verdict changes. */
+  private contractDetach: (() => void) | null = null
 
   // ── Network awareness ──────────────────────────────────────────────────────
   private onlineListener: (() => void) | null = null
@@ -559,6 +589,17 @@ export class CompanionTransport implements Transport {
     this.rpcPath = opts.rpcPath ?? "/api/_rpc"
     this.eventsPath = opts.eventsPath ?? "/ws/events"
     this.attachNetworkListeners()
+    // The verdict is recorded by whichever handshake answers first (the device
+    // token, `whoami`, or the catalog). The RPC plane mirrors it so a shell can
+    // say why nothing dispatches, and forgets it the moment it clears.
+    this.contractDetach = onHostContractChange((deviceId, verdict) => {
+      if (this.config()?.deviceId !== deviceId) return
+      if (verdict.state === "incompatible") {
+        this.setPlaneHealth({ rpc: "incompatible" })
+      } else if (this.planeHealth.rpc === "incompatible") {
+        this.setPlaneHealth({ rpc: "unknown" })
+      }
+    })
   }
 
   /** The active config: injected provider first, storage cache otherwise. */
@@ -570,6 +611,62 @@ export class CompanionTransport implements Transport {
 
   public getConnectionState(): ConnectionState {
     return this.connectionState
+  }
+
+  /**
+   * What this caller may dispatch, as the Host describes it (ADR-0175).
+   *
+   * The device plane answers `GET /api/catalog`, filtered by this device's
+   * grants with the predicate dispatch itself uses, so a command listed here
+   * is one the device can call. The headless brain's service plane answers
+   * `GET /internal/catalog` with every remote command. The document names the
+   * Host's contract, so reading it also settles the contract verdict for this
+   * pairing: a Host on another version is refused here, before any command.
+   */
+  public async catalog(): Promise<CompanionCommandCatalog> {
+    const config = this.config()
+    if (!config) {
+      throw new CompanionError({
+        code: "not_paired",
+        message: "companion not paired. Open Mobile companion settings to scan a QR",
+        retryable: false,
+      })
+    }
+    const path = this.rpcPath.startsWith("/internal") ? "/internal/catalog" : "/api/catalog"
+    const headers = await authorizationHeadersProvider(config, "GET", path)
+    let response: Response
+    try {
+      response = await pinnedFetch(`${config.baseUrl}${path}`, {
+        method: "GET",
+        headers,
+        serverFingerprint: config.serverFingerprint,
+      })
+    } catch (err: unknown) {
+      this.setPlaneHealth({ rpc: "unavailable" })
+      throw new CompanionError({
+        code: "network",
+        message: err instanceof Error ? err.message : String(err),
+        retryable: true,
+      })
+    }
+    if (!response.ok) {
+      if (response.status === 401) this.setPlaneHealth({ rpc: "unauthenticated" })
+      const body = await safeJson(response)
+      const detail = nestedError(body)
+      throw new CompanionError({
+        code: detail?.code ?? `http_${response.status}`,
+        message: detail?.message ?? `HTTP ${response.status}`,
+        retryable: detail?.retryable ?? response.status >= 500,
+      })
+    }
+    const document = (await response.json()) as CompanionCommandCatalog
+    const verdict = recordHostContract(config.deviceId, document)
+    if (verdict.state === "incompatible") {
+      this.setPlaneHealth({ rpc: "incompatible" })
+      throw new CompanionError(contractIncompatibleError(verdict))
+    }
+    this.setPlaneHealth({ rpc: "ready" })
+    return document
   }
 
   /**
@@ -679,6 +776,15 @@ export class CompanionTransport implements Transport {
           retryable: false,
         })
       )
+    }
+
+    // The device handshake already judged this Host's contract (ADR-0175).
+    // An incompatible Host gets one named refusal here, before any transport
+    // is chosen, instead of a different failure per command.
+    const verdict = hostContractVerdict(config.deviceId)
+    if (verdict.state === "incompatible") {
+      this.setPlaneHealth({ rpc: "incompatible" })
+      return Promise.reject(new CompanionError(contractIncompatibleError(verdict)))
     }
 
     // ADR-0021 — route through the WebRTC DataChannel when it is open,
@@ -1970,6 +2076,8 @@ export class CompanionTransport implements Transport {
     this.channelHandlers.clear()
     this.connectionStateHandlers.clear()
     this.planeHealthHandlers.clear()
+    this.contractDetach?.()
+    this.contractDetach = null
   }
 }
 
@@ -2038,18 +2146,27 @@ async function safeJson(response: Response): Promise<Record<string, unknown> | n
 function nestedError(
   body: Record<string, unknown> | null
 ): { code: string; message: string; retryable?: boolean } | null {
-  if (!body) return null
-  const candidate =
-    body.error && typeof body.error === "object" && !Array.isArray(body.error)
-      ? (body.error as Record<string, unknown>)
-      : body
-  return typeof candidate.code === "string" && typeof candidate.message === "string"
+  // The Host answers with one problem document (ADR-0175). `parseProblem`
+  // also reads the nested and flat envelopes older Hosts wrote, so a refusal
+  // from any Host still carries its code here instead of an HTTP status.
+  const problem = parseProblem(body)
+  return problem
     ? {
-        code: candidate.code,
-        message: candidate.message,
-        // The host now states this (RpcError.retryable). Absent on older
-        // hosts, where the caller falls back to its status-code guess.
-        ...(typeof candidate.retryable === "boolean" ? { retryable: candidate.retryable } : {}),
+        code: problem.code,
+        message: problem.detail,
+        // The host states this (`Problem.retryable`). Absent only on an older
+        // host that did not, where the caller falls back to its status guess.
+        ...(hostStatedRetryable(body) ? { retryable: problem.retryable } : {}),
       }
     : null
+}
+
+function hostStatedRetryable(body: Record<string, unknown> | null): boolean {
+  if (!body) return false
+  const nested = body.error
+  const candidate =
+    nested && typeof nested === "object" && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : body
+  return typeof candidate.retryable === "boolean"
 }

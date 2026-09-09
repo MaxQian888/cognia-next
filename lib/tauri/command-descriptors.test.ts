@@ -1,4 +1,9 @@
-import { getCommandDescriptor, getCommandManifest, isLocalOnlyCommand } from "./command-descriptors"
+import {
+  COMPANION_CONTRACT_VERSION,
+  getCommandDescriptor,
+  getCommandManifest,
+  isLocalOnlyCommand,
+} from "./command-descriptors"
 
 describe("companion command descriptors", () => {
   it("loads a unique, capability-complete manifest", () => {
@@ -6,6 +11,7 @@ describe("companion command descriptors", () => {
     const names = manifest.commands.map((command) => command.name)
 
     expect(manifest.contractVersion).toBe(3)
+    expect(COMPANION_CONTRACT_VERSION).toBe(manifest.contractVersion)
     expect(names.length).toBeGreaterThanOrEqual(900)
     expect(new Set(names).size).toBe(names.length)
     expect(manifest.commands.every((command) => command.capability.length > 0)).toBe(true)

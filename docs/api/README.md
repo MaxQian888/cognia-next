@@ -36,7 +36,10 @@ Do not hand-edit generated RPC path inventories. The generator combines:
 - `protocol/companion-request-schemas.json` for explicit detailed request contracts;
 - Zod 4 contracts in `scripts/build/companion-request-schema-contracts.mjs` for delegated and
   recursively nested request shapes;
-- `KNOWN_COMMANDS` in `src-tauri/src/companion_api/rpc.rs` for the runtime dispatcher allowlist;
+- `protocol/companion-command-renames.json` for the old-name to new-name table (ADR-0175);
+- the Rust dispatch arms, scanned for the `arm` each remote descriptor names. The runtime
+  allowlist is no longer typed by hand: the generator renders the contract into
+  `src-tauri/src/companion_api/generated/known_commands.rs` and `command_manifest.rs` reads it;
 - Rust dispatch arms for command-specific required/optional request fields and primitive types;
 - the existing public specification for non-RPC route and reusable component schemas.
 
@@ -46,9 +49,12 @@ Generation fails if any Headless RPC would use a generic fallback, if an array l
 schema, or if an unconstrained object could produce placeholder request fields.
 
 The paired-device and Headless contracts are deliberately separate. Public
-commands must target `execution` or `host-admin`, support the HTTP transport,
-and exist in `KNOWN_COMMANDS`. The Headless specification contains every
-command accepted by that dispatcher, including service-only commands.
+commands must target `execution` or `host-admin` and support the HTTP
+transport. The Headless specification contains every remote-executable command
+(every descriptor whose target is not `client`), including service-only
+commands. A running Host lists the same thing at `GET /api/catalog` (filtered by
+the device's grants) and `GET /internal/catalog`, and `GET /api/whoami` names the
+`contractVersion` and `catalogHash` it serves.
 
 ## Tooling
 

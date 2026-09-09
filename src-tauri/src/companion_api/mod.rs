@@ -28,6 +28,8 @@ pub mod audit;
 pub mod bridge_transport;
 pub mod browser_access;
 pub mod browser_gateway;
+/// Runtime discovery of the command contract (ADR-0175).
+pub mod catalog;
 pub mod command_manifest;
 pub mod data_plane;
 pub mod deny_list;

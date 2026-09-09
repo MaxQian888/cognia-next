@@ -28,7 +28,7 @@ pub enum ExecutionTransport {
 }
 
 impl ExecutionTransport {
-    fn manifest_transport(self) -> CommandTransport {
+    pub(super) fn manifest_transport(self) -> CommandTransport {
         match self {
             Self::Http => CommandTransport::Http,
             Self::WebSocket => CommandTransport::Websocket,
@@ -302,18 +302,45 @@ pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_li
     }
 }
 
+/// The answer for a name the contract does not serve. A name the rename
+/// table knows is 410 `command_renamed` with the replacement in
+/// `details.replacement` (ADR-0175). Any other name is 404 `unknown_command`.
+fn missing_command_problem(request_id: &str, command: &str) -> Problem {
+    missing_command_problem_for(
+        request_id,
+        command,
+        super::command_manifest::renamed_to(command),
+    )
+}
+
+fn missing_command_problem_for(
+    request_id: &str,
+    command: &str,
+    replacement: Option<&str>,
+) -> Problem {
+    match replacement {
+        Some(replacement) => problem(
+            request_id,
+            StatusCode::GONE,
+            "command_renamed",
+            format!("the command '{command}' was renamed. Call '{replacement}' instead"),
+        )
+        .with_detail_field("replacement", replacement),
+        None => problem(
+            request_id,
+            StatusCode::NOT_FOUND,
+            "unknown_command",
+            "the requested command is not registered",
+        ),
+    }
+}
+
 async fn execute_inner(
     state: &SharedState,
     request: ExecutionRequest,
 ) -> Result<ExecutionOutcome, Problem> {
-    let descriptor = super::command_manifest::descriptor(&request.command).ok_or_else(|| {
-        problem(
-            &request.request_id,
-            StatusCode::NOT_FOUND,
-            "unknown_command",
-            "the requested command is not registered",
-        )
-    })?;
+    let descriptor = super::command_manifest::descriptor(&request.command)
+        .ok_or_else(|| missing_command_problem(&request.request_id, &request.command))?;
     authorize_transport(&request, descriptor)?;
     if let Err(error) = authorize_capability(&request, descriptor) {
         super::audit::record_async(
@@ -567,24 +594,81 @@ fn validate_contract_value(
     })
 }
 
+/// Whether a principal of this kind may reach `descriptor` over `transport`.
+///
+/// The one transport predicate, shared by dispatch (`authorize_transport`) and
+/// by discovery (`catalog.rs`), so the catalog can never advertise a command
+/// the transport gate would refuse. The service principal owns the internal
+/// plane and nothing else. A device owns the device transports the contract
+/// lists for an `execution` or `host-admin` command and nothing else.
+pub(super) fn transport_admits(
+    service_principal: bool,
+    transport: ExecutionTransport,
+    descriptor: &CommandDescriptor,
+) -> bool {
+    if transport == ExecutionTransport::Internal {
+        return service_principal;
+    }
+    !service_principal
+        && matches!(
+            descriptor.target,
+            CommandTarget::Execution | CommandTarget::HostAdmin
+        )
+        && descriptor
+            .transports
+            .contains(&transport.manifest_transport())
+}
+
+/// Whether `principal` holds `capability`: the authorization snapshot when
+/// the authenticating adapter loaded one (including an empty one), otherwise
+/// the durable security store.
+#[allow(clippy::result_large_err)]
+pub(super) fn capability_granted(
+    principal: &DeviceContext,
+    capability: &str,
+    request_id: &str,
+) -> Result<bool, Problem> {
+    match snapshot_capability_decision(principal, capability) {
+        Some(granted) => Ok(granted),
+        None => security_store()
+            .ok_or_else(|| store_unavailable(request_id))?
+            .has_capability(&principal.account_id, &principal.device_id, capability)
+            .map_err(|error| map_store_error(request_id, error)),
+    }
+}
+
+/// Whether `principal` may dispatch `descriptor` over `transport` at all:
+/// the transport predicate, then the descriptor's capability. This is what
+/// `GET /api/catalog` filters by (ADR-0175). It cannot see a request body,
+/// so the per-payload capability `payload_required_capability` adds for a
+/// handful of commands is still checked at dispatch time only.
+#[allow(clippy::result_large_err)]
+pub(super) fn command_admitted(
+    principal: &DeviceContext,
+    transport: ExecutionTransport,
+    descriptor: &CommandDescriptor,
+    request_id: &str,
+) -> Result<bool, Problem> {
+    let service_principal = principal.scope == "service";
+    if !transport_admits(service_principal, transport, descriptor) {
+        return Ok(false);
+    }
+    if service_principal {
+        return Ok(true);
+    }
+    capability_granted(principal, descriptor.capability.as_str(), request_id)
+}
+
 #[allow(clippy::result_large_err)]
 fn authorize_transport(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
 ) -> Result<(), Problem> {
-    let service_principal = request.principal.scope == "service";
-    let allowed = if request.transport == ExecutionTransport::Internal {
-        service_principal
-    } else {
-        !service_principal
-            && matches!(
-                descriptor.target,
-                CommandTarget::Execution | CommandTarget::HostAdmin
-            )
-            && descriptor
-                .transports
-                .contains(&request.transport.manifest_transport())
-    };
+    let allowed = transport_admits(
+        request.principal.scope == "service",
+        request.transport,
+        descriptor,
+    );
     if !allowed {
         return Err(problem(
             &request.request_id,
@@ -609,17 +693,7 @@ fn authorize_capability(
         super::rpc::payload_required_capability(&request.command, &request.args),
     ];
     for capability in required.into_iter().flatten() {
-        let granted = match snapshot_capability_decision(&request.principal, capability) {
-            Some(granted) => granted,
-            None => security_store()
-                .ok_or_else(|| store_unavailable(&request.request_id))?
-                .has_capability(
-                    &request.principal.account_id,
-                    &request.principal.device_id,
-                    capability,
-                )
-                .map_err(|error| map_store_error(&request.request_id, error))?,
-        };
+        let granted = capability_granted(&request.principal, capability, &request.request_id)?;
         if !granted {
             let mut error = problem(
                 &request.request_id,

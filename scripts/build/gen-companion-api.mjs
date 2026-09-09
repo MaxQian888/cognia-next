@@ -9,6 +9,12 @@ import { parseDocument, stringify } from "yaml"
 import { z } from "zod"
 
 import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
+import {
+  KNOWN_COMMANDS_RUST_PATH,
+  remoteCommandNames,
+  renderKnownCommandsRust,
+} from "./lib/companion-known-commands.mjs"
+import { DISPATCH_SOURCES, hasArm } from "../gates/check-command-grammar.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const PUBLIC_SPEC_PATH = "docs/api/mobile-companion-api.openapi.yaml"
@@ -22,11 +28,11 @@ const BRIDGE_FIXTURE_PATH = "cli/src/serve/fixtures/bridge-frames.json"
 const BRIDGE_PROTOCOL_VERSION = 3
 const ROUTE_CONTRACT_PATH = "protocol/companion-api-routes.json"
 const COMMAND_MANIFEST_PATH = "protocol/companion-commands.json"
+const COMMAND_RENAMES_PATH = "protocol/companion-command-renames.json"
 const REQUEST_SCHEMA_CATALOG_PATH = "protocol/companion-request-schemas.json"
 const RESPONSE_SCHEMA_CATALOG_PATH = "protocol/companion-response-schemas.json"
 const HEADLESS_DISPOSITIONS_PATH = "protocol/headless-command-dispositions.json"
 const ZOD_REQUEST_SCHEMA_PATH = "scripts/build/companion-request-schema-contracts.mjs"
-const RPC_SOURCE_PATH = "src-tauri/src/companion_api/rpc.rs"
 const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/chat.rs",
   "src-tauri/src/companion_api/rpc/codex_app.rs",
@@ -190,7 +196,19 @@ export function classifyCommands(manifest, remoteNames) {
   return { byName, publicNames, internalNames }
 }
 
-export function validateCommandCoverage(manifest, dispatchNames) {
+/**
+ * The contract's own consistency, plus the one fact only the Rust source can
+ * supply: that every remote command's `arm` is matched by some dispatcher.
+ *
+ * `dispatchArms` answers `has(arm)`. It used to be the set of names typed into
+ * `KNOWN_COMMANDS`, which made the check circular (the array was hand-kept in
+ * lockstep with the manifest, and this compared the two copies). The allowlist
+ * is rendered from the contract now, so the thing to hold the contract against
+ * is the `match` arms themselves. The reverse direction, an arm with no
+ * descriptor, is dead code rather than a defect: the dispatcher's allowlist
+ * gate makes such an arm unreachable.
+ */
+export function validateCommandCoverage(manifest, dispatchArms) {
   const errors = []
   const descriptors = new Map()
   for (const command of manifest.commands) {
@@ -208,14 +226,22 @@ export function validateCommandCoverage(manifest, dispatchNames) {
     ) {
       errors.push(`service command must be internal-only: ${command.name}`)
     }
-    if (command.target !== "client" && !dispatchNames.has(command.name)) {
+    if (command.target !== "client" && !dispatchArms.has(command.arm ?? command.name)) {
       errors.push(`remote command has no canonical dispatch arm: ${command.name}`)
     }
   }
-  for (const name of dispatchNames) {
-    if (!descriptors.has(name)) errors.push(`dispatch arm has no command descriptor: ${name}`)
-  }
   return errors
+}
+
+/** `has(arm)` over every dispatch source the grammar gate knows. */
+export function dispatchArmIndex(sources) {
+  const cache = new Map()
+  return {
+    has(arm) {
+      if (!cache.has(arm)) cache.set(arm, sources.some((source) => hasArm(source, arm)))
+      return cache.get(arm)
+    },
+  }
 }
 
 function clone(value) {
@@ -723,7 +749,13 @@ export function buildHostCommandCatalog(manifest, remoteNames, headlessSpec) {
       }
       return { id, title: hostResourceTitle(id), category: categories[0] }
     })
-  const payload = { schemaVersion: 1, categories, resources, commands }
+  // One version for the whole contract (ADR-0175). The catalog the Brain
+  // validates against carries the same number as the manifest it was rendered
+  // from, so the bridge hello and the device handshake compare one thing.
+  if (!Number.isInteger(manifest.contractVersion)) {
+    throw new Error("companion-commands.json contractVersion must be an integer")
+  }
+  const payload = { schemaVersion: manifest.contractVersion, categories, resources, commands }
   return {
     ...payload,
     catalogHash: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
@@ -998,6 +1030,206 @@ function completedRpcSchema(resultSchema = {}) {
   }
 }
 
+const PROBLEM_CONTENT_TYPE = "application/problem+json"
+const PROBLEM_TYPE_BASE = "https://cognia.dev/problems/"
+
+/**
+ * The one error document (ADR-0175): RFC 9457 `application/problem+json`
+ * plus the companion extensions. Mirrors `crates/cognia-problem`.
+ */
+function problemSchema() {
+  return {
+    type: "object",
+    description:
+      "RFC 9457 problem document. Every non-2xx answer on every companion plane is one of these, " +
+      "served as application/problem+json with requestId mirrored in the x-request-id header.",
+    required: ["type", "title", "status", "detail", "code", "requestId", "retryable", "details"],
+    additionalProperties: false,
+    properties: {
+      type: {
+        type: "string",
+        format: "uri",
+        description: `${PROBLEM_TYPE_BASE}<code>.`,
+      },
+      title: { type: "string", description: "The HTTP reason phrase. Human-facing, never branched on." },
+      status: { type: "integer", minimum: 100, maximum: 599 },
+      detail: { type: "string", description: "Human-readable explanation of this occurrence." },
+      instance: { type: "string", description: "The request path this occurrence belongs to." },
+      code: {
+        type: "string",
+        pattern: "^[a-z][a-z0-9_]*$",
+        description: "Stable snake_case code a client branches on.",
+      },
+      requestId: { type: "string", description: "Equals the x-request-id response header." },
+      retryable: {
+        type: "boolean",
+        description: "Whether repeating the identical request can succeed.",
+      },
+      details: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "Machine-readable extras: replacement, retryAfterSeconds, violations, capability. Always an object.",
+      },
+      operationId: {
+        type: "string",
+        description: "Present when the failure belongs to a long-running operation.",
+      },
+    },
+  }
+}
+
+function problemResponse(description) {
+  return {
+    description,
+    headers: {
+      "x-request-id": {
+        description: "Mirrors requestId in the problem document.",
+        schema: { type: "string" },
+      },
+    },
+    content: { [PROBLEM_CONTENT_TYPE]: { schema: { $ref: "#/components/schemas/Problem" } } },
+  }
+}
+
+const RPC_PROBLEM_STATUSES = {
+  400: "The request or command arguments are invalid.",
+  401: "Authentication failed.",
+  403: "Capability, transport, or policy authorization failed.",
+  404: "The command is not registered.",
+  409: "The idempotency key conflicts with an existing operation.",
+  410: "The command was renamed. details.replacement names the command to call instead.",
+  415: "The request body is not JSON.",
+  422: "The JSON request body does not match the endpoint shape.",
+  428: "A valid signed policy is required.",
+  429: "The principal exceeded its command rate limit.",
+  500: "The canonical dispatch failed.",
+  503: "The durable security store is unavailable.",
+}
+
+function rpcProblemResponses() {
+  return Object.fromEntries(
+    Object.entries(RPC_PROBLEM_STATUSES).map(([status, description]) => [
+      status,
+      problemResponse(description),
+    ]),
+  )
+}
+
+/**
+ * Runtime discovery (ADR-0175): what a caller may dispatch, as the contract
+ * describes it. Shared by the device and Headless specifications.
+ */
+function commandCatalogSchemas() {
+  const enumeration = (values) => ({ type: "string", enum: values })
+  return {
+    CommandDescriptor: {
+      type: "object",
+      description:
+        "One command as protocol/companion-commands.json declares it. The field names are the contract's own.",
+      required: [
+        "name",
+        "resource",
+        "verb",
+        "arm",
+        "target",
+        "operation",
+        "capability",
+        "risk",
+        "approval",
+        "idempotency",
+        "transports",
+        "pagination",
+        "longRunning",
+        "inputSchema",
+        "outputSchema",
+      ],
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", description: "The name on the wire." },
+        resource: { type: "string", description: "Declared resource path (companion-resources.json)." },
+        verb: { type: "string", description: "Vocabulary verb, optionally qualified (companion-verbs.json)." },
+        arm: { type: "string", description: "The host's dispatch literal. Equal to name until the rename cut." },
+        target: enumeration(["client", "execution", "host-admin", "service"]),
+        operation: enumeration(["read", "write", "side-effect"]),
+        capability: { type: "string" },
+        risk: enumeration(["low", "high", "critical"]),
+        approval: enumeration(["none", "interactive", "signed-policy"]),
+        idempotency: enumeration(["structural", "required", "forbidden"]),
+        transports: { type: "array", items: enumeration(["http", "websocket", "webrtc", "internal"]) },
+        pagination: enumeration(["none", "page-token", "byte-range"]),
+        longRunning: { type: "boolean" },
+        inputSchema: { type: "string", description: "JSON pointer into the published specification." },
+        outputSchema: { type: "string", description: "JSON pointer into the published specification." },
+      },
+    },
+    CommandCatalog: {
+      type: "object",
+      required: ["contractVersion", "catalogHash", "plane", "commands"],
+      additionalProperties: false,
+      properties: {
+        contractVersion: {
+          type: "integer",
+          description: "The contract this host was compiled against. A client built for another number must not dispatch.",
+        },
+        catalogHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+          description: "sha256 of the Headless command catalog this host embeds. The strong ETag is derived from it.",
+        },
+        plane: enumeration(["device", "service"]),
+        commands: {
+          type: "array",
+          description:
+            "Every command this caller may dispatch on this plane, in contract order. On the device plane the list is filtered by the caller's grants, so it never advertises what dispatch would refuse.",
+          items: { $ref: "#/components/schemas/CommandDescriptor" },
+        },
+      },
+    },
+  }
+}
+
+function catalogOperation({ operationId, tags, plane, security, rejected }) {
+  return {
+    operationId,
+    tags,
+    summary:
+      plane === "device"
+        ? "List the commands this device may dispatch."
+        : "List every command the Headless dispatcher accepts.",
+    description:
+      plane === "device"
+        ? "Runtime discovery (ADR-0175). The list is filtered by the device's transport and capability grants with the same predicate dispatch uses, so a command that appears here is one the device can call and a command that does not is one it would be refused. The response carries a strong ETag; send it back as If-None-Match to get 304 when nothing changed."
+        : "Runtime discovery (ADR-0175) for the loopback Brain: every remote-executable command in the contract. The ETag is the catalog hash; send it back as If-None-Match to get 304 when nothing changed.",
+    ...(security ? { security } : {}),
+    parameters: [
+      {
+        in: "header",
+        name: "If-None-Match",
+        required: false,
+        schema: { type: "string" },
+        description: "A previously returned ETag. A match answers 304 with no body.",
+      },
+    ],
+    responses: {
+      200: {
+        description: "The commands this caller may dispatch.",
+        headers: {
+          ETag: { schema: { type: "string" }, description: "Strong validator for If-None-Match." },
+        },
+        content: {
+          "application/json": { schema: { $ref: "#/components/schemas/CommandCatalog" } },
+        },
+      },
+      304: {
+        description: "The catalog matches the presented ETag. No body.",
+        headers: { ETag: { schema: { type: "string" } } },
+      },
+      ...rejected,
+    },
+  }
+}
+
 function genericRpcPath(command, audience, argumentSchemas = new Map()) {
   const requiresIdempotency = command.idempotency === "required"
   const usesGenericFallback = command.inputSchema === "#/components/schemas/RpcArgs"
@@ -1060,54 +1292,7 @@ function genericRpcPath(command, audience, argumentSchemas = new Map()) {
             },
           },
         },
-        400: {
-          description: "The request or command arguments are invalid.",
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/RpcError" } },
-          },
-        },
-        401: {
-          description: "Authentication failed.",
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/RpcError" } },
-          },
-        },
-        403: {
-          description: "Capability, transport, or policy authorization failed.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        404: {
-          description: "The command is not registered.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        409: {
-          description: "The idempotency key conflicts with an existing operation.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        415: {
-          description: "The request body is not JSON.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        422: {
-          description: "The JSON request body does not match the endpoint shape.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        428: {
-          description: "A valid signed policy is required.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        429: {
-          description: "The principal exceeded its command rate limit.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        500: {
-          description: "The canonical dispatch failed.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
-        503: {
-          description: "The durable security store is unavailable.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
+        ...rpcProblemResponses(),
       },
     },
   }
@@ -1190,6 +1375,7 @@ export function reconcileRpcPaths({
             403: { $ref: "#/components/responses/AuthenticationRejected" },
             404: { $ref: "#/components/responses/PublicApiError" },
             409: { $ref: "#/components/responses/PublicApiError" },
+            410: { $ref: "#/components/responses/PublicApiError" },
             415: { $ref: "#/components/responses/PublicApiError" },
             422: { $ref: "#/components/responses/PublicApiError" },
             428: { $ref: "#/components/responses/PublicApiError" },
@@ -1585,11 +1771,35 @@ function normalizePublicPaths(paths, contract) {
     }
   }
   if (whoami) {
+    whoami.description =
+      "Requires a five-minute device access token and a matching DPoP proof; returns the device, tenant, server version, pinned TLS fingerprint, and the command contract identity (contractVersion, catalogHash, catalogUrl)."
     whoami.responses[200] = schemaResponse(
       "WhoamiResponse",
       "Authenticated Companion device identity."
     )
     addPublicErrors(whoami, [400, 401, 409, 503])
+  }
+  const catalog = next["/api/catalog"]?.get
+  if (catalog) {
+    // The route stub already carries the plane's security requirement and the
+    // DPoP proof parameter from the pass above. Keep both under the real shape.
+    const generated = catalogOperation({
+      operationId: "deviceCatalog",
+      tags: whoami?.tags ?? ["identity"],
+      plane: "device",
+      rejected: { 401: authenticationRejected, 503: publicApiError },
+    })
+    // Idempotent over a committed spec that already carries the generated
+    // parameters: keep only the stub's own (the DPoP proof), then append.
+    const generatedNames = new Set(generated.parameters.map((parameter) => parameter.name))
+    next["/api/catalog"].get = {
+      ...generated,
+      security: catalog.security,
+      parameters: [
+        ...(catalog.parameters ?? []).filter((parameter) => !generatedNames.has(parameter?.name)),
+        ...generated.parameters,
+      ],
+    }
   }
   const devices = next["/api/devices"]?.get
   if (devices) {
@@ -1946,13 +2156,28 @@ function ensurePublicComponents(components, publicNames) {
     },
     WhoamiResponse: {
       type: "object",
-      required: ["deviceId", "accountId", "serverVersion", "tlsFingerprint"],
+      required: [
+        "deviceId",
+        "accountId",
+        "serverVersion",
+        "tlsFingerprint",
+        "contractVersion",
+        "catalogHash",
+        "catalogUrl",
+      ],
       additionalProperties: false,
       properties: {
         deviceId: { type: "string" },
         accountId: { type: "string" },
         serverVersion: { type: "string" },
         tlsFingerprint: { type: "string" },
+        contractVersion: {
+          type: "integer",
+          description:
+            "The command contract this host serves (ADR-0175). A device built against another number refuses to dispatch.",
+        },
+        catalogHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        catalogUrl: { type: "string", description: "Where this device's admitted commands are listed." },
       },
     },
     DeviceSummary: {
@@ -2386,40 +2611,19 @@ function ensurePublicComponents(components, publicNames) {
       required: ["ticket", "expiresIn"],
       properties: { ticket: { type: "string" }, expiresIn: { type: "integer", const: 60 } },
     },
-    CanonicalApiError: {
-      type: "object",
-      required: ["error"],
-      properties: {
-        error: {
-          type: "object",
-          required: ["code", "message", "requestId", "retryable", "details"],
-          properties: {
-            code: { type: "string" },
-            message: { type: "string" },
-            requestId: { type: "string", format: "uuid" },
-            retryable: { type: "boolean" },
-            details: {},
-            operationId: { type: "string" },
-          },
-        },
-      },
-    },
+    Problem: problemSchema(),
+    ...commandCatalogSchemas(),
   }
-  next.schemas.RpcError = { $ref: "#/components/schemas/CanonicalApiError" }
+  next.schemas.RpcError = { $ref: "#/components/schemas/Problem" }
+  delete next.schemas.CanonicalApiError
   delete next.schemas.BrowserSocketCommand
   for (const legacySchema of ["IssueResponse", "PairRequest", "PairResponse"]) {
     delete next.schemas[legacySchema]
   }
   next.responses = {
     ...(next.responses ?? {}),
-    PublicApiError: {
-      description: "The request was rejected by the public Companion API.",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalApiError" } } },
-    },
-    AuthenticationRejected: {
-      description: "Authentication or authorization rejected.",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalApiError" } } },
-    },
+    PublicApiError: problemResponse("The request was rejected by the public Companion API."),
+    AuthenticationRejected: problemResponse("Authentication or authorization rejected."),
   }
   for (const legacyResponse of [
     "PayloadTooLarge",
@@ -2486,7 +2690,7 @@ function buildPublicSpec(base, contract, manifest, remoteNames, argumentSchemas)
         COMMAND_MANIFEST_PATH,
         ROUTE_CONTRACT_PATH,
         REQUEST_SCHEMA_CATALOG_PATH,
-        RPC_SOURCE_PATH,
+        COMMAND_RENAMES_PATH,
         ZOD_REQUEST_SCHEMA_PATH,
       ],
       publicCommandCount: classified.publicNames.length,
@@ -2561,6 +2765,7 @@ function headlessBaseSpec() {
             403: { $ref: "#/components/responses/ServiceTokenRejected" },
             404: { $ref: "#/components/responses/HeadlessRpcError" },
             409: { $ref: "#/components/responses/HeadlessRpcError" },
+            410: { $ref: "#/components/responses/HeadlessRpcError" },
             415: { $ref: "#/components/responses/HeadlessRpcError" },
             422: { $ref: "#/components/responses/HeadlessRpcError" },
             428: { $ref: "#/components/responses/HeadlessRpcError" },
@@ -2569,6 +2774,17 @@ function headlessBaseSpec() {
             503: { $ref: "#/components/responses/HeadlessRpcError" },
           },
         },
+      },
+      "/internal/catalog": {
+        get: catalogOperation({
+          operationId: "headlessCatalog",
+          tags: ["headless-rpc"],
+          plane: "service",
+          rejected: {
+            401: { $ref: "#/components/responses/ServiceTokenRejected" },
+            403: { $ref: "#/components/responses/ServiceTokenRejected" },
+          },
+        }),
       },
       "/internal/operations/{operation_id}": {
         get: {
@@ -2691,38 +2907,17 @@ function headlessBaseSpec() {
             updatedAt: { type: "integer", format: "int64" },
           },
         },
-        RpcError: {
-          type: "object",
-          required: ["code", "message", "requestId", "retryable", "details"],
-          additionalProperties: false,
-          properties: {
-            code: { type: "string" },
-            message: { type: "string" },
-            requestId: { type: "string", format: "uuid" },
-            retryable: { type: "boolean" },
-            details: { type: "object", additionalProperties: true },
-            operationId: { type: "string", format: "uuid" },
-          },
-        },
-        ServiceTokenError: {
-          type: "object",
-          required: ["error", "message"],
-          additionalProperties: false,
-          properties: {
-            error: { type: "string" },
-            message: { type: "string" },
-          },
-        },
+        Problem: problemSchema(),
+        RpcError: { $ref: "#/components/schemas/Problem" },
+        ...commandCatalogSchemas(),
       },
       responses: {
-        ServiceTokenRejected: {
-          description: "The token is missing, invalid, not service-scoped, or presented by a non-loopback peer.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/ServiceTokenError" } } },
-        },
-        HeadlessRpcError: {
-          description: "The Headless request failed before producing a valid command result.",
-          content: { "application/json": { schema: { $ref: "#/components/schemas/RpcError" } } },
-        },
+        ServiceTokenRejected: problemResponse(
+          "The token is missing, invalid, not service-scoped, or presented by a non-loopback peer.",
+        ),
+        HeadlessRpcError: problemResponse(
+          "The Headless request failed before producing a valid command result.",
+        ),
       },
     },
   }
@@ -2774,7 +2969,7 @@ function buildHeadlessSpec(
         REQUEST_SCHEMA_CATALOG_PATH,
         RESPONSE_SCHEMA_CATALOG_PATH,
         HEADLESS_DISPOSITIONS_PATH,
-        RPC_SOURCE_PATH,
+        COMMAND_RENAMES_PATH,
         ZOD_REQUEST_SCHEMA_PATH,
       ],
       internalCommandCount: classified.internalNames.length,
@@ -3175,20 +3370,6 @@ function assertBridgeMessagesCoverFixture(spec, bridgeFixture) {
   }
 }
 
-export function extractKnownCommands(source) {
-  const match = source.match(/const KNOWN_COMMANDS[^=]*=\s*&\[([\s\S]*?)\n\];/)
-  if (!match) throw new Error("Could not locate KNOWN_COMMANDS in rpc.rs")
-  const names = [...match[1].matchAll(/"([a-z0-9_]+)"/g)].map((entry) => entry[1])
-  const unique = new Set(names)
-  if (unique.size !== names.length) {
-    const duplicates = [...unique].filter(
-      (name) => names.indexOf(name) !== names.lastIndexOf(name),
-    )
-    throw new Error(`duplicate KNOWN_COMMANDS entries: ${duplicates.sort().join(", ")}`)
-  }
-  return unique
-}
-
 function createProgram() {
   return new Command()
     .name("pnpm companion-api:gen")
@@ -3204,6 +3385,7 @@ function readRepo(path) {
 
 export function inspectCommittedContract() {
   const manifest = JSON.parse(readRepo(COMMAND_MANIFEST_PATH))
+  const renames = JSON.parse(readRepo(COMMAND_RENAMES_PATH))
   const contract = JSON.parse(readRepo(ROUTE_CONTRACT_PATH))
   const requestSchemaCatalogSource = readRepo(REQUEST_SCHEMA_CATALOG_PATH)
   const requestSchemaCatalog = requestSchemaCatalogSchema.parse(
@@ -3250,6 +3432,12 @@ export function inspectCommittedContract() {
   } catch {
     // The first generator run creates the compact Brain bridge identity module.
   }
+  let knownCommandsRustSource = ""
+  try {
+    knownCommandsRustSource = readRepo(KNOWN_COMMANDS_RUST_PATH)
+  } catch {
+    // The first generator run creates the host's command table.
+  }
   const bridgeFixtureSource = readRepo(BRIDGE_FIXTURE_PATH)
   const publicSpec = parseYaml(publicSource, PUBLIC_SPEC_PATH)
   const runtime = collectRuntimeRoutes(
@@ -3257,9 +3445,21 @@ export function inspectCommittedContract() {
     readRepo("src-tauri/src/companion_api/server.rs"),
   )
   const runtimeRoutes = runtime.routes
-  const remoteNames = extractKnownCommands(readRepo(RPC_SOURCE_PATH))
+  // What is remote-executable is a fact of the contract, not of a Rust array:
+  // every descriptor whose target is not `client`. The Rust source is consulted
+  // only for the one thing the contract cannot know, whether each arm exists.
+  const remoteNames = remoteCommandNames(manifest)
   const byName = new Map(manifest.commands.map((command) => [command.name, command]))
-  const commandCoverageErrors = validateCommandCoverage(manifest, remoteNames)
+  const dispatchArms = dispatchArmIndex(
+    DISPATCH_SOURCES.map((sourcePath) => {
+      try {
+        return readRepo(sourcePath)
+      } catch {
+        return ""
+      }
+    }),
+  )
+  const commandCoverageErrors = validateCommandCoverage(manifest, dispatchArms)
   const inferredArgumentSchemas = new Map(
     RPC_DISPATCH_SOURCE_PATHS.flatMap((sourcePath) => [
       ...extractCommandArgumentSchemas(readRepo(sourcePath)),
@@ -3385,6 +3585,11 @@ export function inspectCommittedContract() {
     bridgeFixtureSource,
     desiredHostCommandCatalog,
   )
+  const desiredKnownCommandsRustSource = renderKnownCommandsRust({
+    manifest,
+    renames,
+    catalogHash: desiredHostCommandCatalog.catalogHash,
+  })
   const errors = validateRouteContract({
     contract,
     runtimeRoutes,
@@ -3458,6 +3663,7 @@ export function inspectCommittedContract() {
     desiredHeadlessContractIdentitySource,
     desiredRequestSchemaCatalogSource,
     desiredBridgeFixtureSource,
+    desiredKnownCommandsRustSource,
     headlessDispositions: headlessDispositionResult.dispositions,
     publicDrift: publicSource !== desiredPublicSource,
     headlessDrift: headlessSource !== desiredHeadlessSource,
@@ -3469,6 +3675,7 @@ export function inspectCommittedContract() {
     requestSchemaCatalogDrift:
       requestSchemaCatalogSource !== desiredRequestSchemaCatalogSource,
     bridgeFixtureDrift: bridgeFixtureSource !== desiredBridgeFixtureSource,
+    knownCommandsRustDrift: knownCommandsRustSource !== desiredKnownCommandsRustSource,
     errors,
   }
 }
@@ -3495,7 +3702,8 @@ async function main(argv = process.argv.slice(2)) {
       inspected.devicePlaneOverridesDrift ||
       inspected.headlessContractIdentityDrift ||
       inspected.requestSchemaCatalogDrift ||
-      inspected.bridgeFixtureDrift)
+      inspected.bridgeFixtureDrift ||
+      inspected.knownCommandsRustDrift)
   ) {
     const drift = [
       inspected.publicDrift ? PUBLIC_SPEC_PATH : null,
@@ -3506,6 +3714,7 @@ async function main(argv = process.argv.slice(2)) {
       inspected.headlessContractIdentityDrift ? HEADLESS_CONTRACT_IDENTITY_PATH : null,
       inspected.requestSchemaCatalogDrift ? REQUEST_SCHEMA_CATALOG_PATH : null,
       inspected.bridgeFixtureDrift ? BRIDGE_FIXTURE_PATH : null,
+      inspected.knownCommandsRustDrift ? KNOWN_COMMANDS_RUST_PATH : null,
     ].filter(Boolean)
     throw new Error(`generated artifacts drifted: ${drift.join(", ")}; run pnpm companion-api:gen`)
   }
@@ -3536,6 +3745,11 @@ async function main(argv = process.argv.slice(2)) {
     writeFileSync(
       resolve(repoRoot, BRIDGE_FIXTURE_PATH),
       inspected.desiredBridgeFixtureSource,
+    )
+    mkdirSync(resolve(repoRoot, dirname(KNOWN_COMMANDS_RUST_PATH)), { recursive: true })
+    writeFileSync(
+      resolve(repoRoot, KNOWN_COMMANDS_RUST_PATH),
+      inspected.desiredKnownCommandsRustSource,
     )
   }
   process.stdout.write(

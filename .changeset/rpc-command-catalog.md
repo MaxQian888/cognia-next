@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+The companion command contract has one version and one runtime discovery surface (ADR-0175). The Host's dispatch allowlist is now rendered from `protocol/companion-commands.json` into `generated/known_commands.rs` instead of being typed a second time in `rpc.rs`, and the Headless catalog, the bridge hello, and the CLI identity all carry the contract's `contractVersion` (3). A paired device can read what it may dispatch at `GET /api/catalog`, filtered with the same predicate dispatch uses so the list never advertises a refused command, and the loopback Brain gets the full set at `GET /internal/catalog`. Both answer a strong ETag and 304. `GET /api/whoami` now names `contractVersion`, `catalogHash`, and `catalogUrl`, and a device built against a different contract version refuses to dispatch instead of failing command by command. The published OpenAPI documents describe every refusal as `application/problem+json` (`Problem`) and document 410 `command_renamed` for the rename cut to come.
