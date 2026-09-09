@@ -20,9 +20,16 @@ jest.mock("../runtime/model-meta", () => ({
   resolveModelMeta: () => new Promise(() => {}),
 }))
 
+const backgroundSettleListeners = new Set<(event: unknown) => void>()
 jest.mock("../../agent/subagent-background-tasks", () => ({
   countRunningCliBackgroundRuns: jest.fn(() => 0),
   countInterruptedCliBackgroundRuns: jest.fn(() => new Promise(() => {})),
+  subscribeCliBackgroundSettle: jest.fn((listener: (event: unknown) => void) => {
+    backgroundSettleListeners.add(listener)
+    return () => backgroundSettleListeners.delete(listener)
+  }),
+  listPendingCliBackgroundDeliveries: jest.fn(async () => []),
+  markCliBackgroundDelivery: jest.fn(async () => undefined),
 }))
 
 jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
@@ -35,6 +42,7 @@ jest.mock("@/plugins/cognia-builtin-characters/src/index", () => ({
 // markdown tokenization, which has its own focused tests.
 jest.mock("../render/cell-terminal-block", () => ({
   markdownSpans: jest.requireActual("../render/cell-terminal-block").markdownSpans,
+  markdownLineSpans: jest.requireActual("../render/cell-terminal-block").markdownLineSpans,
   cellToTerminalBlock: (cell: { id?: string; text?: string; raw?: string; result?: string }) => {
     const plainText = cell.text ?? cell.raw ?? cell.result ?? ""
     return {
@@ -492,6 +500,50 @@ describe("App", () => {
       home: "/tmp/cognia",
       owner: "s1",
     })
+  })
+
+  it("injects a settled background sub-agent result as a framed turn while idle", async () => {
+    const { create, prompts } = fakeSession("noted")
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} home="/tmp/cognia" />
+    )
+    expect(backgroundSettleListeners.size).toBeGreaterThan(0)
+    act(() => {
+      for (const listener of backgroundSettleListeners) {
+        listener({
+          runId: "bg_1",
+          kind: "subagent",
+          subagentId: "reviewer",
+          sessionId: "s1",
+          status: "done",
+          startedAt: 1_000,
+          settledAt: 4_000,
+          resultText: "No issues found.",
+          entry: {
+            runId: "bg_1",
+            subagentId: "reviewer",
+            status: "done",
+            startedAt: 1_000,
+            settledAt: 4_000,
+            text: "No issues found.",
+          },
+        })
+      }
+    })
+    await waitFor(() => expect(prompts).toHaveLength(1))
+    expect(prompts[0]).toContain('[background task update] Subagent "reviewer" (runId bg_1)')
+    expect(prompts[0]).toContain("No issues found.")
+    await waitFor(() =>
+      expect(container.textContent).toContain('Background subagent "reviewer" done in 3s')
+    )
+    const backgroundTasks = jest.requireMock("../../agent/subagent-background-tasks") as {
+      markCliBackgroundDelivery: jest.Mock
+    }
+    expect(backgroundTasks.markCliBackgroundDelivery).toHaveBeenCalledWith(
+      ["bg_1"],
+      "delivered",
+      "/tmp/cognia"
+    )
   })
 
   it("does not poll running background runs on input-only rerenders", () => {

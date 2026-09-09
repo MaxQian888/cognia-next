@@ -131,6 +131,7 @@ describe("BottomStatus", () => {
         subagentRunning={{ name: "reviewer", count: 3 }}
         backgroundSubagents={2}
         interruptedBackgroundSubagents={1}
+        pendingBackgroundResults={2}
         copilot={{ name: "Nightly report" }}
       />
     )
@@ -139,6 +140,7 @@ describe("BottomStatus", () => {
     expect(text).toContain("◆ reviewer×3")
     expect(text).toContain("⧗ 2 bg")
     expect(text).toContain("! 1 bg interrupted")
+    expect(text).toContain("↩ 2 bg results queued")
     expect(text).toContain("copilot: Nightly report")
     expect(text).toContain("/workflow exit")
   })

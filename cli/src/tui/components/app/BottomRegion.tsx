@@ -45,6 +45,7 @@ export interface BottomRegionProps {
   footerSubagentRunning: ReturnType<typeof runningSubagents>
   footerBackgroundSubagents: number
   interruptedBackgroundSubagents: number
+  pendingBackgroundResults: number
   footerCopilot: { name: string } | undefined
   backtrackArmed: boolean
   subagentChipRef: React.RefObject<DOMElement | null>
@@ -88,6 +89,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
     footerSubagentRunning,
     footerBackgroundSubagents,
     interruptedBackgroundSubagents,
+    pendingBackgroundResults,
     footerCopilot,
     backtrackArmed,
     subagentChipRef,
@@ -132,6 +134,7 @@ export function BottomRegion(props: BottomRegionProps): React.ReactElement {
           subagentRunning={footerSubagentRunning}
           backgroundSubagents={footerBackgroundSubagents}
           interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+          pendingBackgroundResults={pendingBackgroundResults}
           copilot={footerCopilot}
           verbose={state.verbose}
           backtrackArmed={backtrackArmed}

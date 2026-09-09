@@ -55,6 +55,7 @@ function baseProps(over: Partial<BottomRegionProps> = {}): BottomRegionProps {
     footerSubagentRunning: null,
     footerBackgroundSubagents: 0,
     interruptedBackgroundSubagents: 0,
+    pendingBackgroundResults: 0,
     footerCopilot: undefined,
     backtrackArmed: false,
     subagentChipRef: { current: null },

@@ -81,6 +81,7 @@ function BottomStatusImpl({
   subagentRunning,
   backgroundSubagents = 0,
   interruptedBackgroundSubagents = 0,
+  pendingBackgroundResults = 0,
   copilot,
   verbose = false,
   backtrackArmed = false,
@@ -108,6 +109,8 @@ function BottomStatusImpl({
   backgroundSubagents?: number
   /** Detached background runs interrupted by a prior CLI exit. */
   interruptedBackgroundSubagents?: number
+  /** Settled background results waiting for the next turn boundary to reach the model. */
+  pendingBackgroundResults?: number
   /** Active Workflow Copilot draft, routing free-text to the copilot. */
   copilot?: { name: string } | null
   /** Detailed-output mode (Ctrl+O) is on. */
@@ -246,6 +249,12 @@ function BottomStatusImpl({
         ! {interruptedBackgroundSubagents} bg interrupted
       </Text>
     )
+  if (pendingBackgroundResults > 0)
+    chips.push(
+      <Text key="bgpending" color={theme.secondary}>
+        ↩ {pendingBackgroundResults} bg result{pendingBackgroundResults > 1 ? "s" : ""} queued
+      </Text>
+    )
 
   const queuePreview = steerQueue.slice(0, QUEUE_PREVIEW_MAX)
 
@@ -259,6 +268,7 @@ function BottomStatusImpl({
     !backtrackArmed &&
     backgroundSubagents === 0 &&
     interruptedBackgroundSubagents === 0 &&
+    pendingBackgroundResults === 0 &&
     treeRows.length === 0
   ) {
     return null

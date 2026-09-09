@@ -184,6 +184,7 @@ import { clearTerminal, readThemeFile } from "./app/app-helpers"
 import { useBashShellout } from "./app/use-bash-shellout"
 import { useBacktrack } from "./app/use-backtrack"
 import { useSteerQueue } from "./app/use-steer-queue"
+import { useBackgroundResults } from "./app/use-background-results"
 import { useTerminalChrome } from "./app/use-terminal-chrome"
 import { useTextSelection } from "../hooks/use-text-selection"
 import type { FrameBuffer } from "../selection/frame-buffer"
@@ -1096,6 +1097,30 @@ export function App({
   // read, plus `takeSteer` to drain the queue into one framed prompt.
   const { takeSteer } = useSteerQueue(state.steerQueue, dispatch)
 
+  // Background sub-agent completion push: a run this session started settles
+  // ⇒ its result is injected as a framed turn while the session is idle, or
+  // queued behind the running turn and drained with the `btw` steers. The
+  // follow-up drain is defined after the sender, hence the ref hop.
+  const drainFollowUpsRef = useRef<() => Promise<void>>(async () => undefined)
+  const deliverBackgroundResults = useCallback(
+    async (framed: string) => {
+      await agent.send(framed)
+      await drainFollowUpsRef.current()
+    },
+    [agent]
+  )
+  const {
+    takeBackgroundResults,
+    pendingCount: pendingBackgroundResults,
+    settleSeq: backgroundSettleSeq,
+  } = useBackgroundResults({
+    sessionId: state.sessionId,
+    home,
+    dispatch,
+    idle: !busy && runtimeAbort.current === null && state.copilot === undefined,
+    deliver: deliverBackgroundResults,
+  })
+
   // Reactive terminal size. `columns` drives the full-width composer/overlays
   // (so the UI fills the terminal like Claude Code) and `rows` budgets how many
   // list rows fit before scrolling. The live frame reflows the instant this
@@ -1261,7 +1286,8 @@ export function App({
     return () => {
       cancelled = true
     }
-  }, [home, state.sessionId])
+    // Recount when a run this session owns settles (a child can settle as interrupted).
+  }, [home, state.sessionId, backgroundSettleSeq])
 
   useEffect(() => {
     let cancelled = false
@@ -2137,9 +2163,32 @@ export function App({
     ]
   )
 
-  // Send a plain message, then deliver any `btw` steer typed while it streamed
-  // as follow-up turns — so a steer never interrupts the turn it was typed
-  // during. Stops if a goal/loop run takes over (that driver owns the drain).
+  // Turn-boundary drain: `btw` steers typed during the turn first, then settled
+  // background sub-agent results, each as its own follow-up turn, until both
+  // queues are empty. Stops if a goal/loop run takes over (that driver owns
+  // the steer drain, and background results wait for the next idle edge).
+  const drainFollowUps = useCallback(async () => {
+    for (;;) {
+      if (runtimeAbort.current !== null) return
+      const steer = takeSteer()
+      if (steer !== null) {
+        await agent.send(frameSteer(steer))
+        continue
+      }
+      const background = takeBackgroundResults()
+      if (background !== null) {
+        await agent.send(background)
+        continue
+      }
+      return
+    }
+  }, [agent, takeSteer, takeBackgroundResults])
+  useEffect(() => {
+    drainFollowUpsRef.current = drainFollowUps
+  }, [drainFollowUps])
+
+  // Send a plain message, then run the turn-boundary drain, so a steer never
+  // interrupts the turn it was typed during.
   const sendThenDrainSteer = useCallback(
     async (text: string) => {
       // Resolve @-mentions first: enable skills, run agents, rewrite the prompt.
@@ -2148,13 +2197,9 @@ export function App({
       // SendOptions so they re-resolve with the updated ephemeralSkillIds.
       if (enabledSkills.length > 0) agent.invalidate()
       await agent.send(prompt)
-      let steer = takeSteer()
-      while (steer !== null && runtimeAbort.current === null) {
-        await agent.send(frameSteer(steer))
-        steer = takeSteer()
-      }
+      await drainFollowUps()
     },
-    [agent, takeSteer, runMentionPreprocess]
+    [agent, drainFollowUps, runMentionPreprocess]
   )
 
   // In copilot mode a plain message goes to the workflow-editor session; after
@@ -2692,10 +2737,13 @@ export function App({
   const footerSubagentRunning = useMemo(() => runningSubagents(inflightTools), [inflightTools])
   const footerBackgroundSubagents = useMemo(() => {
     void inflightTools
+    void backgroundSettleSeq
     // Scope to this chat session so the footer counts only the background
     // subagents the current session started (the registry is process-global).
+    // Recomputed on each tool event AND on each settlement this session owns,
+    // so a run finishing while the model is idle drops the count at once.
     return countRunningCliBackgroundRuns(state.sessionId)
-  }, [inflightTools, state.sessionId])
+  }, [inflightTools, backgroundSettleSeq, state.sessionId])
   const copilotName = state.copilot?.name
   const hasCopilot = state.copilot !== undefined
   const footerCopilot = useMemo(
@@ -2877,6 +2925,7 @@ export function App({
               footerSubagentRunning={footerSubagentRunning}
               footerBackgroundSubagents={footerBackgroundSubagents}
               interruptedBackgroundSubagents={interruptedBackgroundSubagents}
+              pendingBackgroundResults={pendingBackgroundResults}
               footerCopilot={footerCopilot}
               backtrackArmed={backtrackArmed}
               subagentChipRef={subagentChipRef}

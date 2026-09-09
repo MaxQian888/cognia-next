@@ -22,8 +22,12 @@ import {
   countRunningCliBackgroundRuns,
   hasCliBackgroundRun,
   listCliBackgroundRuns,
+  listPendingCliBackgroundDeliveries,
+  markCliBackgroundDelivery,
   startCliBackgroundRun,
+  subscribeCliBackgroundSettle,
   cancelCliBackgroundRun,
+  type CliBackgroundSettleEvent,
 } from "./subagent-background-tasks"
 
 function deferred<T>(): {
@@ -311,6 +315,82 @@ describe("CLI background subagent tasks", () => {
 
     await expect(collectCliBackgroundResult("renderer-row", { home })).resolves.toBeUndefined()
     await expect(countInterruptedCliBackgroundRuns({ home })).resolves.toBe(0)
+  })
+})
+
+describe("CLI background settle push", () => {
+  it("notifies subscribers with a delivery entry when a run settles done", async () => {
+    const events: CliBackgroundSettleEvent[] = []
+    const unsubscribe = subscribeCliBackgroundSettle((event) => events.push(event))
+    const run = deferred<string>()
+    startCliBackgroundRun("push-1", meta(undefined, { sessionId: "owner" }), run.promise)
+    run.resolve("all clear")
+    await run.promise
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        runId: "push-1",
+        kind: "subagent",
+        subagentId: "reviewer",
+        sessionId: "owner",
+        status: "done",
+        startedAt: 1000,
+        resultText: "all clear",
+      })
+    )
+    expect(events[0].entry).toEqual(expect.objectContaining({ status: "done", text: "all clear" }))
+    unsubscribe()
+    const again = deferred<string>()
+    startCliBackgroundRun("push-2", meta(), again.promise)
+    again.resolve("silent")
+    await again.promise
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(events).toHaveLength(1)
+  })
+
+  it("delivers an interrupted child as an error entry that keeps its partial output", async () => {
+    const events: CliBackgroundSettleEvent[] = []
+    subscribeCliBackgroundSettle((event) => events.push(event))
+    startCliBackgroundRun(
+      "push-int",
+      meta(),
+      Promise.resolve({ text: "half done", interrupted: true })
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(events[0].status).toBe("interrupted")
+    expect(events[0].entry?.status).toBe("error")
+    expect(events[0].entry?.text).toContain("half done")
+    expect(events[0].entry?.text).toContain("interrupted")
+  })
+
+  it("swallows a throwing listener so the run still settles and is collectable", async () => {
+    subscribeCliBackgroundSettle(() => {
+      throw new Error("observer bug")
+    })
+    startCliBackgroundRun("push-throw", meta(), Promise.resolve("fine"))
+    await expect(collectCliBackgroundResult("push-throw")).resolves.toBe("fine")
+  })
+
+  it("stamps delivery state on journal rows and lists pending ones for the owner", async () => {
+    const home = makeHome()
+    await startCliBackgroundJournal(home)
+    await getDb().backgroundTasks.bulkPut([
+      row({ runId: "p1", sessionId: "owner", status: "done", settledAt: 2000, resultText: "r1" }),
+      row({ runId: "p2", sessionId: "other", status: "done", settledAt: 2000, resultText: "r2" }),
+      row({ runId: "p3", sessionId: "owner", status: "running" }),
+    ])
+    await markCliBackgroundDelivery(["p1", "p2"], "pending", home)
+    await expect(listPendingCliBackgroundDeliveries({ home, owner: "owner" })).resolves.toEqual([
+      expect.objectContaining({ runId: "p1", status: "done", text: "r1" }),
+    ])
+    await markCliBackgroundDelivery(["p1"], "delivered", home)
+    await expect(listPendingCliBackgroundDeliveries({ home, owner: "owner" })).resolves.toEqual([])
+    const delivered = await getDb().backgroundTasks.get("p1")
+    expect(delivered?.deliveryState).toBe("delivered")
+    expect(typeof delivered?.deliveredAt).toBe("number")
+    // A no-op for an empty list never touches the journal.
+    await expect(markCliBackgroundDelivery([], "pending", home)).resolves.toBeUndefined()
   })
 })
 

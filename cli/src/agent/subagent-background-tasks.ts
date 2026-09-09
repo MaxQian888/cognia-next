@@ -2,10 +2,16 @@ import {
   BackgroundTaskRegistry,
   backgroundTaskInterruptedMessage,
   type BackgroundTaskControls,
+  type BackgroundTaskDeliveryState,
   type BackgroundTaskJournalWriter,
+  type BackgroundTaskKind,
   type BackgroundTaskStartMeta,
   type BackgroundTaskStatus,
 } from "@/lib/background-tasks/registry-core"
+import {
+  deliveryEntryFromJournal,
+  type BackgroundResultDeliveryEntry,
+} from "@/lib/background-tasks/completion-delivery"
 import {
   createDexieBackgroundTaskJournal,
   getBackgroundTaskRecord,
@@ -30,6 +36,44 @@ export type CliBackgroundTaskMeta = BackgroundTaskStartMeta & {
 }
 
 export type CliBackgroundResult = string | { text: string; error?: string; interrupted?: boolean }
+
+/**
+ * Terminal event for a CLI background run. Fired synchronously from the
+ * registry settle (never racing the async journal write) so the TUI can push
+ * the outcome into the parent chat while it is idle (the OpenCode
+ * `resumeWhenIdle` pattern, mirroring `hooks/chat/background-result-runtime`).
+ */
+export interface CliBackgroundSettleEvent {
+  runId: string
+  kind: BackgroundTaskKind
+  subagentId: string
+  /** The chat session that started the run: only that session may deliver it. */
+  sessionId: string
+  home?: string
+  status: "done" | "error" | "interrupted"
+  startedAt: number
+  settledAt: number
+  resultText?: string
+  error?: string
+  /**
+   * The parent-facing delivery entry. An interrupted child (Ctrl+C reached
+   * it) is delivered as an error entry that keeps its salvaged output, so the
+   * parent model learns the run was cut off instead of waiting on it.
+   */
+  entry: BackgroundResultDeliveryEntry | null
+}
+
+export type CliBackgroundSettleListener = (event: CliBackgroundSettleEvent) => void
+
+const settleListeners = new Set<CliBackgroundSettleListener>()
+
+/** Subscribe to run settlements; returns the unsubscribe. Listeners never throw out. */
+export function subscribeCliBackgroundSettle(listener: CliBackgroundSettleListener): () => void {
+  settleListeners.add(listener)
+  return () => {
+    settleListeners.delete(listener)
+  }
+}
 
 // The shared registry exposes done/error settlements. Preserve CLI interruption
 // semantics in its journal adapter and public list without changing that core.
@@ -68,6 +112,45 @@ const registry = new BackgroundTaskRegistry<CliBackgroundResult>({
           text: value.text,
           ...(value.error || value.interrupted ? { error: value.error ?? value.text } : {}),
         },
+  onSettle: (runId, meta, settle) => {
+    const interrupted = interruptedRuns.has(runId)
+    // An interrupted child projects its partial output as the error too, so
+    // the parent-facing entry would lose the cut-off note. Name the interruption
+    // explicitly and keep the partial output as salvaged text.
+    const error = interrupted
+      ? settle.error && settle.error !== settle.resultText
+        ? settle.error
+        : backgroundTaskInterruptedMessage(runId)
+      : settle.error
+    const event: CliBackgroundSettleEvent = {
+      runId,
+      kind: meta.kind,
+      subagentId: meta.subagentId,
+      sessionId: meta.sessionId,
+      home: runHomes.get(runId),
+      status: interrupted ? "interrupted" : settle.status,
+      startedAt: meta.startedAt,
+      settledAt: settle.settledAt,
+      ...(settle.resultText !== undefined ? { resultText: settle.resultText } : {}),
+      ...(error !== undefined ? { error } : {}),
+      entry: deliveryEntryFromJournal({
+        runId,
+        subagentId: meta.subagentId,
+        status: interrupted ? "error" : settle.status,
+        startedAt: meta.startedAt,
+        settledAt: settle.settledAt,
+        ...(settle.resultText !== undefined ? { resultText: settle.resultText } : {}),
+        ...(error !== undefined ? { error } : {}),
+      }),
+    }
+    for (const listener of settleListeners) {
+      try {
+        listener(event)
+      } catch {
+        // Observers are best-effort; the run lifecycle must not depend on them.
+      }
+    }
+  },
 })
 
 export function startCliBackgroundRun(
@@ -187,6 +270,46 @@ export function cancelCliBackgroundRun(runId: string, owner?: string): boolean {
   return registry.cancel(runId)
 }
 
+/**
+ * Stamp the parent-delivery state on settled rows (best-effort, serialized
+ * through the journal queue). `delivered` also records `deliveredAt`.
+ */
+export function markCliBackgroundDelivery(
+  runIds: readonly string[],
+  deliveryState: BackgroundTaskDeliveryState,
+  home?: string
+): Promise<void> {
+  if (runIds.length === 0) return Promise.resolve()
+  const patch = {
+    deliveryState,
+    ...(deliveryState === "delivered" ? { deliveredAt: Date.now() } : {}),
+  }
+  return enqueueJournal(home ?? runHomes.get(runIds[0]), async (handle) => {
+    await Promise.all(runIds.map((runId) => dexieJournal.update(runId, patch)))
+    handle.scheduleFlush()
+  }).catch(() => undefined)
+}
+
+/**
+ * Settled runs this session started whose result never reached the parent
+ * chat (the process exited between settle and delivery). Read at boot so a
+ * resumed session still hears about them.
+ */
+export async function listPendingCliBackgroundDeliveries(options: {
+  home?: string
+  owner: string
+}): Promise<BackgroundResultDeliveryEntry[]> {
+  const records = await readJournalRecords(options.home)
+  const entries: BackgroundResultDeliveryEntry[] = []
+  for (const record of records) {
+    if (record.host !== "cli" || record.kind !== "subagent") continue
+    if (record.sessionId !== options.owner || record.deliveryState !== "pending") continue
+    const entry = deliveryEntryFromJournal(record)
+    if (entry) entries.push(entry)
+  }
+  return entries
+}
+
 export function countRunningCliBackgroundRuns(owner?: string): number {
   if (owner === undefined) return registry.countRunning()
   return registry.list().filter((entry) => entry.status === "running" && entry.sessionId === owner)
@@ -207,6 +330,7 @@ export async function countInterruptedCliBackgroundRuns(
 
 export function __clearAllCliBackgroundRunsForTesting(): void {
   registry.__clearForTesting()
+  settleListeners.clear()
   runHomes.clear()
   runOwners.clear()
   interruptedHomes.clear()
