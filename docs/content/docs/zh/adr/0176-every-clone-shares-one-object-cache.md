@@ -135,7 +135,30 @@ E2B 后端此前把 token 放进克隆 URL，因而也放到了 microVM 内部�
 成一个它并不具备的门面形状。推送同样按次携带凭据，于是一个活得比克隆时那枚
 installation token 更久的工作区，在轮转之后依然推得动。
 
-### 8. 网络克隆会杀掉自己起的进程
+### 8. 部署是一个值，不是一份放宽了的白名单
+
+`https://api.github.com` 在六个地方是字面量。每一处都意味着「只有 github.com」，
+于是自建的 GitHub Enterprise Server 与其说是不受支持，不如说是根本够不着，而且没有
+任何提示说明这一点。
+
+改由 `lib/github/host.ts` 持有一个 `GithubHost`。API base 无法从 web base 推导，这
+正是这个值同时携带两者的原因：github.com 的 API 在**另一个主机**上
+（`api.github.com`），而 GHES 的 API 在同一主机的**某个路径**下（`/api/v3`）。
+
+host 属于**账号**，不属于应用。一个用户可以同时持有 github.com 的 PAT 和企业版的
+App，而一份凭据只能抵达签发它的那个部署。所以这个 URL 是账号所存凭据上的一个字段，
+对此前已存在的每个账号都是缺省的，而缺省就是 github.com。
+
+默认不放宽任何东西。对没人配置过的 host，`resolveGithubHostForRemote` 回答
+`undefined`，而不是回落到 github.com，因为那个回落恰恰就是「把 github.com 的令牌发
+给远端所指的任意服务器」的路径。凭长得像就认下 `github.acme.com` 才是错误，配置才是
+闸门。
+
+`parseGithubHost` 拒绝 `http://`、带 userinfo 的 URL，以及任何不是 URL 的东西。Rust
+侧在 `canonical_host_root` 中独立复验一遍，才让这个值进入 `git clone` 参数，因为那里
+正是决定凭据头按哪个 origin 键控的地方。
+
+### 9. 网络克隆会杀掉自己起的进程
 
 `exec::run_within` 自己 spawn 子进程、持有句柄，并以 `kill` 加 `wait` 结束预算。调用方
 删除半成品目标目录时，删的已经是没人在写的目录。stderr 由独立任务抽干，因为克隆很
@@ -156,6 +179,13 @@ installation token 更久的工作区，在轮转之后依然推得动。
   也找不到。只取 `.mirrors`，旁边的工作树是有人还在用的活工作区。删除失败只记日志
   并丢弃，因为缓存清扫绝不能让一次克隆失败。
 - 插件安装器的 `--depth=1` 克隆仍然走网络。它刻意是浅的，镜像派生不是它要的东西。
+- 交付插件的 `browserSiteProviders` 仍然只声明 `github.com`。那是一份静态清单声明，
+  在任何账号存在之前就已求值，所以「显式确认」的浏览器兜底路径在清单能按账号命名域名
+  之前，仍然只覆盖 github.com。它所兜底的 API 路径本身已经是按 host 走的，因此影响
+  仅限于那条兜底路径。
+- Agent Team PR 反馈解析里的 `parseGitHubRepo` 仍然只认 github.com。它读的是同一个
+  解析器，只是没有一份已配置 host 列表可传。那份列表随统一交付面到来，在此之前它的
+  行为是「未改变」，而不是「错的」。
 - 工作区克隆的*网络回退*仍然没有挂钟预算。这是未改动的既有行为，不在本文范围内。
   只有它前面的镜像路径是有界的。
 
@@ -173,4 +203,7 @@ installation token 更久的工作区，在轮转之后依然推得动。
 | 受控克隆 | `crates/cognia-git/src/repo.rs::clone_from_mirror` |
 | 会杀进程的超时 | `crates/cognia-git/src/exec.rs::run_within` |
 | 沙箱凭据 | `plugins/e2b-sandbox/src/workspace-backend.ts` |
+| GitHub 部署 | `lib/github/host.ts` |
+| 按账号的 host | `lib/integrations/github-auth.ts` |
+| host 校验（Rust） | `src-tauri/src/github/workspace.rs::canonical_host_root` |
 | 推送凭据转发 | `lib/github/workspace.ts::commitAndPush` |

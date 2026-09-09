@@ -115,9 +115,19 @@ async function defaultAuthenticatedRequest<T>(
   const registered = getRegisteredIntegration(pluginId, account.integrationId)
   if (!registered) throw new Error(`Integration "${account.integrationId}" is not registered`)
   const url = new URL(input)
+  // ADR-0176. The third source is the deployment this account's own credential
+  // belongs to. A plugin manifest can only declare the vendor's public origin,
+  // so without this a GitHub Enterprise account is blocked here before it ever
+  // reaches its own server. It widens nothing: the origin comes from the host
+  // the user configured on this account, and the credential being sent is the
+  // one that server issued.
+  const accountOrigin = await integrationApiBaseUrl(account)
+    .then((base) => (base ? new URL(base).origin : undefined))
+    .catch(() => undefined)
   const allowed = [
     ...(registered.definition.allowedOrigins ?? []),
     ...(account.approvedOrigins ?? []),
+    ...(accountOrigin ? [accountOrigin] : []),
   ]
   if (!allowed.includes(url.origin)) {
     throw new Error(`Integration request origin "${url.origin}" is not allowlisted`)
@@ -303,6 +313,7 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
   const timeout = setTimeout(() => controller.abort(), action.timeoutMs ?? 30_000)
 
   try {
+    const jobAccount = await getIntegrationAccount(job.pluginId, job.accountId)
     const context: IntegrationActionHandlerContext = {
       pluginId: job.pluginId,
       integrationId: job.integrationId,
@@ -311,6 +322,7 @@ export async function runIntegrationActionJob(jobId: string): Promise<Integratio
       signal: controller.signal,
       authenticatedRequest: (input, init) =>
         authenticatedRequest(job.pluginId, job.accountId, input, init),
+      ...(jobAccount ? { apiBaseUrl: await integrationApiBaseUrl(jobAccount) } : {}),
     }
     const output = await handler(job.input, context)
     const outputValidation = action.outputSchema
@@ -401,6 +413,31 @@ export async function cancelIntegrationActionJob(jobId: string): Promise<Integra
     detail: { jobId },
   })
   return cancelled
+}
+
+/**
+ * The REST root an account's credential belongs to (ADR-0176).
+ *
+ * Resolved from the auth session rather than stored on the account, so it can
+ * never disagree with the credential it authenticates: one value, held where
+ * the user configured it. `undefined` for every provider that is not
+ * host-aware, which leaves the plugin's own default in place.
+ *
+ * Never throws. A plugin whose API origin cannot be resolved should run against
+ * its default and fail on the request, with the request's own error, rather
+ * than be refused here with an error about credential storage.
+ */
+export async function integrationApiBaseUrl(account: {
+  providerId: string
+  authSessionId: string
+}): Promise<string | undefined> {
+  if (account.providerId !== "github-app" && account.providerId !== "github-pat") return undefined
+  try {
+    const { githubHostForSession } = await import("./github-auth")
+    return (await githubHostForSession(account.authSessionId))?.apiBaseUrl
+  } catch {
+    return undefined
+  }
 }
 
 export function setIntegrationAuthenticatedRequestExecutorForTesting(

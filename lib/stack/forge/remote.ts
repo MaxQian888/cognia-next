@@ -14,10 +14,15 @@
  * forge and returns null: there is nothing to publish a pull request to.
  */
 
+import { GITHUB_DOT_COM, type GithubHost } from "@/lib/github/host"
+
 export type ForgeRemote =
-  /** GitHub proper. `fullName` is `owner/name`, with no `.git` suffix. */
-  | { forge: "github"; fullName: string }
-  /** A real host we have no adapter for — GitLab, Gitea, GHES. */
+  /**
+   * GitHub proper. `fullName` is `owner/name`, with no `.git` suffix, and
+   * `host` names which deployment it lives on (ADR-0176).
+   */
+  | { forge: "github"; fullName: string; host: GithubHost }
+  /** A real host we have no adapter for — GitLab, Gitea, an unconfigured GHES. */
   | { forge: "unsupported"; host: string }
 
 /**
@@ -32,7 +37,20 @@ function normalize(url: string): string {
   return url.replace(/^([^@/]+@)?([^/:]+):(?!\/)(.+)$/, "ssh://$1$2/$3")
 }
 
-export function parseForgeRemote(raw: string): ForgeRemote | null {
+export function parseForgeRemote(
+  raw: string,
+  /**
+   * Enterprise deployments the user has an account on (ADR-0176).
+   *
+   * A GHES host is "github" only once someone has configured it. Matching
+   * `github.acme.com` on its shape alone would send the user's github.com
+   * token to whatever server answered, which is why the list is the gate
+   * rather than a pattern. `lib/stack/forge/github.ts` still probes for the
+   * stacks endpoint, so a deployment that does not have one falls back on its
+   * own without needing to be named here.
+   */
+  configuredHosts: readonly GithubHost[] = []
+): ForgeRemote | null {
   const cleaned = raw.trim().replace(/\.git\/?$/i, "")
   if (!cleaned) return null
 
@@ -51,11 +69,13 @@ export function parseForgeRemote(raw: string): ForgeRemote | null {
   if (segments.length < 2) return { forge: "unsupported", host }
   const fullName = `${segments[segments.length - 2]}/${segments[segments.length - 1]}`
 
-  // Deliberately exact. GitHub Enterprise Server speaks a compatible API but
-  // has no stacks endpoint and its own auth story; treating `github.acme.com`
-  // as github.com would send the user's token to the wrong place.
+  // Deliberately exact for the public host. Treating `github.acme.com` as
+  // github.com on its shape alone would send the user's token to the wrong
+  // place, so an enterprise deployment counts only once it is configured.
   if (host === "github.com" || host === "www.github.com") {
-    return { forge: "github", fullName }
+    return { forge: "github", fullName, host: GITHUB_DOT_COM }
   }
+  const configured = configuredHosts.find((candidate) => candidate.id === host)
+  if (configured) return { forge: "github", fullName, host: configured }
   return { forge: "unsupported", host }
 }

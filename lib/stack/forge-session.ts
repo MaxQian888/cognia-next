@@ -27,6 +27,7 @@ import type { OctokitLike } from "@/lib/github/pr-observe/types"
 
 import { createGithubStackAdapter } from "./forge/github"
 import { parseForgeRemote } from "./forge/remote"
+import type { GithubHost } from "@/lib/github/host"
 import type { ForgeStackAdapter } from "./forge/types"
 
 export type StackForge =
@@ -50,6 +51,14 @@ export interface StackForgeDeps {
   /** Null when no credential could be resolved. */
   octokit(repository: string): Promise<OctokitLike | null>
   adapter(octokit: OctokitLike): ForgeStackAdapter
+  /**
+   * The GitHub deployments the user has an account on (ADR-0176).
+   *
+   * A GitHub Enterprise remote is a forge only once it is configured. Reading
+   * the list here rather than pattern-matching the hostname is what keeps
+   * "this looks like GitHub" from becoming "send the github.com token there".
+   */
+  hosts(): Promise<GithubHost[]>
 }
 
 const DEFAULT_DEPS: StackForgeDeps = {
@@ -65,6 +74,13 @@ const DEFAULT_DEPS: StackForgeDeps = {
     return createResolveOctokit()(repository)
   },
   adapter: (octokit) => createGithubStackAdapter({ octokit }),
+  // Lazy for the same reason as `octokit`: the account registry belongs to the
+  // application, and a static import would drag it into the stack engine's
+  // own tests.
+  hosts: async () => {
+    const { configuredGithubHosts } = await import("@/lib/integrations/github-auth")
+    return configuredGithubHosts()
+  },
 }
 
 /**
@@ -90,7 +106,10 @@ export async function openStackForge(
   const remote = pickForgeRemote(remotes)
   if (!remote) return { status: "noRemote" }
 
-  const parsed = parseForgeRemote(remote.fetchUrl || remote.pushUrl || "")
+  // A failure to enumerate accounts is not a reason to refuse a github.com
+  // remote: the empty list still recognises the public host.
+  const hosts = await resolved.hosts().catch(() => [] as GithubHost[])
+  const parsed = parseForgeRemote(remote.fetchUrl || remote.pushUrl || "", hosts)
   if (!parsed) return { status: "noRemote" }
   if (parsed.forge !== "github") {
     return { status: "unsupportedHost", host: parsed.host, remote: remote.name }

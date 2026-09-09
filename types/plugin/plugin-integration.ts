@@ -205,6 +205,16 @@ export interface IntegrationActionHandlerContext {
     input: string,
     init?: IntegrationRequestInit
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>
+  /**
+   * REST root for this account's service, no trailing slash (ADR-0176).
+   *
+   * A plugin that hard-codes the vendor's public API origin works for exactly
+   * one deployment. `github-delivery` did, so every request from a GitHub
+   * Enterprise account went to api.github.com, which has never heard of that
+   * installation. Present only when the account's credential names a
+   * deployment. Absent means the plugin's own default is correct.
+   */
+  apiBaseUrl?: string
 }
 
 export interface IntegrationProviderContext {
@@ -215,6 +225,8 @@ export interface IntegrationProviderContext {
     input: string,
     init?: IntegrationRequestInit
   ): Promise<{ status: number; headers: Record<string, string>; data: T }>
+  /** See {@link IntegrationActionHandlerContext.apiBaseUrl}. */
+  apiBaseUrl?: string
 }
 
 export type IntegrationResourceProvider = (

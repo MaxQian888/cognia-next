@@ -5,24 +5,27 @@ import type {
   IntegrationResourcePage,
   IntegrationResourceQuery,
 } from "@/types/plugin/plugin-integration"
-import { authenticatedIntegrationRequest } from "./action-runner"
+import { authenticatedIntegrationRequest, integrationApiBaseUrl } from "./action-runner"
 import {
   getIntegrationAccountStatusProvider,
   getIntegrationResourceProvider,
   getRegisteredIntegration,
 } from "./registry"
 
-function providerContext(
+async function providerContext(
   pluginId: string,
   integrationId: string,
-  accountId: string
-): IntegrationProviderContext {
+  accountId: string,
+  /** ADR-0176: the deployment this account's credential belongs to. */
+  apiBaseUrl?: string
+): Promise<IntegrationProviderContext> {
   return {
     pluginId,
     integrationId,
     accountId,
     authenticatedRequest: (input, init) =>
       authenticatedIntegrationRequest(pluginId, accountId, input, init),
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
   }
 }
 
@@ -47,7 +50,12 @@ export async function listIntegrationResources(
   }
   const page = await provider(
     { ...query, limit: Math.min(Math.max(query.limit ?? 50, 1), 100) },
-    providerContext(pluginId, account.integrationId, account.id)
+    await providerContext(
+      pluginId,
+      account.integrationId,
+      account.id,
+      await integrationApiBaseUrl(account)
+    )
   )
   if (page.items.some((item) => item.kind !== query.kind)) {
     throw new Error("Integration resource provider returned an unexpected resource kind")
@@ -64,7 +72,14 @@ export async function checkIntegrationAccountHealth(
   if (!provider) {
     throw new Error(`Integration "${account.integrationId}" does not provide health checks`)
   }
-  const status = await provider(providerContext(pluginId, account.integrationId, account.id))
+  const status = await provider(
+    await providerContext(
+      pluginId,
+      account.integrationId,
+      account.id,
+      await integrationApiBaseUrl(account)
+    )
+  )
   const normalized = {
     ...status,
     requiredPermissions: status.requiredPermissions

@@ -49,6 +49,12 @@ pub struct CloneArgs {
     /// a tempdir here; production callers leave it unset to use the relative
     /// default that the legacy JS code used.
     pub base_dir: Option<String>,
+    /// Which GitHub deployment this repository lives on (ADR-0176).
+    ///
+    /// The account's configured enterprise URL, or absent for github.com.
+    /// Validated by `canonical_host_root`: the push target must never be
+    /// assembled from something a workspace could have rewritten.
+    pub host_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +83,9 @@ pub struct CommitAndPushArgs {
     /// `apply_git_auth_env`. Optional so a caller pushing to an
     /// already-authenticated remote (e.g. a user's own checkout) still works.
     pub token: Option<String>,
+    /// Which GitHub deployment this repository lives on (ADR-0176). See
+    /// `CloneArgs::host_url`.
+    pub host_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,7 +152,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     // agent runs, including instructions injected through an issue body (which
     // is attacker-controlled: anyone can file an issue). The credential is
     // instead supplied per-invocation via `git_auth_env` below.
-    let remote = canonical_github_remote(&args.repo_full_name)?;
+    let remote = canonical_github_remote(&args.repo_full_name, args.host_url.as_deref())?;
 
     let clone_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
 
@@ -201,7 +210,7 @@ pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result
     let agent_workspace = PathBuf::from(&args.workspace_path);
     let push_branch = args.remote_branch.as_deref().unwrap_or(&args.branch);
     let base_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
-    let remote = canonical_github_remote(&args.repo_full_name)?;
+    let remote = canonical_github_remote(&args.repo_full_name, args.host_url.as_deref())?;
     let staging = tempfile::Builder::new()
         .prefix("cognia-github-push-")
         .tempdir()
@@ -356,7 +365,58 @@ fn unix_millis_now() -> i64 {
         .unwrap_or(0)
 }
 
-fn canonical_github_remote(repo_full_name: &str) -> Result<String, String> {
+/// The web root a repository lives under, from the caller's configured host.
+///
+/// ADR-0176. `None` is github.com, which is what every caller meant before
+/// GitHub Enterprise was reachable at all, so an absent field needs no
+/// migration.
+///
+/// Validated rather than trusted. This value ends up in a `git clone` argument
+/// and, on the push path, decides where a credential is sent:
+///
+/// - **https only.** The token travels as an `extraheader` keyed on this
+///   origin, and plaintext would put it on the wire in clear.
+/// - **No userinfo.** `https://user:token@host/` in the remote is exactly the
+///   credential-in-`.git/config` leak the credential-free remote exists to
+///   close, and a caller must not be able to reintroduce it through the host.
+/// - **No query or fragment**, because neither can appear in a repository root
+///   and both would survive into the URL git is handed.
+fn canonical_host_root(host_url: Option<&str>) -> Result<String, String> {
+    let Some(raw) = host_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok("https://github.com".to_string());
+    };
+    let parsed = url::Url::parse(raw).map_err(|_| format!("invalid GitHub host: {raw}"))?;
+    if parsed.scheme() != "https" {
+        return Err("GitHub host must be https".to_string());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("GitHub host must not carry credentials".to_string());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("GitHub host must not carry a query or fragment".to_string());
+    }
+    let Some(host) = parsed.host_str() else {
+        return Err("GitHub host has no hostname".to_string());
+    };
+    let authority = match parsed.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    };
+    // A GHES may be mounted under a path. Trailing slashes are dropped so the
+    // caller below can join with exactly one.
+    //
+    // No traversal check: `Url::parse` has already resolved `.` and `..`, and
+    // it resolves them against the path root, so the result is always a rooted
+    // path on the authority parsed above. A dot segment cannot reach outside
+    // the host, and the host is what the credential is keyed on. An earlier
+    // version of this function scanned for `..` here, which could never fire
+    // and read as though it were load-bearing.
+    let path = parsed.path().trim_end_matches('/');
+    Ok(format!("https://{authority}{path}"))
+}
+
+fn canonical_github_remote(repo_full_name: &str, host_url: Option<&str>) -> Result<String, String> {
+    let root = canonical_host_root(host_url)?;
     let mut segments = repo_full_name.split('/');
     let owner = segments.next().unwrap_or_default();
     let repo = segments.next().unwrap_or_default();
@@ -371,7 +431,7 @@ fn canonical_github_remote(repo_full_name: &str) -> Result<String, String> {
     if !valid_segment(owner) || !valid_segment(repo) || segments.next().is_some() {
         return Err("invalid GitHub repository identity".to_string());
     }
-    Ok(format!("https://github.com/{owner}/{repo}.git"))
+    Ok(format!("{root}/{owner}/{repo}.git"))
 }
 
 fn mirror_worktree(source: &Path, destination: &Path) -> Result<(), String> {
@@ -896,11 +956,76 @@ mod tests {
     #[test]
     fn canonical_remote_rejects_non_repository_input() {
         assert_eq!(
-            canonical_github_remote("octocat/hello-world").unwrap(),
+            canonical_github_remote("octocat/hello-world", None).unwrap(),
             "https://github.com/octocat/hello-world.git"
         );
         for value in ["octocat", "octocat/repo/extra", "../repo", "octocat/repo?x"] {
-            assert!(canonical_github_remote(value).is_err(), "accepted {value}");
+            assert!(
+                canonical_github_remote(value, None).is_err(),
+                "accepted {value}"
+            );
+        }
+    }
+
+    /// ADR-0176. An absent host is github.com, which is what every caller
+    /// meant before enterprise deployments were reachable, so nothing has to
+    /// be migrated.
+    #[test]
+    fn an_enterprise_host_becomes_the_repository_root() {
+        assert_eq!(
+            canonical_github_remote("octocat/hello", Some("https://ghe.example.com")).unwrap(),
+            "https://ghe.example.com/octocat/hello.git"
+        );
+        // Mounted under a path, and with an explicit port.
+        assert_eq!(
+            canonical_github_remote("o/r", Some("https://corp.example:8443/github/")).unwrap(),
+            "https://corp.example:8443/github/o/r.git"
+        );
+        assert_eq!(
+            canonical_github_remote("o/r", Some("   ")).unwrap(),
+            "https://github.com/o/r.git",
+            "a blank host is an absent host"
+        );
+    }
+
+    /// Dot segments are resolved by the URL parser, against the path root, so
+    /// they cannot reach past the authority. Pinned because the obvious
+    /// defence here is a `..` scan, and such a scan can never fire: it would
+    /// sit in the file reading as though it were load-bearing.
+    #[test]
+    fn a_dot_segment_is_normalised_and_cannot_escape_the_host() {
+        let remote = canonical_github_remote("o/r", Some("https://ghe.example.com/a/../../etc"))
+            .expect("a normalised path is still a host");
+        assert_eq!(remote, "https://ghe.example.com/etc/o/r.git");
+        assert!(
+            remote.starts_with("https://ghe.example.com/"),
+            "the authority must survive path resolution: {remote}"
+        );
+    }
+
+    /// This value decides where a credential is sent, so it is validated
+    /// rather than trusted. Each refusal below is a way a caller could
+    /// otherwise have put the token somewhere it must never go.
+    #[test]
+    fn a_host_a_credential_must_not_reach_is_refused() {
+        for bad in [
+            // Plaintext would put the extraheader on the wire in clear.
+            "http://ghe.example.com",
+            "ftp://ghe.example.com",
+            // Userinfo in the remote is the `.git/config` leak the
+            // credential-free remote exists to close.
+            "https://user:token@ghe.example.com",
+            "https://user@ghe.example.com",
+            // Neither can appear in a repository root, and both would survive
+            // into the URL git is handed.
+            "https://ghe.example.com/?x=1",
+            "https://ghe.example.com/#frag",
+            "not a url",
+        ] {
+            assert!(
+                canonical_github_remote("o/r", Some(bad)).is_err(),
+                "accepted {bad}"
+            );
         }
     }
 

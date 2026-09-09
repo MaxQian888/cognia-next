@@ -14479,6 +14479,8 @@
       "configFields": {
         "accountLabel": "账号名称",
         "appId": "App ID",
+        "hostUrl": "企业服务器地址",
+        "hostUrlHint": "留空即使用 github.com。若是 GitHub Enterprise Server，请填写其地址，例如 https://github.your-company.com。",
         "privateKey": "私钥",
         "token": "个人访问令牌"
       },

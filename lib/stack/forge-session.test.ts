@@ -1,5 +1,6 @@
 import type { GitRemote } from "@/types/git"
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
+import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
 
 import { openStackForge, pickForgeRemote } from "./forge-session"
 import { createFakeForge } from "./forge/fake"
@@ -13,6 +14,7 @@ function remote(name: string, url: string): GitRemote {
 function deps(overrides: {
   remotes?: GitRemote[]
   octokit?: OctokitLike | null | (() => Promise<never>)
+  hosts?: GithubHost[] | (() => Promise<never>)
 }) {
   return {
     remotes: async () => overrides.remotes ?? [],
@@ -22,6 +24,13 @@ function deps(overrides: {
       return value === undefined ? octokit : value
     },
     adapter: () => createFakeForge(),
+    // Default to the public host alone, which is what an account list with no
+    // enterprise entry answers.
+    hosts: async () => {
+      const value = overrides.hosts
+      if (typeof value === "function") return value()
+      return value ?? [GITHUB_DOT_COM]
+    },
   }
 }
 
@@ -79,6 +88,45 @@ describe("openStackForge", () => {
       deps({ remotes: [remote("origin", "https://gitlab.com/acme/app.git")] })
     )
     expect(forge).toEqual({ status: "unsupportedHost", host: "gitlab.com", remote: "origin" })
+  })
+
+  it("serves a configured GitHub Enterprise remote instead of calling it unsupported", async () => {
+    // ADR-0176. The panel used to say "no adapter for github.acme.com" to a
+    // user who had an account on exactly that server.
+    const ghe = parseGithubHost("https://github.acme.com")!
+    const forge = await openStackForge(
+      "/repo",
+      deps({
+        remotes: [remote("origin", "https://github.acme.com/acme/app.git")],
+        hosts: [GITHUB_DOT_COM, ghe],
+      })
+    )
+    expect(forge).toMatchObject({ status: "ready", repository: "acme/app", remote: "origin" })
+  })
+
+  it("still refuses an enterprise host nobody configured", async () => {
+    const forge = await openStackForge(
+      "/repo",
+      deps({ remotes: [remote("origin", "https://github.acme.com/acme/app.git")] })
+    )
+    expect(forge).toEqual({
+      status: "unsupportedHost",
+      host: "github.acme.com",
+      remote: "origin",
+    })
+  })
+
+  it("falls back to the public host when the account list cannot be read", async () => {
+    // Failing to enumerate accounts must not break a github.com repository:
+    // the empty list still recognises the public host.
+    const forge = await openStackForge(
+      "/repo",
+      deps({
+        remotes: [remote("origin", "https://github.com/acme/app.git")],
+        hosts: () => Promise.reject(new Error("keyring locked")) as Promise<never>,
+      })
+    )
+    expect(forge).toMatchObject({ status: "ready", repository: "acme/app" })
   })
 
   it("keeps 'no credential' apart from 'no forge', because only one is fixable here", async () => {

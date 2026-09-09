@@ -1,7 +1,47 @@
 import { clearInstallationTokenCache } from "./auth-app"
-import { _e2eGithubBaseUrl, _throttleHandlers, getOctokitForRepo } from "./octokit-factory"
+import { GITHUB_DOT_COM, parseGithubHost } from "./host"
+import {
+  _e2eGithubBaseUrl,
+  _resolveBaseUrl,
+  _throttleHandlers,
+  getOctokitForRepo,
+} from "./octokit-factory"
 
 beforeEach(() => clearInstallationTokenCache())
+
+describe("_resolveBaseUrl", () => {
+  const originalEnv = process.env.NEXT_PUBLIC_E2E
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_E2E = originalEnv
+    delete (globalThis as Record<string, unknown>).window
+  })
+
+  it("takes Octokit's own default for github.com and for no host at all", () => {
+    // ADR-0176. Passing `https://api.github.com` explicitly would work, but
+    // leaving it unset keeps the production path byte-identical to what it was
+    // before hosts existed.
+    expect(_resolveBaseUrl(undefined)).toBeUndefined()
+    expect(_resolveBaseUrl(GITHUB_DOT_COM)).toBeUndefined()
+  })
+
+  it("points an enterprise repository at its own server", () => {
+    expect(_resolveBaseUrl(parseGithubHost("https://ghe.example.com"))).toBe(
+      "https://ghe.example.com/api/v3"
+    )
+  })
+
+  it("lets the E2E mock override a configured host", () => {
+    // A spec that pointed every request at its mock server must not be
+    // redirected by whatever host happens to be configured on the machine.
+    process.env.NEXT_PUBLIC_E2E = "1"
+    ;(globalThis as Record<string, unknown>).window = {
+      localStorage: { getItem: () => JSON.stringify({ github: "http://127.0.0.1:4010" }) },
+    }
+    expect(_resolveBaseUrl(parseGithubHost("https://ghe.example.com"))).toBe(
+      "http://127.0.0.1:4010"
+    )
+  })
+})
 
 describe("_e2eGithubBaseUrl", () => {
   const originalEnv = process.env.NEXT_PUBLIC_E2E

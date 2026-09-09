@@ -59,8 +59,21 @@ import type {
 const CONFIG_FIELD_TRANSLATIONS = {
   accountLabel: "accounts.configFields.accountLabel",
   appId: "accounts.configFields.appId",
+  hostUrl: "accounts.configFields.hostUrl",
   privateKey: "accounts.configFields.privateKey",
   token: "accounts.configFields.token",
+} as const
+
+/**
+ * Fields whose label is not enough on its own (ADR-0176).
+ *
+ * The enterprise URL is the one field here where leaving it blank is the
+ * common, correct answer, and a bare label cannot say so. Kept as a parallel
+ * map rather than rendering the schema's own `description`, because a plugin's
+ * schema text is authored in one language and this panel is not.
+ */
+const CONFIG_FIELD_HINTS = {
+  hostUrl: "accounts.configFields.hostUrlHint",
 } as const
 
 const GITHUB_STATUS_TRANSLATIONS = {
@@ -476,6 +489,7 @@ export function IntegrationsHub() {
                         : typeof schema.title === "string"
                           ? schema.title
                           : key
+                      const hint = CONFIG_FIELD_HINTS[key as keyof typeof CONFIG_FIELD_HINTS]
                       return (
                         <div key={key} className="grid gap-1">
                           <Label htmlFor={`auth-${key}`}>{fieldLabel}</Label>
@@ -497,6 +511,7 @@ export function IntegrationsHub() {
                               }))
                             }
                           />
+                          {hint ? <p className="text-xs text-muted-foreground">{t(hint)}</p> : null}
                         </div>
                       )
                     })}

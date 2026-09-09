@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db/schema"
+import { GITHUB_DOT_COM, parseGithubHost, type GithubHost } from "@/lib/github/host"
 import { createKeyringStore, type KeyringStore } from "@/lib/credentials/keyring-store"
 import {
   registerAuthenticationProvider,
@@ -20,6 +21,37 @@ type GithubAppRequest = <T>(
 
 let githubAppRequest: GithubAppRequest | undefined
 
+type GithubHostLookup = (sessionId: string) => Promise<GithubHost | undefined>
+
+let githubHostLookup: GithubHostLookup | undefined
+
+/**
+ * Which GitHub deployment a stored account talks to (ADR-0176).
+ *
+ * `undefined` when nothing is registered or the session is unknown, so a caller
+ * can tell "no such account" from "github.com". Callers that only need a
+ * default should fall back to {@link GITHUB_DOT_COM} themselves, at the point
+ * where they know whether guessing is safe.
+ */
+export async function githubHostForSession(sessionId: string): Promise<GithubHost | undefined> {
+  if (!githubHostLookup) return undefined
+  return githubHostLookup(sessionId)
+}
+
+/**
+ * Every deployment the user has an account on, github.com included.
+ *
+ * This is the allow-list `resolveGithubHostForRemote` matches a remote
+ * against. A host nobody configured is not on it, which is what keeps
+ * "recognise the remote" from becoming "reach any host".
+ */
+export async function configuredGithubHosts(): Promise<GithubHost[]> {
+  if (!githubHostsList) return [GITHUB_DOT_COM]
+  return githubHostsList()
+}
+
+let githubHostsList: (() => Promise<GithubHost[]>) | undefined
+
 export async function authenticatedGithubAppRequest<T>(
   sessionId: string,
   path: string,
@@ -36,12 +68,51 @@ interface GithubAppMetadata {
   privateKey: string
   accountLabel: string
   scopes: string[]
+  /**
+   * The GitHub this account lives on, as the user typed it (ADR-0176).
+   *
+   * Stored per account rather than as one global setting: a user can hold a
+   * github.com PAT and a GitHub Enterprise App at the same time, and the whole
+   * point of the value is that a credential goes only to the deployment it was
+   * issued by. Absent means github.com, which is what every existing stored
+   * session means, so nothing has to be migrated.
+   */
+  hostUrl?: string
 }
 
 interface GithubPatMetadata {
   token: string
   accountLabel: string
   scopes: string[]
+  /** See {@link GithubAppMetadata.hostUrl}. */
+  hostUrl?: string
+}
+
+/**
+ * The deployment a stored account talks to.
+ *
+ * An unparseable or absent value answers github.com rather than throwing: the
+ * field is optional, and a session written before this existed has to keep
+ * working. `parseGithubHost` has already refused anything a credential must
+ * not be sent to, so the fallback is the safe direction.
+ */
+function hostOf(metadata: { hostUrl?: string }): GithubHost {
+  return parseGithubHost(metadata.hostUrl) ?? GITHUB_DOT_COM
+}
+
+/** Read the optional host field off a form-values bag. */
+function optionalHostUrl(values: Record<string, unknown>): string | undefined {
+  const raw = values.hostUrl
+  if (typeof raw !== "string") return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  if (!parseGithubHost(trimmed)) {
+    throw new Error(
+      `"${trimmed}" is not an https GitHub Enterprise URL. Use the server's address, ` +
+        "for example https://github.your-company.com."
+    )
+  }
+  return trimmed
 }
 
 interface CachedInstallationToken {
@@ -78,11 +149,12 @@ export async function discoverGithubAppInstallations(
   const createAppJwt = dependencies.createAppJwt ?? createGithubAppJwt
   const appId = requiredPositiveInteger(values, "appId")
   const privateKey = requiredString(values, "privateKey")
+  const host = hostOf({ hostUrl: optionalHostUrl(values) })
   const jwt = await createAppJwt(appId, privateKey, now())
   const installations: GithubAppInstallationOption[] = []
   for (let page = 1; ; page += 1) {
     const response = await fetchImpl(
-      `https://api.github.com/app/installations?per_page=100&page=${page}`,
+      `${host.apiBaseUrl}/app/installations?per_page=100&page=${page}`,
       {
         headers: {
           accept: "application/vnd.github+json",
@@ -241,7 +313,7 @@ export function registerGithubIntegrationAuthProviders(
   ): Promise<{ status: number; headers: Record<string, string>; data: T }> {
     const metadata = await appMetadata(sessionId)
     const jwt = await createAppJwt(metadata.appId, metadata.privateKey, now())
-    const response = await fetchImpl(`https://api.github.com${path}`, {
+    const response = await fetchImpl(`${hostOf(metadata).apiBaseUrl}${path}`, {
       method: init.method,
       headers: {
         accept: "application/vnd.github+json",
@@ -285,6 +357,7 @@ export function registerGithubIntegrationAuthProviders(
         appId: requiredPositiveInteger(values, "appId"),
         installationId: requiredPositiveInteger(values, "installationId"),
         privateKey: requiredString(values, "privateKey"),
+        hostUrl: optionalHostUrl(values),
         accountLabel:
           typeof values.accountLabel === "string" && values.accountLabel.trim()
             ? values.accountLabel.trim()
@@ -307,7 +380,7 @@ export function registerGithubIntegrationAuthProviders(
       const metadata = await appMetadata(sessionId)
       const jwt = await createAppJwt(metadata.appId, metadata.privateKey, now())
       const response = await fetchImpl(
-        `https://api.github.com/app/installations/${metadata.installationId}/access_tokens`,
+        `${hostOf(metadata).apiBaseUrl}/app/installations/${metadata.installationId}/access_tokens`,
         {
           method: "POST",
           headers: {
@@ -357,6 +430,7 @@ export function registerGithubIntegrationAuthProviders(
       const metadata: GithubPatMetadata = {
         token: requiredString(values, "token"),
         accountLabel: requiredString(values, "accountLabel"),
+        hostUrl: optionalHostUrl(values),
         scopes: [...new Set(scopes)],
       }
       const id = crypto.randomUUID()
@@ -374,8 +448,45 @@ export function registerGithubIntegrationAuthProviders(
     },
   })
 
+  const registeredHostLookup: GithubHostLookup = async (sessionId) => {
+    // Either provider may own the session id, and neither knows about the
+    // other's. A missing session is `undefined` rather than github.com so a
+    // caller can tell "no such account" from "the public one".
+    for (const load of [appMetadata, patMetadata]) {
+      try {
+        return hostOf(await load(sessionId))
+      } catch {
+        continue
+      }
+    }
+    return undefined
+  }
+  githubHostLookup = registeredHostLookup
+
+  const registeredHostsList = async (): Promise<GithubHost[]> => {
+    const ids = [
+      ...new Set([
+        ...knownAppSessions,
+        ...(await listAccountSessionIds(APP_PROVIDER_ID)),
+        ...knownPatSessions,
+        ...(await listAccountSessionIds(PAT_PROVIDER_ID)),
+      ]),
+    ]
+    const hosts = await Promise.all(ids.map((id) => registeredHostLookup(id)))
+    // github.com is always reachable, so it is always on the list. Enterprise
+    // hosts are deduplicated by id: two accounts on one server are one host.
+    const byId = new Map<string, GithubHost>([[GITHUB_DOT_COM.id, GITHUB_DOT_COM]])
+    for (const host of hosts) {
+      if (host) byId.set(host.id, host)
+    }
+    return [...byId.values()]
+  }
+  githubHostsList = registeredHostsList
+
   return () => {
     if (githubAppRequest === registeredAppRequest) githubAppRequest = undefined
+    if (githubHostLookup === registeredHostLookup) githubHostLookup = undefined
+    if (githubHostsList === registeredHostsList) githubHostsList = undefined
     tokenCache.clear()
     disposePat()
     disposeApp()

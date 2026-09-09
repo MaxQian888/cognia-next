@@ -86,6 +86,14 @@ export interface CloneOptions {
   backend: WorkspaceBackend
   /** Override the base directory for the local backend (test injection). */
   baseDir?: string
+  /**
+   * Enterprise server URL for the account this clone belongs to (ADR-0176).
+   *
+   * Absent means github.com. The Rust side validates it before it reaches a
+   * `git clone` argument: this value decides where a credential is sent, so it
+   * is never assembled from anything the workspace itself could have rewritten.
+   */
+  hostUrl?: string
 }
 
 /**
@@ -117,6 +125,7 @@ export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHan
         ...(opts.baseBranch ? { baseBranch: opts.baseBranch } : {}),
         token: opts.token,
         baseDir: opts.baseDir,
+        ...(opts.hostUrl ? { hostUrl: opts.hostUrl } : {}),
       },
     }
   )
@@ -145,6 +154,8 @@ export interface CommitAndPushOptions {
    * is supplied per-invocation instead.
    */
   token?: string
+  /** Enterprise server URL for this repository (ADR-0176). See CloneOptions. */
+  hostUrl?: string
 }
 
 /**
@@ -174,6 +185,7 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
       message: opts.message,
       remoteBranch: opts.remoteBranch,
       token: opts.token,
+      ...(opts.hostUrl ? { hostUrl: opts.hostUrl } : {}),
     },
   })
 }

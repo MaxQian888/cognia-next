@@ -162,7 +162,35 @@ than casting the raw SDK object to a facade shape it does not have. Pushing
 takes the credential per call too, so a workspace that outlives the
 installation token it was cloned with can still push after a rotation.
 
-### 8. The network clone kills what it started
+### 8. The deployment is a value, not a loosened allow-list
+
+`https://api.github.com` was a literal in six places. Every one of them meant
+"github.com only", so a self-hosted GitHub Enterprise Server was not so much
+unsupported as unreachable, with nothing saying so.
+
+`lib/github/host.ts` holds a `GithubHost` instead. The API base cannot be
+derived from the web base, which is why the value carries both: github.com
+serves its API from a different *host* (`api.github.com`) and GHES from a
+*path* on the same one (`/api/v3`).
+
+A host belongs to an **account**, not to the application. A user can hold a
+github.com PAT and an enterprise App at once, and a credential must reach only
+the deployment that issued it. So the URL is a field on the account's stored
+credential, absent for every account that existed before, and absent means
+github.com.
+
+Nothing is widened by default. `resolveGithubHostForRemote` answers `undefined`
+for a host nobody configured rather than falling back to github.com, because
+that fallback is precisely how a github.com token would be sent to whatever
+server a remote named. Recognising `github.acme.com` on its shape is the
+mistake, and configuration is the gate.
+
+`parseGithubHost` refuses `http://`, a URL carrying userinfo, and anything that
+is not a URL. The Rust side re-validates independently in `canonical_host_root`
+before the value reaches a `git clone` argument, because that is where it
+decides which origin a credential header is keyed on.
+
+### 9. The network clone kills what it started
 
 `exec::run_within` spawns the child, keeps the handle, and ends the budget with
 a `kill` and a `wait`. The caller deleting the half-written destination is now
@@ -192,6 +220,15 @@ messages are unchanged.
   logged and dropped, because a cache sweep must never be able to fail a clone.
 - The plugin installer's `--depth=1` clone still goes to the network. It is
   shallow by intent, and a mirror derive is not what it asked for.
+- The delivery plugin's `browserSiteProviders` still declares `github.com`
+  alone. That is a static manifest declaration, evaluated before any account
+  exists, so the explicit-confirmation browser fallback stays github.com-only
+  until a manifest can name a per-account domain. The API path it backs up is
+  host-aware, so this affects only that fallback.
+- `parseGitHubRepo` in the Agent Team PR-feedback resolver still recognises
+  github.com alone. It reads the same parser, but has no configured-host list
+  to hand it. That list arrives with the unified delivery face, and until then
+  the behaviour is unchanged rather than wrong.
 - The workspace clone's *network fallback* still has no wall-clock budget. That
   is unchanged behaviour and out of scope here. Only the mirror path in front of
   it is bounded.
@@ -210,4 +247,7 @@ messages are unchanged.
 | Guarded clone | `crates/cognia-git/src/repo.rs::clone_from_mirror` |
 | Killing timeout | `crates/cognia-git/src/exec.rs::run_within` |
 | Sandbox credential | `plugins/e2b-sandbox/src/workspace-backend.ts` |
+| GitHub deployment | `lib/github/host.ts` |
+| Per-account host | `lib/integrations/github-auth.ts` |
+| Host validation (Rust) | `src-tauri/src/github/workspace.rs::canonical_host_root` |
 | Push credential forwarding | `lib/github/workspace.ts::commitAndPush` |

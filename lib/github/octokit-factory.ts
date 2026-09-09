@@ -18,6 +18,7 @@ import { retry } from "@octokit/plugin-retry"
 import { throttling } from "@octokit/plugin-throttling"
 import { createTokenAuth } from "@octokit/auth-token"
 import { getInstallationToken, type AppAuthConfig, type RefreshDeps } from "./auth-app"
+import { isGithubDotCom, type GithubHost } from "./host"
 
 const COGNIA_UA = "cognia-agent-team/1.0"
 
@@ -61,6 +62,32 @@ export interface OctokitForRepoOptions {
   onWarning?: (msg: string) => void
   /** For tests — see auth-app.RefreshDeps. */
   refreshDeps?: RefreshDeps
+  /**
+   * Which GitHub deployment this repository lives on (ADR-0176).
+   *
+   * Defaults to github.com, which is what every caller meant before this
+   * existed. Pass the account's host to reach a GitHub Enterprise Server:
+   * Octokit's own default is `https://api.github.com`, so without it an
+   * enterprise repository is not merely unsupported, it is a 404 against the
+   * wrong server.
+   */
+  host?: GithubHost
+}
+
+/**
+ * The REST root this Octokit should use, or `undefined` to take Octokit's own
+ * default.
+ *
+ * Precedence is E2E override, then the configured host, then github.com. The
+ * E2E override wins because a spec that pointed every request at its mock
+ * server must not be silently redirected by a host someone configured, and
+ * that branch is dead-code-eliminated from production builds anyway.
+ */
+export function _resolveBaseUrl(host: GithubHost | undefined): string | undefined {
+  const e2e = _e2eGithubBaseUrl()
+  if (e2e) return e2e
+  if (!host || isGithubDotCom(host)) return undefined
+  return host.apiBaseUrl
 }
 
 /** Exported for test coverage of the per-callback paths. */
@@ -97,7 +124,7 @@ export const _throttleHandlers = (
  * returned instance per repo if desired — this function does not memoize.
  */
 export async function getOctokitForRepo(opts: OctokitForRepoOptions): Promise<ConfiguredOctokit> {
-  const baseUrl = _e2eGithubBaseUrl()
+  const baseUrl = _resolveBaseUrl(opts.host)
   if (opts.mode === "pat") {
     if (!opts.pat?.token) {
       throw new Error(`PAT mode requires opts.pat.token (repo "${opts.repoFullName}")`)

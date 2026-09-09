@@ -1,3 +1,4 @@
+import { GITHUB_DOT_COM, parseGithubHost } from "@/lib/github/host"
 import { parseForgeRemote } from "./remote"
 
 describe("parseForgeRemote", () => {
@@ -9,7 +10,7 @@ describe("parseForgeRemote", () => {
     ["ssh://git@github.com/acme/app.git", "acme/app"],
     ["https://WWW.GitHub.com/acme/app", "acme/app"],
   ])("reads %s as a GitHub repository", (url, fullName) => {
-    expect(parseForgeRemote(url)).toEqual({ forge: "github", fullName })
+    expect(parseForgeRemote(url)).toEqual({ forge: "github", fullName, host: GITHUB_DOT_COM })
   })
 
   it("names the host it cannot serve rather than pretending there is no remote", () => {
@@ -25,12 +26,35 @@ describe("parseForgeRemote", () => {
     })
   })
 
-  it("does not treat GitHub Enterprise as github.com", () => {
-    // A compatible API is not the same host: it has no stacks endpoint, and a
-    // token minted for github.com must never be sent there.
+  it("does not treat an unconfigured GitHub Enterprise as github.com", () => {
+    // A compatible API is not the same host, and a token minted for github.com
+    // must never be sent there. Shape alone is not evidence: recognising
+    // `github.acme.com` because it looks like GitHub is the whole mistake.
     expect(parseForgeRemote("https://github.acme.com/acme/app")).toEqual({
       forge: "unsupported",
       host: "github.acme.com",
+    })
+  })
+
+  it("serves a GitHub Enterprise host once the user has configured it", () => {
+    // ADR-0176. Configuration is the gate. `lib/stack/forge/github.ts` still
+    // probes for the stacks endpoint, so a deployment without one falls back
+    // on its own rather than needing to be excluded here.
+    const ghe = parseGithubHost("https://github.acme.com")!
+    expect(parseForgeRemote("https://github.acme.com/acme/app.git", [ghe])).toEqual({
+      forge: "github",
+      fullName: "acme/app",
+      host: ghe,
+    })
+    expect(parseForgeRemote("git@github.acme.com:acme/app.git", [ghe])).toEqual({
+      forge: "github",
+      fullName: "acme/app",
+      host: ghe,
+    })
+    // A different enterprise host is still unsupported: the list is exact.
+    expect(parseForgeRemote("https://other.acme.com/acme/app", [ghe])).toEqual({
+      forge: "unsupported",
+      host: "other.acme.com",
     })
   })
 
@@ -48,6 +72,7 @@ describe("parseForgeRemote", () => {
     expect(parseForgeRemote("ssh://github.com/acme/app")).toEqual({
       forge: "github",
       fullName: "acme/app",
+      host: GITHUB_DOT_COM,
     })
   })
 

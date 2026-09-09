@@ -8,6 +8,8 @@
     "configFields": {
       "accountLabel": "Account label",
       "appId": "App ID",
+      "hostUrl": "Enterprise server URL",
+      "hostUrlHint": "Leave empty for github.com. For GitHub Enterprise Server, enter its address, for example https://github.your-company.com.",
       "privateKey": "Private key",
       "token": "Personal access token"
     },

@@ -6,7 +6,9 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { getSession, __resetAuthRegistryForTesting } from "@/lib/plugin/auth/auth-provider-registry"
 import {
   authenticatedGithubAppRequest,
+  configuredGithubHosts,
   discoverGithubAppInstallations,
+  githubHostForSession,
   registerGithubIntegrationAuthProviders,
   type GithubIntegrationSecretStore,
 } from "./github-auth"
@@ -92,6 +94,105 @@ describe("host-owned GitHub Integration authentication", () => {
       )
       expect(JSON.stringify(session)).not.toContain("private-key")
       expect(JSON.stringify(session)).not.toContain("installation-token")
+    } finally {
+      dispose()
+    }
+  })
+
+  it("sends an enterprise account's requests to its own server, never api.github.com", async () => {
+    // ADR-0176. `https://api.github.com` was a literal in three places here, so
+    // a GitHub Enterprise App silently authenticated against the public host:
+    // the JWT is signed by an app that server has never heard of, and the
+    // failure reads like a bad private key.
+    const fetch = jest.fn(
+      async () =>
+        new Response(JSON.stringify({ token: "ghe-token", expires_at: "2026-08-09T02:00:00Z" }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        })
+    )
+    const dispose = registerGithubIntegrationAuthProviders({
+      store: memoryStore(),
+      fetch,
+      now: () => new Date("2026-08-09T01:00:00.000Z").getTime(),
+      createAppJwt: async () => "signed-app-jwt",
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      const session = await getSession("github-app", [], {
+        createIfNone: true,
+        configuration: {
+          appId: 1,
+          installationId: 99,
+          privateKey: "private-key",
+          accountLabel: "Enterprise",
+          hostUrl: "https://ghe.example.com",
+        },
+      })
+      const provider = (await import("@/lib/plugin/auth/auth-provider-registry")).getProvider(
+        "github-app"
+      )!
+      await provider.resolveRequestCredential!(session!.id, {
+        accountId: "a",
+        origin: "https://ghe.example.com",
+      })
+
+      expect(fetch).toHaveBeenCalledWith(
+        "https://ghe.example.com/api/v3/app/installations/99/access_tokens",
+        expect.objectContaining({ method: "POST" })
+      )
+      await expect(githubHostForSession(session!.id)).resolves.toMatchObject({
+        id: "ghe.example.com",
+        apiBaseUrl: "https://ghe.example.com/api/v3",
+      })
+      // The configured set is the allow-list a remote is matched against, and
+      // github.com is always on it.
+      await expect(configuredGithubHosts()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: "github.com" }),
+          expect.objectContaining({ id: "ghe.example.com" }),
+        ])
+      )
+    } finally {
+      dispose()
+    }
+  })
+
+  it("refuses a host a credential must not be sent to instead of storing it", async () => {
+    const dispose = registerGithubIntegrationAuthProviders({
+      store: memoryStore(),
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      await expect(
+        getSession("github-pat", [], {
+          createIfNone: true,
+          configuration: {
+            token: "ghp_test",
+            accountLabel: "Plaintext",
+            hostUrl: "http://ghe.example.com",
+          },
+        })
+      ).rejects.toThrow(/not an https GitHub Enterprise URL/)
+    } finally {
+      dispose()
+    }
+  })
+
+  it("answers github.com for an account stored before hosts existed", async () => {
+    const dispose = registerGithubIntegrationAuthProviders({
+      store: memoryStore(),
+      listAccountSessionIds: async () => [],
+    })
+    try {
+      const session = await getSession("github-pat", [], {
+        createIfNone: true,
+        configuration: { token: "ghp_test", accountLabel: "Legacy" },
+      })
+      await expect(githubHostForSession(session!.id)).resolves.toBe(
+        (await import("@/lib/github/host")).GITHUB_DOT_COM
+      )
+      await expect(githubHostForSession("no-such-session")).resolves.toBeUndefined()
     } finally {
       dispose()
     }

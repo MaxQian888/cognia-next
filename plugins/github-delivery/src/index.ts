@@ -44,7 +44,7 @@ export class GithubIntegrationError extends Error {
 
 type GithubRequestContext = Pick<
   IntegrationProviderContext | IntegrationActionHandlerContext,
-  "authenticatedRequest"
+  "authenticatedRequest" | "apiBaseUrl"
 >
 
 function errorCategory(status: number, headers: Record<string, string>): GithubErrorCategory {
@@ -63,13 +63,28 @@ function messageFromData(data: unknown): string | undefined {
   return typeof message === "string" ? message : undefined
 }
 
+/**
+ * The REST root for this account, falling back to the public host.
+ *
+ * The fallback is not a guess: `apiBaseUrl` is absent exactly when the
+ * credential names no deployment, which is what every github.com account looks
+ * like. A trailing slash is trimmed because every path below starts with one.
+ */
+function apiOrigin(context: GithubRequestContext): string {
+  const configured = context.apiBaseUrl?.trim()
+  return configured ? configured.replace(/\/+$/, "") : API_ORIGIN
+}
+
 async function githubRequest<T>(
   context: GithubRequestContext,
   path: string,
   method = "GET",
   body?: unknown
 ): Promise<{ data: T; headers: Record<string, string> }> {
-  const response = await context.authenticatedRequest<T>(`${API_ORIGIN}${path}`, {
+  // ADR-0176. The account names its own deployment: a GitHub Enterprise
+  // installation is not on api.github.com, and sending its requests there
+  // fails as "not found" against a server that has never heard of it.
+  const response = await context.authenticatedRequest<T>(`${apiOrigin(context)}${path}`, {
     method,
     headers: {
       accept: "application/vnd.github+json",
@@ -148,13 +163,13 @@ export const listGithubResources: IntegrationResourceProvider = async (query, co
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 100)
   let response = await context.authenticatedRequest<{
     repositories?: GithubRepository[]
-  }>(`${API_ORIGIN}/installation/repositories?per_page=${limit}&page=${page}`, {
+  }>(`${apiOrigin(context)}/installation/repositories?per_page=${limit}&page=${page}`, {
     headers: { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION },
   })
   let repositories: GithubRepository[]
   if (response.status === 403 || response.status === 404) {
     const patResponse = await context.authenticatedRequest<GithubRepository[]>(
-      `${API_ORIGIN}/user/repos?per_page=${limit}&page=${page}&affiliation=owner,collaborator,organization_member`,
+      `${apiOrigin(context)}/user/repos?per_page=${limit}&page=${page}&affiliation=owner,collaborator,organization_member`,
       { headers: { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION } }
     )
     if (patResponse.status < 200 || patResponse.status >= 300) {
@@ -203,7 +218,7 @@ export const checkGithubHealth: IntegrationAccountStatusProvider = async (contex
   const response = await context.authenticatedRequest<{
     suspended_at?: string | null
     permissions?: Record<string, unknown>
-  }>(`${API_ORIGIN}/installation`, {
+  }>(`${apiOrigin(context)}/installation`, {
     headers: { accept: "application/vnd.github+json", "x-github-api-version": API_VERSION },
   })
   if (response.status === 403 || response.status === 404) {
@@ -621,6 +636,9 @@ export const githubIntegration: PluginIntegrationDef = {
           installationId: { type: "integer", minimum: 1 },
           privateKey: { type: "string", format: "secret", minLength: 1 },
           accountLabel: { type: "string" },
+          // ADR-0176. Empty means github.com, which is what every account
+          // created before this field existed means.
+          hostUrl: { type: "string", title: "Enterprise server URL" },
         },
       },
       requestAuth: { type: "bearer" },
@@ -637,6 +655,8 @@ export const githubIntegration: PluginIntegrationDef = {
         properties: {
           token: { type: "string", format: "secret", minLength: 1 },
           accountLabel: { type: "string", minLength: 1 },
+          /** See the App strategy's `hostUrl`. */
+          hostUrl: { type: "string", title: "Enterprise server URL" },
         },
       },
       requestAuth: { type: "bearer" },

@@ -23,7 +23,10 @@ jest.mock("@/lib/integrations/registry", () => ({
             configSchema: {
               type: "object",
               required: ["token"],
-              properties: { token: { type: "string", format: "secret" } },
+              properties: {
+                token: { type: "string", format: "secret" },
+                hostUrl: { type: "string", title: "Enterprise server URL" },
+              },
             },
           },
           {
@@ -84,5 +87,21 @@ describe("IntegrationsHub", () => {
     fireEvent.click(screen.getByRole("button", { name: /Token Recommended/ }))
     expect(screen.getByLabelText("Personal access token")).toHaveAttribute("type", "password")
     expect(screen.queryByPlaceholderText("Auth provider ID")).not.toBeInTheDocument()
+  })
+
+  it("offers the enterprise server field and says that leaving it empty is fine", () => {
+    // ADR-0176. The one field here where blank is the common, correct answer.
+    // A bare label cannot say so, and a user who types github.com into it has
+    // been given a worse account than one who left it alone.
+    render(<IntegrationsHub />)
+    fireEvent.change(screen.getByLabelText("Integration"), {
+      target: { value: "demo-delivery:demo" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Token Recommended/ }))
+
+    const field = screen.getByLabelText("Enterprise server URL")
+    expect(field).toHaveAttribute("type", "text")
+    expect(field).not.toBeRequired()
+    expect(screen.getByText(/Leave empty for github\.com/)).toBeInTheDocument()
   })
 })

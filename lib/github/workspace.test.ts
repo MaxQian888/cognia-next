@@ -233,6 +233,42 @@ describe("commitAndPush", () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it("carries the enterprise host to the clone and the push, and omits it otherwise", async () => {
+    // ADR-0176. Without it the Rust side builds https://github.com/<repo>.git
+    // for a repository that lives on the user's own server, and the clone 404s
+    // against a host that has never heard of it.
+    call.mockResolvedValueOnce({ path: "/tmp/ws/o_r/abc", createdAt: 1 })
+    await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "x",
+      backend: "local",
+      hostUrl: "https://ghe.example.com",
+    })
+    expect(call).toHaveBeenLastCalledWith(
+      "github_workspace_clone",
+      expect.objectContaining({
+        args: expect.objectContaining({ hostUrl: "https://ghe.example.com" }),
+      })
+    )
+
+    call.mockResolvedValueOnce("sha")
+    await commitAndPush({ workspace: handle, message: "m", hostUrl: "https://ghe.example.com" })
+    expect(call).toHaveBeenLastCalledWith(
+      "github_workspace_commit_and_push",
+      expect.objectContaining({
+        args: expect.objectContaining({ hostUrl: "https://ghe.example.com" }),
+      })
+    )
+
+    // Absent stays absent rather than becoming an explicit github.com, so an
+    // account created before this field existed sends the same payload it did.
+    call.mockResolvedValueOnce({ path: "/tmp/ws/o_r/def", createdAt: 2 })
+    await cloneToWorkspace({ repoFullName: "o/r", branch: "main", token: "x", backend: "local" })
+    const args = call.mock.calls.at(-1)![1].args as Record<string, unknown>
+    expect("hostUrl" in args).toBe(false)
+  })
+
   it("forwards the push credential to the E2B backend", async () => {
     // ADR-0176. The sandbox clone stores a credential-free remote, so the
     // token has to arrive per push. It was accepted here and dropped on the
