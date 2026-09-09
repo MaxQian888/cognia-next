@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
 import { toolError, toolText } from "./safety.mjs"
+import { planPluginToolNames } from "../dispatch/plugin-tool-aliases.mjs"
 
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"
@@ -115,6 +116,12 @@ export function awaitPluginToolResponse(
  *        this set are pinned resident even when the server defers the rest —
  *        applied via `tool({ alwaysLoad })`, which the SDK OR's with the
  *        server-level flag.
+ * @param {Map<string, string>} [options.toolNameAliases]
+ *        Filled with `modelName → originalName` for every tool whose manifest
+ *        name the bundled Claude Code would rewrite for the API (`ocr.extract`
+ *        registers as `ocr_extract`). The renderer, the permission lists and
+ *        the `plugin_tool_exec` round-trip keep the original name, so the
+ *        dispatcher uses this table to translate at the SDK boundary.
  * @returns {ReturnType<typeof createSdkMcpServer> | null}
  */
 export function buildPluginToolsServer({
@@ -128,17 +135,26 @@ export function buildPluginToolsServer({
   remoteExecutionContext,
   turnId,
   attemptId,
+  toolNameAliases,
 }) {
   if (!Array.isArray(tools) || tools.length === 0) return null
 
   const perToolAlways =
     alwaysLoadToolNames instanceof Set ? alwaysLoadToolNames : new Set(alwaysLoadToolNames ?? [])
 
+  // Register the model-facing name ourselves, with the same replacement Claude
+  // Code applies, so the alias table is exact rather than a guess about what
+  // the SDK will do to the name downstream.
+  const { modelNameOf, aliases } = planPluginToolNames(tools)
+  if (toolNameAliases instanceof Map) {
+    for (const [model, original] of aliases) toolNameAliases.set(model, original)
+  }
+
   const wrappedTools = tools.map((t) => {
     const zodShape = jsonSchemaToZodShape(t.jsonSchema)
     const toolExtras = perToolAlways.has(t.name) ? { alwaysLoad: true } : undefined
     return tool(
-      t.name,
+      modelNameOf.get(t.name) ?? t.name,
       t.description ?? "",
       zodShape,
       async (args) => {

@@ -383,3 +383,51 @@ test("jsonSchemaPropToZod keeps a single-branch oneOf as that branch", () => {
   assert.equal(schema.safeParse("a").success, true)
   assert.equal(schema.safeParse(1).success, false)
 })
+
+test("a manifest name the API would reject registers under its model-facing form and round-trips", async () => {
+  const emitted = []
+  const pending = new Map()
+  const aliases = new Map()
+  const server = buildPluginToolsServer({
+    tools: [
+      {
+        name: "ocr.extract",
+        description: "ocr",
+        jsonSchema: { type: "object", properties: {} },
+        pluginId: "p1",
+      },
+      {
+        name: "sandbox_bash",
+        description: "bash",
+        jsonSchema: { type: "object", properties: {} },
+        pluginId: "p1",
+      },
+    ],
+    emit: (msg) => {
+      emitted.push(msg)
+      pending.get(msg.toolUseId)?.resolve({ result: "text" })
+    },
+    sessionId: "sess-1",
+    pendingPluginToolCalls: pending,
+    toolNameAliases: aliases,
+  })
+  const registered = server.instance?._registeredTools ?? {}
+  assert.ok(registered.ocr_extract, "the model-facing name is what the SDK registers")
+  assert.equal(registered["ocr.extract"], undefined)
+  assert.ok(registered.sandbox_bash, "a safe name is registered unchanged")
+  assert.deepEqual([...aliases], [["ocr_extract", "ocr.extract"]])
+
+  await registered.ocr_extract.handler({})
+  assert.equal(emitted.length, 1)
+  assert.equal(emitted[0].name, "ocr.extract", "the renderer keeps seeing the manifest name")
+})
+
+test("buildPluginToolsServer works without an alias map to fill", () => {
+  const server = buildPluginToolsServer({
+    tools: [{ name: "docs/search", description: "d", jsonSchema: {}, pluginId: "p1" }],
+    emit: () => {},
+    sessionId: "s",
+    pendingPluginToolCalls: new Map(),
+  })
+  assert.ok(server.instance?._registeredTools?.docs_search)
+})

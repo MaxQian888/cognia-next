@@ -25,6 +25,11 @@ import {
   buildPluginToolsServer,
   SERVER_NAME as PLUGIN_TOOLS_SERVER_NAME,
 } from "../builtin-tools/plugin-tools.mjs"
+import {
+  modelPluginToolNameList,
+  restorePluginToolName,
+  restorePluginToolNamesInSdkMessage,
+} from "./plugin-tool-aliases.mjs"
 import { makeInputStream } from "./input-stream.mjs"
 import { buildSubprocessEnv } from "./subprocess-env.mjs"
 import { extractHttpErrorMeta } from "./http-error-meta.mjs"
@@ -175,6 +180,7 @@ export function anthropicPluginToolBridgeOptions({
   remoteExecutionContext,
   turnId,
   attemptId,
+  toolNameAliases,
 }) {
   return {
     tools,
@@ -187,6 +193,7 @@ export function anthropicPluginToolBridgeOptions({
     remoteExecutionContext,
     turnId,
     attemptId,
+    ...(toolNameAliases instanceof Map ? { toolNameAliases } : {}),
   }
 }
 
@@ -353,6 +360,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // map is shared with `claude-host.mjs` so the renderer-side response can
   // resolve the in-flight tool call.
   let mergedMcpServers = withA2UI
+  // Plugin tool names the bundled Claude Code would rewrite for the API
+  // (`ocr.extract` → `ocr_extract`), as `modelName → originalName`. Filled by
+  // the server builder, consumed wherever the SDK's vocabulary meets ours:
+  // the allow/deny lists below, `canUseTool`, and every streamed message.
+  const pluginToolNameAliases = new Map()
   if (Array.isArray(sendOptions.pluginTools) && sendOptions.pluginTools.length > 0) {
     const pluginToolsServer = buildPluginToolsServer(
       anthropicPluginToolBridgeOptions({
@@ -366,8 +378,19 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         remoteExecutionContext: sendOptions.remoteExecutionContext,
         turnId: sendOptions.turnId,
         attemptId: sendOptions.execution?.identity?.attemptId,
+        toolNameAliases: pluginToolNameAliases,
       })
     )
+    if (pluginToolNameAliases.size > 0) {
+      log(
+        "info",
+        `renamed ${pluginToolNameAliases.size} plugin tool name(s) for the model: ${[
+          ...pluginToolNameAliases,
+        ]
+          .map(([model, original]) => `${original} → ${model}`)
+          .join(", ")}`
+      )
+    }
     if (pluginToolsServer) {
       mergedMcpServers = Object.prototype.hasOwnProperty.call(withA2UI, PLUGIN_TOOLS_SERVER_NAME)
         ? (() => {
@@ -381,8 +404,20 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     }
   }
 
+  // The lists the SDK compares tool names against must speak its vocabulary.
+  const modelAllowedTools = modelPluginToolNameList(
+    pluginToolNameAliases,
+    PLUGIN_TOOLS_SERVER_NAME,
+    sendOptions.allowedTools
+  )
   // Defence-in-depth: stamp disabled-category tool names onto disallowedTools.
-  const disallowed = new Set(sendOptions.disallowedTools ?? [])
+  const disallowed = new Set(
+    modelPluginToolNameList(
+      pluginToolNameAliases,
+      PLUGIN_TOOLS_SERVER_NAME,
+      sendOptions.disallowedTools ?? []
+    )
+  )
   if (builtinEnabled !== undefined) {
     // Pass the resolvers so an enabled-but-unresolvable `lsp` / `codeGraph`
     // category is denied rather than silently absent (registration guards on
@@ -449,7 +484,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         : sendOptions.model,
     fallbackModel: sendOptions.execution?.modelBindings?.fast ?? sendOptions.fallbackModel,
     mcpServers: mergedMcpServers,
-    allowedTools: sendOptions.allowedTools,
+    allowedTools: modelAllowedTools,
     maxBudgetUsd: sendOptions.maxBudgetUsd,
   })
 
@@ -473,7 +508,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     // typed `systemPrompt: string | string[]` form (array = separate system
     // blocks, stable→dynamic order) — no reliance on the untyped runtime field.
     systemPrompt: foldSystemPrompt(sendOptions.systemPrompt, sendOptions.appendSystemPrompt),
-    allowedTools: sendOptions.allowedTools,
+    allowedTools: modelAllowedTools,
     disallowedTools: disallowed.size > 0 ? [...disallowed] : sendOptions.disallowedTools,
     additionalDirectories: sendOptions.additionalDirectories,
     permissionMode: sendOptions.permissionMode,
@@ -539,7 +574,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       })
     ),
 
-    canUseTool: (toolName, input, ctx) => {
+    canUseTool: (modelToolName, input, ctx) => {
+      // Everything below (ruleset, plan-mode policy, suppress and always-allow
+      // lists, the permission request the renderer answers) keys on the
+      // original plugin tool name, not the one the SDK just called it by.
+      const toolName = restorePluginToolName(
+        pluginToolNameAliases,
+        PLUGIN_TOOLS_SERVER_NAME,
+        modelToolName
+      )
       if (ctx?.signal?.aborted)
         return Promise.resolve({ behavior: "deny", message: "tool call interrupted" })
       if (resolveForToolCall(sendOptions.permissionRuleset, toolName, input) === "deny") {
@@ -964,7 +1007,15 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
           })
         }
         mcpAutoReconnect.onEvent(evt)
-        emit({ type: "event", sessionId, event: evt })
+        emit({
+          type: "event",
+          sessionId,
+          event: restorePluginToolNamesInSdkMessage(
+            pluginToolNameAliases,
+            PLUGIN_TOOLS_SERVER_NAME,
+            evt
+          ),
+        })
         // THE turn boundary. `query()` is driven by a streaming input iterable,
         // so the SDK keeps the query open for another prompt after the `result`
         // frame and this `for await` does not end on its own — it ends when the

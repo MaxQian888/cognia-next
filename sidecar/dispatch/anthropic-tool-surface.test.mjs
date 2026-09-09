@@ -45,3 +45,22 @@ test("plugin tool bridge preserves the immutable sandbox runtime reference", () 
   assert.equal(options.turnId, "turn-1")
   assert.equal(options.attemptId, "attempt-2")
 })
+
+test("plugin tool bridge forwards the alias table the dispatcher translates with", () => {
+  const toolNameAliases = new Map()
+  const options = anthropicPluginToolBridgeOptions({
+    tools: [],
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls: new Map(),
+    toolNameAliases,
+  })
+  assert.equal(options.toolNameAliases, toolNameAliases)
+  const without = anthropicPluginToolBridgeOptions({
+    tools: [],
+    emit: () => {},
+    sessionId: "s1",
+    pendingPluginToolCalls: new Map(),
+  })
+  assert.equal("toolNameAliases" in without, false)
+})
