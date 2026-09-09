@@ -20,6 +20,7 @@
 
 import { randomUUID } from "node:crypto"
 import { normalizeUsageBlock } from "./usage-normalize.mjs"
+import { restoreToolName } from "./ai-sdk-tool-names.mjs"
 
 /**
  * Shape a tool-result payload for the renderer's `tool_result` content block.
@@ -278,12 +279,18 @@ export function createEventAdapter(ctx) {
           : undefined
   }
 
+  // The model calls tools by their provider-safe names (`ocr_extract`); the
+  // renderer, permission rules and plugin round-trip key on the cognia name
+  // (`ocr.extract`), so every name is mapped back through the session's alias
+  // table before it leaves the adapter.
   function getToolName(event, fallback = "unknown") {
-    return typeof event?.toolName === "string"
-      ? event.toolName
-      : typeof event?.toolCall?.toolName === "string"
-        ? event.toolCall.toolName
-        : fallback
+    const raw =
+      typeof event?.toolName === "string"
+        ? event.toolName
+        : typeof event?.toolCall?.toolName === "string"
+          ? event.toolCall.toolName
+          : fallback
+    return restoreToolName(ctx.toolNameAliases, raw)
   }
 
   function getToolInput(event, fallback = {}) {

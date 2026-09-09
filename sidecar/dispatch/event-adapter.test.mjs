@@ -1177,3 +1177,25 @@ test("circular tool output does not throw out of handle()", () => {
   loop.self = loop
   assert.doesNotThrow(() => adapter.handle({ type: "tool-error", toolCallId: "c1", error: loop }))
 })
+
+test("tool names the provider saw renamed are restored for the renderer", () => {
+  const adapter = createEventAdapter({
+    ...baseCtx(),
+    toolNameAliases: new Map([["ocr_extract", "ocr.extract"]]),
+  })
+  const out = adapter.handle({
+    type: "tool-call",
+    toolCallId: "c-ocr",
+    toolName: "ocr_extract",
+    args: { path: "scan.png" },
+  })
+  const snapshot = out.find((m) => m.type === "assistant")
+  const toolUse = snapshot.message.content.find((c) => c.type === "tool_use")
+  assert.equal(toolUse.name, "ocr.extract")
+  // Names that were never renamed pass through unchanged.
+  const plain = adapter.handle({ type: "tool-call", toolCallId: "c-2", toolName: "read", args: {} })
+  const plainUse = plain
+    .find((m) => m.type === "assistant")
+    .message.content.find((c) => c.type === "tool_use" && c.id === "c-2")
+  assert.equal(plainUse.name, "read")
+})

@@ -172,3 +172,27 @@ test("exact selection also respects the per-call activation limit", async () => 
   assert.deepEqual(output.activated, ["a", "b"])
   assert.ok(!controller.prepareStep().activeTools.includes("c"))
 })
+
+test("select: and alwaysLoadTools accept the cognia name of a tool renamed for the provider", async () => {
+  const ocr = fakeTool("Extract text from an image")
+  const draw = fakeTool("Draw a diagram")
+  markAiSdkToolSource(ocr, { serverName: "cognia-plugin-tools" })
+  markAiSdkToolSource(draw, { serverName: "cognia-plugin-tools" })
+  const controller = createAiSdkToolSearchController({
+    tools: { ocr_extract: ocr, diagram_draw: draw },
+    sendOptions: { toolSearchEnabled: true, alwaysLoadTools: ["diagram.draw"] },
+    toolNameAliases: new Map([
+      ["ocr_extract", "ocr.extract"],
+      ["diagram_draw", "diagram.draw"],
+    ]),
+  })
+  // The always-load rule was written with the cognia name and still applies.
+  assert.deepEqual(controller.prepareStep().activeTools, [AI_SDK_TOOL_SEARCH_NAME, "diagram_draw"])
+  const output = JSON.parse(
+    await controller.tools[AI_SDK_TOOL_SEARCH_NAME].execute({ query: "select:ocr.extract" })
+  )
+  // The model is told the name it can actually call.
+  assert.deepEqual(output.activated, ["ocr_extract"])
+  assert.deepEqual(output.missing, undefined)
+  assert.ok(controller.prepareStep().activeTools.includes("ocr_extract"))
+})

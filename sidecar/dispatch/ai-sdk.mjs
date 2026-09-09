@@ -483,12 +483,18 @@ export function dispatchAiSdk({
     sdkSessionId,
   })
 
+  // Model-facing tool names that had to be renamed for the provider
+  // (`ocr.extract` → `ocr_extract`), filled in once the tools map is sealed.
+  // The adapter maps them back so the renderer keeps seeing cognia names.
+  /** @type {Map<string, string>} */
+  const toolNameAliases = new Map()
   const adapter = createEventAdapter({
     sessionId,
     sdkSessionId,
     model,
     provider,
     startedAt: Date.now(),
+    toolNameAliases,
   })
 
   // For multi-turn support we accumulate user messages in a queue. A new
@@ -1209,6 +1215,28 @@ export function dispatchAiSdk({
             }
           }
 
+          // Providers validate function names against `^[a-zA-Z0-9_-]{1,64}$`.
+          // A plugin tool such as `ocr.extract` or an MCP tool with a slash
+          // would fail the whole request, so rename at the boundary and keep
+          // the alias table for the adapter (renderer-facing names) and
+          // ToolSearch (`select:` by cognia name). Done on the sealed map so
+          // every source (built-in, plugin, external MCP) is covered once.
+          {
+            const { sanitizeToolMap } = await import("./ai-sdk-tool-names.mjs")
+            const renamed = sanitizeToolMap(toolsCache)
+            toolsCache = renamed.tools
+            toolNameAliases.clear()
+            for (const [modelName, original] of renamed.aliases) {
+              toolNameAliases.set(modelName, original)
+            }
+            if (renamed.aliases.size > 0) {
+              const pairs = [...renamed.aliases]
+                .map(([modelName, original]) => `${original} → ${modelName}`)
+                .join(", ")
+              log("info", `renamed ${renamed.aliases.size} tool name(s) for the provider: ${pairs}`)
+            }
+          }
+
           // Cross-provider deferred loading. The Anthropic Agent SDK handles
           // ToolSearch/alwaysLoad natively; AI SDK providers need an explicit
           // ToolSearch tool plus prepareStep(activeTools). Build it only after
@@ -1221,6 +1249,7 @@ export function dispatchAiSdk({
             toolSearchController = createAiSdkToolSearchController({
               tools: toolsCache,
               sendOptions: agentScopedSendOptions,
+              toolNameAliases,
             })
             if (toolSearchController) toolsCache = toolSearchController.tools
           }

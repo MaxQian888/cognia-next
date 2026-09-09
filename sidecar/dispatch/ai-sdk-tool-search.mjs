@@ -9,6 +9,7 @@
 
 import { tool } from "ai"
 import { z } from "zod"
+import { modelToolName, restoreToolName } from "./ai-sdk-tool-names.mjs"
 
 export const AI_SDK_TOOL_SEARCH_NAME = "ToolSearch"
 
@@ -71,8 +72,15 @@ function searchCandidates(tools, query, limit) {
  *   activeToolNames: () => string[],
  * }}
  */
-export function createAiSdkToolSearchController({ tools, sendOptions = {} }) {
+export function createAiSdkToolSearchController({
+  tools,
+  sendOptions = {},
+  toolNameAliases = undefined,
+}) {
   if (sendOptions.toolSearchEnabled !== true) return null
+  // Map keys are the provider-safe names the model will call; `alwaysLoadTools`
+  // and `select:` requests may still use the cognia name they were written with.
+  const aliases = toolNameAliases instanceof Map ? toolNameAliases : new Map()
 
   const available = { ...(tools ?? {}) }
   // ToolSearch is bridge infrastructure and intentionally replaces a same-name
@@ -94,7 +102,8 @@ export function createAiSdkToolSearchController({ tools, sendOptions = {} }) {
     if (
       source.alwaysLoad === true ||
       (source.serverName && alwaysLoadServers.has(source.serverName)) ||
-      configuredToolMatches(alwaysLoadTools, name, source)
+      configuredToolMatches(alwaysLoadTools, name, source) ||
+      configuredToolMatches(alwaysLoadTools, restoreToolName(aliases, name), source)
     ) {
       active.add(name)
     }
@@ -128,6 +137,7 @@ export function createAiSdkToolSearchController({ tools, sendOptions = {} }) {
               .split(/[\s,]+/)
               .map((name) => name.trim())
               .filter(Boolean)
+              .map((name) => (Object.hasOwn(available, name) ? name : modelToolName(aliases, name)))
           ),
         ]
         matches = requested

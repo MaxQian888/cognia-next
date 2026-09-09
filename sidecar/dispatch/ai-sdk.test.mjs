@@ -2698,3 +2698,65 @@ test("AI SDK 7 responseMessages preserves tool calls/results in durable history"
   const snapshot = events.find((event) => event.type === "session_ended").conversationSnapshot
   assert.deepEqual(snapshot.slice(1), messages)
 })
+
+test("tool names a provider would reject are renamed on the wire and restored for the renderer", async () => {
+  const { events, emit } = captureEmit()
+  let captured = null
+  const fakeStream = (args) => {
+    captured = args
+    return makeFakeStream([
+      { type: "tool-call", toolCallId: "c-ocr", toolName: "ocr_extract", args: { path: "a.png" } },
+      { type: "finish", finishReason: "stop" },
+    ])()
+  }
+  const buildMcpTools = async () => ({
+    tools: { "mcp__docs__page/search": { description: "d", execute: async () => "hit" } },
+    close: async () => {},
+  })
+  const logs = []
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "s-rename",
+    firstPrompt: "hi",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      builtinTools: { git: true },
+      pluginTools: [
+        {
+          name: "ocr.extract",
+          description: "OCR",
+          jsonSchema: { type: "object" },
+          pluginId: "ocr",
+        },
+      ],
+      mcpServers: { docs: { type: "sse", url: "https://x/sse" } },
+    },
+    emit,
+    log: (level, message) => logs.push(`${level}: ${message}`),
+    streamText: fakeStream,
+    buildMcpTools,
+  })
+  await waitForEvent(events, (e) => e.type === "session_ended")
+  const keys = Object.keys(captured.tools)
+  assert.ok(keys.includes("ocr_extract"), "plugin tool renamed for the provider")
+  assert.ok(keys.includes("mcp__docs__page_search"), "MCP tool renamed for the provider")
+  assert.ok(!keys.includes("ocr.extract") && !keys.includes("mcp__docs__page/search"))
+  for (const key of keys) assert.match(key, /^[a-zA-Z0-9_-]{1,64}$/, key)
+  assert.deepEqual(keys, [...keys].sort(), "map stays sorted for prompt-cache stability")
+  // The renderer sees the cognia name on the tool_use block, not the wire name.
+  const snapshot = events.find(
+    (e) =>
+      e.type === "event" &&
+      e.event?.type === "assistant" &&
+      e.event.message?.content?.some?.((c) => c.type === "tool_use")
+  )
+  assert.ok(snapshot, "assistant snapshot with the tool call")
+  const toolUse = snapshot.event.message.content.find((c) => c.type === "tool_use")
+  assert.equal(toolUse.name, "ocr.extract")
+  assert.ok(
+    logs.some((l) => l.includes("ocr.extract → ocr_extract")),
+    "rename is logged"
+  )
+  session.closeInput()
+})
