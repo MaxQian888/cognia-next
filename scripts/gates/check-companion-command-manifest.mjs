@@ -23,8 +23,8 @@ function extractRustArray(source, name) {
 
 export function validateManifest(manifest) {
   const errors = []
-  if (manifest.schemaVersion !== 2 || !Array.isArray(manifest.commands)) {
-    return ["manifest must have schemaVersion 2 and a commands array"]
+  if (manifest.contractVersion !== 3 || !Array.isArray(manifest.commands)) {
+    return ["manifest must have contractVersion 3 and a commands array"]
   }
 
   const names = new Set()
@@ -54,6 +54,17 @@ export function validateManifest(manifest) {
     if (!command.inputSchema || !command.outputSchema) {
       errors.push(`${label}: inputSchema and outputSchema are required`)
     }
+    // Grammar fields (ADR-0175). Their values are held to the resource tree and
+    // verb vocabulary by check-command-grammar; this gate only insists they exist.
+    for (const field of ["resource", "verb", "arm"]) {
+      if (typeof command[field] !== "string" || command[field].length === 0) {
+        errors.push(`${label}: ${field} is required`)
+      }
+    }
+    if (!["none", "page-token", "byte-range"].includes(command.pagination)) {
+      errors.push(`${label}: invalid pagination`)
+    }
+    if (typeof command.longRunning !== "boolean") errors.push(`${label}: longRunning is required`)
   }
   return errors
 }

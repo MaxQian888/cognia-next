@@ -1,0 +1,3999 @@
+{
+  "contractVersion": 3,
+  "$comment": "Old snake_case wire name to canonical dotted name (ADR-0175). Applied at the B5 hard cut: the host answers an old name with 410 command_renamed and details.replacement, the codemod rewrites client literals, and check-command-grammar refuses old literals. merge names the surviving command when two old names were one operation.",
+  "renames": {
+    "a2ui_bridge_runtime_paths": {
+      "to": "a2ui.bridge.runtime_paths.get"
+    },
+    "account_bind_person": {
+      "to": "account.person.bind"
+    },
+    "account_password_create_verifier": {
+      "to": "account.password.verifier.create"
+    },
+    "account_password_rotate": {
+      "to": "account.password.rotate"
+    },
+    "account_password_verify": {
+      "to": "account.password.verify"
+    },
+    "account_person": {
+      "to": "account.person.get"
+    },
+    "account_quick_unlock_clear": {
+      "to": "account.quick_unlock.clear"
+    },
+    "account_quick_unlock_create_verifier": {
+      "to": "account.quick_unlock.verifier.create"
+    },
+    "account_quick_unlock_verify": {
+      "to": "account.quick_unlock.verify"
+    },
+    "account_unbind_local": {
+      "to": "account.local.unbind"
+    },
+    "account_unbind_person": {
+      "to": "account.person.unbind"
+    },
+    "acp_terminal_create": {
+      "to": "acp.terminal.create"
+    },
+    "acp_terminal_get_info": {
+      "to": "acp.terminal.info.get"
+    },
+    "acp_terminal_get_session_terminals": {
+      "to": "acp.terminal.session_terminal.get"
+    },
+    "acp_terminal_is_running": {
+      "to": "acp.terminal.probe"
+    },
+    "acp_terminal_kill": {
+      "to": "acp.terminal.stop"
+    },
+    "acp_terminal_kill_session_terminals": {
+      "to": "acp.terminal.session_terminal.stop",
+      "note": "kill becomes stop with force:true (B5)"
+    },
+    "acp_terminal_list": {
+      "to": "acp.terminal.list"
+    },
+    "acp_terminal_output": {
+      "to": "acp.terminal.output.read"
+    },
+    "acp_terminal_release": {
+      "to": "acp.terminal.release"
+    },
+    "acp_terminal_wait_for_exit": {
+      "to": "acp.terminal.wait_for_exit"
+    },
+    "acp_terminal_write": {
+      "to": "acp.terminal.write"
+    },
+    "adapter_update_policy": {
+      "to": "connector.adapter.policy.update"
+    },
+    "agent_close_session": {
+      "to": "agent.session.close"
+    },
+    "agent_command_telemetry": {
+      "to": "agent.command_telemetry.record"
+    },
+    "agent_compact": {
+      "to": "agent.session.compact"
+    },
+    "agent_interrupt": {
+      "to": "agent.session.interrupt"
+    },
+    "agent_resolve_permission": {
+      "to": "agent.permission.resolve"
+    },
+    "agent_send": {
+      "to": "agent.session.send"
+    },
+    "agent_session_api": {
+      "to": "agent.session.call_api"
+    },
+    "agent_start": {
+      "to": "agent.start"
+    },
+    "agent_status": {
+      "to": "agent.status"
+    },
+    "agent_task_cancel": {
+      "to": "team.task.cancel"
+    },
+    "agent_task_comment": {
+      "to": "team.task.comment",
+      "merge": "team_task_comment"
+    },
+    "agent_task_move": {
+      "to": "team.task.move",
+      "merge": "team_task_move"
+    },
+    "agent_task_pause": {
+      "to": "team.task.pause"
+    },
+    "agent_task_resume": {
+      "to": "team.task.resume"
+    },
+    "agent_task_start": {
+      "to": "team.task.start"
+    },
+    "agent_vendor_roots": {
+      "to": "agent.vendor_root.list"
+    },
+    "anthropic_oauth_discover": {
+      "to": "anthropic.oauth.discover"
+    },
+    "anthropic_oauth_save_pkce_result": {
+      "to": "anthropic.oauth.save_pkce_result"
+    },
+    "app_settings_update": {
+      "to": "app.settings.update"
+    },
+    "automation_audit_snapshot": {
+      "to": "automation.audit.snapshot"
+    },
+    "automation_consent_pending": {
+      "to": "automation.consent.list_pending"
+    },
+    "automation_consent_respond": {
+      "to": "automation.consent.respond"
+    },
+    "automation_drain_init_failure": {
+      "to": "automation.init_failure.drain"
+    },
+    "automation_execute": {
+      "to": "automation.exec"
+    },
+    "automation_kill_switch": {
+      "to": "automation.kill_switch.engage"
+    },
+    "automation_kill_switch_engaged": {
+      "to": "automation.kill_switch.get"
+    },
+    "automation_policy_get": {
+      "to": "automation.policy.get"
+    },
+    "automation_policy_set": {
+      "to": "automation.policy.set"
+    },
+    "automation_set_enabled": {
+      "to": "automation.enabled.set"
+    },
+    "automation_settings_get": {
+      "to": "automation.settings.get"
+    },
+    "automation_settings_set": {
+      "to": "automation.settings.set"
+    },
+    "background_job_kill": {
+      "to": "background.job.stop"
+    },
+    "background_job_list": {
+      "to": "background.job.list"
+    },
+    "background_job_read": {
+      "to": "background.job.read"
+    },
+    "background_job_spawn_scheduled": {
+      "to": "background.job.spawn_scheduled"
+    },
+    "background_monitor_cancel": {
+      "to": "background.monitor.cancel"
+    },
+    "background_monitor_list": {
+      "to": "background.monitor.list"
+    },
+    "background_monitor_register_scheduled": {
+      "to": "background.monitor.register_scheduled"
+    },
+    "backup_export": {
+      "to": "backup.export"
+    },
+    "backup_import": {
+      "to": "backup.import"
+    },
+    "browser_act": {
+      "to": "browser.act"
+    },
+    "browser_back": {
+      "to": "browser.page.navigate_back"
+    },
+    "browser_capability": {
+      "to": "browser.capabilities.get"
+    },
+    "browser_cdp_execute": {
+      "to": "browser.cdp.exec"
+    },
+    "browser_cdp_grant": {
+      "to": "browser.cdp.grant"
+    },
+    "browser_cdp_revoke": {
+      "to": "browser.cdp.revoke"
+    },
+    "browser_close_page": {
+      "to": "browser.page.close"
+    },
+    "browser_companion_capability": {
+      "to": "browser.companion.capabilities.get"
+    },
+    "browser_context_cancel": {
+      "to": "browser.context.cancel"
+    },
+    "browser_context_get": {
+      "to": "browser.context.get"
+    },
+    "browser_context_list": {
+      "to": "browser.context.list"
+    },
+    "browser_context_result": {
+      "to": "browser.context.result.get"
+    },
+    "browser_context_submit": {
+      "to": "browser.context.submit"
+    },
+    "browser_cookie_import": {
+      "to": "browser.cookie.import"
+    },
+    "browser_cookie_import_available": {
+      "to": "browser.cookie.import_available"
+    },
+    "browser_downloads": {
+      "to": "browser.download.list"
+    },
+    "browser_drag": {
+      "to": "browser.drag"
+    },
+    "browser_embed_act": {
+      "to": "browser.embed.act"
+    },
+    "browser_embed_back": {
+      "to": "browser.embed.navigate_back"
+    },
+    "browser_embed_capture": {
+      "to": "browser.embed.capture"
+    },
+    "browser_embed_clear_selection": {
+      "to": "browser.embed.selection.clear"
+    },
+    "browser_embed_create": {
+      "to": "browser.embed.create"
+    },
+    "browser_embed_destroy": {
+      "to": "browser.embed.delete"
+    },
+    "browser_embed_drain_console": {
+      "to": "browser.embed.console.drain"
+    },
+    "browser_embed_drain_network": {
+      "to": "browser.embed.network.drain"
+    },
+    "browser_embed_drain_record": {
+      "to": "browser.embed.record.drain"
+    },
+    "browser_embed_drain_selection": {
+      "to": "browser.embed.selection.drain"
+    },
+    "browser_embed_evaluate": {
+      "to": "browser.embed.evaluate"
+    },
+    "browser_embed_forward": {
+      "to": "browser.embed.navigate_forward"
+    },
+    "browser_embed_get_title": {
+      "to": "browser.embed.title.get"
+    },
+    "browser_embed_get_url": {
+      "to": "browser.embed.url.get"
+    },
+    "browser_embed_has_selector": {
+      "to": "browser.embed.has_selector"
+    },
+    "browser_embed_has_text": {
+      "to": "browser.embed.has_text"
+    },
+    "browser_embed_navigate": {
+      "to": "browser.embed.navigate"
+    },
+    "browser_embed_network_state": {
+      "to": "browser.embed.network.get"
+    },
+    "browser_embed_ref_for": {
+      "to": "browser.embed.ref.resolve"
+    },
+    "browser_embed_reload": {
+      "to": "browser.embed.reload"
+    },
+    "browser_embed_resume_record": {
+      "to": "browser.embed.record.resume"
+    },
+    "browser_embed_set_bounds": {
+      "to": "browser.embed.bounds.set"
+    },
+    "browser_embed_set_frozen": {
+      "to": "browser.embed.frozen.set"
+    },
+    "browser_embed_set_panel_labels": {
+      "to": "browser.embed.panel_labels.set"
+    },
+    "browser_embed_set_select_mode": {
+      "to": "browser.embed.select_mode.set"
+    },
+    "browser_embed_set_visible": {
+      "to": "browser.embed.visible.set"
+    },
+    "browser_embed_set_zoom": {
+      "to": "browser.embed.zoom.set"
+    },
+    "browser_embed_snapshot": {
+      "to": "browser.embed.snapshot"
+    },
+    "browser_embed_start_record": {
+      "to": "browser.embed.record.start"
+    },
+    "browser_embed_stop": {
+      "to": "browser.embed.stop"
+    },
+    "browser_embed_stop_record": {
+      "to": "browser.embed.record.stop"
+    },
+    "browser_evaluate": {
+      "to": "browser.evaluate"
+    },
+    "browser_find": {
+      "to": "browser.find"
+    },
+    "browser_find_clear": {
+      "to": "browser.find.clear"
+    },
+    "browser_forward": {
+      "to": "browser.page.navigate_forward"
+    },
+    "browser_get_page": {
+      "to": "browser.page.get"
+    },
+    "browser_handle_dialog": {
+      "to": "browser.dialog.handle"
+    },
+    "browser_navigate": {
+      "to": "browser.navigate"
+    },
+    "browser_new_page": {
+      "to": "browser.page.create"
+    },
+    "browser_pages": {
+      "to": "browser.page.list"
+    },
+    "browser_press_key": {
+      "to": "browser.key.press"
+    },
+    "browser_read_console": {
+      "to": "browser.console.read"
+    },
+    "browser_read_network": {
+      "to": "browser.network.read"
+    },
+    "browser_reload": {
+      "to": "browser.reload"
+    },
+    "browser_runtime_status": {
+      "to": "browser.runtime.status"
+    },
+    "browser_screenshot": {
+      "to": "browser.screenshot"
+    },
+    "browser_scroll": {
+      "to": "browser.scroll"
+    },
+    "browser_session_close": {
+      "to": "browser.session.close"
+    },
+    "browser_session_ensure": {
+      "to": "browser.session.ensure"
+    },
+    "browser_session_get": {
+      "to": "browser.session.get"
+    },
+    "browser_set_files": {
+      "to": "browser.file.set"
+    },
+    "browser_set_zoom": {
+      "to": "browser.zoom.set"
+    },
+    "browser_snapshot": {
+      "to": "browser.page.snapshot"
+    },
+    "browser_stop": {
+      "to": "browser.stop"
+    },
+    "browser_switch_page": {
+      "to": "browser.page.switch"
+    },
+    "browser_wait_for": {
+      "to": "browser.wait_for"
+    },
+    "browser_wait_for_load": {
+      "to": "browser.wait_for_load"
+    },
+    "canvas_cancel_python": {
+      "to": "canvas.python.cancel"
+    },
+    "canvas_run_python": {
+      "to": "canvas.python.run"
+    },
+    "ccswitch_list_mcp_servers": {
+      "to": "ccswitch.mcp_server.list"
+    },
+    "ccswitch_list_prompts": {
+      "to": "ccswitch.prompt.list"
+    },
+    "ccswitch_list_providers": {
+      "to": "ccswitch.provider.list"
+    },
+    "ccswitch_list_skills": {
+      "to": "ccswitch.skill.list"
+    },
+    "ccswitch_status": {
+      "to": "ccswitch.status"
+    },
+    "ccswitch_watch_start": {
+      "to": "ccswitch.watch.start"
+    },
+    "ccswitch_watch_stop": {
+      "to": "ccswitch.watch.stop"
+    },
+    "character_bind_twin": {
+      "to": "character.twin.bind"
+    },
+    "character_delete": {
+      "to": "character.delete"
+    },
+    "character_upsert": {
+      "to": "character.upsert"
+    },
+    "check_command_exists": {
+      "to": "shell.command.probe"
+    },
+    "claude_approve": {
+      "to": "agent.permission.approve"
+    },
+    "claude_close_session": {
+      "to": "agent.session.close",
+      "merge": "agent_close_session",
+      "note": "ADR-0090 migration alias"
+    },
+    "claude_compact": {
+      "to": "agent.session.compact",
+      "merge": "agent_compact",
+      "note": "ADR-0090 migration alias"
+    },
+    "claude_env_for_account": {
+      "to": "agent.account_env.get"
+    },
+    "claude_feature_abort": {
+      "to": "agent.feature.cancel"
+    },
+    "claude_feature_call": {
+      "to": "agent.feature.call"
+    },
+    "claude_has_api_key": {
+      "to": "agent.api_key.probe"
+    },
+    "claude_has_oauth_bearer": {
+      "to": "agent.oauth_bearer.probe"
+    },
+    "claude_interrupt": {
+      "to": "agent.session.interrupt",
+      "merge": "agent_interrupt",
+      "note": "ADR-0090 migration alias"
+    },
+    "claude_plugin_hook_response": {
+      "to": "agent.plugin.hook.respond"
+    },
+    "claude_plugin_tool_response": {
+      "to": "agent.plugin.tool.respond"
+    },
+    "claude_protocol_adapter_message": {
+      "to": "agent.protocol.adapter.send"
+    },
+    "claude_restart_sidecar": {
+      "to": "agent.sidecar.restart"
+    },
+    "claude_restore": {
+      "to": "agent.session.restore"
+    },
+    "claude_send": {
+      "to": "agent.session.send",
+      "merge": "agent_send",
+      "note": "ADR-0090 migration alias"
+    },
+    "claude_session_control": {
+      "to": "agent.session.control"
+    },
+    "claude_set_api_key": {
+      "to": "agent.api_key.set"
+    },
+    "claude_set_mode": {
+      "to": "agent.mode.set"
+    },
+    "claude_set_oauth_bearer": {
+      "to": "agent.oauth_bearer.set"
+    },
+    "claude_set_provider_env": {
+      "to": "agent.provider_env.set"
+    },
+    "claude_sidecar_status": {
+      "to": "agent.sidecar.status"
+    },
+    "claude_tool_result_decision": {
+      "to": "agent.tool_result.decide"
+    },
+    "cli_bridge_host_state_publish": {
+      "to": "cli_bridge.host_state.publish"
+    },
+    "cli_bridge_renderer_response": {
+      "to": "cli_bridge.renderer.respond"
+    },
+    "cli_bridge_status": {
+      "to": "cli_bridge.status"
+    },
+    "close_island_window": {
+      "to": "desktop.island.window.close"
+    },
+    "close_pet_popup": {
+      "to": "desktop.pet.popup.close"
+    },
+    "close_pet_window": {
+      "to": "desktop.pet.window.close"
+    },
+    "close_tray_panel": {
+      "to": "desktop.tray.panel.close"
+    },
+    "code_adoption_turn_begin": {
+      "to": "code_adoption.turn.begin"
+    },
+    "code_adoption_turn_end": {
+      "to": "code_adoption.turn.end"
+    },
+    "codeserver_activate_proxy": {
+      "to": "codeserver.proxy.activate"
+    },
+    "codeserver_agent_apply_edit": {
+      "to": "codeserver.agent.edit.apply"
+    },
+    "codeserver_agent_notify": {
+      "to": "codeserver.agent.notify"
+    },
+    "codeserver_agent_open": {
+      "to": "codeserver.agent.open"
+    },
+    "codeserver_agent_read_active": {
+      "to": "codeserver.agent.active_document.read"
+    },
+    "codeserver_agent_reveal": {
+      "to": "codeserver.agent.reveal"
+    },
+    "codeserver_agent_run_in_terminal": {
+      "to": "codeserver.agent.run_in_terminal"
+    },
+    "codeserver_agent_save_all": {
+      "to": "codeserver.agent.save_all"
+    },
+    "codeserver_agent_show_diff": {
+      "to": "codeserver.agent.diff.show"
+    },
+    "codeserver_agent_workspace_snapshot": {
+      "to": "codeserver.agent.workspace.snapshot"
+    },
+    "codeserver_broker_content_create": {
+      "to": "codeserver.broker.content.create"
+    },
+    "codeserver_broker_content_redeem": {
+      "to": "codeserver.broker.content.redeem"
+    },
+    "codeserver_broker_notify": {
+      "to": "codeserver.broker.notify"
+    },
+    "codeserver_broker_respond": {
+      "to": "codeserver.broker.respond"
+    },
+    "codeserver_broker_validate_paths": {
+      "to": "codeserver.broker.path.validate"
+    },
+    "codeserver_build_proxy": {
+      "to": "codeserver.proxy.build"
+    },
+    "codeserver_cancel_download": {
+      "to": "codeserver.download.cancel"
+    },
+    "codeserver_disk_usage": {
+      "to": "codeserver.disk_usage.get"
+    },
+    "codeserver_download": {
+      "to": "codeserver.download.start"
+    },
+    "codeserver_embed_create": {
+      "to": "codeserver.embed.create"
+    },
+    "codeserver_embed_destroy": {
+      "to": "codeserver.embed.delete"
+    },
+    "codeserver_embed_navigate": {
+      "to": "codeserver.embed.navigate"
+    },
+    "codeserver_embed_set_background": {
+      "to": "codeserver.embed.background.set"
+    },
+    "codeserver_embed_set_bounds": {
+      "to": "codeserver.embed.bounds.set"
+    },
+    "codeserver_embed_set_visible": {
+      "to": "codeserver.embed.visible.set"
+    },
+    "codeserver_ensure": {
+      "to": "codeserver.ensure"
+    },
+    "codeserver_language_pack_available": {
+      "to": "codeserver.language_pack.probe"
+    },
+    "codeserver_list_proxies": {
+      "to": "codeserver.proxy.list"
+    },
+    "codeserver_local_vscode_available": {
+      "to": "codeserver.local_vscode.probe"
+    },
+    "codeserver_open_file": {
+      "to": "codeserver.file.open"
+    },
+    "codeserver_open_in_local_vscode": {
+      "to": "codeserver.local_vscode.open"
+    },
+    "codeserver_read_runtime_args": {
+      "to": "codeserver.runtime_args.read"
+    },
+    "codeserver_read_user_settings": {
+      "to": "codeserver.read_user_settings"
+    },
+    "codeserver_remote_relay_ensure": {
+      "to": "codeserver.remote_relay.ensure"
+    },
+    "codeserver_remote_relay_stop": {
+      "to": "codeserver.remote_relay.stop"
+    },
+    "codeserver_status": {
+      "to": "codeserver.status"
+    },
+    "codeserver_stop": {
+      "to": "codeserver.stop"
+    },
+    "codeserver_stop_all": {
+      "to": "codeserver.stop_all"
+    },
+    "codeserver_supported": {
+      "to": "codeserver.probe"
+    },
+    "codeserver_uninstall": {
+      "to": "codeserver.uninstall"
+    },
+    "codeserver_write_runtime_args": {
+      "to": "codeserver.runtime_args.write"
+    },
+    "codeserver_write_user_settings": {
+      "to": "codeserver.write_user_settings"
+    },
+    "codex_app_dispatch_conversation": {
+      "to": "codex_app.conversation.dispatch"
+    },
+    "codex_app_inventory": {
+      "to": "codex_app.inventory.get"
+    },
+    "codex_app_runtime_status": {
+      "to": "codex_app.runtime.status"
+    },
+    "codex_app_task_create": {
+      "to": "codex_app.task.create"
+    },
+    "codex_app_task_interrupt": {
+      "to": "codex_app.task.interrupt"
+    },
+    "codex_app_task_list": {
+      "to": "codex_app.task.list"
+    },
+    "codex_app_task_open": {
+      "to": "codex_app.task.open"
+    },
+    "codex_app_task_read": {
+      "to": "codex_app.task.read"
+    },
+    "codex_app_task_send": {
+      "to": "codex_app.task.send"
+    },
+    "codex_oauth_cancel_device_code": {
+      "to": "codex.oauth.cancel_device_code"
+    },
+    "codex_oauth_discover": {
+      "to": "codex.oauth.discover"
+    },
+    "codex_oauth_poll_device_code": {
+      "to": "codex.oauth.poll_device_code"
+    },
+    "codex_oauth_request_device_code": {
+      "to": "codex.oauth.request_device_code"
+    },
+    "companion_browser_access_get": {
+      "to": "companion.browser_access.get"
+    },
+    "companion_browser_access_set": {
+      "to": "companion.browser_access.set"
+    },
+    "companion_can_control": {
+      "to": "companion.control.probe"
+    },
+    "companion_create_browser_enrollment": {
+      "to": "companion.browser_enrollment.create"
+    },
+    "companion_create_owner_invitation": {
+      "to": "companion.owner_invitation.create"
+    },
+    "companion_create_worker_enrollment": {
+      "to": "companion.worker_enrollment.create"
+    },
+    "companion_desktop_write_response": {
+      "to": "companion.desktop_write.respond"
+    },
+    "companion_endpoints": {
+      "to": "companion.endpoint.list"
+    },
+    "companion_get_tls_fingerprint": {
+      "to": "companion.tls_fingerprint.get"
+    },
+    "companion_host_state_publish": {
+      "to": "companion.host_state.publish"
+    },
+    "companion_list_device_grants": {
+      "to": "companion.device_grant.list"
+    },
+    "companion_list_devices": {
+      "to": "companion.device.list"
+    },
+    "companion_list_workers": {
+      "to": "companion.worker.list"
+    },
+    "companion_mdns_browse": {
+      "to": "companion.mdns.browse"
+    },
+    "companion_mdns_start": {
+      "to": "companion.mdns.start"
+    },
+    "companion_mdns_status": {
+      "to": "companion.mdns.status"
+    },
+    "companion_mdns_stop": {
+      "to": "companion.mdns.stop"
+    },
+    "companion_media_response": {
+      "to": "companion.media.respond"
+    },
+    "companion_message_response": {
+      "to": "companion.message.respond"
+    },
+    "companion_migrate_legacy_device_grants": {
+      "to": "companion.device_grant.migrate_legacy"
+    },
+    "companion_push_clear_apns": {
+      "to": "companion.push.apns.clear"
+    },
+    "companion_push_clear_fcm": {
+      "to": "companion.push.fcm.clear"
+    },
+    "companion_push_configure_apns": {
+      "to": "companion.push.apns.configure"
+    },
+    "companion_push_configure_fcm": {
+      "to": "companion.push.fcm.configure"
+    },
+    "companion_push_notification": {
+      "to": "companion.push.notify"
+    },
+    "companion_push_status": {
+      "to": "companion.push.status"
+    },
+    "companion_reachability_get": {
+      "to": "companion.reachability.get"
+    },
+    "companion_reachability_set": {
+      "to": "companion.reachability.set"
+    },
+    "companion_resume_device": {
+      "to": "companion.device.resume"
+    },
+    "companion_revoke_device": {
+      "to": "companion.device.revoke"
+    },
+    "companion_seed_deny_list": {
+      "to": "companion.deny_list.seed"
+    },
+    "companion_seed_locked_computer_use": {
+      "to": "companion.locked_computer_use.seed"
+    },
+    "companion_server_start": {
+      "to": "companion.server.start"
+    },
+    "companion_server_status": {
+      "to": "companion.server.status"
+    },
+    "companion_server_stop": {
+      "to": "companion.server.stop"
+    },
+    "companion_set_agent_control": {
+      "to": "companion.agent_control.set"
+    },
+    "companion_set_locked_computer_use": {
+      "to": "companion.locked_computer_use.set"
+    },
+    "companion_set_remote_control": {
+      "to": "companion.remote_control.set"
+    },
+    "companion_set_remote_terminal": {
+      "to": "companion.remote_terminal.set"
+    },
+    "companion_set_ssh_files": {
+      "to": "companion.ssh_file.set"
+    },
+    "companion_set_worker": {
+      "to": "companion.worker.set"
+    },
+    "companion_signaling_configure": {
+      "to": "companion.signaling.configure"
+    },
+    "companion_signaling_devices_status": {
+      "to": "companion.signaling.devices.status"
+    },
+    "companion_signaling_reconnect_device": {
+      "to": "companion.signaling.device.reconnect"
+    },
+    "companion_signaling_status": {
+      "to": "companion.signaling.status"
+    },
+    "companion_signaling_sync_devices": {
+      "to": "companion.signaling.device.sync"
+    },
+    "companion_suspend_device": {
+      "to": "companion.device.suspend"
+    },
+    "companion_sync_pull_response": {
+      "to": "companion.sync_pull.respond"
+    },
+    "companion_test_local_reachability": {
+      "to": "companion.local_reachability.probe"
+    },
+    "companion_tls_paths": {
+      "to": "companion.tls_paths.get"
+    },
+    "companion_tunnel_clear_named": {
+      "to": "companion.tunnel.named_config.clear"
+    },
+    "companion_tunnel_current": {
+      "to": "companion.tunnel.get"
+    },
+    "companion_tunnel_get_config": {
+      "to": "companion.tunnel.config.get"
+    },
+    "companion_tunnel_save_named_config": {
+      "to": "companion.tunnel.named_config.save"
+    },
+    "companion_tunnel_set_mode": {
+      "to": "companion.tunnel.mode.set"
+    },
+    "companion_tunnel_start": {
+      "to": "companion.tunnel.start"
+    },
+    "companion_tunnel_stop": {
+      "to": "companion.tunnel.stop"
+    },
+    "companion_tunnel_probe": {
+      "to": "companion.tunnel.probe"
+    },
+    "companion_mesh_status": {
+      "to": "companion.mesh.status"
+    },
+    "companion_unrevoke_device": {
+      "to": "companion.device.unrevoke"
+    },
+    "companion_wake_worker": {
+      "to": "companion.worker.wake"
+    },
+    "companion_worker_ack_events": {
+      "to": "companion.worker.event.ack"
+    },
+    "companion_worker_attach_channel": {
+      "to": "companion.worker.channel.attach"
+    },
+    "companion_worker_detach_channel": {
+      "to": "companion.worker.channel.detach"
+    },
+    "companion_worker_send_frame": {
+      "to": "companion.worker.frame.send"
+    },
+    "connector_approve_draft": {
+      "to": "connector.draft.approve"
+    },
+    "connector_enqueue_outbound": {
+      "to": "connector.outbound.enqueue"
+    },
+    "connector_reject_draft": {
+      "to": "connector.draft.reject"
+    },
+    "connector_send": {
+      "to": "connector.send"
+    },
+    "connectors_attachment_delete": {
+      "to": "connector.attachment.delete"
+    },
+    "connectors_attachment_enforce_budget": {
+      "to": "connector.attachment.budget.enforce"
+    },
+    "connectors_attachment_evict_adapter": {
+      "to": "connector.attachment.adapter.evict"
+    },
+    "connectors_attachment_fetch": {
+      "to": "connector.attachment.fetch"
+    },
+    "connectors_attachment_list": {
+      "to": "connector.attachment.list"
+    },
+    "connectors_attachment_read": {
+      "to": "connector.attachment.read"
+    },
+    "connectors_discord_upload": {
+      "to": "connector.discord.upload"
+    },
+    "connectors_ensure_server": {
+      "to": "connector.server.ensure"
+    },
+    "connectors_health": {
+      "to": "connector.health.get"
+    },
+    "connectors_http_request": {
+      "to": "connector.http.request"
+    },
+    "connectors_keyring_delete": {
+      "to": "connector.keyring.delete"
+    },
+    "connectors_keyring_get": {
+      "to": "connector.keyring.get"
+    },
+    "connectors_keyring_list": {
+      "to": "connector.keyring.list"
+    },
+    "connectors_keyring_set": {
+      "to": "connector.keyring.set"
+    },
+    "connectors_lark_upload_file": {
+      "to": "connector.lark.file.upload"
+    },
+    "connectors_lark_upload_image": {
+      "to": "connector.lark.image.upload"
+    },
+    "connectors_lark_ws_close": {
+      "to": "connector.lark.ws.close"
+    },
+    "connectors_lark_ws_open": {
+      "to": "connector.lark.ws.open"
+    },
+    "connectors_list_adapters": {
+      "to": "connector.adapter.list"
+    },
+    "connectors_matrix_crypto_close": {
+      "to": "connector.matrix.crypto.close"
+    },
+    "connectors_matrix_crypto_decrypt_event": {
+      "to": "connector.matrix.crypto.decrypt_event"
+    },
+    "connectors_matrix_crypto_encrypt_event": {
+      "to": "connector.matrix.crypto.encrypt_event"
+    },
+    "connectors_matrix_crypto_get_missing_sessions": {
+      "to": "connector.matrix.crypto.missing_session.get"
+    },
+    "connectors_matrix_crypto_init": {
+      "to": "connector.matrix.crypto.init"
+    },
+    "connectors_matrix_crypto_mark_request_sent": {
+      "to": "connector.matrix.crypto.mark_request_sent"
+    },
+    "connectors_matrix_crypto_outgoing_requests": {
+      "to": "connector.matrix.crypto.outgoing_request.list"
+    },
+    "connectors_matrix_crypto_receive_sync_changes": {
+      "to": "connector.matrix.crypto.receive_sync_changes"
+    },
+    "connectors_matrix_crypto_share_room_key": {
+      "to": "connector.matrix.crypto.share_room_key"
+    },
+    "connectors_matrix_crypto_update_tracked_users": {
+      "to": "connector.matrix.crypto.tracked_user.update"
+    },
+    "connectors_matrix_encrypted_media_fetch": {
+      "to": "connector.matrix.encrypted_media.fetch"
+    },
+    "connectors_matrix_encrypted_media_upload": {
+      "to": "connector.matrix.encrypted_media.upload"
+    },
+    "connectors_media_upload": {
+      "to": "connector.media.upload"
+    },
+    "connectors_onebot_probe": {
+      "to": "connector.onebot.probe"
+    },
+    "connectors_onebot_send": {
+      "to": "connector.onebot.send"
+    },
+    "connectors_register": {
+      "to": "connector.register"
+    },
+    "connectors_register_adapter": {
+      "to": "connector.adapter.register"
+    },
+    "connectors_reset_all_ws": {
+      "to": "connector.ws.reset_all"
+    },
+    "connectors_runtime_lease_acquire": {
+      "to": "connector.runtime_lease.acquire"
+    },
+    "connectors_runtime_lease_release": {
+      "to": "connector.runtime_lease.release"
+    },
+    "connectors_runtime_lease_renew": {
+      "to": "connector.runtime_lease.renew"
+    },
+    "connectors_start_server": {
+      "to": "connector.server.start"
+    },
+    "connectors_stop_server": {
+      "to": "connector.server.stop"
+    },
+    "connectors_unregister": {
+      "to": "connector.unregister"
+    },
+    "connectors_unregister_adapter": {
+      "to": "connector.adapter.unregister"
+    },
+    "connectors_ws_close": {
+      "to": "connector.ws.close"
+    },
+    "connectors_ws_open": {
+      "to": "connector.ws.open"
+    },
+    "connectors_ws_send": {
+      "to": "connector.ws.send"
+    },
+    "control_managed_process": {
+      "to": "process.managed.control"
+    },
+    "conversation_overrides_update": {
+      "to": "session.conversation.overrides.update"
+    },
+    "crash_delete_report": {
+      "to": "crash.report.delete"
+    },
+    "crash_delete_submission": {
+      "to": "crash.submission.delete"
+    },
+    "crash_list_reports": {
+      "to": "crash.report.list"
+    },
+    "crash_logging_diagnostics": {
+      "to": "crash.logging_diagnostics.get"
+    },
+    "crash_open_report_dir": {
+      "to": "crash.report_dir.open"
+    },
+    "crash_push_breadcrumb": {
+      "to": "crash.breadcrumb.push"
+    },
+    "crash_read_report": {
+      "to": "crash.report.read"
+    },
+    "crash_refresh_submission": {
+      "to": "crash.submission.refresh"
+    },
+    "crash_set_context": {
+      "to": "crash.context.set"
+    },
+    "crash_submission_records": {
+      "to": "crash.submission.list"
+    },
+    "crash_submit_report": {
+      "to": "crash.report.submit"
+    },
+    "crash_take_pending": {
+      "to": "crash.pending.take"
+    },
+    "crash_withdraw_submission": {
+      "to": "crash.submission.withdraw"
+    },
+    "cua_sandbox_create": {
+      "to": "cua.sandbox.create"
+    },
+    "cua_sandbox_delete": {
+      "to": "cua.sandbox.delete"
+    },
+    "cua_sandbox_exec": {
+      "to": "cua.sandbox.exec"
+    },
+    "cua_sandbox_health": {
+      "to": "cua.sandbox.health.get"
+    },
+    "cua_sandbox_inspect": {
+      "to": "cua.sandbox.inspect"
+    },
+    "cua_sandbox_read_file": {
+      "to": "cua.sandbox.file.read"
+    },
+    "cua_sandbox_resume": {
+      "to": "cua.sandbox.resume"
+    },
+    "cua_sandbox_start": {
+      "to": "cua.sandbox.start"
+    },
+    "cua_sandbox_stop": {
+      "to": "cua.sandbox.stop"
+    },
+    "cua_sandbox_suspend": {
+      "to": "cua.sandbox.suspend"
+    },
+    "default_export_dir": {
+      "to": "fs.export_dir.get"
+    },
+    "desktop_capabilities": {
+      "to": "desktop.capabilities.get"
+    },
+    "desktop_click": {
+      "to": "desktop.click"
+    },
+    "desktop_cursor_position": {
+      "to": "desktop.cursor_position.get"
+    },
+    "desktop_drag": {
+      "to": "desktop.drag"
+    },
+    "desktop_expand_element": {
+      "to": "desktop.element.expand"
+    },
+    "desktop_find": {
+      "to": "desktop.find"
+    },
+    "desktop_get_app_state": {
+      "to": "desktop.app_state.get"
+    },
+    "desktop_get_focus": {
+      "to": "desktop.focus.get"
+    },
+    "desktop_hold_key": {
+      "to": "desktop.key.hold"
+    },
+    "desktop_invoke_pattern": {
+      "to": "desktop.pattern.invoke"
+    },
+    "desktop_keys": {
+      "to": "desktop.key.press"
+    },
+    "desktop_launch_app": {
+      "to": "desktop.app.launch"
+    },
+    "desktop_list_apps": {
+      "to": "desktop.app.list"
+    },
+    "desktop_mouse_button": {
+      "to": "desktop.mouse.press"
+    },
+    "desktop_mouse_move": {
+      "to": "desktop.mouse.move"
+    },
+    "desktop_paste": {
+      "to": "desktop.paste"
+    },
+    "desktop_perform_action": {
+      "to": "desktop.action.perform"
+    },
+    "desktop_pick_at_point": {
+      "to": "desktop.pick_at_point"
+    },
+    "desktop_pick_session_cancel": {
+      "to": "desktop.pick_session.cancel"
+    },
+    "desktop_pick_session_start": {
+      "to": "desktop.pick_session.start"
+    },
+    "desktop_query_elements": {
+      "to": "desktop.element.query"
+    },
+    "desktop_read_tree": {
+      "to": "desktop.tree.read"
+    },
+    "desktop_screenshot": {
+      "to": "desktop.screenshot"
+    },
+    "desktop_scroll": {
+      "to": "desktop.scroll"
+    },
+    "desktop_subscribe_events": {
+      "to": "desktop.event.subscribe"
+    },
+    "desktop_type": {
+      "to": "desktop.type"
+    },
+    "desktop_unsubscribe": {
+      "to": "desktop.event.unsubscribe"
+    },
+    "desktop_window_op": {
+      "to": "desktop.window.control"
+    },
+    "desktop_zoom": {
+      "to": "desktop.zoom"
+    },
+    "destroy_pet_window": {
+      "to": "desktop.pet.window.delete"
+    },
+    "detect_binary": {
+      "to": "os.binary.detect"
+    },
+    "detect_binary_invalidate": {
+      "to": "os.binary.detection.invalidate"
+    },
+    "device_capabilities_report": {
+      "to": "host.device.capabilities.report"
+    },
+    "download_cognia_cli": {
+      "to": "cli.download"
+    },
+    "dsh_runtime_facts": {
+      "to": "dsh.runtime_facts.get"
+    },
+    "dsh_runtime_finalize": {
+      "to": "dsh.runtime.finalize"
+    },
+    "dsh_runtime_install": {
+      "to": "dsh.runtime.install"
+    },
+    "dsh_runtime_remove": {
+      "to": "dsh.runtime.delete"
+    },
+    "ensure_dir": {
+      "to": "fs.dir.ensure"
+    },
+    "ensure_dir_confined": {
+      "to": "fs.dir.ensure_confined"
+    },
+    "ensure_system_lsp_host": {
+      "to": "lsp.system_host.ensure"
+    },
+    "execution_run_control": {
+      "to": "execution.run.control"
+    },
+    "external_agent_admit_run": {
+      "to": "external_agent.run.admit"
+    },
+    "external_agent_cancel_run": {
+      "to": "external_agent.run.cancel"
+    },
+    "external_agent_config_create": {
+      "to": "external_agent.config.create"
+    },
+    "external_agent_config_delete": {
+      "to": "external_agent.config.delete"
+    },
+    "external_agent_config_get": {
+      "to": "external_agent.config.get"
+    },
+    "external_agent_config_list": {
+      "to": "external_agent.config.list"
+    },
+    "external_agent_config_reconcile": {
+      "to": "external_agent.config.reconcile"
+    },
+    "external_agent_config_update": {
+      "to": "external_agent.config.update"
+    },
+    "external_agent_list": {
+      "to": "external_agent.list"
+    },
+    "external_agent_probe_runtime_version": {
+      "to": "external_agent.probe_runtime_version"
+    },
+    "external_agent_release_run": {
+      "to": "external_agent.run.release"
+    },
+    "external_agent_resolve_decision": {
+      "to": "external_agent.decision.resolve"
+    },
+    "external_agent_run_turn": {
+      "to": "external_agent.turn.run"
+    },
+    "external_agent_sessions_read": {
+      "to": "external_agent.session.read"
+    },
+    "external_agent_update": {
+      "to": "external_agent.update"
+    },
+    "external_bridge_client_create": {
+      "to": "external_bridge.client.create"
+    },
+    "external_bridge_client_list": {
+      "to": "external_bridge.client.list"
+    },
+    "external_bridge_client_revoke": {
+      "to": "external_bridge.client.revoke"
+    },
+    "external_bridge_client_rotate": {
+      "to": "external_bridge.client.rotate"
+    },
+    "external_bridge_config_get": {
+      "to": "external_bridge.config.get"
+    },
+    "external_bridge_config_update": {
+      "to": "external_bridge.config.update"
+    },
+    "external_bridge_relay_disable": {
+      "to": "external_bridge.relay.disable"
+    },
+    "external_bridge_relay_enable": {
+      "to": "external_bridge.relay.enable"
+    },
+    "external_bridge_restart": {
+      "to": "external_bridge.restart"
+    },
+    "external_bridge_start": {
+      "to": "external_bridge.start"
+    },
+    "external_bridge_status": {
+      "to": "external_bridge.status"
+    },
+    "external_bridge_stop": {
+      "to": "external_bridge.stop"
+    },
+    "fleet_codex_hooks_capabilities": {
+      "to": "fleet.codex_hooks.capabilities.get"
+    },
+    "fleet_codex_hooks_install": {
+      "to": "fleet.codex_hooks.install"
+    },
+    "fleet_codex_hooks_status": {
+      "to": "fleet.codex_hooks.status"
+    },
+    "fleet_codex_hooks_uninstall": {
+      "to": "fleet.codex_hooks.uninstall"
+    },
+    "fleet_codex_install": {
+      "to": "fleet.codex.install"
+    },
+    "fleet_codex_status": {
+      "to": "fleet.codex.status"
+    },
+    "fleet_codex_uninstall": {
+      "to": "fleet.codex.uninstall"
+    },
+    "fleet_focus_terminal": {
+      "to": "fleet.terminal.focus"
+    },
+    "fleet_get_snapshot": {
+      "to": "fleet.snapshot.get"
+    },
+    "fleet_interrupt_session": {
+      "to": "fleet.session.interrupt"
+    },
+    "fleet_monitor_restore": {
+      "to": "fleet.monitor.restore"
+    },
+    "fleet_monitor_start": {
+      "to": "fleet.monitor.start"
+    },
+    "fleet_monitor_status": {
+      "to": "fleet.monitor.status"
+    },
+    "fleet_monitor_stop": {
+      "to": "fleet.monitor.stop"
+    },
+    "fleet_opencode_install": {
+      "to": "fleet.opencode.install"
+    },
+    "fleet_opencode_outbox_repair": {
+      "to": "fleet.opencode.outbox.repair"
+    },
+    "fleet_opencode_outbox_status": {
+      "to": "fleet.opencode.outbox.status"
+    },
+    "fleet_opencode_send_message": {
+      "to": "fleet.opencode.message.send"
+    },
+    "fleet_opencode_status": {
+      "to": "fleet.opencode.status"
+    },
+    "fleet_opencode_uninstall": {
+      "to": "fleet.opencode.uninstall"
+    },
+    "fleet_permission_respond": {
+      "to": "fleet.permission.respond"
+    },
+    "fleet_project_managed_session": {
+      "to": "fleet.managed_session.project"
+    },
+    "fleet_project_worker_load": {
+      "to": "fleet.worker_load.project"
+    },
+    "fleet_question_reject": {
+      "to": "fleet.question.reject"
+    },
+    "fleet_question_respond": {
+      "to": "fleet.question.respond"
+    },
+    "fleet_remove_managed_session": {
+      "to": "fleet.managed_session.delete"
+    },
+    "fleet_scripts_install": {
+      "to": "fleet.scripts.install"
+    },
+    "fleet_scripts_status": {
+      "to": "fleet.scripts.status"
+    },
+    "fleet_scripts_uninstall": {
+      "to": "fleet.scripts.uninstall"
+    },
+    "fleet_worker_enrollment_create": {
+      "to": "fleet.worker.enrollment.create"
+    },
+    "fleet_worker_list": {
+      "to": "fleet.worker.list"
+    },
+    "fleet_worker_set": {
+      "to": "fleet.worker.set"
+    },
+    "fs_allow_dialog_path": {
+      "to": "fs.dialog_path.allow"
+    },
+    "fs_copy_workspace_entry": {
+      "to": "fs.workspace_entry.copy"
+    },
+    "fs_create_workspace_dir": {
+      "to": "fs.workspace_dir.create"
+    },
+    "fs_delete_workspace_entry": {
+      "to": "fs.workspace_entry.delete"
+    },
+    "fs_list_workspace_dir": {
+      "to": "fs.workspace_dir.list"
+    },
+    "fs_read_workspace_file": {
+      "to": "fs.workspace_file.read"
+    },
+    "fs_rename_workspace_entry": {
+      "to": "fs.workspace_entry.rename"
+    },
+    "fs_search_content_workspace": {
+      "to": "fs.workspace.search_content"
+    },
+    "fs_search_workspace": {
+      "to": "fs.workspace.search"
+    },
+    "fs_set_allowed_roots": {
+      "to": "fs.allowed_root.set"
+    },
+    "fs_stat_workspace_file": {
+      "to": "fs.workspace_file.stat"
+    },
+    "fs_walk_workspace": {
+      "to": "fs.workspace.walk"
+    },
+    "external_agent_detect_runtimes": {
+      "to": "external_agent.runtime.detect"
+    },
+    "fs_workspace_roots": {
+      "to": "fs.workspace_root.list"
+    },
+    "fs_write_workspace_file": {
+      "to": "fs.workspace_file.write"
+    },
+    "gateway_create_key": {
+      "to": "gateway.key.create"
+    },
+    "gateway_decision_response": {
+      "to": "gateway.decision.respond"
+    },
+    "gateway_delete_key": {
+      "to": "gateway.key.delete"
+    },
+    "gateway_get_config": {
+      "to": "gateway.config.get"
+    },
+    "gateway_get_status": {
+      "to": "gateway.local.status"
+    },
+    "gateway_list_cooldowns": {
+      "to": "gateway.cooldown.list"
+    },
+    "gateway_list_keys": {
+      "to": "gateway.key.list"
+    },
+    "gateway_list_route_tickets": {
+      "to": "gateway.route_ticket.list"
+    },
+    "gateway_list_models": {
+      "to": "gateway.model.list"
+    },
+    "gateway_provider_capabilities": {
+      "to": "gateway.provider.capabilities.get"
+    },
+    "gateway_status": {
+      "to": "gateway.status"
+    },
+    "gateway_mint_route_ticket": {
+      "to": "gateway.route_ticket.mint"
+    },
+    "gateway_probe_upstream": {
+      "to": "gateway.upstream.probe"
+    },
+    "gateway_push_snapshot": {
+      "to": "gateway.snapshot.push"
+    },
+    "gateway_reset_key_quota": {
+      "to": "gateway.key_quota.reset"
+    },
+    "gateway_reveal_key": {
+      "to": "gateway.key.reveal"
+    },
+    "gateway_revoke_route_ticket": {
+      "to": "gateway.route_ticket.revoke"
+    },
+    "gateway_start": {
+      "to": "gateway.start"
+    },
+    "gateway_stop": {
+      "to": "gateway.stop"
+    },
+    "gateway_update_config": {
+      "to": "gateway.config.update"
+    },
+    "gateway_update_key": {
+      "to": "gateway.key.update"
+    },
+    "get_close_behavior": {
+      "to": "app.close_behavior.get"
+    },
+    "get_external_agent_info": {
+      "to": "external_agent.info.get"
+    },
+    "get_external_agent_status": {
+      "to": "external_agent.status"
+    },
+    "get_foreground_app": {
+      "to": "desktop.foreground_app.get"
+    },
+    "git_blame": {
+      "to": "git.blame"
+    },
+    "git_branches": {
+      "to": "git.branch.list"
+    },
+    "git_checkout_branch": {
+      "to": "git.branch.checkout"
+    },
+    "git_cherry_pick": {
+      "to": "git.cherry_pick"
+    },
+    "git_clone": {
+      "to": "git.clone"
+    },
+    "git_clone_guarded": {
+      "to": "git.clone_guarded"
+    },
+    "git_commit": {
+      "to": "git.commit"
+    },
+    "git_commit_files": {
+      "to": "git.commit_files"
+    },
+    "git_conflicts": {
+      "to": "git.conflict.list"
+    },
+    "git_create_branch": {
+      "to": "git.branch.create"
+    },
+    "git_create_tag": {
+      "to": "git.tag.create"
+    },
+    "git_default_branch": {
+      "to": "git.default_branch.get"
+    },
+    "git_delete_branch": {
+      "to": "git.branch.delete"
+    },
+    "git_delete_tag": {
+      "to": "git.tag.delete"
+    },
+    "git_diff_commit": {
+      "to": "git.diff_commit"
+    },
+    "git_diff_file": {
+      "to": "git.diff_file"
+    },
+    "git_diff_refs_file": {
+      "to": "git.diff_refs_file"
+    },
+    "git_diff_refs_files": {
+      "to": "git.diff_refs_files"
+    },
+    "git_diff_staged_all": {
+      "to": "git.diff_staged_all"
+    },
+    "git_diff_stat": {
+      "to": "git.diff_stat"
+    },
+    "git_discard": {
+      "to": "git.discard"
+    },
+    "git_discard_all": {
+      "to": "git.discard_all"
+    },
+    "git_fetch": {
+      "to": "git.fetch"
+    },
+    "git_file_history": {
+      "to": "git.file_history.get"
+    },
+    "git_identity": {
+      "to": "git.identity.get"
+    },
+    "git_ignore_add": {
+      "to": "git.ignore.add"
+    },
+    "git_init": {
+      "to": "git.init"
+    },
+    "git_interactive_rebase": {
+      "to": "git.rebase_interactive"
+    },
+    "git_is_repo": {
+      "to": "git.repo.probe"
+    },
+    "git_log": {
+      "to": "git.log.get"
+    },
+    "git_merge": {
+      "to": "git.merge"
+    },
+    "git_merge_abort": {
+      "to": "git.merge.abort"
+    },
+    "git_pull": {
+      "to": "git.pull"
+    },
+    "git_push": {
+      "to": "git.push"
+    },
+    "git_push_tag": {
+      "to": "git.tag.push"
+    },
+    "git_read_blob_at_ref": {
+      "to": "git.blob.read_at_ref"
+    },
+    "git_rebase": {
+      "to": "git.rebase"
+    },
+    "git_rebase_commits": {
+      "to": "git.rebase_commits"
+    },
+    "git_refs": {
+      "to": "git.ref.list"
+    },
+    "git_remote_add": {
+      "to": "git.remote.add"
+    },
+    "git_remote_remove": {
+      "to": "git.remote.delete"
+    },
+    "git_remotes": {
+      "to": "git.remote.list"
+    },
+    "git_rename_branch": {
+      "to": "git.branch.rename"
+    },
+    "git_repo_state": {
+      "to": "git.repo.get"
+    },
+    "git_reset": {
+      "to": "git.reset"
+    },
+    "git_resolve_conflict": {
+      "to": "git.conflict.resolve"
+    },
+    "git_restore": {
+      "to": "git.restore"
+    },
+    "git_revert": {
+      "to": "git.revert"
+    },
+    "git_sequencer_abort": {
+      "to": "git.sequencer.abort"
+    },
+    "git_sequencer_continue": {
+      "to": "git.sequencer.continue"
+    },
+    "git_set_identity": {
+      "to": "git.identity.set"
+    },
+    "git_stack_capabilities": {
+      "to": "git.stack.capabilities.get"
+    },
+    "git_stack_history": {
+      "to": "git.stack.history.get"
+    },
+    "git_stack_parents": {
+      "to": "git.stack.parent.list"
+    },
+    "git_stack_push": {
+      "to": "git.stack.push"
+    },
+    "git_stack_restack": {
+      "to": "git.stack.restack"
+    },
+    "git_stack_revert": {
+      "to": "git.stack.revert"
+    },
+    "git_stack_set_parent": {
+      "to": "git.stack.parent.set"
+    },
+    "git_stack_validate": {
+      "to": "git.stack.validate"
+    },
+    "git_stage": {
+      "to": "git.stage"
+    },
+    "git_stash_apply": {
+      "to": "git.stash.apply"
+    },
+    "git_stash_drop": {
+      "to": "git.stash.drop"
+    },
+    "git_stash_list": {
+      "to": "git.stash.list"
+    },
+    "git_stash_pop": {
+      "to": "git.stash.pop"
+    },
+    "git_stash_push": {
+      "to": "git.stash.push"
+    },
+    "git_status": {
+      "to": "git.status"
+    },
+    "git_sync": {
+      "to": "git.sync"
+    },
+    "git_tags": {
+      "to": "git.tag.list"
+    },
+    "git_unstage": {
+      "to": "git.unstage"
+    },
+    "git_watch_start": {
+      "to": "git.watch.start"
+    },
+    "git_watch_stop": {
+      "to": "git.watch.stop"
+    },
+    "git_workspace_list": {
+      "to": "git.workspace.list"
+    },
+    "git_worktree_add": {
+      "to": "git.worktree.add"
+    },
+    "git_worktree_commit": {
+      "to": "git.worktree.commit"
+    },
+    "git_worktree_list": {
+      "to": "git.worktree.list"
+    },
+    "git_worktree_prune": {
+      "to": "git.worktree.prune"
+    },
+    "git_worktree_remove": {
+      "to": "git.worktree.delete"
+    },
+    "github_workspace_clone": {
+      "to": "github.workspace.clone"
+    },
+    "github_workspace_commit_and_push": {
+      "to": "github.workspace.commit_and_push"
+    },
+    "github_workspace_remove": {
+      "to": "github.workspace.delete"
+    },
+    "github_workspace_stat": {
+      "to": "github.workspace.stat"
+    },
+    "goal_create": {
+      "to": "goal.create"
+    },
+    "goal_pause": {
+      "to": "goal.pause"
+    },
+    "goal_resume": {
+      "to": "goal.resume"
+    },
+    "goal_status": {
+      "to": "goal.status"
+    },
+    "goal_stop": {
+      "to": "goal.stop"
+    },
+    "goal_update": {
+      "to": "goal.update"
+    },
+    "greet": {
+      "to": "host.greet"
+    },
+    "host_admin_lease_issue": {
+      "to": "host.admin_lease.issue"
+    },
+    "host_admin_lease_revoke": {
+      "to": "host.admin_lease.revoke"
+    },
+    "host_capabilities": {
+      "to": "host.capabilities.get"
+    },
+    "host_consent_pending": {
+      "to": "host.consent.list_pending"
+    },
+    "host_consent_respond": {
+      "to": "host.consent.respond"
+    },
+    "host_feature_manifest": {
+      "to": "host.feature_manifest.get"
+    },
+    "host_state_snapshot": {
+      "to": "host.state.snapshot"
+    },
+    "host_state_status": {
+      "to": "host.state.status"
+    },
+    "host_state_submit": {
+      "to": "host.state.submit"
+    },
+    "integration_ingress_ack": {
+      "to": "integration.ingress.ack"
+    },
+    "integration_ingress_deadletter": {
+      "to": "integration.ingress.deadletter.get"
+    },
+    "integration_ingress_deadletters": {
+      "to": "integration.ingress.deadletter.list"
+    },
+    "integration_ingress_get_url": {
+      "to": "integration.ingress.url.get"
+    },
+    "integration_ingress_nack": {
+      "to": "integration.ingress.nack"
+    },
+    "integration_ingress_poll": {
+      "to": "integration.ingress.poll"
+    },
+    "integration_ingress_register": {
+      "to": "integration.ingress.register"
+    },
+    "integration_ingress_requeue": {
+      "to": "integration.ingress.requeue"
+    },
+    "integration_ingress_unregister": {
+      "to": "integration.ingress.unregister"
+    },
+    "is_external_agent_running": {
+      "to": "external_agent.probe"
+    },
+    "is_island_window_open": {
+      "to": "desktop.island.window.probe"
+    },
+    "is_pet_window_open": {
+      "to": "desktop.pet.window.probe"
+    },
+    "island_debug_geometry": {
+      "to": "desktop.island.debug_geometry.get"
+    },
+    "island_get_hide_on_fullscreen": {
+      "to": "desktop.island.hide_on_fullscreen.get"
+    },
+    "island_list_monitors": {
+      "to": "desktop.island.monitor.list"
+    },
+    "island_resize": {
+      "to": "desktop.island.resize"
+    },
+    "island_restore": {
+      "to": "desktop.island.restore"
+    },
+    "island_set_hide_on_fullscreen": {
+      "to": "desktop.island.hide_on_fullscreen.set"
+    },
+    "island_set_monitor": {
+      "to": "desktop.island.monitor.set"
+    },
+    "island_set_tucked": {
+      "to": "desktop.island.tucked.set"
+    },
+    "issue_apply_action": {
+      "to": "issue.action.apply"
+    },
+    "issue_create": {
+      "to": "issue.create"
+    },
+    "keyring_secret_clear": {
+      "to": "secret.clear"
+    },
+    "keyring_secret_get": {
+      "to": "secret.get"
+    },
+    "keyring_secret_set": {
+      "to": "secret.set"
+    },
+    "kill_all_external_agents": {
+      "to": "external_agent.stop_all",
+      "note": "kill becomes stop with force:true (B5)"
+    },
+    "kill_external_agent": {
+      "to": "external_agent.stop",
+      "note": "kill becomes stop with force:true (B5)"
+    },
+    "langfuse_connection_test": {
+      "to": "langfuse.connection.probe"
+    },
+    "langfuse_credentials_clear": {
+      "to": "langfuse.credentials.clear"
+    },
+    "langfuse_credentials_set": {
+      "to": "langfuse.credentials.set"
+    },
+    "langfuse_credentials_status": {
+      "to": "langfuse.credentials.status"
+    },
+    "langfuse_trace_ingest": {
+      "to": "langfuse.trace.ingest"
+    },
+    "lark_entry_issue": {
+      "to": "lark.entry.issue"
+    },
+    "lark_metrics_record": {
+      "to": "lark.metrics.record"
+    },
+    "lark_result_complete": {
+      "to": "lark.result.complete"
+    },
+    "list_external_agents": {
+      "to": "external_agent.process.list",
+      "note": "desktop-local process list; external_agent_list is the brain roster"
+    },
+    "list_managed_processes": {
+      "to": "process.managed.list"
+    },
+    "list_pi_sessions": {
+      "to": "pi.session.list"
+    },
+    "logs_list_files": {
+      "to": "logs.file.list"
+    },
+    "logs_query": {
+      "to": "logs.query"
+    },
+    "lsp_host_ensure": {
+      "to": "lsp.host.ensure"
+    },
+    "lsp_host_request": {
+      "to": "lsp.host.request"
+    },
+    "mcp_oauth_authenticate": {
+      "to": "mcp.oauth.authenticate"
+    },
+    "mcp_oauth_clear": {
+      "to": "mcp.oauth.clear"
+    },
+    "mcp_oauth_load_entry": {
+      "to": "mcp.oauth.entry.load"
+    },
+    "mcp_oauth_refresh": {
+      "to": "mcp.oauth.refresh"
+    },
+    "mcp_oauth_status": {
+      "to": "mcp.oauth.status"
+    },
+    "mcp_server_restart": {
+      "to": "mcp.server.restart"
+    },
+    "mcp_server_sidecar_path": {
+      "to": "mcp.server.sidecar_path.get"
+    },
+    "mcp_server_start": {
+      "to": "mcp.server.start"
+    },
+    "mcp_server_status": {
+      "to": "mcp.server.status"
+    },
+    "mcp_server_stop": {
+      "to": "mcp.server.stop"
+    },
+    "mcp_set_enabled": {
+      "to": "mcp.enabled.set"
+    },
+    "mcp_set_tool_rules": {
+      "to": "mcp.tool_rules.set"
+    },
+    "memory_append": {
+      "to": "memory.append"
+    },
+    "memory_forget": {
+      "to": "memory.forget"
+    },
+    "memory_list": {
+      "to": "memory.list"
+    },
+    "memory_search": {
+      "to": "memory.search"
+    },
+    "memory_store": {
+      "to": "memory.upsert"
+    },
+    "memory_update": {
+      "to": "memory.update"
+    },
+    "menu_action_ids": {
+      "to": "desktop.menu.action_id.list"
+    },
+    "message_delete": {
+      "to": "session.message.delete"
+    },
+    "message_get_by_session": {
+      "to": "session.message.list"
+    },
+    "message_send": {
+      "to": "session.message.send"
+    },
+    "message_update": {
+      "to": "session.message.update"
+    },
+    "native_logging_get_log_directory": {
+      "to": "native.logging.log_directory.get"
+    },
+    "native_logging_get_readiness": {
+      "to": "native.logging.readiness.get"
+    },
+    "native_logging_open_log_directory": {
+      "to": "native.logging.log_directory.open"
+    },
+    "ocr_cancel_model_download": {
+      "to": "ocr.model.cancel_download"
+    },
+    "ocr_download_model": {
+      "to": "ocr.model.download"
+    },
+    "ocr_extract_native": {
+      "to": "ocr.extract_native"
+    },
+    "ocr_http_cancel": {
+      "to": "ocr.http.cancel"
+    },
+    "ocr_http_fetch": {
+      "to": "ocr.http.fetch"
+    },
+    "ocr_list_available_backends": {
+      "to": "ocr.backend.list_available"
+    },
+    "ocr_list_native_backends": {
+      "to": "ocr.backend.list_native"
+    },
+    "ocr_model_status": {
+      "to": "ocr.model.status"
+    },
+    "ocr_msix_status": {
+      "to": "ocr.msix.status"
+    },
+    "ollama_pull_model_stream": {
+      "to": "ollama.model.pull_stream"
+    },
+    "open_island_window": {
+      "to": "desktop.island.window.open"
+    },
+    "open_pet_popup": {
+      "to": "desktop.pet.popup.open"
+    },
+    "open_pet_window": {
+      "to": "desktop.pet.window.open"
+    },
+    "open_tray_panel": {
+      "to": "desktop.tray.panel.open"
+    },
+    "opencode_adopt_discovered": {
+      "to": "opencode.discovered.adopt"
+    },
+    "opencode_oauth_discover": {
+      "to": "opencode.oauth.discover"
+    },
+    "opencode_save_zen_key": {
+      "to": "opencode.zen_key.save"
+    },
+    "opencode_sessions_read": {
+      "to": "opencode.session.read"
+    },
+    "orchestration_proxy_response": {
+      "to": "orchestration.proxy.respond"
+    },
+    "os_list_fonts": {
+      "to": "os.font.list"
+    },
+    "parse_document_native": {
+      "to": "document.parse_native"
+    },
+    "perf_close_lease": {
+      "to": "perf.lease.close"
+    },
+    "perf_hotspots": {
+      "to": "perf.hotspot.list"
+    },
+    "perf_lease_snapshot": {
+      "to": "perf.lease.snapshot"
+    },
+    "perf_list_traces": {
+      "to": "perf.trace.list"
+    },
+    "perf_open_lease": {
+      "to": "perf.lease.open"
+    },
+    "perf_open_trace_dir": {
+      "to": "perf.trace_dir.open"
+    },
+    "perf_read_observations": {
+      "to": "perf.observation.read"
+    },
+    "perf_renew_lease": {
+      "to": "perf.lease.renew"
+    },
+    "perf_reset_hotspots": {
+      "to": "perf.hotspot.reset"
+    },
+    "perf_set_interval": {
+      "to": "perf.interval.set"
+    },
+    "perf_snapshot": {
+      "to": "perf.snapshot"
+    },
+    "perf_start_sampling": {
+      "to": "perf.sampling.start"
+    },
+    "perf_stop_sampling": {
+      "to": "perf.sampling.stop"
+    },
+    "perf_system_details": {
+      "to": "perf.system_details.get"
+    },
+    "perf_trace_close": {
+      "to": "perf.trace.close"
+    },
+    "perf_trace_open": {
+      "to": "perf.trace.open"
+    },
+    "perf_trace_read_chunk": {
+      "to": "perf.trace.read_chunk"
+    },
+    "pet_popup_resize": {
+      "to": "desktop.pet.popup.resize"
+    },
+    "pet_window_get_cursor_position": {
+      "to": "desktop.pet.window.cursor_position.get"
+    },
+    "pet_window_get_position": {
+      "to": "desktop.pet.window.position.get"
+    },
+    "pet_window_get_surfaces": {
+      "to": "desktop.pet.window.surface.get"
+    },
+    "pet_window_get_work_area": {
+      "to": "desktop.pet.window.work_area.get"
+    },
+    "pet_window_set_ignore_cursor_events": {
+      "to": "desktop.pet.window.ignore_cursor_event.set"
+    },
+    "pet_window_set_position": {
+      "to": "desktop.pet.window.position.set"
+    },
+    "platform_logging_forward": {
+      "to": "platform.logging.forward"
+    },
+    "platform_logging_get_status": {
+      "to": "platform.logging.status"
+    },
+    "platform_logging_set_config": {
+      "to": "platform.logging.config.set"
+    },
+    "plugin_activate_vscode": {
+      "to": "plugin.vscode.activate"
+    },
+    "plugin_api_batch_invoke": {
+      "to": "plugin.api.invoke_batch"
+    },
+    "plugin_api_invoke": {
+      "to": "plugin.api.invoke"
+    },
+    "plugin_backup_create": {
+      "to": "plugin.backup.create"
+    },
+    "plugin_backup_delete": {
+      "to": "plugin.backup.delete"
+    },
+    "plugin_backup_restore": {
+      "to": "plugin.backup.restore"
+    },
+    "plugin_cli_exec": {
+      "to": "plugin.cli.exec"
+    },
+    "plugin_commit_staged_update": {
+      "to": "plugin.staged_update.commit"
+    },
+    "plugin_computer_use_bash": {
+      "to": "plugin.computer_use.exec_bash"
+    },
+    "plugin_computer_use_execute": {
+      "to": "plugin.computer_use.exec"
+    },
+    "plugin_computer_use_text_editor": {
+      "to": "plugin.computer_use.exec_text_editor"
+    },
+    "plugin_context_menu_register": {
+      "to": "plugin.context_menu.register"
+    },
+    "plugin_context_menu_unregister": {
+      "to": "plugin.context_menu.unregister"
+    },
+    "plugin_create_signature": {
+      "to": "plugin.signature.create"
+    },
+    "plugin_deactivate_js": {
+      "to": "plugin.js.deactivate"
+    },
+    "plugin_deactivate_vscode": {
+      "to": "plugin.vscode.deactivate"
+    },
+    "plugin_dev_server_unwatch": {
+      "to": "plugin.dev_server.unwatch"
+    },
+    "plugin_dev_server_watch": {
+      "to": "plugin.dev_server.watch"
+    },
+    "plugin_disable": {
+      "to": "plugin.disable"
+    },
+    "plugin_discard_staged_update": {
+      "to": "plugin.staged_update.discard"
+    },
+    "plugin_download_version": {
+      "to": "plugin.version.download"
+    },
+    "plugin_enable": {
+      "to": "plugin.enable"
+    },
+    "plugin_finalize_staged_update": {
+      "to": "plugin.staged_update.finalize"
+    },
+    "plugin_fs_unwatch": {
+      "to": "plugin.fs.unwatch"
+    },
+    "plugin_fs_watch": {
+      "to": "plugin.fs.watch"
+    },
+    "plugin_generate_keypair": {
+      "to": "plugin.keypair.generate"
+    },
+    "plugin_get_all": {
+      "to": "plugin.list_all"
+    },
+    "plugin_get_capabilities": {
+      "to": "plugin.capabilities.get"
+    },
+    "plugin_get_directory": {
+      "to": "plugin.directory.get"
+    },
+    "plugin_get_state": {
+      "to": "plugin.state.get"
+    },
+    "plugin_install": {
+      "to": "plugin.install"
+    },
+    "plugin_install_from_directory": {
+      "to": "plugin.install_from_directory"
+    },
+    "plugin_install_from_github": {
+      "to": "plugin.install_from_github"
+    },
+    "plugin_invalidate_cache": {
+      "to": "plugin.cache.invalidate"
+    },
+    "plugin_invoke_js_callback": {
+      "to": "plugin.js_callback.invoke"
+    },
+    "plugin_invoke_vscode_rpc": {
+      "to": "plugin.vscode_rpc.invoke"
+    },
+    "plugin_js_status": {
+      "to": "plugin.js.status"
+    },
+    "plugin_launch_js": {
+      "to": "plugin.js.launch"
+    },
+    "plugin_list": {
+      "to": "plugin.list"
+    },
+    "plugin_list_dev_plugins": {
+      "to": "plugin.dev_plugin.list"
+    },
+    "plugin_load": {
+      "to": "plugin.load"
+    },
+    "plugin_load_vscode": {
+      "to": "plugin.vscode.load"
+    },
+    "plugin_marketplace_versions": {
+      "to": "plugin.marketplace.version.list"
+    },
+    "plugin_media_add_transition": {
+      "to": "media.transition.add"
+    },
+    "plugin_media_apply_video_effect": {
+      "to": "media.video_effect.apply"
+    },
+    "plugin_media_concatenate_videos": {
+      "to": "media.video.concatenate"
+    },
+    "plugin_media_export_video": {
+      "to": "media.video.export"
+    },
+    "plugin_media_get_video_frame": {
+      "to": "media.video_frame.get"
+    },
+    "plugin_permission_grant": {
+      "to": "plugin.permission.grant"
+    },
+    "plugin_permission_list": {
+      "to": "plugin.permission.list"
+    },
+    "plugin_permission_revoke": {
+      "to": "plugin.permission.revoke"
+    },
+    "plugin_process_kill": {
+      "to": "plugin.process.stop"
+    },
+    "plugin_public_key_fingerprint": {
+      "to": "plugin.public_key.fingerprint.get"
+    },
+    "plugin_python_call": {
+      "to": "plugin.python.call"
+    },
+    "plugin_python_call_hook": {
+      "to": "plugin.python.hook.call"
+    },
+    "plugin_python_call_tool": {
+      "to": "plugin.python.tool.call"
+    },
+    "plugin_python_eval": {
+      "to": "plugin.python.eval"
+    },
+    "plugin_python_get_info": {
+      "to": "plugin.python.info.get"
+    },
+    "plugin_python_get_tools": {
+      "to": "plugin.python.tool.list"
+    },
+    "plugin_python_host_response": {
+      "to": "plugin.python.host.respond"
+    },
+    "plugin_python_import": {
+      "to": "plugin.python.import"
+    },
+    "plugin_python_initialize": {
+      "to": "plugin.python.initialize"
+    },
+    "plugin_python_install_deps": {
+      "to": "plugin.python.deps.install"
+    },
+    "plugin_python_install_uv": {
+      "to": "plugin.python.uv.install"
+    },
+    "plugin_python_is_initialized": {
+      "to": "plugin.python.probe"
+    },
+    "plugin_python_list": {
+      "to": "plugin.python.list"
+    },
+    "plugin_python_load": {
+      "to": "plugin.python.load"
+    },
+    "plugin_python_module_call": {
+      "to": "plugin.python.module.call"
+    },
+    "plugin_python_module_getattr": {
+      "to": "plugin.python.module.getattr"
+    },
+    "plugin_python_push_config": {
+      "to": "plugin.python.config.push"
+    },
+    "plugin_python_runtime_info": {
+      "to": "plugin.python.runtime_info.get"
+    },
+    "plugin_python_unload": {
+      "to": "plugin.python.unload"
+    },
+    "plugin_read_entry": {
+      "to": "plugin.entry.read"
+    },
+    "plugin_read_entry_base64": {
+      "to": "plugin.entry.read_base64"
+    },
+    "plugin_read_verification": {
+      "to": "plugin.verification.read"
+    },
+    "plugin_runtime_snapshot": {
+      "to": "plugin.runtime.snapshot"
+    },
+    "plugin_scan_directory": {
+      "to": "plugin.directory.scan"
+    },
+    "plugin_set_enabled": {
+      "to": "plugin.enabled.set"
+    },
+    "plugin_set_network_allowlist": {
+      "to": "plugin.network_allowlist.set"
+    },
+    "plugin_set_shell_allowlist": {
+      "to": "plugin.shell_allowlist.set"
+    },
+    "plugin_set_state": {
+      "to": "plugin.state.set"
+    },
+    "plugin_set_status": {
+      "to": "plugin.status.set"
+    },
+    "plugin_shortcut_register": {
+      "to": "plugin.shortcut.register"
+    },
+    "plugin_shortcut_unregister": {
+      "to": "plugin.shortcut.unregister"
+    },
+    "plugin_show_notification": {
+      "to": "plugin.notification.show"
+    },
+    "plugin_stage_version": {
+      "to": "plugin.version.stage"
+    },
+    "plugin_stop_js": {
+      "to": "plugin.js.stop"
+    },
+    "plugin_tray_item_list": {
+      "to": "plugin.tray_item.list"
+    },
+    "plugin_tray_item_register": {
+      "to": "plugin.tray_item.register"
+    },
+    "plugin_tray_item_unregister": {
+      "to": "plugin.tray_item.unregister"
+    },
+    "plugin_tray_item_unregister_by_plugin": {
+      "to": "plugin.tray_item.unregister_by_plugin"
+    },
+    "plugin_uninstall": {
+      "to": "plugin.uninstall"
+    },
+    "plugin_unload": {
+      "to": "plugin.unload"
+    },
+    "plugin_unload_vscode": {
+      "to": "plugin.vscode.unload"
+    },
+    "plugin_verify_detached_signature": {
+      "to": "plugin.detached_signature.verify"
+    },
+    "plugin_verify_pack_signature": {
+      "to": "plugin.pack_signature.verify"
+    },
+    "plugin_verify_signature": {
+      "to": "plugin.signature.verify"
+    },
+    "plugin_vscode_download_vsix": {
+      "to": "plugin.vscode.vsix.download"
+    },
+    "plugin_vscode_install_vsix": {
+      "to": "plugin.vscode.vsix.install"
+    },
+    "plugin_vscode_install_vsix_from_path": {
+      "to": "plugin.vscode.vsix_from_path.install"
+    },
+    "plugin_vscode_send_response": {
+      "to": "plugin.vscode.respond"
+    },
+    "plugin_wasm_activate": {
+      "to": "plugin.wasm.activate"
+    },
+    "plugin_wasm_call": {
+      "to": "plugin.wasm.call"
+    },
+    "plugin_wasm_deactivate": {
+      "to": "plugin.wasm.deactivate"
+    },
+    "plugin_wasm_install_from_git": {
+      "to": "plugin.wasm.install_from_git"
+    },
+    "plugin_wasm_install_from_url": {
+      "to": "plugin.wasm.install_from_url"
+    },
+    "plugin_wasm_list": {
+      "to": "plugin.wasm.list"
+    },
+    "plugin_wasm_load": {
+      "to": "plugin.wasm.load"
+    },
+    "plugin_wasm_renderer_response": {
+      "to": "plugin.wasm.renderer.respond"
+    },
+    "plugin_wasm_unload": {
+      "to": "plugin.wasm.unload"
+    },
+    "plugin_watch_start": {
+      "to": "plugin.watch.start"
+    },
+    "plugin_watch_stop": {
+      "to": "plugin.watch.stop"
+    },
+    "plugin_window_maximize": {
+      "to": "plugin.window.maximize"
+    },
+    "plugin_window_minimize": {
+      "to": "plugin.window.minimize"
+    },
+    "plugin_window_set_always_on_top": {
+      "to": "plugin.window.always_on_top.set"
+    },
+    "plugin_window_unmaximize": {
+      "to": "plugin.window.unmaximize"
+    },
+    "plugin_workspace_repo_dir": {
+      "to": "plugin.workspace_repo_dir.get"
+    },
+    "plugin_workspace_repo_remove": {
+      "to": "plugin.workspace_repo.delete"
+    },
+    "preview_local_manifest": {
+      "to": "plugin.local_manifest.preview"
+    },
+    "project_environment_execute": {
+      "to": "project.environment.exec"
+    },
+    "provider_catalog_refresh": {
+      "to": "provider.catalog.refresh"
+    },
+    "provider_catalog_search": {
+      "to": "provider.catalog.search"
+    },
+    "provider_catalog_status": {
+      "to": "provider.catalog.status"
+    },
+    "provider_diagnostics_cancel": {
+      "to": "provider.diagnostics.cancel"
+    },
+    "provider_diagnostics_clear_balance_token": {
+      "to": "provider.diagnostics.balance_token.clear"
+    },
+    "provider_diagnostics_history": {
+      "to": "provider.diagnostics.history.get"
+    },
+    "provider_diagnostics_migrate_balance_token": {
+      "to": "provider.diagnostics.balance_token.migrate"
+    },
+    "provider_diagnostics_run_balance_script": {
+      "to": "provider.diagnostics.balance_script.run"
+    },
+    "provider_diagnostics_start": {
+      "to": "provider.diagnostics.start"
+    },
+    "provider_diagnostics_status": {
+      "to": "provider.diagnostics.status"
+    },
+    "provider_profiles_import": {
+      "to": "provider.profile.import"
+    },
+    "provider_profiles_list": {
+      "to": "provider.profile.list"
+    },
+    "provider_profiles_version": {
+      "to": "provider.profile.version.get"
+    },
+    "proxy_apply": {
+      "to": "proxy.apply"
+    },
+    "proxy_detect": {
+      "to": "proxy.detect"
+    },
+    "proxy_get_active": {
+      "to": "proxy.active.get"
+    },
+    "proxy_http_cancel": {
+      "to": "proxy.http.cancel"
+    },
+    "proxy_http_request": {
+      "to": "proxy.http.request"
+    },
+    "proxy_http_stream_ack": {
+      "to": "proxy.http_stream.ack"
+    },
+    "proxy_http_stream_cancel": {
+      "to": "proxy.http_stream.cancel"
+    },
+    "proxy_http_stream_open": {
+      "to": "proxy.http_stream.open"
+    },
+    "proxy_identify_clash": {
+      "to": "proxy.clash.identify"
+    },
+    "proxy_test": {
+      "to": "proxy.probe"
+    },
+    "read_agent_config": {
+      "to": "agent.config.read"
+    },
+    "read_claude_effective_settings": {
+      "to": "agent.settings.read_effective"
+    },
+    "read_claude_local_settings": {
+      "to": "agent.settings.read_local"
+    },
+    "read_claude_project_settings": {
+      "to": "agent.settings.read_project"
+    },
+    "read_claude_user_config": {
+      "to": "agent.user_config.read"
+    },
+    "read_claude_user_settings": {
+      "to": "agent.settings.read_user"
+    },
+    "read_project_mcp_config": {
+      "to": "mcp.project_config.read"
+    },
+    "read_text_file": {
+      "to": "fs.text_file.read"
+    },
+    "record_delete_bundle": {
+      "to": "recorder.bundle.delete"
+    },
+    "record_interrupt": {
+      "to": "recorder.interrupt"
+    },
+    "record_list_capture_targets": {
+      "to": "recorder.capture_target.list"
+    },
+    "record_list_recoverable": {
+      "to": "recorder.recoverable.list"
+    },
+    "record_load_bundle": {
+      "to": "recorder.bundle.load"
+    },
+    "record_pause": {
+      "to": "recorder.pause"
+    },
+    "record_preflight": {
+      "to": "recorder.preflight"
+    },
+    "record_read_asset": {
+      "to": "recorder.asset.read"
+    },
+    "record_resume": {
+      "to": "recorder.resume"
+    },
+    "record_start": {
+      "to": "recorder.start"
+    },
+    "record_status": {
+      "to": "recorder.status"
+    },
+    "record_stop": {
+      "to": "recorder.stop"
+    },
+    "record_undo_last": {
+      "to": "recorder.undo_last"
+    },
+    "recorder_controller_begin_drag": {
+      "to": "recorder.controller.begin_drag"
+    },
+    "recorder_controller_set_collapsed": {
+      "to": "recorder.controller.collapsed.set"
+    },
+    "recovery_boot_get": {
+      "to": "recovery.boot.get"
+    },
+    "recovery_checkpoint_record": {
+      "to": "recovery.checkpoint.record"
+    },
+    "recovery_heartbeat": {
+      "to": "recovery.heartbeat"
+    },
+    "recovery_retry": {
+      "to": "recovery.retry"
+    },
+    "recovery_state_get": {
+      "to": "recovery.state.get"
+    },
+    "register_push_token": {
+      "to": "notification.push_token.register"
+    },
+    "remote_notification_publish": {
+      "to": "notification.remote.publish"
+    },
+    "resolve_cli_home": {
+      "to": "cli.home.resolve"
+    },
+    "resolve_close_request": {
+      "to": "app.close_request.resolve"
+    },
+    "resolve_pi_extension": {
+      "to": "pi.extension.resolve"
+    },
+    "retrieval_profile_dek_export": {
+      "to": "retrieval.profile_dek.export"
+    },
+    "reveal_island_window": {
+      "to": "desktop.island.window.reveal"
+    },
+    "reveal_pet_window": {
+      "to": "desktop.pet.window.reveal"
+    },
+    "reveal_tray_panel": {
+      "to": "desktop.tray.panel.reveal"
+    },
+    "revoke_push_token": {
+      "to": "notification.push_token.revoke"
+    },
+    "run_agent_hook": {
+      "to": "agent.hook.run"
+    },
+    "sandbox_exec": {
+      "to": "sandbox.exec"
+    },
+    "sandbox_health_check": {
+      "to": "sandbox.health.probe"
+    },
+    "sandbox_health_probe": {
+      "to": "sandbox.health.probe"
+    },
+    "scan_claude_skills": {
+      "to": "skill.scan_claude"
+    },
+    "scheduled_task_backfill": {
+      "to": "scheduler.task.backfill"
+    },
+    "scheduled_task_cancel_run": {
+      "to": "scheduler.task.run.cancel"
+    },
+    "scheduled_task_cleanup": {
+      "to": "scheduler.task.cleanup"
+    },
+    "scheduled_task_create": {
+      "to": "scheduler.task.create"
+    },
+    "scheduled_task_delete": {
+      "to": "scheduler.task.delete"
+    },
+    "scheduled_task_emit_event": {
+      "to": "scheduler.task.event.emit"
+    },
+    "scheduled_task_export": {
+      "to": "scheduler.task.export"
+    },
+    "scheduled_task_get": {
+      "to": "scheduler.task.get"
+    },
+    "scheduled_task_import": {
+      "to": "scheduler.task.import"
+    },
+    "scheduled_task_list": {
+      "to": "scheduler.task.list"
+    },
+    "scheduled_task_pause": {
+      "to": "scheduler.task.pause"
+    },
+    "scheduled_task_resume": {
+      "to": "scheduler.task.resume"
+    },
+    "scheduled_task_run_now": {
+      "to": "scheduler.task.run_now"
+    },
+    "scheduled_task_runs": {
+      "to": "scheduler.task.run.list"
+    },
+    "scheduled_task_statistics": {
+      "to": "scheduler.task.statistics.get"
+    },
+    "scheduled_task_upcoming": {
+      "to": "scheduler.task.list_upcoming"
+    },
+    "scheduled_task_update": {
+      "to": "scheduler.task.update"
+    },
+    "scheduler_arm_task": {
+      "to": "scheduler.system_task.arm"
+    },
+    "scheduler_cancel_confirmation": {
+      "to": "scheduler.system_task.cancel_confirmation"
+    },
+    "scheduler_confirm_task": {
+      "to": "scheduler.system_task.confirm"
+    },
+    "scheduler_create_task": {
+      "to": "scheduler.system_task.create"
+    },
+    "scheduler_delete_task": {
+      "to": "scheduler.system_task.delete"
+    },
+    "scheduler_disable_task": {
+      "to": "scheduler.system_task.disable"
+    },
+    "scheduler_disarm_task": {
+      "to": "scheduler.system_task.disarm"
+    },
+    "scheduler_enable_task": {
+      "to": "scheduler.system_task.enable"
+    },
+    "scheduler_get_capabilities": {
+      "to": "scheduler.system_task.capabilities.get"
+    },
+    "scheduler_get_pending_confirmations": {
+      "to": "scheduler.system_task.pending_confirmation.list"
+    },
+    "scheduler_get_task": {
+      "to": "scheduler.system_task.get"
+    },
+    "scheduler_is_available": {
+      "to": "scheduler.system_task.probe"
+    },
+    "scheduler_is_elevated": {
+      "to": "scheduler.system_task.probe_elevation"
+    },
+    "scheduler_list_tasks": {
+      "to": "scheduler.system_task.list"
+    },
+    "scheduler_request_elevation": {
+      "to": "scheduler.system_task.request_elevation"
+    },
+    "scheduler_run_task_now": {
+      "to": "scheduler.system_task.run_now"
+    },
+    "scheduler_update_task": {
+      "to": "scheduler.system_task.update"
+    },
+    "scheduler_validate_task": {
+      "to": "scheduler.system_task.validate"
+    },
+    "secret_store_delete": {
+      "to": "secret.delete"
+    },
+    "secret_store_get": {
+      "to": "secret.get",
+      "merge": "keyring_secret_get",
+      "note": "deprecated wire alias of keyring_secret_get"
+    },
+    "secret_store_set": {
+      "to": "secret.set",
+      "merge": "keyring_secret_set",
+      "note": "deprecated wire alias of keyring_secret_set"
+    },
+    "selection_toolbar_capture_clipboard": {
+      "to": "desktop.selection.toolbar.clipboard.capture"
+    },
+    "selection_toolbar_copy_result": {
+      "to": "desktop.selection.toolbar.copy_result"
+    },
+    "selection_toolbar_current_candidate": {
+      "to": "desktop.selection.toolbar.candidate.get"
+    },
+    "selection_toolbar_execute": {
+      "to": "desktop.selection.toolbar.exec"
+    },
+    "selection_toolbar_finish": {
+      "to": "desktop.selection.toolbar.finish"
+    },
+    "selection_toolbar_open_permission_settings": {
+      "to": "desktop.selection.toolbar.permission_settings.open"
+    },
+    "selection_toolbar_replace": {
+      "to": "desktop.selection.toolbar.replace"
+    },
+    "selection_toolbar_resize": {
+      "to": "desktop.selection.toolbar.resize"
+    },
+    "selection_toolbar_reveal": {
+      "to": "desktop.selection.toolbar.reveal"
+    },
+    "selection_toolbar_set_interactive": {
+      "to": "desktop.selection.toolbar.interactive.set"
+    },
+    "selection_toolbar_set_keep_alive": {
+      "to": "desktop.selection.toolbar.keep_alive.set"
+    },
+    "selection_toolbar_start": {
+      "to": "desktop.selection.toolbar.start"
+    },
+    "selection_toolbar_status": {
+      "to": "desktop.selection.toolbar.status"
+    },
+    "selection_toolbar_stop": {
+      "to": "desktop.selection.toolbar.stop"
+    },
+    "selection_toolbar_take_pending_stage": {
+      "to": "desktop.selection.toolbar.take_pending_stage"
+    },
+    "selection_toolbar_undo": {
+      "to": "desktop.selection.toolbar.undo"
+    },
+    "send_to_external_agent": {
+      "to": "external_agent.send"
+    },
+    "server_ops_events_close": {
+      "to": "server_ops.events.close"
+    },
+    "server_ops_events_open": {
+      "to": "server_ops.events.open"
+    },
+    "session_attach": {
+      "to": "session.attach"
+    },
+    "session_attachment_upload_abort": {
+      "to": "session.attachment.upload.cancel"
+    },
+    "session_attachment_upload_chunk": {
+      "to": "session.attachment.upload.write_chunk"
+    },
+    "session_attachment_upload_commit": {
+      "to": "session.attachment.upload.commit"
+    },
+    "session_attachment_upload_init": {
+      "to": "session.attachment.upload.init"
+    },
+    "session_detach": {
+      "to": "session.detach"
+    },
+    "session_import_watch_start": {
+      "to": "session.import.watch.start"
+    },
+    "session_import_watch_stop": {
+      "to": "session.import.watch.stop"
+    },
+    "session_list": {
+      "to": "session.list"
+    },
+    "session_timeline": {
+      "to": "session.timeline.get"
+    },
+    "session_turn_messages": {
+      "to": "session.turn.message.list"
+    },
+    "set_close_behavior": {
+      "to": "app.close_behavior.set"
+    },
+    "set_external_agent_failed": {
+      "to": "external_agent.mark_failed"
+    },
+    "set_external_agent_running": {
+      "to": "external_agent.mark_running"
+    },
+    "set_trusted_workspaces": {
+      "to": "workspace.trusted.set"
+    },
+    "set_window_background_color": {
+      "to": "desktop.window.background_color.set"
+    },
+    "sftp_create_dir": {
+      "to": "sftp.dir.create"
+    },
+    "sftp_delete_entry": {
+      "to": "sftp.entry.delete"
+    },
+    "sftp_download_close": {
+      "to": "sftp.download.close"
+    },
+    "sftp_download_open": {
+      "to": "sftp.download.open"
+    },
+    "sftp_download_read_chunk": {
+      "to": "sftp.download.read_chunk"
+    },
+    "sftp_list_dir": {
+      "to": "sftp.dir.list"
+    },
+    "sftp_realpath": {
+      "to": "sftp.realpath"
+    },
+    "sftp_rename_entry": {
+      "to": "sftp.entry.rename"
+    },
+    "sftp_session_close": {
+      "to": "sftp.session.close"
+    },
+    "sftp_stat": {
+      "to": "sftp.stat"
+    },
+    "sftp_upload_abort": {
+      "to": "sftp.upload.cancel"
+    },
+    "sftp_upload_commit": {
+      "to": "sftp.upload.commit"
+    },
+    "sftp_upload_open": {
+      "to": "sftp.upload.open"
+    },
+    "sftp_upload_write_chunk": {
+      "to": "sftp.upload.write_chunk"
+    },
+    "shell_exec": {
+      "to": "shell.exec"
+    },
+    "shortcut_bind": {
+      "to": "desktop.shortcut.bind"
+    },
+    "shortcut_check_conflict": {
+      "to": "desktop.shortcut.probe_conflict"
+    },
+    "shortcut_get_chord_for_id": {
+      "to": "desktop.shortcut.chord.get"
+    },
+    "shortcut_list": {
+      "to": "desktop.shortcut.list"
+    },
+    "shortcut_unbind": {
+      "to": "desktop.shortcut.unbind"
+    },
+    "show_main_window": {
+      "to": "desktop.main_window.reveal"
+    },
+    "sidecar_restart_count": {
+      "to": "agent.sidecar.restart_count.get"
+    },
+    "skill_set_enabled": {
+      "to": "skill.enabled.set"
+    },
+    "skills_bundle_upload_abort": {
+      "to": "skill.bundle.upload.cancel"
+    },
+    "skills_bundle_upload_commit": {
+      "to": "skill.bundle.upload.commit"
+    },
+    "skills_bundle_upload_open": {
+      "to": "skill.bundle.upload.open"
+    },
+    "skills_bundle_upload_write": {
+      "to": "skill.bundle.upload.write"
+    },
+    "skills_catalog_get": {
+      "to": "skill.catalog.get"
+    },
+    "skills_empty_trash": {
+      "to": "skill.trash.empty"
+    },
+    "skills_fetch_remote_json": {
+      "to": "skill.fetch_remote_json"
+    },
+    "skills_fetch_remote_md": {
+      "to": "skill.fetch_remote_md"
+    },
+    "skills_install_atomic": {
+      "to": "skill.install_atomic"
+    },
+    "skills_install_mirrored": {
+      "to": "skill.install_mirrored"
+    },
+    "skills_install_native": {
+      "to": "skill.install_native"
+    },
+    "skills_list_trash": {
+      "to": "skill.trash.list"
+    },
+    "skills_load_registry": {
+      "to": "skill.registry.load"
+    },
+    "skills_move_to_trash": {
+      "to": "skill.trash.move"
+    },
+    "skills_scan_codex": {
+      "to": "skill.scan_codex"
+    },
+    "skills_scan_dir": {
+      "to": "skill.scan_dir"
+    },
+    "skills_scan_native": {
+      "to": "skill.scan_native"
+    },
+    "skills_scan_resources": {
+      "to": "skill.scan_resources"
+    },
+    "skills_scan_security": {
+      "to": "skill.scan_security"
+    },
+    "skills_uninstall": {
+      "to": "skill.uninstall"
+    },
+    "skills_uninstall_native": {
+      "to": "skill.uninstall_native"
+    },
+    "slash_commands_scan": {
+      "to": "slash_command.scan"
+    },
+    "spawn_external_agent": {
+      "to": "external_agent.spawn"
+    },
+    "ssh_forget_host_key": {
+      "to": "ssh.host_key.forget"
+    },
+    "ssh_terminal_forward_status": {
+      "to": "ssh.terminal_forward.status"
+    },
+    "ssh_terminal_kill": {
+      "to": "ssh.terminal.stop"
+    },
+    "ssh_terminal_resize": {
+      "to": "ssh.terminal.resize"
+    },
+    "ssh_terminal_set_forward_enabled": {
+      "to": "ssh.terminal.forward_enabled.set"
+    },
+    "ssh_terminal_spawn": {
+      "to": "ssh.terminal.spawn"
+    },
+    "ssh_terminal_write": {
+      "to": "ssh.terminal.write"
+    },
+    "subscription_authed_get": {
+      "to": "subscription.authed.get"
+    },
+    "subscription_authed_request": {
+      "to": "subscription.authed.request"
+    },
+    "subscription_clear_runtime": {
+      "to": "subscription.runtime.clear"
+    },
+    "subscription_delete_account": {
+      "to": "subscription.account.delete"
+    },
+    "subscription_delete_preset": {
+      "to": "subscription.preset.delete"
+    },
+    "subscription_get_account": {
+      "to": "subscription.account.get"
+    },
+    "subscription_get_account_detail": {
+      "to": "subscription.account_detail.get"
+    },
+    "subscription_get_active": {
+      "to": "subscription.active.get"
+    },
+    "subscription_get_preset": {
+      "to": "subscription.preset.get"
+    },
+    "subscription_init": {
+      "to": "subscription.init"
+    },
+    "subscription_list_accounts": {
+      "to": "subscription.account.list"
+    },
+    "subscription_list_presets": {
+      "to": "subscription.preset.list"
+    },
+    "subscription_reauthenticate_codex_account": {
+      "to": "subscription.codex_account.reauthenticate"
+    },
+    "subscription_refresh_codex_account": {
+      "to": "subscription.codex_account.refresh"
+    },
+    "subscription_rename_account": {
+      "to": "subscription.account.rename"
+    },
+    "subscription_replace_account_credential": {
+      "to": "subscription.account_credential.replace"
+    },
+    "subscription_save_account": {
+      "to": "subscription.account.save"
+    },
+    "subscription_save_preset": {
+      "to": "subscription.preset.save"
+    },
+    "subscription_set_active": {
+      "to": "subscription.active.set"
+    },
+    "subscription_set_default_preset": {
+      "to": "subscription.default_preset.set"
+    },
+    "subscription_set_preset": {
+      "to": "subscription.preset.set"
+    },
+    "subscription_volcengine_usage": {
+      "to": "subscription.volcengine.usage.get"
+    },
+    "sync_list_tables": {
+      "to": "sync.table.list"
+    },
+    "sync_pull": {
+      "to": "sync.pull"
+    },
+    "task_resource_download_close": {
+      "to": "task.resource.download.close"
+    },
+    "task_resource_download_open": {
+      "to": "task.resource.download.open"
+    },
+    "task_resource_download_read_chunk": {
+      "to": "task.resource.download.read_chunk"
+    },
+    "task_resource_read_diff": {
+      "to": "task.resource.diff.read"
+    },
+    "task_resource_read_text": {
+      "to": "task.resource.read_text"
+    },
+    "task_resource_upload_abort": {
+      "to": "task.resource.upload.cancel"
+    },
+    "task_resource_upload_commit": {
+      "to": "task.resource.upload.commit"
+    },
+    "task_resource_upload_open": {
+      "to": "task.resource.upload.open"
+    },
+    "task_resource_upload_write_chunk": {
+      "to": "task.resource.upload.write_chunk"
+    },
+    "task_workspace_apply": {
+      "to": "task.workspace.apply"
+    },
+    "task_workspace_begin": {
+      "to": "task.workspace.begin"
+    },
+    "task_workspace_bundle_acquire": {
+      "to": "task.workspace.bundle.acquire"
+    },
+    "task_workspace_bundle_apply": {
+      "to": "task.workspace.bundle.apply"
+    },
+    "task_workspace_bundle_begin": {
+      "to": "task.workspace.bundle.begin"
+    },
+    "task_workspace_bundle_get": {
+      "to": "task.workspace.bundle.get"
+    },
+    "task_workspace_bundle_handoff_get": {
+      "to": "task.workspace.bundle.handoff.get"
+    },
+    "task_workspace_bundle_handoff_retry": {
+      "to": "task.workspace.bundle.handoff.retry"
+    },
+    "task_workspace_bundle_handoff_undo": {
+      "to": "task.workspace.bundle.handoff.undo"
+    },
+    "task_workspace_bundle_handoff_undo_get": {
+      "to": "task.workspace.bundle.handoff.undo.get"
+    },
+    "task_workspace_bundle_list": {
+      "to": "task.workspace.bundle.list"
+    },
+    "task_workspace_bundle_turn_abort": {
+      "to": "task.workspace.bundle.turn.cancel"
+    },
+    "task_workspace_bundle_turn_begin": {
+      "to": "task.workspace.bundle.turn.begin"
+    },
+    "task_workspace_bundle_turn_get": {
+      "to": "task.workspace.bundle.turn.get"
+    },
+    "task_workspace_bundle_turn_settle": {
+      "to": "task.workspace.bundle.turn.settle"
+    },
+    "task_workspace_environment_adopt": {
+      "to": "task.workspace.environment.adopt"
+    },
+    "task_workspace_environment_create_branch": {
+      "to": "task.workspace.environment.branch.create"
+    },
+    "task_workspace_environment_list": {
+      "to": "task.workspace.environment.list"
+    },
+    "task_workspace_export_resource_manifest": {
+      "to": "task.workspace.resource_manifest.export"
+    },
+    "task_workspace_get": {
+      "to": "task.workspace.get"
+    },
+    "task_workspace_get_patch_set": {
+      "to": "task.workspace.patch_set.get"
+    },
+    "task_workspace_get_resource": {
+      "to": "task.workspace.resource.get"
+    },
+    "task_workspace_get_resource_summary": {
+      "to": "task.workspace.resource_summary.get"
+    },
+    "task_workspace_list": {
+      "to": "task.workspace.list"
+    },
+    "task_workspace_list_resource_events": {
+      "to": "task.workspace.resource_event.list"
+    },
+    "task_workspace_list_resources": {
+      "to": "task.workspace.resource.list"
+    },
+    "task_workspace_list_runs": {
+      "to": "task.workspace.run.list"
+    },
+    "task_workspace_maintenance_events": {
+      "to": "task.workspace.maintenance_event.list"
+    },
+    "task_workspace_maintenance_run": {
+      "to": "task.workspace.maintenance.run"
+    },
+    "task_workspace_managed_adopt": {
+      "to": "task.workspace.managed.adopt"
+    },
+    "task_workspace_managed_archive": {
+      "to": "task.workspace.managed.archive"
+    },
+    "task_workspace_managed_delete": {
+      "to": "task.workspace.managed.delete"
+    },
+    "task_workspace_managed_get": {
+      "to": "task.workspace.managed.get"
+    },
+    "task_workspace_managed_list": {
+      "to": "task.workspace.managed.list"
+    },
+    "task_workspace_managed_permanent": {
+      "to": "task.workspace.managed.mark_permanent"
+    },
+    "task_workspace_managed_pin": {
+      "to": "task.workspace.managed.pin"
+    },
+    "task_workspace_managed_restore": {
+      "to": "task.workspace.managed.restore"
+    },
+    "task_workspace_pin": {
+      "to": "task.workspace.pin"
+    },
+    "task_workspace_policy_get": {
+      "to": "task.workspace.policy.get"
+    },
+    "task_workspace_policy_set": {
+      "to": "task.workspace.policy.set"
+    },
+    "task_workspace_prune": {
+      "to": "task.workspace.prune"
+    },
+    "task_workspace_reconcile": {
+      "to": "task.workspace.reconcile"
+    },
+    "task_workspace_record_tool_event": {
+      "to": "task.workspace.tool_event.record"
+    },
+    "task_workspace_resolve_conflict": {
+      "to": "task.workspace.conflict.resolve"
+    },
+    "task_workspace_restore_snapshot": {
+      "to": "task.workspace.snapshot.restore"
+    },
+    "task_workspace_settle": {
+      "to": "task.workspace.settle"
+    },
+    "task_workspace_status": {
+      "to": "task.workspace.status"
+    },
+    "task_workspace_stop_watch": {
+      "to": "task.workspace.watch.stop"
+    },
+    "task_workspace_undo": {
+      "to": "task.workspace.undo"
+    },
+    "task_workspace_watch": {
+      "to": "task.workspace.watch.start"
+    },
+    "team_run_pause": {
+      "to": "team.run.pause"
+    },
+    "team_run_resume": {
+      "to": "team.run.resume"
+    },
+    "team_run_stop": {
+      "to": "team.run.stop"
+    },
+    "team_task_comment": {
+      "to": "team.task.comment"
+    },
+    "team_task_create": {
+      "to": "team.task.create"
+    },
+    "team_task_move": {
+      "to": "team.task.move"
+    },
+    "telemetry_configure_sidecar": {
+      "to": "telemetry.sidecar.configure"
+    },
+    "telemetry_otlp_cancel": {
+      "to": "telemetry.otlp.cancel"
+    },
+    "telemetry_otlp_export": {
+      "to": "telemetry.otlp.export"
+    },
+    "telemetry_secret_clear": {
+      "to": "telemetry.secret.clear"
+    },
+    "telemetry_secret_has": {
+      "to": "telemetry.secret.has"
+    },
+    "telemetry_secret_set": {
+      "to": "telemetry.secret.set"
+    },
+    "terminal_close_serial": {
+      "to": "terminal.serial.close"
+    },
+    "terminal_complete_paths": {
+      "to": "terminal.path.complete"
+    },
+    "terminal_detach": {
+      "to": "terminal.detach"
+    },
+    "terminal_detect_multiplexer": {
+      "to": "terminal.multiplexer.detect"
+    },
+    "terminal_exec": {
+      "to": "terminal.exec"
+    },
+    "terminal_headless_exec": {
+      "to": "terminal.headless.exec"
+    },
+    "terminal_headless_kill": {
+      "to": "terminal.headless.stop"
+    },
+    "terminal_headless_run": {
+      "to": "terminal.headless.run"
+    },
+    "terminal_headless_spawn": {
+      "to": "terminal.headless.spawn"
+    },
+    "terminal_host_configure": {
+      "to": "terminal.host.configure"
+    },
+    "terminal_host_service": {
+      "to": "terminal.host_service.control"
+    },
+    "terminal_host_status": {
+      "to": "terminal.host.status"
+    },
+    "terminal_host_sync_profiles": {
+      "to": "terminal.host.profile.sync"
+    },
+    "terminal_kill": {
+      "to": "terminal.stop"
+    },
+    "terminal_kill_port": {
+      "to": "terminal.port.stop"
+    },
+    "terminal_list_all": {
+      "to": "terminal.list_all"
+    },
+    "terminal_list_for_project": {
+      "to": "terminal.list_for_project"
+    },
+    "terminal_list_path_executables": {
+      "to": "terminal.path_executable.list"
+    },
+    "terminal_list_serial_ports": {
+      "to": "terminal.serial_port.list"
+    },
+    "terminal_list_tmux_sessions": {
+      "to": "terminal.tmux_session.list"
+    },
+    "terminal_list_tmux_windows": {
+      "to": "terminal.tmux_window.list"
+    },
+    "terminal_open_serial": {
+      "to": "terminal.serial.open"
+    },
+    "terminal_reattach": {
+      "to": "terminal.reattach"
+    },
+    "terminal_release_control": {
+      "to": "terminal.control.release"
+    },
+    "terminal_resize": {
+      "to": "terminal.resize"
+    },
+    "terminal_serial_attach": {
+      "to": "terminal.serial.attach"
+    },
+    "terminal_serial_status": {
+      "to": "terminal.serial.status"
+    },
+    "terminal_serial_write": {
+      "to": "terminal.serial.write"
+    },
+    "terminal_set_flow_control": {
+      "to": "terminal.flow_control.set"
+    },
+    "terminal_spawn": {
+      "to": "terminal.spawn"
+    },
+    "terminal_take_control": {
+      "to": "terminal.take_control"
+    },
+    "terminal_write": {
+      "to": "terminal.write"
+    },
+    "thread_handoff_abort": {
+      "to": "session.thread_handoff.cancel"
+    },
+    "thread_handoff_accept": {
+      "to": "session.thread_handoff.accept"
+    },
+    "thread_handoff_commit": {
+      "to": "session.thread_handoff.commit"
+    },
+    "thread_handoff_offer": {
+      "to": "session.thread_handoff.offer"
+    },
+    "thread_handoff_preflight": {
+      "to": "session.thread_handoff.preflight"
+    },
+    "thread_handoff_status": {
+      "to": "session.thread_handoff.status"
+    },
+    "toggle_tray_panel": {
+      "to": "desktop.tray.panel.toggle"
+    },
+    "tracing_logging_get_levels": {
+      "to": "tracing.logging.level.get"
+    },
+    "tracing_logging_set_levels": {
+      "to": "tracing.logging.level.set"
+    },
+    "transcript_capabilities": {
+      "to": "session.transcript.capabilities.get"
+    },
+    "tray_get_current_menu": {
+      "to": "desktop.tray.current_menu.get"
+    },
+    "tray_get_icon_state": {
+      "to": "desktop.tray.icon_state.get"
+    },
+    "tray_get_title": {
+      "to": "desktop.tray.title.get"
+    },
+    "tray_get_tooltip": {
+      "to": "desktop.tray.tooltip.get"
+    },
+    "tray_panel_get_config": {
+      "to": "desktop.tray.panel.config.get"
+    },
+    "tray_panel_resize": {
+      "to": "desktop.tray.panel.resize"
+    },
+    "tray_panel_set_left_click": {
+      "to": "desktop.tray.panel.left_click.set"
+    },
+    "tray_register_icon": {
+      "to": "desktop.tray.icon.register"
+    },
+    "tray_run_native_action": {
+      "to": "desktop.tray.native_action.run"
+    },
+    "tray_set_icon_state": {
+      "to": "desktop.tray.icon_state.set"
+    },
+    "tray_set_menu": {
+      "to": "desktop.tray.menu.set"
+    },
+    "tray_set_title": {
+      "to": "desktop.tray.title.set"
+    },
+    "tray_set_tooltip": {
+      "to": "desktop.tray.tooltip.set"
+    },
+    "tts_keyring_delete": {
+      "to": "tts.keyring.delete"
+    },
+    "tts_keyring_get": {
+      "to": "tts.keyring.get"
+    },
+    "tts_keyring_list_providers": {
+      "to": "tts.keyring.provider.list"
+    },
+    "tts_keyring_set": {
+      "to": "tts.keyring.set"
+    },
+    "tts_proxy_cancel": {
+      "to": "tts.proxy.cancel"
+    },
+    "tts_proxy_fetch": {
+      "to": "tts.proxy.fetch"
+    },
+    "turn_provision": {
+      "to": "turn.provision"
+    },
+    "twin_create": {
+      "to": "twin.create"
+    },
+    "twin_delete": {
+      "to": "twin.delete"
+    },
+    "twin_draft_review": {
+      "to": "twin.draft.review"
+    },
+    "twin_ingest_source": {
+      "to": "twin.source.ingest"
+    },
+    "twin_job_cancel": {
+      "to": "twin.job.cancel"
+    },
+    "twin_job_pause": {
+      "to": "twin.job.pause"
+    },
+    "twin_job_resume": {
+      "to": "twin.job.resume"
+    },
+    "twin_job_retry": {
+      "to": "twin.job.retry"
+    },
+    "twin_job_status": {
+      "to": "twin.job.status"
+    },
+    "twin_parse_git_repo": {
+      "to": "twin.git_repo.parse"
+    },
+    "twin_profile_get": {
+      "to": "twin.profile.get"
+    },
+    "twin_profile_update": {
+      "to": "twin.profile.update"
+    },
+    "twin_source_create": {
+      "to": "twin.source.create"
+    },
+    "twin_source_delete": {
+      "to": "twin.source.delete"
+    },
+    "twin_source_list": {
+      "to": "twin.source.list"
+    },
+    "twin_source_update": {
+      "to": "twin.source.update"
+    },
+    "usage_dock_capabilities": {
+      "to": "usage.dock.capabilities.get"
+    },
+    "usage_dock_close": {
+      "to": "usage.dock.close"
+    },
+    "usage_dock_get_config": {
+      "to": "usage.dock.config.get"
+    },
+    "usage_dock_is_open": {
+      "to": "usage.dock.probe"
+    },
+    "usage_dock_list_monitors": {
+      "to": "usage.dock.monitor.list"
+    },
+    "usage_dock_open": {
+      "to": "usage.dock.open"
+    },
+    "usage_dock_resize": {
+      "to": "usage.dock.resize"
+    },
+    "usage_dock_reveal": {
+      "to": "usage.dock.reveal"
+    },
+    "usage_dock_set_click_through": {
+      "to": "usage.dock.click_through.set"
+    },
+    "usage_dock_set_monitor": {
+      "to": "usage.dock.monitor.set"
+    },
+    "usage_dock_set_placement": {
+      "to": "usage.dock.placement.set"
+    },
+    "usage_dock_set_scale": {
+      "to": "usage.dock.scale.set"
+    },
+    "usage_dock_snap": {
+      "to": "usage.dock.snap"
+    },
+    "vector_cloud_count": {
+      "to": "vector.cloud.count"
+    },
+    "vector_cloud_create_collection": {
+      "to": "vector.cloud.collection.create"
+    },
+    "vector_cloud_delete_collection": {
+      "to": "vector.cloud.collection.delete"
+    },
+    "vector_cloud_delete_points": {
+      "to": "vector.cloud.point.delete"
+    },
+    "vector_cloud_get_collection": {
+      "to": "vector.cloud.collection.get"
+    },
+    "vector_cloud_get_points": {
+      "to": "vector.cloud.point.get"
+    },
+    "vector_cloud_health_check": {
+      "to": "vector.cloud.health.probe"
+    },
+    "vector_cloud_list_collections": {
+      "to": "vector.cloud.collection.list"
+    },
+    "vector_cloud_query": {
+      "to": "vector.cloud.query"
+    },
+    "vector_cloud_scroll": {
+      "to": "vector.cloud.scroll"
+    },
+    "vector_cloud_truncate": {
+      "to": "vector.cloud.truncate"
+    },
+    "vector_cloud_upsert": {
+      "to": "vector.cloud.upsert"
+    },
+    "vector_count_points": {
+      "to": "vector.point.count"
+    },
+    "vector_create_collection": {
+      "to": "vector.collection.create"
+    },
+    "vector_delete_all_points": {
+      "to": "vector.point.delete_all"
+    },
+    "vector_delete_collection": {
+      "to": "vector.collection.delete"
+    },
+    "vector_delete_credentials": {
+      "to": "vector.credential.delete"
+    },
+    "vector_delete_points": {
+      "to": "vector.point.delete"
+    },
+    "vector_export_collection": {
+      "to": "vector.collection.export"
+    },
+    "vector_get_collection": {
+      "to": "vector.collection.get"
+    },
+    "vector_get_points": {
+      "to": "vector.point.get"
+    },
+    "vector_get_stats": {
+      "to": "vector.stats.get"
+    },
+    "vector_get_store_size": {
+      "to": "vector.store_size.get"
+    },
+    "vector_import_collection": {
+      "to": "vector.collection.import"
+    },
+    "vector_list_collections": {
+      "to": "vector.collection.list"
+    },
+    "vector_list_configured_providers": {
+      "to": "vector.configured_provider.list"
+    },
+    "vector_rename_collection": {
+      "to": "vector.collection.rename"
+    },
+    "vector_reset_store": {
+      "to": "vector.store.reset"
+    },
+    "vector_save_credentials": {
+      "to": "vector.credential.save"
+    },
+    "vector_scroll_points": {
+      "to": "vector.point.scroll"
+    },
+    "vector_search_points": {
+      "to": "vector.point.search"
+    },
+    "vector_truncate_collection": {
+      "to": "vector.collection.truncate"
+    },
+    "vector_upsert_points": {
+      "to": "vector.point.upsert"
+    },
+    "video_analyze": {
+      "to": "media.video.analyze"
+    },
+    "video_cleanup_analysis": {
+      "to": "media.video.analysis.cleanup"
+    },
+    "video_get_info": {
+      "to": "media.video.info.get"
+    },
+    "video_trim": {
+      "to": "media.video.trim"
+    },
+    "virtual_display_arm": {
+      "to": "desktop.virtual_display.arm"
+    },
+    "virtual_display_health_probe": {
+      "to": "desktop.virtual_display.health.probe"
+    },
+    "virtual_display_probe": {
+      "to": "desktop.virtual_display.probe"
+    },
+    "virtual_display_release": {
+      "to": "desktop.virtual_display.release"
+    },
+    "virtual_display_setup": {
+      "to": "desktop.virtual_display.setup"
+    },
+    "voice_live_ws_open": {
+      "to": "tts.voice.live_ws.open"
+    },
+    "wake_paired_host": {
+      "to": "host.paired.wake"
+    },
+    "wallpaper_delete": {
+      "to": "desktop.wallpaper.delete"
+    },
+    "wallpaper_list": {
+      "to": "desktop.wallpaper.list"
+    },
+    "wallpaper_read_data_url": {
+      "to": "desktop.wallpaper.data_url.read"
+    },
+    "wallpaper_resolve_path": {
+      "to": "desktop.wallpaper.path.resolve"
+    },
+    "wallpaper_save": {
+      "to": "desktop.wallpaper.save"
+    },
+    "web_clone_snapshot": {
+      "to": "web.snapshot.clone"
+    },
+    "webview_acknowledge_boot_reveal": {
+      "to": "desktop.webview.boot_reveal.acknowledge"
+    },
+    "webview_heartbeat": {
+      "to": "desktop.webview.heartbeat"
+    },
+    "webview_take_recovery_notice": {
+      "to": "desktop.webview.recovery_notice.take"
+    },
+    "workflow_ack_completed": {
+      "to": "workflow.ack_completed"
+    },
+    "workflow_approval_list": {
+      "to": "workflow.approval.list"
+    },
+    "workflow_approval_respond": {
+      "to": "workflow.approval.respond"
+    },
+    "workflow_cancel_run": {
+      "to": "workflow.run.cancel"
+    },
+    "workflow_create": {
+      "to": "workflow.create"
+    },
+    "workflow_delete": {
+      "to": "workflow.delete"
+    },
+    "workflow_get_webhook_url": {
+      "to": "workflow.webhook_url.get"
+    },
+    "workflow_handoff_create": {
+      "to": "workflow.handoff.create"
+    },
+    "workflow_human_input_list": {
+      "to": "workflow.human_input.list"
+    },
+    "workflow_human_input_submit": {
+      "to": "workflow.human_input.submit"
+    },
+    "workflow_persist_run_state": {
+      "to": "workflow.run_state.persist"
+    },
+    "workflow_placement_probe": {
+      "to": "workflow.placement.probe"
+    },
+    "workflow_register_trigger": {
+      "to": "workflow.trigger.register"
+    },
+    "workflow_reload_in_flight_runs": {
+      "to": "workflow.run.reload_in_flight"
+    },
+    "workflow_run_list": {
+      "to": "workflow.run.list"
+    },
+    "workflow_schedule_pause": {
+      "to": "workflow.schedule.pause"
+    },
+    "workflow_schedule_resume": {
+      "to": "workflow.schedule.resume"
+    },
+    "workflow_step_result": {
+      "to": "workflow.step.result.submit"
+    },
+    "bot_delivery_replay": {
+      "to": "bot.delivery.replay"
+    },
+    "bot_run_manual": {
+      "to": "bot.run.start"
+    },
+    "bot_trigger_set_armed": {
+      "to": "bot.trigger.armed.set"
+    },
+    "workflow_trigger_manual": {
+      "to": "workflow.trigger.fire"
+    },
+    "workflow_unregister_trigger": {
+      "to": "workflow.trigger.unregister"
+    },
+    "workflow_update": {
+      "to": "workflow.update"
+    },
+    "workflow_wait_event_persist": {
+      "to": "workflow.wait_event.persist"
+    },
+    "workflow_wait_event_prune": {
+      "to": "workflow.wait_event.prune"
+    },
+    "workflow_waitpoint_create": {
+      "to": "workflow.waitpoint.create"
+    },
+    "workflow_waitpoint_decide": {
+      "to": "workflow.waitpoint.decide"
+    },
+    "workflow_waitpoint_get": {
+      "to": "workflow.waitpoint.get"
+    },
+    "workflow_waitpoint_list_pending": {
+      "to": "workflow.waitpoint.list_pending"
+    },
+    "workflow_webhook_respond": {
+      "to": "workflow.webhook.respond"
+    },
+    "write_agent_config": {
+      "to": "agent.config.write"
+    },
+    "write_claude_local_settings": {
+      "to": "agent.settings.write_local"
+    },
+    "write_claude_project_settings": {
+      "to": "agent.settings.write_project"
+    },
+    "write_claude_settings_env": {
+      "to": "agent.settings.write_env"
+    },
+    "write_claude_user_settings": {
+      "to": "agent.settings.write_user"
+    },
+    "write_cli_home_file": {
+      "to": "cli.home_file.write"
+    },
+    "write_codex_auth_env": {
+      "to": "codex.auth_env.write"
+    },
+    "write_gemini_settings_env": {
+      "to": "gemini.settings_env.write"
+    },
+    "write_opencode_auth_env": {
+      "to": "opencode.auth_env.write"
+    },
+    "write_text_file": {
+      "to": "fs.text_file.write"
+    },
+    "write_text_file_confined": {
+      "to": "fs.text_file.write_confined"
+    }
+  }
+}

@@ -10,6 +10,7 @@ description: "显式、手写维护的 Tauri 命令白名单，通过 /api/v1/_r
 **分支：** `feat/mobile-m1-foundation`
 **相关 issue：** [#34](https://github.com/MaxQian888/cognia-next/issues/34) (M2.2)
 **前序：** [ADR 0012 — 传输层抽象](./0012-transport-abstraction.md)
+**被修订：** [ADR 0171](./0171-the-cli-speaks-the-protocol-not-a-copy-of-it.md)（客户端如何消费清单）、[ADR 0175](./0175-the-rpc-face-has-one-grammar-one-error-and-one-version.md)（白名单由契约生成，命名遵循同一语法）
 
 ---
 

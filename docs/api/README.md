@@ -73,6 +73,13 @@ The Headless surface is internal and versioned with the application. Its
 `/internal/*` routes are never a substitute for the paired-device API and are
 rejected for non-loopback peers.
 
+The command contract itself carries one version, `contractVersion` in
+`protocol/companion-commands.json` (ADR-0175). Command names follow one
+grammar, `<resource>.<verb>`, over `protocol/companion-resources.json` and
+`protocol/companion-verbs.json`; `protocol/companion-command-renames.json`
+records the old snake_case name of every command until the rename cut lands,
+and `pnpm audit:command-grammar` holds the three files to each other.
+
 ## Out of scope
 
 - Tauri `invoke()` commands and in-process `cognia://` events;

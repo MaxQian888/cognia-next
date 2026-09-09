@@ -236,6 +236,8 @@
     "audit:command-parity:test": "node --test scripts/gates/check-command-parity.test.mjs scripts/gates/lib/generate-handler.test.mjs",
     "audit:companion-command-manifest": "node scripts/gates/check-companion-command-manifest.mjs",
     "audit:companion-command-manifest:test": "node --test scripts/gates/check-companion-command-manifest.test.mjs",
+    "audit:command-grammar": "node scripts/gates/check-command-grammar.mjs",
+    "audit:command-grammar:test": "node --test scripts/gates/check-command-grammar.test.mjs",
     "audit:data-governance": "node scripts/gates/check-data-governance.mjs",
     "audit:data-governance:test": "node --test scripts/gates/check-data-governance.test.mjs",
     "audit:deps": "pnpm audit --audit-level=moderate --ignore GHSA-w3rx-r6r6-pgpr --ignore GHSA-5p2g-fcmc-qvqq",

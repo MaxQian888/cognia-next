@@ -7,8 +7,16 @@ export type CommandApproval = "none" | "interactive" | "signed-policy"
 export type CommandIdempotency = "structural" | "required" | "forbidden"
 export type CommandTransport = "http" | "websocket" | "webrtc" | "internal"
 
+export type CommandPagination = "none" | "page-token" | "byte-range"
+
 export interface CommandDescriptor {
   name: string
+  /** Declared resource path in protocol/companion-resources.json (ADR-0175). */
+  resource: string
+  /** Vocabulary verb, optionally qualified, from protocol/companion-verbs.json. */
+  verb: string
+  /** The Rust dispatch literal. Equal to `name` until the ADR-0175 rename cut. */
+  arm: string
   target: CommandTarget
   operation: CommandOperation
   capability: string
@@ -16,12 +24,15 @@ export interface CommandDescriptor {
   approval: CommandApproval
   idempotency: CommandIdempotency
   transports: CommandTransport[]
+  pagination: CommandPagination
+  longRunning: boolean
   inputSchema: string
   outputSchema: string
 }
 
 export interface CommandManifest {
-  schemaVersion: number
+  /** One version for the whole command contract (ADR-0175). */
+  contractVersion: number
   commands: CommandDescriptor[]
 }
 

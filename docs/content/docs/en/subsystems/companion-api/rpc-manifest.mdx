@@ -18,7 +18,7 @@ description: How the command manifest, runtime allowlist, route catalog, and gen
 <StatGrid>
   <Stat label="Runtime dispatcher" value="generated" hint="KNOWN_COMMANDS" />
   <Stat label="Public device subset" value="generated" hint="execution/host-admin + HTTP" />
-  <Stat label="Manifest schema" value="v2" hint="protocol/companion-commands.json" />
+  <Stat label="Command contract" value="v3" hint="protocol/companion-commands.json (ADR-0175)" />
   <Stat label="Generated specs" value="2" hint="public device + Headless service" />
 </StatGrid>
 
@@ -52,7 +52,7 @@ the wildcard handler:
 
 ```http
 POST /api/_rpc/session_list HTTP/1.1
-Authorization: DPoP <access-token>
+Authorization: Bearer <access-token>
 DPoP: <signed-proof>
 Content-Type: application/json
 

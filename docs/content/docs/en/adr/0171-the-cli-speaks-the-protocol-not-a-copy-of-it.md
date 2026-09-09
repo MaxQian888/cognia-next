@@ -8,6 +8,7 @@ description: "cognia-agent reaches the Host command plane through a generated in
 **Status:** Accepted
 **Date:** 2026-09-06
 **Amends:** ADR-0013 (command manifest), ADR-0078 (CLI to app bridge)
+**Amended by:** ADR-0175 (the CLI index takes group and action from the declared resource and verb)
 **Related:** ADR-0059 (headless brain), ADR-0143 (device console), ADR-0153 (the host obtains the confirmation)
 
 ## Context

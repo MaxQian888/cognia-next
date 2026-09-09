@@ -172,7 +172,7 @@ frames are generated into `docs/api/headless-service-api.asyncapi.yaml`. They ar
 separate from the paired-device specification so a service-only command can never be mistaken for a
 public mobile endpoint.
 
-The current catalog contains **450** Headless commands. The server compiles the embedded Draft
+The current catalog contains **661** Headless commands (the generated `docs/api/headless-service-api.openapi.yaml` carries one `/internal/_rpc/{name}` operation per command). The server compiles the embedded Draft
 2020-12 input and output schemas at startup, validates input before dispatch, and validates output
 before recording a successful receipt. A request violation returns `422 contract_input_violation`;
 an implementation/schema mismatch returns `500 contract_output_violation`. Violation details contain
@@ -278,5 +278,5 @@ pnpm companion-api:lint
 When a command is added to the dispatcher, the generator and Rust parity test require the Headless
 spec to expose it. Public exposure still requires the stricter target and transport classification.
 The same generator owns the embedded catalog hash, the compact Brain bridge identity module, the
-OpenAPI document, and the AsyncAPI document. Bridge protocol v2 refuses `hello`/`hello_ack` when the
+OpenAPI document, and the AsyncAPI document. Bridge protocol v3 refuses `hello`/`hello_ack` when the
 catalog hash or contract version differs, so a stale Brain never becomes ready.

@@ -126,6 +126,9 @@ const REGISTRY = [
   // in CI; until now nothing ran it (ADR-0119).
   { script: "pi:extension:pin:check", group: "artifacts" },
   { script: "companion-api:check", group: "artifacts" },
+  // ADR-0171 says the CLI's coverage stays correct "by gate rather than by
+  // review"; until this row the gate ran only when someone remembered it.
+  { script: "cli:api:check", group: "artifacts" },
   // ADR-0163: the provider operation manifest must name real zod exports and
   // agree with the frozen id list in both directions. A `$ref` string every
   // descriptor points at the same way validates nothing, so this checks names.
@@ -188,6 +191,10 @@ const REGISTRY = [
   { script: "audit:network-egress", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:companion-command-manifest", group: "audit" },
+  // ADR-0175: every command name is <resource>.<verb> over a declared resource
+  // tree and a closed verb vocabulary; list verbs paginate by token, byte I/O
+  // uses offset/length, and a renamed name may not survive as a client literal.
+  { script: "audit:command-grammar", group: "audit" },
   { script: "companion-api:lint", group: "audit" },
   // The manifest gate above compares NAME SETS only — its whole schema check is
   // `if (!command.inputSchema)`. So a dispatch arm could drop half its

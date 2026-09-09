@@ -5,7 +5,7 @@ describe("companion command descriptors", () => {
     const manifest = getCommandManifest()
     const names = manifest.commands.map((command) => command.name)
 
-    expect(manifest.schemaVersion).toBe(2)
+    expect(manifest.contractVersion).toBe(3)
     expect(names.length).toBeGreaterThanOrEqual(900)
     expect(new Set(names).size).toBe(names.length)
     expect(manifest.commands.every((command) => command.capability.length > 0)).toBe(true)

@@ -46,7 +46,7 @@ authority.
 | RPC dispatch | `POST /api/_rpc/{name}` |
 | Identity | `GET /api/whoami` |
 | Event stream | `GET /ws/events?ticket=…&since=…` |
-| Terminal and browser sockets | `/ws/terminal/*`, `/ws/browser/{session_id}` |
+| Terminal and browser sockets | `/ws/terminal`, `/ws/browser/{session_id}` |
 
 No `/api/v1/*`, `/ws/v1/*`, `cgnp2`, or bearer-device-JWT compatibility surface is mounted. Older
 clients must complete a new `cgnp3` pairing and use the DPoP flow.

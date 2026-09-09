@@ -76,17 +76,24 @@ pub struct CommandDescriptor {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandManifest {
-    schema_version: u32,
+    /// One version for the whole command contract (ADR-0175). It moves when a
+    /// client compiled against the previous contract could send something the
+    /// host now refuses or mis-parse something it now returns; a new command
+    /// or optional field only moves the catalog hash.
+    contract_version: u32,
     commands: Vec<CommandDescriptor>,
 }
+
+/// The command contract version this build was compiled against.
+pub const CONTRACT_VERSION: u32 = 3;
 
 static MANIFEST: Lazy<CommandManifest> = Lazy::new(|| {
     let manifest: CommandManifest =
         serde_json::from_str(include_str!("../../../protocol/companion-commands.json"))
             .expect("protocol/companion-commands.json must be valid");
     assert_eq!(
-        manifest.schema_version, 2,
-        "unsupported companion command manifest schema"
+        manifest.contract_version, CONTRACT_VERSION,
+        "unsupported companion command contract version"
     );
 
     let mut names = std::collections::HashSet::with_capacity(manifest.commands.len());

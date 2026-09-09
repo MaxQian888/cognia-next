@@ -1,0 +1,1211 @@
+{
+  "contractVersion": 3,
+  "$comment": "Declared resource tree for companion command names (ADR-0175). A command's resource must be a path in this tree; child keys are singular snake_case nouns.",
+  "resources": {
+    "a2ui": {
+      "children": {
+        "bridge": {
+          "children": {
+            "runtime_paths": {}
+          }
+        }
+      }
+    },
+    "account": {
+      "children": {
+        "local": {},
+        "password": {
+          "children": {
+            "verifier": {}
+          }
+        },
+        "person": {},
+        "quick_unlock": {
+          "children": {
+            "verifier": {}
+          }
+        }
+      }
+    },
+    "acp": {
+      "children": {
+        "terminal": {
+          "children": {
+            "info": {},
+            "output": {},
+            "session_terminal": {}
+          }
+        }
+      }
+    },
+    "agent": {
+      "children": {
+        "account_env": {},
+        "api_key": {},
+        "command_telemetry": {},
+        "config": {},
+        "feature": {},
+        "hook": {},
+        "mode": {},
+        "oauth_bearer": {},
+        "permission": {},
+        "plugin": {
+          "children": {
+            "hook": {},
+            "tool": {}
+          }
+        },
+        "protocol": {
+          "children": {
+            "adapter": {}
+          }
+        },
+        "provider_env": {},
+        "session": {},
+        "settings": {},
+        "sidecar": {
+          "children": {
+            "restart_count": {}
+          }
+        },
+        "tool_result": {},
+        "user_config": {},
+        "vendor_root": {}
+      }
+    },
+    "anthropic": {
+      "children": {
+        "oauth": {}
+      }
+    },
+    "app": {
+      "children": {
+        "close_behavior": {},
+        "close_request": {},
+        "settings": {}
+      }
+    },
+    "automation": {
+      "children": {
+        "audit": {},
+        "consent": {},
+        "enabled": {},
+        "init_failure": {},
+        "kill_switch": {},
+        "policy": {},
+        "settings": {}
+      }
+    },
+    "background": {
+      "children": {
+        "job": {},
+        "monitor": {}
+      }
+    },
+    "backup": {},
+    "bot": {
+      "children": {
+        "delivery": {},
+        "run": {},
+        "trigger": {
+          "children": {
+            "armed": {}
+          }
+        }
+      }
+    },
+    "browser": {
+      "children": {
+        "capabilities": {},
+        "cdp": {},
+        "companion": {
+          "children": {
+            "capabilities": {}
+          }
+        },
+        "console": {},
+        "context": {
+          "children": {
+            "result": {}
+          }
+        },
+        "cookie": {},
+        "dialog": {},
+        "download": {},
+        "embed": {
+          "children": {
+            "bounds": {},
+            "console": {},
+            "frozen": {},
+            "network": {},
+            "panel_labels": {},
+            "record": {},
+            "ref": {},
+            "select_mode": {},
+            "selection": {},
+            "title": {},
+            "url": {},
+            "visible": {},
+            "zoom": {}
+          }
+        },
+        "file": {},
+        "find": {},
+        "key": {},
+        "network": {},
+        "page": {},
+        "runtime": {},
+        "session": {},
+        "zoom": {}
+      }
+    },
+    "canvas": {
+      "children": {
+        "python": {}
+      }
+    },
+    "ccswitch": {
+      "children": {
+        "mcp_server": {},
+        "prompt": {},
+        "provider": {},
+        "skill": {},
+        "watch": {}
+      }
+    },
+    "character": {
+      "children": {
+        "twin": {}
+      }
+    },
+    "cli": {
+      "children": {
+        "home": {},
+        "home_file": {}
+      }
+    },
+    "cli_bridge": {
+      "children": {
+        "host_state": {},
+        "renderer": {}
+      }
+    },
+    "code_adoption": {
+      "children": {
+        "turn": {}
+      }
+    },
+    "codeserver": {
+      "children": {
+        "agent": {
+          "children": {
+            "active_document": {},
+            "diff": {},
+            "edit": {},
+            "workspace": {}
+          }
+        },
+        "broker": {
+          "children": {
+            "content": {},
+            "path": {}
+          }
+        },
+        "disk_usage": {},
+        "download": {},
+        "embed": {
+          "children": {
+            "background": {},
+            "bounds": {},
+            "visible": {}
+          }
+        },
+        "file": {},
+        "language_pack": {},
+        "local_vscode": {},
+        "proxy": {},
+        "remote_relay": {},
+        "runtime_args": {}
+      }
+    },
+    "codex": {
+      "children": {
+        "auth_env": {},
+        "oauth": {}
+      }
+    },
+    "codex_app": {
+      "children": {
+        "conversation": {},
+        "inventory": {},
+        "runtime": {},
+        "task": {}
+      }
+    },
+    "companion": {
+      "children": {
+        "agent_control": {},
+        "browser_access": {},
+        "browser_enrollment": {},
+        "control": {},
+        "deny_list": {},
+        "desktop_write": {},
+        "device": {},
+        "device_grant": {},
+        "endpoint": {},
+        "host_state": {},
+        "local_reachability": {},
+        "locked_computer_use": {},
+        "mdns": {},
+        "media": {},
+        "mesh": {},
+        "message": {},
+        "owner_invitation": {},
+        "push": {
+          "children": {
+            "apns": {},
+            "fcm": {}
+          }
+        },
+        "reachability": {},
+        "remote_control": {},
+        "remote_terminal": {},
+        "server": {},
+        "signaling": {
+          "children": {
+            "device": {},
+            "devices": {}
+          }
+        },
+        "ssh_file": {},
+        "sync_pull": {},
+        "tls_fingerprint": {},
+        "tls_paths": {},
+        "tunnel": {
+          "children": {
+            "config": {},
+            "mode": {},
+            "named_config": {}
+          }
+        },
+        "worker": {
+          "children": {
+            "channel": {},
+            "event": {},
+            "frame": {}
+          }
+        },
+        "worker_enrollment": {}
+      }
+    },
+    "connector": {
+      "children": {
+        "adapter": {
+          "children": {
+            "policy": {}
+          }
+        },
+        "attachment": {
+          "children": {
+            "adapter": {},
+            "budget": {}
+          }
+        },
+        "discord": {},
+        "draft": {},
+        "health": {},
+        "http": {},
+        "keyring": {},
+        "lark": {
+          "children": {
+            "file": {},
+            "image": {},
+            "ws": {}
+          }
+        },
+        "matrix": {
+          "children": {
+            "crypto": {
+              "children": {
+                "missing_session": {},
+                "outgoing_request": {},
+                "tracked_user": {}
+              }
+            },
+            "encrypted_media": {}
+          }
+        },
+        "media": {},
+        "onebot": {},
+        "outbound": {},
+        "runtime_lease": {},
+        "server": {},
+        "ws": {}
+      }
+    },
+    "crash": {
+      "children": {
+        "breadcrumb": {},
+        "context": {},
+        "logging_diagnostics": {},
+        "pending": {},
+        "report": {},
+        "report_dir": {},
+        "submission": {}
+      }
+    },
+    "cua": {
+      "children": {
+        "sandbox": {
+          "children": {
+            "file": {},
+            "health": {}
+          }
+        }
+      }
+    },
+    "desktop": {
+      "children": {
+        "action": {},
+        "app": {},
+        "app_state": {},
+        "capabilities": {},
+        "cursor_position": {},
+        "element": {},
+        "event": {},
+        "focus": {},
+        "foreground_app": {},
+        "island": {
+          "children": {
+            "debug_geometry": {},
+            "hide_on_fullscreen": {},
+            "monitor": {},
+            "tucked": {},
+            "window": {}
+          }
+        },
+        "key": {},
+        "main_window": {},
+        "menu": {
+          "children": {
+            "action_id": {}
+          }
+        },
+        "mouse": {},
+        "pattern": {},
+        "pet": {
+          "children": {
+            "popup": {},
+            "window": {
+              "children": {
+                "cursor_position": {},
+                "ignore_cursor_event": {},
+                "position": {},
+                "surface": {},
+                "work_area": {}
+              }
+            }
+          }
+        },
+        "pick_session": {},
+        "selection": {
+          "children": {
+            "toolbar": {
+              "children": {
+                "candidate": {},
+                "clipboard": {},
+                "interactive": {},
+                "keep_alive": {},
+                "permission_settings": {}
+              }
+            }
+          }
+        },
+        "shortcut": {
+          "children": {
+            "chord": {}
+          }
+        },
+        "tray": {
+          "children": {
+            "current_menu": {},
+            "icon": {},
+            "icon_state": {},
+            "menu": {},
+            "native_action": {},
+            "panel": {
+              "children": {
+                "config": {},
+                "left_click": {}
+              }
+            },
+            "title": {},
+            "tooltip": {}
+          }
+        },
+        "tree": {},
+        "virtual_display": {
+          "children": {
+            "health": {}
+          }
+        },
+        "wallpaper": {
+          "children": {
+            "data_url": {},
+            "path": {}
+          }
+        },
+        "webview": {
+          "children": {
+            "boot_reveal": {},
+            "recovery_notice": {}
+          }
+        },
+        "window": {
+          "children": {
+            "background_color": {}
+          }
+        }
+      }
+    },
+    "document": {},
+    "dsh": {
+      "children": {
+        "runtime": {},
+        "runtime_facts": {}
+      }
+    },
+    "execution": {
+      "children": {
+        "run": {}
+      }
+    },
+    "external_agent": {
+      "children": {
+        "config": {},
+        "decision": {},
+        "info": {},
+        "process": {},
+        "run": {},
+        "runtime": {},
+        "session": {},
+        "turn": {}
+      }
+    },
+    "external_bridge": {
+      "children": {
+        "client": {},
+        "config": {},
+        "relay": {}
+      }
+    },
+    "fleet": {
+      "children": {
+        "codex": {},
+        "codex_hooks": {
+          "children": {
+            "capabilities": {}
+          }
+        },
+        "managed_session": {},
+        "monitor": {},
+        "opencode": {
+          "children": {
+            "message": {},
+            "outbox": {}
+          }
+        },
+        "permission": {},
+        "question": {},
+        "scripts": {},
+        "session": {},
+        "snapshot": {},
+        "terminal": {},
+        "worker": {
+          "children": {
+            "enrollment": {}
+          }
+        },
+        "worker_load": {}
+      }
+    },
+    "fs": {
+      "children": {
+        "allowed_root": {},
+        "dialog_path": {},
+        "dir": {},
+        "export_dir": {},
+        "text_file": {},
+        "workspace": {},
+        "workspace_dir": {},
+        "workspace_entry": {},
+        "workspace_file": {},
+        "workspace_root": {}
+      }
+    },
+    "gateway": {
+      "children": {
+        "config": {},
+        "cooldown": {},
+        "decision": {},
+        "key": {},
+        "key_quota": {},
+        "local": {},
+        "model": {},
+        "provider": {
+          "children": {
+            "capabilities": {}
+          }
+        },
+        "route_ticket": {},
+        "snapshot": {},
+        "upstream": {}
+      }
+    },
+    "gemini": {
+      "children": {
+        "settings_env": {}
+      }
+    },
+    "git": {
+      "children": {
+        "blob": {},
+        "branch": {},
+        "conflict": {},
+        "default_branch": {},
+        "file_history": {},
+        "identity": {},
+        "ignore": {},
+        "log": {},
+        "merge": {},
+        "ref": {},
+        "remote": {},
+        "repo": {},
+        "sequencer": {},
+        "stack": {
+          "children": {
+            "capabilities": {},
+            "history": {},
+            "parent": {}
+          }
+        },
+        "stash": {},
+        "tag": {},
+        "watch": {},
+        "workspace": {},
+        "worktree": {}
+      }
+    },
+    "github": {
+      "children": {
+        "workspace": {}
+      }
+    },
+    "goal": {},
+    "host": {
+      "children": {
+        "admin_lease": {},
+        "capabilities": {},
+        "consent": {},
+        "device": {
+          "children": {
+            "capabilities": {}
+          }
+        },
+        "feature_manifest": {},
+        "paired": {},
+        "state": {}
+      }
+    },
+    "integration": {
+      "children": {
+        "ingress": {
+          "children": {
+            "deadletter": {},
+            "url": {}
+          }
+        }
+      }
+    },
+    "issue": {
+      "children": {
+        "action": {}
+      }
+    },
+    "langfuse": {
+      "children": {
+        "connection": {},
+        "credentials": {},
+        "trace": {}
+      }
+    },
+    "lark": {
+      "children": {
+        "entry": {},
+        "metrics": {},
+        "result": {}
+      }
+    },
+    "logs": {
+      "children": {
+        "file": {}
+      }
+    },
+    "lsp": {
+      "children": {
+        "host": {},
+        "system_host": {}
+      }
+    },
+    "mcp": {
+      "children": {
+        "enabled": {},
+        "oauth": {
+          "children": {
+            "entry": {}
+          }
+        },
+        "project_config": {},
+        "server": {
+          "children": {
+            "sidecar_path": {}
+          }
+        },
+        "tool_rules": {}
+      }
+    },
+    "media": {
+      "children": {
+        "analysis_frame": {},
+        "transfer": {},
+        "transition": {},
+        "video": {
+          "children": {
+            "analysis": {},
+            "info": {}
+          }
+        },
+        "video_effect": {},
+        "video_frame": {}
+      }
+    },
+    "memory": {},
+    "native": {
+      "children": {
+        "logging": {
+          "children": {
+            "log_directory": {},
+            "readiness": {}
+          }
+        }
+      }
+    },
+    "notification": {
+      "children": {
+        "push_token": {},
+        "remote": {}
+      }
+    },
+    "ocr": {
+      "children": {
+        "backend": {},
+        "http": {},
+        "model": {},
+        "msix": {}
+      }
+    },
+    "ollama": {
+      "children": {
+        "model": {}
+      }
+    },
+    "opencode": {
+      "children": {
+        "auth_env": {},
+        "discovered": {},
+        "oauth": {},
+        "session": {},
+        "zen_key": {}
+      }
+    },
+    "orchestration": {
+      "children": {
+        "proxy": {}
+      }
+    },
+    "os": {
+      "children": {
+        "binary": {
+          "children": {
+            "detection": {}
+          }
+        },
+        "font": {}
+      }
+    },
+    "perf": {
+      "children": {
+        "hotspot": {},
+        "interval": {},
+        "lease": {},
+        "observation": {},
+        "sampling": {},
+        "system_details": {},
+        "trace": {},
+        "trace_dir": {}
+      }
+    },
+    "pi": {
+      "children": {
+        "extension": {},
+        "session": {}
+      }
+    },
+    "platform": {
+      "children": {
+        "logging": {
+          "children": {
+            "config": {}
+          }
+        }
+      }
+    },
+    "plugin": {
+      "children": {
+        "api": {},
+        "backup": {},
+        "cache": {},
+        "capabilities": {},
+        "cli": {},
+        "computer_use": {},
+        "context_menu": {},
+        "detached_signature": {},
+        "dev_plugin": {},
+        "dev_server": {},
+        "directory": {},
+        "enabled": {},
+        "entry": {},
+        "fs": {},
+        "js": {},
+        "js_callback": {},
+        "keypair": {},
+        "local_manifest": {},
+        "marketplace": {
+          "children": {
+            "version": {}
+          }
+        },
+        "network_allowlist": {},
+        "notification": {},
+        "pack_signature": {},
+        "permission": {},
+        "process": {},
+        "public_key": {
+          "children": {
+            "fingerprint": {}
+          }
+        },
+        "python": {
+          "children": {
+            "config": {},
+            "deps": {},
+            "hook": {},
+            "host": {},
+            "info": {},
+            "module": {},
+            "runtime_info": {},
+            "tool": {},
+            "uv": {}
+          }
+        },
+        "runtime": {},
+        "shell_allowlist": {},
+        "shortcut": {},
+        "signature": {},
+        "staged_update": {},
+        "state": {},
+        "status": {},
+        "tray_item": {},
+        "verification": {},
+        "version": {},
+        "vscode": {
+          "children": {
+            "vsix": {},
+            "vsix_from_path": {}
+          }
+        },
+        "vscode_rpc": {},
+        "wasm": {
+          "children": {
+            "renderer": {}
+          }
+        },
+        "watch": {},
+        "window": {
+          "children": {
+            "always_on_top": {}
+          }
+        },
+        "workspace_repo": {},
+        "workspace_repo_dir": {}
+      }
+    },
+    "process": {
+      "children": {
+        "managed": {}
+      }
+    },
+    "project": {
+      "children": {
+        "environment": {}
+      }
+    },
+    "provider": {
+      "children": {
+        "catalog": {},
+        "diagnostics": {
+          "children": {
+            "balance_script": {},
+            "balance_token": {},
+            "history": {}
+          }
+        },
+        "profile": {
+          "children": {
+            "version": {}
+          }
+        }
+      }
+    },
+    "proxy": {
+      "children": {
+        "active": {},
+        "clash": {},
+        "http": {},
+        "http_stream": {}
+      }
+    },
+    "recorder": {
+      "children": {
+        "asset": {},
+        "bundle": {},
+        "capture_target": {},
+        "controller": {
+          "children": {
+            "collapsed": {}
+          }
+        },
+        "recoverable": {}
+      }
+    },
+    "recovery": {
+      "children": {
+        "boot": {},
+        "checkpoint": {},
+        "state": {}
+      }
+    },
+    "retrieval": {
+      "children": {
+        "profile_dek": {}
+      }
+    },
+    "sandbox": {
+      "children": {
+        "health": {}
+      }
+    },
+    "scheduler": {
+      "children": {
+        "system_task": {
+          "children": {
+            "capabilities": {},
+            "pending_confirmation": {}
+          }
+        },
+        "task": {
+          "children": {
+            "event": {},
+            "run": {},
+            "statistics": {}
+          }
+        }
+      }
+    },
+    "secret": {},
+    "server_ops": {
+      "children": {
+        "events": {}
+      }
+    },
+    "session": {
+      "children": {
+        "attachment": {
+          "children": {
+            "upload": {}
+          }
+        },
+        "conversation": {
+          "children": {
+            "overrides": {}
+          }
+        },
+        "import": {
+          "children": {
+            "watch": {}
+          }
+        },
+        "message": {},
+        "thread_handoff": {},
+        "timeline": {},
+        "transcript": {
+          "children": {
+            "capabilities": {}
+          }
+        },
+        "turn": {
+          "children": {
+            "message": {}
+          }
+        }
+      }
+    },
+    "sftp": {
+      "children": {
+        "dir": {},
+        "download": {},
+        "entry": {},
+        "session": {},
+        "upload": {}
+      }
+    },
+    "shell": {
+      "children": {
+        "command": {}
+      }
+    },
+    "skill": {
+      "children": {
+        "bundle": {
+          "children": {
+            "upload": {}
+          }
+        },
+        "catalog": {},
+        "enabled": {},
+        "registry": {},
+        "trash": {}
+      }
+    },
+    "slash_command": {},
+    "ssh": {
+      "children": {
+        "host_key": {},
+        "terminal": {
+          "children": {
+            "forward_enabled": {}
+          }
+        },
+        "terminal_forward": {}
+      }
+    },
+    "subscription": {
+      "children": {
+        "account": {},
+        "account_credential": {},
+        "account_detail": {},
+        "active": {},
+        "authed": {},
+        "codex_account": {},
+        "default_preset": {},
+        "preset": {},
+        "runtime": {},
+        "volcengine": {
+          "children": {
+            "usage": {}
+          }
+        }
+      }
+    },
+    "sync": {
+      "children": {
+        "table": {}
+      }
+    },
+    "task": {
+      "children": {
+        "resource": {
+          "children": {
+            "diff": {},
+            "download": {},
+            "upload": {}
+          }
+        },
+        "workspace": {
+          "children": {
+            "bundle": {
+              "children": {
+                "handoff": {
+                  "children": {
+                    "undo": {}
+                  }
+                },
+                "turn": {}
+              }
+            },
+            "conflict": {},
+            "environment": {
+              "children": {
+                "branch": {}
+              }
+            },
+            "maintenance": {},
+            "maintenance_event": {},
+            "managed": {},
+            "patch_set": {},
+            "policy": {},
+            "resource": {},
+            "resource_event": {},
+            "resource_manifest": {},
+            "resource_summary": {},
+            "run": {},
+            "snapshot": {},
+            "tool_event": {},
+            "watch": {}
+          }
+        }
+      }
+    },
+    "team": {
+      "children": {
+        "run": {},
+        "task": {}
+      }
+    },
+    "telemetry": {
+      "children": {
+        "otlp": {},
+        "secret": {},
+        "sidecar": {}
+      }
+    },
+    "terminal": {
+      "children": {
+        "control": {},
+        "flow_control": {},
+        "headless": {},
+        "host": {
+          "children": {
+            "profile": {}
+          }
+        },
+        "host_service": {},
+        "multiplexer": {},
+        "path": {},
+        "path_executable": {},
+        "port": {},
+        "serial": {},
+        "serial_port": {},
+        "tmux_session": {},
+        "tmux_window": {}
+      }
+    },
+    "tracing": {
+      "children": {
+        "logging": {
+          "children": {
+            "level": {}
+          }
+        }
+      }
+    },
+    "tts": {
+      "children": {
+        "keyring": {
+          "children": {
+            "provider": {}
+          }
+        },
+        "proxy": {},
+        "voice": {
+          "children": {
+            "live_ws": {}
+          }
+        }
+      }
+    },
+    "turn": {},
+    "twin": {
+      "children": {
+        "draft": {},
+        "git_repo": {},
+        "job": {},
+        "profile": {},
+        "source": {}
+      }
+    },
+    "usage": {
+      "children": {
+        "dock": {
+          "children": {
+            "capabilities": {},
+            "click_through": {},
+            "config": {},
+            "monitor": {},
+            "placement": {},
+            "scale": {}
+          }
+        }
+      }
+    },
+    "vector": {
+      "children": {
+        "cloud": {
+          "children": {
+            "collection": {},
+            "health": {},
+            "point": {}
+          }
+        },
+        "collection": {},
+        "configured_provider": {},
+        "credential": {},
+        "point": {},
+        "stats": {},
+        "store": {},
+        "store_size": {}
+      }
+    },
+    "web": {
+      "children": {
+        "snapshot": {}
+      }
+    },
+    "workflow": {
+      "children": {
+        "approval": {},
+        "handoff": {},
+        "human_input": {},
+        "placement": {},
+        "run": {},
+        "run_state": {},
+        "schedule": {},
+        "step": {
+          "children": {
+            "result": {}
+          }
+        },
+        "trigger": {},
+        "wait_event": {},
+        "waitpoint": {},
+        "webhook": {},
+        "webhook_url": {}
+      }
+    },
+    "workspace": {
+      "children": {
+        "trusted": {}
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ description: "cognia-agent 通过冻结协议契约生成的命令索引触达�
 **状态：** 已接受
 **日期：** 2026-09-06
 **修订：** ADR-0013（命令清单）、ADR-0078（CLI ↔ App 桥）
+**被修订：** ADR-0175（CLI 索引的 group 与 action 改由声明的 resource 与 verb 给出）
 **相关：** ADR-0059（无头大脑）、ADR-0143（设备控制台）、ADR-0153（确认由宿主取得）
 
 ## 背景

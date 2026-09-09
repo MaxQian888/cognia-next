@@ -453,7 +453,7 @@ test("keeps every concrete RPC request Apifox-generatable", () => {
 })
 
 const manifest = {
-  schemaVersion: 2,
+  contractVersion: 3,
   commands: [
     {
       name: "public_read",

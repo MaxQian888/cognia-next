@@ -144,6 +144,7 @@ export const EXEMPTIONS = {
   "check:all:test": "covered by scripts:test:gates",
   "audit:command-parity:test": "covered by scripts:test:gates",
   "audit:companion-command-manifest:test": "covered by scripts:test:gates",
+  "audit:command-grammar:test": "covered by scripts:test:gates",
   "audit:rpc-semantic-parity:test": "covered by scripts:test:gates",
   "audit:host-parity:test": "covered by scripts:test:gates",
   "audit:headless-registry:test": "covered by scripts:test:gates",

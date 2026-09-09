@@ -1,5 +1,5 @@
 /**
- * Bridge WS protocol v2 — TS side (ADR-0059 W3 / T-B1).
+ * Bridge WS protocol v3 — TS side (ADR-0059 W3 / T-B1).
  *
  * Frame shapes are frozen in `./fixtures/bridge-frames.json`, asserted
  * byte-for-byte by BOTH this package's tests and the Rust server

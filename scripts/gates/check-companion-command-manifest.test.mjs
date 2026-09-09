@@ -6,6 +6,11 @@ import { compareCommandSets, validateManifest } from "./check-companion-command-
 function descriptor(overrides = {}) {
   return {
     name: "git_status",
+    resource: "git",
+    verb: "status",
+    arm: "git_status",
+    pagination: "none",
+    longRunning: false,
     target: "execution",
     operation: "read",
     capability: "workspace.read",
@@ -20,12 +25,22 @@ function descriptor(overrides = {}) {
 }
 
 test("accepts a complete descriptor", () => {
-  assert.deepEqual(validateManifest({ schemaVersion: 2, commands: [descriptor()] }), [])
+  assert.deepEqual(validateManifest({ contractVersion: 3, commands: [descriptor()] }), [])
+})
+
+test("requires the grammar fields", () => {
+  const errors = validateManifest({
+    contractVersion: 3,
+    commands: [descriptor({ resource: "", pagination: "cursor", longRunning: "no" })],
+  })
+  assert(errors.some((error) => error.includes("resource is required")))
+  assert(errors.some((error) => error.includes("invalid pagination")))
+  assert(errors.some((error) => error.includes("longRunning is required")))
 })
 
 test("rejects unclassified mutations and device-transportable service commands", () => {
   const errors = validateManifest({
-    schemaVersion: 2,
+    contractVersion: 3,
     commands: [
       descriptor({
         name: "test_mcp_server",
@@ -45,7 +60,7 @@ test("rejects unclassified mutations and device-transportable service commands",
 
 test("requires every remote RPC to have a descriptor", () => {
   const manifest = {
-    schemaVersion: 2,
+    contractVersion: 3,
     commands: [descriptor(), descriptor({ name: "local_only", target: "client" })],
   }
 
@@ -67,7 +82,7 @@ test("rejects a descriptor whose handler was deleted", () => {
   // kept discovering a command that could only ever fail to dispatch.
   const errors = compareCommandSets(
     {
-      schemaVersion: 2,
+      contractVersion: 3,
       commands: [descriptor({ name: "record_cancel", target: "client" })],
     },
     new Set(),
@@ -84,7 +99,7 @@ test("accepts plugin-dispatched descriptors with no static registration", () => 
   assert.deepEqual(
     compareCommandSets(
       {
-        schemaVersion: 2,
+        contractVersion: 3,
         commands: [descriptor({ name: "plugin_computer_use_bash", target: "client" })],
       },
       new Set(),

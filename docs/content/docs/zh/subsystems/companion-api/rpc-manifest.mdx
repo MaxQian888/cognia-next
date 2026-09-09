@@ -17,7 +17,7 @@ description: 命令 manifest、运行时 allowlist、路由目录与生成器如
 <StatGrid>
   <Stat label="运行时 dispatcher" value="自动生成" hint="KNOWN_COMMANDS" />
   <Stat label="公开设备子集" value="自动生成" hint="execution/host-admin + HTTP" />
-  <Stat label="Manifest schema" value="v2" hint="protocol/companion-commands.json" />
+  <Stat label="命令契约" value="v3" hint="protocol/companion-commands.json（ADR-0175）" />
   <Stat label="生成 spec" value="2" hint="公开设备 + Headless service" />
 </StatGrid>
 
@@ -50,7 +50,7 @@ service token 保护，因此包含 dispatcher 的全部命令。
 
 ```http
 POST /api/_rpc/session_list HTTP/1.1
-Authorization: DPoP <access-token>
+Authorization: Bearer <access-token>
 DPoP: <signed-proof>
 Content-Type: application/json
 

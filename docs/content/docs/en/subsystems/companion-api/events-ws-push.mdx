@@ -35,8 +35,7 @@ channel. If connection setup fails after the ticket is consumed, request a new t
 | Channel | Route | Notes |
 | --- | --- | --- |
 | Events | `GET /ws/events?ticket=…&since=…` | Sequence replay and `resync_required` when the gap is outside retention |
-| Terminal create | `GET /ws/terminal/new?ticket=…` | Creates a resumable remote PTY session |
-| Terminal resume | `GET /ws/terminal/{session_id}?ticket=…` | Reattaches to a live terminal session |
+| Terminal | `GET /ws/terminal?ticket=…` | One socket for remote PTY sessions; create and reattach are frames on it, not paths |
 | Browser | `GET /ws/browser/{session_id}?ticket=…` | Browser session channel |
 | ACP | `GET /ws/acp?ticket=…` | Agent Client Protocol bridge |
 

@@ -10,6 +10,7 @@ description: "Explicit, hand-written allowlist of Tauri commands exposed to mobi
 **Branch:** `feat/mobile-m1-foundation`
 **Related issues:** [#34](https://github.com/MaxQian888/cognia-next/issues/34) (M2.2)
 **Predecessor:** [ADR 0012 — Transport Abstraction](./0012-transport-abstraction.md)
+**Amended by:** [ADR 0171](./0171-the-cli-speaks-the-protocol-not-a-copy-of-it.md) (how clients consume the manifest), [ADR 0175](./0175-the-rpc-face-has-one-grammar-one-error-and-one-version.md) (the allowlist is generated from the contract and names follow one grammar)
 
 ---
 

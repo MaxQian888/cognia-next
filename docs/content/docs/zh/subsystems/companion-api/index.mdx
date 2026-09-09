@@ -44,7 +44,7 @@ description: 当前的配对设备与无渲染服务契约、鉴权边界、自�
 | RPC dispatch | `POST /api/_rpc/{name}` |
 | 身份 | `GET /api/whoami` |
 | 事件流 | `GET /ws/events?ticket=…&since=…` |
-| 终端与浏览器 socket | `/ws/terminal/*`、`/ws/browser/{session_id}` |
+| 终端与浏览器 socket | `/ws/terminal`、`/ws/browser/{session_id}` |
 
 服务端不挂载 `/api/v1/*`、`/ws/v1/*`、`cgnp2` 或 bearer device JWT 兼容入口。旧客户端必须
 重新完成 `cgnp3` 配对并使用 DPoP 流程。

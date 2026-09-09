@@ -155,7 +155,7 @@ pnpm --silent dev:headless browser-enroll --skip-build --browser-listener-port 2
 `docs/api/headless-service-api.asyncapi.yaml`。它们与配对设备 spec 刻意分离，避免 service-only
 命令被误认为公开移动端接口。
 
-当前 catalog 包含 **450** 个 Headless 命令。服务启动时会编译内嵌的 Draft 2020-12 输入与输出
+当前 catalog 包含 **661** 个 Headless 命令（生成的 `docs/api/headless-service-api.openapi.yaml` 每条命令一个 `/internal/_rpc/{name}` 操作）。服务启动时会编译内嵌的 Draft 2020-12 输入与输出
 schema，在 dispatch 前校验输入，并在写入成功 receipt 前校验输出。请求不符合契约时返回
 `422 contract_input_violation`；实现输出与 schema 不一致时返回
 `500 contract_output_violation`。违规详情只包含 instance path 与 schema path，不包含被拒绝的
@@ -251,5 +251,5 @@ pnpm companion-api:lint
 dispatcher 新增命令后，生成器和 Rust parity test 会要求 Headless spec 同步公开；公开设备暴露仍需
 通过更严格的 target 与 transport 分类。
 同一生成器还负责内嵌 catalog hash、Brain bridge 的精简 identity 模块、OpenAPI 和 AsyncAPI。
-Bridge protocol v2 会在 `hello` / `hello_ack` 的 catalog hash 或 contract version 不一致时拒绝
+Bridge protocol v3 会在 `hello` / `hello_ack` 的 catalog hash 或 contract version 不一致时拒绝
 连接，因此旧 Brain 不会进入 ready 状态。

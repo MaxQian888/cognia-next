@@ -35,8 +35,7 @@ Ticket 只能使用一次且绑定路径。为 events 签发的 ticket 不能打
 | Channel | 路由 | 说明 |
 | --- | --- | --- |
 | Events | `GET /ws/events?ticket=…&since=…` | 序列 replay；缺口超出保留窗口时返回 `resync_required` |
-| 新建终端 | `GET /ws/terminal/new?ticket=…` | 创建可恢复的远程 PTY session |
-| 恢复终端 | `GET /ws/terminal/{session_id}?ticket=…` | 重新连接存活终端 session |
+| 终端 | `GET /ws/terminal?ticket=…` | 远程 PTY 只有这一个 socket；新建与重连是它上面的帧，不是路径 |
 | Browser | `GET /ws/browser/{session_id}?ticket=…` | 浏览器 session channel |
 | ACP | `GET /ws/acp?ticket=…` | Agent Client Protocol bridge |
 
