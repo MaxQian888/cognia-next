@@ -797,3 +797,126 @@ describe("end-to-end: handle → handler → real runCliSubagent", () => {
     expect(resp.result).toContain("9 tok")
   })
 })
+
+describe("handleCliDispatchAgent, cancel / multi-collect / model / width", () => {
+  it("cancels a live background run (owner-scoped) and reports unknown ids readably", async () => {
+    let sawAbort = false
+    const run = jest.fn(
+      (_def: unknown, _prompt: string, _sid: string, deps: { signal?: AbortSignal }) =>
+        new Promise<{ text: string }>((_resolve, reject) => {
+          deps.signal?.addEventListener("abort", () => {
+            sawAbort = true
+            reject(new Error("aborted"))
+          })
+        })
+    )
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-cancel" }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go", background: true }))
+    const resp = await handleCliDispatchAgent(req({ cancel: ["bg-cancel", "ghost"] }))
+    expect(resp.result).toContain('Cancelled run "bg-cancel"')
+    expect(resp.result).toContain('No running background run "ghost"')
+    expect(sawAbort).toBe(true)
+    // Cancelling again finds nothing live.
+    const again = await handleCliDispatchAgent(req({ cancel: "bg-cancel" }))
+    expect(again.result).toContain('No running background run "bg-cancel"')
+  })
+
+  it("does not cancel a run owned by another session", async () => {
+    const run = jest.fn(() => new Promise<{ text: string }>(() => {}))
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => "bg-mine" }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "go", background: true }))
+    registerCliSubagentContext("s2", makeCtx({ run }))
+    const resp = await handleCliDispatchAgent({
+      type: "plugin_tool_exec",
+      sessionId: "s2",
+      toolUseId: "t2",
+      name: DISPATCH_AGENT_TOOL_NAME,
+      args: { cancel: "bg-mine" },
+    })
+    expect(resp.result).toContain('No running background run "bg-mine"')
+    clearCliSubagentContext("s2")
+  })
+
+  it("collects several runs at once and reports still-running ones as pending under a timeout", async () => {
+    const resolvers: Array<(r: { text: string }) => void> = []
+    const run = jest.fn(
+      () =>
+        new Promise<{ text: string }>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    let n = 0
+    registerCliSubagentContext("s1", makeCtx({ run, mintRunId: () => `bg-multi-${++n}` }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "a", background: true }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "b", background: true }))
+    const pending = await handleCliDispatchAgent(
+      req({ collect: ["bg-multi-1", "bg-multi-2"], timeoutMs: 5 })
+    )
+    expect(pending.result).toContain('Run "bg-multi-1" is still running')
+    expect(pending.result).toContain('Run "bg-multi-2" is still running')
+    resolvers[0]({ text: "first done" })
+    const partial = await handleCliDispatchAgent(
+      req({ collect: ["bg-multi-1", "bg-multi-2"], timeoutMs: 20 })
+    )
+    expect(partial.result).toContain("first done")
+    expect(partial.result).toContain('Run "bg-multi-2" is still running')
+    resolvers[1]({ text: "second done" })
+    const all = await handleCliDispatchAgent(req({ collect: ["bg-multi-1", "bg-multi-2"] }))
+    expect(all.result).toContain("first done")
+    expect(all.result).toContain("second done")
+  })
+
+  it("overlays a per-call model onto the definition for that run only", async () => {
+    const run = jest.fn(async () => ({ text: "ok" }))
+    registerCliSubagentContext("s1", makeCtx({ run }))
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "x", model: "fast" }))
+    expect(run.mock.calls[0][0]).toMatchObject({ id: "reviewer", model: "fast" })
+    await handleCliDispatchAgent(req({ subagentId: "reviewer", prompt: "y" }))
+    expect((run.mock.calls[1][0] as { model?: string }).model).toBeUndefined()
+  })
+
+  it("runs a fan-out serially when config.subagentMaxConcurrent is 1", async () => {
+    let active = 0
+    let peak = 0
+    const release: Array<() => void> = []
+    const run = jest.fn(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise<void>((resolve) => release.push(resolve))
+      active -= 1
+      return { text: "done" }
+    })
+    registerCliSubagentContext(
+      "s1",
+      makeCtx({
+        agents: [agent("a"), agent("b")],
+        run,
+        config: {
+          ...DEFAULT_RESOLVED_CONFIG,
+          builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+          cwd: "/work",
+          subagentMaxConcurrent: 1,
+        },
+      })
+    )
+    const pending = handleCliDispatchAgent(
+      req({
+        dispatches: [
+          { subagentId: "a", prompt: "pa" },
+          { subagentId: "b", prompt: "pb" },
+        ],
+      })
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(peak).toBe(1)
+    expect(release.length).toBe(1)
+    release[0]()
+    for (let i = 0; i < 5 && release.length < 2; i += 1) await Promise.resolve()
+    expect(release.length).toBe(2)
+    release[1]()
+    const resp = await pending
+    expect(peak).toBe(1)
+    expect(resp.result).toContain("done")
+  })
+})

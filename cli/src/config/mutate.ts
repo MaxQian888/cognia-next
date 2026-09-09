@@ -455,6 +455,7 @@ export const NUMBER_CONFIG_KEYS = [
   "toolExecutionTimeoutMs",
   "subagentStreamIdleTimeoutMs",
   "subagentMaxDepth",
+  "subagentMaxConcurrent",
 ] as const
 export type NumberConfigKey = (typeof NUMBER_CONFIG_KEYS)[number]
 

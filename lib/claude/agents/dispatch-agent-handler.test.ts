@@ -2,6 +2,7 @@ import {
   runDispatchAgentTool,
   releaseDispatchBudgetForSession,
   releaseDispatchStateForSession,
+  resolveDispatchWidth,
 } from "./dispatch-agent-handler"
 import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
@@ -21,6 +22,7 @@ import {
 import {
   __clearRendererBackgroundRunsForTesting,
   cancelRendererBackgroundRun,
+  countRunningRendererBackgroundRuns,
 } from "@/lib/background-tasks/renderer-subagent-registry"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { requestCancelSubagentRun, liveSubagentRunCount } from "./subagent-cancel-registry"
@@ -492,5 +494,150 @@ describe("runDispatchAgentTool — fan-out concurrency vs budget", () => {
     const peak = trackingDispatch()
     await runDispatchAgentTool({ sessionId: "chat-unlimited", args: twoDispatches })
     expect(peak()).toBe(2)
+  })
+})
+
+describe("runDispatchAgentTool, cancel / multi-collect / model / width", () => {
+  const startBackground = async (sessionId = "chat-1"): Promise<string> => {
+    const started = await runDispatchAgentTool({
+      sessionId,
+      args: { subagentId: "coder", prompt: "long", background: true },
+    })
+    const runId = started.match(/runId: ([\w-]+)/)?.[1]
+    expect(runId).toBeTruthy()
+    return runId!
+  }
+
+  it("cancel aborts a live background run and reports it", async () => {
+    // Like the real executor, the dispatch settles (rejects) once its signal
+    // aborts, which is what lets the background registry retire the run.
+    mockDispatch.mockImplementation(
+      (_id, _prompt, opts) =>
+        new Promise<PluginSubagentDispatchResult>((_resolve, reject) => {
+          opts?.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")))
+        })
+    )
+    const runId = await startBackground()
+    const signal = mockDispatch.mock.calls[0][2]?.abortSignal
+    expect(signal?.aborted).toBe(false)
+    const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { cancel: runId } })
+    expect(out).toContain(`Cancelled run "${runId}"`)
+    expect(signal?.aborted).toBe(true)
+    expect(useSubagentRuntimeStore.getState().subAgents[runId]?.status).toBe("cancelled")
+    // The aborted dispatch settles on its own and the registry retires the run.
+    await waitFor(() => (countRunningRendererBackgroundRuns() === 0 ? true : undefined))
+    // A second cancel finds nothing live.
+    const again = await runDispatchAgentTool({ sessionId: "chat-1", args: { cancel: runId } })
+    expect(again).toContain("No running background run")
+  })
+
+  it("cancel with an unknown id is a readable line, not a throw", async () => {
+    const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { cancel: ["ghost"] } })
+    expect(out).toContain('No running background run "ghost"')
+  })
+
+  it("collect with a timeout reports still-running runs as pending, then answers later", async () => {
+    const resolvers: Array<(r: PluginSubagentDispatchResult) => void> = []
+    mockDispatch.mockImplementation(
+      () =>
+        new Promise<PluginSubagentDispatchResult>((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+    const first = await startBackground()
+    const second = await startBackground()
+    const pending = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { collect: [first, second], timeoutMs: 5 },
+    })
+    expect(pending).toContain(`Run "${first}" is still running`)
+    expect(pending).toContain(`Run "${second}" is still running`)
+    expect(pending).toContain(`cancel:"${second}"`)
+
+    resolvers[0](ok("first done", first))
+    const partial = await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { collect: [first, second], timeoutMs: 20 },
+    })
+    expect(partial).toContain("first done")
+    expect(partial).toContain(`Run "${second}" is still running`)
+    // Order follows the model's list, not settle order.
+    expect(partial.indexOf("first done")).toBeLessThan(partial.indexOf(second))
+    resolvers[1](ok("second done", second))
+  })
+
+  it("collect of several ids without a timeout awaits all of them", async () => {
+    mockDispatch.mockResolvedValue(ok("quick"))
+    const a = await startBackground()
+    const b = await startBackground()
+    const out = await runDispatchAgentTool({ sessionId: "chat-1", args: { collect: [a, b] } })
+    expect(out.split("---").length).toBe(2)
+    expect(out).toContain("quick")
+  })
+
+  it("overlays a per-call model onto the resolved definition for that run only", async () => {
+    mockGetDef.mockReturnValue({
+      id: "coder",
+      name: "coder",
+      description: "writes code",
+      prompt: "You write code.",
+      model: "default-model",
+    })
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "x", model: "fast-model" },
+    })
+    expect(mockDispatch.mock.calls[0][0]).toMatchObject({ id: "coder", model: "fast-model" })
+    await runDispatchAgentTool({ sessionId: "chat-1", args: { subagentId: "coder", prompt: "y" } })
+    expect(mockDispatch.mock.calls[1][0]).toMatchObject({ id: "coder", model: "default-model" })
+  })
+
+  it("leaves an SDK-registered id untouched when no inline definition exists to overlay", async () => {
+    mockGetDef.mockReturnValue(undefined)
+    await runDispatchAgentTool({
+      sessionId: "chat-1",
+      args: { subagentId: "coder", prompt: "x", model: "fast-model" },
+    })
+    expect(mockDispatch.mock.calls[0][0]).toBe("coder")
+  })
+
+  it("bounds fan-out width by subagentNesting.maxConcurrent under an unlimited budget", async () => {
+    mockGetSettings.mockResolvedValue({
+      subagentNesting: {
+        enabled: true,
+        maxDepth: 2,
+        tokenBudget: 0,
+        timeoutMs: 0,
+        maxConcurrent: 1,
+      },
+    } as never)
+    let active = 0
+    let peak = 0
+    mockDispatch.mockImplementation(async (_id, prompt) => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((r) => setTimeout(r, 0))
+      active -= 1
+      return ok(`R:${prompt}`)
+    })
+    const out = await runDispatchAgentTool({
+      sessionId: "chat-width",
+      args: {
+        dispatches: [
+          { subagentId: "a", prompt: "one" },
+          { subagentId: "b", prompt: "two" },
+          { subagentId: "c", prompt: "three" },
+        ],
+      },
+    })
+    expect(peak).toBe(1)
+    expect(out).toContain("R:three")
+  })
+
+  it("resolveDispatchWidth: finite budget beats the cap, 0 means unlimited", () => {
+    expect(resolveDispatchWidth({ budgetRoot: "none", maxConcurrent: 0 })).toBe(Infinity)
+    expect(resolveDispatchWidth({ budgetRoot: "none", maxConcurrent: 3 })).toBe(3)
+    getOrCreateDispatchBudget("finite-root", 100)
+    expect(resolveDispatchWidth({ budgetRoot: "finite-root", maxConcurrent: 3 })).toBe(1)
   })
 })

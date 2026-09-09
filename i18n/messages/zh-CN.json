@@ -37860,6 +37860,8 @@
           "writing": "写作"
         },
         "configTitle": "高级配置",
+        "maxConcurrent": "最大并发子代理数",
+        "maxConcurrentHint": "一次派发最多同时运行多少个子代理。0 表示不限制。设置了 token 预算时始终逐个运行。",
         "copyName": "{name}（副本）",
         "description": "内置与用户创建的子代理模板。内置模板只读——复制一份即可得到可编辑的副本。",
         "disabledBadge": "已停用",

@@ -458,6 +458,13 @@ describe("settingsSections", () => {
       type: "enum",
       apply: { kind: "numberValue", key: "subagentMaxDepth" },
     })
+    // Subagent fan-out width knob (default 8, editable as a numeric enum).
+    const width = advanced.rows.find((r) => r.id === "subagentMaxConcurrent")!
+    expect(width.value).toBe("8")
+    expect(width.control).toMatchObject({
+      type: "enum",
+      apply: { kind: "numberValue", key: "subagentMaxConcurrent" },
+    })
   })
 })
 

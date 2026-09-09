@@ -1107,6 +1107,12 @@ export const cliConfigFileSchema = z
      * ⇒ 2. Set `1` to make every subagent a leaf.
      */
     subagentMaxDepth: z.number().int().min(1).optional(),
+    /**
+     * Max sibling subagent runs one `dispatch_agent` fan-out keeps in flight
+     * at once over the single live sidecar (Codex `agent_max_threads`
+     * parity). Absent ⇒ 8. `1` runs every fan-out serially.
+     */
+    subagentMaxConcurrent: z.number().int().min(1).optional(),
     /** Agent runtime hosted by `chat`: built-in sidecar (default) or any
      * executable external-agent preset id (for example codex/claude-code). */
     agentBackend: z.string().min(1).optional(),
@@ -1342,6 +1348,9 @@ export interface ResolvedConfig {
    * is a leaf. Cycles on the dispatch chain are always refused regardless of
    * depth. Absent ⇒ 2; `1` restores the old leaf-only CLI behavior. */
   subagentMaxDepth?: number
+  /** Max sibling subagent runs one `dispatch_agent` fan-out keeps in flight at
+   * once. Absent ⇒ 8. `1` runs every fan-out serially. */
+  subagentMaxConcurrent?: number
 }
 
 /** Provider id assumed when neither config, env, nor flag names one. */
@@ -1373,4 +1382,5 @@ export const DEFAULT_RESOLVED_CONFIG: Omit<ResolvedConfig, "cwd"> = {
   toolExecutionTimeoutMs: 120_000,
   subagentStreamIdleTimeoutMs: 300_000,
   subagentMaxDepth: 2,
+  subagentMaxConcurrent: 8,
 }

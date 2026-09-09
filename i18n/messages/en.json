@@ -37860,6 +37860,8 @@
           "writing": "Writing"
         },
         "configTitle": "Advanced configuration",
+        "maxConcurrent": "Max concurrent sub-agents",
+        "maxConcurrentHint": "How many sub-agents one dispatch may run at the same time. 0 = unlimited. A finite token budget always runs them one at a time.",
         "copyName": "{name} (copy)",
         "description": "Built-in and user-created sub-agent templates. Built-ins are read-only — duplicate to fork an editable copy.",
         "disabledBadge": "Disabled",

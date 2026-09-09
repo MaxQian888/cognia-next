@@ -441,3 +441,81 @@ describe("resolveCaller / loadNesting", () => {
     })
   })
 })
+
+describe("resolveCaller / loadNesting, concurrency cap", () => {
+  it("defaults the cap to 0 (unlimited) and normalises junk values", async () => {
+    nesting({})
+    await expect(loadNesting()).resolves.toMatchObject({ maxConcurrent: 0 })
+    nesting({ maxConcurrent: -4 })
+    await expect(loadNesting()).resolves.toMatchObject({ maxConcurrent: 0 })
+    nesting({ maxConcurrent: 3.7 })
+    await expect(loadNesting()).resolves.toMatchObject({ maxConcurrent: 3 })
+  })
+
+  it("threads the cap to the top-level caller and to a nested caller alike", async () => {
+    nesting({ maxConcurrent: 2 })
+    await expect(resolveCaller("chat-cap")).resolves.toMatchObject({ maxConcurrent: 2 })
+    registerDispatchContext("sub-cap", {
+      depth: 1,
+      maxDepth: 3,
+      parentChain: ["root"],
+      selfRunId: "run-B",
+      budgetRootRunId: "budget-root",
+    })
+    await expect(resolveCaller("sub-cap")).resolves.toMatchObject({
+      parentDepth: 1,
+      maxConcurrent: 2,
+    })
+  })
+
+  it("falls back to an unlimited cap when settings are unreadable", async () => {
+    mockGetSettings.mockRejectedValue(new Error("no db"))
+    await expect(loadNesting()).resolves.toMatchObject({ maxConcurrent: 0 })
+  })
+})
+
+describe("startDispatchRun, per-call model override", () => {
+  const caller: ResolvedCaller = {
+    parentDepth: 0,
+    maxDepth: 2,
+    parentChain: [],
+    budgetRoot: "dispatch:model",
+    maxConcurrent: 0,
+  }
+
+  it("overlays the model on the resolved definition for this run only", async () => {
+    mockGetDef.mockReturnValue({
+      id: "coder",
+      name: "coder",
+      description: "d",
+      prompt: "p",
+      model: "base",
+    })
+    await startDispatchRun({
+      subagentId: "coder",
+      prompt: "x",
+      toolsEnabled: true,
+      background: false,
+      parentSessionId: "chat-1",
+      caller,
+      model: "fast",
+    })
+    expect(mockDispatch.mock.calls[0][0]).toMatchObject({ id: "coder", model: "fast" })
+    // The registry's definition is untouched for the next run.
+    expect(mockGetDef.mock.results[0].value).toMatchObject({ model: "base" })
+  })
+
+  it("cannot overlay a model on a bare SDK id, so the id passes through unchanged", async () => {
+    mockGetDef.mockReturnValue(undefined)
+    await startDispatchRun({
+      subagentId: "sdk-only",
+      prompt: "x",
+      toolsEnabled: true,
+      background: false,
+      parentSessionId: "chat-1",
+      caller,
+      model: "fast",
+    })
+    expect(mockDispatch.mock.calls[0][0]).toBe("sdk-only")
+  })
+})

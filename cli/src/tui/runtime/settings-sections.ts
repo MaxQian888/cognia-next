@@ -957,6 +957,19 @@ export function settingsSections(
         description:
           "How deep dispatch_agent may nest (subagents spawning subagents). 1 = subagents are leaves.",
       },
+      {
+        id: "subagentMaxConcurrent",
+        label: "Subagent max concurrency",
+        value: numStr(config.subagentMaxConcurrent, 8),
+        control: {
+          type: "enum",
+          options: [...SUBAGENT_MAX_CONCURRENT_OPTIONS],
+          current: numStr(config.subagentMaxConcurrent, 8),
+          apply: { kind: "numberValue", key: "subagentMaxConcurrent" },
+        },
+        description:
+          "How many subagents one dispatch_agent fan-out may run at once over the live sidecar. 1 = one after another.",
+      },
     ],
   }
 
@@ -1046,6 +1059,8 @@ export const SUBAGENT_IDLE_TIMEOUT_OPTIONS = ["0", "120000", "300000", "600000"]
 
 /** Nesting-depth choices for `dispatch_agent` (1 = subagents are leaves). */
 export const SUBAGENT_MAX_DEPTH_OPTIONS = ["1", "2", "3", "4"] as const
+/** Fan-out width choices for `dispatch_agent` (1 = siblings run one after another). */
+export const SUBAGENT_MAX_CONCURRENT_OPTIONS = ["1", "2", "4", "8", "16"] as const
 /** Preset byte-cap options for the OSC 52 clipboard escape (`0` disables the cap). */
 export const OSC52_MAX_BYTES_OPTIONS = ["0", "65536", "74994", "131072", "262144"] as const
 /** Preset rotation sizes (KiB) for mcp.log. */
@@ -1084,6 +1099,7 @@ const NUMBER_DEFAULTS: Record<NumberConfigKey, number> = {
   toolExecutionTimeoutMs: 120_000,
   subagentStreamIdleTimeoutMs: 300_000,
   subagentMaxDepth: 2,
+  subagentMaxConcurrent: 8,
 }
 
 /** Default for the scalar `configValue` keys the panel edits (only skillLoadMode today). */

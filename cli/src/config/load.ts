@@ -265,6 +265,7 @@ function applyLayer(acc: ResolvedConfig, layer: CliConfigFile | undefined): Reso
     subagentStreamIdleTimeoutMs:
       layer.subagentStreamIdleTimeoutMs ?? acc.subagentStreamIdleTimeoutMs,
     subagentMaxDepth: layer.subagentMaxDepth ?? acc.subagentMaxDepth,
+    subagentMaxConcurrent: layer.subagentMaxConcurrent ?? acc.subagentMaxConcurrent,
     agentBackend: layer.agentBackend ?? acc.agentBackend,
     agentBackends: mergeAgentBackends(acc.agentBackends, layer.agentBackends),
   }

@@ -22,6 +22,8 @@ import {
   buildDispatchAgentManifestEntry,
   parseDispatchAgentArgs,
   type NormalizedDispatch,
+  collectWithTimeout,
+  renderCollectPending,
 } from "@/lib/claude/agents/dispatch-agent-tool"
 import { runDispatchFanout } from "@/lib/claude/agents/dispatch-core"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
@@ -48,6 +50,7 @@ import {
   startCliBackgroundRun,
   hasCliBackgroundRun,
   collectCliBackgroundResult,
+  cancelCliBackgroundRun,
   getCliBackgroundRecord,
 } from "./subagent-background-tasks"
 import { frameResumePrompt } from "@/lib/background-tasks/completion-delivery"
@@ -59,12 +62,13 @@ import {
 import { errorMessage } from "../tui/runtime/shared"
 
 /**
- * Max concurrent CLI subagent runs in a single `dispatch_agent` fan-out. The CLI
- * has no token-budget accounting (unlike the renderer, which serializes under a
+ * Default max concurrent CLI subagent runs in a single `dispatch_agent`
+ * fan-out, used when `config.subagentMaxConcurrent` is unset. The CLI has no
+ * token-budget accounting (unlike the renderer, which serializes under a
  * finite budget), so it bounds concurrency to keep a large sibling batch from
  * spawning unbounded parallel runs over the one live sidecar.
  */
-const CLI_MAX_CONCURRENT_SUBAGENTS = 8
+export const CLI_MAX_CONCURRENT_SUBAGENTS = 8
 
 /**
  * Fallback nesting cap when neither the context nor the resolved config carry
@@ -186,23 +190,39 @@ export async function handleCliDispatchAgent(
   }
   const parsed = parseDispatchAgentArgs(req.args)
   if (parsed.mode === "error") return { ...base, result: parsed.message }
+  // Background runs are owned by the ROOT chat session even when a nested
+  // subagent started them, so any member of the tree may collect or cancel.
+  const owner = ctx.rootSessionId ?? req.sessionId
+  if (parsed.mode === "cancel") {
+    // Owner-scoped like collect: a runId guessed from another session reads
+    // as unknown rather than stopping that session's work.
+    const lines = parsed.runIds.map((runId) =>
+      cancelCliBackgroundRun(runId, owner)
+        ? `Cancelled run "${runId}". Any partial output it produced can still be collected.`
+        : `No running background run "${runId}" (already finished, or unknown).`
+    )
+    return { ...base, result: lines.join("\n") }
+  }
   if (parsed.mode === "collect") {
     // Scope the collect to the OWNING chat session so a run started by a
     // different chat session (or one cleared away with `/clear`) reads as
     // unknown rather than leaking another session's subagent output back to
-    // this model. Background runs are owned by the root chat session even when
-    // a nested subagent started them, so any member of the tree may collect.
-    const collected = await collectCliBackgroundResult(parsed.runId, {
-      home: ctx.home,
-      owner: ctx.rootSessionId ?? req.sessionId,
-    })
-    if (collected === undefined) {
-      return {
-        ...base,
-        result: `dispatch_agent: no background run "${parsed.runId}".`,
-      }
-    }
-    return { ...base, result: collected }
+    // this model. Several ids are awaited concurrently and reported in the
+    // order given. With `timeoutMs`, a run still in flight when the window
+    // closes reads as pending instead of blocking the rest.
+    const startedAt = Date.now()
+    const parts = await Promise.all(
+      parsed.runIds.map(async (runId) => {
+        const outcome = await collectWithTimeout(
+          () => collectCliBackgroundResult(runId, { home: ctx.home, owner }),
+          parsed.timeoutMs
+        )
+        if (!outcome.settled) return renderCollectPending(runId, Date.now() - startedAt)
+        if (outcome.value === undefined) return `dispatch_agent: no background run "${runId}".`
+        return outcome.value
+      })
+    )
+    return { ...base, result: parts.join("\n\n---\n\n") }
   }
 
   const run = ctx.run ?? runCliSubagent
@@ -300,8 +320,12 @@ export async function handleCliDispatchAgent(
           }
         : undefined
     let settled = false
+    // A per-call `model` overlays the definition for this run only. The
+    // runner lands it in the child's per-provider slot, so it beats the
+    // provider's catalog default the way a frontmatter `model` does.
+    const def = d.model ? { ...match.def, model: d.model } : match.def
     try {
-      const r = await run(match.def, d.prompt, req.sessionId, {
+      const r = await run(def, d.prompt, req.sessionId, {
         config: ctx.config,
         home: ctx.home,
         cwd: ctx.cwd,
@@ -425,6 +449,7 @@ export async function handleCliDispatchAgent(
       prompt: framed,
       toolsEnabled: parsed.toolsEnabled ?? record.toolsEnabled ?? true,
       background: parsed.background,
+      ...(parsed.model ? { model: parsed.model } : {}),
     }
     const outcome = await runOne(resumeDispatch, `${record.subagentId} (resumed)`)
     return outcome.ok ? { ...base, result: outcome.text } : { ...base, error: outcome.text }
@@ -436,7 +461,7 @@ export async function handleCliDispatchAgent(
   // subagent runs over the one live sidecar (the old `Promise.all` had no cap).
   const outcomes = await runDispatchFanout({
     dispatches: parsed.dispatches,
-    width: CLI_MAX_CONCURRENT_SUBAGENTS,
+    width: ctx.config.subagentMaxConcurrent ?? CLI_MAX_CONCURRENT_SUBAGENTS,
     runOne: (d, label) => runOne(d, label),
   })
   const result = outcomes.map((o) => o.text).join("\n\n---\n\n")

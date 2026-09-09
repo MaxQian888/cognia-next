@@ -16,11 +16,16 @@
  * Returns the plain-text tool result the model reads (never throws).
  */
 
-import { parseDispatchAgentArgs } from "./dispatch-agent-tool"
+import {
+  collectWithTimeout,
+  parseDispatchAgentArgs,
+  renderCollectPending,
+} from "./dispatch-agent-tool"
 import { runDispatchFanout } from "./dispatch-core"
 import { clearResolvedPermissionCeiling } from "./dispatch-context-registry"
 import { releaseDispatchBudget, isDispatchBudgetFinite } from "./dispatch-budget"
 import { collectRendererBackgroundResult } from "@/lib/background-tasks/renderer-subagent-registry"
+import { cancelSubagentRun } from "./cancel-subagent"
 import { renderDispatchOutcomeForModel } from "./dispatch-error"
 import { resolveCaller, startDispatchRun, DEFAULT_NESTING_MAX_DEPTH } from "./dispatch-run"
 
@@ -31,15 +36,63 @@ export interface DispatchAgentToolRequest {
   args: Record<string, unknown>
 }
 
+/**
+ * Resolve the fan-out width for one call. A finite token budget forces
+ * serial fan-out (see below). Otherwise the user's concurrency cap applies,
+ * and `0` (unset) keeps the historical fully-parallel behaviour.
+ */
+export function resolveDispatchWidth(caller: {
+  budgetRoot: string
+  maxConcurrent: number
+}): number {
+  if (isDispatchBudgetFinite(caller.budgetRoot)) return 1
+  return caller.maxConcurrent > 0 ? caller.maxConcurrent : Infinity
+}
+
+/**
+ * Await one or more background runs, optionally bounded by a wait window.
+ * Runs are awaited concurrently and reported in the order the model listed
+ * them. A run that is still in flight when the window closes is reported as
+ * pending rather than blocking the rest.
+ */
+async function collectDispatchRuns(runIds: string[], timeoutMs: number | undefined) {
+  const startedAt = Date.now()
+  const parts = await Promise.all(
+    runIds.map(async (runId) => {
+      const outcome = await collectWithTimeout(
+        () => collectRendererBackgroundResult(runId),
+        timeoutMs
+      )
+      if (!outcome.settled) return renderCollectPending(runId, Date.now() - startedAt)
+      if (!outcome.value) return `No background run "${runId}" found.`
+      return renderDispatchOutcomeForModel(runId, outcome.value)
+    })
+  )
+  return parts.join("\n\n---\n\n")
+}
+
+/** Stop running background runs. A run that is not live reads as such. */
+function cancelDispatchRuns(runIds: string[]): string {
+  return runIds
+    .map((runId) => {
+      const cancelled = cancelSubagentRun(runId, {
+        backgrounded: true,
+        reason: "Cancelled by the dispatching agent.",
+      })
+      return cancelled
+        ? `Cancelled run "${runId}". Any partial output it produced can still be collected.`
+        : `No running background run "${runId}" (already finished, or unknown).`
+    })
+    .join("\n")
+}
+
 export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promise<string> {
   const parsed = parseDispatchAgentArgs(req.args)
   if (parsed.mode === "error") return parsed.message
 
-  if (parsed.mode === "collect") {
-    const r = await collectRendererBackgroundResult(parsed.runId)
-    if (!r) return `No background run "${parsed.runId}" found.`
-    return renderDispatchOutcomeForModel(parsed.runId, r)
-  }
+  if (parsed.mode === "cancel") return cancelDispatchRuns(parsed.runIds)
+
+  if (parsed.mode === "collect") return collectDispatchRuns(parsed.runIds, parsed.timeoutMs)
 
   if (parsed.mode === "resume") {
     return resumeDispatchRun(req.sessionId, parsed)
@@ -53,8 +106,8 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
   // pre-spend exhaustion gate and overshoot in one batch. When the budget is
   // finite, serialize (`width: 1`) so each sibling sees the prior siblings'
   // draw-down and the per-child budget check trips mid-batch. An unlimited
-  // budget has nothing to overshoot, so it stays fully parallel.
-  const width = isDispatchBudgetFinite(caller.budgetRoot) ? 1 : Infinity
+  // budget has nothing to overshoot, so it runs as wide as the user's cap.
+  const width = resolveDispatchWidth(caller)
   const outcomes = await runDispatchFanout({
     dispatches: parsed.dispatches,
     width,
@@ -69,6 +122,7 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
         parentSessionId: req.sessionId,
         caller,
         label,
+        ...(d.model ? { model: d.model } : {}),
       })
       return { text, ok: true }
     },
@@ -84,7 +138,13 @@ export async function runDispatchAgentTool(req: DispatchAgentToolRequest): Promi
  */
 async function resumeDispatchRun(
   sessionId: string,
-  parsed: { runId: string; prompt: string; toolsEnabled?: boolean; background: boolean }
+  parsed: {
+    runId: string
+    prompt: string
+    toolsEnabled?: boolean
+    background: boolean
+    model?: string
+  }
 ): Promise<string> {
   const [{ getBackgroundTaskRecord }, { frameResumePrompt }, { getDispatchableSubagentDef }] =
     await Promise.all([
@@ -126,6 +186,7 @@ async function resumeDispatchRun(
     caller,
     label: `${record.subagentId} (resumed)`,
     resumeOfRunId: record.runId,
+    ...(parsed.model ? { model: parsed.model } : {}),
   })
   // Provenance: link the original row to its continuation (best-effort).
   try {

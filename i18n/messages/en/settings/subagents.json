@@ -94,6 +94,8 @@
     "dispatchMaxRetriesHint": "Retries for transient dispatch failures (rate-limit, timeout, network, sidecar restart). 0 disables. Default 1.",
     "enabled": "Enable nested dispatch",
     "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
+    "maxConcurrent": "Max concurrent sub-agents",
+    "maxConcurrentHint": "How many sub-agents one dispatch may run at the same time. 0 = unlimited. A finite token budget always runs them one at a time.",
     "maxDepth": "Max nesting depth",
     "maxDepthHint": "How many levels below the chat a sub-agent may nest (1–5).",
     "timeout": "Subtree timeout (seconds)",

@@ -69,12 +69,29 @@ describe("nestingValuesToSettings", () => {
       tokenBudget: 50_000,
       timeoutSeconds: 120,
       dispatchMaxRetries: 3,
+      maxConcurrent: 4,
     }
     expect(
       nestingValuesFromSettings({
         subagentNesting: nestingValuesToSettings(values),
       } as AppSettings)
     ).toEqual(values)
+  })
+
+  it("treats a missing or non-positive concurrency cap as unlimited (0)", () => {
+    expect(
+      nestingValuesFromSettings({
+        subagentNesting: { enabled: true, maxDepth: 2 },
+      } as AppSettings).maxConcurrent
+    ).toBe(0)
+    expect(
+      nestingValuesFromSettings({
+        subagentNesting: { enabled: true, maxDepth: 2, maxConcurrent: -3 },
+      } as AppSettings).maxConcurrent
+    ).toBe(0)
+    expect(nestingValuesToSettings({ ...NESTING_DEFAULTS, maxConcurrent: -1 }).maxConcurrent).toBe(
+      0
+    )
   })
 })
 

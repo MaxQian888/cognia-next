@@ -3270,6 +3270,12 @@ export interface AppSettings {
      * retry re-checks abort, the subtree deadline, and the token budget.
      */
     dispatchMaxRetries?: number
+    /**
+     * Max sibling subagent runs one `dispatch_agent` fan-out keeps in flight
+     * at once (Codex `agent_max_threads` parity). `0` or absent = unlimited.
+     * A finite `tokenBudget` still serializes fan-out regardless.
+     */
+    maxConcurrent?: number
   }
   /**
    * Background subagent-run lifecycle. Merged forward by `getSettings()` so

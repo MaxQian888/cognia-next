@@ -22,6 +22,8 @@ export interface NestingPolicyValues {
   tokenBudget: number
   timeoutSeconds: number
   dispatchMaxRetries: number
+  /** Fan-out width cap. 0 = unlimited. */
+  maxConcurrent: number
 }
 
 export const NESTING_DEFAULTS: NestingPolicyValues = {
@@ -30,6 +32,7 @@ export const NESTING_DEFAULTS: NestingPolicyValues = {
   tokenBudget: 0,
   timeoutSeconds: 0,
   dispatchMaxRetries: 1,
+  maxConcurrent: 0,
 }
 
 export function nestingValuesFromSettings(
@@ -43,6 +46,7 @@ export function nestingValuesFromSettings(
     tokenBudget: cfg.tokenBudget ?? NESTING_DEFAULTS.tokenBudget,
     timeoutSeconds: cfg.timeoutMs ? Math.round(cfg.timeoutMs / 1000) : 0,
     dispatchMaxRetries: cfg.dispatchMaxRetries ?? NESTING_DEFAULTS.dispatchMaxRetries,
+    maxConcurrent: cfg.maxConcurrent && cfg.maxConcurrent > 0 ? cfg.maxConcurrent : 0,
   }
 }
 
@@ -55,6 +59,7 @@ export function nestingValuesToSettings(
     tokenBudget: values.tokenBudget > 0 ? values.tokenBudget : 0,
     timeoutMs: values.timeoutSeconds > 0 ? values.timeoutSeconds * 1000 : 0,
     dispatchMaxRetries: values.dispatchMaxRetries,
+    maxConcurrent: values.maxConcurrent > 0 ? values.maxConcurrent : 0,
   }
 }
 
@@ -150,6 +155,20 @@ export function SubagentNestingCard({ value, onChange }: SubagentNestingCardProp
           aria-label={t("dispatchMaxRetries")}
         />
         <p className="text-xs text-muted-foreground">{t("dispatchMaxRetriesHint")}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="settings-subagent-max-concurrent">{t("maxConcurrent")}</Label>
+        <Input
+          id="settings-subagent-max-concurrent"
+          type="number"
+          min={0}
+          max={64}
+          value={value.maxConcurrent}
+          onChange={(e) => onChange({ maxConcurrent: clampInt(e.target.value, 0, 64, 0) })}
+          aria-label={t("maxConcurrent")}
+        />
+        <p className="text-xs text-muted-foreground">{t("maxConcurrentHint")}</p>
       </div>
     </div>
   )

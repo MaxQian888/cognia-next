@@ -512,6 +512,7 @@ describe("setNumberConfig", () => {
       ["toolExecutionTimeoutMs", 0],
       ["subagentStreamIdleTimeoutMs", 600000],
       ["subagentMaxDepth", 3],
+      ["subagentMaxConcurrent", 4],
     ]
     for (const [key, value] of cases) {
       const m = memFs()

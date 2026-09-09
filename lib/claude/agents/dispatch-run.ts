@@ -56,6 +56,12 @@ export interface ResolvedCaller {
   budgetRoot: string
   /** The caller's resolved permission ceiling, clamping every child it dispatches. */
   parentCeiling?: ExternalSessionPermissionSpec
+  /**
+   * Max sibling runs one `dispatch_agent` fan-out may keep in flight at once
+   * (`subagentNesting.maxConcurrent`). `0` means unlimited. A finite token
+   * budget still forces serial fan-out regardless of this value.
+   */
+  maxConcurrent: number
 }
 
 export interface NestingSettings {
@@ -63,6 +69,14 @@ export interface NestingSettings {
   tokenBudget: number
   timeoutMs: number
   dispatchMaxRetries: number
+  /** Fan-out width cap. `0` means unlimited. */
+  maxConcurrent: number
+}
+
+/** Clamp a stored concurrency cap to a usable integer (`0` = unlimited). */
+function normalizeMaxConcurrent(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return 0
+  return Math.floor(raw)
 }
 
 export async function loadNesting(): Promise<NestingSettings> {
@@ -75,6 +89,7 @@ export async function loadNesting(): Promise<NestingSettings> {
       tokenBudget: n?.tokenBudget ?? 0,
       timeoutMs: n?.timeoutMs ?? 0,
       dispatchMaxRetries: n?.dispatchMaxRetries ?? DEFAULT_DISPATCH_RETRY.maxRetries,
+      maxConcurrent: normalizeMaxConcurrent(n?.maxConcurrent),
     }
   } catch {
     return {
@@ -82,6 +97,7 @@ export async function loadNesting(): Promise<NestingSettings> {
       tokenBudget: 0,
       timeoutMs: 0,
       dispatchMaxRetries: DEFAULT_DISPATCH_RETRY.maxRetries,
+      maxConcurrent: 0,
     }
   }
 }
@@ -121,6 +137,9 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
   const parentCeiling =
     getResolvedPermissionCeiling(sessionId) ?? (await fallbackCeilingFromSession(sessionId))
   const ctx = getDispatchContext(sessionId)
+  // The concurrency cap is a global policy, not part of the per-run context
+  // a nested caller carries, so every caller reads it from settings.
+  const settings = await loadNesting()
   if (ctx) {
     return {
       parentDepth: ctx.depth,
@@ -129,11 +148,11 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
       parentSubagentId: ctx.selfRunId,
       deadlineMs: ctx.deadlineMs,
       budgetRoot: ctx.budgetRootRunId ?? `dispatch:${sessionId}`,
+      maxConcurrent: settings.maxConcurrent,
       ...(parentCeiling ? { parentCeiling } : {}),
     }
   }
   // Top-level chat: derive from settings and seed the subtree budget once.
-  const settings = await loadNesting()
   const budgetRoot = `dispatch:${sessionId}`
   getOrCreateDispatchBudget(budgetRoot, settings.tokenBudget)
   return {
@@ -141,6 +160,7 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
     maxDepth: settings.maxDepth,
     parentChain: [],
     budgetRoot,
+    maxConcurrent: settings.maxConcurrent,
     ...(settings.timeoutMs > 0 ? { deadlineMs: Date.now() + settings.timeoutMs } : {}),
     ...(parentCeiling ? { parentCeiling } : {}),
   }
@@ -171,6 +191,12 @@ export interface StartDispatchRunParams {
   resumeOfRunId?: string
   /** Chained auto-resume attempt counter (crash-loop cap). */
   resumeAttempt?: number
+  /**
+   * Per-call model override from the tool call. Applied on top of the
+   * resolved definition for this run only. Ignored when the target is an
+   * SDK-registered id with no inline definition to overlay.
+   */
+  model?: string
 }
 
 export interface DispatchRunHandle {
@@ -208,7 +234,8 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
   ])
   // Prefer the inline def (projected ids like `template:x` / `pluginId:y` are
   // not resolvable by the registry's `getSubagent`); fall back to the raw id.
-  const target = getDispatchableSubagentDef(p.subagentId) ?? p.subagentId
+  const resolved = getDispatchableSubagentDef(p.subagentId)
+  const target = resolved && p.model ? { ...resolved, model: p.model } : (resolved ?? p.subagentId)
   const tracker = createDispatchRunTracker(childRunId)
   const policy: DispatchRetryPolicy = {
     ...DEFAULT_DISPATCH_RETRY,

@@ -94,6 +94,8 @@
     "dispatchMaxRetriesHint": "针对瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 表示禁用，默认 1。",
     "enabled": "启用嵌套派发",
     "enabledHint": "默认关闭——代理仍使用标准的单层 Task 工具。",
+    "maxConcurrent": "最大并发子代理数",
+    "maxConcurrentHint": "一次派发最多同时运行多少个子代理。0 表示不限制。设置了 token 预算时始终逐个运行。",
     "maxDepth": "最大嵌套深度",
     "maxDepthHint": "子代理最多可以在聊天之下嵌套几层（1–5）。",
     "timeout": "子树超时（秒）",

@@ -1,9 +1,12 @@
 import {
+  COLLECT_TIMEOUT_MAX_MS,
   DISPATCH_AGENT_TOOL_NAME,
   DISPATCH_AGENT_PLUGIN_ID,
   buildDispatchAgentSchema,
   buildDispatchAgentManifestEntry,
+  collectWithTimeout,
   parseDispatchAgentArgs,
+  renderCollectPending,
   type DispatchAgentAvailableSubagent,
 } from "./dispatch-agent-tool"
 
@@ -100,7 +103,77 @@ describe("dispatch-agent-tool — parseDispatchAgentArgs", () => {
 
   it("parses the collect form and trims the runId", () => {
     const r = parseDispatchAgentArgs({ collect: "  run-123  " })
-    expect(r).toEqual({ mode: "collect", runId: "run-123" })
+    expect(r).toEqual({ mode: "collect", runIds: ["run-123"] })
+  })
+
+  it("collect accepts a list of runIds, dropping blanks and duplicates", () => {
+    const r = parseDispatchAgentArgs({ collect: ["a", " b ", "", "a", 7] })
+    expect(r).toEqual({ mode: "collect", runIds: ["a", "b"] })
+  })
+
+  it("collect carries a clamped timeoutMs (negative and NaN dropped, cap applied)", () => {
+    expect(parseDispatchAgentArgs({ collect: "a", timeoutMs: 1500.9 })).toEqual({
+      mode: "collect",
+      runIds: ["a"],
+      timeoutMs: 1500,
+    })
+    expect(parseDispatchAgentArgs({ collect: "a", timeoutMs: "250" })).toMatchObject({
+      timeoutMs: 250,
+    })
+    expect(parseDispatchAgentArgs({ collect: "a", timeoutMs: -1 })).toEqual({
+      mode: "collect",
+      runIds: ["a"],
+    })
+    expect(parseDispatchAgentArgs({ collect: "a", timeoutMs: Infinity })).toEqual({
+      mode: "collect",
+      runIds: ["a"],
+    })
+    expect(parseDispatchAgentArgs({ collect: "a", timeoutMs: 10 ** 12 })).toMatchObject({
+      timeoutMs: COLLECT_TIMEOUT_MAX_MS,
+    })
+  })
+
+  it("collect with no usable id is an error rather than a silent no-op", () => {
+    expect(parseDispatchAgentArgs({ collect: "   " }).mode).toBe("error")
+    expect(parseDispatchAgentArgs({ collect: [] }).mode).toBe("error")
+  })
+
+  it("parses the cancel form (single id or list) and gives it top precedence", () => {
+    expect(parseDispatchAgentArgs({ cancel: " r1 " })).toEqual({ mode: "cancel", runIds: ["r1"] })
+    expect(parseDispatchAgentArgs({ cancel: ["r1", "r2"] })).toEqual({
+      mode: "cancel",
+      runIds: ["r1", "r2"],
+    })
+    expect(
+      parseDispatchAgentArgs({ cancel: "r1", collect: "r2", resume: "r3", prompt: "x" })
+    ).toEqual({ mode: "cancel", runIds: ["r1"] })
+    expect(parseDispatchAgentArgs({ cancel: [] }).mode).toBe("error")
+  })
+
+  it("threads a per-call model override through single, parallel and resume forms", () => {
+    expect(parseDispatchAgentArgs({ subagentId: "a", prompt: "x", model: " haiku " })).toEqual({
+      mode: "dispatch",
+      dispatches: [
+        { subagentId: "a", prompt: "x", toolsEnabled: true, background: false, model: "haiku" },
+      ],
+    })
+    expect(
+      parseDispatchAgentArgs({
+        dispatches: [
+          { subagentId: "a", prompt: "x", model: "m1" },
+          { subagentId: "b", prompt: "y" },
+        ],
+      })
+    ).toMatchObject({ dispatches: [{ model: "m1" }, { subagentId: "b" }] })
+    expect(parseDispatchAgentArgs({ resume: "r", prompt: "x", model: "m2" })).toMatchObject({
+      mode: "resume",
+      model: "m2",
+    })
+    // A blank model is the same as none.
+    expect(parseDispatchAgentArgs({ subagentId: "a", prompt: "x", model: "  " })).toEqual({
+      mode: "dispatch",
+      dispatches: [{ subagentId: "a", prompt: "x", toolsEnabled: true, background: false }],
+    })
   })
 
   it("collect wins over a dispatch payload", () => {
@@ -154,5 +227,64 @@ describe("dispatch-agent-tool — parseDispatchAgentArgs", () => {
     const entry = buildDispatchAgentManifestEntry([{ id: "explore", description: "d" }])
     expect(JSON.stringify(entry.jsonSchema)).toContain('"resume"')
     expect(entry.description).toContain('{resume:"<runId>"')
+  })
+})
+
+describe("dispatch-agent-tool, collect helpers", () => {
+  it("advertises cancel, list-collect, timeoutMs and model in the schema and description", () => {
+    const entry = buildDispatchAgentManifestEntry([{ id: "explore", description: "d" }])
+    const schema = JSON.stringify(entry.jsonSchema)
+    expect(schema).toContain('"cancel"')
+    expect(schema).toContain('"timeoutMs"')
+    expect(schema).toContain('"model"')
+    expect(entry.description).toContain("cancel")
+    expect(entry.description).toContain("model")
+    const collect = (entry.jsonSchema as { properties: { collect: { type: unknown } } }).properties
+      .collect
+    expect(collect.type).toEqual(["string", "array"])
+  })
+
+  it("collectWithTimeout awaits outright when no window is given", async () => {
+    await expect(collectWithTimeout(async () => "v", undefined)).resolves.toEqual({
+      settled: true,
+      value: "v",
+    })
+  })
+
+  it("collectWithTimeout reports pending when the window closes first", async () => {
+    let release!: (v: string) => void
+    const slow = new Promise<string>((resolve) => {
+      release = resolve
+    })
+    await expect(collectWithTimeout(() => slow, 5)).resolves.toEqual({ settled: false })
+    release("late")
+    // The losing collect settles on its own without surfacing anywhere.
+    await expect(slow).resolves.toBe("late")
+  })
+
+  it("collectWithTimeout settles when the collect wins the race", async () => {
+    await expect(collectWithTimeout(async () => 42, 1000)).resolves.toEqual({
+      settled: true,
+      value: 42,
+    })
+  })
+
+  it("collectWithTimeout swallows a late rejection from the losing collect", async () => {
+    let reject!: (e: Error) => void
+    const failing = new Promise<string>((_resolve, rej) => {
+      reject = rej
+    })
+    await expect(collectWithTimeout(() => failing, 5)).resolves.toEqual({ settled: false })
+    reject(new Error("late failure"))
+    await Promise.resolve()
+    // Reaching here without an unhandled-rejection crash is the assertion.
+  })
+
+  it("renderCollectPending names both the retry and the cancel verb", () => {
+    const text = renderCollectPending("r-1", 12_400)
+    expect(text).toContain('"r-1"')
+    expect(text).toContain("12s")
+    expect(text).toContain('collect:"r-1"')
+    expect(text).toContain('cancel:"r-1"')
   })
 })
