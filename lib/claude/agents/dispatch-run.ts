@@ -48,6 +48,13 @@ import {
 export const DEFAULT_NESTING_MAX_DEPTH = 2
 
 export interface ResolvedCaller {
+  /**
+   * The directory the caller's own turn runs in, so every child inherits it
+   * (project instruction discovery, relative paths in the prompt, the sandbox
+   * placement all key off it). Absent when nothing in the session's chain
+   * names a directory.
+   */
+  cwd?: string
   parentDepth: number
   maxDepth: number
   parentChain: string[]
@@ -139,7 +146,7 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
   const ctx = getDispatchContext(sessionId)
   // The concurrency cap is a global policy, not part of the per-run context
   // a nested caller carries, so every caller reads it from settings.
-  const settings = await loadNesting()
+  const [settings, cwd] = await Promise.all([loadNesting(), resolveCallerCwd(sessionId)])
   if (ctx) {
     return {
       parentDepth: ctx.depth,
@@ -149,6 +156,7 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
       deadlineMs: ctx.deadlineMs,
       budgetRoot: ctx.budgetRootRunId ?? `dispatch:${sessionId}`,
       maxConcurrent: settings.maxConcurrent,
+      ...(cwd ? { cwd } : {}),
       ...(parentCeiling ? { parentCeiling } : {}),
     }
   }
@@ -161,8 +169,23 @@ export async function resolveCaller(sessionId: string): Promise<ResolvedCaller> 
     parentChain: [],
     budgetRoot,
     maxConcurrent: settings.maxConcurrent,
+    ...(cwd ? { cwd } : {}),
     ...(settings.timeoutMs > 0 ? { deadlineMs: Date.now() + settings.timeoutMs } : {}),
     ...(parentCeiling ? { parentCeiling } : {}),
+  }
+}
+
+/**
+ * The caller session's working directory, read from Dexie the same way the
+ * send path resolves it. Best-effort: a failed read means the child starts
+ * without a cwd, which is the pre-existing behaviour, never a failed dispatch.
+ */
+async function resolveCallerCwd(sessionId: string): Promise<string | undefined> {
+  try {
+    const { resolveSessionCwd } = await import("@/lib/workspace/session-cwd")
+    return await resolveSessionCwd(sessionId)
+  } catch {
+    return undefined
   }
 }
 
@@ -260,6 +283,9 @@ export async function startDispatchRun(p: StartDispatchRunParams): Promise<Dispa
       },
       ...(p.caller.deadlineMs ? { _deadlineMs: p.caller.deadlineMs } : {}),
       ...(p.caller.parentCeiling ? { _permissionCeiling: p.caller.parentCeiling } : {}),
+      // The child works where its parent works (P0 before this: an app-dispatched
+      // child started with no cwd, so it never saw the project's CLAUDE.md).
+      ...(p.caller.cwd ? { cwd: p.caller.cwd } : {}),
     }).catch((err): PluginSubagentDispatchResult => {
       const envelope = toDispatchErrorEnvelope(err, {
         aborted: abort.signal.aborted,

@@ -3,6 +3,7 @@ import { dispatchSubagent } from "@/lib/plugin/agent-sdk/dispatch"
 import { getDispatchableSubagentDef } from "@/lib/claude/agents/subagents"
 import { getSettings } from "@/lib/db/settings"
 import { getSession } from "@/lib/db/sessions"
+import { resolveSessionCwd } from "@/lib/workspace/session-cwd"
 import {
   journalRendererForegroundRun,
   startRendererBackgroundRun,
@@ -32,6 +33,10 @@ jest.mock("@/lib/db/sessions", () => ({
   __esModule: true,
   getSession: jest.fn(),
 }))
+jest.mock("@/lib/workspace/session-cwd", () => ({
+  __esModule: true,
+  resolveSessionCwd: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
   __esModule: true,
   journalRendererForegroundRun: jest.fn(),
@@ -44,6 +49,7 @@ const mockGetDef = getDispatchableSubagentDef as jest.MockedFunction<
 >
 const mockGetSettings = getSettings as jest.MockedFunction<typeof getSettings>
 const mockGetSession = getSession as jest.MockedFunction<typeof getSession>
+const mockSessionCwd = resolveSessionCwd as jest.MockedFunction<typeof resolveSessionCwd>
 const mockForegroundJournal = journalRendererForegroundRun as jest.MockedFunction<
   typeof journalRendererForegroundRun
 >
@@ -517,5 +523,55 @@ describe("startDispatchRun, per-call model override", () => {
       model: "fast",
     })
     expect(mockDispatch.mock.calls[0][0]).toBe("sdk-only")
+  })
+})
+
+describe("resolveCaller / cwd inheritance", () => {
+  it("carries the caller session's working directory so every child inherits it", async () => {
+    mockSessionCwd.mockResolvedValueOnce("/repo/parent")
+    await expect(resolveCaller("chat-1")).resolves.toMatchObject({ cwd: "/repo/parent" })
+    expect(mockSessionCwd).toHaveBeenCalledWith("chat-1")
+
+    registerDispatchContext("sub-session", {
+      depth: 1,
+      maxDepth: 3,
+      parentChain: ["root"],
+      selfRunId: "run-A",
+    })
+    mockSessionCwd.mockResolvedValueOnce("/repo/child")
+    await expect(resolveCaller("sub-session")).resolves.toMatchObject({ cwd: "/repo/child" })
+  })
+
+  it("leaves cwd absent when the session names no directory or the read fails", async () => {
+    mockSessionCwd.mockResolvedValueOnce(undefined)
+    expect(await resolveCaller("chat-1")).not.toHaveProperty("cwd")
+    mockSessionCwd.mockRejectedValueOnce(new Error("dexie closed"))
+    expect(await resolveCaller("chat-1")).not.toHaveProperty("cwd")
+  })
+
+  it("hands the caller's cwd to the dispatched child", async () => {
+    await startDispatchRun({
+      subagentId: "coder",
+      prompt: "build",
+      toolsEnabled: true,
+      background: false,
+      parentSessionId: "chat-1",
+      caller: caller({ cwd: "/repo/parent" }),
+    })
+    expect(mockDispatch).toHaveBeenCalledWith(
+      "coder",
+      "build",
+      expect.objectContaining({ cwd: "/repo/parent" })
+    )
+    mockDispatch.mockClear()
+    await startDispatchRun({
+      subagentId: "coder",
+      prompt: "build",
+      toolsEnabled: true,
+      background: false,
+      parentSessionId: "chat-1",
+      caller: caller(),
+    })
+    expect(mockDispatch.mock.calls[0][2]).not.toHaveProperty("cwd")
   })
 })

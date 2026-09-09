@@ -215,6 +215,12 @@ export async function dispatchSubagent(
       // credentials) instead of the dispatching session's provider.
       ...(def.provider ? { provider: def.provider } : {}),
       ...(def.tools !== undefined ? { allowedTools: def.tools } : {}),
+      // The definition's own deny list and reasoning effort ride to the
+      // executor (the CLI runner honours both, so the two shells agree).
+      ...(def.disallowedTools && def.disallowedTools.length > 0
+        ? { disallowedTools: [...def.disallowedTools] }
+        : {}),
+      ...(def.effort ? { effort: def.effort } : {}),
       // Parent ceiling: clamp THIS child's resolved tool surface against the
       // dispatching agent's ceiling (fail-closed). The child's own dispatchContext
       // below is for its grandchildren; this is the ceiling that bounds the child.

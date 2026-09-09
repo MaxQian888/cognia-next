@@ -228,10 +228,10 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "agents",
-    description: "Open the characters / agents panel.",
+    description: "Open the subagents settings: definitions, dispatch and nesting.",
     scope: "builtin",
     category: "system",
-    handler: (ctx) => ctx.openSettings("characters"),
+    handler: (ctx) => ctx.openSettings("subagents"),
   },
   {
     name: "mcp",

@@ -122,3 +122,13 @@ describe("SettingsTab is the live SettingsSectionId union", () => {
     expect(stale).toBe("unknown-section")
   })
 })
+
+describe("/agents", () => {
+  it("opens the subagents settings, not the characters panel", () => {
+    const agents = BUILTIN_SLASH_COMMANDS.find((c) => c.name === "agents")!
+    const openSettings = jest.fn()
+    void agents.handler?.({ openSettings } as never)
+    expect(openSettings).toHaveBeenCalledWith("subagents")
+    expect(agents.description).toMatch(/subagents/i)
+  })
+})

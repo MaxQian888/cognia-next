@@ -522,6 +522,32 @@ describe("executeAgent", () => {
       )
     })
 
+    it("puts a run-level effort at the head of the chain and unions its deny list", async () => {
+      mockResolveSendOptions.mockResolvedValue({
+        model: "claude",
+        disallowedTools: ["Write"],
+      } as never)
+      await executeAgent("do work", {
+        toolsEnabled: true,
+        effort: "high",
+        disallowedTools: ["Bash", "Write"],
+      })
+      expect(mockResolveSendOptions).toHaveBeenCalledWith(
+        expect.objectContaining({ session: expect.objectContaining({ effort: "high" }) })
+      )
+      expect(mockRunAndCapture).toHaveBeenCalledWith(
+        "s1",
+        "do work",
+        expect.objectContaining({ disallowedTools: ["Write", "Bash"] }),
+        expect.anything()
+      )
+      // The persisted row is never touched: the overlay is in-memory only.
+      expect(mockSetSdkSessionId).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ effort: expect.anything() })
+      )
+    })
+
     it("uses the shared plan to retry a tool rail failure before commitment", async () => {
       const plan = routingPlan([
         { providerId: "openai", modelId: "gpt-4o" },

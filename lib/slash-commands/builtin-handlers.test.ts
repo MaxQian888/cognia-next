@@ -89,12 +89,12 @@ describe("/help handler", () => {
 })
 
 describe("/model, /agents, /mcp open settings panels", () => {
-  it("model → general, agents → characters, mcp → mcp", async () => {
+  it("model → general, agents → subagents, mcp → mcp", async () => {
     const c = ctx()
     await find("model").handler!(c)
     await find("agents").handler!(c)
     await find("mcp").handler!(c)
-    expect(c._opened).toEqual(["general", "characters", "mcp"])
+    expect(c._opened).toEqual(["general", "subagents", "mcp"])
   })
 })
 

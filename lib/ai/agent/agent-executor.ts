@@ -147,6 +147,13 @@ export interface ExecuteAgentConfig {
   cwd?: string
   /** Restrict the tool surface for the synthesised character. */
   allowedTools?: string[]
+  /**
+   * Tools the run must never see, unioned onto the resolved deny list after
+   * the permission chain runs (a subagent definition's `disallowedTools`).
+   */
+  disallowedTools?: string[]
+  /** Reasoning-effort dial for this run, ahead of the session/character chain. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max"
   /** Wall-clock timeout (ms) for the tool-enabled run. Defaults to the runner's own default. */
   timeoutMs?: number
   /**
@@ -417,9 +424,14 @@ async function runToolEnabledStandalone(
     // the session's `providerOverride` (which `resolveSendOptions` honors over
     // appSettings). Applied to an in-memory copy only — never persisted, so a
     // reused persistent session keeps its own provider.
-    const sessionRow = config.provider
-      ? { ...baseSessionRow, providerOverride: config.provider }
-      : baseSessionRow
+    // `effort` sits at the head of the resolver's effort chain, so the run's
+    // own dial (a subagent definition's `effort`) wins over the session and
+    // character defaults. In-memory only, like the provider override.
+    const sessionRow = {
+      ...baseSessionRow,
+      ...(config.provider ? { providerOverride: config.provider } : {}),
+      ...(config.effort ? { effort: config.effort } : {}),
+    }
     const sendOptions = await buildOpts.resolveSendOptions({
       session: sessionRow,
       character,
@@ -430,6 +442,13 @@ async function runToolEnabledStandalone(
       routingSurface: "agent",
       routingContextHint: { promptText: prompt },
     })
+    // The run's own deny list is unioned AFTER the permission chain so it can
+    // only narrow: nothing a definition lists can be re-admitted by a mode.
+    if (config.disallowedTools && config.disallowedTools.length > 0) {
+      sendOptions.disallowedTools = [
+        ...new Set([...(sendOptions.disallowedTools ?? []), ...config.disallowedTools]),
+      ]
+    }
     // Append-style system extension + structured-output instruction ride
     // `appendSystemPrompt` so the resolved character/skill blocks survive.
     const appended = composeSystem(

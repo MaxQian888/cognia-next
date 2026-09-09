@@ -586,3 +586,26 @@ describe("dispatchSubagent — synthesized SubagentStart / SubagentStop", () => 
     expect(mockFireAgentHook).not.toHaveBeenCalled()
   })
 })
+
+describe("dispatchSubagent definition fidelity", () => {
+  it("forwards the definition's deny list and reasoning effort to the executor", async () => {
+    await dispatchSubagent(
+      { ...subagent, disallowedTools: ["Bash", "Write"], effort: "high" },
+      "review this PR"
+    )
+    expect(mockExecute).toHaveBeenCalledWith(
+      "review this PR",
+      expect.objectContaining({ disallowedTools: ["Bash", "Write"], effort: "high" })
+    )
+    // The forwarded list is a copy, never the definition's own array.
+    const passed = (mockExecute.mock.calls[0][1] as { disallowedTools: string[] }).disallowedTools
+    expect(passed).not.toBe(subagent.disallowedTools)
+  })
+
+  it("omits both when the definition sets neither, or an empty deny list", async () => {
+    await dispatchSubagent({ ...subagent, disallowedTools: [] }, "go")
+    const config = mockExecute.mock.calls[0][1] as Record<string, unknown>
+    expect(config).not.toHaveProperty("disallowedTools")
+    expect(config).not.toHaveProperty("effort")
+  })
+})

@@ -54,6 +54,12 @@ jest.mock("@/lib/db/sessions", () => ({
   __esModule: true,
   getSession: jest.fn(),
 }))
+// The caller's cwd resolver reads the session row too. Mocked so the ceiling
+// tests can keep asserting that the ceiling path itself never touches Dexie.
+jest.mock("@/lib/workspace/session-cwd", () => ({
+  __esModule: true,
+  resolveSessionCwd: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/db/background-tasks", () => ({
   __esModule: true,
   createDexieBackgroundTaskJournal: () => ({
