@@ -227,6 +227,7 @@ function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagent
         prompt: def.prompt,
         ...(def.tools ? { tools: def.tools } : {}),
         ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+        ...(def.color ? { color: def.color } : {}),
       },
     }
   })

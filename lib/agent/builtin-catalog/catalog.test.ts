@@ -5,10 +5,13 @@ import {
   builtinAgents,
   builtinAgentsForSurface,
   resolveBuiltinToolPolicy,
+  CODE_REVIEWER_AGENT_ID,
   EXPLORE_AGENT_ID,
   GENERAL_PURPOSE_AGENT_ID,
   PLAN_AGENT_ID,
 } from "./catalog"
+import { isNamedAgentColor } from "@/lib/claude/agents/agent-color"
+import { SUBAGENT_CONTRACT_TAG } from "@/lib/claude/agents/subagent-prompt-frame"
 
 describe("the built-in catalog", () => {
   it("ships one entry per id, with no duplicates", () => {
@@ -94,5 +97,60 @@ describe("tool policy", () => {
     expect(
       builtinAgentDefinition(builtinAgentById(GENERAL_PURPOSE_AGENT_ID)!).tools
     ).toBeUndefined()
+  })
+})
+
+describe("code-reviewer", () => {
+  it("is a read-only dispatch-and-CLI agent, never a session agent", () => {
+    const entry = builtinAgentById(CODE_REVIEWER_AGENT_ID)!
+    expect(entry.toolPolicy).toEqual({ kind: "read-only" })
+    expect(builtinAgentsForSurface("dispatch").map((e) => e.id)).toContain(CODE_REVIEWER_AGENT_ID)
+    expect(builtinAgentsForSurface("cli").map((e) => e.id)).toContain(CODE_REVIEWER_AGENT_ID)
+    expect(builtinAgentsForSurface("team").map((e) => e.id)).not.toContain(CODE_REVIEWER_AGENT_ID)
+    expect(builtinAgentsForSurface("workflow-editor").map((e) => e.id)).not.toContain(
+      CODE_REVIEWER_AGENT_ID
+    )
+    expect(builtinAgentDefinition(entry).tools).toBeDefined()
+  })
+
+  it("asks for severity-ordered, confirmed findings and refuses praise", () => {
+    const prompt = builtinAgentById(CODE_REVIEWER_AGENT_ID)!.prompt
+    for (const phrase of ["severity", "file:line", "smallest fix", "No praise", "read-only"]) {
+      expect(prompt).toContain(phrase)
+    }
+  })
+})
+
+describe("prompt hygiene", () => {
+  // The runtime frames every dispatched child with the shared contract, so the
+  // catalog prompts must not restate it (it would drift, and it is wrong for a
+  // nesting-enabled child).
+  it("never restates the dispatched-subagent contract", () => {
+    for (const entry of builtinAgents()) {
+      expect(entry.prompt).not.toContain(`<${SUBAGENT_CONTRACT_TAG}>`)
+      expect(entry.prompt).not.toMatch(/cannot dispatch (further )?subagents/i)
+      expect(entry.prompt).not.toMatch(/final message is the ONLY/i)
+      expect(entry.prompt).not.toMatch(/follow-up questions/i)
+    }
+  })
+
+  it("gives the non-workflow built-ins a palette colour that the definition projects", () => {
+    for (const id of [
+      GENERAL_PURPOSE_AGENT_ID,
+      EXPLORE_AGENT_ID,
+      PLAN_AGENT_ID,
+      CODE_REVIEWER_AGENT_ID,
+    ]) {
+      const entry = builtinAgentById(id)!
+      expect(isNamedAgentColor(entry.color ?? "")).toBe(true)
+      expect(builtinAgentDefinition(entry).color).toBe(entry.color)
+    }
+    const colours = [
+      GENERAL_PURPOSE_AGENT_ID,
+      EXPLORE_AGENT_ID,
+      PLAN_AGENT_ID,
+      CODE_REVIEWER_AGENT_ID,
+    ].map((id) => builtinAgentById(id)!.color)
+    expect(new Set(colours).size).toBe(colours.length)
   })
 })

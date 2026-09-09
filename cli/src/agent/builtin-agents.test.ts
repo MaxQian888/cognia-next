@@ -40,6 +40,7 @@ describe("generalPurposeAgent", () => {
 
   it("is the canonical built-in", () => {
     expect(BUILTIN_AGENT_IDS).toContain(GENERAL_PURPOSE_AGENT_ID)
+    expect(BUILTIN_AGENT_IDS).toContain("code-reviewer")
   })
 })
 
@@ -105,6 +106,7 @@ describe("withBuiltinAgents", () => {
       GENERAL_PURPOSE_AGENT_ID,
       EXPLORE_AGENT_ID,
       PLAN_AGENT_ID,
+      "code-reviewer",
     ])
   })
 

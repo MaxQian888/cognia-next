@@ -49,6 +49,7 @@ function toSummary(entry: BuiltinAgentEntry): AgentSummary {
       // means inherit the active provider's model in `buildChildConfig`.
       ...(tools ? { tools } : {}),
       ...(entry.maxTurns !== undefined ? { maxTurns: entry.maxTurns } : {}),
+      ...(entry.color ? { color: entry.color } : {}),
     },
   }
 }

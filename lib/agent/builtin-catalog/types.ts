@@ -50,4 +50,9 @@ export interface BuiltinAgentEntry {
   toolPolicy: BuiltinToolPolicy
   /** Round-trip ceiling. Omitted means the runtime's own default. */
   maxTurns?: number
+  /**
+   * Presentation colour for pickers and the CLI's live agent rows (a palette
+   * name from `lib/claude/agents/agent-color`). Never reaches the model.
+   */
+  color?: string
 }
