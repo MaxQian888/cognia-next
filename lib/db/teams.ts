@@ -1,5 +1,6 @@
 import type { Team, TeamMember, TeamOrchestration } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
+import { MAX_AUTO_ROUNDS } from "@/lib/claude/team-primary-router"
 
 function newId() {
   return "team_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -29,6 +30,7 @@ export type TeamDraft = Pick<Team, "name" | "members"> &
       | "avatarEmoji"
       | "orchestration"
       | "maxResponses"
+      | "maxAutoRounds"
       | "supervisorCharacterId"
       | "mcpServerIds"
     >
@@ -57,6 +59,20 @@ function validateMaxResponses(maxResponses: number | undefined): void {
   }
 }
 
+/**
+ * A room that keeps talking without the user spends real money per round with
+ * nobody watching, so the ceiling is enforced at the write, not only in the
+ * editor. Zero is the default and means the room never continues on its own.
+ */
+function validateMaxAutoRounds(maxAutoRounds: number | undefined): void {
+  if (
+    maxAutoRounds !== undefined &&
+    (!Number.isInteger(maxAutoRounds) || maxAutoRounds < 0 || maxAutoRounds > MAX_AUTO_ROUNDS)
+  ) {
+    throw new Error(`Team auto rounds must be an integer from 0 through ${MAX_AUTO_ROUNDS}.`)
+  }
+}
+
 export async function createTeam(draft: TeamDraft): Promise<Team> {
   if (!draft.members || draft.members.length === 0) {
     throw new Error("A team needs at least one member.")
@@ -65,6 +81,7 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
   const members = draft.members.map((m) => ({ ...m }))
   validateOrchestration(orchestration, members, draft.supervisorCharacterId)
   validateMaxResponses(draft.maxResponses)
+  validateMaxAutoRounds(draft.maxAutoRounds)
   const now = Date.now()
   const team: Team = {
     id: newId(),
@@ -75,6 +92,7 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
     members,
     orchestration,
     maxResponses: draft.maxResponses,
+    maxAutoRounds: draft.maxAutoRounds,
     supervisorCharacterId: draft.supervisorCharacterId,
     mcpServerIds: draft.mcpServerIds,
     createdAt: now,
@@ -102,6 +120,7 @@ export async function updateTeam(
     "supervisorCharacterId" in patch ? patch.supervisorCharacterId : existing.supervisorCharacterId
   validateOrchestration(nextOrchestration, nextMembers, nextSupervisor)
   validateMaxResponses("maxResponses" in patch ? patch.maxResponses : existing.maxResponses)
+  validateMaxAutoRounds("maxAutoRounds" in patch ? patch.maxAutoRounds : existing.maxAutoRounds)
   await getDb().teams.update(id, { ...patch, updatedAt: Date.now() })
 }
 

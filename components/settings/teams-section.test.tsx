@@ -173,6 +173,61 @@ describe("TeamsSection — create flow", () => {
       expect((await listTeams()).find((team) => team.name === "Capped")?.maxResponses).toBe(2)
     })
   })
+
+  it("defaults auto rounds to off, so no existing team changes behaviour", async () => {
+    const user = userEvent.setup()
+    render(<TeamsSection />)
+    const newBtn = await screen.findByRole("button", { name: /settings\.teams\.newTeam/ })
+    await waitFor(() => expect(newBtn).not.toBeDisabled())
+    await user.click(newBtn)
+
+    await user.type(screen.getByPlaceholderText("settings.teams.editor.namePlaceholder"), "Quiet")
+    await user.click(screen.getByRole("button", { name: /Coding Assistant/ }))
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+
+    await waitFor(async () => {
+      expect((await listTeams()).find((team) => team.name === "Quiet")?.maxAutoRounds).toBe(0)
+    })
+  })
+
+  it("persists an auto-round budget, so the handoff runtime is reachable", async () => {
+    const user = userEvent.setup()
+    render(<TeamsSection />)
+    const newBtn = await screen.findByRole("button", { name: /settings\.teams\.newTeam/ })
+    await waitFor(() => expect(newBtn).not.toBeDisabled())
+    await user.click(newBtn)
+
+    await user.type(screen.getByPlaceholderText("settings.teams.editor.namePlaceholder"), "Chatty")
+    await user.click(screen.getByRole("button", { name: /Coding Assistant/ }))
+    const autoRounds = screen.getByLabelText("settings.teams.editor.autoRounds")
+    await user.clear(autoRounds)
+    await user.type(autoRounds, "2")
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+
+    await waitFor(async () => {
+      expect((await listTeams()).find((team) => team.name === "Chatty")?.maxAutoRounds).toBe(2)
+    })
+  })
+
+  it("refuses an auto-round budget above the ceiling", async () => {
+    const user = userEvent.setup()
+    render(<TeamsSection />)
+    const newBtn = await screen.findByRole("button", { name: /settings\.teams\.newTeam/ })
+    await waitFor(() => expect(newBtn).not.toBeDisabled())
+    await user.click(newBtn)
+
+    await user.type(screen.getByPlaceholderText("settings.teams.editor.namePlaceholder"), "Runaway")
+    await user.click(screen.getByRole("button", { name: /Coding Assistant/ }))
+    const autoRounds = screen.getByLabelText("settings.teams.editor.autoRounds")
+    await user.clear(autoRounds)
+    await user.type(autoRounds, "99")
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("settings.teams.validation.autoRoundsInvalid")
+    })
+    expect((await listTeams()).find((team) => team.name === "Runaway")).toBeUndefined()
+  })
 })
 
 describe("TeamsSection — supervisor mode", () => {

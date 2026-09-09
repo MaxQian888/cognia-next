@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { listCharacters } from "@/lib/db/characters"
+import { MAX_AUTO_ROUNDS } from "@/lib/claude/team-primary-router"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import {
   TEAM_ORCHESTRATIONS,
@@ -163,6 +164,7 @@ export function TeamsSection() {
             members: [],
             orchestration: "mention_round_robin",
             responseCap: "4",
+            autoRounds: "0",
             supervisorCharacterId: undefined,
             mcpServerIds: undefined,
           }}
@@ -223,6 +225,7 @@ function TeamRow({
           members: team.members.map((m) => ({ ...m })),
           orchestration: team.orchestration,
           responseCap: (team.maxResponses ?? 4).toString(),
+          autoRounds: (team.maxAutoRounds ?? 0).toString(),
           supervisorCharacterId: team.supervisorCharacterId,
           mcpServerIds: team.mcpServerIds,
         }}
@@ -334,6 +337,7 @@ type EditorState = {
   members: TeamMember[]
   orchestration: TeamOrchestration
   responseCap: string
+  autoRounds: string
   supervisorCharacterId: string | undefined
   mcpServerIds: string[] | undefined
 }
@@ -346,6 +350,7 @@ type EditorOutput = {
   members: TeamMember[]
   orchestration: TeamOrchestration
   maxResponses?: number
+  maxAutoRounds?: number
   supervisorCharacterId?: string
   mcpServerIds?: string[]
 }
@@ -420,6 +425,11 @@ function TeamEditor({
       toast.error(t("validation.atLeastOneMember"))
       return
     }
+    const autoRounds = Number(s.autoRounds)
+    if (!Number.isInteger(autoRounds) || autoRounds < 0 || autoRounds > MAX_AUTO_ROUNDS) {
+      toast.error(t("validation.autoRoundsInvalid"))
+      return
+    }
     const responseCap = Number(s.responseCap)
     if (!Number.isInteger(responseCap) || responseCap < 1 || responseCap > 12) {
       toast.error(t("validation.responseCapInvalid"))
@@ -445,6 +455,7 @@ function TeamEditor({
         members: s.members,
         orchestration: s.orchestration,
         maxResponses: responseCap,
+        maxAutoRounds: autoRounds,
         supervisorCharacterId:
           s.orchestration === "supervisor" ? s.supervisorCharacterId : undefined,
         mcpServerIds: s.mcpServerIds,
@@ -551,6 +562,24 @@ function TeamEditor({
         />
         <p id="team-response-cap-help" className="text-[11px] text-muted-foreground">
           {tEditor("responseCapHelp")}
+        </p>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs" htmlFor="team-auto-rounds">
+          {tEditor("autoRounds")}
+        </Label>
+        <Input
+          id="team-auto-rounds"
+          type="number"
+          min={0}
+          max={MAX_AUTO_ROUNDS}
+          value={s.autoRounds}
+          onChange={(event) => setS({ ...s, autoRounds: event.target.value })}
+          aria-describedby="team-auto-rounds-help"
+        />
+        <p id="team-auto-rounds-help" className="text-[11px] text-muted-foreground">
+          {tEditor("autoRoundsHelp")}
         </p>
       </div>
 

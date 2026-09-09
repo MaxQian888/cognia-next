@@ -1,7 +1,10 @@
 import {
+  MAX_TURNS_PER_MEMBER_PER_ROUND,
   buildSupervisorRoster,
   parseDispatches,
+  parseHandoffTargets,
   parseMentions,
+  planAutoRound,
   routeTurn,
   stripDispatches,
 } from "./team-router"
@@ -321,5 +324,130 @@ describe("buildSupervisorRoster", () => {
     const out = buildSupervisorRoster([m], new Map())
     // The description segment should be exactly 80 'x' characters.
     expect(out).toMatch(/Mallory — x{80}\n/)
+  })
+})
+
+// ---- Handoff ---------------------------------------------------------------
+
+const ANA = makeCharacter({ id: "char_a", name: "Ana" })
+const BEN = makeCharacter({ id: "char_b", name: "Ben" })
+const CARA = makeCharacter({ id: "char_c", name: "Cara" })
+const ROOM = [ANA, BEN, CARA]
+
+function plan(overrides: Partial<Parameters<typeof planAutoRound>[0]> = {}) {
+  return planAutoRound({
+    replies: [],
+    members: ROOM,
+    spokenCount: 1,
+    responseCap: 4,
+    round: 0,
+    maxAutoRounds: 2,
+    spokenIds: [],
+    ...overrides,
+  })
+}
+
+describe("parseHandoffTargets", () => {
+  it("reads the members an agent's own reply addresses", () => {
+    // `parseMentions` only ever ran on the user's text, so an agent writing
+    // "@Ben, can you check this?" was addressing nobody.
+    expect(parseHandoffTargets("@Ben can you check the migration?", ROOM, "char_a")).toEqual([BEN])
+  })
+
+  it("drops a self-mention, which is narration and would loop forever", () => {
+    expect(parseHandoffTargets("As @Ana already said, no", ROOM, "char_a")).toEqual([])
+  })
+
+  it("keeps every distinct member in the order addressed", () => {
+    expect(parseHandoffTargets("@Cara then @Ben please", ROOM, "char_a")).toEqual([CARA, BEN])
+  })
+
+  it("finds nothing in a reply that mentions nobody", () => {
+    expect(parseHandoffTargets("done, shipping it", ROOM, "char_a")).toEqual([])
+  })
+})
+
+describe("planAutoRound", () => {
+  it("queues the members a reply handed the floor to", () => {
+    const result = plan({ replies: [{ characterId: "char_a", text: "@Ben your turn" }] })
+    expect(result.targets).toEqual([BEN])
+    expect(result.stop).toBeNull()
+  })
+
+  it("is off entirely when the team allows no auto rounds", () => {
+    const result = plan({
+      maxAutoRounds: 0,
+      replies: [{ characterId: "char_a", text: "@Ben your turn" }],
+    })
+    expect(result).toEqual({ targets: [], stop: "budget" })
+  })
+
+  it("stops when the round budget is spent", () => {
+    const result = plan({
+      round: 2,
+      maxAutoRounds: 2,
+      replies: [{ characterId: "char_a", text: "@Ben your turn" }],
+    })
+    expect(result.stop).toBe("budget")
+  })
+
+  it("stops when the team's response cap is reached", () => {
+    const result = plan({
+      spokenCount: 4,
+      responseCap: 4,
+      replies: [{ characterId: "char_a", text: "@Ben your turn" }],
+    })
+    expect(result.stop).toBe("cap")
+  })
+
+  it("truncates to the responses left rather than stopping", () => {
+    const result = plan({
+      spokenCount: 3,
+      responseCap: 4,
+      replies: [{ characterId: "char_a", text: "@Ben and @Cara" }],
+    })
+    expect(result.targets).toEqual([BEN])
+    expect(result.stop).toBeNull()
+  })
+
+  it("lets a member speak twice, which is what makes a handoff worth having", () => {
+    // "A asks B, B answers, A concludes".
+    const result = plan({
+      replies: [{ characterId: "char_b", text: "@Ana over to you" }],
+      spokenIds: ["char_a", "char_b"],
+    })
+    expect(result.targets).toEqual([ANA])
+  })
+
+  it("refuses a third turn, so two agents cannot address each other forever", () => {
+    const result = plan({
+      replies: [{ characterId: "char_b", text: "@Ana again" }],
+      spokenIds: Array.from({ length: MAX_TURNS_PER_MEMBER_PER_ROUND }, () => "char_a"),
+    })
+    expect(result).toEqual({ targets: [], stop: "repeat" })
+  })
+
+  it("distinguishes a room that went quiet from one that was throttled", () => {
+    const quiet = plan({ replies: [{ characterId: "char_a", text: "all done" }] })
+    expect(quiet.stop).toBe("no-handoff")
+  })
+
+  it("still admits a fresh member when a repeat one is blocked", () => {
+    const result = plan({
+      replies: [{ characterId: "char_b", text: "@Ana and @Cara" }],
+      spokenIds: ["char_a", "char_a"],
+    })
+    expect(result.targets).toEqual([CARA])
+    expect(result.stop).toBeNull()
+  })
+
+  it("merges the handoffs of several members without duplicating one", () => {
+    const result = plan({
+      replies: [
+        { characterId: "char_a", text: "@Cara please" },
+        { characterId: "char_b", text: "@Cara too" },
+      ],
+    })
+    expect(result.targets).toEqual([CARA])
   })
 })

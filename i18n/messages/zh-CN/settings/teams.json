@@ -17,6 +17,8 @@
   "editor": {
     "addMembersFirst": "请先添加成员",
     "allowedToolsOverride": "允许工具覆盖（用逗号分隔；替换角色列表）",
+    "autoRounds": "自动轮次",
+    "autoRoundsHelp": "当成员在回复中点名把话头交给队友时，房间可以自行多跑几轮。0 表示每条消息只回一轮。",
     "avatarEmoji": "头像 Emoji",
     "avatarEmojiPlaceholder": "🧩",
     "description": "描述",
@@ -69,6 +71,7 @@
   "updatedToast": "已更新 {name}。",
   "validation": {
     "atLeastOneMember": "团队至少需要一位成员。",
+    "autoRoundsInvalid": "自动轮次必须是 0 到 5 之间的整数。",
     "nameRequired": "请填写名称。",
     "responseCapInvalid": "回复上限必须是 1 到 12 之间的整数。",
     "supervisorMustBeMember": "监督者必须是团队成员之一。",

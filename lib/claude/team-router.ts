@@ -206,3 +206,108 @@ export function buildSupervisorRoster(
   )
   return lines.join("\n")
 }
+
+// ---- Handoff: letting the room continue without the user ------------------
+
+/**
+ * Members a reply hands the floor to.
+ *
+ * `parseMentions` only ever ran on the USER's text, so an agent writing
+ * "@Ben, can you check the migration?" was addressing nobody: the sentence
+ * read as prose and the room stopped until a human pushed it. Scanning replies
+ * with the same scanner is what makes a team able to hold a conversation
+ * rather than take turns answering one person.
+ *
+ * Self-mentions are dropped. A member that says its own name is narrating, not
+ * handing over, and honouring it would let one agent loop on itself forever.
+ */
+export function parseHandoffTargets(
+  replyText: string,
+  members: readonly Character[],
+  speakerId: string
+): Character[] {
+  return parseMentions(replyText, members).filter((member) => member.id !== speakerId)
+}
+
+/** One member's contribution to the round that just finished. */
+export interface TeamReply {
+  characterId: string
+  text: string
+}
+
+/** Why the room stopped continuing on its own. `null` means it did not. */
+export type AutoRoundStop = "budget" | "cap" | "repeat" | "no-handoff"
+
+export interface AutoRoundPlan {
+  /** Members to run next, in the order they were first addressed. */
+  targets: Character[]
+  stop: AutoRoundStop | null
+}
+
+/**
+ * A member may hold the floor at most this many times inside ONE user turn.
+ *
+ * Two, not one, because "A asks B, B answers, A concludes" is the shape that
+ * makes a handoff worth having. Not more, because A and B addressing each
+ * other is otherwise a perpetual motion machine that bills by the token: the
+ * time-based ping-pong guard in `lib/ai/agent/team/message-guard.ts` cannot
+ * help here, since these rounds run back to back with no gap between them.
+ */
+export const MAX_TURNS_PER_MEMBER_PER_ROUND = 2
+
+export interface PlanAutoRoundArgs {
+  /** What the members who just spoke produced. */
+  replies: readonly TeamReply[]
+  members: readonly Character[]
+  /** How many member replies this user turn has already produced. */
+  spokenCount: number
+  /** `Team.maxResponses`, already resolved. */
+  responseCap: number
+  /** Completed auto rounds so far. The first handoff round is 0. */
+  round: number
+  /** `Team.maxAutoRounds`. Zero disables handoff entirely. */
+  maxAutoRounds: number
+  /** Every member id that has spoken in this user turn, including repeats. */
+  spokenIds: readonly string[]
+}
+
+/**
+ * Decide who speaks next when nobody has typed anything.
+ *
+ * Three independent ceilings, all of which must hold: the round budget, the
+ * team's existing response cap, and the per-member limit above. Any one of
+ * them ending the chain is reported rather than silently observed, because a
+ * room that stops has to be able to say why.
+ */
+export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
+  const { replies, members, spokenCount, responseCap, round, maxAutoRounds, spokenIds } = args
+
+  if (maxAutoRounds <= 0 || round >= maxAutoRounds) return { targets: [], stop: "budget" }
+  const remaining = responseCap - spokenCount
+  if (remaining <= 0) return { targets: [], stop: "cap" }
+
+  const spokenTally = new Map<string, number>()
+  for (const id of spokenIds) spokenTally.set(id, (spokenTally.get(id) ?? 0) + 1)
+
+  const picked: Character[] = []
+  const seen = new Set<string>()
+  let blockedByRepeat = false
+  for (const reply of replies) {
+    for (const target of parseHandoffTargets(reply.text, members, reply.characterId)) {
+      if (seen.has(target.id)) continue
+      if ((spokenTally.get(target.id) ?? 0) >= MAX_TURNS_PER_MEMBER_PER_ROUND) {
+        blockedByRepeat = true
+        continue
+      }
+      seen.add(target.id)
+      picked.push(target)
+    }
+  }
+
+  if (picked.length === 0) {
+    return { targets: [], stop: blockedByRepeat ? "repeat" : "no-handoff" }
+  }
+  // Truncating is not a stop: the members that did fit still speak, and the
+  // cap check at the top of the next round is what ends the chain.
+  return { targets: picked.slice(0, remaining), stop: null }
+}

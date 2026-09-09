@@ -6432,6 +6432,16 @@ export interface Team {
   orchestration: TeamOrchestration
   /** Maximum Agent replies produced for one user turn. Legacy rows default to four. */
   maxResponses?: number
+  /**
+   * How many extra rounds the room may run on its own, without the user
+   * typing, when a member's reply hands the floor to a teammate by name.
+   *
+   * Zero (the default, and every legacy row) keeps the behaviour every team
+   * had before: one fan-out per user turn, full stop. Raising it is what lets
+   * "A asks B, B answers, A concludes" happen in one turn, bounded by this,
+   * by `maxResponses`, and by a per-member limit of two turns per round.
+   */
+  maxAutoRounds?: number
   /** When orchestration === "supervisor", which member acts as the leader. */
   supervisorCharacterId?: string
   /** Team-level MCP override applied to members without their own subset. */

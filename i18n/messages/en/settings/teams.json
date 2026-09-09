@@ -17,6 +17,8 @@
   "editor": {
     "addMembersFirst": "Add members first",
     "allowedToolsOverride": "Allowed tools override (comma-separated; replaces character list)",
+    "autoRounds": "Auto rounds",
+    "autoRoundsHelp": "Extra rounds the room may run on its own when a member hands the floor to a teammate by name. 0 keeps one reply round per message.",
     "avatarEmoji": "Avatar emoji",
     "avatarEmojiPlaceholder": "🧩",
     "description": "Description",
@@ -69,6 +71,7 @@
   "updatedToast": "Updated {name}.",
   "validation": {
     "atLeastOneMember": "A team needs at least one member.",
+    "autoRoundsInvalid": "Auto rounds must be a whole number between 0 and 5.",
     "nameRequired": "Name is required.",
     "responseCapInvalid": "The response cap must be an integer from 1 through 12.",
     "supervisorMustBeMember": "The supervisor must be one of the team's members.",

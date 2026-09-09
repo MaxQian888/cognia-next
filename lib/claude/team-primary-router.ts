@@ -4,6 +4,12 @@ import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 export const DEFAULT_TEAM_RESPONSE_CAP = 4
 export const MAX_TEAM_RESPONSE_CAP = 12
+/**
+ * Ceiling on `Team.maxAutoRounds`. A room that continues on its own spends
+ * real money per round with nobody watching, so the editor refuses a number
+ * large enough for that to be a surprise.
+ */
+export const MAX_AUTO_ROUNDS = 5
 
 export function resolveTeamResponseCap(maxResponses: number | undefined): number {
   if (!Number.isInteger(maxResponses)) return DEFAULT_TEAM_RESPONSE_CAP

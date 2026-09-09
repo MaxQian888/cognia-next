@@ -47,9 +47,12 @@ import {
   buildSupervisorRoster,
   parseDispatches,
   parseMentions,
+  planAutoRound,
   routeTurn,
   stripDispatches,
+  type TeamReply,
 } from "@/lib/claude/team-router"
+import { canSendMessage, type RecentMessage } from "@/lib/ai/agent/team/message-guard"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import {
   duplicateTeamResponseIds,
@@ -601,6 +604,22 @@ export function useTeamChat() {
             turnMemoryDeps,
             turnUserMessage: userText,
           })
+          await runAutoRounds({
+            session,
+            sessionId,
+            team,
+            content,
+            members,
+            firstRoundTargets: targets,
+            memberByCharId,
+            turnId,
+            interruptedRef,
+            resolvers: resolvers.current,
+            turnTwinDeps,
+            turnEmbedding,
+            turnMemoryDeps,
+            turnUserMessage: userText,
+          })
         }
 
         // Long-term memory write parity with direct chat (team↔direct): the team
@@ -942,6 +961,72 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
         })
       )
     }
+  }
+}
+
+/**
+ * Let the room keep talking when a member hands the floor to a teammate.
+ *
+ * Everything before this required a human to push every round: a member could
+ * write "@Ben, can you check the migration?" and nothing happened, because
+ * `parseMentions` only ever ran on the USER's text. This reads the replies the
+ * round just produced and runs whoever they addressed.
+ *
+ * The decision is `planAutoRound` in `lib/claude/team-router.ts`, kept pure so
+ * the three ceilings that stop this thing are actually testable: the round
+ * budget (`Team.maxAutoRounds`, zero by default so no existing team changes
+ * behaviour), the team's response cap, and a per-member limit of two turns per
+ * user turn. On top of those, `canSendMessage` (the Squad plane's guard) drops
+ * idle acknowledgements and duplicate handoffs, which are the two ways a room
+ * burns rounds without saying anything.
+ */
+async function runAutoRounds(
+  args: Omit<RunLinearArgs, "targets"> & { firstRoundTargets: Character[] }
+): Promise<void> {
+  const { sessionId, team, members, interruptedRef, firstRoundTargets } = args
+  const maxAutoRounds = Math.max(0, Math.trunc(team.maxAutoRounds ?? 0))
+  if (maxAutoRounds === 0) return
+
+  const responseCap = resolveTeamResponseCap(team.maxResponses)
+  const spokenIds: string[] = firstRoundTargets.map((member) => member.id)
+  let lastRoundTargets = firstRoundTargets
+  // Feeds the guard's dedupe and ping-pong windows. These rounds run back to
+  // back, so wall-clock is nearly constant across them and only the content
+  // and pair checks do real work.
+  const recentMessages: RecentMessage[] = []
+
+  for (let round = 0; round < maxAutoRounds; round++) {
+    if (interruptedRef.current.has(sessionId)) return
+
+    const replies: TeamReply[] = []
+    for (const member of lastRoundTargets) {
+      const text = await readLastAssistantText(sessionId, member.id)
+      if (!text.trim()) continue
+      const decision = canSendMessage({
+        senderId: member.id,
+        content: text,
+        now: Date.now(),
+        recentMessages,
+      })
+      if (!decision.allow) continue
+      recentMessages.push({ senderId: member.id, content: text, createdAt: Date.now() })
+      replies.push({ characterId: member.id, text })
+    }
+
+    const plan = planAutoRound({
+      replies,
+      members,
+      spokenCount: spokenIds.length,
+      responseCap,
+      round,
+      maxAutoRounds,
+      spokenIds,
+    })
+    if (plan.targets.length === 0) return
+
+    await runLinearTurn({ ...args, targets: plan.targets })
+    spokenIds.push(...plan.targets.map((member) => member.id))
+    lastRoundTargets = plan.targets
   }
 }
 

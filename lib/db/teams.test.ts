@@ -363,4 +363,39 @@ describe("seedBuiltInTeams", () => {
       }
     }
   })
+
+  describe("auto rounds", () => {
+    it("persists the budget, which the editor could set but the write dropped", async () => {
+      const team = await createTeam({
+        name: "Chatty",
+        members: [{ characterId: "c1" }],
+        maxAutoRounds: 2,
+      })
+      expect((await getTeam(team.id))?.maxAutoRounds).toBe(2)
+    })
+
+    it("defaults to absent, so no existing team starts continuing on its own", async () => {
+      const team = await createTeam({ name: "Quiet", members: [{ characterId: "c1" }] })
+      expect((await getTeam(team.id))?.maxAutoRounds).toBeUndefined()
+    })
+
+    it("refuses a budget outside the ceiling at the write, not only in the editor", async () => {
+      await expect(
+        createTeam({ name: "Runaway", members: [{ characterId: "c1" }], maxAutoRounds: 99 })
+      ).rejects.toThrow(/auto rounds/i)
+      await expect(
+        createTeam({ name: "Negative", members: [{ characterId: "c1" }], maxAutoRounds: -1 })
+      ).rejects.toThrow(/auto rounds/i)
+      await expect(
+        createTeam({ name: "Fractional", members: [{ characterId: "c1" }], maxAutoRounds: 1.5 })
+      ).rejects.toThrow(/auto rounds/i)
+    })
+
+    it("validates an update the same way", async () => {
+      const team = await createTeam({ name: "Editable", members: [{ characterId: "c1" }] })
+      await expect(updateTeam(team.id, { maxAutoRounds: 99 })).rejects.toThrow(/auto rounds/i)
+      await updateTeam(team.id, { maxAutoRounds: 3 })
+      expect((await getTeam(team.id))?.maxAutoRounds).toBe(3)
+    })
+  })
 })
