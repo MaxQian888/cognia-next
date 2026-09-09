@@ -39,6 +39,7 @@ import {
 } from "@/lib/ai/agent/external/permission-cascade"
 import { recordResolvedPermissionCeiling } from "@/lib/claude/agents/dispatch-context-registry"
 import { DISPATCH_AGENT_TOOL_NAME, TASK_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
+import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
 import { ASK_USER_TOOL_NAME } from "@/lib/claude/ask-user-tool"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import {
@@ -903,10 +904,18 @@ async function listDispatchAgentAvailable(
  * subagents to research before proposing), even when the user hasn't turned on
  * subagent nesting, because the dispatched child inherits the read-only `plan`
  * ceiling and cannot make edits.
+ *
+ * `runtimeAdapter` is the rail the turn will run on. Only the Claude Agent SDK
+ * rail has a native Task tool behind the `opts.agents` map: on the `ai-sdk`
+ * rail that map backs `@agent` routing alone, so without `dispatch_agent` a
+ * top-level chat on any non-Anthropic provider has no way to delegate at all.
+ * There the tool is offered at depth 0 like the plan-mode force-offer, still
+ * behind the same surface and leaf checks.
  */
 async function resolveDispatchAgentGate(
   ctx: BuildOptionsContext,
-  permissionMode?: string
+  permissionMode?: string,
+  runtimeAdapter?: ReturnType<typeof runtimeFromLegacy>
 ): Promise<
   | {
       enabled: boolean
@@ -936,13 +945,15 @@ async function resolveDispatchAgentGate(
   // plan-mode Explore/Plan child would be re-offered dispatch and could nest
   // unboundedly (the CLI enforces leaf children; this is the GUI parity).
   if (ctx.isDispatchedSubagent) return undefined
-  // Top-level direct chat: offered when the user enabled nesting OR the session
-  // is in plan mode (read-only research dispatch). Never on the workflow-editor /
-  // team surfaces, which keep their SDK-native subagent surface.
+  // Top-level direct chat: offered when the user enabled nesting, OR the session
+  // is in plan mode (read-only research dispatch), OR the rail has no native
+  // Task tool to delegate through. Never on the workflow-editor / team
+  // surfaces, which keep their SDK-native subagent surface.
   const nesting = appSettings?.subagentNesting
   const isNestingSurface = session?.kind !== "workflow-editor" && session?.kind !== "team"
   const planMode = permissionMode === "plan"
-  if (isNestingSurface && (nesting?.enabled === true || planMode)) {
+  const noNativeTaskTool = runtimeAdapter === "ai-sdk"
+  if (isNestingSurface && (nesting?.enabled === true || planMode || noNativeTaskTool)) {
     const available = await listDispatchAgentAvailable(subagentRules)
     if (available.length === 0) return undefined
     return { enabled: true, depth: 0, maxDepth: nesting?.maxDepth ?? 2, available }
@@ -2655,7 +2666,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // top-level direct chat and the user enabled nesting. Withheld otherwise
       // (default off → zero change). The cap-reached withholding is the depth-N
       // generalization of Claude Code dropping the Agent tool from subagents.
-      const dispatchAgentGate = await resolveDispatchAgentGate(ctx, opts.permissionMode)
+      const dispatchAgentGate = await resolveDispatchAgentGate(
+        ctx,
+        opts.permissionMode,
+        runtimeFromLegacy({
+          provider: providerId,
+          ...(ctx.externalRuntimeId ? { teammateRuntime: ctx.externalRuntimeId } : {}),
+        })
+      )
       let manifest = buildPluginToolsManifest({
         exposeDockToAgents,
         ...(dispatchAgentGate ? { dispatchAgent: dispatchAgentGate } : {}),

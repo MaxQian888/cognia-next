@@ -1827,6 +1827,45 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
     expect(lastCall?.dispatchAgent).toBeUndefined()
   })
 
+  it("offers dispatch_agent at depth 0 on a provider whose rail has no native Task tool", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    // The ai-sdk rail never exposes the SDK's Task tool: `opts.agents` only
+    // backs `@agent` routing there. Without this offer a top-level chat on any
+    // non-Anthropic provider could not delegate at all unless the user had
+    // switched nesting on or entered plan mode.
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { defaultProvider: "openai" } as never,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0 })
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Explore")).toBe(
+      true
+    )
+  })
+
+  it("keeps dispatch_agent withheld from a dispatched leaf child on such a provider", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { defaultProvider: "openai" } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("keeps the team surface on its native subagents even without a Task tool", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      session: makeSession({ id: "s1", kind: "team", teamId: "t1" }),
+      appSettings: { defaultProvider: "openai" } as never,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
   it("still offers dispatch_agent to a dispatched child that carries a dispatchContext", async () => {
     ;(buildPluginToolsManifest as jest.Mock).mockClear()
     useSubagentRuntimeStore.getState().addTemplate({
