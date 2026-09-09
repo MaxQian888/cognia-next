@@ -416,7 +416,18 @@ export function managedWorkspaceRoot(context: SessionExecutionContext): string |
 }
 
 async function defaultManagedWorkspaceDeps(): Promise<ManagedWorkspaceDeps> {
-  if (!isTauri()) throw new Error("Managed workspaces require the desktop app on this device")
+  // Only the desktop has an implementation, not only the desktop COULD have
+  // one: a paired browser or phone reaches a real filesystem through the
+  // companion transport, and `lib/files/workspace-fs.ts` already exposes the
+  // pieces (`listWorkspaceRoots` reports a headless Host's writable root,
+  // `createWorkspaceDir` and `statWorkspaceFile` go over `transport.call`).
+  // Say which of the two this is, so the message does not read as a permanent
+  // property of browsers and send someone looking for a setting to flip.
+  if (!isTauri()) {
+    throw new Error(
+      "materializing a managed workspace needs the desktop app: no host-backed implementation exists yet"
+    )
+  }
   const [{ appLocalDataDir }, fs] = await Promise.all([
     import("@tauri-apps/api/path"),
     import("@tauri-apps/plugin-fs"),

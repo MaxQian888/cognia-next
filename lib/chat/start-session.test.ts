@@ -27,6 +27,19 @@ jest.mock("@/lib/workspace/ensure-default-workspace", () => ({
   defaultEnsureDefaultWorkspaceDeps: () => ({}),
 }))
 
+const mockDispatchDiagnostic = jest.fn()
+jest.mock("@/lib/diagnostics/bus", () => ({
+  dispatchDiagnostic: (...args: unknown[]) => mockDispatchDiagnostic(...(args as [])),
+}))
+
+// Only the one predicate is replaced. The module is a leaf that other imports
+// in this graph still read, so a wholesale factory would strip them.
+const mockHasHostRuntime = jest.fn(() => true)
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  hasHostRuntime: () => mockHasHostRuntime(),
+}))
+
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
 
 const dbFixture = createDbTestFixture()
@@ -36,6 +49,8 @@ beforeEach(async () => {
   jest.restoreAllMocks()
   await dbFixture.restore()
   emitMock.mockClear()
+  mockDispatchDiagnostic.mockClear()
+  mockHasHostRuntime.mockReset().mockReturnValue(true)
   mockLoadDeclaredWorkspace.mockReset().mockResolvedValue(null)
   mockEnsureDefaultWorkspace
     .mockReset()
@@ -430,6 +445,36 @@ describe("startNewSession", () => {
       // `ensureSessionExecutionBundle` throwing the name of an internal object
       // behind a Retry that re-ran the same refusal.
       expect(session.executionContext?.managedWorkspace?.availability).toBe("missing-on-device")
+    })
+
+    // The same exception carries two different situations, and only one of them
+    // is about the workspace.
+    it("names the missing HOST, not the workspace, when nothing is paired", async () => {
+      // A plain browser tab: no Tauri, no Capacitor, no pairing. EVERY
+      // host-owned call rejects, so "bind this workspace to a folder" is advice
+      // the user cannot act on. This is the state a tab is in even while a Host
+      // runs on the same machine, because pairing is a manual step.
+      mockHasHostRuntime.mockReturnValue(false)
+
+      await startNewSession()
+
+      const codes = mockDispatchDiagnostic.mock.calls.map(
+        ([diagnostic]) => (diagnostic as { code: string }).code
+      )
+      expect(codes).toContain("hostUnavailable")
+      expect(codes).not.toContain("workspaceUnavailable")
+    })
+
+    it("names the workspace when a host exists but the workspace cannot be built", async () => {
+      mockHasHostRuntime.mockReturnValue(true)
+
+      await startNewSession()
+
+      const codes = mockDispatchDiagnostic.mock.calls.map(
+        ([diagnostic]) => (diagnostic as { code: string }).code
+      )
+      expect(codes).toContain("workspaceUnavailable")
+      expect(codes).not.toContain("hostUnavailable")
     })
   })
 
