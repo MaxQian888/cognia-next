@@ -53,3 +53,37 @@ export function browserDirectHeaders(protocol: string | undefined): Record<strin
   }
   return {}
 }
+
+/**
+ * Providers whose official endpoint answers a browser-origin request, so the
+ * standalone (BYOK) path can stream straight from the WebView with no desktop
+ * host in the middle. Anthropic needs the opt-in header from
+ * `browserDirectHeaders`, OpenAI and Google reply with permissive CORS.
+ *
+ * Deliberately a literal rather than something derived:
+ *
+ * 1. It is keyed by provider **id**, while `browserDirectHeaders` is keyed by
+ *    wire **protocol**. Several catalog entries speak the `openai` protocol
+ *    without being `api.openai.com`, and their own CORS policy is their own.
+ * 2. Once a user points a provider at a custom `baseURL` (a gateway, a proxy,
+ *    a local runtime), whether that origin sends `Access-Control-Allow-Origin`
+ *    is not decidable from anything we hold statically. Callers that care about
+ *    a custom endpoint have to say so themselves.
+ */
+export const BROWSER_STREAMING_PROVIDER_IDS = ["anthropic", "openai", "google"] as const
+
+export type BrowserStreamingProviderId = (typeof BROWSER_STREAMING_PROVIDER_IDS)[number]
+
+/**
+ * True when this provider's official endpoint is reachable from a browser
+ * origin. Says nothing about a custom `baseURL`: see the note on
+ * `BROWSER_STREAMING_PROVIDER_IDS`.
+ */
+export function streamsDirectFromBrowser(
+  providerId: string | null | undefined
+): providerId is BrowserStreamingProviderId {
+  return (
+    typeof providerId === "string" &&
+    (BROWSER_STREAMING_PROVIDER_IDS as readonly string[]).includes(providerId)
+  )
+}

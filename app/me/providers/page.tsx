@@ -32,12 +32,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  BROWSER_STREAMING_PROVIDER_IDS,
+  streamsDirectFromBrowser,
+} from "@/lib/runtime/streaming-fetch"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import { useSettingsStore } from "@/stores/settings"
 
 // Official providers that allow browser-origin streaming go first; the rest of
 // the API-key cloud providers follow. Local engines are excluded (no key flow).
-const RECOMMENDED = ["anthropic", "openai", "google"] as const
+// The list itself lives next to the transport that depends on it.
 
 export default function MobileProvidersPage() {
   const t = useTranslations("mobile.providers")
@@ -48,16 +52,18 @@ export default function MobileProvidersPage() {
 
   const options = useMemo(() => {
     const cloud = Object.values(PROVIDERS).filter((p) => p.apiKeyRequired && p.category !== "local")
-    const recommended = RECOMMENDED.map((id) => cloud.find((p) => p.id === id)).filter(
-      (p): p is (typeof cloud)[number] => Boolean(p)
-    )
+    const recommended = BROWSER_STREAMING_PROVIDER_IDS.map((id) =>
+      cloud.find((p) => p.id === id)
+    ).filter((p): p is (typeof cloud)[number] => Boolean(p))
     const rest = cloud
-      .filter((p) => !RECOMMENDED.includes(p.id as (typeof RECOMMENDED)[number]))
+      .filter((p) => !streamsDirectFromBrowser(p.id))
       .sort((a, b) => a.name.localeCompare(b.name))
     return [...recommended, ...rest]
   }, [])
 
-  const [providerId, setProviderId] = useState<string>(settings?.defaultProvider || RECOMMENDED[0])
+  const [providerId, setProviderId] = useState<string>(
+    settings?.defaultProvider || BROWSER_STREAMING_PROVIDER_IDS[0]
+  )
   const stored = settings?.providerSettings?.[providerId]
   const [apiKey, setApiKey] = useState<string>(stored?.apiKey ?? "")
   const [baseURL, setBaseURL] = useState<string>(stored?.baseURL ?? "")
@@ -71,7 +77,7 @@ export default function MobileProvidersPage() {
     setSaved(false)
   }
 
-  const isRecommended = RECOMMENDED.includes(providerId as (typeof RECOMMENDED)[number])
+  const isRecommended = streamsDirectFromBrowser(providerId)
 
   const onSave = async () => {
     try {
@@ -113,9 +119,7 @@ export default function MobileProvidersPage() {
                   {options.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name}
-                      {RECOMMENDED.includes(p.id as (typeof RECOMMENDED)[number])
-                        ? ` · ${t("streamingBadge")}`
-                        : ""}
+                      {streamsDirectFromBrowser(p.id) ? ` · ${t("streamingBadge")}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
