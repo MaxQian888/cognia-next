@@ -19,6 +19,10 @@ import {
 import type { Server } from "node:http"
 
 import { MOBILE_OUTBOUND_COMMANDS } from "../../../lib/db/mobile-outbound-types"
+import {
+  HEADLESS_CATALOG_HASH,
+  HEADLESS_CONTRACT_VERSION,
+} from "../../../cli/src/serve/headless-contract-identity"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const createExpressApp = () => require("express")() as import("express").Application
@@ -310,7 +314,15 @@ export function createMockCompanionServer(): MockCompanionServer {
       jti,
       expiresAt,
     })
-    res.json({ accessToken: token, tokenType: "DPoP", expiresIn: ACCESS_TOKEN_TTL_SECONDS })
+    res.json({
+      accessToken: token,
+      tokenType: "DPoP",
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      // The device handshake (ADR-0175): the mock serves the contract the app
+      // was built against, or the transport would refuse every command.
+      contractVersion: HEADLESS_CONTRACT_VERSION,
+      catalogHash: HEADLESS_CATALOG_HASH,
+    })
   })
 
   app.post("/api/auth/socket-ticket", (req: RequestLike, res: ResponseLike) => {

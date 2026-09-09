@@ -2574,11 +2574,17 @@ function ensurePublicComponents(components, publicNames) {
     },
     DeviceTokenResponse: {
       type: "object",
-      required: ["accessToken", "tokenType", "expiresIn"],
+      required: ["accessToken", "tokenType", "expiresIn", "contractVersion", "catalogHash"],
       properties: {
         accessToken: { type: "string" },
         tokenType: { type: "string", const: "DPoP" },
         expiresIn: { type: "integer", const: 300 },
+        contractVersion: {
+          type: "integer",
+          description:
+            "The command contract this host serves (ADR-0175). Issuing a token is the device handshake, and a device built against another number refuses to dispatch.",
+        },
+        catalogHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
       },
     },
     SocketTicketRequest: {

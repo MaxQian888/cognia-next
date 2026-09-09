@@ -5,6 +5,7 @@ import { APP_VERSION } from "@/lib/app-version"
 import { requireJwtPayload } from "@/lib/security/jwt-payload"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 import { parseProblem } from "./companion-problem"
+import { recordHostContract } from "./companion-contract"
 
 /** A social sign-in method the deployment enabled at Logto. */
 export interface CompanionAuthSocialProvider {
@@ -525,6 +526,10 @@ async function refreshAccessToken(
   }
   const claims = requireJwtPayload(body.accessToken, "access token is malformed")
   if (typeof claims.jti !== "string") throw new Error("access token is missing jti")
+  // The token is the device handshake (ADR-0175). The Host names the contract
+  // it serves here, and a Host that names none is an older Host. The transport
+  // reads this verdict before every dispatch.
+  recordHostContract(config.deviceId, body)
   const state = {
     accessToken: body.accessToken,
     jti: claims.jti,

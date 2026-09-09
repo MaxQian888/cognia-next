@@ -13,12 +13,16 @@ import {
   registerCompanionWorker,
   type AuthFetcher,
 } from "./companion-auth"
+import { __resetHostContractsForTests, hostContractVerdict } from "./companion-contract"
+import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
 
 function unsignedToken(payload: Record<string, unknown>): string {
   return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`
 }
 
 describe("companion auth lifecycle", () => {
+  afterEach(() => __resetHostContractsForTests())
+
   afterEach(() => clearCompanionAccessTokens())
 
   it("keeps bearer credentials out of the pairing payload", () => {
@@ -242,7 +246,12 @@ describe("companion auth lifecycle", () => {
       }
       if (path === "/api/auth/token") {
         const payload = Buffer.from(JSON.stringify({ jti: "access-jti" })).toString("base64url")
-        return Response.json({ accessToken: `header.${payload}.signature`, expiresIn: 300 })
+        return Response.json({
+          accessToken: `header.${payload}.signature`,
+          expiresIn: 300,
+          contractVersion: COMPANION_CONTRACT_VERSION,
+          catalogHash: "a".repeat(64),
+        })
       }
       throw new Error(`unexpected request ${path}`)
     }) as unknown as AuthFetcher
@@ -270,6 +279,13 @@ describe("companion auth lifecycle", () => {
       signalingPrivateKeyJwk: expect.objectContaining({ d: expect.any(String) }),
     })
     expect(fetcher).toHaveBeenCalledTimes(5)
+    // The token is the device handshake: the Host named this client's
+    // contract, so the pairing is judged compatible before any command.
+    expect(hostContractVerdict(config.deviceId)).toEqual({
+      state: "compatible",
+      contractVersion: COMPANION_CONTRACT_VERSION,
+      catalogHash: "a".repeat(64),
+    })
   })
 
   it("registers worker enrollment with only the dedicated worker capability", async () => {
@@ -316,6 +332,13 @@ describe("companion auth lifecycle", () => {
 
     expect(registered).toMatchObject({ tenantId: "tenant-a", serverVersion: "1.0.0" })
     expect(registered.devicePrivateKeyJwk).toBeDefined()
+    // A Host whose token names no contract is an older Host, and older is
+    // incompatible: the hard cut leaves no contract the two share.
+    expect(hostContractVerdict(registered.deviceId)).toEqual({
+      state: "incompatible",
+      hostContractVersion: null,
+      clientContractVersion: COMPANION_CONTRACT_VERSION,
+    })
   })
 
   it("rejects a Host mismatch before generating or registering a device", async () => {

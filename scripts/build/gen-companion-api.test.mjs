@@ -801,6 +801,14 @@ test("documents canonical identity and owner-management response shapes", () => 
     "catalogUrl",
   ])
   assert.equal(schemas.WhoamiResponse.properties.device_id, undefined)
+  // The token is the device handshake, so it names the contract too.
+  assert.deepEqual(schemas.DeviceTokenResponse.required, [
+    "accessToken",
+    "tokenType",
+    "expiresIn",
+    "contractVersion",
+    "catalogHash",
+  ])
   assert.equal(
     desiredPublicSpec.paths["/api/devices"].get.responses[200].content["application/json"].schema
       .$ref,

@@ -1801,12 +1801,18 @@ struct TokenRequest {
     proof: String,
 }
 
+/// The five-minute device access token. It also names the command contract
+/// this host serves (ADR-0175): issuing a token is the device handshake, so
+/// this is where a device built against another `contractVersion` learns to
+/// refuse before its first command.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TokenResponse {
     access_token: String,
     token_type: &'static str,
     expires_in: i64,
+    contract_version: u32,
+    catalog_hash: &'static str,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1921,6 +1927,8 @@ async fn token_handler(
         access_token,
         token_type: "DPoP",
         expires_in: ACCESS_TOKEN_TTL_SECS,
+        contract_version: super::command_manifest::CONTRACT_VERSION,
+        catalog_hash: super::command_manifest::CATALOG_HASH,
     }))
 }
 
@@ -3150,6 +3158,29 @@ mod tests {
             serde_json::json!(["web-popup", "native-loopback", "deep-link"])
         );
         assert!(value.get("collaboration").is_none());
+    }
+
+    /// The token response is the device handshake (ADR-0175): it names the
+    /// contract so the client can refuse before its first command.
+    #[test]
+    fn token_response_names_the_command_contract() {
+        let body = serde_json::to_value(TokenResponse {
+            access_token: "t".to_string(),
+            token_type: "DPoP",
+            expires_in: ACCESS_TOKEN_TTL_SECS,
+            contract_version: super::super::command_manifest::CONTRACT_VERSION,
+            catalog_hash: super::super::command_manifest::CATALOG_HASH,
+        })
+        .unwrap();
+        assert_eq!(body["tokenType"], "DPoP");
+        assert_eq!(
+            body["contractVersion"],
+            super::super::command_manifest::CONTRACT_VERSION
+        );
+        assert_eq!(
+            body["catalogHash"],
+            super::super::command_manifest::CATALOG_HASH
+        );
     }
 
     /// The device handshake reads the contract identity from here (ADR-0175):
