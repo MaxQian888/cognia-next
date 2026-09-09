@@ -105,6 +105,8 @@ cognia-observability = { path = "../crates/cognia-observability", features = ["d
 # build with `Permission log:default not found`.
 tauri-plugin-log = "2"
 cognia-headless-contract = { path = "../crates/cognia-headless-contract" }
+# ADR-0175. The single error document on every companion plane.
+cognia-problem = { path = "../crates/cognia-problem", features = ["axum"] }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
 cognia-subscription = { path = "../crates/cognia-subscription" }

@@ -153,8 +153,9 @@ mod tests {
             .await
             .expect("response body");
         let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON error");
-        assert_eq!(body["error"]["code"], "media_not_found");
-        assert_eq!(body["error"]["retryable"], false);
-        assert!(body["error"]["requestId"].as_str().is_some());
+        assert_eq!(body["code"], "media_not_found");
+        assert_eq!(body["status"], 404);
+        assert_eq!(body["retryable"], false);
+        assert!(body["requestId"].as_str().is_some());
     }
 }

@@ -58,6 +58,7 @@ pub mod mesh;
 pub mod metrics;
 pub mod middleware;
 pub mod oidc;
+mod problem_surface;
 pub mod push;
 pub mod push_creds;
 pub mod rate_limit;

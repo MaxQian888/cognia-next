@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::http::StatusCode;
+use cognia_problem::Problem;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -193,39 +194,16 @@ pub enum ExecutionOutcome {
     },
 }
 
-#[derive(Clone, Debug)]
-pub struct ExecutionError {
-    pub status: StatusCode,
-    pub code: String,
-    pub message: String,
-    pub request_id: String,
-    pub retryable: bool,
-    pub details: Value,
-    pub operation_id: Option<String>,
-}
-
-impl ExecutionError {
-    fn new(
-        request_id: &str,
-        status: StatusCode,
-        code: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            status,
-            code: code.into(),
-            message: message.into(),
-            request_id: request_id.to_string(),
-            retryable: status.is_server_error(),
-            details: json!({}),
-            operation_id: None,
-        }
-    }
-
-    fn with_operation_id(mut self, operation_id: String) -> Self {
-        self.operation_id = Some(operation_id);
-        self
-    }
+/// The failure document for one request (ADR-0175). `retryable` starts as
+/// "a server-side condition" (`status >= 500`), and every producer below that
+/// knows better says so on the value it returns.
+fn problem(
+    request_id: &str,
+    status: StatusCode,
+    code: impl Into<String>,
+    detail: impl Into<String>,
+) -> Problem {
+    Problem::with_status(status, code, detail).with_request_id(request_id)
 }
 
 /// The single remote command authority. Wire adapters authenticate their
@@ -234,7 +212,7 @@ impl ExecutionError {
 pub async fn execute(
     state: &SharedState,
     request: ExecutionRequest,
-) -> Result<ExecutionOutcome, ExecutionError> {
+) -> Result<ExecutionOutcome, Problem> {
     let target = super::command_manifest::descriptor(&request.command)
         .map(|descriptor| format!("{:?}", descriptor.target).to_ascii_lowercase())
         .unwrap_or_else(|| "unknown".to_string());
@@ -279,7 +257,7 @@ pub async fn execute(
 /// Two things this answer has to carry, and for a long time it carried neither
 /// in a form any client reads.
 ///
-/// **`retryable`.** `ExecutionError::new` derives it from `is_server_error()`,
+/// **`retryable`.** `problem()` derives it from the status class,
 /// which is false for a 429. That default is wrong for exactly this error: we
 /// have just computed how long the caller must wait, so "come back then" is the
 /// whole message. Left false, the client refuses to retry at all
@@ -296,9 +274,9 @@ pub async fn execute(
 /// its mirror on every boot. The burst drains the read bucket, which is
 /// expected and self-correcting, but every table refused after that gave up
 /// instantly instead of waiting out a refill this host had already quantified.
-fn rate_limited_error(request_id: &str, retry_after: std::time::Duration) -> ExecutionError {
+fn rate_limited_error(request_id: &str, retry_after: std::time::Duration) -> Problem {
     let retry_after_secs = retry_after.as_secs();
-    let mut error = ExecutionError::new(
+    let mut error = problem(
         request_id,
         StatusCode::TOO_MANY_REQUESTS,
         "rate_limited",
@@ -327,9 +305,9 @@ pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_li
 async fn execute_inner(
     state: &SharedState,
     request: ExecutionRequest,
-) -> Result<ExecutionOutcome, ExecutionError> {
+) -> Result<ExecutionOutcome, Problem> {
     let descriptor = super::command_manifest::descriptor(&request.command).ok_or_else(|| {
-        ExecutionError::new(
+        problem(
             &request.request_id,
             StatusCode::NOT_FOUND,
             "unknown_command",
@@ -345,7 +323,7 @@ async fn execute_inner(
             "deny",
             json!({
                 "command": &request.command,
-                "reason": &error.message,
+                "reason": &error.detail,
             }),
         )
         .await;
@@ -400,7 +378,7 @@ async fn execute_inner(
     }
 
     let idempotency_key = request.idempotency_key.as_deref().ok_or_else(|| {
-        ExecutionError::new(
+        problem(
             &request.request_id,
             StatusCode::BAD_REQUEST,
             "idempotency_key_required",
@@ -408,7 +386,7 @@ async fn execute_inner(
         )
     })?;
     if Uuid::parse_str(idempotency_key).is_err() {
-        return Err(ExecutionError::new(
+        return Err(problem(
             &request.request_id,
             StatusCode::BAD_REQUEST,
             "idempotency_key_required",
@@ -460,15 +438,7 @@ async fn execute_inner(
                 cognia_headless_contract::ContractDirection::Output,
                 contract_plane_for(&request.principal.scope),
             ) {
-                let receipt = json!({
-                    "httpStatus": error.status.as_u16(),
-                    "error": {
-                        "code": error.code,
-                        "message": error.message,
-                        "retryable": error.retryable,
-                        "details": error.details,
-                    }
-                });
+                let receipt = json!({ "httpStatus": error.status, "error": error });
                 store
                     .complete_idempotent_operation(
                         &request.principal.account_id,
@@ -501,15 +471,7 @@ async fn execute_inner(
             })
         }
         Err(mut error) => {
-            let receipt = json!({
-                "httpStatus": error.status.as_u16(),
-                "error": {
-                    "code": error.code,
-                    "message": error.message,
-                    "retryable": error.retryable,
-                    "details": error.details,
-                }
-            });
+            let receipt = json!({ "httpStatus": error.status, "error": error });
             store
                 .complete_idempotent_operation(
                     &request.principal.account_id,
@@ -541,7 +503,7 @@ fn contract_plane_for(scope: &str) -> cognia_headless_contract::ContractPlane {
     }
 }
 
-// ExecutionError intentionally carries the complete receipt-ready failure
+// The `Problem` intentionally carries the complete receipt-ready failure
 // payload used at the remote execution boundary.
 #[allow(clippy::result_large_err)]
 fn validate_contract_value(
@@ -550,12 +512,12 @@ fn validate_contract_value(
     value: &Value,
     direction: cognia_headless_contract::ContractDirection,
     plane: cognia_headless_contract::ContractPlane,
-) -> Result<(), ExecutionError> {
+) -> Result<(), Problem> {
     if !super::command_manifest::headless_contract_enforced() {
         return Ok(());
     }
     let contract = super::command_manifest::headless_contract().map_err(|_| {
-        let mut error = ExecutionError::new(
+        let mut error = problem(
             request_id,
             StatusCode::SERVICE_UNAVAILABLE,
             "contract_unavailable",
@@ -598,7 +560,7 @@ fn validate_contract_value(
                 violations,
             ),
         };
-        let mut error = ExecutionError::new(request_id, status, code, message);
+        let mut error = problem(request_id, status, code, message);
         error.retryable = false;
         error.details = json!({ "violations": violations });
         error
@@ -609,7 +571,7 @@ fn validate_contract_value(
 fn authorize_transport(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
-) -> Result<(), ExecutionError> {
+) -> Result<(), Problem> {
     let service_principal = request.principal.scope == "service";
     let allowed = if request.transport == ExecutionTransport::Internal {
         service_principal
@@ -624,7 +586,7 @@ fn authorize_transport(
                 .contains(&request.transport.manifest_transport())
     };
     if !allowed {
-        return Err(ExecutionError::new(
+        return Err(problem(
             &request.request_id,
             StatusCode::FORBIDDEN,
             "command_transport_forbidden",
@@ -638,7 +600,7 @@ fn authorize_transport(
 fn authorize_capability(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
-) -> Result<(), ExecutionError> {
+) -> Result<(), Problem> {
     if request.principal.scope == "service" {
         return Ok(());
     }
@@ -659,7 +621,7 @@ fn authorize_capability(
                 .map_err(|error| map_store_error(&request.request_id, error))?,
         };
         if !granted {
-            let mut error = ExecutionError::new(
+            let mut error = problem(
                 &request.request_id,
                 StatusCode::FORBIDDEN,
                 "missing_capability",
@@ -683,7 +645,7 @@ fn snapshot_capability_decision(principal: &DeviceContext, capability: &str) -> 
 fn authorize_approval(
     request: &ExecutionRequest,
     descriptor: &CommandDescriptor,
-) -> Result<(), ExecutionError> {
+) -> Result<(), Problem> {
     // The loopback-only service principal is the policy authority for the
     // internal Brain plane. Device transports must still present interactive
     // leases or signed host policies according to the manifest.
@@ -707,7 +669,7 @@ fn authorize_approval(
                 .and_then(Value::as_str);
             super::admin_lease::validate(&request.principal.device_id, &request.command, lease)
                 .map_err(|_| {
-                    ExecutionError::new(
+                    problem(
                         &request.request_id,
                         StatusCode::PRECONDITION_REQUIRED,
                         "interactive_approval_required",
@@ -717,7 +679,7 @@ fn authorize_approval(
         }
         CommandApproval::SignedPolicy => {
             let policy_id = request.policy_id.as_deref().ok_or_else(|| {
-                ExecutionError::new(
+                problem(
                     &request.request_id,
                     StatusCode::PRECONDITION_REQUIRED,
                     "signed_policy_required",
@@ -740,7 +702,7 @@ fn authorize_approval(
             ) {
                 Ok(())
             } else {
-                Err(ExecutionError::new(
+                Err(problem(
                     &request.request_id,
                     StatusCode::FORBIDDEN,
                     "policy_constraints_mismatch",
@@ -752,10 +714,7 @@ fn authorize_approval(
 }
 
 #[allow(clippy::result_large_err)]
-async fn dispatch(
-    state: &SharedState,
-    request: &ExecutionRequest,
-) -> Result<Value, ExecutionError> {
+async fn dispatch(state: &SharedState, request: &ExecutionRequest) -> Result<Value, Problem> {
     super::rpc::dispatch_canonical(
         &request.command,
         request.args.clone(),
@@ -765,7 +724,10 @@ async fn dispatch(
     )
     .await
     .map_err(|(status, axum::Json(error))| {
-        ExecutionError::new(&request.request_id, status, error.code, error.message)
+        // `RpcError` is the arm-internal shape. This is the plane boundary where
+        // it becomes the one document, and the arm's own answer on whether a
+        // retry can succeed must not be replaced by a guess from the status.
+        problem(&request.request_id, status, error.code, error.message).retryable(error.retryable)
     })
 }
 
@@ -774,7 +736,7 @@ fn replay_receipt(
     request_id: &str,
     operation_id: String,
     receipt_json: &str,
-) -> Result<ExecutionOutcome, ExecutionError> {
+) -> Result<ExecutionOutcome, Problem> {
     let receipt: Value = serde_json::from_str(receipt_json).unwrap_or_else(|_| json!({}));
     if let Some(result) = receipt.get("result").cloned().or_else(|| {
         receipt
@@ -793,32 +755,19 @@ fn replay_receipt(
         .get("httpStatus")
         .and_then(Value::as_u64)
         .and_then(|value| u16::try_from(value).ok())
-        .and_then(|value| StatusCode::from_u16(value).ok())
-        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        .unwrap_or(500);
     let detail = receipt
         .get("error")
         .or_else(|| receipt.get("body").and_then(|body| body.get("error")));
-    let mut error = ExecutionError::new(
-        request_id,
-        status,
-        detail
-            .and_then(|value| value.get("code"))
-            .and_then(Value::as_str)
-            .unwrap_or("operation_failed"),
-        detail
-            .and_then(|value| value.get("message"))
-            .and_then(Value::as_str)
-            .unwrap_or("the prior operation failed"),
-    )
-    .with_operation_id(operation_id);
-    error.retryable = detail
-        .and_then(|value| value.get("retryable"))
-        .and_then(Value::as_bool)
-        .unwrap_or_else(|| status.is_server_error());
-    error.details = detail
-        .and_then(|value| value.get("details"))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    // Receipts written since ADR-0175 hold the whole problem document. Older
+    // rows hold `{code, message, retryable, details}`, which `parse` also reads.
+    // Either way the replay answers under the id of the request that asked,
+    // exactly like a replayed success does.
+    let error = detail
+        .and_then(|value| Problem::parse(value, status))
+        .unwrap_or_else(|| Problem::new(status, "operation_failed", "the prior operation failed"))
+        .with_request_id(request_id)
+        .with_operation_id(operation_id);
     Err(error)
 }
 
@@ -839,15 +788,15 @@ pub(super) fn json_subset_matches(expected: &Value, actual: &Value) -> bool {
     matches(expected, actual, 0)
 }
 
-fn map_store_error(request_id: &str, error: SecurityStoreError) -> ExecutionError {
+fn map_store_error(request_id: &str, error: SecurityStoreError) -> Problem {
     match error {
-        SecurityStoreError::IdempotencyConflict => ExecutionError::new(
+        SecurityStoreError::IdempotencyConflict => problem(
             request_id,
             StatusCode::CONFLICT,
             "idempotency_conflict",
             "the idempotency key was already used with different parameters",
         ),
-        SecurityStoreError::InvalidPolicy => ExecutionError::new(
+        SecurityStoreError::InvalidPolicy => problem(
             request_id,
             StatusCode::FORBIDDEN,
             "invalid_policy",
@@ -857,8 +806,8 @@ fn map_store_error(request_id: &str, error: SecurityStoreError) -> ExecutionErro
     }
 }
 
-fn store_unavailable(request_id: &str) -> ExecutionError {
-    ExecutionError::new(
+fn store_unavailable(request_id: &str) -> Problem {
+    problem(
         request_id,
         StatusCode::SERVICE_UNAVAILABLE,
         "security_store_unavailable",
@@ -1158,16 +1107,16 @@ mod tests {
     fn a_quota_refusal_is_retryable_and_says_how_long_to_wait() {
         let error = rate_limited_error("req-1", std::time::Duration::from_secs(3));
 
-        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(error.status_code(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(error.code, "rate_limited");
         assert!(
             error.retryable,
             "a 429 the host itself timed is retryable; `is_server_error()` is the wrong default here"
         );
         assert!(
-            error.message.contains("retry_after_seconds=3"),
-            "the wait must ride in the message, which is where the client parses it: {}",
-            error.message
+            error.detail.contains("retry_after_seconds=3"),
+            "the wait must ride in the detail, which is where the client parses it: {}",
+            error.detail
         );
         assert_eq!(error.details["retryAfterSeconds"], json!(3));
     }
@@ -1179,9 +1128,9 @@ mod tests {
         let device_plane = rate_limited_error("req-1", std::time::Duration::from_secs(7));
         let (status, rpc_plane) = super::super::rpc::RpcError::rate_limited(7);
 
-        assert_eq!(device_plane.status, status);
+        assert_eq!(device_plane.status_code(), status);
         assert_eq!(device_plane.code, rpc_plane.0.code);
-        assert!(device_plane.message.contains("retry_after_seconds=7"));
+        assert!(device_plane.detail.contains("retry_after_seconds=7"));
         assert!(rpc_plane.0.message.contains("retry_after_seconds=7"));
         assert_eq!(device_plane.retryable, rpc_plane.0.retryable);
     }
@@ -1377,7 +1326,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(error.code, "contract_input_violation");
         assert_eq!(error.request_id, "request-a");
         assert!(!error.retryable);

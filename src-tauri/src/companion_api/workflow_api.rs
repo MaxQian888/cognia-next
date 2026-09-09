@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use cognia_problem::Problem;
+
 use super::{middleware::DeviceContext, SharedState};
 
 const WORKFLOW_RUN_SCOPE: &str = "workflow:run";
@@ -56,57 +58,15 @@ struct EventsPage {
     terminal: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ErrorBody {
-    code: String,
-    message: String,
-    request_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<Value>,
+/// A refusal from the workflow portal: the one problem document (ADR-0175).
+fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> Problem {
+    Problem::with_status(status, code, message).retryable(false)
 }
 
-#[derive(Debug)]
-struct ApiError {
-    status: StatusCode,
-    body: ErrorBody,
-}
-
-impl ApiError {
-    fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            body: ErrorBody {
-                code: code.to_string(),
-                message: message.into(),
-                request_id: Uuid::new_v4().to_string(),
-                details: None,
-            },
-        }
-    }
-
-    fn from_bridge(error: BridgeError) -> Self {
-        Self {
-            status: StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            body: ErrorBody {
-                code: error.code,
-                message: error.message,
-                request_id: Uuid::new_v4().to_string(),
-                details: error.details,
-            },
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let request_id = self.body.request_id.clone();
-        let mut response = (self.status, Json(self.body)).into_response();
-        if let Ok(value) = HeaderValue::from_str(&request_id) {
-            response.headers_mut().insert("x-request-id", value);
-        }
-        response
-    }
+fn bridge_error(error: BridgeError) -> Problem {
+    Problem::new(error.status, error.code, error.message)
+        .retryable(false)
+        .with_details(error.details.unwrap_or_else(|| json!({})))
 }
 
 fn has_scope(context: &DeviceContext, required: &str) -> bool {
@@ -119,11 +79,11 @@ fn has_scope(context: &DeviceContext, required: &str) -> bool {
             .any(|scope| scope == required || scope == WORKFLOW_ADMIN_SCOPE)
 }
 
-fn require_scope(context: &DeviceContext, required: &str) -> Result<(), ApiError> {
+fn require_scope(context: &DeviceContext, required: &str) -> Result<(), Problem> {
     if has_scope(context, required) {
         return Ok(());
     }
-    Err(ApiError::new(
+    Err(api_error(
         StatusCode::FORBIDDEN,
         "scope_denied",
         format!("{required} scope is required"),
@@ -153,9 +113,9 @@ async fn dispatch_bridge(
     state: &SharedState,
     command: &str,
     payload: Value,
-) -> Result<Value, ApiError> {
+) -> Result<Value, Problem> {
     let transport = super::ws_bridge::resolve_bridge_transport(state).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "workflow_service_unavailable",
             "The workflow brain is not connected",
@@ -170,7 +130,7 @@ async fn dispatch_bridge(
         )
         .await
         .map_err(|_| {
-            ApiError::new(
+            api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "workflow_service_unavailable",
                 "The workflow brain did not answer the request",
@@ -178,7 +138,7 @@ async fn dispatch_bridge(
         })?;
     super::metrics::record_rpc_call(true);
     let envelope: BridgeEnvelope = serde_json::from_value(result).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_service_protocol_error",
             "The workflow brain returned an invalid response",
@@ -186,23 +146,20 @@ async fn dispatch_bridge(
     })?;
     if envelope.ok {
         envelope.data.ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_service_protocol_error",
                 "The workflow brain returned no response data",
             )
         })
     } else {
-        Err(envelope
-            .error
-            .map(ApiError::from_bridge)
-            .unwrap_or_else(|| {
-                ApiError::new(
-                    StatusCode::BAD_GATEWAY,
-                    "workflow_service_protocol_error",
-                    "The workflow brain returned an incomplete error",
-                )
-            }))
+        Err(envelope.error.map(bridge_error).unwrap_or_else(|| {
+            api_error(
+                StatusCode::BAD_GATEWAY,
+                "workflow_service_protocol_error",
+                "The workflow brain returned an incomplete error",
+            )
+        }))
     }
 }
 
@@ -215,12 +172,12 @@ fn json_response(status: StatusCode, value: Value) -> Response {
     response
 }
 
-fn parse_idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
+fn parse_idempotency_key(headers: &HeaderMap) -> Result<Option<String>, Problem> {
     let Some(value) = headers.get("idempotency-key") else {
         return Ok(None);
     };
     let value = value.to_str().map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_idempotency_key",
             "Idempotency-Key must be valid UTF-8 and at most 255 bytes",
@@ -230,7 +187,7 @@ fn parse_idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError
         return Ok(None);
     }
     if value.len() > 255 {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_idempotency_key",
             "Idempotency-Key must be valid UTF-8 and at most 255 bytes",
@@ -251,7 +208,7 @@ pub async fn create_run_handler(
             &context,
             "workflow_api_run_create",
             "deny",
-            json!({ "deployment_id": deployment_id, "code": error.body.code.clone() }),
+            json!({ "deployment_id": deployment_id, "code": error.code.clone() }),
         )
         .await;
         return error.into_response();
@@ -259,7 +216,7 @@ pub async fn create_run_handler(
     let Json(body) = match body {
         Ok(body) => body,
         Err(_) => {
-            let error = ApiError::new(
+            let error = api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "The request body must be valid workflow run JSON",
@@ -268,7 +225,7 @@ pub async fn create_run_handler(
                 &context,
                 "workflow_api_run_create",
                 "deny",
-                json!({ "deployment_id": deployment_id, "code": error.body.code.clone() }),
+                json!({ "deployment_id": deployment_id, "code": error.code.clone() }),
             )
             .await;
             return error.into_response();
@@ -281,7 +238,7 @@ pub async fn create_run_handler(
                 &context,
                 "workflow_api_run_create",
                 "deny",
-                json!({ "deployment_id": deployment_id, "code": error.body.code.clone() }),
+                json!({ "deployment_id": deployment_id, "code": error.code.clone() }),
             )
             .await;
             return error.into_response();
@@ -311,7 +268,7 @@ pub async fn create_run_handler(
                 &context,
                 "workflow_api_run_create",
                 "deny",
-                json!({ "deployment_id": deployment_id, "code": error.body.code.clone() }),
+                json!({ "deployment_id": deployment_id, "code": error.code.clone() }),
             )
             .await;
             error.into_response()
@@ -329,7 +286,7 @@ pub async fn get_run_handler(
             &context,
             "workflow_api_run_get",
             "deny",
-            json!({ "run_id": run_id, "code": error.body.code.clone() }),
+            json!({ "run_id": run_id, "code": error.code.clone() }),
         )
         .await;
         return error.into_response();
@@ -355,7 +312,7 @@ pub async fn get_run_handler(
                 &context,
                 "workflow_api_run_get",
                 "deny",
-                json!({ "run_id": run_id, "code": error.body.code.clone() }),
+                json!({ "run_id": run_id, "code": error.code.clone() }),
             )
             .await;
             error.into_response()
@@ -373,7 +330,7 @@ pub async fn cancel_run_handler(
             &context,
             "workflow_api_run_cancel",
             "deny",
-            json!({ "run_id": run_id, "code": error.body.code.clone() }),
+            json!({ "run_id": run_id, "code": error.code.clone() }),
         )
         .await;
         return error.into_response();
@@ -400,7 +357,7 @@ pub async fn cancel_run_handler(
                 &context,
                 "workflow_api_run_cancel",
                 "deny",
-                json!({ "run_id": run_id, "code": error.body.code.clone() }),
+                json!({ "run_id": run_id, "code": error.code.clone() }),
             )
             .await;
             error.into_response()
@@ -408,26 +365,26 @@ pub async fn cancel_run_handler(
     }
 }
 
-fn parse_last_event_id(headers: &HeaderMap) -> Result<u64, ApiError> {
+fn parse_last_event_id(headers: &HeaderMap) -> Result<u64, Problem> {
     let Some(raw) = headers.get("last-event-id") else {
         return Ok(0);
     };
     let raw = raw.to_str().map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
         )
     })?;
     let cursor = raw.parse::<u64>().map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
         )
     })?;
     if cursor > 9_007_199_254_740_991 {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
@@ -441,7 +398,7 @@ async fn load_events(
     context: &DeviceContext,
     run_id: &str,
     after_sequence: u64,
-) -> Result<EventsPage, ApiError> {
+) -> Result<EventsPage, Problem> {
     let data = dispatch_bridge(
         state,
         "workflow_api_events_list",
@@ -460,9 +417,9 @@ fn parse_events_page(
     data: Value,
     run_id: &str,
     after_sequence: u64,
-) -> Result<EventsPage, ApiError> {
+) -> Result<EventsPage, Problem> {
     let page: EventsPage = serde_json::from_value(data).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_service_protocol_error",
             "The workflow brain returned invalid event data",
@@ -478,7 +435,7 @@ fn parse_events_page(
                 .and_then(Value::as_u64)
                 .is_some_and(|sequence| sequence > cursor);
         if !valid {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_service_protocol_error",
                 "The workflow brain returned invalid event data",
@@ -524,7 +481,7 @@ pub async fn events_handler(
             &context,
             "workflow_api_events",
             "deny",
-            json!({ "run_id": run_id, "code": error.body.code.clone() }),
+            json!({ "run_id": run_id, "code": error.code.clone() }),
         )
         .await;
         return error.into_response();
@@ -536,7 +493,7 @@ pub async fn events_handler(
                 &context,
                 "workflow_api_events",
                 "deny",
-                json!({ "run_id": run_id, "code": error.body.code.clone() }),
+                json!({ "run_id": run_id, "code": error.code.clone() }),
             )
             .await;
             return error.into_response();
@@ -551,7 +508,7 @@ pub async fn events_handler(
                 &context,
                 "workflow_api_events",
                 "deny",
-                json!({ "run_id": run_id, "code": error.body.code.clone() }),
+                json!({ "run_id": run_id, "code": error.code.clone() }),
             )
             .await;
             return error.into_response();
@@ -605,8 +562,8 @@ pub async fn events_handler(
                         "type": "error",
                         "timestamp": chrono::Utc::now().to_rfc3339(),
                         "payload": {
-                            "code": error.body.code,
-                            "message": error.body.message,
+                            "code": error.code,
+                            "message": error.detail,
                             "requestId": stream_state.request_id,
                         }
                     });
@@ -675,7 +632,7 @@ mod tests {
         assert_eq!(parse_last_event_id(&headers).unwrap(), 42);
         headers.insert("last-event-id", "-1".parse().unwrap());
         assert_eq!(
-            parse_last_event_id(&headers).unwrap_err().body.code,
+            parse_last_event_id(&headers).unwrap_err().code,
             "invalid_event_cursor"
         );
         headers.insert("last-event-id", "9007199254740992".parse().unwrap());
@@ -699,7 +656,7 @@ mod tests {
             HeaderValue::from_bytes(&[0xff]).expect("opaque invalid UTF-8 header"),
         );
         assert_eq!(
-            parse_idempotency_key(&headers).unwrap_err().body.code,
+            parse_idempotency_key(&headers).unwrap_err().code,
             "invalid_idempotency_key"
         );
         headers.insert("idempotency-key", "x".repeat(256).parse().unwrap());
@@ -743,10 +700,7 @@ mod tests {
             1
         );
         assert_eq!(
-            parse_events_page(page, "run-other", 1)
-                .unwrap_err()
-                .body
-                .code,
+            parse_events_page(page, "run-other", 1).unwrap_err().code,
             "workflow_service_protocol_error"
         );
         assert!(parse_events_page(

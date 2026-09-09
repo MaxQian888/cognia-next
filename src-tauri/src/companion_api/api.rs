@@ -12,6 +12,7 @@ use axum::{
     Extension, Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use cognia_problem::Problem;
 use cognia_signaling_core::{proto::RoomDescriptor, protocol::validate_room_descriptor};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use once_cell::sync::Lazy;
@@ -234,7 +235,7 @@ async fn auth_config_handler(
                 })
             }
             _ => {
-                return ApiError::unavailable(
+                return store_unavailable_error(
                     "multi-tenant browser authentication is not fully configured",
                 )
                 .into_response()
@@ -421,7 +422,7 @@ pub(crate) async fn whoami_handler(Extension(context): Extension<DeviceContext>)
 fn authenticate_owner_request(
     _state: &SharedState,
     request: &Request,
-) -> Result<DeviceContext, ApiError> {
+) -> Result<DeviceContext, Problem> {
     if deployment_mode() == DeploymentMode::SingleUser
         && request.uri().path() == "/api/invitations"
         && !request
@@ -429,7 +430,7 @@ fn authenticate_owner_request(
             .get::<ConnectInfo<SocketAddr>>()
             .is_some_and(|peer| peer.0.ip().is_loopback())
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "loopback_required",
             "single-user Owner invitations can only be created from loopback",
@@ -441,7 +442,7 @@ fn authenticate_owner_request(
         .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "device_unavailable",
                 "the device is unknown or revoked",
@@ -453,7 +454,7 @@ fn authenticate_owner_request(
             .iter()
             .any(|capability| capability == "host.admin")
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "owner_context_required",
             "an active Owner device is required",
@@ -465,7 +466,7 @@ fn authenticate_owner_request(
         .get("dpop")
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "missing_device_proof",
                 "a DPoP device proof is required",
@@ -565,7 +566,7 @@ pub(crate) async fn worker_enrollment_handler(
     let request = parse_public_json(body)?;
     let ttl = request.ttl_seconds.unwrap_or(600);
     if !(1..=3_600).contains(&ttl) {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_worker_enrollment_ttl",
             "ttlSeconds must be between 1 and 3600",
@@ -591,7 +592,7 @@ pub(crate) async fn invitation_handler(
 ) -> ApiResult<InvitationResponse> {
     let request = parse_public_json(body)?;
     if deployment_mode() != DeploymentMode::SingleUser {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::CONFLICT,
             "oidc_registration_required",
             "multi-tenant devices register through OIDC instead of Owner invitations",
@@ -599,7 +600,7 @@ pub(crate) async fn invitation_handler(
     }
     let ttl = request.ttl_seconds.unwrap_or(600);
     if !(1..=3_600).contains(&ttl) {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_invitation_ttl",
             "ttlSeconds must be between 1 and 3600",
@@ -704,7 +705,7 @@ fn apply_lifecycle(
     context: &DeviceContext,
     device_id: &str,
     action: super::device_lifecycle::LifecycleAction,
-) -> Result<super::device_lifecycle::LifecycleOutcome, ApiError> {
+) -> Result<super::device_lifecycle::LifecycleOutcome, Problem> {
     super::device_lifecycle::apply(
         &super::device_lifecycle::LifecycleContext {
             event_bus: Some(std::sync::Arc::clone(&state.event_bus)),
@@ -724,19 +725,19 @@ fn apply_lifecycle(
     .map_err(lifecycle_error)
 }
 
-fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> ApiError {
+fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> Problem {
     use super::device_lifecycle::LifecycleError;
     match error {
         LifecycleError::StoreUnavailable => {
-            ApiError::unavailable("the security database is unavailable")
+            store_unavailable_error("the security database is unavailable")
         }
-        LifecycleError::UnknownDevice => ApiError::new(
+        LifecycleError::UnknownDevice => api_error(
             StatusCode::NOT_FOUND,
             "device_not_found",
             "the requested device does not exist for this tenant",
         ),
         LifecycleError::Store(error) => store_error(error),
-        LifecycleError::Signaling(message) => ApiError::new(
+        LifecycleError::Signaling(message) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "signaling_revocation_activate_failed",
             message,
@@ -754,7 +755,7 @@ pub(crate) async fn operation_handler(
             .map_err(store_error)
     }) {
         Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
-        Ok(None) => ApiError::new(
+        Ok(None) => api_error(
             StatusCode::NOT_FOUND,
             "operation_not_found",
             "the requested operation does not exist for this device",
@@ -773,7 +774,7 @@ pub(crate) async fn internal_operation_handler(
 }
 
 fn internal_operation_response(
-    store: Result<std::sync::Arc<SecurityStore>, ApiError>,
+    store: Result<std::sync::Arc<SecurityStore>, Problem>,
     context: &DeviceContext,
     operation_id: String,
     request_id: String,
@@ -784,29 +785,17 @@ fn internal_operation_response(
             .map_err(store_error)
     }) {
         Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
-        Ok(None) => (
+        Ok(None) => api_error(
             StatusCode::NOT_FOUND,
-            Json(json!({
-                "code": "operation_not_found",
-                "message": "the requested operation does not exist for this service principal",
-                "requestId": request_id,
-                "retryable": false,
-                "details": {},
-                "operationId": operation_id,
-            })),
+            "operation_not_found",
+            "the requested operation does not exist for this service principal",
         )
-            .into_response(),
-        Err(error) => (
-            error.status,
-            Json(json!({
-                "code": error.code,
-                "message": error.message,
-                "requestId": request_id,
-                "retryable": error.retryable,
-                "details": {},
-                "operationId": operation_id,
-            })),
-        )
+        .with_request_id(request_id)
+        .with_operation_id(operation_id)
+        .into_response(),
+        Err(error) => error
+            .with_request_id(request_id)
+            .with_operation_id(operation_id)
             .into_response(),
     }
 }
@@ -864,9 +853,9 @@ fn empty_json_object() -> serde_json::Value {
     json!({})
 }
 
-fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<(), ApiError> {
+fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<(), Problem> {
     if request.expires_at <= now || request.expires_at > now.saturating_add(MAX_POLICY_TTL_SECS) {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_policy_expiry",
             "expiresAt must be in the future and no more than 30 days away",
@@ -876,7 +865,7 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
         || request.commands.is_empty()
         || request.commands.len() > MAX_POLICY_COMMANDS
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_policy_scope",
             "a policy must cover between 1 and 64 non-service commands",
@@ -887,7 +876,7 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
             .map(|bytes| bytes.len() > MAX_POLICY_BYTES)
             .unwrap_or(true)
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_policy_constraints",
             "policy constraints must be a JSON object no larger than 16 KiB",
@@ -899,7 +888,7 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
             .as_object()
             .is_none_or(serde_json::Map::is_empty)
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "process_policy_constraints_required",
             "process.spawn policies must constrain at least one request field",
@@ -908,7 +897,7 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
     let mut unique = std::collections::HashSet::with_capacity(request.commands.len());
     for command in &request.commands {
         let descriptor = super::command_manifest::descriptor(command).ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_policy_command",
                 "a policy command is not registered",
@@ -919,7 +908,7 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
             || descriptor.approval != CommandApproval::SignedPolicy
             || descriptor.capability != request.capability
         {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_policy_command",
                 "every policy command must be a unique, device-reachable signed-policy command with the declared capability",
@@ -1010,11 +999,11 @@ pub async fn rpc_handler(
         }
         Err(error) => {
             let saturated = matches!(
-                error.status,
+                error.status_code(),
                 StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
             );
             observation.finish(super::metrics::RpcOutcome::Error { saturated });
-            execution_error_response(error)
+            error.into_response()
         }
     }
 }
@@ -1034,17 +1023,7 @@ pub async fn internal_rpc_handler(
         Ok(body) => body,
         Err(rejection) => {
             observation.finish(super::metrics::RpcOutcome::Error { saturated: false });
-            return (
-                rejection.status(),
-                Json(json!({
-                    "code": "invalid_json_request",
-                    "message": "the request body must be valid JSON for this endpoint",
-                    "requestId": uuid::Uuid::new_v4().to_string(),
-                    "retryable": false,
-                    "details": {},
-                })),
-            )
-                .into_response();
+            return json_rejection_problem(rejection).into_response();
         }
     };
     let idempotency_key = headers
@@ -1093,33 +1072,13 @@ pub async fn internal_rpc_handler(
         }
         Err(error) => {
             let saturated = matches!(
-                error.status,
+                error.status_code(),
                 StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
             );
             observation.finish(super::metrics::RpcOutcome::Error { saturated });
-            let status = error.status;
-            (status, Json(internal_execution_error_body(error))).into_response()
+            error.into_response()
         }
     }
-}
-
-fn internal_execution_error_body(error: super::remote_execution::ExecutionError) -> Value {
-    let mut body = serde_json::Map::from_iter([
-        ("code".to_string(), Value::String(error.code)),
-        ("message".to_string(), Value::String(error.message)),
-        ("requestId".to_string(), Value::String(error.request_id)),
-        ("retryable".to_string(), Value::Bool(error.retryable)),
-        ("details".to_string(), error.details),
-    ]);
-    if let Some(operation_id) = error.operation_id {
-        body.insert("operationId".to_string(), Value::String(operation_id));
-    }
-    Value::Object(body)
-}
-
-fn execution_error_response(error: super::remote_execution::ExecutionError) -> Response {
-    let status = error.status;
-    (status, Json(execution_error_body(error))).into_response()
 }
 
 fn completed_rpc_response(
@@ -1135,20 +1094,6 @@ fn completed_rpc_response(
         body.insert("operationId".to_string(), Value::String(operation_id));
     }
     Value::Object(body)
-}
-
-fn execution_error_body(error: super::remote_execution::ExecutionError) -> Value {
-    let mut detail = serde_json::Map::from_iter([
-        ("code".to_string(), Value::String(error.code)),
-        ("message".to_string(), Value::String(error.message)),
-        ("requestId".to_string(), Value::String(error.request_id)),
-        ("retryable".to_string(), Value::Bool(error.retryable)),
-        ("details".to_string(), error.details),
-    ]);
-    if let Some(operation_id) = error.operation_id {
-        detail.insert("operationId".to_string(), Value::String(operation_id));
-    }
-    json!({ "error": detail })
 }
 
 /// Refuse a request that does not present the origin its device registered from.
@@ -1170,13 +1115,13 @@ fn execution_error_body(error: super::remote_execution::ExecutionError) -> Value
 fn enforce_bound_origin(
     snapshot: &AuthorizationSnapshot,
     headers: &HeaderMap,
-) -> Result<(), ApiError> {
+) -> Result<(), Problem> {
     let Some(bound_origin) = snapshot.bound_origin.as_deref() else {
         return Ok(());
     };
     let presented = headers.get(ORIGIN).and_then(|value| value.to_str().ok());
     if presented != Some(bound_origin) {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "device_origin_mismatch",
             "the request did not come from the extension this device registered from",
@@ -1188,7 +1133,7 @@ fn enforce_bound_origin(
 fn authenticate_device_request(
     _state: &SharedState,
     request: &Request,
-) -> Result<DeviceContext, ApiError> {
+) -> Result<DeviceContext, Problem> {
     let token = bearer_token(request.headers())?;
     let access = decode_access_token(token)?;
     let security = store()?;
@@ -1196,14 +1141,14 @@ fn authenticate_device_request(
         .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "device_unavailable",
                 "the device is unknown or revoked",
             )
         })?;
     if snapshot.key_thumbprint != access.cnf.key_thumbprint {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::UNAUTHORIZED,
             "token_key_mismatch",
             "the access token is not bound to the active device key",
@@ -1217,7 +1162,7 @@ fn authenticate_device_request(
         .filter(|name| !name.is_empty())
     {
         let descriptor = super::command_manifest::descriptor(command_name).ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::NOT_FOUND,
                 "unknown_command",
                 "the requested command is not registered",
@@ -1227,7 +1172,7 @@ fn authenticate_device_request(
             || descriptor.target == CommandTarget::Service
             || !descriptor.transports.contains(&CommandTransport::Http)
         {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::FORBIDDEN,
                 "command_transport_forbidden",
                 "the command cannot run through a device HTTP transport",
@@ -1240,7 +1185,7 @@ fn authenticate_device_request(
                 .and_then(|value| value.to_str().ok())
                 .is_some_and(|value| uuid::Uuid::parse_str(value).is_ok());
             if !valid_idempotency_key {
-                return Err(ApiError::new(
+                return Err(api_error(
                     StatusCode::BAD_REQUEST,
                     "idempotency_key_required",
                     "a UUID Idempotency-Key is required for this command",
@@ -1250,7 +1195,7 @@ fn authenticate_device_request(
         if descriptor.idempotency == CommandIdempotency::Forbidden
             && request.headers().contains_key("idempotency-key")
         {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "idempotency_key_forbidden",
                 "this command does not accept an Idempotency-Key",
@@ -1262,7 +1207,7 @@ fn authenticate_device_request(
         .get("dpop")
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "missing_device_proof",
                 "a DPoP device proof is required",
@@ -1286,65 +1231,29 @@ fn authenticate_device_request(
     })
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ErrorBody {
-    error: ErrorDetail,
+/// A refusal raised by a handler in this module (ADR-0175). Answers are
+/// non-retryable unless the producer says otherwise: most of what these
+/// handlers refuse is a contract or authorization fact that repeating the
+/// request verbatim cannot change.
+fn api_error(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Problem {
+    Problem::with_status(status, code, message).retryable(false)
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ErrorDetail {
-    code: String,
-    message: String,
-    request_id: String,
-    retryable: bool,
-    details: serde_json::Value,
+/// The security store could not be reached. The one 503 in this module that
+/// is worth retrying, because the store comes back.
+fn store_unavailable_error(message: impl Into<String>) -> Problem {
+    Problem::with_status(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "security_store_unavailable",
+        message,
+    )
+    .retryable(true)
 }
 
-#[derive(Debug)]
-pub(crate) struct ApiError {
-    status: StatusCode,
-    code: String,
-    message: String,
-    retryable: bool,
-}
-
-impl ApiError {
-    fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            code: code.into(),
-            message: message.into(),
-            retryable: false,
-        }
-    }
-
-    fn unavailable(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "security_store_unavailable".to_string(),
-            message: message.into(),
-            retryable: true,
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        public_error_response(
-            self.status,
-            self.code,
-            self.message,
-            self.retryable,
-            json!({}),
-        )
-    }
-}
-
-/// Build the canonical public Companion error envelope used by HTTP handlers
-/// and WebSocket upgrade rejections. Protocol frames keep their native error
-/// shapes after a successful upgrade.
+/// Build the one public Companion error answer used by HTTP handlers and
+/// WebSocket upgrade rejections: an RFC 9457 problem document (ADR-0175).
+/// Protocol frames keep their native envelope after a successful upgrade and
+/// carry the same document as their `error` member.
 pub(crate) fn public_error_response(
     status: StatusCode,
     code: impl Into<String>,
@@ -1352,31 +1261,52 @@ pub(crate) fn public_error_response(
     retryable: bool,
     details: Value,
 ) -> Response {
-    (
-        status,
-        Json(ErrorBody {
-            error: ErrorDetail {
-                code: code.into(),
-                message: message.into(),
-                request_id: uuid::Uuid::new_v4().to_string(),
-                retryable,
-                details,
-            },
-        }),
-    )
+    Problem::with_status(status, code, message)
+        .retryable(retryable)
+        .with_details(details)
         .into_response()
 }
 
-type ApiResult<T> = Result<Json<T>, ApiError>;
+type ApiResult<T> = Result<Json<T>, Problem>;
 
-fn parse_public_json<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
-    body.map(|Json(value)| value).map_err(|rejection| {
-        ApiError::new(
-            rejection.status(),
+fn parse_public_json<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {
+    body.map(|Json(value)| value)
+        .map_err(json_rejection_problem)
+}
+
+/// The document for a body the JSON extractor refused.
+///
+/// The extractor answers three different refusals under one rejection type,
+/// and a client branches on `code`, not on the status alone: a body over the
+/// plane's limit is not something re-encoding fixes, and a missing content
+/// type is not a syntax error. The status the extractor chose is kept and the
+/// code names the same thing the outermost layer names for the bare refusals
+/// (`bare_error_code` in server.rs), so one refusal reads the same wherever
+/// it is produced.
+pub(crate) fn json_rejection_problem(rejection: JsonRejection) -> Problem {
+    let status = rejection.status();
+    let (code, detail) = match status {
+        StatusCode::PAYLOAD_TOO_LARGE => (
+            "payload_too_large",
+            "the request body is larger than this plane accepts",
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => (
+            "unsupported_media_type",
+            "the request body must be sent as application/json",
+        ),
+        // The body never arrived whole: over the limit on a request that
+        // declared no length, or a connection that ended early. Calling that a
+        // syntax error sends a client off to re-encode a body that was fine.
+        _ if matches!(rejection, JsonRejection::BytesRejection(_)) => (
+            "unreadable_request_body",
+            "the request body could not be read to the end",
+        ),
+        _ => (
             "invalid_json_request",
             "the request body must be valid JSON for this endpoint",
-        )
-    })
+        ),
+    };
+    api_error(status, code, detail)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1565,14 +1495,14 @@ async fn register_handler(
     let invitation = match (authority.requires_invitation, request.invitation.as_deref()) {
         (true, Some(invitation)) if !invitation.is_empty() => Some(invitation),
         (true, _) => {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::FORBIDDEN,
                 "owner_invitation_required",
                 "a one-time owner invitation is required",
             ))
         }
         (false, Some(_)) => {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "owner_invitation_forbidden",
                 "OIDC registration must not include an Owner invitation",
@@ -1622,7 +1552,7 @@ async fn register_handler(
             )
             .map_err(store_error)?;
         cleanup_signaling(&request.device_id)?;
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "signaling_registration_activate_failed",
             error,
@@ -1671,7 +1601,7 @@ async fn worker_register_handler(
 ) -> ApiResult<WorkerRegisterResponse> {
     let request = parse_public_json(body)?;
     if request.enrollment.is_empty() {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "worker_enrollment_required",
             "a one-time worker enrollment is required",
@@ -1714,7 +1644,7 @@ async fn browser_register_handler(
 ) -> ApiResult<BrowserRegisterResponse> {
     let request = parse_public_json(body)?;
     if request.enrollment.is_empty() {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "browser_enrollment_required",
             "a one-time browser enrollment is required",
@@ -1728,7 +1658,7 @@ async fn browser_register_handler(
         &request.extension_origin,
     )
     .ok_or_else(|| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_extension_origin",
             "extensionOrigin must be a bare chrome-extension:// origin",
@@ -1771,7 +1701,7 @@ async fn browser_register_handler(
 fn provision_signaling(
     device_id: &str,
     client_public_key: &str,
-) -> Result<SignalingRegistrationResponse, ApiError> {
+) -> Result<SignalingRegistrationResponse, Problem> {
     let paired_at_ms = chrono::Utc::now().timestamp_millis();
     let host_identity = SignalingIdentity::generate();
     let room_nonce = {
@@ -1786,7 +1716,7 @@ fn provision_signaling(
         paired_at_ms.saturating_add(ROOM_DESCRIPTOR_TTL_MS),
     );
     validate_room_descriptor(&room_descriptor, paired_at_ms).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_signaling_public_key",
             "signalingPublicKey must be an uncompressed P-256 public key",
@@ -1796,7 +1726,7 @@ fn provision_signaling(
     let private_key = URL_SAFE_NO_PAD.encode(host_identity.private_bytes());
     cognia_secrets::keyring_secrets::set(SIGNALING_KEY_NAMESPACE, &key_ref, &private_key).map_err(
         |_| {
-            ApiError::new(
+            api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "signaling_key_store_failed",
                 "the Host signaling identity could not be stored",
@@ -1811,7 +1741,7 @@ fn provision_signaling(
     };
     let Some(registration_store) = super::signaling::registration_store::installed() else {
         cleanup_signaling(device_id)?;
-        return Err(ApiError::unavailable(
+        return Err(store_unavailable_error(
             "the signaling registration store is unavailable",
         ));
     };
@@ -1820,7 +1750,7 @@ fn provision_signaling(
         .is_err()
     {
         cleanup_signaling(device_id)?;
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "signaling_registration_store_failed",
             "the signaling registration could not be persisted",
@@ -1832,12 +1762,12 @@ fn provision_signaling(
     })
 }
 
-fn cleanup_signaling(device_id: &str) -> Result<(), ApiError> {
+fn cleanup_signaling(device_id: &str) -> Result<(), Problem> {
     let key_ref = match super::signaling::registration_store::installed() {
         Some(registration_store) => registration_store
             .remove_device(device_id)
             .map_err(|error| {
-                ApiError::new(
+                api_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "signaling_registration_cleanup_failed",
                     error.to_string(),
@@ -1847,7 +1777,7 @@ fn cleanup_signaling(device_id: &str) -> Result<(), ApiError> {
         None => device_id.to_string(),
     };
     super::signaling::envelope::clear_signaling_key(&key_ref).map_err(|error| {
-        ApiError::new(
+        api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "signaling_key_cleanup_failed",
             format!("the Host signaling identity could not be removed: {error}"),
@@ -1939,7 +1869,7 @@ async fn token_handler(
         .active_device_key(&tenant_id, &request.device_id)
         .map_err(store_error)?
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "device_unavailable",
                 "the device is unknown or revoked",
@@ -1975,7 +1905,7 @@ async fn token_handler(
         },
     };
     let access_token = ACCESS_TOKEN_AUTHORITY.issue(&claims).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "token_issue_failed",
             "the access token could not be issued",
@@ -2016,7 +1946,7 @@ impl SocketChannel {
         }
     }
 
-    fn binding(self, session_id: Option<&str>) -> Result<(String, &'static str), ApiError> {
+    fn binding(self, session_id: Option<&str>) -> Result<(String, &'static str), Problem> {
         match (self, session_id) {
             (Self::Events, None) => Ok(("/ws/events".to_string(), "events")),
             (Self::Terminal, None) => Ok(("/ws/terminal".to_string(), "terminal")),
@@ -2025,12 +1955,12 @@ impl SocketChannel {
             (Self::Browser, Some(session_id)) if !session_id.is_empty() => {
                 Ok((format!("/ws/browser/{session_id}"), "browser"))
             }
-            (Self::Browser, _) => Err(ApiError::new(
+            (Self::Browser, _) => Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "browser_session_required",
                 "browser socket tickets require a sessionId",
             )),
-            (_, Some(_)) => Err(ApiError::new(
+            (_, Some(_)) => Err(api_error(
                 StatusCode::BAD_REQUEST,
                 "socket_ticket_resource_forbidden",
                 "sessionId is only valid for browser socket tickets",
@@ -2058,14 +1988,14 @@ async fn socket_ticket_handler(
         .authorization_snapshot(&access.tenant_id, &access.sub)
         .map_err(store_error)?
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "device_unavailable",
                 "the device is unknown or revoked",
             )
         })?;
     if snapshot.key_thumbprint != access.cnf.key_thumbprint {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::UNAUTHORIZED,
             "token_key_mismatch",
             "the access token is not bound to the active device key",
@@ -2076,7 +2006,7 @@ async fn socket_ticket_handler(
         .get("dpop")
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "missing_device_proof",
                 "a DPoP device proof is required",
@@ -2098,7 +2028,7 @@ async fn socket_ticket_handler(
         .iter()
         .any(|capability| capability == required_capability)
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "socket_capability_required",
             format!("the {required_capability} capability is required for this channel"),
@@ -2111,7 +2041,7 @@ async fn socket_ticket_handler(
                 &access.sub,
                 request.session_id.as_deref().unwrap_or_default(),
             )
-            .map_err(|error| ApiError::new(StatusCode::FORBIDDEN, error.code, error.message))?;
+            .map_err(|error| api_error(StatusCode::FORBIDDEN, error.code, error.message))?;
     }
     socket_channel_host_gate(
         request.channel,
@@ -2148,9 +2078,9 @@ async fn socket_ticket_handler(
 fn socket_channel_host_gate(
     channel: SocketChannel,
     remote_terminal_enabled: bool,
-) -> Result<(), ApiError> {
+) -> Result<(), Problem> {
     if matches!(channel, SocketChannel::Terminal) && !remote_terminal_enabled {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::FORBIDDEN,
             "terminal_remote_access_disabled",
             "remote terminal access is disabled on this host",
@@ -2159,16 +2089,16 @@ fn socket_channel_host_gate(
     Ok(())
 }
 
-fn decode_access_token(token: &str) -> Result<AccessClaims, ApiError> {
+fn decode_access_token(token: &str) -> Result<AccessClaims, Problem> {
     let access = ACCESS_TOKEN_AUTHORITY.decode(token).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_access_token",
             "the access token is invalid or expired",
         )
     })?;
     if access.scope != "device" {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_access_scope",
             "the access token scope is invalid",
@@ -2199,9 +2129,9 @@ fn verify_device_proof(
     method: &str,
     path: &str,
     now: i64,
-) -> Result<VerifiedDeviceProof, ApiError> {
+) -> Result<VerifiedDeviceProof, Problem> {
     let key = DecodingKey::from_ec_pem(public_key_pem.as_bytes()).map_err(|_| {
-        dpop_rejected(ApiError::new(
+        dpop_rejected(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_device_key",
             "the device public key is invalid",
@@ -2212,7 +2142,7 @@ fn verify_device_proof(
     validation.set_required_spec_claims(&["exp", "iat"]);
     let claims = decode::<DeviceProofClaims>(proof, &key, &validation)
         .map_err(|_| {
-            dpop_rejected(ApiError::new(
+            dpop_rejected(api_error(
                 StatusCode::UNAUTHORIZED,
                 "invalid_device_proof",
                 "the device proof is invalid or expired",
@@ -2227,7 +2157,7 @@ fn verify_device_proof(
         || claims.htm != method
         || claims.htu != path
     {
-        return Err(dpop_rejected(ApiError::new(
+        return Err(dpop_rejected(api_error(
             StatusCode::UNAUTHORIZED,
             "device_proof_mismatch",
             "the device proof does not match this request",
@@ -2239,7 +2169,7 @@ fn verify_device_proof(
     })
 }
 
-fn dpop_rejected(error: ApiError) -> ApiError {
+fn dpop_rejected(error: Problem) -> Problem {
     super::metrics::record_dpop_rejection();
     error
 }
@@ -2248,7 +2178,7 @@ fn consume_device_proof(
     tenant_id: &str,
     device_id: &str,
     proof: &VerifiedDeviceProof,
-) -> Result<(), ApiError> {
+) -> Result<(), Problem> {
     let cache_key = format!("{tenant_id}\0{device_id}\0{}", proof.jti);
     let now = unix_time_secs();
     // jsonwebtoken accepts an expired proof within `PROOF_CLOCK_SKEW_SECS`, so
@@ -2258,7 +2188,7 @@ fn consume_device_proof(
         Ok(())
     } else {
         super::metrics::record_dpop_replay();
-        Err(ApiError::new(
+        Err(api_error(
             StatusCode::CONFLICT,
             "device_proof_replay",
             "the device proof has already been used",
@@ -2276,7 +2206,7 @@ struct RegistrationAuthority {
 async fn registration_authority(
     headers: &HeaderMap,
     requested_tenant: Option<&str>,
-) -> Result<RegistrationAuthority, ApiError> {
+) -> Result<RegistrationAuthority, Problem> {
     match deployment_mode() {
         DeploymentMode::SingleUser => Ok(RegistrationAuthority {
             tenant_id: host_identity::current_tenant_or_unbound(),
@@ -2285,13 +2215,14 @@ async fn registration_authority(
             requires_invitation: true,
         }),
         DeploymentMode::MultiTenant => {
-            let authenticator = super::oidc_authenticator()
-                .ok_or_else(|| ApiError::unavailable("tenant authentication is not configured"))?;
+            let authenticator = super::oidc_authenticator().ok_or_else(|| {
+                store_unavailable_error("tenant authentication is not configured")
+            })?;
             let claims = authenticator
                 .authenticate(bearer_token(headers)?)
                 .await
                 .map_err(|_| {
-                    ApiError::new(
+                    api_error(
                         StatusCode::UNAUTHORIZED,
                         "oidc_authentication_failed",
                         "the identity provider could not authenticate this request",
@@ -2302,7 +2233,7 @@ async fn registration_authority(
                 .clone()
                 .unwrap_or_else(|| claims.sub.clone());
             if requested_tenant.is_some_and(|requested| requested != tenant) {
-                return Err(ApiError::new(
+                return Err(api_error(
                     StatusCode::FORBIDDEN,
                     "tenant_mismatch",
                     "the requested tenant does not match the authenticated tenant",
@@ -2323,13 +2254,13 @@ async fn registration_authority(
     }
 }
 
-fn request_tenant(requested: Option<String>) -> Result<String, ApiError> {
+fn request_tenant(requested: Option<String>) -> Result<String, Problem> {
     match deployment_mode() {
         DeploymentMode::SingleUser => Ok(host_identity::current_tenant_or_unbound()),
         DeploymentMode::MultiTenant => requested
             .filter(|tenant| !tenant.trim().is_empty())
             .ok_or_else(|| {
-                ApiError::new(
+                api_error(
                     StatusCode::BAD_REQUEST,
                     "tenant_required",
                     "tenantId is required in multi-tenant mode",
@@ -2338,13 +2269,13 @@ fn request_tenant(requested: Option<String>) -> Result<String, ApiError> {
     }
 }
 
-fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
+fn bearer_token(headers: &HeaderMap) -> Result<&str, Problem> {
     headers
         .get(AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "missing_authorization",
                 "an Authorization bearer token is required",
@@ -2352,69 +2283,69 @@ fn bearer_token(headers: &HeaderMap) -> Result<&str, ApiError> {
         })
 }
 
-fn store() -> Result<std::sync::Arc<SecurityStore>, ApiError> {
-    security_store().ok_or_else(|| ApiError::unavailable("the security database is unavailable"))
+fn store() -> Result<std::sync::Arc<SecurityStore>, Problem> {
+    security_store().ok_or_else(|| store_unavailable_error("the security database is unavailable"))
 }
 
-fn store_error(error: SecurityStoreError) -> ApiError {
+fn store_error(error: SecurityStoreError) -> Problem {
     match error {
-        SecurityStoreError::InvalidChallenge => ApiError::new(
+        SecurityStoreError::InvalidChallenge => api_error(
             StatusCode::CONFLICT,
             "invalid_challenge",
             "the challenge is expired or already used",
         ),
-        SecurityStoreError::InvalidInvitation => ApiError::new(
+        SecurityStoreError::InvalidInvitation => api_error(
             StatusCode::FORBIDDEN,
             "invalid_owner_invitation",
             "the owner invitation is expired or already used",
         ),
-        SecurityStoreError::DeviceUnavailable => ApiError::new(
+        SecurityStoreError::DeviceUnavailable => api_error(
             StatusCode::UNAUTHORIZED,
             "device_unavailable",
             "the device is unknown or revoked",
         ),
-        SecurityStoreError::InvalidSocketTicket => ApiError::new(
+        SecurityStoreError::InvalidSocketTicket => api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_socket_ticket",
             "the socket ticket is invalid or already used",
         ),
-        SecurityStoreError::IdempotencyConflict => ApiError::new(
+        SecurityStoreError::IdempotencyConflict => api_error(
             StatusCode::CONFLICT,
             "idempotency_conflict",
             "the idempotency key was already used with a different request",
         ),
-        SecurityStoreError::InvalidPolicy => ApiError::new(
+        SecurityStoreError::InvalidPolicy => api_error(
             StatusCode::PRECONDITION_REQUIRED,
             "signed_policy_required",
             "the host policy is invalid, expired, revoked, or does not cover this command",
         ),
-        SecurityStoreError::InvalidRunTransition => ApiError::new(
+        SecurityStoreError::InvalidRunTransition => api_error(
             StatusCode::CONFLICT,
             "invalid_run_transition",
             "the operation is not in a state that permits this transition",
         ),
-        SecurityStoreError::LastOwner => ApiError::new(
+        SecurityStoreError::LastOwner => api_error(
             StatusCode::CONFLICT,
             "last_owner",
             "the last owner cannot be revoked through the device API",
         ),
-        SecurityStoreError::InvalidCapabilities => ApiError::new(
+        SecurityStoreError::InvalidCapabilities => api_error(
             StatusCode::BAD_REQUEST,
             "invalid_device_capabilities",
             "the requested capability snapshot contains an invalid grant or removes required Owner authority",
         ),
-        SecurityStoreError::HostBindingMismatch => ApiError::new(
+        SecurityStoreError::HostBindingMismatch => api_error(
             StatusCode::FORBIDDEN,
             "host_binding_mismatch",
             "the local account does not match this host's recorded binding",
         ),
-        SecurityStoreError::InvalidDeviceTransition => ApiError::new(
+        SecurityStoreError::InvalidDeviceTransition => api_error(
             StatusCode::CONFLICT,
             "invalid_device_transition",
             "the device is not in a state that permits this lifecycle change",
         ),
         SecurityStoreError::Sqlite(_) | SecurityStoreError::Migration(_) => {
-            ApiError::unavailable("the security database could not complete the request")
+            store_unavailable_error("the security database could not complete the request")
         }
     }
 }
@@ -2669,7 +2600,7 @@ mod tests {
         let error = socket_channel_host_gate(SocketChannel::Terminal, false)
             .expect_err("a terminal ticket must not be issued while remote access is off");
         assert_eq!(error.code, "terminal_remote_access_disabled");
-        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.status_code(), StatusCode::FORBIDDEN);
 
         socket_channel_host_gate(SocketChannel::Terminal, true)
             .expect("the switch being on is the whole point of the switch");
@@ -2817,13 +2748,22 @@ mod tests {
 
     #[tokio::test]
     async fn error_envelope_has_request_id_and_retryability() {
-        let response = ApiError::unavailable("down").into_response();
+        let response = store_unavailable_error("down").into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers()[axum::http::header::CONTENT_TYPE],
+            "application/problem+json"
+        );
         let body = response_json(response).await;
-        assert_eq!(body["error"]["code"], "security_store_unavailable");
-        assert_eq!(body["error"]["retryable"], true);
-        assert!(uuid::Uuid::parse_str(body["error"]["requestId"].as_str().unwrap()).is_ok());
-        assert_eq!(body["error"]["details"], json!({}));
+        assert_eq!(body["code"], "security_store_unavailable");
+        assert_eq!(body["status"], 503);
+        assert_eq!(body["retryable"], true);
+        assert!(uuid::Uuid::parse_str(body["requestId"].as_str().unwrap()).is_ok());
+        assert_eq!(body["details"], json!({}));
+        assert!(
+            body.get("error").is_none(),
+            "the envelope is the document, not a wrapper"
+        );
     }
 
     #[tokio::test]
@@ -2844,8 +2784,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = response_json(response).await;
-        assert_eq!(body["error"]["code"], "invalid_json_request");
-        assert_eq!(body["error"]["retryable"], false);
+        assert_eq!(body["code"], "invalid_json_request");
+        assert_eq!(body["retryable"], false);
     }
 
     #[test]
@@ -2864,18 +2804,11 @@ mod tests {
 
     #[test]
     fn rpc_error_envelope_omits_absent_operation_id() {
-        let error = super::super::remote_execution::ExecutionError {
-            status: StatusCode::BAD_REQUEST,
-            code: "invalid_request".into(),
-            message: "invalid".into(),
-            request_id: "request-b".into(),
-            retryable: false,
-            details: json!({}),
-            operation_id: None,
-        };
-        let body = execution_error_body(error);
-        assert_eq!(body["error"]["requestId"], "request-b");
-        assert!(body["error"].get("operationId").is_none());
+        let error = Problem::with_status(StatusCode::BAD_REQUEST, "invalid_request", "invalid")
+            .with_request_id("request-b");
+        let body = serde_json::to_value(&error).unwrap();
+        assert_eq!(body["requestId"], "request-b");
+        assert!(body.get("operationId").is_none());
     }
 
     #[tokio::test]

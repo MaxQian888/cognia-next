@@ -16,6 +16,8 @@ name = "cognia_core"
 path = "src/lib.rs"
 
 [dependencies]
+# ADR-0175. `CommandError` converts into the plane-level `Problem`.
+cognia-problem = { path = "../cognia-problem" }
 # command_error serializes as a 3-key object for the renderer.
 serde = { version = "1.0", features = ["derive"] }
 wait-timeout = "0.2"

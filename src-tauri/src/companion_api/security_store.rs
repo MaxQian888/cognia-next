@@ -2397,12 +2397,12 @@ fn reconcile_interrupted_operations(
     };
     let receipt = serde_json::json!({
         "httpStatus": 500,
-        "error": {
-            "code": "operation_interrupted",
-            "message": "the server restarted before the operation recorded a terminal result",
-            "retryable": true,
-            "details": {},
-        }
+        "error": cognia_problem::Problem::new(
+            500,
+            "operation_interrupted",
+            "the server restarted before the operation recorded a terminal result",
+        )
+        .retryable(true),
     })
     .to_string();
     for (tenant_id, device_id, operation_id) in &interrupted {

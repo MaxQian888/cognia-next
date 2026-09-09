@@ -31,6 +31,7 @@ use tracing::Instrument as _;
 use uuid::Uuid;
 
 use super::SharedState;
+use cognia_problem::Problem;
 
 const APP_SESSION_SCOPE: &str = "workflow-app-session";
 const APP_SESSION_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
@@ -147,65 +148,24 @@ struct EventsPage {
     terminal: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ErrorBody {
-    code: String,
-    message: String,
-    request_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<Value>,
+/// A refusal from the workflow app portal: the one problem document (ADR-0175).
+fn api_error(status: StatusCode, code: &str, message: impl Into<String>) -> Problem {
+    Problem::with_status(status, code, message).retryable(false)
 }
 
-#[derive(Debug)]
-struct ApiError {
-    status: StatusCode,
-    body: ErrorBody,
+fn anonymous_challenge_error(
+    offer: super::workflow_app_challenge::AnonymousChallengeOffer,
+) -> Problem {
+    api_error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "anonymous_challenge_required",
+        "Anonymous traffic requires a short proof-of-work challenge",
+    )
+    .with_details(serde_json::to_value(offer).unwrap_or_else(|_| json!({})))
 }
 
-impl ApiError {
-    fn new(status: StatusCode, code: &str, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            body: ErrorBody {
-                code: code.to_string(),
-                message: message.into(),
-                request_id: Uuid::new_v4().to_string(),
-                details: None,
-            },
-        }
-    }
-
-    fn anonymous_challenge(offer: super::workflow_app_challenge::AnonymousChallengeOffer) -> Self {
-        Self {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            body: ErrorBody {
-                code: "anonymous_challenge_required".into(),
-                message: "Anonymous traffic requires a short proof-of-work challenge".into(),
-                request_id: Uuid::new_v4().to_string(),
-                details: serde_json::to_value(offer).ok(),
-            },
-        }
-    }
-
-    fn from_bridge(error: BridgeError) -> Self {
-        Self::new(
-            StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            &error.code,
-            error.message,
-        )
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let request_id = self.body.request_id.clone();
-        let mut response = (self.status, Json(self.body)).into_response();
-        if let Ok(value) = HeaderValue::from_str(&request_id) {
-            response.headers_mut().insert("x-request-id", value);
-        }
-        response
-    }
+fn bridge_error(error: BridgeError) -> Problem {
+    Problem::new(error.status, error.code, error.message).retryable(false)
 }
 
 fn blocking_mode() -> String {
@@ -220,7 +180,7 @@ fn issue_session_with_ttl(
     secret: &[u8],
     mut claims: AppSessionClaims,
     ttl_seconds: i64,
-) -> Result<String, ApiError> {
+) -> Result<String, Problem> {
     let now = now_seconds();
     claims.scope = APP_SESSION_SCOPE.to_string();
     claims.iat = now;
@@ -232,7 +192,7 @@ fn issue_session_with_ttl(
         &EncodingKey::from_secret(secret),
     )
     .map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "session_issue_failed",
             "Application session could not be issued",
@@ -240,17 +200,17 @@ fn issue_session_with_ttl(
     })
 }
 
-fn issue_session(secret: &[u8], claims: AppSessionClaims) -> Result<String, ApiError> {
+fn issue_session(secret: &[u8], claims: AppSessionClaims) -> Result<String, Problem> {
     issue_session_with_ttl(secret, claims, APP_SESSION_TTL_SECONDS)
 }
 
-fn verify_session(secret: &[u8], token: &str) -> Result<AppSessionClaims, ApiError> {
+fn verify_session(secret: &[u8], token: &str) -> Result<AppSessionClaims, Problem> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.leeway = 0;
     validation.set_required_spec_claims(&["exp"]);
     let claims = decode::<AppSessionClaims>(token, &DecodingKey::from_secret(secret), &validation)
         .map_err(|_| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "invalid_app_session",
                 "Application session is invalid or expired",
@@ -258,7 +218,7 @@ fn verify_session(secret: &[u8], token: &str) -> Result<AppSessionClaims, ApiErr
         })?
         .claims;
     if claims.scope != APP_SESSION_SCOPE {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_app_session",
             "Application session has the wrong scope",
@@ -267,14 +227,14 @@ fn verify_session(secret: &[u8], token: &str) -> Result<AppSessionClaims, ApiErr
     Ok(claims)
 }
 
-fn bearer(headers: &HeaderMap) -> Result<&str, ApiError> {
+fn bearer(headers: &HeaderMap) -> Result<&str, Problem> {
     let value = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::UNAUTHORIZED,
                 "app_session_required",
                 "A Bearer application session is required",
@@ -287,11 +247,11 @@ fn session_for_slug(
     state: &SharedState,
     headers: &HeaderMap,
     app_slug: &str,
-) -> Result<AppSessionClaims, ApiError> {
+) -> Result<AppSessionClaims, Problem> {
     let secret = state.secret.read();
     let claims = verify_session(secret.as_slice(), bearer(headers)?)?;
     if claims.app_slug != app_slug {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::NOT_FOUND,
             "app_not_found",
             "Published app was not found",
@@ -322,11 +282,11 @@ async fn dispatch_bridge(
     state: &SharedState,
     command: &str,
     payload: Value,
-) -> Result<Value, ApiError> {
+) -> Result<Value, Problem> {
     let span = tracing::info_span!("workflow_app.bridge", command = command);
     let result = async {
         let transport = super::ws_bridge::resolve_bridge_transport(state).map_err(|_| {
-            ApiError::new(
+            api_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "workflow_app_service_unavailable",
                 "The application runtime is not connected",
@@ -341,14 +301,14 @@ async fn dispatch_bridge(
             )
             .await
             .map_err(|_| {
-                ApiError::new(
+                api_error(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "workflow_app_service_unavailable",
                     "The application runtime did not answer",
                 )
             })?;
         let envelope: BridgeEnvelope = serde_json::from_value(result).map_err(|_| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_app_protocol_error",
                 "The application runtime returned an invalid response",
@@ -356,30 +316,27 @@ async fn dispatch_bridge(
         })?;
         if envelope.ok {
             envelope.data.ok_or_else(|| {
-                ApiError::new(
+                api_error(
                     StatusCode::BAD_GATEWAY,
                     "workflow_app_protocol_error",
                     "The application runtime returned no data",
                 )
             })
         } else {
-            Err(envelope
-                .error
-                .map(ApiError::from_bridge)
-                .unwrap_or_else(|| {
-                    ApiError::new(
-                        StatusCode::BAD_GATEWAY,
-                        "workflow_app_protocol_error",
-                        "The application runtime returned an incomplete error",
-                    )
-                }))
+            Err(envelope.error.map(bridge_error).unwrap_or_else(|| {
+                api_error(
+                    StatusCode::BAD_GATEWAY,
+                    "workflow_app_protocol_error",
+                    "The application runtime returned an incomplete error",
+                )
+            }))
         }
     }
     .instrument(span)
     .await;
     let quota_rejected = result.as_ref().is_err_and(|error| {
         matches!(
-            error.body.code.as_str(),
+            error.code.as_str(),
             "request_rate_exhausted"
                 | "concurrency_exhausted"
                 | "token_budget_exhausted"
@@ -414,13 +371,13 @@ fn cors_json_response(status: StatusCode, value: Value, origin: &str) -> Respons
     response
 }
 
-fn parse_idempotency_key(headers: &HeaderMap) -> Result<String, ApiError> {
+fn parse_idempotency_key(headers: &HeaderMap) -> Result<String, Problem> {
     let value = headers
         .get("idempotency-key")
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.trim().is_empty() && value.len() <= 256)
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_idempotency_key",
                 "A non-empty Idempotency-Key of at most 256 bytes is required",
@@ -437,7 +394,7 @@ fn admit_anonymous_mutation(
     state: &SharedState,
     headers: &HeaderMap,
     claims: &AppSessionClaims,
-) -> Result<(), ApiError> {
+) -> Result<(), Problem> {
     if !requires_anonymous_challenge(claims) {
         return Ok(());
     }
@@ -455,22 +412,22 @@ fn admit_anonymous_mutation(
         challenge_proof,
         now_seconds(),
     )
-    .map_err(ApiError::anonymous_challenge)
+    .map_err(anonymous_challenge_error)
 }
 
-fn request_origin(headers: &HeaderMap) -> Result<String, ApiError> {
+fn request_origin(headers: &HeaderMap) -> Result<String, Problem> {
     let origin = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_REQUEST,
                 "embed_origin_required",
                 "The embedding page Origin is required",
             )
         })?;
     let parsed = url::Url::parse(origin).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_embed_origin",
             "The embedding page Origin is invalid",
@@ -479,7 +436,7 @@ fn request_origin(headers: &HeaderMap) -> Result<String, ApiError> {
     if parsed.origin().ascii_serialization() != origin
         || !super::web_origin::is_secure_or_loopback(&parsed)
     {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_embed_origin",
             "The embedding page Origin must be HTTPS or loopback HTTP",
@@ -493,7 +450,7 @@ async fn bootstrap_application(
     app_slug: String,
     bearer_token: Option<&str>,
     requested_embed_origin: Option<String>,
-) -> Result<Value, ApiError> {
+) -> Result<Value, Problem> {
     let existing = bearer_token
         .and_then(|token| verify_session(state.secret.read().as_slice(), token).ok())
         .filter(|claims| claims.app_slug == app_slug);
@@ -502,7 +459,7 @@ async fn bootstrap_application(
             (Some(token), Some(authenticator)) => match authenticator.authenticate(token).await {
                 Ok(claims) => Some(claims),
                 Err(_) => {
-                    return Err(ApiError::new(
+                    return Err(api_error(
                         StatusCode::UNAUTHORIZED,
                         "oidc_authentication_failed",
                         "OIDC access token is invalid or expired",
@@ -581,7 +538,7 @@ async fn bootstrap_application(
         .and_then(Value::as_str)
         .unwrap_or_default();
     if account_id.is_empty() || app_id.is_empty() || release_id.is_empty() {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_app_protocol_error",
             "The application runtime returned an invalid session",
@@ -629,28 +586,28 @@ pub async fn bootstrap_handler(
     }
 }
 
-fn request_hostname(headers: &HeaderMap) -> Result<String, ApiError> {
+fn request_hostname(headers: &HeaderMap) -> Result<String, Problem> {
     let forwarded = headers
         .get("x-forwarded-host")
         .or_else(|| headers.get(header::HOST))
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.contains(','))
         .ok_or_else(|| {
-            ApiError::new(
+            api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_custom_domain",
                 "The request hostname is invalid",
             )
         })?;
     let parsed = url::Url::parse(&format!("https://{forwarded}")).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_custom_domain",
             "The request hostname is invalid",
         )
     })?;
     parsed.host_str().map(str::to_lowercase).ok_or_else(|| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_custom_domain",
             "The request hostname is invalid",
@@ -677,7 +634,7 @@ pub async fn domain_bootstrap_handler(
         Err(error) => return error.into_response(),
     };
     let Some(app_slug) = resolved.get("appSlug").and_then(Value::as_str) else {
-        return ApiError::new(
+        return api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_app_protocol_error",
             "The application runtime returned an invalid custom domain",
@@ -730,7 +687,7 @@ pub async fn create_run_handler(
     let Json(body) = match body {
         Ok(body) if matches!(body.response_mode.as_str(), "blocking" | "streaming") => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "The request body or responseMode is invalid",
@@ -782,7 +739,7 @@ pub async fn chat_message_handler(
     let Json(body) = match body {
         Ok(body) if !body.query.trim().is_empty() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "A non-empty chat query is required",
@@ -836,7 +793,7 @@ pub async fn feedback_handler(
             body
         }
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_feedback",
                 "Feedback requires like/dislike, input, and output",
@@ -889,7 +846,7 @@ pub async fn create_result_share_handler(
             body
         }
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_share_ttl",
                 "Result shares must expire between 1 minute and 30 days",
@@ -969,7 +926,7 @@ pub async fn batch_template_handler(
             );
             response
         }
-        Ok(_) => ApiError::new(
+        Ok(_) => api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_app_protocol_error",
             "The application runtime returned an invalid CSV template",
@@ -992,7 +949,7 @@ pub async fn batch_create_handler(
     let Json(body) = match body {
         Ok(body) if !body.csv.trim().is_empty() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_csv",
                 "A non-empty CSV body is required",
@@ -1146,7 +1103,7 @@ pub async fn batch_export_handler(
             );
             response
         }
-        Ok(_) => ApiError::new(
+        Ok(_) => api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_app_protocol_error",
             "The application runtime returned an invalid CSV export",
@@ -1195,7 +1152,7 @@ pub async fn human_input_submit_handler(
     let Json(body) = match body {
         Ok(body) if !body.action_id.trim().is_empty() && body.values.is_object() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "Human Input requires an actionId and values object",
@@ -1236,7 +1193,7 @@ pub async fn human_input_file_upload_handler(
     let mut multipart = match multipart {
         Ok(value) => value,
         Err(_) => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "A multipart/form-data body is required",
@@ -1251,7 +1208,7 @@ pub async fn human_input_file_upload_handler(
             Ok(Some(field)) => field,
             Ok(None) => break,
             Err(_) => {
-                return ApiError::new(
+                return api_error(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
                     "Multipart data could not be read",
@@ -1265,7 +1222,7 @@ pub async fn human_input_file_upload_handler(
                     field_id = Some(value)
                 }
                 _ => {
-                    return ApiError::new(
+                    return api_error(
                         StatusCode::BAD_REQUEST,
                         "invalid_request",
                         "fieldId is required",
@@ -1275,7 +1232,7 @@ pub async fn human_input_file_upload_handler(
             },
             Some("file") => {
                 if file.is_some() {
-                    return ApiError::new(
+                    return api_error(
                         StatusCode::BAD_REQUEST,
                         "too_many_files",
                         "Only one file is allowed per request",
@@ -1291,7 +1248,7 @@ pub async fn human_input_file_upload_handler(
                         value
                     }
                     _ => {
-                        return ApiError::new(
+                        return api_error(
                             StatusCode::BAD_REQUEST,
                             "invalid_request",
                             "A safe filename is required",
@@ -1307,7 +1264,7 @@ pub async fn human_input_file_upload_handler(
                 let bytes = match field.bytes().await {
                     Ok(value) if !value.is_empty() => value.to_vec(),
                     _ => {
-                        return ApiError::new(
+                        return api_error(
                             StatusCode::BAD_REQUEST,
                             "invalid_request",
                             "A non-empty file is required",
@@ -1323,7 +1280,7 @@ pub async fn human_input_file_upload_handler(
     let field_id = match field_id {
         Some(value) => value,
         None => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "fieldId is required",
@@ -1334,7 +1291,7 @@ pub async fn human_input_file_upload_handler(
     let (name, media_type, bytes) = match file {
         Some(value) => value,
         None => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "A file is required",
@@ -1373,7 +1330,7 @@ pub async fn mcp_handler(
     let api_key = match bearer(&headers) {
         Ok(value) => value.to_string(),
         Err(_) => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::UNAUTHORIZED,
                 "invalid_api_key",
                 "A Bearer application API key is required",
@@ -1384,7 +1341,7 @@ pub async fn mcp_handler(
     let Json(request) = match body {
         Ok(body) if body.0.is_object() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "MCP requires a JSON-RPC request object",
@@ -1405,9 +1362,9 @@ pub async fn mcp_handler(
     }
 }
 
-fn dify_api_key(headers: &HeaderMap) -> Result<String, ApiError> {
+fn dify_api_key(headers: &HeaderMap) -> Result<String, Problem> {
     bearer(headers).map(str::to_string).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::UNAUTHORIZED,
             "invalid_api_key",
             "A Bearer application API key is required",
@@ -1420,10 +1377,10 @@ async fn dispatch_dify(
     headers: &HeaderMap,
     command: &str,
     mut payload: Value,
-) -> Result<Value, ApiError> {
+) -> Result<Value, Problem> {
     let api_key = dify_api_key(headers)?;
     let object = payload.as_object_mut().ok_or_else(|| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_param",
             "Dify-compatible payload must be an object",
@@ -1437,7 +1394,7 @@ fn dify_query_value(query: &HashMap<String, String>, key: &str) -> Option<Value>
     query.get(key).cloned().map(Value::String)
 }
 
-fn dify_json_result(result: Result<Value, ApiError>, status: StatusCode) -> Response {
+fn dify_json_result(result: Result<Value, Problem>, status: StatusCode) -> Response {
     match result {
         Ok(data) => json_response(status, data),
         Err(error) => error.into_response(),
@@ -1456,7 +1413,7 @@ pub async fn dify_file_upload_handler(
     let mut multipart = match multipart {
         Ok(value) => value,
         Err(_) => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_param",
                 "A multipart/form-data body is required",
@@ -1472,7 +1429,7 @@ pub async fn dify_file_upload_handler(
             Ok(Some(field)) => field,
             Ok(None) => break,
             Err(_) => {
-                return ApiError::new(
+                return api_error(
                     StatusCode::BAD_REQUEST,
                     "invalid_param",
                     "Multipart data could not be read",
@@ -1484,17 +1441,13 @@ pub async fn dify_file_upload_handler(
             Some("user") => match field.text().await {
                 Ok(value) if !value.trim().is_empty() && value.len() <= 240 => user = Some(value),
                 _ => {
-                    return ApiError::new(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_param",
-                        "user is required",
-                    )
-                    .into_response()
+                    return api_error(StatusCode::BAD_REQUEST, "invalid_param", "user is required")
+                        .into_response()
                 }
             },
             Some("file") => {
                 if file.is_some() {
-                    return ApiError::new(
+                    return api_error(
                         StatusCode::BAD_REQUEST,
                         "too_many_files",
                         "Only one file is allowed per request",
@@ -1510,7 +1463,7 @@ pub async fn dify_file_upload_handler(
                         value
                     }
                     _ => {
-                        return ApiError::new(
+                        return api_error(
                             StatusCode::BAD_REQUEST,
                             "filename_not_exists_error",
                             "The uploaded file has no safe filename",
@@ -1521,7 +1474,7 @@ pub async fn dify_file_upload_handler(
                 let media_type = match field.content_type().map(str::to_string) {
                     Some(value) if !value.trim().is_empty() && value.len() <= 255 => value,
                     _ => {
-                        return ApiError::new(
+                        return api_error(
                             StatusCode::UNSUPPORTED_MEDIA_TYPE,
                             "unsupported_file_type",
                             "The uploaded file has no supported content type",
@@ -1532,7 +1485,7 @@ pub async fn dify_file_upload_handler(
                 let bytes = match field.bytes().await {
                     Ok(value) if !value.is_empty() => value.to_vec(),
                     _ => {
-                        return ApiError::new(
+                        return api_error(
                             StatusCode::BAD_REQUEST,
                             "no_file_uploaded",
                             "A non-empty file is required",
@@ -1549,14 +1502,14 @@ pub async fn dify_file_upload_handler(
     let user = match user {
         Some(value) => value,
         None => {
-            return ApiError::new(StatusCode::BAD_REQUEST, "invalid_param", "user is required")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_param", "user is required")
                 .into_response()
         }
     };
     let (name, media_type, bytes) = match file {
         Some(value) => value,
         None => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "no_file_uploaded",
                 "A file must be provided",
@@ -1593,7 +1546,7 @@ async fn load_dify_events(
     user: &str,
     run_id: &str,
     after_sequence: u64,
-) -> Result<DifyEventsPage, ApiError> {
+) -> Result<DifyEventsPage, Problem> {
     let data = dispatch_bridge(
         state,
         "dify_events_list",
@@ -1606,7 +1559,7 @@ async fn load_dify_events(
     )
     .await?;
     serde_json::from_value(data).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_GATEWAY,
             "dify_protocol_error",
             "The runtime returned invalid Dify event data",
@@ -1713,7 +1666,7 @@ pub async fn dify_workflow_run_handler(
     let Json(request) = match body {
         Ok(body) if body.0.is_object() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_param",
                 "Invalid request body",
@@ -1746,7 +1699,7 @@ pub async fn dify_workflow_run_handler(
     };
     if streaming {
         let Some(user) = user else {
-            return ApiError::new(StatusCode::BAD_REQUEST, "invalid_param", "user is required")
+            return api_error(StatusCode::BAD_REQUEST, "invalid_param", "user is required")
                 .into_response();
         };
         let Some(run_id) = data
@@ -1754,7 +1707,7 @@ pub async fn dify_workflow_run_handler(
             .and_then(Value::as_str)
             .map(str::to_string)
         else {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_GATEWAY,
                 "dify_protocol_error",
                 "Runtime returned no task id",
@@ -1811,7 +1764,7 @@ pub async fn dify_chat_message_handler(
     let Json(request) = match body {
         Ok(body) if body.0.is_object() => body,
         _ => {
-            return ApiError::new(
+            return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_param",
                 "Invalid request body",
@@ -2021,26 +1974,26 @@ pub async fn cancel_run_handler(
     }
 }
 
-fn parse_last_event_id(headers: &HeaderMap) -> Result<u64, ApiError> {
+fn parse_last_event_id(headers: &HeaderMap) -> Result<u64, Problem> {
     let Some(raw) = headers.get("last-event-id") else {
         return Ok(0);
     };
     let raw = raw.to_str().map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
         )
     })?;
     let value = raw.parse::<u64>().map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
         )
     })?;
     if value > 9_007_199_254_740_991 {
-        return Err(ApiError::new(
+        return Err(api_error(
             StatusCode::BAD_REQUEST,
             "invalid_event_cursor",
             "Last-Event-ID must be a non-negative safe integer",
@@ -2054,7 +2007,7 @@ async fn load_events(
     claims: &AppSessionClaims,
     run_id: &str,
     after_sequence: u64,
-) -> Result<EventsPage, ApiError> {
+) -> Result<EventsPage, Problem> {
     let data = dispatch_bridge(
         state,
         "workflow_app_events_list",
@@ -2068,7 +2021,7 @@ async fn load_events(
     )
     .await?;
     let page: EventsPage = serde_json::from_value(data).map_err(|_| {
-        ApiError::new(
+        api_error(
             StatusCode::BAD_GATEWAY,
             "workflow_app_protocol_error",
             "The application runtime returned invalid event data",
@@ -2084,7 +2037,7 @@ async fn load_events(
                 .and_then(Value::as_u64)
                 .is_some_and(|sequence| sequence > cursor);
         if !valid {
-            return Err(ApiError::new(
+            return Err(api_error(
                 StatusCode::BAD_GATEWAY,
                 "workflow_app_protocol_error",
                 "The application runtime returned invalid event data",

@@ -126,7 +126,7 @@ async fn dispatch(
         Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
             Ok(json!({ "operationId": operation_id, "status": "running" }))
         }
-        Err(error) => Err(error.message),
+        Err(error) => Err(error.detail),
     }
 }
 
@@ -444,7 +444,7 @@ mod tests {
             .await
             .expect("response body");
         let body: Value = serde_json::from_slice(&bytes).expect("JSON error");
-        assert_eq!(body["error"]["code"], "host_header_required");
+        assert_eq!(body["code"], "host_header_required");
     }
 
     #[tokio::test]
@@ -685,7 +685,7 @@ mod tests {
             .await
             .expect("response body");
         let body: Value = serde_json::from_slice(&bytes).expect("JSON error");
-        assert_eq!(body["error"]["code"], "invalid_a2a_request");
-        assert!(body["error"]["requestId"].as_str().is_some());
+        assert_eq!(body["code"], "invalid_a2a_request");
+        assert!(body["requestId"].as_str().is_some());
     }
 }

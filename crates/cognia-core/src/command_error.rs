@@ -70,6 +70,15 @@ fn truncate_message(message: String) -> String {
     format!("{truncated}{TRUNCATED_SUFFIX}")
 }
 
+/// The plane-level document for a command rejection (ADR-0175). The status
+/// comes from the shared code table, and a code the table does not know is a
+/// 500, which is what an unclassified rejection is.
+impl From<CommandError> for cognia_problem::Problem {
+    fn from(error: CommandError) -> Self {
+        cognia_problem::Problem::for_code(error.code, error.message).retryable(error.retryable)
+    }
+}
+
 // ADR-0067 Phase 6 — `impl From<scheduler::SchedulerError> for CommandError`
 // lives in `cognia-scheduling` (which owns SchedulerError) to keep this
 // foundation crate free of any upward edge into the scheduler.
@@ -107,6 +116,19 @@ mod tests {
         let json = serde_json::to_string(&err).unwrap();
         let back: CommandError = serde_json::from_str(&json).unwrap();
         assert_eq!(back, err);
+    }
+
+    #[test]
+    fn converts_into_the_plane_problem_keeping_code_and_retryability() {
+        let problem: cognia_problem::Problem =
+            CommandError::retryable("rate_limited", "slow down").into();
+        assert_eq!(problem.status, 429);
+        assert_eq!(problem.code, "rate_limited");
+        assert_eq!(problem.detail, "slow down");
+        assert!(problem.retryable);
+        let unknown: cognia_problem::Problem = CommandError::new("task_not_found", "gone").into();
+        assert_eq!(unknown.status, 500);
+        assert!(!unknown.retryable);
     }
 
     #[test]

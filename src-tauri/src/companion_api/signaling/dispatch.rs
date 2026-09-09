@@ -539,7 +539,7 @@ async fn handle_inbound(
             result: None,
             error: Some(ErrorBody {
                 code: error.code,
-                message: error.message,
+                message: error.detail,
             }),
         }),
     };

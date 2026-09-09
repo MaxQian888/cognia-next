@@ -53,6 +53,7 @@ use super::{lark_entry, middleware, SharedState};
 /// 64 KiB — pair request bodies are tiny; the generous limit leaves room for
 /// future endpoints (e.g., push-token registration in M4.6).
 const BODY_LIMIT_BYTES: usize = 64 * 1024;
+const INTERNAL_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES: usize = 11 * 1024 * 1024;
 
 async fn harden_internal_response(request: Request, next: Next) -> Response {
@@ -371,6 +372,7 @@ pub async fn spawn_browser_listener(
 ///
 /// device routes — device access token plus DPoP proof
 ///   GET  /api/whoami
+///   GET  /api/catalog
 ///   POST /api/_rpc/{name}
 ///   GET  /ws/events
 /// ```
@@ -605,6 +607,7 @@ fn build_router_for_mode(
     // because that layer can interfere with the WS upgrade handshake.
     let device_routes = Router::new()
         .route("/api/whoami", get(super::api::whoami_handler))
+        .route("/api/catalog", get(super::catalog::device_catalog_handler))
         .route("/api/_rpc/{name}", post(super::api::rpc_handler))
         .route(
             "/api/sessions/{session_id}/media/{hash}",
@@ -700,6 +703,21 @@ fn build_router_for_mode(
             "/internal/operations/{operation_id}",
             get(super::api::internal_operation_handler),
         )
+        .route(
+            "/internal/catalog",
+            get(super::catalog::internal_catalog_handler),
+        )
+        // Two layers, and both are load-bearing. `DefaultBodyLimit` raises the
+        // extractor's own 2 MiB default so an agent-sized body reaches the
+        // handler at all; `RequestBodyLimitLayer` is what actually refuses,
+        // short-circuiting on `content-length` with a bare 413 that the
+        // outermost layer renders as `payload_too_large`. A body that declares
+        // no length is caught by the wrapper instead, and lands in
+        // `json_rejection_problem`'s unreadable-body arm.
+        .layer(axum::extract::DefaultBodyLimit::max(
+            INTERNAL_BODY_LIMIT_BYTES,
+        ))
+        .layer(RequestBodyLimitLayer::new(INTERNAL_BODY_LIMIT_BYTES))
         .layer(from_fn_with_state(
             state.clone(),
             middleware::require_service_jwt,
@@ -732,7 +750,6 @@ fn build_router_for_mode(
         .route("/ws/acp", any(acp::acp_handler))
         .merge(device_routes)
         .merge(owner_routes)
-        .merge(internal_routes)
         // Browser stream upgrades authenticate with a 60-second, single-use
         // ticket obtained through the protected route above. Long-lived JWTs
         // are deliberately never placed in the WebSocket URL.
@@ -796,6 +813,13 @@ fn build_router_for_mode(
     let router = router
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(from_fn(reject_mutations_while_draining));
+    // Agent requests include assembled system context and tool schemas. The
+    // service-only plane needs a larger bounded body than public webhooks.
+    let router = router.merge(
+        internal_routes
+            .layer(from_fn(reject_mutations_while_draining))
+            .with_state(state.clone()),
+    );
     let router = router.merge(
         dify_upload_routes
             .layer(RequestBodyLimitLayer::new(
@@ -813,10 +837,12 @@ fn build_router_for_mode(
             .with_state(state.clone()),
     );
     if crate::headless::headless_services().is_none() {
-        return router.layer(from_fn_with_state(
-            origin_policy,
-            super::web_origin::enforce,
-        ));
+        return router
+            .layer(from_fn_with_state(
+                origin_policy,
+                super::web_origin::enforce,
+            ))
+            .layer(from_fn(problem_for_bare_errors));
     }
     // Raw broker content deliberately sits outside the default JSON/webhook
     // body limit. It has its own 64 MiB cap and requires the same loopback-only
@@ -837,10 +863,99 @@ fn build_router_for_mode(
         ))
         .layer(from_fn(reject_mutations_while_draining))
         .with_state(state);
-    router.merge(content_router).layer(from_fn_with_state(
-        origin_policy,
-        super::web_origin::enforce,
-    ))
+    router
+        .merge(content_router)
+        .layer(from_fn_with_state(
+            origin_policy,
+            super::web_origin::enforce,
+        ))
+        .layer(from_fn(problem_for_bare_errors))
+}
+
+/// The largest bare error body this layer will read to use as `detail`.
+/// Axum's own rejections are one line. Anything bigger is not a rejection.
+const BARE_ERROR_DETAIL_LIMIT_BYTES: usize = 64 * 1024;
+
+/// The outermost layer (ADR-0175): every failure leaves the server as a
+/// problem document.
+///
+/// The handlers and middleware in this module already answer with one, but
+/// the framework has its own refusals that never reach a handler: the body
+/// limit's 413, a 405 from a route that exists for another method, a 415 for
+/// a body without `content-type`, a 404 for a path no route matches. Those
+/// arrive here as plain text, and a client that has been promised one shape
+/// would be back to reading the status. This layer rewrites them, keeping
+/// every header the framework set (`allow`, `retry-after`) and the framework's
+/// line as the `detail`. Answers that already carry JSON are left alone.
+async fn problem_for_bare_errors(request: Request, next: Next) -> Response {
+    let response = next.run(request).await;
+    let status = response.status();
+    if !status.is_client_error() && !status.is_server_error() {
+        return response;
+    }
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if content_type.starts_with("application/json")
+        || content_type.starts_with(cognia_problem::CONTENT_TYPE)
+    {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    let detail = match axum::body::to_bytes(body, BARE_ERROR_DETAIL_LIMIT_BYTES).await {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).trim().to_string(),
+        Err(_) => String::new(),
+    };
+    let detail = if detail.is_empty() {
+        cognia_problem::title_for_status(status.as_u16()).to_string()
+    } else {
+        detail
+    };
+    let retry_after = parts
+        .headers
+        .get(header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let mut problem = cognia_problem::Problem::with_status(status, bare_error_code(status), detail)
+        .retryable(matches!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::REQUEST_TIMEOUT
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        ));
+    if let Some(secs) = retry_after {
+        problem = problem.with_detail_field("retryAfterSeconds", secs);
+    }
+    let mut rewritten = problem.into_response();
+    for (name, value) in parts.headers.iter() {
+        if name != header::CONTENT_TYPE && name != header::CONTENT_LENGTH {
+            rewritten.headers_mut().insert(name.clone(), value.clone());
+        }
+    }
+    rewritten
+}
+
+/// The code a framework refusal carries. Handlers state their own codes; this
+/// table covers only the statuses the framework raises on its own.
+fn bare_error_code(status: StatusCode) -> String {
+    match status {
+        StatusCode::BAD_REQUEST => "malformed_request".to_string(),
+        StatusCode::UNAUTHORIZED => "unauthorized".to_string(),
+        StatusCode::FORBIDDEN => "forbidden".to_string(),
+        StatusCode::NOT_FOUND => "not_found".to_string(),
+        StatusCode::METHOD_NOT_ALLOWED => "method_not_allowed".to_string(),
+        StatusCode::PAYLOAD_TOO_LARGE => "payload_too_large".to_string(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported_media_type".to_string(),
+        StatusCode::UNPROCESSABLE_ENTITY => "validation_failed".to_string(),
+        StatusCode::TOO_MANY_REQUESTS => "rate_limited".to_string(),
+        StatusCode::INTERNAL_SERVER_ERROR => "internal_error".to_string(),
+        StatusCode::SERVICE_UNAVAILABLE => "service_unavailable".to_string(),
+        other => format!("http_{}", other.as_u16()),
+    }
 }
 
 async fn reject_mutations_while_draining(request: Request, next: Next) -> Response {
@@ -853,26 +968,28 @@ async fn reject_mutations_while_draining(request: Request, next: Next) -> Respon
         return next.run(request).await;
     }
     if !is_accepting_writes() {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [("retry-after", "300")],
-            "server is draining",
-        )
-            .into_response();
+        return draining_problem().into_response();
     }
     ACTIVE_MUTATIONS.fetch_add(1, Ordering::SeqCst);
     let active = ActiveMutationGuard;
     if !is_accepting_writes() {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [("retry-after", "300")],
-            "server is draining",
-        )
-            .into_response();
+        return draining_problem().into_response();
     }
     let response = next.run(request).await;
     drop(active);
     response
+}
+
+/// The answer to a mutation while the server drains (ADR-0175). Retryable,
+/// with the wait stated in the document so it also becomes `retry-after`.
+fn draining_problem() -> cognia_problem::Problem {
+    cognia_problem::Problem::with_status(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "server_draining",
+        "server is draining",
+    )
+    .retryable(true)
+    .with_detail_field("retryAfterSeconds", 300)
 }
 
 // ---------------------------------------------------------------------------
@@ -1572,6 +1689,72 @@ mod tests {
     #[test]
     fn body_limit_is_64_kib() {
         assert_eq!(BODY_LIMIT_BYTES, 64 * 1024);
+    }
+
+    #[tokio::test]
+    async fn internal_rpc_accepts_agent_sized_bodies_but_keeps_a_bounded_limit() {
+        use tower::ServiceExt as _;
+        let (_guard, router) = build_desktop_router().await;
+        let (jwt, _) = crate::companion_api::jwt::issue_service_jwt(SECRET, ACCOUNT_ID).unwrap();
+        for (bytes, too_large) in [(3 * 1024 * 1024, false), (17 * 1024 * 1024, true)] {
+            let body = serde_json::json!({ "unexpected": "x".repeat(bytes) }).to_string();
+            let mut request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/internal/_rpc/claude_sidecar_status")
+                .header("authorization", format!("Bearer {jwt}"))
+                .header("content-type", "application/json")
+                .header("content-length", body.len())
+                .body(axum::body::Body::from(body))
+                .unwrap();
+            request.extensions_mut().insert(axum::extract::ConnectInfo(
+                std::net::SocketAddr::from(([127, 0, 0, 1], 34567)),
+            ));
+            let response = router.clone().oneshot(request).await.unwrap();
+            if too_large {
+                assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            } else {
+                // The desktop test topology has no headless command host;
+                // reaching that 503 proves JSON extraction accepted the body.
+                assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            }
+        }
+    }
+
+    /// The draining answer is the one problem document, and the wait it
+    /// states is what the client reads from `retry-after`.
+    #[tokio::test]
+    async fn draining_answers_a_retryable_problem_with_the_wait_in_both_places() {
+        let response = draining_problem().into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            cognia_problem::CONTENT_TYPE
+        );
+        assert_eq!(response.headers()[header::RETRY_AFTER], "300");
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "server_draining");
+        assert_eq!(body["retryable"], true);
+        assert_eq!(body["details"]["retryAfterSeconds"], 300);
+    }
+
+    #[test]
+    fn bare_error_codes_are_snake_case_and_cover_the_framework_statuses() {
+        for status in [
+            StatusCode::BAD_REQUEST,
+            StatusCode::NOT_FOUND,
+            StatusCode::METHOD_NOT_ALLOWED,
+            StatusCode::PAYLOAD_TOO_LARGE,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ] {
+            let code = bare_error_code(status);
+            assert!(!code.starts_with("http_"), "{status} needs a named code");
+            assert!(code.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
+        }
+        assert_eq!(bare_error_code(StatusCode::IM_A_TEAPOT), "http_418");
     }
 
     #[test]

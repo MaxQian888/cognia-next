@@ -36,7 +36,7 @@
 
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{HeaderValue, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -179,16 +179,13 @@ pub async fn require_loopback_operator(request: Request, next: Next) -> Response
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::to_owned);
     if !is_loopback && !has_operator_bearer(operator_bearer.as_deref()).await {
-        return (
+        return cognia_problem::Problem::with_status(
             StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": {
-                    "code": "operator_identity_required",
-                    "message": "this operator endpoint requires loopback or an operator bearer token"
-                }
-            })),
+            "operator_identity_required",
+            "this operator endpoint requires loopback or an operator bearer token",
         )
-            .into_response();
+        .retryable(false)
+        .into_response();
     }
     next.run(request).await
 }
@@ -492,23 +489,12 @@ async fn authenticate_request(
 // Helper
 // ---------------------------------------------------------------------------
 
-/// Wave 3.1: unified flat envelope `{ code, message, details? }`.
+/// An authentication refusal: a 401 problem document (ADR-0175).
 fn error_response(code: &str, message: &str) -> Response {
     super::metrics::record_auth_failure();
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let mut response = (
-        StatusCode::UNAUTHORIZED,
-        Json(json!({
-            "code": code,
-            "message": message,
-            "requestId": request_id.clone(),
-        })),
-    )
-        .into_response();
-    if let Ok(value) = HeaderValue::from_str(&request_id) {
-        response.headers_mut().insert("x-request-id", value);
-    }
-    response
+    cognia_problem::Problem::with_status(StatusCode::UNAUTHORIZED, code, message)
+        .retryable(false)
+        .into_response()
 }
 
 /// Map validated Logto claims (ADR-0059 cloud mode) onto a [`DeviceContext`].
@@ -561,26 +547,17 @@ pub async fn pre_auth_rate_limit(
     match limiter.check(&key) {
         RateLimitDecision::Accept => next.run(request).await,
         RateLimitDecision::Reject { retry_after } => {
-            let request_id = uuid::Uuid::new_v4().to_string();
-            let mut resp = (
+            // `as_secs()` is fine, the limiter rounds up internally so the
+            // value is at least 1. The document's `retryAfterSeconds` is what
+            // becomes the `retry-after` header.
+            cognia_problem::Problem::with_status(
                 StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({
-                    "error": {
-                        "code": "rate_limited",
-                        "message": "too many authentication attempts, slow down",
-                        "requestId": request_id,
-                        "retryable": true,
-                        "details": {},
-                    },
-                })),
+                "rate_limited",
+                "too many authentication attempts, slow down",
             )
-                .into_response();
-            // `as_secs()` is fine — the limiter rounds up internally so the
-            // value is at least 1.
-            if let Ok(hv) = HeaderValue::from_str(&retry_after.as_secs().to_string()) {
-                resp.headers_mut().insert("retry-after", hv);
-            }
-            resp
+            .retryable(true)
+            .with_detail_field("retryAfterSeconds", retry_after.as_secs())
+            .into_response()
         }
     }
 }
@@ -1022,9 +999,13 @@ mod tests {
                     "Retry-After should be a positive integer"
                 );
                 let body = body_json(resp).await;
-                assert_eq!(body["error"]["code"], "rate_limited");
-                assert_eq!(body["error"]["retryable"], true);
-                assert!(body["error"]["requestId"].is_string());
+                assert_eq!(body["code"], "rate_limited");
+                assert_eq!(body["retryable"], true);
+                assert!(body["requestId"].is_string());
+                assert_eq!(
+                    body["details"]["retryAfterSeconds"],
+                    json!(retry_after.unwrap())
+                );
                 saw_429 = true;
                 break;
             }

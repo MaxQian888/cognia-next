@@ -564,8 +564,13 @@ pub fn lark_env_issues(get: impl Fn(&str) -> Option<String>) -> Vec<LarkEnvIssue
 // HTTP handlers
 // ---------------------------------------------------------------------------
 
+/// A refusal from the companion listener: the one problem document
+/// (ADR-0175). Lark's own webhook acknowledgement format is a foreign
+/// protocol and is not built here.
 fn error_json(status: StatusCode, code: &str) -> Response {
-    (status, Json(json!({ "error": code }))).into_response()
+    cognia_problem::Problem::with_status(status, code, code.replace('_', " "))
+        .retryable(false)
+        .into_response()
 }
 
 #[derive(Deserialize)]

@@ -1575,10 +1575,10 @@ pub async fn provider_execute(
         )
             .into_response(),
         Err(error) => (
-            error.status,
+            error.status_code(),
             Json(json!({
                 "ok": false,
-                "error": error.message,
+                "error": error.detail,
                 "code": error.code,
                 "command": request.name,
                 "retryable": error.retryable,

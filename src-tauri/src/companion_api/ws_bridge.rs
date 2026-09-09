@@ -48,7 +48,7 @@ use axum::{
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -552,24 +552,22 @@ pub async fn ws_bridge_handler(
     request: axum::extract::Request,
 ) -> Response {
     let Some(ctx) = request.extensions().get::<DeviceContext>().cloned() else {
-        return (
+        return super::api::public_error_response(
             axum::http::StatusCode::UNAUTHORIZED,
-            axum::Json(serde_json::json!({
-                "error": "missing_device_context",
-                "message": "JWT middleware did not run"
-            })),
-        )
-            .into_response();
+            "missing_device_context",
+            "JWT middleware did not run",
+            false,
+            serde_json::json!({}),
+        );
     };
     if ctx.scope != "service" {
-        return (
+        return super::api::public_error_response(
             axum::http::StatusCode::FORBIDDEN,
-            axum::Json(serde_json::json!({
-                "error": "service_scope_required",
-                "message": "the bridge WS is reserved for the headless brain's service token"
-            })),
-        )
-            .into_response();
+            "service_scope_required",
+            "the bridge WS is reserved for the headless brain's service token",
+            false,
+            serde_json::json!({}),
+        );
     }
 
     ws.max_message_size(MAX_BRIDGE_FRAME_BYTES)

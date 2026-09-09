@@ -289,7 +289,7 @@ impl AcpConnection {
             Ok(ExecutionOutcome::Accepted { operation_id, .. }) => {
                 Ok(json!({ "operationId": operation_id, "status": "running" }))
             }
-            Err(error) => Err(error.message),
+            Err(error) => Err(error.detail),
         }
     }
 

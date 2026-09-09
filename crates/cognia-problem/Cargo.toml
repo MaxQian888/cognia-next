@@ -1,0 +1,35 @@
+# ADR-0175. The one error document every companion plane answers with.
+#
+# A leaf on purpose: `cognia-gateway`, `cognia-connectors` and
+# `cognia-headless-contract` do not depend on `cognia-core`, and every one of
+# them has to be able to answer a failure in this shape. Nothing here may grow
+# an edge back into the app.
+[package]
+name = "cognia-problem"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "RFC 9457 problem details with the companion extensions (code, requestId, retryable, details, operationId)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_problem"
+path = "src/lib.rs"
+
+[features]
+default = []
+# `IntoResponse` that sets `application/problem+json`, `x-request-id` and
+# `retry-after`. Off for the crates that only carry the document.
+axum = ["dep:axum"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+schemars = "1"
+uuid = { version = "1", features = ["v4"] }
+axum = { version = "0.8", default-features = false, optional = true }
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false }
+tokio = { version = "1", features = ["macros", "rt"] }

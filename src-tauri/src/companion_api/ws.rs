@@ -21,8 +21,7 @@ use axum::{
         Query, State,
     },
     http::StatusCode,
-    response::{IntoResponse, Response},
-    Json,
+    response::Response,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -124,24 +123,22 @@ pub async fn internal_ws_handler(
         .get::<super::middleware::DeviceContext>()
         .cloned()
     else {
-        return (
+        return super::api::public_error_response(
             StatusCode::UNAUTHORIZED,
-            Json(json!({
-                "error": "missing_device_context",
-                "message": "JWT middleware did not run"
-            })),
-        )
-            .into_response();
+            "missing_device_context",
+            "JWT middleware did not run",
+            false,
+            json!({}),
+        );
     };
     if context.scope != "service" {
-        return (
+        return super::api::public_error_response(
             StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "service_scope_required",
-                "message": "the internal event stream requires a headless service token"
-            })),
-        )
-            .into_response();
+            "service_scope_required",
+            "the internal event stream requires a headless service token",
+            false,
+            json!({}),
+        );
     }
     upgrade_events_ws(
         ws,
