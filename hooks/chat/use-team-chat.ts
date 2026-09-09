@@ -56,6 +56,11 @@ import {
   resolveTeamResponseCap,
   selectPrimaryResponder,
 } from "@/lib/claude/team-primary-router"
+import {
+  buildTeamTranscript,
+  textFromParts,
+  type TeamTranscriptMessage,
+} from "@/lib/chat/team-transcript"
 import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
@@ -1197,7 +1202,16 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     routingSurface: "chat",
     routingContextHint: { promptText: turnUserMessage },
   })
-  const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
+  const transcript = buildTeamTranscript({
+    messages: (await listMessages(sessionId)) as unknown as TeamTranscriptMessage[],
+    respondingCharacterId: character.id,
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: memberByCharId.get(member.id)?.role,
+    })),
+    scratchpad: session.scratchpad,
+  })
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
     .filter((p) => p && p.trim())
     .join("\n\n---\n\n")
@@ -1650,73 +1664,4 @@ async function readLastAssistantText(teamSessionId: string, characterId: string)
     return textFromParts(m.parts)
   }
   return ""
-}
-
-/**
- * Build a transcript for `respondingCharacterId` to read as conversation
- * context. Earlier messages are attributed by speaker name; the responder
- * sees their own prior replies un-prefixed (just like the SDK normally would).
- *
- * If `scratchpad` is non-empty, it's prepended as a "Shared scratchpad" block
- * so every member sees the team's shared notes.
- */
-async function buildTranscript(
-  teamSessionId: string,
-  respondingCharacterId: string,
-  members: readonly Character[],
-  scratchpad?: string
-): Promise<string> {
-  const messages = await listMessages(teamSessionId)
-  const sections: string[] = []
-
-  if (scratchpad && scratchpad.trim()) {
-    sections.push(["## Shared scratchpad", "", scratchpad.trim()].join("\n"))
-  }
-
-  if (messages.length === 0) {
-    return sections.join("\n\n")
-  }
-
-  const byId = new Map(members.map((m) => [m.id, m]))
-  const lines: string[] = []
-  for (const m of messages) {
-    const meta = (m as { metadata?: Record<string, unknown> }).metadata
-    const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
-    const text = textFromParts(m.parts)
-    if (!text.trim()) continue
-
-    if (m.role === "user") {
-      lines.push(`User: ${text}`)
-    } else if (senderId === respondingCharacterId) {
-      lines.push(`You: ${text}`)
-    } else {
-      const speaker = senderId ? (byId.get(senderId)?.name ?? senderId) : "Assistant"
-      lines.push(`${speaker}: ${text}`)
-    }
-  }
-
-  if (lines.length > 0) {
-    sections.push(
-      [
-        "## Conversation context",
-        "",
-        "You are participating in a multi-agent group chat. The transcript so far is below — `User:` is the human, `You:` is your prior turn, others are your teammates. Reply only with your next turn (no transcript, no prefix).",
-        "",
-        lines.join("\n"),
-      ].join("\n")
-    )
-  }
-
-  return sections.join("\n\n")
-}
-
-function textFromParts(parts: UIMessage["parts"]): string {
-  const out: string[] = []
-  for (const p of parts) {
-    const t = (p as { type?: string }).type
-    if (t === "text") {
-      out.push((p as { text?: string }).text ?? "")
-    }
-  }
-  return out.join("")
 }
