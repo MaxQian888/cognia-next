@@ -25,13 +25,24 @@
  */
 
 export type ContextRefKind =
-  "file" | "agent" | "subagent" | "skill" | "preset" | "wfNode" | "wfEdge" | "doc" | "entity"
+  | "file"
+  | "agent"
+  | "subagent"
+  /** A member of the character team this session belongs to. */
+  | "member"
+  | "skill"
+  | "preset"
+  | "wfNode"
+  | "wfEdge"
+  | "doc"
+  | "entity"
 
 export interface ContextRef {
   kind: ContextRefKind
   /**
-   * Stable id: relPath for files, agent name, subagent handle, skill / preset /
-   * graph id, `<providerId>:<documentId>` for a document,
+   * Stable id: relPath for files, agent name, subagent handle, character id
+   * for a team member, skill / preset / graph id,
+   * `<providerId>:<documentId>` for a document,
    * `<entityKind>:<recordId>` for a record.
    */
   id: string

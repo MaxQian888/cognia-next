@@ -193,6 +193,22 @@ function registerBuiltinMentionPickHandlers(): void {
   })
 
   registerMentionPickHandler({
+    kind: "member",
+    onPick: (item, ctx) => {
+      // The character NAME, not a slug. `lib/claude/team-router.ts:parseMentions`
+      // matches team members by name at send time, so this is the one mention
+      // whose inserted text has to be the display string exactly.
+      ctx.insertReplacement(`@${item.target.name}`)
+    },
+    toContextRef: (item) => ({
+      kind: "member",
+      id: item.target.id,
+      label: item.target.name,
+      raw: `@${item.target.name}`,
+    }),
+  })
+
+  registerMentionPickHandler({
     kind: "skill",
     onPick: (item, ctx) => {
       // Picking a skill ENABLES it for the session (renders as a chip); no

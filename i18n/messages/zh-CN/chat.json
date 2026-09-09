@@ -506,6 +506,7 @@
     "placeholderDisabled": "请选择一个会话开始聊天…",
     "popover": {
       "agentsSection": "智能体",
+      "membersSection": "成员",
       "argumentTitle": "补全 /{name}",
       "bashEmpty": "'<空>'",
       "bashHintPrefix": "按",

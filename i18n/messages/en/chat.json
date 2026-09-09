@@ -506,6 +506,7 @@
     "placeholderDisabled": "Select a session to start chatting…",
     "popover": {
       "agentsSection": "Agents",
+      "membersSection": "Members",
       "argumentTitle": "Complete /{name}",
       "bashEmpty": "'<empty>'",
       "bashHintPrefix": "Press",

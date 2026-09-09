@@ -794,6 +794,126 @@ describe("ComposerPopover — combined @ panel (subagents + files)", () => {
   })
 })
 
+describe("ComposerPopover — team members in the combined @ panel", () => {
+  // A team room used to fall through to the file-only picker, so desktop had
+  // no `@` completion for the people in the room at all.
+  const members = [
+    { id: "char_a", name: "Ana", description: "Reads the spec", avatarColor: "#f00" },
+    { id: "char_b", name: "Ben", description: "Writes the code", avatarColor: "#0f0" },
+  ] as never
+
+  function fileTrigger(query: string): ComposerTrigger {
+    return { kind: "file", tokenStart: 0, tokenEnd: query.length + 1, query }
+  }
+
+  function setupMembers(
+    query: string,
+    extra: Partial<ComponentProps<typeof ComposerPopover>> = {}
+  ) {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    const ref = createRef<ComposerPopoverHandle>()
+    const onPick = jest.fn()
+    render(
+      <ComposerPopover
+        ref={ref}
+        trigger={fileTrigger(query)}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        teamMembers={members}
+        onPick={onPick}
+        onDismiss={jest.fn()}
+        {...extra}
+      />
+    )
+    return { ref, onPick }
+  }
+
+  it("lists the room's members under a Members section header", () => {
+    setupMembers("")
+    expect(screen.getByText("Ana")).toBeInTheDocument()
+    expect(screen.getByText("Ben")).toBeInTheDocument()
+    expect(screen.getByText("membersSection")).toBeInTheDocument()
+  })
+
+  it("fuzzy-filters members by name", () => {
+    setupMembers("be")
+    expect(screen.queryByText("Ana")).not.toBeInTheDocument()
+    expect(screen.getByText("Ben")).toBeInTheDocument()
+  })
+
+  it("shows each member's role in this team when the slot assigns one", () => {
+    setupMembers("", { teamMemberRoleById: new Map([["char_a", "Critic"]]) })
+    expect(screen.getByText("Critic")).toBeInTheDocument()
+  })
+
+  it("picks a member as its own kind, never as a subagent", () => {
+    const { ref, onPick } = setupMembers("")
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick).toHaveBeenCalledWith({
+      kind: "member",
+      target: expect.objectContaining({ id: "char_a", name: "Ana" }),
+    })
+  })
+
+  it("puts members above subagents, because in a room they are what you want", () => {
+    const { ref, onPick } = setupMembers("", {
+      chatAgents: [
+        { id: "sub_1", name: "Workflow Designer", description: "d", handle: "workflow-designer" },
+      ],
+    })
+    act(() => {
+      ref.current!.confirm()
+    })
+    expect(onPick.mock.calls[0][0].kind).toBe("member")
+  })
+
+  it("renders section headers for a room with members and no subagents", () => {
+    // `hasSubagentSection` used to gate every header on a subagent existing, so
+    // a team room's members and files ran together with no separator.
+    setupMembers("")
+    expect(screen.getByText("membersSection")).toBeInTheDocument()
+  })
+
+  it("shows no members section outside a team room", () => {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    render(
+      <ComposerPopover
+        ref={createRef<ComposerPopoverHandle>()}
+        trigger={fileTrigger("")}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        onPick={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.queryByText("membersSection")).not.toBeInTheDocument()
+  })
+
+  it("lists files only when the user typed the explicit @file: namespace", () => {
+    const anchor = document.createElement("div")
+    document.body.appendChild(anchor)
+    render(
+      <ComposerPopover
+        ref={createRef<ComposerPopoverHandle>()}
+        trigger={{ kind: "file", tokenStart: 0, tokenEnd: 6, query: "", namespace: "file:" }}
+        cwd={null}
+        slashCommands={commands}
+        anchor={anchor}
+        teamMembers={members}
+        onPick={jest.fn()}
+        onDismiss={jest.fn()}
+      />
+    )
+    expect(screen.queryByText("Ana")).not.toBeInTheDocument()
+  })
+})
+
 describe("ComposerPopover — @skill: / @preset: namespaced pickers", () => {
   const chatSkills = [
     { id: "sk_a", name: "Concise", description: "Short answers" },

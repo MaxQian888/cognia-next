@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { renderHook } from "@testing-library/react"
-import { useTeamMembers } from "./use-team-members"
+import { useTeamMemberRoles, useTeamMembers } from "./use-team-members"
 import type { Character, Team } from "@cognia/agent-config-types"
 
 const liveQueryMock = jest.fn<unknown, [() => Promise<unknown>, unknown[], unknown]>()
@@ -70,4 +70,30 @@ test("returns empty when characters list is empty", () => {
   })
   const { result } = renderHook(() => useTeamMembers("t2"))
   expect(result.current).toEqual([])
+})
+
+describe("useTeamMemberRoles", () => {
+  it("is an empty map before the team loads, so callers never branch on absence", () => {
+    liveQueryMock.mockReturnValue(undefined)
+    const { result } = renderHook(() => useTeamMemberRoles("t1"))
+    expect(result.current.size).toBe(0)
+  })
+
+  it("maps each member slot's role, which belongs to the team and not the character", () => {
+    const team = {
+      id: "t1",
+      members: [
+        { characterId: "c1", role: "Critic" },
+        { characterId: "c2", role: "  Researcher  " },
+        { characterId: "c3" },
+        { characterId: "c4", role: "   " },
+      ],
+    } as unknown as Team
+    liveQueryMock.mockReturnValue(team)
+    const { result } = renderHook(() => useTeamMemberRoles("t1"))
+    expect(result.current.get("c1")).toBe("Critic")
+    expect(result.current.get("c2")).toBe("Researcher")
+    expect(result.current.has("c3")).toBe(false)
+    expect(result.current.has("c4")).toBe(false)
+  })
 })

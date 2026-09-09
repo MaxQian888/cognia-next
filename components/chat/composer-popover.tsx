@@ -81,7 +81,8 @@ import type {
 import type { RemoteDocRef } from "@/lib/docs-providers"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import type { SystemPromptPreset } from "@cognia/agent-config-types"
+import type { Character, SystemPromptPreset } from "@cognia/agent-config-types"
+import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import type { SkillMentionTarget } from "@/hooks/chat/use-mentionable-skills"
 import { fuzzyFilterSort, fuzzyFilterSortRanked } from "@/lib/chat/completion/fuzzy-match"
 import { MatchHighlight } from "@/components/chat/completion/match-highlight"
@@ -143,6 +144,17 @@ export type PopoverItem =
     }
   | { kind: "agent"; target: MentionTarget }
   | { kind: "subagent"; target: SubagentMentionTarget }
+  /**
+   * One member of the character team this session belongs to.
+   *
+   * Deliberately NOT projected onto `subagent`. The two insert different
+   * text for different routers: a subagent pick writes its slugified
+   * `handle` and hands the whole turn to that agent, while a member pick
+   * writes the character NAME, which is the token
+   * `lib/claude/team-router.ts:parseMentions` matches to pick who answers.
+   * Collapsing them would make one of the two silently stop routing.
+   */
+  | { kind: "member"; target: Character; role?: string }
   | { kind: "skill"; skill: SkillMentionTarget }
   | { kind: "preset"; preset: SystemPromptPreset }
   /**
@@ -203,6 +215,18 @@ interface Props {
    * team (`mentionMode="agents"`) composers.
    */
   chatAgents?: readonly SubagentMentionTarget[]
+  /**
+   * Members of the character team this session belongs to.
+   *
+   * When non-empty, the `@` panel opens with a "Members" section above the
+   * agents and files. Before this, a team room had no `@` completion at all on
+   * desktop: `parseMentions` still routed a typed `@Name`, but you had to
+   * remember and spell the character name, and the only affordance was the `@`
+   * button on each row of the members panel. Empty outside a team session.
+   */
+  teamMembers?: readonly Character[]
+  /** `characterId` to that member's role in THIS team ("Critic"). Display only. */
+  teamMemberRoleById?: ReadonlyMap<string, string>
   /**
    * Enabled skills surfaced by the `@skill:` namespaced mention. Picking one
    * ENABLES it for the session (no text inserted) — see `composer.tsx`'s
@@ -275,6 +299,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     anchor,
     mentionables,
     chatAgents,
+    teamMembers,
+    teamMemberRoleById,
     chatSkills,
     chatPresets,
     chatTemplates,
@@ -662,6 +688,16 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     // An explicit `@file:` means files and nothing else — that is the only
     // reason to type it over a bare `@`, which lists both.
     const filesOnly = trigger.namespace === "file:"
+    // Members lead. In a team room the overwhelmingly likely thing you want
+    // after `@` is one of the people in it, and unlike a file or a subagent the
+    // name has to be spelled exactly for `parseMentions` to route the turn.
+    const memberItems: PopoverItem[] =
+      !filesOnly && teamMembers && teamMembers.length > 0
+        ? filterTeamMembers(teamMembers, trigger.query).map((target) => {
+            const role = teamMemberRoleById?.get(target.id)
+            return { kind: "member" as const, target, ...(role ? { role } : {}) }
+          })
+        : []
     const agentItems: PopoverItem[] =
       !filesOnly && chatAgents && chatAgents.length > 0
         ? filterSubagents(chatAgents, trigger.query).map((target) => ({
@@ -669,9 +705,9 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
             target,
           }))
         : []
-    if (agentItems.length === 0) return base
+    if (memberItems.length === 0 && agentItems.length === 0) return base
     return {
-      items: [...agentItems, ...base.items],
+      items: [...memberItems, ...agentItems, ...base.items],
       loading: base.loading,
       // Agents are showing — never surface a file-search error (e.g. no
       // workspace in web mode) that would replace the whole list. Files just
@@ -691,6 +727,8 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     tAgent,
     mentionables,
     chatAgents,
+    teamMembers,
+    teamMemberRoleById,
     chatSkills,
     chatPresets,
     chatTemplates,
@@ -786,8 +824,10 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
   const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
   // Hoisted out of the per-row header check so it isn't recomputed N times.
-  const hasSubagentSection = useMemo(
-    () => displayList.items.some((i) => i.kind === "subagent"),
+  // Members count as well as subagents: a team room can list members and files
+  // with no subagent between them, and without a header the two run together.
+  const hasMentionSections = useMemo(
+    () => displayList.items.some((i) => i.kind === "subagent" || i.kind === "member"),
     [displayList.items]
   )
 
@@ -895,7 +935,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               // Two sources: combined `@` mode (subagents/files by kind change),
               // and the empty-query slash view (Pinned/Recent/category groups).
               const prev = idx === 0 ? undefined : displayList.items[idx - 1]
-              const header = sectionHeader(item, prev, hasSubagentSection, t)
+              const header = sectionHeader(item, prev, hasMentionSections, t)
               return (
                 <Fragment key={itemKey(item, idx)}>
                   {header ? (
@@ -1056,7 +1096,7 @@ function triggerTitle(
 function sectionHeader(
   item: PopoverItem,
   prev: PopoverItem | undefined,
-  hasSubagentSection: boolean,
+  hasMentionSections: boolean,
   t: (key: string, params?: Record<string, string | number | Date>) => string
 ): string | null {
   if (item.kind === "slash" && item.group) {
@@ -1067,10 +1107,11 @@ function sectionHeader(
     return t("templatesSection")
   }
   if (
-    hasSubagentSection &&
+    hasMentionSections &&
     item.kind !== prev?.kind &&
-    (item.kind === "subagent" || item.kind === "file")
+    (item.kind === "member" || item.kind === "subagent" || item.kind === "file")
   ) {
+    if (item.kind === "member") return t("membersSection")
     return item.kind === "subagent" ? t("agentsSection") : t("filesSection")
   }
   return null
@@ -1137,6 +1178,18 @@ function CommandCategoryIcon({ command }: { command: SlashCommand }) {
   }
 }
 
+/**
+ * Rank team members for the `@` panel with the same fuzzy scorer the slash
+ * picker and the subagent picker use, so every list in this popover ranks
+ * candidates the same way. Matches the character name first and its
+ * description second.
+ */
+function filterTeamMembers(members: readonly Character[], query: string): Character[] {
+  return fuzzyFilterSort(members, query, (member) => member.name, {
+    secondaryText: (member) => member.description ?? "",
+  })
+}
+
 function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "slash") return `slash-${item.command.name}`
   if (item.kind === "slashArgument") {
@@ -1146,6 +1199,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "memory") return `memory-${memoryTargetKey(item.target)}`
   if (item.kind === "agent") return `agent-${item.target.id}`
   if (item.kind === "subagent") return `subagent-${item.target.id}`
+  if (item.kind === "member") return `member-${item.target.id}`
   if (item.kind === "skill") return `skill-${item.skill.id}`
   if (item.kind === "preset") return `preset-${item.preset.id}`
   if (item.kind === "chatTemplate") return `chat-template-${item.template.id}`
@@ -1332,6 +1386,17 @@ const ItemRow = memo(function ItemRow({
   }
   if (item.kind === "subagent") {
     return <SubagentMentionRow target={item.target} />
+  }
+  if (item.kind === "member") {
+    return (
+      <>
+        <AvatarBadge subject={item.target} size={20} textClassName="text-[11px]" />
+        <span className="min-w-0 flex-1 truncate text-sm">{item.target.name}</span>
+        {item.role ? (
+          <span className="shrink-0 truncate text-xs text-muted-foreground">{item.role}</span>
+        ) : null}
+      </>
+    )
   }
   if (item.kind === "chatTemplate") {
     const template = item.template

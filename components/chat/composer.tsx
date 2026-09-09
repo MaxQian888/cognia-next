@@ -105,6 +105,7 @@ import { useEntityMentionStaging } from "@/hooks/chat/use-entity-mention-staging
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
 import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
 import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
+import { useTeamMemberRoles, useTeamMembers } from "@/hooks/use-team-members"
 import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
 import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
 import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
@@ -615,14 +616,28 @@ function ComposerInner(props: InnerProps) {
   const cwd = useEffectiveCwd(props.session)
   const sessionId = props.session?.id ?? null
 
-  // `@` mode resolution. Callers may set `mentionMode` explicitly (team chat →
-  // "agents", etc.). Otherwise a DIRECT chat defaults to the combined panel
-  // (subagents + files), so every general-chat composer gets `@agent` without
-  // each call site opting in; non-direct composers keep the file picker.
+  // `@` mode resolution. Callers may set `mentionMode` explicitly. Otherwise a
+  // direct chat AND a team room default to the combined panel, so every
+  // general-chat composer gets `@agent` and every team room gets `@member`
+  // without each call site opting in. Other composers keep the file picker.
+  //
+  // A team room used to fall through to `"files"`, which meant desktop had no
+  // `@` completion for the people in the room at all: `parseMentions` still
+  // routed a typed `@Name` at send time, but you had to remember and spell the
+  // character name, and the only affordance was the `@` button on each row of
+  // the members panel.
+  const isTeamRoom = props.session?.kind === "team" && Boolean(props.session.teamId)
   const resolvedMentionMode: MentionMode =
     props.mentionMode ??
-    (props.workflowMention ? "workflow" : props.session?.kind === "direct" ? "combined" : "files")
+    (props.workflowMention
+      ? "workflow"
+      : props.session?.kind === "direct" || isTeamRoom
+        ? "combined"
+        : "files")
   const isCombinedMention = resolvedMentionMode === "combined"
+  // The people in this room. Empty (and free) outside a team session.
+  const teamMembers = useTeamMembers(isTeamRoom ? props.session?.teamId : null)
+  const teamMemberRoleById = useTeamMemberRoles(isTeamRoom ? props.session?.teamId : null)
   // Reactive subagent list for the combined panel (no-op cost otherwise). The
   // built-in/plugin/template subagents union with on-disk markdown agents
   // (`.cognia/agents/*.md`) so both surface in the `@` "Agents" section.
@@ -2860,6 +2875,8 @@ function ComposerInner(props: InnerProps) {
           anchor={containerEl}
           mentionables={props.mentionables}
           chatAgents={chatAgents}
+          teamMembers={teamMembers}
+          teamMemberRoleById={teamMemberRoleById}
           chatSkills={chatSkills}
           chatPresets={chatPresets}
           entityContext={entityContext}
