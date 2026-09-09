@@ -38,7 +38,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import {
   Select,
   SelectContent,
