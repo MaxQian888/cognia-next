@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
-import { ProviderConfigTab, type TestResult } from "./provider-config-tab"
+import { ProviderConfigTab } from "./provider-config-tab"
+import type { TestResult } from "./connection-status-card"
 import { makeUserProviderSettings } from "@/lib/storybook/fixtures/settings-provider"
 
 // Pure config tab: a stack of titled blocks — credentials + endpoint (with the

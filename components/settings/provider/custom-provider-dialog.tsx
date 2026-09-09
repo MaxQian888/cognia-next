@@ -38,7 +38,7 @@ import {
   buildCustomProviderModelDiscoverySnapshot,
   discoverOpenAICompatibleModels,
 } from "@cognia/provider-core/providers/model-discovery"
-import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
+import { ConnectionStatusCard, toConnectionCardResult } from "./connection-status-card"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {

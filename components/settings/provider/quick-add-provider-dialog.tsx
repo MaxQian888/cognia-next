@@ -32,7 +32,7 @@ import {
   type BuiltInProviderQuickAddPreset as QuickAddPreset,
 } from "@cognia/provider-types/built-in-provider-catalog"
 import { getCustomProviderReadiness } from "./provider-readiness"
-import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
+import { ConnectionStatusCard, toConnectionCardResult } from "./connection-status-card"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 export type { BuiltInProviderQuickAddPreset as QuickAddPreset } from "@cognia/provider-types/built-in-provider-catalog"
