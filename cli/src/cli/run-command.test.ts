@@ -169,6 +169,38 @@ describe("runCommand", () => {
     expect(s.stderr.join("")).toMatch(/prompt is required/)
   })
 
+  it("routes library logs off stdout for the run and restores them afterwards", async () => {
+    const s = sink()
+    const restore = jest.fn()
+    const configureLogging = jest.fn(() => restore)
+    const run = jest.fn(async () => {
+      expect(restore).not.toHaveBeenCalled()
+      return { sessionId: "s1", text: "done" }
+    })
+    const code = await runCommand(parseArgv(["run", "do it", "--yes", "--verbose"]), {
+      out: s.out,
+      loadConfig: () => cfg(),
+      run,
+      configureLogging,
+      ...noStdin,
+    })
+    expect(code).toBe(0)
+    expect(configureLogging).toHaveBeenCalledWith({ surface: "headless", verbose: true })
+    expect(restore).toHaveBeenCalledTimes(1)
+
+    // Quiet by default, and restored even when the turn fails.
+    const failing = jest.fn().mockRejectedValue(new Error("provider down"))
+    await runCommand(parseArgv(["run", "do it"]), {
+      out: sink().out,
+      loadConfig: () => cfg(),
+      run: failing,
+      configureLogging,
+      ...noStdin,
+    })
+    expect(configureLogging).toHaveBeenLastCalledWith({ surface: "headless", verbose: false })
+    expect(restore).toHaveBeenCalledTimes(2)
+  })
+
   it("runs a turn and prints the reply text (non-json)", async () => {
     const s = sink()
     const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "done" })

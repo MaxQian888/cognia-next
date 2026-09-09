@@ -16,6 +16,7 @@
 
 import type { CliConfigFile } from "../config/schema"
 import { loadConfig as defaultLoadConfig } from "../config/load"
+import { configureCliLogging as defaultConfigureLogging } from "../config/cli-logging"
 import { createPermissionGate } from "../agent/permission-gate"
 import { runHeadlessTurn as defaultRun } from "../agent/run"
 import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
@@ -39,6 +40,8 @@ export interface RunDeps {
   /** Read the piped (non-TTY) stdin as the merged prompt source. Defaults to
    * draining `process.stdin` when it is not a TTY, else "". Injected in tests. */
   readStdin?: () => Promise<string>
+  /** Route library console logs off stdout for the run (see `cli-logging.ts`). */
+  configureLogging?: typeof defaultConfigureLogging
 }
 
 /** Drain piped stdin (non-TTY) to a string; "" on a TTY or when empty. */
@@ -148,6 +151,30 @@ export async function runCommand(args: ParsedArgs, deps: RunDeps = {}): Promise<
   const out = deps.out ?? realOutput
   const loadConfig = deps.loadConfig ?? defaultLoadConfig
   const run = deps.run ?? defaultRun
+  // stdout carries the answer (text or JSONL), so every library log line moves
+  // to stderr and, unless `--verbose`, only warnings and errors survive. Done
+  // before config/plugin loading, which is where the noise starts.
+  const restoreLogging = (deps.configureLogging ?? defaultConfigureLogging)({
+    surface: "headless",
+    verbose: boolFlag(args, "verbose") || boolFlag(args, "debug"),
+  })
+  try {
+    return await runCommandInner(args, deps, { out, loadConfig, run })
+  } finally {
+    restoreLogging()
+  }
+}
+
+async function runCommandInner(
+  args: ParsedArgs,
+  deps: RunDeps,
+  io: {
+    out: OutputSink
+    loadConfig: NonNullable<RunDeps["loadConfig"]>
+    run: typeof defaultRun
+  }
+): Promise<number> {
+  const { out, loadConfig, run } = io
 
   let format: OutputFormat
   try {

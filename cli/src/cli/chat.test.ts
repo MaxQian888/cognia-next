@@ -159,6 +159,38 @@ describe("chatCommand", () => {
     expect(renderTui.mock.calls[0][0].sessionOnlyPermissionMode).toBe("bypassPermissions")
   })
 
+  it("quiets library logs through the console for the TUI and via stderr for the REPL", async () => {
+    const builtin = fakeSessionFactory()
+    const external = fakeSessionFactory()
+    const configureLogging = jest.fn(() => () => undefined)
+    const renderTui = jest.fn(async () => 0)
+    await chatCommand(parseArgv(["chat", "--verbose"]), {
+      loadConfig: () => cfg(),
+      out: sink().out,
+      createSession: builtin.factory,
+      externalCreateSession: external.factory,
+      isTty: () => true,
+      renderTui,
+      configureLogging,
+    })
+    expect(configureLogging).toHaveBeenCalledWith({ surface: "tui", verbose: true })
+    expect(configureLogging.mock.invocationCallOrder[0]).toBeLessThan(
+      renderTui.mock.invocationCallOrder[0]
+    )
+
+    configureLogging.mockClear()
+    await chatCommand(parseArgv(["chat"]), {
+      loadConfig: () => cfg(),
+      out: sink().out,
+      createSession: builtin.factory,
+      externalCreateSession: external.factory,
+      readLine: async () => null,
+      confirm: async () => true,
+      configureLogging,
+    })
+    expect(configureLogging).toHaveBeenCalledWith({ surface: "repl", verbose: false })
+  })
+
   it("/handoff pushes the current session", async () => {
     const s = sink()
     const f = fakeSessionFactory()

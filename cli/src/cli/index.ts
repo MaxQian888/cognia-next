@@ -130,6 +130,8 @@ Flags:
       --json            alias for --output-format stream-json
       --max-turns n     cap the agentic loop for this run
       --plugin-tools    expose in-tree first-party plugin tools to the agent
+      --verbose         run/chat: show info + debug library logs on stderr
+                        (default: warnings and errors only; COGNIA_LOG_LEVEL overrides)
       --dev-plugins     also load the repo's plugins/<id> as live dev plugins
       --bypass          start with every approval gate disarmed (alias:
                         --dangerously-skip-permissions). Session-only — it is

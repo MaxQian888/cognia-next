@@ -20,6 +20,7 @@ import { createPermissionGate } from "../agent/permission-gate"
 import { maybePushHandoff as defaultPushHandoff } from "./handoff-cmd"
 import { bypassRequested, runFlagsToOverrides } from "./run-command"
 import { boolFlag, type ParsedArgs } from "./args"
+import { configureCliLogging as defaultConfigureLogging } from "../config/cli-logging"
 import { realOutput, type OutputSink } from "./output"
 
 /**
@@ -146,6 +147,8 @@ export interface ChatDeps {
   confirm?: (question: string) => Promise<boolean>
   /** Whether the terminal is interactive (real TTY). Injected for tests. */
   isTty?: () => boolean
+  /** Route library console logs off the answer stream (see `cli-logging.ts`). */
+  configureLogging?: typeof defaultConfigureLogging
   /** Mount the rich Ink TUI. Injected for tests; defaults to a lazy import. */
   renderTui?: (deps: {
     config: ReturnType<typeof defaultLoadConfig>
@@ -188,7 +191,13 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
   // pull Ink into the bundle's eager graph.
   const isTty = deps.isTty ?? (() => Boolean(stdout.isTTY && stdin.isTTY))
   const initialCommand = launchCommandFromFlags(args)
+  const configureLogging = deps.configureLogging ?? defaultConfigureLogging
+  const verbose = boolFlag(args, "verbose") || boolFlag(args, "debug")
   if (isTty() && !deps.readLine) {
+    // Library logs (plugin activation, backend sync retries) would otherwise be
+    // painted above the app by Ink's console patch. Route them through the
+    // console at warn+ so the screen stays coherent and quiet.
+    configureLogging({ surface: "tui", verbose })
     const renderTui = deps.renderTui ?? (await import("../tui/mount")).renderTui
     // The TUI picks the backend itself — `/backend` can switch it mid-session —
     // so it gets BOTH factories rather than the one chosen here. The readline
@@ -202,6 +211,8 @@ export async function chatCommand(args: ParsedArgs, deps: ChatDeps = {}): Promis
       ...(bypassRequested(args) ? { sessionOnlyPermissionMode: "bypassPermissions" } : {}),
     })
   }
+  // The readline REPL owns stdout for replies, so diagnostics go to stderr.
+  configureLogging({ surface: "repl", verbose })
   // The readline fallback has no session store — resuming needs the TUI.
   if (initialCommand) {
     out.error("--continue/--resume need an interactive terminal (TTY); starting fresh.")
