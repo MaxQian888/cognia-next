@@ -16,10 +16,13 @@ const meta = {
     onSetDefault: fn(),
     onToggleEnabled: fn(),
     onDelete: fn(),
-    configTab: <p className="text-sm text-muted-foreground">API key, base URL, default model…</p>,
+    connectTab: (
+      <p className="text-sm text-muted-foreground">
+        API key, base URL, key rotation, transport, request parameters…
+      </p>
+    ),
     modelsTab: <p className="text-sm text-muted-foreground">Enabled model list…</p>,
-    costTab: <p className="text-sm text-muted-foreground">Usage & spend…</p>,
-    advancedTab: <p className="text-sm text-muted-foreground">Headers, timeouts…</p>,
+    usageTab: <p className="text-sm text-muted-foreground">Spend & tokens…</p>,
   },
   decorators: [
     (Story) => (

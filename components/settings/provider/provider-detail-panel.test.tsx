@@ -25,11 +25,10 @@ jest.mock("next-intl", () => ({
       "sidebar.moreActions": "More provider actions",
       verificationLimitedShort: "Limited",
       delete: "Delete",
-      "tabs.config": "Config",
+      "tabs.connect": "Connect",
       "tabs.models": "Models",
-      "tabs.cost": "Cost",
+      "tabs.usage": "Usage",
       "tabs.diagnostics": "Diagnostics",
-      "tabs.advanced": "Advanced",
     }
     return map[key] ?? key
   },
@@ -48,11 +47,10 @@ describe("ProviderDetailPanel", () => {
         provider={{ id: "openai", name: "OpenAI", icon: "🤖", modelCount: 12 }}
         onToggleEnabled={jest.fn()}
         isEnabled={true}
-        configTab={<div />}
+        connectTab={<div />}
         modelsTab={<div />}
-        costTab={<div />}
+        usageTab={<div />}
         diagnosticsTab={<div />}
-        advancedTab={<div />}
       />
     )
     expect(screen.getByText("OpenAI")).toBeInTheDocument()
@@ -60,32 +58,30 @@ describe("ProviderDetailPanel", () => {
       screen.getByText("OpenAI").closest("div")?.parentElement?.querySelector("img")
     ).toHaveAttribute("src", "/icons/lobe/openai.svg")
     expect(screen.queryByText("🤖")).not.toBeInTheDocument()
-    expect(screen.getByText("Config")).toBeInTheDocument()
+    expect(screen.getByText("Connect")).toBeInTheDocument()
     expect(screen.getByText("Models")).toBeInTheDocument()
-    expect(screen.getByText("Cost")).toBeInTheDocument()
+    expect(screen.getByText("Usage")).toBeInTheDocument()
     expect(screen.getByText("Diagnostics")).toBeInTheDocument()
-    expect(screen.getByText("Advanced")).toBeInTheDocument()
   })
 
   it("hides the tabs whose slots are empty, keeping the shared header", () => {
     // Lets a local inference engine live in this shell (header, enable switch,
-    // default badge, status) while showing only the Config tab that applies,
+    // default badge, status) while showing only the Connect tab that applies,
     // instead of replacing the whole panel with a different layout.
     render(
       <ProviderDetailPanel
         provider={{ id: "ollama", name: "Ollama", icon: "🦙" }}
         onToggleEnabled={jest.fn()}
         isEnabled={true}
-        configTab={<div data-testid="local-config" />}
+        connectTab={<div data-testid="local-connect" />}
       />
     )
     expect(screen.getByText("Ollama")).toBeInTheDocument()
-    expect(screen.getByText("Config")).toBeInTheDocument()
-    expect(screen.getByTestId("local-config")).toBeInTheDocument()
+    expect(screen.getByText("Connect")).toBeInTheDocument()
+    expect(screen.getByTestId("local-connect")).toBeInTheDocument()
     expect(screen.queryByText("Models")).not.toBeInTheDocument()
-    expect(screen.queryByText("Cost")).not.toBeInTheDocument()
+    expect(screen.queryByText("Usage")).not.toBeInTheDocument()
     expect(screen.queryByText("Diagnostics")).not.toBeInTheDocument()
-    expect(screen.queryByText("Advanced")).not.toBeInTheDocument()
   })
 
   describe("tab layout", () => {
@@ -96,7 +92,7 @@ describe("ProviderDetailPanel", () => {
       const { container } = render(
         <ProviderDetailPanel
           provider={{ id: "openai", name: "OpenAI" }}
-          configTab={<div />}
+          connectTab={<div />}
           modelsTab={<div />}
         />
       )
@@ -111,12 +107,12 @@ describe("ProviderDetailPanel", () => {
       const { container } = render(
         <ProviderDetailPanel
           provider={{ id: "openai", name: "OpenAI" }}
-          configTab={<div data-testid="config-body" />}
+          connectTab={<div data-testid="connect-body" />}
           modelsTab={<div data-testid="models-body" />}
         />
       )
       const scroller = container.querySelector('[data-slot="scroll-area"]')
-      expect(scroller).toContainElement(screen.getByTestId("config-body"))
+      expect(scroller).toContainElement(screen.getByTestId("connect-body"))
 
       openModels()
       expect(container.querySelector('[data-slot="scroll-area"]')).not.toContainElement(
@@ -130,7 +126,7 @@ describe("ProviderDetailPanel", () => {
       const { container } = render(
         <ProviderDetailPanel
           provider={{ id: "openai", name: "OpenAI" }}
-          configTab={<div />}
+          connectTab={<div />}
           modelsTab={<div />}
         />
       )
@@ -139,13 +135,13 @@ describe("ProviderDetailPanel", () => {
       expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass("hidden")
     })
 
-    it("falls back to Config when the active tab's slot disappears", () => {
+    it("falls back to Connect when the active tab's slot disappears", () => {
       // Selecting a local engine drops the Models slot; the panel must not sit
       // on a tab that no longer has a trigger to leave it.
       const { rerender } = render(
         <ProviderDetailPanel
           provider={{ id: "openai", name: "OpenAI" }}
-          configTab={<div data-testid="config-body" />}
+          connectTab={<div data-testid="connect-body" />}
           modelsTab={<div data-testid="models-body" />}
         />
       )
@@ -155,10 +151,10 @@ describe("ProviderDetailPanel", () => {
       rerender(
         <ProviderDetailPanel
           provider={{ id: "ollama", name: "Ollama" }}
-          configTab={<div data-testid="config-body" />}
+          connectTab={<div data-testid="connect-body" />}
         />
       )
-      expect(screen.getByTestId("config-body")).toBeInTheDocument()
+      expect(screen.getByTestId("connect-body")).toBeInTheDocument()
       expect(screen.queryByTestId("models-body")).not.toBeInTheDocument()
     })
   })
@@ -331,9 +327,9 @@ describe("ProviderDetailPanel", () => {
     render(
       <ProviderDetailPanel
         provider={{ id: "openai", name: "OpenAI" }}
-        configTab={<div>Config content</div>}
+        connectTab={<div>Connect content</div>}
       />
     )
-    expect(screen.getByText("Config content")).toBeInTheDocument()
+    expect(screen.getByText("Connect content")).toBeInTheDocument()
   })
 })

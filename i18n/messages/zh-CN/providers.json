@@ -244,6 +244,7 @@
     },
     "newKeyPlaceholder": "sk-...",
     "notVerifiedHint": "尚未验证 — 运行一次连接测试，确认密钥与端点可用。",
+    "parametersDescription": "对这个提供商的每次请求都生效的超时、重试与采样默认值。",
     "random": "随机",
     "removeKey": "移除",
     "rotationNeedsTwoKeys": "再添加一把密钥后才能启用轮换。",
@@ -1338,14 +1339,13 @@
   "tabbyapi": "TabbyAPI",
   "tabbyapiDescription": "Exllamav2 API 服务器",
   "tabs": {
-    "advanced": "高级设置",
-    "config": "基本配置",
-    "cost": "费用统计",
+    "connect": "连接",
     "diagnostics": "诊断",
     "health": "健康",
     "models": "模型管理",
     "parameters": "参数",
-    "routing": "路由"
+    "routing": "路由",
+    "usage": "用量"
   },
   "test": "测试",
   "testAllProviders": "测试所有服务商",

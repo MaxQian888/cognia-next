@@ -19,10 +19,12 @@ import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
 
-/** Tab order. A tab renders only when its slot is filled (Config is always on). */
-const TAB_KEYS = ["config", "models", "cost", "diagnostics", "advanced"] as const
+/** Tab order. A tab renders only when its slot is filled (Connect is always on). */
+export const TAB_KEYS = ["connect", "models", "usage", "diagnostics"] as const
 
-type TabKey = (typeof TAB_KEYS)[number]
+export type ProviderTabKey = (typeof TAB_KEYS)[number]
+
+export const DEFAULT_PROVIDER_TAB: ProviderTabKey = "connect"
 
 interface ProviderDetailPanelProvider {
   id: string
@@ -57,11 +59,16 @@ interface ProviderDetailPanelProps {
   isCustom?: boolean
   connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited" | "untested"
   /** Tab content slots — passed by parent to inject actual tab components */
-  configTab?: React.ReactNode
+  connectTab?: React.ReactNode
   modelsTab?: React.ReactNode
-  costTab?: React.ReactNode
+  usageTab?: React.ReactNode
   diagnosticsTab?: React.ReactNode
-  advancedTab?: React.ReactNode
+  /**
+   * Drive the tab from outside (a URL parameter, say). Omit both and the panel
+   * keeps its own state, which is what every caller did before deep links.
+   */
+  activeTab?: string
+  onActiveTabChange?: (tab: string) => void
 }
 
 export function ProviderDetailPanel({
@@ -77,26 +84,36 @@ export function ProviderDetailPanel({
   enableBlockedReason,
   isCustom,
   connectionStatus,
-  configTab,
+  connectTab,
   modelsTab,
-  costTab,
+  usageTab,
   diagnosticsTab,
-  advancedTab,
+  activeTab,
+  onActiveTabChange,
 }: ProviderDetailPanelProps) {
   const t = useTranslations("providers")
-  const [activeTab, setActiveTab] = React.useState<string>("config")
+  const [uncontrolledTab, setUncontrolledTab] = React.useState<string>(DEFAULT_PROVIDER_TAB)
+  const requestedTab = activeTab ?? uncontrolledTab
+  const setTab = React.useCallback(
+    (tab: string) => {
+      setUncontrolledTab(tab)
+      onActiveTabChange?.(tab)
+    },
+    [onActiveTabChange]
+  )
 
-  const slots: Record<Exclude<TabKey, "config">, React.ReactNode> = {
+  const slots: Record<Exclude<ProviderTabKey, "connect">, React.ReactNode> = {
     models: modelsTab,
-    cost: costTab,
+    usage: usageTab,
     diagnostics: diagnosticsTab,
-    advanced: advancedTab,
   }
-  // A provider swap can take the active tab's slot away with it (local engines
-  // ship Config only). Derive the effective tab instead of syncing state in an
-  // effect, so the panel never lands on a tab that has no trigger to leave it.
-  const visibleTabs = TAB_KEYS.filter((key) => key === "config" || slots[key] != null)
-  const activeTabValue = visibleTabs.includes(activeTab as TabKey) ? activeTab : "config"
+  // A provider swap can take the active tab's slot away with it. Derive the
+  // effective tab instead of syncing state in an effect, so the panel never
+  // lands on a tab that has no trigger to leave it.
+  const visibleTabs = TAB_KEYS.filter((key) => key === "connect" || slots[key] != null)
+  const activeTabValue = visibleTabs.includes(requestedTab as ProviderTabKey)
+    ? requestedTab
+    : DEFAULT_PROVIDER_TAB
   const modelsTabActive = activeTabValue === "models"
 
   if (provider === null) {
@@ -295,13 +312,13 @@ export function ProviderDetailPanel({
           Models is active, or it would claim half the pane as an empty box. */}
       <Tabs
         value={activeTabValue}
-        onValueChange={setActiveTab}
+        onValueChange={setTab}
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
         {/* A tab appears only when its slot is filled. Local inference engines
-            have no cloud models/cost/routing story, so they render just Config
-            — and still keep the shared header (enable switch, default badge,
-            status) instead of replacing the whole panel with a foreign shell. */}
+            have no cloud models story, so a slot the caller leaves empty simply
+            has no tab, and the shared header (enable switch, default badge,
+            status) stays either way. */}
         {/* Triggers divide the pane rather than overflowing it: `min-w-0` +
             `truncate` let a label give up width on a narrow pane instead of
             pushing the strip past the right edge, where it was clipped with no
@@ -324,7 +341,7 @@ export function ProviderDetailPanel({
             `max-w-4xl`: the providers section opts out of the settings shell's
             `max-w-5xl` cap (it owns a fill-height master/detail frame), so on an
             ultrawide window these forms stretched edge to edge. The cap lives
-            here, once, rather than in each of Config / Models / Cost / Advanced.
+            here, once, rather than in each of Connect / Models / Usage.
             Container queries still resolve against `@container/provider-pane`
             one level up, so the cost tab's `@3xl` grid is unaffected. */}
         {/* The Models tab owns its own scrolling: its toolbar (search, refresh,
@@ -341,22 +358,17 @@ export function ProviderDetailPanel({
         )}
         <ScrollArea className={cn("min-h-0 flex-1", modelsTabActive && "hidden")}>
           <div className="mx-auto w-full max-w-4xl">
-            <TabsContent value="config" className="m-0 p-4">
-              {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
+            <TabsContent value="connect" className="m-0 p-4">
+              {connectTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
             </TabsContent>
-            {costTab && (
-              <TabsContent value="cost" className="m-0 p-4">
-                {costTab}
+            {usageTab && (
+              <TabsContent value="usage" className="m-0 p-4">
+                {usageTab}
               </TabsContent>
             )}
             {diagnosticsTab && (
               <TabsContent value="diagnostics" className="m-0 p-4">
                 {diagnosticsTab}
-              </TabsContent>
-            )}
-            {advancedTab && (
-              <TabsContent value="advanced" className="m-0 p-4">
-                {advancedTab}
               </TabsContent>
             )}
           </div>

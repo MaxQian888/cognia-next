@@ -327,11 +327,10 @@ jest.mock("./oauth-login-button", () => ({
 jest.mock("./provider-detail-panel", () => ({
   ProviderDetailPanel: ({
     provider,
-    configTab,
+    connectTab,
     modelsTab,
-    costTab,
+    usageTab,
     diagnosticsTab,
-    advancedTab,
     isDefault,
     isCustom,
     onSetDefault,
@@ -339,11 +338,10 @@ jest.mock("./provider-detail-panel", () => ({
     onDelete,
   }: {
     provider: { id: string; name: string } | null
-    configTab?: React.ReactNode
+    connectTab?: React.ReactNode
     modelsTab?: React.ReactNode
-    costTab?: React.ReactNode
+    usageTab?: React.ReactNode
     diagnosticsTab?: React.ReactNode
-    advancedTab?: React.ReactNode
     isDefault?: boolean
     isCustom?: boolean
     onSetDefault?: () => void
@@ -371,11 +369,10 @@ jest.mock("./provider-detail-panel", () => ({
           delete
         </button>
       )}
-      <div data-testid="provider-detail-config-tab">{configTab}</div>
+      <div data-testid="provider-detail-connect-tab">{connectTab}</div>
       <div data-testid="provider-detail-models-tab">{modelsTab}</div>
-      <div data-testid="provider-detail-cost-tab">{costTab}</div>
+      <div data-testid="provider-detail-usage-tab">{usageTab}</div>
       <div data-testid="provider-detail-diagnostics-tab">{diagnosticsTab}</div>
-      <div data-testid="provider-detail-advanced-tab">{advancedTab}</div>
     </div>
   ),
 }))
@@ -633,7 +630,11 @@ jest.mock("./provider-models-tab", () => ({
   ),
 }))
 jest.mock("./provider-cost-tab", () => ({ ProviderCostTab: () => null }))
-jest.mock("./provider-parameters-tab", () => ({ ProviderParametersTab: () => null }))
+jest.mock("./provider-parameters-tab", () => ({
+  ProviderParametersTab: ({ providerId }: { providerId: string }) => (
+    <div data-testid="mock-provider-parameters">{providerId}</div>
+  ),
+}))
 jest.mock("./routing-tab", () => ({
   RoutingTab: () => <div data-testid="routing-workspace" />,
 }))
@@ -980,12 +981,14 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     await findByTestId("local-provider-settings")
 
     // Local engines keep their model manager and source-neutral inference /
-    // connection parameters, but cost remains cloud-only.
+    // connection parameters, but usage remains cloud-only.
     expect(screen.getByTestId("provider-detail-models-tab")).toContainElement(
       screen.getByTestId("local-provider-model-manager")
     )
-    expect(screen.getByTestId("provider-detail-cost-tab")).toBeEmptyDOMElement()
-    expect(screen.getByTestId("provider-detail-advanced-tab")).not.toBeEmptyDOMElement()
+    expect(screen.getByTestId("provider-detail-usage-tab")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("provider-detail-connect-tab")).toContainElement(
+      screen.getByTestId("mock-provider-parameters")
+    )
   })
 
   it("persists a local engine's discovered models only when the set changed", async () => {
@@ -1106,7 +1109,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       selectedProviderId: "my-custom",
     })
     render(<ProviderSettings />)
-    const configTab = screen.getByTestId("provider-detail-config-tab")
+    const configTab = screen.getByTestId("provider-detail-connect-tab")
     // Values must come from the customProviders row — NOT providerSettings[id]
     // (empty here), or the controlled inputs reset on every keystroke.
     expect(configTab.querySelector('input[type="password"]')).toHaveValue("sk-custom-123")
@@ -1326,21 +1329,24 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     })
     render(<ProviderSettings />)
     expect(screen.queryByTestId("parameters-placeholder")).toBeNull()
-    expect(screen.getByTestId("provider-detail-advanced-tab")).not.toBeEmptyDOMElement()
+    expect(screen.getByTestId("mock-provider-parameters")).toHaveTextContent("openai")
   })
 
-  it("lays Advanced out as flat sections rather than a tab strip inside a tab", () => {
-    // Tabs nested inside a tab hid their own state from the outer navigation:
-    // leaving the panel on Routing and coming back looked like Parameters had
-    // vanished, with nothing on screen explaining why.
+  // Parameters used to be a tab of its own holding one collapsible block. It is
+  // now the last block of Connect, which is where the rest of the per-provider
+  // request setup already lives.
+  it("puts request parameters in the Connect tab as a collapsed block", () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "openai",
     })
     render(<ProviderSettings />)
-    const advancedTab = screen.getByTestId("provider-detail-advanced-tab")
-    expect(advancedTab.querySelector('[data-tab="parameters"]')).toBeNull()
-    expect(advancedTab.querySelector('[data-slot="collapsible-trigger"]')).toBeInTheDocument()
+    const connectTab = screen.getByTestId("provider-detail-connect-tab")
+    expect(connectTab).toContainElement(screen.getByTestId("mock-provider-parameters"))
+    // Not a tab strip nested inside a tab: leaving the panel on one inner tab
+    // and coming back looked like Parameters had vanished.
+    expect(connectTab.querySelector('[data-tab="parameters"]')).toBeNull()
+    expect(connectTab.querySelector('[data-slot="collapsible-trigger"]')).toBeInTheDocument()
   })
 
   it("promotes Diagnostics to a top-level provider detail slot", () => {
@@ -1351,7 +1357,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     expect(screen.getByTestId("provider-detail-diagnostics-tab")).toHaveTextContent("openai")
     expect(
-      screen.getByTestId("provider-detail-advanced-tab").querySelector('[data-value="health"]')
+      screen.getByTestId("provider-detail-connect-tab").querySelector('[data-value="health"]')
     ).toBeNull()
   })
 
@@ -1381,7 +1387,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       selectedProviderId: "deleted-provider",
     })
     render(<ProviderSettings />)
-    expect(screen.getByTestId("provider-detail-config-tab")).toContainElement(
+    expect(screen.getByTestId("provider-detail-connect-tab")).toContainElement(
       screen.getByTestId("unknown-provider-placeholder")
     )
   })
@@ -1650,7 +1656,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     expect(screen.getByTestId("mock-provider-diagnostics")).toHaveTextContent("openai")
     expect(
-      screen.getByTestId("provider-detail-advanced-tab").querySelector('[data-value="health"]')
+      screen.getByTestId("provider-detail-connect-tab").querySelector('[data-value="health"]')
     ).toBeNull()
   })
 

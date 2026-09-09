@@ -24827,6 +24827,7 @@
       "moveUp": "Move up",
       "newKeyPlaceholder": "sk-...",
       "notVerifiedHint": "Not verified yet — run a connection test to confirm the key and endpoint work.",
+      "parametersDescription": "Timeouts, retries and sampling defaults applied to every request to this provider.",
       "random": "Random",
       "removeKey": "Remove",
       "rotationNeedsTwoKeys": "Add a second key before rotation can be enabled.",
@@ -25921,14 +25922,13 @@
     "tabbyapi": "TabbyAPI",
     "tabbyapiDescription": "Exllamav2 API server",
     "tabs": {
-      "advanced": "Advanced",
-      "config": "Config",
-      "cost": "Cost",
+      "connect": "Connect",
       "diagnostics": "Diagnostics",
       "health": "Health",
       "models": "Models",
       "parameters": "Parameters",
-      "routing": "Routing"
+      "routing": "Routing",
+      "usage": "Usage"
     },
     "test": "Test",
     "testAllProviders": "Test All Providers",

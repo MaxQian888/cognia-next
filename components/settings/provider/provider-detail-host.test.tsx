@@ -16,13 +16,12 @@ jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 jest.mock("./provider-detail-panel", () => ({
   ProviderDetailPanel: (props: Record<string, unknown>) => (
     <div data-testid="panel" data-connection-status={String(props.connectionStatus)}>
-      <div data-testid="slot-config">{props.configTab as React.ReactNode}</div>
+      <div data-testid="slot-connect">{props.connectTab as React.ReactNode}</div>
       <div data-testid="slot-models">{props.modelsTab as React.ReactNode}</div>
-      <div data-testid="slot-cost">
-        {props.costTab === undefined ? "no-cost-tab" : (props.costTab as React.ReactNode)}
+      <div data-testid="slot-usage">
+        {props.usageTab === undefined ? "no-usage-tab" : (props.usageTab as React.ReactNode)}
       </div>
       <div data-testid="slot-diagnostics">{props.diagnosticsTab as React.ReactNode}</div>
-      <div data-testid="slot-advanced">{props.advancedTab as React.ReactNode}</div>
       <div data-testid="panel-flags">
         {[
           props.isDefault ? "default" : "",
@@ -147,7 +146,7 @@ describe("ProviderDetailHost", () => {
   describe("a built-in provider", () => {
     it("fills the connect slot with the shared config tab", () => {
       renderHost()
-      expect(screen.getByTestId("slot-config")).toContainElement(screen.getByTestId("config-tab"))
+      expect(screen.getByTestId("slot-connect")).toContainElement(screen.getByTestId("config-tab"))
     })
 
     // Both panels shipped with a catalog entry and a full settings schema but
@@ -180,7 +179,7 @@ describe("ProviderDetailHost", () => {
       expect(await screen.findByTestId("cliproxyapi-settings")).toBeInTheDocument()
     })
 
-    it("gets the models tab and a cost tab", () => {
+    it("gets the models tab and a usage tab", () => {
       renderHost()
       expect(screen.getByTestId("models-tab")).toBeInTheDocument()
       expect(screen.getByTestId("cost-tab")).toBeInTheDocument()
@@ -241,9 +240,9 @@ describe("ProviderDetailHost", () => {
     // Recorded here so the change in a later commit is a deliberate edit to a
     // pinned expectation rather than a silent flip. Token counts are written
     // for local engines and nothing renders them today.
-    it("has no cost tab today", () => {
+    it("has no usage tab today", () => {
       renderHost(local)
-      expect(screen.getByTestId("slot-cost")).toHaveTextContent("no-cost-tab")
+      expect(screen.getByTestId("slot-usage")).toHaveTextContent("no-usage-tab")
     })
   })
 
@@ -286,11 +285,38 @@ describe("ProviderDetailHost", () => {
     expect(screen.getByTestId("diagnostics-tab")).toBeInTheDocument()
   })
 
-  it("puts the request parameters in the advanced slot", () => {
+  // Parameters was a tab of its own holding one collapsible block. It is now
+  // the last block of Connect, for every provider kind.
+  it("puts the request parameters at the end of the connect slot", () => {
     renderHost()
-    expect(screen.getByTestId("slot-advanced")).toContainElement(
+    expect(screen.getByTestId("slot-connect")).toContainElement(
       screen.getByTestId("parameters-tab")
     )
+  })
+
+  it("gives a custom endpoint and a local engine the parameters block too", async () => {
+    const { unmount } = renderHost({
+      isCustom: true,
+      selectedBuiltIn: undefined,
+      selectedCustom: { id: "gw", customName: "GW" } as never,
+    })
+    expect(screen.getByTestId("slot-connect")).toContainElement(
+      screen.getByTestId("parameters-tab")
+    )
+    unmount()
+
+    renderHost({ isLocalProvider: true, selectedId: "ollama", selectedBuiltIn: undefined })
+    expect(await screen.findByTestId("local-settings")).toBeInTheDocument()
+    expect(screen.getByTestId("slot-connect")).toContainElement(
+      screen.getByTestId("parameters-tab")
+    )
+  })
+
+  // The placeholder branch is the one connect case with no parameters block:
+  // there is no provider to configure.
+  it("gives the unknown-provider placeholder no parameters block", () => {
+    renderHost({ selectedBuiltIn: undefined, selectedCustom: undefined, isCustom: false })
+    expect(screen.queryByTestId("parameters-tab")).not.toBeInTheDocument()
   })
 
   it("shows the setup checklist once readiness has been derived", () => {

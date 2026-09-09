@@ -143,6 +143,46 @@ export function ProviderDetailHost({
 }: ProviderDetailHostProps) {
   const t = useTranslations("providers")
 
+  // Request parameters used to be a tab of their own, holding this one
+  // collapsible block. It belongs with the rest of the connection setup, so it
+  // is the last block of the connect tab for every provider kind instead.
+  const parametersBlock = (
+    <SettingsStack>
+      <SettingsBlock
+        collapsible
+        icon={<SlidersHorizontal />}
+        title={t("tabs.parameters")}
+        description={t("configTab.parametersDescription")}
+        settingId={`provider-${selectedId}-parameters`}
+      >
+        <ProviderParametersTab
+          providerId={selectedId}
+          settings={
+            (isCustom ? selectedCustom : selectedSettings) ?? {
+              providerId: selectedId,
+              enabled: false,
+              defaultModel: selectedBuiltIn?.defaultModel ?? selectedCustom?.defaultModel ?? "",
+            }
+          }
+          schema={getSchemaForProvider(
+            selectedId,
+            Object.fromEntries(
+              Object.values(s.customProviders).map((provider) => [
+                provider.id,
+                { apiProtocol: provider.apiProtocol, name: provider.name },
+              ])
+            )
+          )}
+          onSettingsChange={(patch) =>
+            isCustom
+              ? s.updateCustomProvider(selectedId, patch)
+              : setProviderConfig(selectedId, patch)
+          }
+        />
+      </SettingsBlock>
+    </SettingsStack>
+  )
+
   return (
     <ProviderDetailPanel
       // Explicit key: `PanelTransition` only remounts when motion is
@@ -216,7 +256,7 @@ export function ProviderDetailHost({
       }}
       onDelete={isCustom ? onRequestDelete : undefined}
       onBack={onBack}
-      configTab={
+      connectTab={
         // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
         // and gets its own dashboard, but it stays INSIDE the shared
         // detail shell so it keeps the header, enable switch, default
@@ -227,6 +267,7 @@ export function ProviderDetailHost({
               <ProviderSetupChecklist checklist={selectedReadiness.setupChecklist} isLocalEngine />
             )}
             <LocalProviderSettings providerId={selectedId as LocalProviderName} />
+            {parametersBlock}
           </div>
         ) : isCustom && selectedCustom ? (
           <div className="space-y-6">
@@ -250,6 +291,7 @@ export function ProviderDetailHost({
               testMessage={s.customTestMessages[selectedId] ?? null}
               isTesting={!!s.testingCustomProviders[selectedId]}
             />
+            {parametersBlock}
           </div>
         ) : selectedBuiltIn ? (
           <div className="space-y-6">
@@ -348,6 +390,7 @@ export function ProviderDetailHost({
               </>
             )}
             {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+            {parametersBlock}
           </div>
         ) : (
           <div className="text-sm text-muted-foreground" data-testid="unknown-provider-placeholder">
@@ -393,7 +436,7 @@ export function ProviderDetailHost({
           <div className="p-4 text-sm text-muted-foreground">{t("noModelsAvailable")}</div>
         )
       }
-      costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
+      usageTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
       diagnosticsTab={
         <ProviderDiagnosticsTab
           providerId={selectedId}
@@ -405,36 +448,6 @@ export function ProviderDetailHost({
           }
           defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
         />
-      }
-      advancedTab={
-        <SettingsStack>
-          <SettingsBlock collapsible icon={<SlidersHorizontal />} title={t("tabs.parameters")}>
-            <ProviderParametersTab
-              providerId={selectedId}
-              settings={
-                (isCustom ? selectedCustom : selectedSettings) ?? {
-                  providerId: selectedId,
-                  enabled: false,
-                  defaultModel: selectedBuiltIn?.defaultModel ?? selectedCustom?.defaultModel ?? "",
-                }
-              }
-              schema={getSchemaForProvider(
-                selectedId,
-                Object.fromEntries(
-                  Object.values(s.customProviders).map((provider) => [
-                    provider.id,
-                    { apiProtocol: provider.apiProtocol, name: provider.name },
-                  ])
-                )
-              )}
-              onSettingsChange={(patch) =>
-                isCustom
-                  ? s.updateCustomProvider(selectedId, patch)
-                  : setProviderConfig(selectedId, patch)
-              }
-            />
-          </SettingsBlock>
-        </SettingsStack>
       }
     />
   )
