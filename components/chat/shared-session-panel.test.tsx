@@ -232,6 +232,20 @@ it("only converts a local conversation after the explicit share action", async (
   fireEvent.click(screen.getByRole("button", { name: "convertAndShare" }))
   await waitFor(() => expect(mockConvert).toHaveBeenCalled())
 })
+it("offers no share for a team room, and says why rather than hiding the button", async () => {
+  // Converting a team room left it as both a team session and a shared one:
+  // `useTeamChat` kept writing replies locally while the sync pulled server
+  // events into the same list. A hidden button could not tell "not for this
+  // conversation" from "broken", so it stays visible and disabled.
+  configured()
+  render(<SharedSessionPanel session={{ ...session(), kind: "team", teamId: "team_1" }} />)
+  fireEvent.click(screen.getByRole("button", { name: "openPrivateSession" }))
+  const share = await screen.findByRole("button", { name: "convertAndShare" })
+  expect(share).toBeDisabled()
+  expect(screen.getByText("teamRoomConversion")).toBeInTheDocument()
+  fireEvent.click(share)
+  expect(mockConvert).not.toHaveBeenCalled()
+})
 it("accepts an invitation from private conversation controls", async () => {
   const client = configured()
   mockSync.mockResolvedValue({ localSessionId: "joined" })

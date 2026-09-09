@@ -85,6 +85,28 @@ export interface SharedChatConversionResult {
   importedAttachmentCount: number
 }
 
+/**
+ * A character-team room cannot be converted, yet.
+ *
+ * Conversion leaves `kind: "team"` and `teamId` on the local row and adds
+ * `collaboration` beside them, which makes the session two things at once:
+ * `desktop-chat-workspace` still routes its sends to `useTeamChat`, which
+ * writes messages straight to Dexie, while `shared-chat-sync` pulls the
+ * server's events into the same list. Nothing reconciles the two, so the local
+ * members keep answering and no one else in the shared session ever sees it.
+ *
+ * Failing here is the honest outcome until a shared session can carry a team
+ * (which needs `shared-run-coordinator` to accept that one turn produces N
+ * agent messages rather than one). Silently half-working is worse than a
+ * refusal that says what is missing.
+ */
+export class SharedChatTeamSessionUnsupportedError extends Error {
+  constructor() {
+    super("A team conversation cannot be shared yet")
+    this.name = "SharedChatTeamSessionUnsupportedError"
+  }
+}
+
 export class SharedChatAttachmentImportRequiredError extends Error {
   constructor(readonly attachmentCount: number) {
     super("Shared chat conversion requires an attachment importer")
@@ -240,6 +262,7 @@ export async function convertLocalSessionToShared(
   assertSharedChatClientEnabled()
   const db = getDb()
   const { session: local, messages } = await readSource(input.localSessionId)
+  if (local.kind === "team") throw new SharedChatTeamSessionUnsupportedError()
   const files = attachmentCount(messages)
   if (
     files > 0 &&

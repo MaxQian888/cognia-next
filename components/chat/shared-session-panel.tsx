@@ -279,6 +279,11 @@ export function SharedSessionPanel({ session }: Props) {
     }
   }
 
+  // A character-team room writes its turns locally through `useTeamChat`, and
+  // a shared session's turns come from the server. Converting one leaves the
+  // row as both, with nothing reconciling the two writers.
+  const isTeamRoom = session.kind === "team"
+
   const shareHistory = async () => {
     if (!context || !session.projectId || !navigator.onLine) return
     setLoading(true)
@@ -543,7 +548,16 @@ export function SharedSessionPanel({ session }: Props) {
               {!online ? (
                 <p className="text-sm text-destructive">{t("offlineConversion")}</p>
               ) : null}
-              <Button className="w-full gap-2" disabled={loading || !online} onClick={shareHistory}>
+              {isTeamRoom ? (
+                <p className="text-sm text-muted-foreground">{t("teamRoomConversion")}</p>
+              ) : null}
+              {/* Disabled and explained rather than hidden: a missing button
+                  cannot distinguish "not for this conversation" from "broken". */}
+              <Button
+                className="w-full gap-2"
+                disabled={loading || !online || isTeamRoom}
+                onClick={shareHistory}
+              >
                 <Share2Icon className="size-4" /> {t("convertAndShare")}
               </Button>
             </div>

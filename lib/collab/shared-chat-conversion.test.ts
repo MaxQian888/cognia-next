@@ -1,6 +1,10 @@
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { convertLocalSessionToShared, resolveSharedAttachmentParts } from "./shared-chat-conversion"
+import {
+  SharedChatTeamSessionUnsupportedError,
+  convertLocalSessionToShared,
+  resolveSharedAttachmentParts,
+} from "./shared-chat-conversion"
 
 jest.mock("@/lib/db/schema", () => {
   const actual = jest.requireActual("@/lib/db/schema")
@@ -199,6 +203,41 @@ describe("local-to-shared chat conversion", () => {
 
     expect((await getDb().sessions.get("local_1"))?.collaboration).toBeUndefined()
     expect(client.updateSharedSession).not.toHaveBeenCalled()
+  })
+
+  it("refuses a character-team room before it creates anything on the server", async () => {
+    // Converting one left `kind: "team"` and `teamId` on the row beside the
+    // new `collaboration` block, so the session became two things at once:
+    // `useTeamChat` kept writing replies straight to Dexie while the sync
+    // pulled the server's events into the same list, and nobody outside ever
+    // saw the room answer. Refusing is the honest outcome until a shared
+    // session can carry a team.
+    await getDb().sessions.put({
+      id: "local_team",
+      projectId: "workspace_1",
+      title: "Doc Polishers",
+      kind: "team",
+      teamId: "team_1",
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const client = {
+      identity: jest.fn(),
+      createSharedSession: jest.fn(),
+      appendSessionEvent: jest.fn(),
+      updateSharedSession: jest.fn(),
+    }
+
+    await expect(
+      convertLocalSessionToShared(client as never, {
+        localSessionId: "local_team",
+        orgId: "org_1",
+        workspaceId: "workspace_1",
+      })
+    ).rejects.toThrow(SharedChatTeamSessionUnsupportedError)
+
+    expect(client.createSharedSession).not.toHaveBeenCalled()
+    expect((await getDb().sessions.get("local_team"))?.collaboration).toBeUndefined()
   })
 })
 

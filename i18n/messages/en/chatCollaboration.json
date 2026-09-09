@@ -89,5 +89,6 @@
   "requestAI": "Request AI",
   "takeoverExecution": "Take over execution",
   "connected": "Connected",
-  "connectionStale": "Reconnecting · draft stays local"
+  "connectionStale": "Reconnecting · draft stays local",
+  "teamRoomConversion": "A team conversation cannot be shared yet: its replies are produced locally, and a shared session's come from the server."
 }

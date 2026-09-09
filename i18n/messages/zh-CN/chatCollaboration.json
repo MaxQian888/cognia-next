@@ -89,5 +89,6 @@
   "requestAI": "请求 AI 回复",
   "takeoverExecution": "接管执行",
   "connected": "已连接",
-  "connectionStale": "正在重连 · 草稿保留在本机"
+  "connectionStale": "正在重连 · 草稿保留在本机",
+  "teamRoomConversion": "团队会话暂时无法共享：它的回复在本机生成，而共享会话的回复来自服务端。"
 }
