@@ -95,8 +95,17 @@ export interface CancellationOptions {
  * silence rather than duration.
  */
 export function createTurnCancellation(options: CancellationOptions = {}): TurnCancellation & {
-  /** Reset the idle deadline. Call on every stream event. */
+  /** Reset the idle deadline. Call on every stream event. A no-op while paused. */
   noteActivity(): void
+  /**
+   * Suspend the idle deadline while a tool is executing. The provider stream
+   * is legitimately silent for as long as a tool runs, and a dispatched
+   * sub-agent or a long build easily outlasts the idle budget. Reentrant: one
+   * `resumeIdle()` per `pauseIdle()`, and the deadline re-arms on the last.
+   */
+  pauseIdle(): void
+  /** Release one pause. Re-arms the idle deadline once nothing is paused. */
+  resumeIdle(): void
 } {
   const controller = new AbortController()
   const cleanups: Array<() => void | Promise<void>> = []
@@ -151,11 +160,23 @@ export function createTurnCancellation(options: CancellationOptions = {}): TurnC
     proc.on("SIGTERM", onSigterm)
   }
 
+  let idlePauseDepth = 0
   const armIdle = (): void => {
     if (options.idleTimeoutMs === undefined || options.idleTimeoutMs <= 0) return
+    if (idlePauseDepth > 0) return
     if (idleTimer) clearTimeout(idleTimer)
     idleTimer = setTimeout(() => cancel("idle-timeout"), options.idleTimeoutMs)
     idleTimer.unref?.()
+  }
+  const pauseIdle = (): void => {
+    idlePauseDepth += 1
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = null
+  }
+  const resumeIdle = (): void => {
+    if (idlePauseDepth === 0) return
+    idlePauseDepth -= 1
+    if (idlePauseDepth === 0) armIdle()
   }
   armIdle()
 
@@ -172,6 +193,8 @@ export function createTurnCancellation(options: CancellationOptions = {}): TurnC
     signal: controller.signal,
     cancel,
     noteActivity: armIdle,
+    pauseIdle,
+    resumeIdle,
     onCleanup(cleanup) {
       cleanups.push(cleanup)
       return () => {

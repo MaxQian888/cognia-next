@@ -292,3 +292,50 @@ describe("teardown", () => {
     }
   })
 })
+
+describe("idle deadline while a tool runs", () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  it("suspends the idle clock between pauseIdle and resumeIdle", () => {
+    const scope = createTurnCancellation({ idleTimeoutMs: 1000 })
+    scope.pauseIdle()
+    jest.advanceTimersByTime(60_000)
+    expect(scope.cancelled).toBe(false)
+    // Activity while paused does not re-arm the clock either.
+    scope.noteActivity()
+    jest.advanceTimersByTime(60_000)
+    expect(scope.cancelled).toBe(false)
+    scope.resumeIdle()
+    jest.advanceTimersByTime(1_001)
+    expect(scope.reason).toBe("idle-timeout")
+  })
+
+  it("is reentrant: the clock re-arms only after the last resume", () => {
+    const scope = createTurnCancellation({ idleTimeoutMs: 1000 })
+    scope.pauseIdle()
+    scope.pauseIdle()
+    scope.resumeIdle()
+    jest.advanceTimersByTime(5_000)
+    expect(scope.cancelled).toBe(false)
+    scope.resumeIdle()
+    jest.advanceTimersByTime(1_001)
+    expect(scope.reason).toBe("idle-timeout")
+  })
+
+  it("ignores a resume without a matching pause", () => {
+    const scope = createTurnCancellation({ idleTimeoutMs: 1000 })
+    scope.resumeIdle()
+    jest.advanceTimersByTime(900)
+    scope.noteActivity()
+    jest.advanceTimersByTime(900)
+    expect(scope.cancelled).toBe(false)
+  })
+
+  it("still honours the wall clock while paused", () => {
+    const scope = createTurnCancellation({ timeoutMs: 5_000, idleTimeoutMs: 1000 })
+    scope.pauseIdle()
+    jest.advanceTimersByTime(5_001)
+    expect(scope.reason).toBe("timeout")
+  })
+})

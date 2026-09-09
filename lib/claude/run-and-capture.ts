@@ -48,6 +48,7 @@ import type { PluginMessage } from "@/types/plugin/plugin"
 import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 
 /**
@@ -667,6 +668,9 @@ async function captureAssistantReplyCore(
   options?: SendOptions,
   cap?: RunAndCaptureOptions
 ): Promise<RunAndCaptureResult> {
+  if (isExternalAgentProviderId(options?.provider)) {
+    return captureHostExternalReply(sessionId, prompt, options, cap)
+  }
   const timeoutMs = cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const idleTimeoutMs = cap?.idleTimeoutMs ?? 0
   const signal = cap?.signal
@@ -1202,6 +1206,7 @@ async function captureAssistantReplyCore(
                   id?: string
                   name?: string
                   input?: Record<string, unknown>
+                  state?: string
                 }>
               }
             | undefined
@@ -1239,7 +1244,12 @@ async function captureAssistantReplyCore(
                 block?.type === "tool_use" &&
                 typeof block.name === "string" &&
                 block.input &&
-                typeof block.input === "object"
+                typeof block.input === "object" &&
+                // The AI SDK adapter re-emits the snapshot while the input is
+                // still streaming, with `input: {}` and `state:
+                // "input-streaming"`. Recording that would make the id-dedup
+                // below keep the empty arguments and drop the real ones.
+                block.state !== "input-streaming"
               ) {
                 flushTextSnapshot()
                 applyA2UIToolCall(surfaceAcc, block.name, block.input)
@@ -1472,4 +1482,260 @@ async function captureAssistantReplyCore(
         )
       })
   })
+}
+
+/** Host-owned agents use their admitted run plane, inside the same middleware and lease. */
+async function captureHostExternalReply(
+  sessionId: string,
+  prompt: SendContent,
+  options?: SendOptions,
+  cap?: RunAndCaptureOptions
+): Promise<RunAndCaptureResult> {
+  const { externalAgentIdFromProviderId } = await import("@/lib/ai/agent/external/session-models")
+  const { getRemoteHostConfig } = await import("@/lib/ai/agent/external/remote-host-configs")
+  const {
+    startRemoteExternalTurn,
+    subscribeRemoteExternalRun,
+    cancelRemoteExternalTurn,
+    resolveRemotePermission,
+  } = await import("@/lib/ai/agent/external/remote-run-client")
+  const { remoteDecisionId } = await import("@/lib/ai/agent/external/remote-run-service")
+  const { canonicalEventFromExternalEvent, captureEventFromCanonical } =
+    await import("@/lib/ai/agent/execution/event-envelope")
+  const configId = externalAgentIdFromProviderId(options?.provider)
+  if (!configId)
+    throw new RunAndCaptureError("External agent selection has no configuration id", "send_failed")
+  if (typeof prompt !== "string" && prompt.some((block) => block.type !== "text")) {
+    throw new RunAndCaptureError(
+      "Host external-agent turns require extracted text content",
+      "send_failed"
+    )
+  }
+  const config = await getRemoteHostConfig(configId)
+  if (!config)
+    throw new RunAndCaptureError(
+      "Selected external agent configuration no longer exists",
+      "send_failed"
+    )
+  const runId = options?.turnId ?? `capture_${crypto.randomUUID()}`
+  const textPrompt =
+    typeof prompt === "string" ? prompt : prompt.map((b) => ("text" in b ? b.text : "")).join("\n")
+  const hostPrompt = [options?.systemPrompt, options?.appendSystemPrompt, textPrompt]
+    .filter(Boolean)
+    .join("\n\n")
+  const timeoutMs = cap?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const surfaceAcc: SurfaceAccumulator = { surfaces: new Map(), order: [] }
+  let usage: UsageInfo | undefined
+  const toolCalls = new Map<string, { name: string; input: Record<string, unknown> }>()
+  let text = ""
+  let sdkSessionId: string | undefined
+  let errorDetail: string | undefined
+  let settled = false
+  let started = false
+  let shouldCancel = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let idle: ReturnType<typeof setTimeout> | undefined
+  const busy = new Set<string>()
+  const observe = (fn: (() => unknown) | undefined) => {
+    if (fn) {
+      try {
+        void Promise.resolve(fn()).catch(() => undefined)
+      } catch {
+        /* Observer only. */
+      }
+    }
+  }
+  let resolve!: (value: RunAndCaptureResult) => void
+  let reject!: (error: Error) => void
+  const finished = new Promise<RunAndCaptureResult>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  // A start RPC can fail after a synchronous event has already rejected capture.
+  void finished.catch(() => undefined)
+  const fail = (
+    message: string,
+    code: "session_error" | "aborted" | "send_failed" = "session_error"
+  ) => {
+    if (settled) return
+    settled = true
+    shouldCancel = true
+    if (started) void cancelRemoteExternalTurn(runId).catch(() => undefined)
+    reject(new RunAndCaptureError(message, code))
+  }
+  const armIdle = () => {
+    clearTimeout(idle)
+    if (cap?.idleTimeoutMs && busy.size === 0 && !settled) {
+      idle = setTimeout(() => fail("External agent stream timed out"), cap.idleTimeoutMs)
+    }
+  }
+  const abort = () => fail("External agent turn aborted", "aborted")
+  const stop = subscribeRemoteExternalRun(runId, {
+    onGap: () => fail("External agent stream has missing events"),
+    onEvent: (event) => {
+      if (settled) return
+      armIdle()
+      if (event.type === "error") errorDetail = event.error
+      if (event.sessionId && event.sessionId !== sdkSessionId) {
+        sdkSessionId = event.sessionId
+        observe(cap?.onSdkSessionId ? () => cap.onSdkSessionId!(event.sessionId!) : undefined)
+      }
+      if (event.type === "elicitation_request") {
+        fail("External agent requested interactive input unavailable on this capture surface")
+        return
+      }
+      if (event.type === "permission_request") {
+        const request = event.request
+        const requestId = request.requestId || request.id
+        if (!requestId) {
+          fail("External agent permission request has no id")
+          return
+        }
+        busy.add(requestId)
+        clearTimeout(idle)
+        void (async () => {
+          let decision: CapturePermissionDecision = { decision: "deny" }
+          try {
+            if (cap?.onPermissionRequest)
+              decision = await cap.onPermissionRequest({
+                type: "permission_request",
+                sessionId,
+                requestId,
+                toolUseID: request.toolCallId ?? requestId,
+                toolName: request.toolInfo?.name ?? "unknown",
+                input: request.rawInput ?? request.toolInfo?.parameters ?? {},
+                title: request.title,
+                description: request.reason,
+              })
+            // This protocol cannot rewrite tool arguments. Never approve the original
+            // when the responder only approved a different input.
+            const outcome = await resolveRemotePermission(
+              remoteDecisionId(runId, requestId),
+              decision.updatedInput === undefined ? decision.decision : "deny"
+            )
+            if (!outcome.resolved) fail("External agent permission is no longer pending")
+          } catch {
+            fail("Could not resolve external agent permission")
+          } finally {
+            busy.delete(requestId)
+            armIdle()
+          }
+        })()
+        return
+      }
+      if ((event.type === "message_end" || event.type === "done") && event.tokenUsage) {
+        const tokens = event.tokenUsage
+        usage = {
+          inputTokens: (usage?.inputTokens ?? 0) + tokens.promptTokens,
+          outputTokens: (usage?.outputTokens ?? 0) + tokens.completionTokens,
+          cacheReadInputTokens: (usage?.cacheReadInputTokens ?? 0) + (tokens.cacheReadTokens ?? 0),
+          cacheCreationInputTokens:
+            (usage?.cacheCreationInputTokens ?? 0) + (tokens.cacheWriteTokens ?? 0),
+        }
+      }
+      if (event.type === "tool_use_start") {
+        toolCalls.set(event.toolUseId, { name: event.toolName, input: event.rawInput ?? {} })
+        busy.add(event.toolUseId)
+        clearTimeout(idle)
+      }
+      if (event.type === "tool_use_end") {
+        const tool = toolCalls.get(event.toolUseId)
+        if (tool) tool.input = event.input
+      }
+      const tool = event.type === "tool_result" ? toolCalls.get(event.toolUseId) : undefined
+      const canonical =
+        event.type === "tool_use_start"
+          ? canonicalEventFromExternalEvent({
+              type: "tool_call",
+              id: event.toolUseId,
+              name: event.toolName,
+              input: event.rawInput ?? {},
+            })
+          : event.type === "tool_result"
+            ? canonicalEventFromExternalEvent({
+                ...event,
+                id: event.toolUseId,
+                name: event.toolName ?? tool?.name,
+              })
+            : canonicalEventFromExternalEvent(event)
+      const capture = captureEventFromCanonical(canonical)
+      if (capture?.type === "text-delta") {
+        text += capture.delta
+        observe(cap?.onPartial ? () => cap.onPartial!(text) : undefined)
+      }
+      if (capture?.type === "tool-call") {
+        busy.add(capture.id ?? capture.toolName)
+        clearTimeout(idle)
+        applyA2UIToolCall(surfaceAcc, capture.toolName, capture.input)
+      }
+      if (capture?.type === "tool-result") {
+        observe(
+          cap?.onToolResultReview
+            ? () =>
+                cap.onToolResultReview!({
+                  toolName: capture.toolName,
+                  input: tool?.input ?? {},
+                  result: capture.result,
+                  isError: capture.isError === true,
+                })
+            : undefined
+        )
+        busy.delete(capture.id ?? capture.toolName)
+        armIdle()
+      }
+      if (cap?.onCanonicalEvent) observe(() => cap.onCanonicalEvent!(canonical))
+      else if (capture) observe(() => cap?.onEvent?.(capture))
+    },
+    onTerminal: (terminal, error) => {
+      if (settled) return
+      if (terminal !== "completed") {
+        fail(error ?? errorDetail ?? terminal)
+        return
+      }
+      if (!text.trim()) {
+        fail(errorDetail ?? "External agent returned no assistant text")
+        return
+      }
+      settled = true
+      resolve({
+        text,
+        messageId: runId,
+        sdkSessionId,
+        usage,
+        a2uiSurfaces: Object.fromEntries(surfaceAcc.surfaces),
+        a2uiSurfaceOrder: surfaceAcc.order,
+      })
+    },
+  })
+  cap?.signal?.addEventListener("abort", abort, { once: true })
+  try {
+    if (cap?.signal?.aborted) abort()
+    if (timeoutMs > 0) timer = setTimeout(() => fail("External agent turn timed out"), timeoutMs)
+    if (!settled) {
+      const result = await startRemoteExternalTurn({
+        runId,
+        chatSessionId: sessionId,
+        stamp: {
+          configId,
+          revision: config.revision,
+          lifecycleGeneration: config.lifecycleGeneration,
+        },
+        prompt: hostPrompt,
+        model: options?.model,
+        reasoningEffort: options?.requestedEffort ?? options?.effort,
+        externalSessionId: options?.resumeSessionId,
+      })
+      started = result.started
+      if (started && shouldCancel) void cancelRemoteExternalTurn(runId).catch(() => undefined)
+      if (!result.started)
+        fail(`External agent admission refused: ${JSON.stringify(result.refusal)}`, "send_failed")
+    }
+    return await finished
+  } finally {
+    clearTimeout(timer)
+    clearTimeout(idle)
+    cap?.signal?.removeEventListener("abort", abort)
+    stop()
+    releaseSkillLoadContext(sessionId)
+  }
 }

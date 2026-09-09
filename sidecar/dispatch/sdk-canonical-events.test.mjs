@@ -515,3 +515,99 @@ test("non-objects are ignored", () => {
   assert.deepEqual(canonicalEventsFromSdkMessage(null, createSdkMappingState()), [])
   assert.deepEqual(canonicalEventsFromSdkMessage("nope", createSdkMappingState()), [])
 })
+
+test("a tool call surfaces once, from the first sealed snapshot, with its real input", () => {
+  const state = createSdkMappingState()
+  const snapshot = (block) => ({ type: "assistant", message: { id: "m1", content: [block] } })
+  // The AI SDK adapter marks the block input-streaming from tool-input-start
+  // until the input is sealed, and its input is empty for that whole window.
+  const streaming = canonicalEventsFromSdkMessage(
+    snapshot({
+      type: "tool_use",
+      id: "t1",
+      name: "dispatch_agent",
+      input: {},
+      state: "input-streaming",
+    }),
+    state
+  )
+  assert.deepEqual(streaming, [])
+  const sealed = canonicalEventsFromSdkMessage(
+    snapshot({
+      type: "tool_use",
+      id: "t1",
+      name: "dispatch_agent",
+      input: { subagentId: "Explore" },
+    }),
+    state
+  )
+  assert.deepEqual(sealed, [
+    {
+      kind: "tool-call",
+      toolName: "dispatch_agent",
+      input: { subagentId: "Explore" },
+      toolCallId: "t1",
+    },
+  ])
+  // Every later snapshot repeats the sealed block (the tool-call finalizer, the
+  // approval request, each following text delta). None of them is a new call.
+  for (let i = 0; i < 3; i += 1) {
+    const again = canonicalEventsFromSdkMessage(
+      snapshot({
+        type: "tool_use",
+        id: "t1",
+        name: "dispatch_agent",
+        input: { subagentId: "Explore" },
+      }),
+      state
+    )
+    assert.deepEqual(again, [])
+  }
+  // A different id is a different call.
+  const other = canonicalEventsFromSdkMessage(
+    snapshot({ type: "tool_use", id: "t2", name: "Read", input: { file: "a" } }),
+    state
+  )
+  assert.equal(other.length, 1)
+  assert.equal(other[0].toolCallId, "t2")
+})
+
+test("a tool_use block without an id is never deduplicated away", () => {
+  const state = createSdkMappingState()
+  const message = {
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] },
+  }
+  assert.equal(canonicalEventsFromSdkMessage(message, state).length, 1)
+  assert.equal(canonicalEventsFromSdkMessage(message, state).length, 1)
+})
+
+test("a streamed content_block_start for a tool_use yields no tool-call of its own", () => {
+  const state = createSdkMappingState()
+  const start = canonicalEventsFromSdkMessage(
+    {
+      type: "stream_event",
+      event: {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "tool_use", id: "t1", name: "Bash", input: {} },
+      },
+    },
+    state
+  )
+  assert.deepEqual(start, [])
+  // The sealed assistant snapshot that follows is the one record of the call.
+  const sealed = canonicalEventsFromSdkMessage(
+    {
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }],
+      },
+    },
+    state
+  )
+  assert.deepEqual(
+    sealed.map((e) => [e.kind, e.toolCallId, e.input]),
+    [["tool-call", "t1", { command: "ls" }]]
+  )
+})

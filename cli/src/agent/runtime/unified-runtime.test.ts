@@ -1117,3 +1117,79 @@ describe("provider-session lifetime", () => {
     lease.close()
   })
 })
+
+describe("idle deadline while a tool runs", () => {
+  const envelope = (event: CanonicalAgentEvent): AgentEventEnvelope => ({
+    schemaVersion: 1,
+    eventId: "inner",
+    sequence: 0,
+    sessionId: "fake",
+    runId: "inner",
+    turnId: "inner",
+    attemptId: "inner",
+    hostRef: "cli",
+    runtime: "builtin",
+    timestamp: new Date(0).toISOString(),
+    event,
+  })
+
+  it("does not read a slow tool as a stalled stream", async () => {
+    // A dispatched sub-agent or a long build keeps the provider stream silent
+    // far longer than the idle budget. The tool-call / tool-result pair brackets
+    // that silence.
+    const fsx = createMemoryFs()
+    const { result } = await runUnifiedTurn(
+      params(fsx, {
+        idleTimeoutMs: 20,
+        createSession: (() => ({
+          sessionId: "fake",
+          async send(_prompt: string, opts: SendTurnOptions) {
+            opts.onEnvelope?.(
+              envelope({
+                kind: "tool-call",
+                toolName: "dispatch_agent",
+                input: {},
+                toolCallId: "t1",
+              })
+            )
+            await new Promise((resolve) => setTimeout(resolve, 120))
+            if (opts.signal?.aborted) throw Object.assign(new Error("t"), { name: "AbortError" })
+            opts.onEnvelope?.(
+              envelope({
+                kind: "tool-result",
+                toolName: "dispatch_agent",
+                toolCallId: "t1",
+                result: "ok",
+              })
+            )
+            return { text: "child reported" } as unknown as RunAndCaptureResult
+          },
+          async close() {},
+        })) as (p: AgentSessionParams) => AgentSession,
+      })
+    )
+    expect(result.error).toBeUndefined()
+    expect(result.text).toBe("child reported")
+  })
+
+  it("re-arms the idle clock once the last tool result arrives", async () => {
+    const fsx = createMemoryFs()
+    const { result } = await runUnifiedTurn(
+      params(fsx, {
+        idleTimeoutMs: 20,
+        createSession: (() => ({
+          sessionId: "fake",
+          async send(_prompt: string, opts: SendTurnOptions) {
+            opts.onEvent?.({ type: "tool-call", toolName: "bash", input: {}, id: "t1" })
+            opts.onEvent?.({ type: "tool-result", toolName: "bash", id: "t1", result: "ok" })
+            await new Promise((resolve) => setTimeout(resolve, 120))
+            if (opts.signal?.aborted) throw Object.assign(new Error("t"), { name: "AbortError" })
+            return { text: "too late" } as unknown as RunAndCaptureResult
+          },
+          async close() {},
+        })) as (p: AgentSessionParams) => AgentSession,
+      })
+    )
+    expect(result.error?.code).toBe("idle_timeout")
+  })
+})

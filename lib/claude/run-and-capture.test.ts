@@ -1407,6 +1407,54 @@ describe("runAndCaptureAssistantReply", () => {
     expect(toolCalls[0]).toMatchObject({ type: "tool-call", toolName: "ls", id: "tu_1" })
   })
 
+  it("waits for the sealed snapshot: an input-streaming block is not the call", async () => {
+    // The AI SDK adapter snapshots the block from `tool-input-start` with
+    // `input: {}` and `state: "input-streaming"`. The sealed snapshot with the
+    // real arguments follows. First-seen dedup alone kept the empty one.
+    const streamingSnapshot: ClaudeEvent = {
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "assistant",
+        uuid: "uuid-tu",
+        session_id: SESSION,
+        message: {
+          id: "m-tu",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tu_s",
+              name: "dispatch_agent",
+              input: {},
+              state: "input-streaming",
+            },
+          ],
+        },
+      },
+    } as unknown as ClaudeEvent
+    const events: Array<{ type: string; input?: Record<string, unknown> }> = []
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      timeoutMs: 1_000,
+      onEvent: (e) => events.push(e as { type: string; input?: Record<string, unknown> }),
+    })
+    await Promise.resolve()
+    fire(streamingSnapshot)
+    fire(streamingSnapshot)
+    fire(toolUseEventWithId("tu_s", "dispatch_agent", { subagentId: "Explore", prompt: "go" }))
+    fire(toolUseEventWithId("tu_s", "dispatch_agent", { subagentId: "Explore", prompt: "go" }))
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    const toolCalls = events.filter((e) => e.type === "tool-call")
+    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls[0]).toMatchObject({
+      type: "tool-call",
+      id: "tu_s",
+      input: { subagentId: "Explore", prompt: "go" },
+    })
+  })
+
   it("does not reject a tool-only turn (tool calls, no closing text)", async () => {
     // Multi-round tool sessions that end after a tool call without a final
     // text summary used to crash with no_assistant_text. The tool calls ARE the
@@ -1958,5 +2006,255 @@ describe("subscribeCaptureFromEnvelopes (ADR-0090 Phase 3)", () => {
 
     await expect(subscribeCaptureFromEnvelopes("s1", jest.fn())).resolves.not.toBeNull()
     expect(subscribeAgentEventsMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+jest.mock("@/lib/ai/agent/external/remote-run-service", () => ({
+  remoteDecisionId: (runId: string, requestId: string) => `${runId}:${requestId}`,
+}))
+const getRemoteConfigMock = jest.fn()
+const startExternalTurnMock = jest.fn()
+const cancelExternalTurnMock = jest.fn<Promise<boolean>, unknown[]>(async () => true)
+const resolveExternalPermissionMock = jest.fn<Promise<{ resolved: boolean }>, unknown[]>(
+  async () => ({ resolved: true })
+)
+let externalHandlers:
+  import("@/lib/ai/agent/external/remote-run-client").RemoteRunSubscription | undefined
+const stopExternalMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/remote-host-configs", () => ({
+  getRemoteHostConfig: (...args: unknown[]) => getRemoteConfigMock(...args),
+}))
+jest.mock("@/lib/ai/agent/external/remote-run-client", () => ({
+  subscribeRemoteExternalRun: (
+    _id: string,
+    handlers: import("@/lib/ai/agent/external/remote-run-client").RemoteRunSubscription
+  ) => {
+    externalHandlers = handlers
+    return stopExternalMock
+  },
+  startRemoteExternalTurn: (...args: unknown[]) => startExternalTurnMock(...args),
+  cancelRemoteExternalTurn: (...args: unknown[]) => cancelExternalTurnMock(...args),
+  resolveRemotePermission: (...args: unknown[]) => resolveExternalPermissionMock(...args),
+}))
+
+describe("host-owned external agent capture", () => {
+  beforeEach(() => {
+    externalHandlers = undefined
+    getRemoteConfigMock.mockResolvedValue({
+      configId: "pi-1",
+      revision: "rev-1",
+      lifecycleGeneration: 2,
+    })
+    startExternalTurnMock.mockReset()
+    stopExternalMock.mockClear()
+    cancelExternalTurnMock.mockClear()
+  })
+
+  it("dispatches Pi's provider marker to the host runner and captures its reply", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      externalHandlers!.onEvent(
+        { type: "message_delta", timestamp: new Date(), delta: { type: "text", text: "OK" } },
+        {} as never
+      )
+      externalHandlers!.onTerminal("completed", undefined)
+      return { started: true }
+    })
+    const onPartial = jest.fn()
+    const result = await runAndCaptureAssistantReply(
+      SESSION,
+      "hello",
+      {
+        provider: "cognia:external-agent:pi-1",
+        model: "commandcode/meta/muse-spark-1.3-contributor",
+      },
+      { execution: { skip: true }, onPartial, timeoutMs: 100 }
+    )
+    expect(result.text).toBe("OK")
+    expect(startExternalTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatSessionId: SESSION,
+        prompt: "hello",
+        model: "commandcode/meta/muse-spark-1.3-contributor",
+        stamp: { configId: "pi-1", revision: "rev-1", lifecycleGeneration: 2 },
+      })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(onPartial).toHaveBeenCalledWith("OK")
+    expect(stopExternalMock).toHaveBeenCalled()
+  })
+  it("surfaces admission refusals without falling back to the SDK", async () => {
+    startExternalTurnMock.mockResolvedValue({
+      started: false,
+      refusal: { kind: "config", reason: "disabled" },
+    })
+    await expect(
+      runAndCaptureAssistantReply(
+        SESSION,
+        "hello",
+        { provider: "cognia:external-agent:pi-1" },
+        { execution: { skip: true } }
+      )
+    ).rejects.toThrow("admission refused")
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(stopExternalMock).toHaveBeenCalled()
+  })
+
+  it("cancels an admitted run when the caller aborts", async () => {
+    const controller = new AbortController()
+    startExternalTurnMock.mockImplementation(async () => {
+      controller.abort()
+      return { started: true }
+    })
+    await expect(
+      runAndCaptureAssistantReply(
+        SESSION,
+        "hello",
+        { provider: "cognia:external-agent:pi-1" },
+        { execution: { skip: true }, signal: controller.signal }
+      )
+    ).rejects.toMatchObject({ code: "aborted" })
+    expect(cancelExternalTurnMock).toHaveBeenCalledTimes(1)
+    expect(stopExternalMock).toHaveBeenCalled()
+  })
+
+  it("preserves the provider's failure detail", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      externalHandlers!.onEvent(
+        { type: "error", error: "402 Insufficient Balance", timestamp: new Date() },
+        {} as never
+      )
+      externalHandlers!.onTerminal("failed", undefined)
+      return { started: true }
+    })
+    await expect(
+      runAndCaptureAssistantReply(
+        SESSION,
+        "hello",
+        { provider: "cognia:external-agent:pi-1" },
+        { execution: { skip: true } }
+      )
+    ).rejects.toThrow("402 Insufficient Balance")
+  })
+
+  it("times out and cancels a silent host run", async () => {
+    startExternalTurnMock.mockResolvedValue({ started: true })
+    await expect(
+      runAndCaptureAssistantReply(
+        SESSION,
+        "hello",
+        { provider: "cognia:external-agent:pi-1" },
+        { execution: { skip: true }, timeoutMs: 10 }
+      )
+    ).rejects.toThrow("timed out")
+    expect(cancelExternalTurnMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("routes permission requests through the capture responder", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      externalHandlers!.onEvent(
+        {
+          type: "permission_request",
+          timestamp: new Date(),
+          request: {
+            id: "permission-1",
+            toolCallId: "tool-1",
+            toolInfo: { name: "bash", parameters: { command: "pwd" } },
+          },
+        } as never,
+        {} as never
+      )
+      return { started: true }
+    })
+    resolveExternalPermissionMock.mockImplementation(async () => {
+      externalHandlers!.onEvent(
+        { type: "message_delta", timestamp: new Date(), delta: { type: "text", text: "done" } },
+        {} as never
+      )
+      externalHandlers!.onTerminal("completed", undefined)
+      return { resolved: true }
+    })
+    const onPermissionRequest = jest.fn(async () => ({ decision: "deny" as const }))
+    const result = await runAndCaptureAssistantReply(
+      SESSION,
+      "hello",
+      { provider: "cognia:external-agent:pi-1" },
+      { execution: { skip: true }, onPermissionRequest, timeoutMs: 100 }
+    )
+    expect(result.text).toBe("done")
+    expect(onPermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "bash", toolUseID: "tool-1" })
+    )
+    expect(resolveExternalPermissionMock).toHaveBeenCalledWith(
+      expect.stringContaining("permission-1"),
+      "deny"
+    )
+  })
+  it("projects Pi tool activity, observes results, and retains billed usage", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      const emit = (event: unknown) => externalHandlers!.onEvent(event as never, {} as never)
+      emit({
+        type: "tool_use_start",
+        toolUseId: "t1",
+        toolName: "bash",
+        rawInput: { command: "pwd" },
+      })
+      emit({ type: "tool_use_end", toolUseId: "t1", input: { command: "pwd" } })
+      emit({ type: "tool_result", toolUseId: "t1", result: "/project" })
+      emit({ type: "message_delta", delta: { type: "text", text: "/project" } })
+      emit({
+        type: "message_end",
+        tokenUsage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+      })
+      externalHandlers!.onTerminal("completed", undefined)
+      return { started: true }
+    })
+    const onEvent = jest.fn()
+    const onToolResultReview = jest.fn()
+    const result = await runAndCaptureAssistantReply(
+      SESSION,
+      "pwd",
+      { provider: "cognia:external-agent:pi-1" },
+      { execution: { skip: true }, onEvent, onToolResultReview, timeoutMs: 100 }
+    )
+    expect(result.usage).toMatchObject({ inputTokens: 10, outputTokens: 2 })
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool-call", id: "t1", toolName: "bash" })
+    )
+    expect(onToolResultReview).toHaveBeenCalledWith({
+      toolName: "bash",
+      input: { command: "pwd" },
+      result: "/project",
+      isError: false,
+    })
+  })
+  it("persists Pi's native session id from ordinary events and resumes it on the next turn", async () => {
+    startExternalTurnMock.mockImplementation(async () => {
+      externalHandlers!.onEvent(
+        {
+          type: "message_delta",
+          timestamp: new Date(),
+          sessionId: "pi-native-1",
+          delta: { type: "text", text: "remembered" },
+        },
+        {} as never
+      )
+      externalHandlers!.onTerminal("completed", undefined)
+      return { started: true }
+    })
+    const onSdkSessionId = jest.fn()
+    const options = { provider: "cognia:external-agent:pi-1" }
+    const cap = { execution: { skip: true }, onSdkSessionId, timeoutMs: 100 }
+    const first = await runAndCaptureAssistantReply(SESSION, "remember", options, cap)
+    expect(first.sdkSessionId).toBe("pi-native-1")
+    expect(onSdkSessionId).toHaveBeenCalledWith("pi-native-1")
+    await runAndCaptureAssistantReply(
+      SESSION,
+      "recall",
+      { ...options, resumeSessionId: first.sdkSessionId },
+      cap
+    )
+    expect(startExternalTurnMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ externalSessionId: "pi-native-1" })
+    )
   })
 })

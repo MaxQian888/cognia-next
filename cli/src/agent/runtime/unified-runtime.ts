@@ -396,6 +396,21 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
         })
       }
 
+      // Tool calls of THIS attempt still waiting for their result. While any
+      // tool runs the provider stream is silent by design (a dispatched
+      // sub-agent or a long build easily outlasts the idle budget), so the idle
+      // deadline is suspended until the last one resolves. Ids come from the
+      // canonical events, which surface each call exactly once.
+      const inFlightToolCalls = new Set<string>()
+      const noteToolCall = (id: string | undefined): void => {
+        if (!id || inFlightToolCalls.has(id)) return
+        inFlightToolCalls.add(id)
+        cancellation.pauseIdle()
+      }
+      const noteToolResult = (id: string | undefined): void => {
+        if (!id || !inFlightToolCalls.delete(id)) return
+        cancellation.resumeIdle()
+      }
       try {
         const captured = await session.send(params.prompt, {
           gate: params.gate,
@@ -403,6 +418,9 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
           onEnvelope: (envelope) => {
             cancellation.noteActivity()
+            if (envelope.event.kind === "tool-call") noteToolCall(envelope.event.toolCallId)
+            else if (envelope.event.kind === "tool-result")
+              noteToolResult(envelope.event.toolCallId)
             // The outer attempt owns its lifecycle and input identity. All other
             // events must survive without narrowing through CaptureStreamEvent.
             if (envelope.event.kind === "lifecycle" || envelope.event.kind === "user-input") return
@@ -411,6 +429,8 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           onEvent: (event: CaptureStreamEvent) => {
             // Any byte of progress resets the idle deadline.
             cancellation.noteActivity()
+            if (event.type === "tool-call") noteToolCall(event.id)
+            else if (event.type === "tool-result") noteToolResult(event.id)
             emitter.fromCapture(event)
           },
         })
@@ -517,6 +537,10 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
         }
         failure = { code: signal.code, message: signal.message }
         attempt += 1
+      } finally {
+        // A tool whose result never arrived (the attempt failed mid-tool) must
+        // not leave the deadline suspended for the next attempt.
+        for (const id of [...inFlightToolCalls]) noteToolResult(id)
       }
     }
 

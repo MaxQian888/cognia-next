@@ -52,8 +52,39 @@ export function createSdkMappingState(opts = {}) {
     sawStreamEvents: false,
     activeStreamMessageId: undefined,
     streamedMessageIds: new Set(),
+    // Tool-use ids already surfaced as `tool-call`. Both rails re-send a
+    // sealed `tool_use` block in every later assistant snapshot (the AI SDK
+    // adapter emits one snapshot per input-streaming step, then one at seal,
+    // then one per text delta that follows), so without this a single call
+    // reached the persisted log and the CLI three to four times over.
+    emittedToolCallIds: new Set(),
     expectStructuredOutput: opts.expectStructuredOutput === true,
   }
+}
+
+/**
+ * Whether a `tool_use` block is still receiving its input. The AI SDK adapter
+ * marks the block `input-streaming` from `tool-input-start` until the input
+ * is sealed, and its `input` is `{}` for that whole window. Surfacing such a
+ * block as a `tool-call` records a call the model has not finished making,
+ * with arguments it never sent.
+ */
+function isToolInputStreaming(block) {
+  return block?.state === "input-streaming"
+}
+
+/**
+ * Whether this snapshot is the first time the block's id is seen. Blocks
+ * without an id cannot be correlated and always pass (both rails supply ids).
+ */
+function claimToolCallId(state, block) {
+  const id = asString(block?.id)
+  if (!id) return true
+  const seen = state.emittedToolCallIds instanceof Set ? state.emittedToolCallIds : null
+  if (!seen) return true
+  if (seen.has(id)) return false
+  seen.add(id)
+  return true
 }
 
 const asString = (v) => (typeof v === "string" ? v : undefined)
@@ -82,6 +113,10 @@ function fromAssistant(evt, state) {
     : state.sawStreamEvents
   for (const block of contentBlocks(evt.message)) {
     if (block?.type === "tool_use") {
+      // One `tool-call` per call, carrying the input the model actually sent:
+      // skip the snapshots taken while the input was still streaming, then
+      // let only the first sealed snapshot through.
+      if (isToolInputStreaming(block) || !claimToolCallId(state, block)) continue
       events.push(
         compact({
           kind: "tool-call",
@@ -164,17 +199,13 @@ function fromStreamEvent(evt, state) {
     }
     return [{ kind: "thinking-delta", delta: String(delta.thinking) }]
   }
-  const start = evt.event?.content_block
-  if (evt.event?.type === "content_block_start" && start?.type === "tool_use") {
-    return [
-      compact({
-        kind: "tool-call",
-        toolName: String(start.name ?? ""),
-        input: {},
-        toolCallId: asString(start.id),
-      }),
-    ]
-  }
+  // A `content_block_start` for a `tool_use` block deliberately yields nothing.
+  // The Anthropic API streams the arguments as `input_json_delta` frames after
+  // it, so the only input available here is `{}`. The authoritative
+  // `assistant` snapshot seals the same block with its real input and arrives
+  // before the tool executes, and that is the one `tool-call` the log keeps.
+  // Emitting here as well recorded every call twice, the first time with
+  // arguments the model never sent.
   return []
 }
 
