@@ -658,9 +658,17 @@ function header(req: RequestLike, name: string): string | undefined {
   return Array.isArray(value) ? value[0] : value
 }
 
+/** The one failure document a Host answers with (ADR-0175). */
 function publicError(res: ResponseLike, status: number, code: string, message: string): void {
   res.status(status).json({
-    error: { code, message, requestId: randomUUID(), retryable: status >= 500, details: {} },
+    type: `https://cognia.dev/problems/${code}`,
+    title: "Error",
+    status,
+    detail: message,
+    code,
+    requestId: randomUUID(),
+    retryable: status >= 500,
+    details: {},
   })
 }
 

@@ -1,3 +1,5 @@
+import { parseProblem } from "./problem"
+
 /**
  * A companion API refusal, carrying the machine-readable `code` alongside the
  * human message.
@@ -35,10 +37,10 @@ export async function expectCompanionJson(
   const response = await responsePromise
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
   if (!response.ok) {
-    const detail = body?.error as Record<string, unknown> | undefined
+    const problem = parseProblem(body, response.status)
     throw new CompanionApiError(
-      typeof detail?.message === "string" ? detail.message : `HTTP ${response.status}`,
-      typeof detail?.code === "string" ? detail.code : "",
+      problem && problem.detail.length > 0 ? problem.detail : `HTTP ${response.status}`,
+      problem?.code ?? "",
       response.status
     )
   }

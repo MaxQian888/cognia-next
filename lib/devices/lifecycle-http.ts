@@ -19,6 +19,7 @@
 import { companionAuthorizationHeaders, type AuthFetcher } from "@/lib/tauri/companion-auth"
 import { pinnedFetch } from "@/lib/tauri/pinned-fetch"
 import { loadCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
+import { parseProblem } from "@/lib/tauri/companion-problem"
 
 export type DeviceLifecycleAction = "suspend" | "resume" | "revoke"
 
@@ -70,8 +71,8 @@ export async function applyDeviceLifecycleOverHttp(
   if (!response.ok) {
     let detail = ""
     try {
-      const body = (await response.json()) as { error?: string; message?: string }
-      detail = body.message ?? body.error ?? ""
+      const problem = parseProblem(await response.json(), response.status)
+      detail = problem ? problem.detail || problem.code : ""
     } catch {
       detail = ""
     }

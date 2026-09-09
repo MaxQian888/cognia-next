@@ -117,8 +117,12 @@ export function classifyStatus(status: number, code?: string): FailureCause {
 
 function failureFromResponse(status: number, body: Record<string, unknown>): CommandFailure {
   const code = stringField(body, "code", "error")
+  // The Host answers one problem document (ADR-0175), whose `detail` is the
+  // message. `message` and `error_description` are what older Hosts and the
+  // OAuth-shaped routes wrote.
   const message =
-    stringField(body, "message", "error_description") ?? `the host answered HTTP ${status}`
+    stringField(body, "detail", "message", "error_description") ??
+    `the host answered HTTP ${status}`
   const nonJson = body.__nonJsonBody
   return {
     ok: false,

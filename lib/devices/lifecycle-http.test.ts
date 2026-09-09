@@ -72,6 +72,30 @@ describe("applyDeviceLifecycleOverHttp", () => {
     )
   })
 
+  it("surfaces the Host's refusal out of the problem document", async () => {
+    // ADR-0175: the Host answers one RFC 9457 document, whose `detail` is what
+    // the older `{error, message}` envelope put in `message`.
+    const fetcher = jest.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            type: "https://cognia.dev/problems/forbidden",
+            title: "Forbidden",
+            status: 403,
+            detail: "not the owner",
+            code: "forbidden",
+            requestId: "req-1",
+            retryable: false,
+            details: {},
+          }),
+          { status: 403, headers: { "content-type": "application/problem+json" } }
+        )
+    )
+    await expect(applyDeviceLifecycleOverHttp("revoke", "d1", { config, fetcher })).rejects.toThrow(
+      /refused revoke \(403\): not the owner/
+    )
+  })
+
   it("surfaces the Host's refusal with its status and message", async () => {
     const fetcher = jest.fn(
       async () =>

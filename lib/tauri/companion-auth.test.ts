@@ -81,6 +81,40 @@ describe("companion auth lifecycle", () => {
   // missing capability wants a grant from an owner, a host-wide switch wants
   // the switch. Callers were left string-matching English server copy to tell
   // them apart — `lib/terminal/host-state.ts` classifies on the code instead.
+  it("reads the code and detail out of a problem document", async () => {
+    const fetcher = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        type: "https://cognia.dev/problems/terminal_remote_access_disabled",
+        title: "Forbidden",
+        status: 403,
+        detail: "remote terminal access is disabled on this host",
+        code: "terminal_remote_access_disabled",
+        requestId: "req-1",
+        retryable: false,
+        details: {},
+      }),
+    })
+
+    const error = await issueSocketTicket(
+      {
+        baseUrl: "https://host.test",
+        serviceToken: "service-token",
+        deviceId: "device-a",
+        serverVersion: "1.0.0",
+      },
+      "terminal",
+      fetcher
+    ).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(CompanionApiError)
+    expect(companionErrorCode(error)).toBe("terminal_remote_access_disabled")
+    expect((error as CompanionApiError).message).toBe(
+      "remote terminal access is disabled on this host"
+    )
+  })
+
   it("carries the refusal code alongside the message", async () => {
     const fetcher = jest.fn().mockResolvedValue({
       ok: false,

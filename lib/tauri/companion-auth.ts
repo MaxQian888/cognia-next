@@ -4,6 +4,7 @@ import { generatePersistableSigningIdentity, type RoomDescriptor } from "@/lib/s
 import { APP_VERSION } from "@/lib/app-version"
 import { requireJwtPayload } from "@/lib/security/jwt-payload"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
+import { parseProblem } from "./companion-problem"
 
 /** A social sign-in method the deployment enabled at Logto. */
 export interface CompanionAuthSocialProvider {
@@ -619,10 +620,10 @@ async function expectJson(responsePromise: Promise<Response>): Promise<Record<st
   const response = await responsePromise
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
   if (!response.ok) {
-    const detail = body?.error as Record<string, unknown> | undefined
+    const problem = parseProblem(body, response.status)
     throw new CompanionApiError(
-      typeof detail?.message === "string" ? detail.message : `HTTP ${response.status}`,
-      typeof detail?.code === "string" ? detail.code : "",
+      problem && problem.detail.length > 0 ? problem.detail : `HTTP ${response.status}`,
+      problem?.code ?? "",
       response.status
     )
   }

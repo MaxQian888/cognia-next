@@ -125,6 +125,34 @@ describe("internalTransport", () => {
     })
   })
 
+  it("takes the message from a problem document's detail", async () => {
+    const fetchImpl = stubFetch(() => ({
+      status: 410,
+      body: {
+        type: "https://cognia.dev/problems/command_renamed",
+        title: "Gone",
+        status: 410,
+        detail: "session_list is now session.list",
+        code: "command_renamed",
+        requestId: "r2",
+        retryable: false,
+        details: { replacement: "session.list" },
+      },
+    }))
+    const outcome = await internalTransport({
+      endpoint: ENDPOINT,
+      serviceToken: "s",
+      fetchImpl,
+    }).execute("session_list")
+    expect(outcome).toMatchObject({
+      ok: false,
+      status: 410,
+      code: "command_renamed",
+      message: "session_list is now session.list",
+      requestId: "r2",
+    })
+  })
+
   it("keeps a non-JSON error body as a detail instead of discarding it", async () => {
     const fetchImpl = stubFetch(() => ({ status: 502, text: "<html>bad gateway</html>" }))
     const outcome = await internalTransport({

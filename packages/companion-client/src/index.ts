@@ -15,6 +15,14 @@ export {
   utf8ByteLength,
 } from "./base64url"
 export { CompanionApiError, companionErrorCode, expectCompanionJson } from "./errors"
+export {
+  isProblem,
+  parseProblem,
+  problemRetryAfterMs,
+  PROBLEM_CONTENT_TYPE,
+  PROBLEM_TYPE_BASE,
+  type Problem,
+} from "./problem"
 export { createDeviceProof, type DeviceProofInput } from "./dpop"
 export { signerFromCryptoKey, signerFromJwk, type DeviceSigner } from "./device-signer"
 export {

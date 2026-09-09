@@ -12,6 +12,8 @@
  * (`lib/tauri/transport-companion.ts`) — same code/retryable vocabulary.
  */
 
+import { isProblem } from "./companion-problem"
+
 export interface ParsedCommandError {
   /** Stable snake_case code; "unknown" for legacy plain-string rejections. */
   code: string
@@ -39,6 +41,11 @@ export function isCommandErrorEnvelope(value: unknown): value is CommandErrorEnv
 }
 
 export function parseInvokeError(err: unknown): ParsedCommandError {
+  // A Host refusal that crossed the companion transport arrives as the one
+  // problem document (ADR-0175). Its `detail` is the message.
+  if (isProblem(err)) {
+    return { code: err.code, message: err.detail, retryable: err.retryable, structured: true }
+  }
   if (isCommandErrorEnvelope(err)) {
     return {
       code: err.code,

@@ -156,6 +156,33 @@ describe("createCompanionSession", () => {
     )
   })
 
+  it("reads the refusal code out of a problem document", async () => {
+    const session = createCompanionSession({
+      baseUrl: "http://127.0.0.1:27891",
+      tenantId: "tenant-a",
+      signer: SIGNER,
+      fetchImpl: async () =>
+        jsonResponse(
+          {
+            type: "https://cognia.dev/problems/device_revoked",
+            title: "Unauthorized",
+            status: 401,
+            detail: "this device was revoked",
+            code: "device_revoked",
+            requestId: "req-1",
+            retryable: false,
+            details: {},
+          },
+          401
+        ),
+    })
+    await expect(session.authorizationHeaders("GET", "/a")).rejects.toMatchObject({
+      code: "device_revoked",
+      message: "this device was revoked",
+      status: 401,
+    })
+  })
+
   it("does not cache a failed exchange as if it had succeeded", async () => {
     let fail = true
     let tokens = 0

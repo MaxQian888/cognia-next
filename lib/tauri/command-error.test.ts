@@ -27,6 +27,26 @@ describe("parseInvokeError", () => {
     )
   })
 
+  it("decodes a Host problem document, taking detail as the message", () => {
+    expect(
+      parseInvokeError({
+        type: "https://cognia.dev/problems/command_renamed",
+        title: "Gone",
+        status: 410,
+        detail: "session_list is now session.list",
+        code: "command_renamed",
+        requestId: "req-1",
+        retryable: false,
+        details: { replacement: "session.list" },
+      })
+    ).toEqual({
+      code: "command_renamed",
+      message: "session_list is now session.list",
+      retryable: false,
+      structured: true,
+    })
+  })
+
   it("defaults retryable to false when the envelope omits it", () => {
     expect(parseInvokeError({ code: "install_error", message: "bad vsix" })).toMatchObject({
       retryable: false,
