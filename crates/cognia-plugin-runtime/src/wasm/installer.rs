@@ -274,6 +274,106 @@ pub async fn plugin_wasm_install_from_url(
     .map_err(|error| format!("WASM bundle install task failed: {error}"))?
 }
 
+/// Install a WASM plugin bundle the user picked off this machine's disk.
+///
+/// The third source this module's docblock has always named, and the only one
+/// that was never written. `install-wasm-plugin-button.tsx` therefore had
+/// nowhere to send a picked file and fell back to `plugin_install`, which
+/// unpacks nothing at all (it validates a manifest, creates a directory and
+/// writes `manifest.json`) and whose signature the call did not match anyway,
+/// so the button could not succeed under any input.
+///
+/// Everything after "have the bytes" is the path `plugin_wasm_install_from_url`
+/// already takes, so a local bundle gets the same archive limits, the same
+/// manifest-contract validation, and the same atomic replace over any prior
+/// install. Only the two steps that differ live here: reading the file instead
+/// of streaming a response, and verifying a signature that is handed over
+/// directly rather than fetched from a second URL.
+///
+/// A `.zip` only, despite older wording elsewhere about a bare `.wasm`. A lone
+/// component carries no manifest, so there is no id to install under, nothing
+/// to validate and no capabilities to grant. Refusing it by name beats
+/// accepting the file and failing deeper in with an archive error.
+///
+/// Deliberately ABSENT from `protocol/companion-commands.json`, unlike its two
+/// siblings. They name a URL or a repository, while this names a path on the
+/// HOST, so publishing it remotely would hand a paired client a read primitive
+/// over the host filesystem. That is a decision to take on its own evidence,
+/// not as a side effect of adding a local installer.
+#[tauri::command]
+pub async fn plugin_wasm_install_from_file(
+    state: State<'_, PluginRuntimeState>,
+    bundle_path: String,
+    signature_base64: Option<String>,
+    expected_public_key_base64: Option<String>,
+) -> Result<WasmInstallResult, String> {
+    let install_root = state.plugin_install_dir.clone();
+    let path = PathBuf::from(bundle_path.trim());
+    if !path.is_absolute() {
+        return Err("bundle_path must be an absolute path".into());
+    }
+
+    let bundle = {
+        let path = path.clone();
+        tokio::task::spawn_blocking(move || {
+            read_bundle_file_limited(&path, crate::archive_limits::MAX_DOWNLOAD_BYTES)
+        })
+        .await
+        .map_err(|error| format!("read plugin bundle task failed: {error}"))??
+    };
+
+    // The same pairing rule the URL installer enforces: a signature with no key
+    // (or a key with no signature) is a verification the caller asked for and
+    // this cannot perform, which is a refusal rather than a reason to install
+    // the bundle unverified.
+    let signature_verified = match (
+        signature_base64.as_deref(),
+        expected_public_key_base64.as_deref(),
+    ) {
+        (Some(signature), Some(public_key)) => {
+            verify_detached(&bundle, signature.trim(), public_key.trim())?;
+            true
+        }
+        (None, None) => false,
+        _ => {
+            return Err(
+                "signature_base64 and expected_public_key_base64 must be provided together".into(),
+            )
+        }
+    };
+
+    let mut result = tokio::task::spawn_blocking(move || {
+        install_downloaded_wasm_bundle(&install_root, &bundle, signature_verified)
+    })
+    .await
+    .map_err(|error| format!("WASM bundle install task failed: {error}"))??;
+    // The shared helper is written for the marketplace path and stamps that
+    // provenance. This bundle came off the user's own disk, and `source` is
+    // what the plugin store shows and filters on.
+    result.source = "local".into();
+    Ok(result)
+}
+
+/// Read a local bundle without letting an enormous file become an OOM.
+///
+/// The size is checked from metadata BEFORE the read rather than after, which
+/// is the whole point: `std::fs::read` on a 40 GB file allocates 40 GB first
+/// and reports the limit violation second.
+fn read_bundle_file_limited(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let metadata =
+        std::fs::metadata(path).map_err(|error| format!("stat {}: {error}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a file", path.display()));
+    }
+    if metadata.len() > limit {
+        return Err(format!(
+            "plugin bundle is {} bytes, limit is {limit}",
+            metadata.len()
+        ));
+    }
+    std::fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))
+}
+
 fn install_downloaded_wasm_bundle(
     install_root: &Path,
     bundle: &[u8],
@@ -570,6 +670,55 @@ mod tests {
             writer.finish().unwrap();
         }
         buf
+    }
+
+    // The local-file source: `plugin_wasm_install_from_file` only adds "read the
+    // bytes" in front of the shared install path, so these pin the reading half
+    // and that the bytes it produces really do install.
+
+    #[test]
+    fn local_bundle_reads_and_installs_through_the_shared_path() {
+        let manifest = r#"{"id":"demo.wasm","type":"wasm","wasmMain":"main.wasm","wasm":{"apiVersion":"0.1.0"}}"#;
+        let source = tempfile::tempdir().unwrap();
+        let bundle_path = source.path().join("demo.zip");
+        std::fs::write(&bundle_path, make_test_zip(manifest, &[0, 1, 2, 3])).unwrap();
+
+        let bytes = read_bundle_file_limited(&bundle_path, 1024 * 1024).unwrap();
+        let install_root = tempfile::tempdir().unwrap();
+        let result = install_downloaded_wasm_bundle(install_root.path(), &bytes, false).unwrap();
+
+        assert_eq!(result.manifest["id"], "demo.wasm");
+        assert!(!result.signature_verified);
+        assert!(install_root
+            .path()
+            .join("demo.wasm")
+            .join("main.wasm")
+            .exists());
+    }
+
+    #[test]
+    fn local_bundle_size_is_refused_from_metadata_before_the_read() {
+        // Checked from metadata FIRST on purpose: reading then measuring would
+        // allocate the whole file before reporting that it was too large.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.zip");
+        std::fs::write(&path, vec![0_u8; 4096]).unwrap();
+
+        let error = read_bundle_file_limited(&path, 1024).unwrap_err();
+        assert!(error.contains("4096"), "{error}");
+        assert!(error.contains("limit is 1024"), "{error}");
+    }
+
+    #[test]
+    fn local_bundle_path_must_name_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = read_bundle_file_limited(dir.path(), 1024).unwrap_err();
+        assert!(error.contains("is not a file"), "{error}");
+
+        let missing = dir.path().join("absent.zip");
+        assert!(read_bundle_file_limited(&missing, 1024)
+            .unwrap_err()
+            .contains("stat"));
     }
 
     #[test]

@@ -1137,8 +1137,18 @@ describe("PluginManager", () => {
       }
 
       mockInvoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "plugin_install") {
-          return { manifest: wasmManifest, path: "/plugins/demo.wasm" }
+        // The real unpacker. This used to answer `plugin_install`, a command
+        // that unpacks nothing and takes different arguments entirely, so the
+        // assertion below pinned a call that could not succeed against the
+        // actual host: mocking `invoke` wholesale hid the mismatch.
+        if (cmd === "plugin_wasm_install_from_file") {
+          return {
+            manifest: wasmManifest,
+            path: "/plugins/demo.wasm",
+            source: "local",
+            installRootKind: "installed",
+            signatureVerified: false,
+          }
         }
         if (cmd === "plugin_wasm_load") {
           return { pluginApiVersion: "0.1.0" }
@@ -1154,10 +1164,11 @@ describe("PluginManager", () => {
       })
 
       expect(plugin?.manifest.id).toBe("demo.wasm")
-      expect(mockInvoke).toHaveBeenCalledWith(
-        "plugin_install",
-        expect.objectContaining({ source: "/tmp/demo.zip", installType: "local" })
-      )
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_wasm_install_from_file", {
+        bundlePath: "/tmp/demo.zip",
+        signatureBase64: null,
+        expectedPublicKeyBase64: null,
+      })
       expect(mockInvoke).toHaveBeenCalledWith(
         "plugin_wasm_load",
         expect.objectContaining({

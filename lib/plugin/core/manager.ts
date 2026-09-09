@@ -169,6 +169,7 @@ import {
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import { installFromLocalFile } from "@/lib/plugin/package/local-installer"
 import {
   validateActivationEvent,
   validateHookPoint,
@@ -2982,13 +2983,54 @@ export class PluginManager {
     if (grantDecision) {
       await applyWasmCapabilityGrant(grantDecision)
     }
-    const plugin = await this.installPlugin(bundlePath, { type: "local" })
-    if (plugin.manifest.type !== "wasm") {
-      throw new Error(
-        `installWasmPluginFromLocalFile: bundle at ${bundlePath} did not declare type: "wasm"`
-      )
+
+    // `installPlugin` was the wrong door and could never open. It calls
+    // `plugin_install`, which unpacks nothing (it validates a manifest, creates
+    // a directory and writes `manifest.json`) and which takes
+    // `(pluginId, source, payload)` rather than the `{ source, installType,
+    // pluginDir }` that call sent, so the invoke was rejected before any of
+    // that mattered. `plugin_wasm_install_from_file` is the real unpacker, and
+    // it shares the archive limits, manifest-contract validation and atomic
+    // replace with the HTTP and Git installers.
+    const txn: InstallTransactionState = {
+      pluginId: null,
+      pluginPath: null,
+      manifest: null,
+      stepsCompleted: {
+        backendInstall: false,
+        storeDiscovery: false,
+        storeInstall: false,
+        permissionRegistration: false,
+      },
     }
-    return plugin
+
+    try {
+      const result = await installFromLocalFile({ bundlePath })
+      // Checked BEFORE registering: a non-wasm bundle that reached the store
+      // would leave behind a plugin nothing can load, and the rollback below is
+      // what removes the directory the host has already written.
+      if (result.manifest.type !== "wasm") {
+        throw new Error(`bundle at ${bundlePath} did not declare type: "wasm"`)
+      }
+      return await this.registerBackendInstall(
+        {
+          manifest: result.manifest,
+          path: result.path,
+          source: "local" as PluginSource,
+        },
+        "local",
+        txn
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      await this.performInstallRollback(txn, reason).catch((rollbackErr) => {
+        loggers.manager.error(
+          `[plugin:${txn.pluginId || "(unknown)"}] local install rollback itself failed`,
+          rollbackErr
+        )
+      })
+      throw new Error(`Failed to install plugin: ${reason}`)
+    }
   }
 
   /**
