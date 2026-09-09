@@ -2172,19 +2172,30 @@ dependencies = [
 name = "cognia-git"
 version = "0.1.0"
 dependencies = [
+ "cognia-git-mirror",
  "cognia-instrument",
  "git2",
  "ignore",
  "notify",
  "once_cell",
  "parking_lot",
- "regex",
  "serde",
  "serde_json",
  "tauri",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+]
+
+[[package]]
+name = "cognia-git-mirror"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "once_cell",
+ "regex",
+ "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]
@@ -2322,6 +2333,7 @@ dependencies = [
  "cognia-files",
  "cognia-gateway",
  "cognia-git",
+ "cognia-git-mirror",
  "cognia-headless-contract",
  "cognia-instrument",
  "cognia-jobs",
@@ -2725,6 +2737,7 @@ name = "cognia-task-workspace"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "cognia-git-mirror",
  "cognia-instrument",
  "flate2",
  "git2",

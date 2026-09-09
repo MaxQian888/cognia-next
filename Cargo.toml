@@ -35,6 +35,11 @@ members = [
   # the whole 170k-LOC tree.
   "crates/cognia-core",
   "crates/cognia-instrument",
+  # ADR-0176. The shared bare-mirror object cache plus the one credential
+  # policy and the git runner that enforces a clone budget. A leaf, like
+  # cognia-instrument: cognia-git, cognia-task-workspace and src-tauri all
+  # carry it, and it carries none of them.
+  "crates/cognia-git-mirror",
   "crates/cognia-git",
   "crates/cognia-ocr",
   "crates/cognia-vector",

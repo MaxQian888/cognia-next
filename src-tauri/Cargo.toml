@@ -150,6 +150,10 @@ cognia-instrument = { path = "../crates/cognia-instrument" }
 # git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
 # lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
 cognia-git = { path = "../crates/cognia-git" }
+# ADR-0176. The shared bare-mirror object cache. This crate owns the
+# credential policy and the git runner that `github/workspace.rs` used to
+# carry itself; the app now only points the cache root at the data dir.
+cognia-git-mirror = { path = "../crates/cognia-git-mirror" }
 cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 # ADR-0067 Tier C — multi-agent MCP config IO (owns `toml_edit`).
 cognia-agents = { path = "../crates/cognia-agents" }

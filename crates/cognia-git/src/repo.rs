@@ -111,12 +111,27 @@ pub struct CloneGuards {
     pub max_size_mb: Option<u64>,
     /// Wall-clock budget for the clone. Default 120s.
     pub timeout_secs: Option<u64>,
+    /// Serve the clone out of the shared object cache when it can be
+    /// (ADR-0176). Default **true**.
+    ///
+    /// `Option<bool>` rather than a bare `bool` so `Default` stays derived and
+    /// the "unset" default lives with the other three, in one const below,
+    /// instead of in a hand-written `impl` that would drift from them.
+    ///
+    /// A caller sets this to `false` when it needs the clone to have actually
+    /// reached the remote: verifying a URL resolves, or proving a token still
+    /// authenticates. The cache would answer those from disk and say yes to a
+    /// remote that is gone.
+    pub use_mirror: Option<bool>,
 }
 
 /// Full history by default. See [`CloneGuards::depth`].
 const CLONE_DEFAULT_DEPTH: u32 = 0;
 const CLONE_DEFAULT_MAX_SIZE_MB: u64 = 500;
 const CLONE_DEFAULT_TIMEOUT_SECS: u64 = 120;
+/// See [`CloneGuards::use_mirror`]. On by default: sharing the objects is the
+/// point, and every cache failure falls through to the network anyway.
+const CLONE_DEFAULT_USE_MIRROR: bool = true;
 
 /// Validate a clone URL against the host floor.
 ///
@@ -215,6 +230,55 @@ fn guarded_clone_args(depth: u32, remote_url: &str, destination: &std::path::Pat
     args
 }
 
+/// Serve the clone out of the shared bare mirror when we can (ADR-0176).
+///
+/// Returns `false` for "the cache did not answer, go to the network", which is
+/// every failure: a corrupt mirror, an unreachable remote, a branch created
+/// upstream since the last fetch. A cache that can fail a clone is worse than
+/// no cache, and the caller's network path below is the fallback.
+///
+/// **Only on the blobless default.** A caller that passed `depth` asked for the
+/// *small* clone and `--single-branch` with it; a mirror derive is full commit
+/// history, so honouring the cache there would quietly hand back something
+/// larger than was requested — and the size post-condition, not the cache, is
+/// what would report it. `derive_args` is `--filter=blob:none`, which is
+/// exactly what [`guarded_clone_args`] does at `depth == 0`.
+///
+/// No credential is ever passed: [`validate_clone_url`] has already rejected
+/// URLs carrying one, and this path clones public https remotes.
+///
+/// `spawn_blocking` because the mirror crate is sync — deliberately, so that
+/// `cognia-task-workspace` (which has no tokio) can call it too — and because
+/// its budget is an explicit `kill`, not a dropped future.
+async fn clone_from_mirror(
+    depth: u32,
+    remote_url: &str,
+    destination: &std::path::Path,
+    budget: std::time::Duration,
+) -> bool {
+    if depth > 0 {
+        return false;
+    }
+    let remote = remote_url.to_string();
+    let destination = destination.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let root = cognia_git_mirror::root();
+        let request = cognia_git_mirror::MirrorRequest::new(&root, &remote).budget(budget);
+        cognia_git_mirror::derive_from_mirror(
+            &request,
+            &destination,
+            // No branch: a plain guarded clone checks out the remote's HEAD,
+            // and so must the derived one.
+            None,
+            // The checkout may fetch and push later; an `origin` pointing at a
+            // directory on this machine could do neither.
+            cognia_git_mirror::DerivedOrigin::RealRemote,
+        )
+    })
+    .await
+    .unwrap_or(false)
+}
+
 /// Clone with guard rails: https-only, host allow-list, no embedded
 /// credentials, blobless by default, under a wall-clock budget, and bounded in
 /// size.
@@ -261,27 +325,29 @@ async fn clone_repo_guarded_inner(
         GitError::CommandFailed(format!("create clone parent {}: {err}", parent.display()).into())
     })?;
 
-    let args = guarded_clone_args(
-        guards.depth.unwrap_or(CLONE_DEFAULT_DEPTH),
-        remote_url.trim(),
-        &destination_path,
-    );
-
+    let depth = guards.depth.unwrap_or(CLONE_DEFAULT_DEPTH);
     let budget = std::time::Duration::from_secs(
         guards
             .timeout_secs
             .unwrap_or(CLONE_DEFAULT_TIMEOUT_SECS)
             .max(1),
     );
-    match tokio::time::timeout(budget, exec::run(parent, args)).await {
-        Ok(result) => result?,
-        Err(_) => {
-            // A half-written checkout is worse than none: the next call would
-            // find a directory that looks cloned and is not.
-            let _ = tokio::fs::remove_dir_all(&destination_path).await;
-            return Err(GitError::CommandFailed(
-                format!("clone timed out after {}s", budget.as_secs()).into(),
-            ));
+
+    let use_mirror = guards.use_mirror.unwrap_or(CLONE_DEFAULT_USE_MIRROR);
+    if !use_mirror || !clone_from_mirror(depth, remote_url.trim(), &destination_path, budget).await
+    {
+        let args = guarded_clone_args(depth, remote_url.trim(), &destination_path);
+        match exec::run_within(parent, args, budget).await? {
+            exec::Budgeted::Completed => {}
+            exec::Budgeted::TimedOut => {
+                // A half-written checkout is worse than none: the next call
+                // would find a directory that looks cloned and is not. Safe to
+                // delete because `run_within` reaped the child first.
+                let _ = tokio::fs::remove_dir_all(&destination_path).await;
+                return Err(GitError::CommandFailed(
+                    format!("clone timed out after {}s", budget.as_secs()).into(),
+                ));
+            }
         }
     }
 
@@ -629,6 +695,102 @@ mod tests {
             assert!(separator < url, "depth {depth}");
         }
     }
+
+    /// ADR-0176. A caller that passed `depth` asked for the small clone, and
+    /// `guarded_clone_args` gives it `--single-branch` with it. A mirror derive
+    /// is full commit history, so serving that request from the cache would
+    /// hand back something larger than was asked for — and the size
+    /// post-condition, not the cache, is what would report it.
+    #[tokio::test]
+    async fn a_shallow_request_is_never_served_from_the_mirror() {
+        let tmp = TempDir::new().unwrap();
+        let destination = tmp.path().join("checkout");
+
+        assert!(
+            !clone_from_mirror(1, "https://example.test/r.git", &destination, CLONE_BUDGET).await
+        );
+        assert!(
+            !destination.exists(),
+            "the depth guard must return before anything is written"
+        );
+    }
+
+    /// The point of the whole extraction: the second guarded clone of a
+    /// repository reuses the objects the first one fetched. Proven by deleting
+    /// the upstream between the two — a clone that still succeeds cannot have
+    /// gone to the network for it.
+    #[tokio::test]
+    async fn a_second_guarded_clone_is_served_out_of_the_mirror() {
+        if !git_on_path() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join("cache");
+        // `set_root` is a process-global `OnceLock`. Nothing else in this crate
+        // claims it, so losing the race means a new test started competing for
+        // it and this one is no longer testing what it says.
+        assert!(
+            cognia_git_mirror::set_root(cache.clone()),
+            "another test claimed the process-global mirror root"
+        );
+
+        let upstream = tmp.path().join("upstream");
+        fs::create_dir_all(&upstream).unwrap();
+        let repo = Repository::init(&upstream).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.email", "test@example.com").unwrap();
+        config.set_str("user.name", "Test User").unwrap();
+        fs::write(upstream.join("README.md"), "# mirrored\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("README.md")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = repo.signature().unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+        let remote = format!("file://{}", upstream.display());
+
+        let first = tmp.path().join("first");
+        assert!(
+            clone_from_mirror(0, &remote, &first, CLONE_BUDGET).await,
+            "the first clone should have populated the cache"
+        );
+        assert_eq!(
+            fs::read_to_string(first.join("README.md")).unwrap(),
+            "# mirrored\n"
+        );
+
+        // A derived checkout must be able to push, so `origin` is the real
+        // remote and not the directory it was actually cloned from.
+        let origin = std::process::Command::new("git")
+            .current_dir(&first)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&origin.stdout).trim(),
+            remote,
+            "a checkout whose origin is a local mirror cannot push"
+        );
+
+        // Now nothing can reach the upstream.
+        fs::remove_dir_all(&upstream).unwrap();
+
+        let second = tmp.path().join("second");
+        assert!(
+            clone_from_mirror(0, &remote, &second, CLONE_BUDGET).await,
+            "the second clone went to the network instead of the cache"
+        );
+        assert_eq!(
+            fs::read_to_string(second.join("README.md")).unwrap(),
+            "# mirrored\n"
+        );
+    }
+
+    /// A budget the tests can share without pretending it is under test here;
+    /// the kill itself is pinned in `cognia-git-mirror`'s runner tests.
+    const CLONE_BUDGET: std::time::Duration = std::time::Duration::from_secs(60);
 
     #[tokio::test]
     async fn clone_repo_rejects_relative_destinations_before_running_git() {

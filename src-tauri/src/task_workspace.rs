@@ -34,6 +34,14 @@ fn slot() -> &'static RwLock<Option<Arc<TaskWorkspaceService>>> {
 }
 
 pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
+    // ADR-0176. Point the shared mirror cache at the data directory before any
+    // clone can run. Both hosts reach this one function — the desktop shell at
+    // `lib.rs` boot and `cognia-server` at `bin/cognia-server.rs` — so the
+    // cache has one location per process instead of following whatever the
+    // working directory happened to be, which is the bug the process-global
+    // root exists to close. A second call losing is fine and expected in tests:
+    // the root is set once and the first writer wins.
+    cognia_git_mirror::set_root(data_dir.join("task-workspaces").join("mirrors"));
     let mut config = ServiceConfig::new(data_dir);
     if let Ok(days) = std::env::var("COGNIA_TASK_WORKSPACE_RETENTION_DAYS") {
         let days = days
@@ -70,7 +78,11 @@ pub fn start_workspace_maintenance() {
         loop {
             // Mirrors are ours, not the user's repositories, so they are
             // reclaimed on the same schedule as the workspaces they serve.
-            let mirrors = crate::github::workspace::reclaim_stale_mirrors().await;
+            // ADR-0176: the sweep reads the same process-global root every
+            // writer clones into, so the collector and the writers can no
+            // longer disagree about where the cache is.
+            let mirrors = reclaim_stale_mirrors().await;
+            discard_the_legacy_relative_cache().await;
             let result = run_workspace_maintenance_once().await;
             match result {
                 Ok(outcome) => log::info!(
@@ -87,6 +99,81 @@ pub fn start_workspace_maintenance() {
             tokio::time::sleep(MAINTENANCE_INTERVAL).await;
         }
     });
+}
+
+/// Delete mirrors nothing has fetched in [`cognia_git_mirror::DEFAULT_MIRROR_MAX_AGE`].
+///
+/// ADR-0176. This used to live in `github/workspace.rs`, which made the cache
+/// GitHub's — it swept `mirror_root(None)` while a caller that passed a base
+/// directory wrote somewhere else entirely. The cache is now every clone's, so
+/// the sweep belongs next to the loop that owns the schedule, and it reads
+/// [`cognia_git_mirror::root`] rather than deriving a root of its own.
+///
+/// `spawn_blocking` because the crate is deliberately sync: the directory walk
+/// and the `remove_dir_all` are filesystem work, and a day-long timer has no
+/// reason to hold a runtime thread while they run.
+async fn reclaim_stale_mirrors() -> usize {
+    tokio::task::spawn_blocking(|| {
+        cognia_git_mirror::reclaim_stale(
+            &cognia_git_mirror::root(),
+            cognia_git_mirror::DEFAULT_MIRROR_MAX_AGE,
+        )
+    })
+    .await
+    .unwrap_or(0)
+}
+
+/// The directory name the pre-ADR-0176 cache used, relative to the process
+/// working directory.
+const LEGACY_RELATIVE_CACHE: &str = "cognia-github-worktrees/.mirrors";
+
+static LEGACY_CACHE_SWEPT: AtomicBool = AtomicBool::new(false);
+
+/// Delete the cache the relative root left behind, once per process.
+///
+/// ADR-0176. The old `mirror_root` derived its path from `DEFAULT_BASE_DIR`,
+/// which is relative, so the cache landed under whatever working directory the
+/// process happened to have. Nothing ever swept it: the collector looked at the
+/// un-injected default instead. Those mirrors are bare repositories of real
+/// repositories and can be hundreds of megabytes each.
+///
+/// Only `.mirrors` is removed. The worktrees beside it are live workspaces
+/// somebody may still be working in, and this is a cache sweep, not a cleanup
+/// of the user's checkouts.
+///
+/// Best effort in every direction: a working directory that has since changed
+/// simply finds nothing, and a failure to delete is logged and dropped. This
+/// runs on the maintenance loop rather than at `install`, so a large legacy
+/// cache costs a background task rather than boot latency, and a sweep that
+/// cannot finish can never fail a clone.
+async fn discard_the_legacy_relative_cache() {
+    if LEGACY_CACHE_SWEPT.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // Relative on purpose: the path is only meaningful against the working
+    // directory that produced it, which is the whole defect being cleaned up.
+    discard_cache_at(&PathBuf::from(LEGACY_RELATIVE_CACHE)).await;
+}
+
+/// The sweep itself, against an explicit directory.
+///
+/// Split out so the test can name a temporary directory instead of moving the
+/// process working directory. `set_current_dir` is process-global, and this
+/// module's tests share a binary with every other test in the crate.
+async fn discard_cache_at(legacy: &Path) {
+    if !legacy.is_dir() {
+        return;
+    }
+    match tokio::fs::remove_dir_all(legacy).await {
+        Ok(()) => log::info!(
+            "removed the legacy relative mirror cache at {}",
+            legacy.display()
+        ),
+        Err(error) => log::warn!(
+            "could not remove the legacy relative mirror cache at {}: {error}",
+            legacy.display()
+        ),
+    }
 }
 
 async fn run_workspace_maintenance_once() -> Result<WorkspaceMaintenanceResult, String> {
@@ -1263,5 +1350,73 @@ mod tests {
         assert_eq!(summary.counts.created, 1);
         assert_eq!(manifest.events, vec![event]);
         assert_eq!(manifest.summaries, vec![summary]);
+    }
+
+    /// ADR-0176. The legacy sweep must take the orphaned cache and nothing
+    /// else. The worktrees beside it are live workspaces, and a "cleanup" that
+    /// deleted the directory someone is working in would be worse than the
+    /// wasted disk it set out to reclaim.
+    #[tokio::test]
+    async fn the_legacy_sweep_takes_the_cache_and_leaves_the_worktrees() {
+        let base = TempDir::new().unwrap();
+        let legacy = base.path().join(LEGACY_RELATIVE_CACHE);
+        std::fs::create_dir_all(legacy.join("github.com-o-r.git")).unwrap();
+        let worktree = base.path().join("cognia-github-worktrees").join("o-r");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(worktree.join("README.md"), "live work").unwrap();
+
+        discard_cache_at(&legacy).await;
+
+        assert!(!legacy.exists(), "the orphaned cache was not reclaimed");
+        assert!(
+            worktree.join("README.md").exists(),
+            "the sweep took a live worktree with it"
+        );
+    }
+
+    /// A working directory that never held the legacy cache finds nothing, and
+    /// says nothing about it. The sweep runs on every host at every boot, and
+    /// most of them have no such directory.
+    #[tokio::test]
+    async fn the_legacy_sweep_is_silent_when_there_is_nothing_to_sweep() {
+        let base = TempDir::new().unwrap();
+        let absent = base.path().join(LEGACY_RELATIVE_CACHE);
+
+        discard_cache_at(&absent).await;
+
+        assert!(!absent.exists());
+        assert!(base.path().exists(), "the sweep must not touch its parent");
+    }
+
+    /// Once per process. The loop runs daily, and after the first pass the path
+    /// belongs to whoever recreated it, not to us.
+    #[tokio::test]
+    async fn the_legacy_sweep_runs_once() {
+        LEGACY_CACHE_SWEPT.store(true, Ordering::Release);
+        discard_the_legacy_relative_cache().await;
+        assert!(LEGACY_CACHE_SWEPT.load(Ordering::Acquire));
+    }
+
+    /// ADR-0176. The mirror cache root is dormant unless boot points it at the
+    /// data directory: `cognia_git_mirror::root()` otherwise answers with a
+    /// temp-dir fallback, and every clone would cache somewhere the day-long
+    /// sweep never looks. `install` is the one seam both hosts pass through, so
+    /// pinning it here pins it for the desktop shell and `cognia-server` alike.
+    #[test]
+    fn install_points_the_mirror_cache_at_the_data_directory() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        install(data.path().to_path_buf()).unwrap();
+
+        let root = cognia_git_mirror::root();
+        assert!(
+            root.ends_with("task-workspaces/mirrors"),
+            "the cache must sit under the task-workspace data directory, got {}",
+            root.display()
+        );
+        assert!(
+            !root.starts_with(std::env::temp_dir().join("cognia-git-mirrors")),
+            "boot must beat the unset fallback"
+        );
     }
 }

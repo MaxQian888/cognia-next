@@ -7,7 +7,6 @@
 mod bundle;
 mod ledger;
 mod lifecycle;
-mod mirror;
 mod registry;
 mod resource;
 mod sensitive;
@@ -27,7 +26,12 @@ pub use bundle::{
 pub use lifecycle::{
     WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
-pub use mirror::{
+// ADR-0176. The mirror moved to `cognia-git-mirror`, a leaf `cognia-git` can
+// also depend on. The algorithm is unchanged and these aliases are unchanged,
+// so every existing caller compiles as it did. What moved with it is the part
+// this crate never had: the orchestration that drives git, the cache root, and
+// the credential policy.
+pub use cognia_git_mirror::plan::{
     clone_args as mirror_clone_args, derive_args as mirror_derive_args,
     fetch_args as mirror_fetch_args, is_fresh as mirror_is_fresh, is_mirror,
     maintenance_commands as mirror_maintenance_commands, mirror_path, normalize_remote_url,

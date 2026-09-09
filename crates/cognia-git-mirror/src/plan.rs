@@ -260,8 +260,15 @@ pub fn clone_args(remote_url: &str, destination: &Path) -> Vec<String> {
 }
 
 /// `git fetch` arguments that refresh it.
-pub fn fetch_args() -> Vec<String> {
-    vec![
+///
+/// `extra_refspecs` exists because a `--mirror` clone copies the remote's
+/// advertised refs, and GitHub does not advertise `refs/pull/*`. A caller that
+/// needs to resolve a pull-request base has to name the refspec itself
+/// (`refs/pull/<n>/head:refs/pull/<n>/head`); asking for it here, on the
+/// mirror, is what lets the derived checkout resolve it without reaching the
+/// network a second time. An empty slice is the ordinary refresh.
+pub fn fetch_args(extra_refspecs: &[String]) -> Vec<String> {
+    let mut args = vec![
         "fetch".to_string(),
         "--prune".to_string(),
         // A branch deleted upstream and recreated at an unrelated commit
@@ -270,7 +277,9 @@ pub fn fetch_args() -> Vec<String> {
         "--prune-tags".to_string(),
         "--filter=blob:none".to_string(),
         "origin".to_string(),
-    ]
+    ];
+    args.extend(extra_refspecs.iter().cloned());
+    args
 }
 
 /// `git clone` arguments that derive a working checkout from the mirror.
@@ -500,6 +509,22 @@ mod tests {
             .position(|arg| arg.contains("github.com"))
             .unwrap();
         assert!(separator < url);
+    }
+
+    #[test]
+    fn fetch_args_can_request_refs_the_remote_does_not_advertise() {
+        // A `--mirror` clone copies what the remote advertises, and GitHub does
+        // not advertise `refs/pull/*`. Without an explicit refspec the mirror
+        // simply does not have the PR head, and a base that resolves against it
+        // is unresolvable no matter how fresh the fetch was.
+        let plain = fetch_args(&[]);
+        assert_eq!(plain.last().map(String::as_str), Some("origin"));
+
+        let pr = "refs/pull/42/head:refs/pull/42/head".to_string();
+        let asked = fetch_args(std::slice::from_ref(&pr));
+        assert_eq!(asked.last(), Some(&pr));
+        // The refspec is appended, never a replacement for the ordinary refresh.
+        assert_eq!(&asked[..plain.len()], &plain[..]);
     }
 
     #[test]

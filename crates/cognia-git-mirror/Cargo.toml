@@ -1,0 +1,36 @@
+# ADR-0176: the one repository supply path.
+#
+# The mirror *algorithm* already had a single home (`cognia-task-workspace`).
+# What was duplicated was everything around it: the cache root, the
+# orchestration that drives git, and the credential policy. Those lived in
+# `src-tauri`, so `cognia-git` (a leaf) could not reach them, which is the real
+# reason `git_clone_guarded` had no cache at all.
+#
+# This crate is that orchestration, as a leaf everyone may depend on
+# (`cognia-instrument` is the precedent). It is deliberately **sync**:
+# `cognia-task-workspace` has no tokio and must not grow one, and its service is
+# already called under `spawn_blocking`. The two async callers wrap it the same
+# way, which also lets the clone budget be enforced by an explicit `try_wait` +
+# `kill` rather than by dropping a future. Dropping a `tokio::process` future
+# does not kill the child.
+[package]
+name = "cognia-git-mirror"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Shared bare-mirror object cache, credential policy, and git runner for every clone cognia makes."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_git_mirror"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.23"
+once_cell = "1"
+regex = "1"
+sha2 = "0.11"
+
+[dev-dependencies]
+tempfile = "3"

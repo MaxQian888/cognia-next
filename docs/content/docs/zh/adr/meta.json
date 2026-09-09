@@ -174,6 +174,7 @@
     "0172-remote-access-is-verified-not-assumed",
     "0173-the-tracker-has-one-programmatic-face",
     "0174-the-bot-control-plane",
-    "0175-the-rpc-face-has-one-grammar-one-error-and-one-version"
+    "0175-the-rpc-face-has-one-grammar-one-error-and-one-version",
+    "0176-every-clone-shares-one-object-cache"
   ]
 }

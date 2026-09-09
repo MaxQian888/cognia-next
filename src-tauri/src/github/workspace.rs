@@ -17,11 +17,23 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use cognia_git_mirror::credential::{self, GitCredential};
+use cognia_git_mirror::{DerivedOrigin, MirrorRequest};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 /// Mirrors the JS default that lived inline at `lib/github/workspace.ts`.
 const DEFAULT_BASE_DIR: &str = "cognia-github-worktrees";
+
+/// Wall-clock ceiling for each git call the mirror makes on our behalf.
+///
+/// Not a deadline for the work: the clone below it has none. It is the point
+/// past which "the cache is not answering" is a better explanation than "this
+/// repository is large" — generous, because the first blobless mirror of a big
+/// repository really is slow, and bounded, because a hung fetch would
+/// otherwise hang the issue run waiting behind it. A miss costs one network
+/// clone, which is exactly what a cache miss is supposed to cost.
+const MIRROR_BUDGET: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,9 +117,13 @@ fn clone_args<'a>(remote: &'a str, destination: &'a str, branch: &'a str) -> [&'
 /// allocation timestamp so the TS side can synthesize a `WorkspaceHandle`.
 #[tauri::command]
 pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, String> {
-    let base_dir = args
-        .base_dir
-        .filter(|s| !s.is_empty())
+    // Captured before the line below folds the absent case into the *relative*
+    // `DEFAULT_BASE_DIR`: handing that default to `mirror_root` is exactly the
+    // working-directory-follows-the-cache bug ADR-0176 closes. Absent here has
+    // to stay absent, so the cache falls to the process-global root.
+    let injected_base = args.base_dir.clone().filter(|s| !s.is_empty());
+    let base_dir = injected_base
+        .clone()
         .unwrap_or_else(|| DEFAULT_BASE_DIR.to_string());
     let sanitized = sanitize_repo_name(&args.repo_full_name);
     let now_ms = unix_millis_now();
@@ -136,14 +152,13 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     // corrupt or half-written mirror must cost a slow clone, never a broken
     // issue run.
     let derived = derive_from_mirror(
-        &mirror_root(Some(&base_dir)),
+        &mirror_root(injected_base.as_deref()),
         &remote,
         &path_str,
         clone_branch,
         &args.token,
     )
-    .await
-    .unwrap_or(false);
+    .await;
 
     if !derived {
         let mut command = Command::new("git");
@@ -152,7 +167,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
             .args(clone_args(&remote, &path_str, clone_branch))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        apply_git_auth_env(&mut command, &args.token);
+        apply_git_auth_env(&mut command, &remote, &args.token);
         let output = command
             .output()
             .await
@@ -202,25 +217,40 @@ pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result
     // (`core.sshCommand`, `core.fsmonitor`), while our token is in the
     // environment. On the Issue→PR path the agent's instructions come from an
     // issue body, which anyone can write.
-    let mut clone = Command::new("git");
-    clone
-        .arg("clone")
-        .args(clone_args(&remote, &staging_str, base_branch));
-    if let Some(token) = args.token.as_deref() {
-        apply_git_auth_env(&mut clone, token);
-    } else {
-        apply_git_isolation_env(&mut clone);
-    }
-    let output = clone
-        .output()
-        .await
-        .map_err(|e| format!("trusted git clone spawn: {e}"))?;
-    if !output.status.success() {
-        let stderr = redact_git_credentials(
-            &String::from_utf8_lossy(&output.stderr),
-            args.token.as_deref(),
-        );
-        return Err(format!("trusted git clone failed: {stderr}"));
+    // The trust boundary costs a second clone, and the mirror is what makes it
+    // cheap: the objects are already on disk, so this is a local copy rather
+    // than a second trip to GitHub. A cache miss still falls through to the
+    // network, because a boundary that can fail is not a boundary.
+    let derived = derive_from_mirror(
+        &mirror_root(None),
+        &remote,
+        &staging_str,
+        base_branch,
+        args.token.as_deref().unwrap_or_default(),
+    )
+    .await;
+
+    if !derived {
+        let mut clone = Command::new("git");
+        clone
+            .arg("clone")
+            .args(clone_args(&remote, &staging_str, base_branch));
+        if let Some(token) = args.token.as_deref() {
+            apply_git_auth_env(&mut clone, &remote, token);
+        } else {
+            apply_git_isolation_env(&mut clone);
+        }
+        let output = clone
+            .output()
+            .await
+            .map_err(|e| format!("trusted git clone spawn: {e}"))?;
+        if !output.status.success() {
+            let stderr = redact_git_credentials(
+                &String::from_utf8_lossy(&output.stderr),
+                args.token.as_deref(),
+            );
+            return Err(format!("trusted git clone failed: {stderr}"));
+        }
     }
 
     if base_branch != args.branch {
@@ -243,6 +273,7 @@ pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result
     run_git_silent_auth(
         &staging_path,
         ["push", &remote, &refspec],
+        &remote,
         args.token.as_deref(),
     )
     .await?;
@@ -343,24 +374,6 @@ fn canonical_github_remote(repo_full_name: &str) -> Result<String, String> {
     Ok(format!("https://github.com/{owner}/{repo}.git"))
 }
 
-/// Replace every literal occurrence of the token with `<redacted>` so callers
-/// can safely surface git's stderr to renderer logs / audit trails.
-fn redact_token(text: &str, token: &str) -> String {
-    if token.is_empty() {
-        return text.to_string();
-    }
-    text.replace(token, "<redacted>")
-}
-
-fn redact_git_credentials(text: &str, token: Option<&str>) -> String {
-    let Some(token) = token.filter(|value| !value.is_empty()) else {
-        return text.to_string();
-    };
-    use base64::Engine as _;
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
-    redact_token(&redact_token(text, token), &basic)
-}
-
 fn mirror_worktree(source: &Path, destination: &Path) -> Result<(), String> {
     if !source.is_dir() || !destination.join(".git").is_dir() {
         return Err("trusted worktree mirror requires source and git destination".to_string());
@@ -429,37 +442,40 @@ fn copy_entry(source: &Path, destination: &Path) -> Result<(), String> {
 /// Supply the GitHub credential to a single `git` invocation without ever
 /// writing it to disk or putting it on the command line.
 ///
-/// `GIT_CONFIG_COUNT`/`_KEY_n`/`_VALUE_n` is git's env-based config override:
-/// it applies only to this child process, so nothing lands in
-/// `<workspace>/.git/config` (which an agent working in the clone can read) and
-/// nothing lands in argv (which any process listing can read).
+/// The policy itself now lives in `cognia_git_mirror::credential`, which is
+/// where `cognia-git` and the E2B backend reach it too. This is only the
+/// adapter onto `tokio::process::Command`. That split is the point: the policy
+/// returns env pairs, so a caller holding any command type (or, in the sandbox
+/// backend's case, no command type at all) applies the same one.
 fn apply_git_isolation_env(command: &mut Command) {
-    command
-        // Host-owned git operations must never execute hooks installed by an
-        // issue-controlled agent in the worktree.
-        .env("GIT_CONFIG_COUNT", "3")
-        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
-        .env("GIT_CONFIG_VALUE_0", "/dev/null")
-        .env("GIT_CONFIG_KEY_1", "user.name")
-        .env("GIT_CONFIG_VALUE_1", "Cognia")
-        .env("GIT_CONFIG_KEY_2", "user.email")
-        .env("GIT_CONFIG_VALUE_2", "noreply@cognia.app")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_TERMINAL_PROMPT", "0");
+    for (key, value) in credential::isolation_env() {
+        command.env(key, value);
+    }
 }
 
-fn apply_git_auth_env(command: &mut Command, token: &str) {
-    use base64::Engine as _;
-    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
-    apply_git_isolation_env(command);
-    command
-        .env("GIT_CONFIG_COUNT", "4")
-        .env("GIT_CONFIG_KEY_3", "http.https://github.com/.extraheader")
-        .env(
-            "GIT_CONFIG_VALUE_3",
-            format!("Authorization: Basic {basic}"),
-        );
+/// [`apply_git_isolation_env`] plus the credential, keyed on the host `remote`
+/// points at.
+///
+/// Keying on the actual host rather than a hard-coded `https://github.com/` is
+/// what lets a GitHub Enterprise Server remote authenticate, and is also what
+/// stops a github.com token being offered to a host a redirect reached.
+fn apply_git_auth_env(command: &mut Command, remote: &str, token: &str) {
+    let origin = credential::origin_of(remote);
+    match (origin.as_deref(), GitCredential::from_token(token)) {
+        (Some(origin), Some(cred)) => {
+            for (key, value) in credential::auth_env(origin, &cred) {
+                command.env(key, value);
+            }
+        }
+        // A credential we cannot key on a host is a credential we do not send.
+        _ => apply_git_isolation_env(command),
+    }
+}
+
+/// Redact both the literal token and any credentialed URL git echoed back.
+fn redact_git_credentials(text: &str, token: Option<&str>) -> String {
+    let cred = token.and_then(GitCredential::from_token);
+    credential::redact(text, cred.as_ref())
 }
 
 async fn run_git_silent<I, S>(cwd: &Path, args: I) -> Result<(), String>
@@ -467,10 +483,15 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    run_git_silent_auth(cwd, args, None).await
+    run_git_silent_auth(cwd, args, "", None).await
 }
 
-async fn run_git_silent_auth<I, S>(cwd: &Path, args: I, token: Option<&str>) -> Result<(), String>
+async fn run_git_silent_auth<I, S>(
+    cwd: &Path,
+    args: I,
+    remote: &str,
+    token: Option<&str>,
+) -> Result<(), String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
@@ -478,7 +499,7 @@ where
     let mut command = Command::new("git");
     command.current_dir(cwd).args(args);
     if let Some(token) = token {
-        apply_git_auth_env(&mut command, token);
+        apply_git_auth_env(&mut command, remote, token);
     } else {
         apply_git_isolation_env(&mut command);
     }
@@ -512,156 +533,60 @@ where
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// The shared bare-mirror cache directory for a given worktree base.
+/// The shared bare-mirror cache directory.
 ///
-/// Derived from the base directory rather than configured separately, so a
-/// caller that redirects the worktrees redirects the cache with them and there
-/// is no second setting to keep in step. The leading dot keeps it out of the
-/// way of the per-repository worktree directories beside it.
+/// `base_dir` is a test seam, not a setting. In production the cache is the
+/// process-global `cognia_git_mirror::root()`, set once at boot to
+/// `<data_dir>/task-workspaces/mirrors`.
+///
+/// It used to be derived from the worktree base directory, whose default
+/// (`DEFAULT_BASE_DIR`) is a **relative** path. That put the production cache
+/// under whatever the process working directory happened to be, while the GC
+/// swept the un-injected default and an injected caller wrote somewhere else
+/// again: the writer and the collector could disagree about where the cache
+/// was. One absolute root is the fix.
 pub(crate) fn mirror_root(base_dir: Option<&str>) -> PathBuf {
-    let base = base_dir
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_BASE_DIR);
-    PathBuf::from(base).join(".mirrors")
-}
-
-/// How long an untouched mirror is kept.
-///
-/// Long enough that a project worked on weekly never re-clones, short enough
-/// that a repository someone tried once does not sit on disk forever. A mirror
-/// is a cache: deleting one costs a slow clone, keeping one costs the whole
-/// repository's history.
-const MIRROR_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
-
-/// Delete mirrors nothing has fetched in [`MIRROR_MAX_AGE`]. Returns how many.
-///
-/// By age rather than by size: a mirror nobody has asked for in a month is the
-/// one to drop, and evicting the biggest instead removes the repository the
-/// user is most likely working in.
-pub(crate) async fn reclaim_stale_mirrors() -> usize {
-    let root = mirror_root(None);
-    let candidates = tokio::task::spawn_blocking(move || {
-        cognia_task_workspace::mirror_reclaim_candidates(&root, MIRROR_MAX_AGE, SystemTime::now())
-    })
-    .await
-    .unwrap_or_default();
-    let mut removed = 0usize;
-    for mirror in candidates {
-        if tokio::fs::remove_dir_all(&mirror).await.is_ok() {
-            removed += 1;
-        }
+    match base_dir.filter(|value| !value.is_empty()) {
+        Some(base) => PathBuf::from(base).join(".mirrors"),
+        None => cognia_git_mirror::root(),
     }
-    removed
 }
 
 /// Bring a mirror up to date, then clone the requested branch out of it.
 ///
-/// Returns `Ok(false)` when the mirror could not be used, which is a request
-/// to clone from the network instead. The only `Err` is one the network clone
-/// could not fix either.
+/// Returns `false` when the mirror could not be used, which is a request to
+/// clone from the network instead. The orchestration lives in
+/// `cognia_git_mirror`; this is the async adapter, because the crate is sync so
+/// that `cognia-task-workspace` (which has no tokio) can call it too.
 ///
-/// # Why the derived clone re-points its own remote
-///
-/// `git clone <local path>` writes that path into the checkout's `origin`. A
-/// workspace whose `origin` is a directory on this machine cannot push, and
-/// the whole point of the workspace is to push. The URL is set back to the
-/// real remote — credential-free, exactly as the network path leaves it, for
-/// the reason the clone comment above gives at length.
+/// [`DerivedOrigin::RealRemote`] because both callers here push. A checkout
+/// whose `origin` is a directory on this machine cannot, and the whole point of
+/// this workspace is to push.
 async fn derive_from_mirror(
     root: &Path,
     remote: &str,
     destination: &str,
     branch: &str,
     token: &str,
-) -> Result<bool, String> {
-    let Ok(mirror) = cognia_task_workspace::mirror_path(root, remote) else {
-        return Ok(false);
-    };
-    if tokio::fs::create_dir_all(root).await.is_err() {
-        return Ok(false);
-    }
-
-    let exists = cognia_task_workspace::is_mirror(&mirror);
-    if !exists {
-        // A previous attempt may have died partway through; a directory that
-        // is not a bare repository is garbage, not a cache.
-        let _ = tokio::fs::remove_dir_all(&mirror).await;
-        let args = cognia_task_workspace::mirror_clone_args(remote, &mirror);
-        if !run_mirror_git(root, &args, token).await {
-            let _ = tokio::fs::remove_dir_all(&mirror).await;
-            return Ok(false);
-        }
-        let _ = cognia_task_workspace::mirror_stamp_fetch(&mirror);
-        run_mirror_maintenance(&mirror).await;
-    } else if !cognia_task_workspace::mirror_is_fresh(
-        &mirror,
-        cognia_task_workspace::DEFAULT_MIRROR_TTL,
-        SystemTime::now(),
-    ) {
-        let args = cognia_task_workspace::mirror_fetch_args();
-        if run_mirror_git(&mirror, &args, token).await {
-            let _ = cognia_task_workspace::mirror_stamp_fetch(&mirror);
-            run_mirror_maintenance(&mirror).await;
-        }
-        // A failed refresh is not fatal: a slightly stale mirror still holds
-        // the history, and the derived clone fetches from the real remote the
-        // first time it needs something newer.
-    }
-
-    let derive =
-        cognia_task_workspace::mirror_derive_args(&mirror, Path::new(destination), Some(branch));
-    if !run_mirror_git(root, &derive, token).await {
-        // The branch may simply not be in the mirror yet (created upstream
-        // after the last fetch). Leave nothing half-written behind and let the
-        // network clone answer.
-        let _ = tokio::fs::remove_dir_all(destination).await;
-        return Ok(false);
-    }
-
-    let destination_path = PathBuf::from(destination);
-    if run_git_silent(&destination_path, ["remote", "set-url", "origin", remote])
-        .await
-        .is_err()
-    {
-        // A checkout that cannot push is worse than a slow clone.
-        let _ = tokio::fs::remove_dir_all(destination).await;
-        return Ok(false);
-    }
-    Ok(true)
-}
-
-/// Run one git command for the mirror, reporting only whether it worked.
-///
-/// Output is discarded rather than surfaced: every caller above treats a
-/// failure as "use the network", and a cache miss is not something to report
-/// to the user as an error.
-async fn run_mirror_git(cwd: &Path, args: &[String], token: &str) -> bool {
-    let mut command = Command::new("git");
-    command
-        .current_dir(cwd)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    apply_git_auth_env(&mut command, token);
-    matches!(command.status().await, Ok(status) if status.success())
-}
-
-/// Write the commit-graph and multi-pack-index for a mirror.
-///
-/// Best effort and never fatal. Deliberately not `git maintenance register`,
-/// which would write our cache directory into the user's global config and
-/// schedule machine-wide background jobs against it.
-async fn run_mirror_maintenance(mirror: &Path) {
-    for args in cognia_task_workspace::mirror_maintenance_commands() {
-        let mut command = Command::new("git");
-        command
-            .current_dir(mirror)
-            .args(&args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        apply_git_isolation_env(&mut command);
-        let _ = command.status().await;
-    }
+) -> bool {
+    let root = root.to_path_buf();
+    let remote = remote.to_string();
+    let destination = PathBuf::from(destination);
+    let branch_owned = branch.to_string();
+    let credential = GitCredential::from_token(token);
+    tokio::task::spawn_blocking(move || {
+        let request = MirrorRequest::new(&root, &remote)
+            .maybe_credential(credential.as_ref())
+            .budget(MIRROR_BUDGET);
+        cognia_git_mirror::derive_from_mirror(
+            &request,
+            &destination,
+            Some(&branch_owned),
+            DerivedOrigin::RealRemote,
+        )
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -725,13 +650,28 @@ mod tests {
         (origin, url)
     }
 
+    /// ADR-0176. The absent case is the production case, and it must resolve to
+    /// the process-global root rather than to anything derived from
+    /// `DEFAULT_BASE_DIR`. That default is a *relative* path, and a cache that
+    /// hangs off it follows the process working directory: the writer and the
+    /// day-long sweep could then disagree about where the cache was. An
+    /// injected base stays a test seam, and stays absolute-per-caller.
     #[test]
-    fn the_cache_follows_the_worktree_base_directory() {
-        // One setting, not two: a caller that redirects the worktrees must not
-        // then leave the cache pointing at the default.
+    fn an_absent_base_directory_means_the_process_global_cache() {
         let default = mirror_root(None);
-        assert!(default.ends_with(".mirrors"));
-        assert!(default.starts_with(DEFAULT_BASE_DIR));
+        assert_eq!(default, cognia_git_mirror::root());
+        assert!(
+            default.is_absolute(),
+            "a relative cache root is the bug this closes: {}",
+            default.display()
+        );
+        assert!(
+            !default.starts_with(DEFAULT_BASE_DIR),
+            "the cache must not hang off the relative worktree default"
+        );
+
+        // The test seam is unchanged: an injected base still keys the cache to
+        // itself, so the existing clone tests stay isolated from each other.
         assert_eq!(
             mirror_root(Some("/tmp/base")),
             PathBuf::from("/tmp/base").join(".mirrors")
@@ -750,9 +690,7 @@ mod tests {
         let cache = tmp.path().join("cache");
         let dest = tmp.path().join("work");
 
-        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
-            .await
-            .unwrap();
+        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "").await;
         assert!(derived, "the mirror should have served this clone");
         assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "hello\n");
 
@@ -772,11 +710,7 @@ mod tests {
 
         for name in ["first", "second"] {
             let dest = tmp.path().join(name);
-            assert!(
-                derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
-                    .await
-                    .unwrap()
-            );
+            assert!(derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "").await);
         }
         let mirrors: Vec<_> = fs::read_dir(&cache)
             .unwrap()
@@ -798,11 +732,7 @@ mod tests {
             let (_origin, url) = upstream(tmp.path());
             let cache = tmp.path().join("cache");
             let dest = tmp.path().join("work");
-            assert!(
-                derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
-                    .await
-                    .unwrap()
-            );
+            assert!(derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "").await);
 
             let packs = |root: &Path| -> Vec<u64> {
                 let dir = root.join("objects").join("pack");
@@ -842,9 +772,7 @@ mod tests {
         let cache = tmp.path().join("cache");
         let dest = tmp.path().join("work");
 
-        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "no-such", "")
-            .await
-            .unwrap();
+        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "no-such", "").await;
         assert!(!derived);
         assert!(!dest.exists(), "left a half-written workspace behind");
     }
@@ -855,20 +783,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("cache");
         let dest = tmp.path().join("work");
+        assert!(!derive_from_mirror(&cache, "not a url", dest.to_str().unwrap(), "main", "").await);
         assert!(
-            !derive_from_mirror(&cache, "not a url", dest.to_str().unwrap(), "main", "")
-                .await
-                .unwrap()
+            !derive_from_mirror(
+                &cache,
+                "file:///nope/nowhere",
+                dest.to_str().unwrap(),
+                "main",
+                ""
+            )
+            .await
         );
-        assert!(!derive_from_mirror(
-            &cache,
-            "file:///nope/nowhere",
-            dest.to_str().unwrap(),
-            "main",
-            ""
-        )
-        .await
-        .unwrap());
     }
 
     #[tokio::test]
@@ -883,11 +808,7 @@ mod tests {
         fs::write(junk.join("stray.txt"), b"half a clone").unwrap();
 
         let dest = tmp.path().join("work");
-        assert!(
-            derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
-                .await
-                .unwrap()
-        );
+        assert!(derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "").await);
         assert!(cognia_task_workspace::is_mirror(&junk));
         assert!(!junk.join("stray.txt").exists());
     }
@@ -898,11 +819,7 @@ mod tests {
         let (origin, url) = upstream(tmp.path());
         let cache = tmp.path().join("cache");
         let first = tmp.path().join("first");
-        assert!(
-            derive_from_mirror(&cache, &url, first.to_str().unwrap(), "main", "")
-                .await
-                .unwrap()
-        );
+        assert!(derive_from_mirror(&cache, &url, first.to_str().unwrap(), "main", "").await);
 
         // A new commit upstream, and a mirror whose stamp says it is old.
         fs::write(origin.join("b.txt"), "second\n").unwrap();
@@ -912,11 +829,7 @@ mod tests {
         fs::remove_file(mirror.join("cognia-fetched-at")).unwrap();
 
         let second = tmp.path().join("second");
-        assert!(
-            derive_from_mirror(&cache, &url, second.to_str().unwrap(), "main", "")
-                .await
-                .unwrap()
-        );
+        assert!(derive_from_mirror(&cache, &url, second.to_str().unwrap(), "main", "").await);
         assert!(
             second.join("b.txt").exists(),
             "the refresh did not pick up the new commit"
@@ -945,18 +858,25 @@ mod tests {
         assert_eq!(base36(1_700_000_000_000), "loyw3v28");
     }
 
+    /// ADR-0176. One redactor, and it must still strip every occurrence of a
+    /// token it *was* told about, not only the one inside the URL. Git repeats
+    /// the remote in more than one line of a failure.
     #[test]
-    fn redact_token_replaces_all_occurrences() {
+    fn redaction_replaces_all_occurrences_of_a_known_token() {
         let text = "Cloning from https://x-access-token:abc123@github.com/o/r.git\nabc123 again";
-        let cleaned = redact_token(text, "abc123");
-        assert!(!cleaned.contains("abc123"));
+        let credential = GitCredential::from_token("abc123").expect("a credential");
+        let cleaned = credential::redact(text, Some(&credential));
+        assert!(!cleaned.contains("abc123"), "{cleaned}");
         assert_eq!(cleaned.matches("<redacted>").count(), 2);
     }
 
+    /// An empty token is not a token, so there is nothing to key on and the
+    /// text with no credentialed URL in it comes back untouched.
     #[test]
-    fn redact_token_is_a_noop_when_token_empty() {
+    fn redaction_is_a_noop_without_a_credential_or_a_url() {
         let text = "literal text";
-        assert_eq!(redact_token(text, ""), text);
+        assert!(GitCredential::from_token("").is_none());
+        assert_eq!(credential::redact(text, None), text);
     }
 
     #[test]
@@ -1031,13 +951,48 @@ mod tests {
         assert!(s.mtime.is_none());
     }
 
+    /// ADR-0176. The extraheader key used to be the literal
+    /// `http.https://github.com/.extraheader`, so a self-hosted GitHub
+    /// Enterprise remote got the isolation environment and no credential at
+    /// all. That surfaces as `could not read Username`, with nothing naming the
+    /// cause. The key is now derived from the remote.
+    #[test]
+    fn the_credential_is_keyed_on_the_remote_not_on_github_dot_com() {
+        let mut command = Command::new("git");
+        apply_git_auth_env(
+            &mut command,
+            "https://ghe.example.com/o/r.git",
+            "ghs_SECRET",
+        );
+
+        let std_command = command.as_std();
+        let envs: std::collections::HashMap<String, String> = std_command
+            .get_envs()
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(
+            envs.get("GIT_CONFIG_KEY_3").map(String::as_str),
+            Some("http.https://ghe.example.com/.extraheader"),
+            "a GitHub Enterprise remote must be given its own origin"
+        );
+        assert!(
+            !envs.values().any(|value| value.contains("ghs_SECRET")),
+            "the raw token must never be an env value; only its basic form"
+        );
+    }
+
     #[test]
     fn git_auth_env_carries_the_credential_out_of_band() {
         // The credential must travel in the child's ENV, never in argv (visible
         // to any process listing) and never in a config file git would persist.
         let mut command = Command::new("git");
         command.arg("push");
-        apply_git_auth_env(&mut command, "ghs_SECRET");
+        apply_git_auth_env(&mut command, "https://github.com/o/r.git", "ghs_SECRET");
 
         let std_command = command.as_std();
         let argv: Vec<String> = std_command

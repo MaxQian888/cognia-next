@@ -13,23 +13,23 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 
-use once_cell::sync::Lazy;
-use regex::Regex;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use super::error::{Detail, GitError};
 
-/// `https://user:token@host/...` → `https://<redacted>@host/...`.
-/// Generalizes `github::workspace::redact_token` (which only strips a *known*
-/// literal token) to any credentialed URL in arbitrary git stderr.
-static CRED_URL: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(https?://)[^/@\s]+@").expect("static regex"));
-
 /// Strip embedded credentials from any text before it leaves the backend.
+///
+/// ADR-0176: one redactor. The regex that used to live here and the literal
+/// token stripper that used to live in `github::workspace` are now the same
+/// function, so a path that knows its token and a path that does not both get
+/// the whole treatment. `None` here because this runner is never handed a
+/// credential: it inherits the ambient credential manager instead, and the
+/// credentialed URLs it must scrub are the ones git echoes back.
 pub fn redact(text: &str) -> String {
-    CRED_URL.replace_all(text, "$1<redacted>@").into_owned()
+    cognia_git_mirror::credential::redact(text, None)
 }
 
 /// Build a `git` command rooted at `cwd` with the standard non-interactive
@@ -153,6 +153,71 @@ where
         return Err(classify_failure(&String::from_utf8_lossy(&output.stderr)));
     }
     Ok(())
+}
+
+/// Whether a budgeted run finished on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Budgeted {
+    Completed,
+    /// The budget elapsed. The child was killed *and reaped* before this was
+    /// returned, so a caller is free to delete the directory it was writing to.
+    TimedOut,
+}
+
+/// Run `git <args>` in `cwd` under a wall-clock budget, and actually stop it.
+///
+/// `tokio::time::timeout(budget, run(..))` does not stop it.
+/// `tokio::process::Command` defaults to `kill_on_drop(false)`, so dropping
+/// that future on timeout leaves git running — still writing into the very
+/// directory the timeout branch then deletes. The clone "timed out"; the
+/// process did not. Keeping the child handle here means the budget ends with a
+/// `kill` and a `wait`, and the caller deletes a directory nothing is writing
+/// to.
+///
+/// stderr is drained on its own task rather than after the wait: a clone is
+/// chatty, and a pipe nobody reads is a git that blocks on the write instead of
+/// making progress.
+pub async fn run_within<I, S>(cwd: &Path, args: I, budget: Duration) -> Result<Budgeted, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let _perf = cognia_instrument::guard("git.exec");
+    let mut child = base_command(cwd)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        // Belt and braces for the case the budget cannot cover: the whole
+        // future being dropped (a cancelled caller, a runtime shutting down).
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(spawn_error)?;
+
+    let pipe = child.stderr.take();
+    let drain = tokio::spawn(async move {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buffer).await;
+        }
+        buffer
+    });
+
+    let status = match tokio::time::timeout(budget, child.wait()).await {
+        Ok(status) => status.map_err(spawn_error)?,
+        Err(_) => {
+            // `kill` is start_kill + wait: the child is reaped, not merely
+            // signalled, before the caller is told the budget elapsed.
+            let _ = child.kill().await;
+            let _ = drain.await;
+            return Ok(Budgeted::TimedOut);
+        }
+    };
+
+    let stderr = drain.await.unwrap_or_default();
+    if !status.success() {
+        return Err(classify_failure(&String::from_utf8_lossy(&stderr)));
+    }
+    Ok(Budgeted::Completed)
 }
 
 /// Run `git <args>` in `cwd` with extra environment variables layered on top

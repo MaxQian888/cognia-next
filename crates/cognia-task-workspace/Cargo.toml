@@ -22,6 +22,10 @@ base64 = "0.23"
 # into the same process-global registry the `/performance` panel reads, so a
 # span added here shows up next to `git.exec` with no extra plumbing.
 cognia-instrument = { path = "../cognia-instrument" }
+# ADR-0176. The bare-mirror cache this crate used to own outright. It moved
+# to a leaf so `cognia-git` could reach it too, and is re-exported from
+# `lib.rs` under the same `mirror_*` names.
+cognia-git-mirror = { path = "../cognia-git-mirror" }
 flate2 = "1"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hex = "0.4"
