@@ -51,6 +51,13 @@ export interface AgentDefinition {
    * levels are what every Cognia surface offers, so the union stays named.
    */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Display colour for this agent's rows and badges, so parallel runs are
+   * telling apart at a glance (Claude Code and OpenCode `color:` parity). A
+   * palette name or `#rrggbb`, normalised by `lib/claude/agents/agent-color`.
+   * Never sent to the model.
+   */
+  color?: string
 
   // ---- SDK fields with no Cognia-side equivalent -----------------------------
 

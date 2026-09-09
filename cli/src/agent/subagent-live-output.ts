@@ -81,6 +81,8 @@ export interface SubagentLiveEntry {
   parentLiveId?: string
   /** Native SDK task id when this entry was projected from a canonical task event. */
   runtimeTaskId?: string
+  /** The agent definition's declared display colour, when it has one. */
+  color?: string
   status: SubagentLiveStatus
   startedAt: number
   settledAt?: number
@@ -128,6 +130,8 @@ export interface StartLiveSubagentMeta {
   parentLiveId?: string
   /** Native SDK task id; omitted for renderer-dispatched and journal-backed runs. */
   runtimeTaskId?: string
+  /** The agent definition's declared display colour. */
+  color?: string
   /** Defaults to `Date.now()`. */
   startedAt?: number
 }
@@ -264,6 +268,7 @@ export function startLiveSubagent(meta: StartLiveSubagentMeta): string {
     ...(meta.depth !== undefined ? { depth: meta.depth } : {}),
     ...(meta.parentLiveId !== undefined ? { parentLiveId: meta.parentLiveId } : {}),
     ...(meta.runtimeTaskId !== undefined ? { runtimeTaskId: meta.runtimeTaskId } : {}),
+    ...(meta.color !== undefined ? { color: meta.color } : {}),
     status: "running",
     startedAt: meta.startedAt ?? Date.now(),
     text: "",

@@ -513,3 +513,12 @@ describe("isolation + listing + eviction", () => {
     expect(listLiveSubagents("s1").length).toBe(51)
   })
 })
+
+describe("startLiveSubagent, display colour", () => {
+  it("stores the definition's colour on the entry and omits the key otherwise", () => {
+    const coloured = startLiveSubagent({ name: "x", task: "t", sessionId: "s1", color: "cyan" })
+    expect(getLiveSubagent(coloured)?.color).toBe("cyan")
+    const plain = startLiveSubagent({ name: "y", task: "t", sessionId: "s1" })
+    expect(getLiveSubagent(plain)).not.toHaveProperty("color")
+  })
+})

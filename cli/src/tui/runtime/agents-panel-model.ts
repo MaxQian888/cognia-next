@@ -49,6 +49,8 @@ export interface AgentPanelRow {
   /** Indent level for nested runs (0 = dispatched by the chat turn), stamped
    * by the hierarchical ordering pass. */
   depth?: number
+  /** The agent definition's declared display colour (live rows only). */
+  color?: string
 }
 
 export interface AgentPanelSources {
@@ -96,6 +98,7 @@ function liveEntryRow(entry: SubagentLiveEntry, bgRunIds: Set<string>): AgentPan
     ...(isBackground ? { runId: entry.liveId } : {}),
     ...(entry.text ? { output: entry.text } : {}),
     ...(entry.parentLiveId ? { parentLiveId: entry.parentLiveId } : {}),
+    ...(entry.color ? { color: entry.color } : {}),
     toolUses: entry.toolUseCount,
     tokens,
   }
@@ -346,6 +349,8 @@ export interface LiveAgentTreeRow {
   stats: string
   /** `Searching for 3 patterns, reading 6 files…` */
   activity: string
+  /** The agent definition's declared display colour, when it has one. */
+  color?: string
 }
 
 /**
@@ -385,6 +390,7 @@ export function buildLiveAgentTreeRows(entries: SubagentLiveEntry[]): LiveAgentT
       depth,
       stats: `${uses} tool use${uses === 1 ? "" : "s"} · ${formatTokenCount(tokens)} tokens`,
       activity: liveAgentActivity(entry),
+      ...(entry.color ? { color: entry.color } : {}),
     })
     for (const child of children.get(entry.liveId) ?? []) visit(child, depth + 1)
   }

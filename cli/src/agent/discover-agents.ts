@@ -8,6 +8,7 @@ import nodeFs from "node:fs/promises"
 import path from "node:path"
 
 import { buildMarkdownAgents, type MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
+import type { AgentDefinition } from "@/lib/claude/agents/subagents/types"
 import { claudeCodeAdapter } from "@/lib/claude/subagent-importers/claude-code"
 import { codexCliAdapter } from "@/lib/claude/subagent-importers/codex-cli"
 import type {
@@ -123,18 +124,39 @@ export function buildAgents(files: MarkdownAgentFile[]): AgentSummary[] {
         id: name,
         name,
         description: def.description ?? "",
-        def: {
-          id: name,
-          name,
-          description: def.description ?? "",
-          prompt: def.prompt ?? "",
-          ...(def.tools ? { tools: def.tools } : {}),
-          ...(def.model ? { model: def.model } : {}),
-          ...(def.provider ? { provider: def.provider } : {}),
-          ...(def.hidden ? { hidden: true } : {}),
-        },
+        def: markdownDefToDispatchable(name, def),
       }))
   )
+}
+
+/**
+ * Project a parsed markdown `AgentDefinition` onto the dispatchable shape,
+ * keeping EVERY field the parser understood. This used to hand-pick four
+ * (`tools`, `model`, `provider`, `hidden`), so an agent file declaring
+ * `maxTurns`, `effort`, `disallowedTools`, `allowNesting`, `maxDepth`,
+ * `color`, or an external preset parsed cleanly and was then silently run
+ * without them. The two shapes overlap on purpose, so this is a spread plus
+ * the id and name the dispatchable shape adds.
+ */
+export function markdownDefToDispatchable(name: string, def: AgentDefinition): PluginSubagentDef {
+  return {
+    id: name,
+    name,
+    description: def.description ?? "",
+    prompt: def.prompt ?? "",
+    ...(def.tools ? { tools: def.tools } : {}),
+    ...(def.disallowedTools ? { disallowedTools: def.disallowedTools } : {}),
+    ...(def.model ? { model: def.model } : {}),
+    ...(def.provider ? { provider: def.provider } : {}),
+    ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+    ...(def.effort ? { effort: def.effort } : {}),
+    ...(def.color ? { color: def.color } : {}),
+    ...(def.externalPresetId ? { externalPresetId: def.externalPresetId } : {}),
+    ...(def.mcpServerIds?.length ? { mcpServerIds: def.mcpServerIds } : {}),
+    ...(def.allowNesting ? { allowNesting: true } : {}),
+    ...(def.maxDepth !== undefined ? { maxDepth: def.maxDepth } : {}),
+    ...(def.hidden ? { hidden: true } : {}),
+  }
 }
 
 /** Map an explicit/source-model provider hint onto Cognia's provider ids. */

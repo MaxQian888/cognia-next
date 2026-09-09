@@ -23,6 +23,7 @@ import { runningToolLines } from "../format/tools"
 import { progressBar } from "../format/status-bar"
 import { WorkingIndicator } from "./WorkingIndicator"
 import { buildLiveAgentTreeRows, type LiveAgentTreeRow } from "../runtime/agents-panel-model"
+import { agentInkColor } from "../theme/agent-color"
 import { listLiveSubagents, type SubagentLiveEntry } from "../../agent/subagent-live-output"
 import type { ActivityState, ToolCell, TurnStatus } from "../state/types"
 
@@ -322,7 +323,7 @@ function BottomStatusImpl({
                     {indent}
                     {branch}
                   </Text>{" "}
-                  <Text color={theme.accent} bold>
+                  <Text color={agentInkColor(row.color, theme.accent)} bold>
                     {row.name}
                   </Text>
                   <Text color={theme.muted}>

@@ -295,6 +295,7 @@ export async function handleCliDispatchAgent(
       sessionId: rootSessionId,
       depth: childDepth,
       ...(ctx.selfLiveId ? { parentLiveId: ctx.selfLiveId } : {}),
+      ...(match.def.color ? { color: match.def.color } : {}),
     })
     // Grant the child nested delegation only while it would run BELOW the cap:
     // at the cap the tool is simply not advertised (the child is a leaf), the

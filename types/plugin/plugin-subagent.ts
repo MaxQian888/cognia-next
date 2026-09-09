@@ -74,6 +74,12 @@ export interface PluginSubagentDef {
   /** Reasoning effort dial. */
   effort?: PluginSubagentEffort
   /**
+   * Display colour for this agent's rows and badges (palette name or
+   * `#rrggbb`, see `lib/claude/agents/agent-color`). Presentation only, never
+   * sent to the model.
+   */
+  color?: string
+  /**
    * Optional external-agent preset id backing this subagent (Thread A2). When
    * set, `dispatchSubagent` routes the run to the external CLI agent instead of
    * the built-in executor. `prompt` / `tools` remain advisory.

@@ -920,3 +920,21 @@ describe("handleCliDispatchAgent, cancel / multi-collect / model / width", () =>
     expect(resp.result).toContain("done")
   })
 })
+
+describe("live-output wiring, display colour", () => {
+  it("stamps the definition's colour on the live entry", async () => {
+    const coloured: AgentSummary = {
+      ...agent("scout", "scouts"),
+      def: { ...agent("scout", "scouts").def, color: "cyan" },
+    }
+    let liveId = ""
+    const run = jest.fn(async () => {
+      liveId = listLiveSubagents("s1")[0]?.liveId ?? ""
+      return { text: "ok" }
+    })
+    registerCliSubagentContext("s1", makeCtx({ agents: [coloured], run }))
+    await handleCliDispatchAgent(req({ subagentId: "scout", prompt: "x" }))
+    expect(liveId).not.toBe("")
+    expect(getLiveSubagent(liveId)?.color).toBe("cyan")
+  })
+})

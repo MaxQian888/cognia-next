@@ -27,6 +27,7 @@ import type {
 import { assertNoLeakingPiiDeep } from "@/lib/plugin/api/plugin-pii-gate"
 import { fireAgentHook, type AgentHookContext } from "@/lib/ai/agent/external/agent-hooks"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
+import { composeSubagentSystemPrompt } from "@/lib/claude/agents/subagent-prompt-frame"
 import {
   envelopeForBudgetExhausted,
   envelopeForRejection,
@@ -198,7 +199,17 @@ export async function dispatchSubagent(
       // allowNesting unset) build-options must WITHHOLD dispatch_agent — including
       // the plan-mode force-offer — instead of treating the child as top-level.
       isDispatchedSubagent: true,
-      ...(def.prompt ? { systemPrompt: def.prompt } : {}),
+      // The definition's prompt is the child's identity. Frame it with the
+      // environment and the dispatched-subagent contract (shared with the CLI
+      // runner) so the child knows its cwd, the date, and that only its final
+      // message reaches the dispatcher.
+      systemPrompt: composeSubagentSystemPrompt(def.prompt, {
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        now: Date.now(),
+        canDelegate:
+          def.allowNesting === true &&
+          (typeof effectiveMaxDepth !== "number" || childDepth < effectiveMaxDepth),
+      }),
       ...(def.model ? { model: def.model } : {}),
       // Cross-provider subagent: route the run to the def's provider (with its own
       // credentials) instead of the dispatching session's provider.

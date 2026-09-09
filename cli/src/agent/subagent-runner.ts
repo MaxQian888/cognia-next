@@ -37,6 +37,9 @@ import type { McpServer, SendOptions } from "@cognia/agent-config-types"
 import type { PluginToolManifestEntry } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
+import { composeSubagentSystemPrompt } from "@/lib/claude/agents/subagent-prompt-frame"
+
+import { buildCliOperatingRules } from "../config/default-system-prompt"
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
 import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
@@ -187,16 +190,46 @@ export async function runCliSubagent(
   const mintId = deps.mintId ?? defaultMintId
 
   const childSessionId = `${parentSessionId}::sub-${mintId()}`
-  const childConfig = { ...buildChildConfig(deps.config, def), cwd: deps.cwd }
+  const turnNow = now()
+  const childConfig = {
+    ...buildChildConfig(deps.config, def),
+    cwd: deps.cwd,
+    // The definition's prompt is the child's identity, but on its own it left
+    // the child without a working directory, a date, or the contract every
+    // dispatched subagent works under. Frame it (shared with the app path)
+    // and append the CLI's own tool rules, which the child needs as much as
+    // the parent since it runs the same tools in the same shell.
+    systemPrompt: [
+      composeSubagentSystemPrompt(def.prompt, {
+        cwd: deps.cwd,
+        platform: process.platform,
+        now: turnNow,
+        canDelegate: Boolean(deps.nesting?.manifest),
+      }),
+      buildCliOperatingRules(
+        deps.config.agentBackend && deps.config.agentBackend !== "builtin"
+          ? { externalBackend: deps.config.agentBackend }
+          : {}
+      ),
+    ].join("\n\n"),
+  }
 
   const ctx = toBuildContext({
     sessionId: childSessionId,
     config: childConfig,
     mcpServers: deps.mcpServers,
-    now: now(),
+    now: turnNow,
   })
   let sendOptions = await resolveOptions(ctx)
   deps.signal?.throwIfAborted()
+  // The definition's own restrictions and dial, which the parsed frontmatter
+  // carried and this runner used to drop on the floor.
+  if (def.disallowedTools?.length) {
+    sendOptions.disallowedTools = [
+      ...new Set([...(sendOptions.disallowedTools ?? []), ...def.disallowedTools]),
+    ]
+  }
+  if (def.effort) sendOptions.effort = def.effort
   // Bound the subagent: an explicit `maxTurns` from its definition wins as the
   // ai-sdk step budget; otherwise it inherits the parent's configured cap.
   if (typeof def.maxTurns === "number" && def.maxTurns > 0) {

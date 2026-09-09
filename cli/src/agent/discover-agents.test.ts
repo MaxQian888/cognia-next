@@ -247,3 +247,51 @@ describe("applySubagentModelOverrides", () => {
     expect(agents[0].def.model).toBe("sonnet")
   })
 })
+
+describe("buildAgents, field retention", () => {
+  it("keeps every field the markdown parser understood, not just four of them", () => {
+    const md = `---
+name: deep
+description: deep worker
+model: sonnet
+provider: anthropic
+effort: high
+maxTurns: 12
+tools: read, grep
+disallowedTools: bash
+allowNesting: true
+maxDepth: 3
+color: cyan
+externalPresetId: codex
+mcpServerIds: fs, git
+hidden: true
+---
+Body.`
+    const [agent] = buildAgents([{ id: "deep", content: md }])
+    expect(agent.def).toEqual({
+      id: "deep",
+      name: "deep",
+      description: "deep worker",
+      prompt: "Body.",
+      tools: ["read", "grep"],
+      disallowedTools: ["bash"],
+      model: "sonnet",
+      provider: "anthropic",
+      maxTurns: 12,
+      effort: "high",
+      color: "cyan",
+      externalPresetId: "codex",
+      mcpServerIds: ["fs", "git"],
+      allowNesting: true,
+      maxDepth: 3,
+      hidden: true,
+    })
+  })
+
+  it("omits the optional fields an agent file does not declare", () => {
+    const [agent] = buildAgents([{ id: "reviewer", content: AGENT_MD }])
+    expect(Object.keys(agent.def).sort()).toEqual(
+      ["description", "id", "name", "prompt", "tools"].sort()
+    )
+  })
+})

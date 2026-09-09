@@ -234,3 +234,39 @@ describe("serializeMarkdownAgent", () => {
     })
   })
 })
+
+describe("parseMarkdownAgent, display colour and OpenCode-only fields", () => {
+  it("normalises a declared colour and drops an unknown one silently", () => {
+    const named = parseMarkdownAgent("a", `---\ndescription: x\ncolor: Magenta\n---\nbody`)
+    if (!("def" in named)) throw new Error("expected def")
+    expect(named.def.color).toBe("purple")
+    const hex = parseMarkdownAgent("a", `---\ndescription: x\ncolor: "#ABC"\n---\nbody`)
+    if (!("def" in hex)) throw new Error("expected def")
+    expect(hex.def.color).toBe("#aabbcc")
+    const junk = parseMarkdownAgent("a", `---\ndescription: x\ncolor: chartreuse\n---\nbody`)
+    if (!("def" in junk)) throw new Error("expected def")
+    expect(junk.def.color).toBeUndefined()
+    expect(junk.unsupportedFields).toEqual([])
+  })
+
+  it("reports OpenCode's temperature, mode and permission as unsupported", () => {
+    const r = parseMarkdownAgent(
+      "a",
+      `---\ndescription: x\nmode: subagent\ntemperature: 0.2\npermission:\n  edit: deny\n---\nbody`
+    )
+    if (!("def" in r)) throw new Error("expected def")
+    expect(r.unsupportedFields).toEqual(["temperature", "mode", "permission"])
+  })
+
+  it("round-trips the colour through serializeMarkdownAgent", () => {
+    const text = serializeMarkdownAgent("scout", {
+      description: "scouts",
+      prompt: "Scout.",
+      color: "cyan",
+    })
+    expect(text).toContain("color: cyan")
+    const back = parseMarkdownAgent("scout", text)
+    if (!("def" in back)) throw new Error("expected def")
+    expect(back.def.color).toBe("cyan")
+  })
+})

@@ -31,6 +31,7 @@ import { toolDisplayName } from "../../format/tools"
 import { contentRows } from "../../layout/terminal-layout"
 import { panelColumns } from "../overlay-layout"
 import { truncateToWidth } from "../../markdown/width"
+import { agentInkColor } from "../../theme/agent-color"
 import {
   agentRowBadge,
   formatElapsed,
@@ -227,7 +228,8 @@ export function AgentRunPage({
       width={width}
     >
       <Text bold>
-        Agent · <Text color={theme[badge.token]}>{badge.glyph}</Text> {name}
+        Agent · <Text color={theme[badge.token]}>{badge.glyph}</Text>{" "}
+        <Text color={agentInkColor(entry?.color, theme.accent)}>{name}</Text>
         <Text color={theme.muted}> · {statsParts.join(" · ")}</Text>
       </Text>
       {task ? (

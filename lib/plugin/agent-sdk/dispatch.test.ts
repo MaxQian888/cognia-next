@@ -117,11 +117,17 @@ describe("dispatchSubagent", () => {
     expect(mockExecute).toHaveBeenCalledWith("review this PR", {
       toolsEnabled: true,
       isDispatchedSubagent: true,
-      systemPrompt: "You review code.",
+      systemPrompt: expect.stringContaining("You review code."),
       model: "sonnet",
       allowedTools: ["Read", "Grep"],
       maxSteps: 4,
     })
+    // The identity prompt is framed with the shared dispatched-subagent
+    // contract, and a leaf is told it cannot delegate.
+    const framed = (mockExecute.mock.calls[0][1] as { systemPrompt: string }).systemPrompt
+    expect(framed.startsWith("You review code.")).toBe(true)
+    expect(framed).toContain("<subagent_contract>")
+    expect(framed).toContain("cannot dispatch subagents of your own")
     expect(res).toMatchObject({
       text: "reviewed",
       channel: "sidecar",

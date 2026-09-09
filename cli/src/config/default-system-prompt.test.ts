@@ -1,4 +1,8 @@
-import { buildDefaultSystemPrompt, PLAN_MODE_PROMPT_SECTION } from "./default-system-prompt"
+import {
+  buildCliOperatingRules,
+  buildDefaultSystemPrompt,
+  PLAN_MODE_PROMPT_SECTION,
+} from "./default-system-prompt"
 
 describe("buildDefaultSystemPrompt", () => {
   const NOW = Date.UTC(2026, 5, 30, 12, 0, 0) // 2026-06-30
@@ -89,5 +93,22 @@ describe("buildDefaultSystemPrompt", () => {
       })
       expect(out).toBe(base)
     }
+  })
+})
+
+describe("buildCliOperatingRules", () => {
+  it("is exactly the rules tail of the default prompt, so parent and child cannot drift", () => {
+    const full = buildDefaultSystemPrompt({
+      cwd: "/repo",
+      now: 0,
+      platform: "linux",
+      shell: "/bin/zsh",
+    })
+    const rules = buildCliOperatingRules({ platform: "linux", shell: "/bin/zsh" })
+    expect(full.endsWith(rules)).toBe(true)
+    expect(rules.startsWith("Tool usage:")).toBe(true)
+    expect(rules).not.toContain("<env>")
+    expect(rules).not.toContain("You are Cognia's command-line coding agent")
+    expect(rules).toContain("Verifying your work:")
   })
 })

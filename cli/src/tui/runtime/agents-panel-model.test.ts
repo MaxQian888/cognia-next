@@ -563,3 +563,20 @@ describe("agentRowTask", () => {
     expect(agentRowTask(base, 60_000, 80)).toBe("")
   })
 })
+
+describe("display colour propagation", () => {
+  it("carries a live entry's colour onto its panel row and its tree row", () => {
+    const rows = buildAgentPanelRows(
+      sources({ live: [liveEntry({ liveId: "live-c", color: "purple" })] })
+    )
+    expect(rows[0]).toMatchObject({ liveId: "live-c", color: "purple" })
+    const tree = buildLiveAgentTreeRows([liveEntry({ liveId: "live-c", color: "purple" })])
+    expect(tree[0]).toMatchObject({ liveId: "live-c", color: "purple" })
+  })
+
+  it("leaves the colour key off rows whose entry declared none", () => {
+    const rows = buildAgentPanelRows(sources({ live: [liveEntry({ liveId: "live-n" })] }))
+    expect(rows[0]).not.toHaveProperty("color")
+    expect(buildLiveAgentTreeRows([liveEntry({ liveId: "live-n" })])[0]).not.toHaveProperty("color")
+  })
+})

@@ -50,29 +50,32 @@ export interface DefaultSystemPromptInput {
  */
 export const PLAN_MODE_PROMPT_SECTION = PLAN_MODE_PROMPT
 
-/** Build the default CLI base system prompt for the given environment. */
-export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): string {
+/** The environment facts the operating rules need. */
+export interface CliOperatingRulesInput {
+  /** Overridable for tests. Defaults to {@link process.platform}. */
+  platform?: string
+  /** The user's login shell. Defaults to `$SHELL`. */
+  shell?: string
+  /** The external backend running the tools, when one is in use. */
+  externalBackend?: string
+}
+
+/**
+ * The tool-usage, shell, convention, file-editing and verification rules of
+ * the CLI base prompt, without the identity line, the `<env>` block or the
+ * tone section. Shared with dispatched subagents: a child's identity is its
+ * definition's prompt and its `<env>` comes from the subagent frame, but it
+ * runs the same tools in the same shell and needs the same rules. One
+ * function, so the parent and child rule sets cannot drift.
+ */
+export function buildCliOperatingRules(input: CliOperatingRulesInput = {}): string {
   const platform = input.platform ?? process.platform
-  const date = new Date(input.now).toISOString().slice(0, 10)
-  const planSection = input.permissionMode === "plan" ? ["", PLAN_MODE_PROMPT_SECTION] : []
   const shellSection = buildShellEnvironmentSection({
     platform,
     ...((input.shell ?? process.env.SHELL) ? { shell: input.shell ?? process.env.SHELL } : {}),
     ...(input.externalBackend ? { externalBackend: input.externalBackend } : {}),
   })
   return [
-    "You are Cognia's command-line coding agent. You help with software-engineering tasks in the user's project, using the available tools to read, search, edit, and run code.",
-    "",
-    "<env>",
-    `Working directory: ${input.cwd}`,
-    `Platform: ${platform}`,
-    `Today's date: ${date}`,
-    "</env>",
-    "",
-    "Tone and output:",
-    "- You run in a terminal; your output is shown as plain text. Be concise and direct — skip preamble, restating the question, and end-of-turn summaries unless the user asks. Match the response length to the task: a one-line answer for a simple question, no filler.",
-    "- Reference code as `path:line` so the user can jump to it. Don't dump large file contents you've already read back into the chat.",
-    "",
     "Tool usage:",
     "- Prefer the dedicated tools over shelling out: use `grep` for content search, `glob` for finding files by name, and `read`/`ls` for inspecting files — not `bash` with `grep`/`find`/`cat`/`ls`. Reach for `bash` for actually running commands (builds, tests, git, package managers).",
     "- When several tool calls are independent, issue them together in one step instead of waiting for each in turn.",
@@ -92,6 +95,32 @@ export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): strin
     "Verifying your work:",
     "- After a change, verify it: run the project's tests, type-check, lint, or build when they're available, and read the output. Don't claim something works or is done without checking.",
     "- If a command or test fails, report the failure and its output plainly rather than asserting success.",
+  ].join("\n")
+}
+
+/** Build the default CLI base system prompt for the given environment. */
+export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): string {
+  const platform = input.platform ?? process.platform
+  const date = new Date(input.now).toISOString().slice(0, 10)
+  const planSection = input.permissionMode === "plan" ? ["", PLAN_MODE_PROMPT_SECTION] : []
+  return [
+    "You are Cognia's command-line coding agent. You help with software-engineering tasks in the user's project, using the available tools to read, search, edit, and run code.",
+    "",
+    "<env>",
+    `Working directory: ${input.cwd}`,
+    `Platform: ${platform}`,
+    `Today's date: ${date}`,
+    "</env>",
+    "",
+    "Tone and output:",
+    "- You run in a terminal; your output is shown as plain text. Be concise and direct — skip preamble, restating the question, and end-of-turn summaries unless the user asks. Match the response length to the task: a one-line answer for a simple question, no filler.",
+    "- Reference code as `path:line` so the user can jump to it. Don't dump large file contents you've already read back into the chat.",
+    "",
+    buildCliOperatingRules({
+      platform,
+      ...(input.shell ? { shell: input.shell } : {}),
+      ...(input.externalBackend ? { externalBackend: input.externalBackend } : {}),
+    }),
     ...planSection,
   ].join("\n")
 }

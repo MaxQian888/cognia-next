@@ -24,6 +24,7 @@
  */
 
 import matter from "gray-matter"
+import { normalizeAgentColor } from "./agent-color"
 import type { AgentDefinition } from "./subagents/types"
 
 export interface MarkdownAgentResult {
@@ -58,6 +59,7 @@ export function serializeMarkdownAgent(id: string, def: AgentDefinition): string
   if (def.maxTurns) data.maxTurns = def.maxTurns
   if (def.tools?.length) data.tools = [...def.tools]
   if (def.disallowedTools?.length) data.disallowedTools = [...def.disallowedTools]
+  if (def.color) data.color = def.color
   const body = def.prompt.endsWith("\n") ? def.prompt : `${def.prompt}\n`
   return matter.stringify(body, data)
 }
@@ -169,6 +171,15 @@ export function parseMarkdownAgent(
   const disabled = data.disabled ?? data.disable
   if (disabled === true || disabled === "true") def.disabled = true
 
+  // Display colour (Claude Code / OpenCode `color:`). An unknown value is
+  // dropped rather than warned about: it only affects presentation.
+  const color = normalizeAgentColor(data.color)
+  if (color) def.color = color
+
+  // Fields other tools' agent files carry that Cognia cannot honour yet. They
+  // are reported, never silently dropped, so an author learns why an agent
+  // behaves differently here. `temperature`, `mode` and `permission` are
+  // OpenCode's, the rest are Claude Code's.
   const unsupportedFields = [
     "skills",
     "memory",
@@ -177,6 +188,9 @@ export function parseMarkdownAgent(
     "hooks",
     "mcpServers",
     "permissionMode",
+    "temperature",
+    "mode",
+    "permission",
   ].filter((key) => {
     const value = data[key]
     if (value === undefined || value === null || value === false) return false

@@ -189,7 +189,14 @@ describe("runCliSubagent", () => {
 
     // Child config: subagent identity is the system prompt, model + tools overlaid,
     // outputStyle dropped (so the parent's response-mode append never leaks in).
-    expect(ctxSeen!.session?.systemPrompt).toBe("You are a reviewer.")
+    const systemPrompt = ctxSeen!.session?.systemPrompt ?? ""
+    expect(systemPrompt.startsWith("You are a reviewer.")).toBe(true)
+    // Framed: the child learns its cwd and date, the dispatched-subagent
+    // contract, and the CLI's own tool rules (no identity line, no tone block).
+    expect(systemPrompt).toContain("<env>\nWorking directory: /work")
+    expect(systemPrompt).toContain("<subagent_contract>")
+    expect(systemPrompt).toContain("Tool usage:")
+    expect(systemPrompt).not.toContain("You are Cognia's command-line coding agent")
     expect(ctxSeen!.session?.model).toBe("sub-model")
     expect(ctxSeen!.character?.allowedTools).toEqual(["Read"])
 
@@ -559,5 +566,62 @@ describe("runCliSubagent", () => {
       mintId: () => "y",
     })
     expect(r).toEqual({ text: "bare" })
+  })
+})
+
+describe("runCliSubagent, definition fidelity", () => {
+  function setupDeps(): RunCliSubagentDeps {
+    return {
+      config: cfg(),
+      home: "/unused",
+      cwd: "/work",
+      gate: createPermissionGate({ yes: true }),
+      mcpServers: [],
+      approvedTools: new Set(),
+      disabledMcpTools: new Set(),
+      resolveOptions: jest.fn(async () => ({})),
+      resolveHooks: () => undefined,
+      capture: jest.fn(async () => captureResult()),
+      closeSession: jest.fn(async () => undefined),
+      mintId: () => "fidelity",
+    }
+  }
+
+  it("unions the definition's disallowedTools into the child's send options", async () => {
+    const deps = setupDeps()
+    deps.capture = jest.fn(async () => captureResult())
+    await runCliSubagent(def({ disallowedTools: ["bash", "write"] }), "go", "parent", deps)
+    const sendOptions = (deps.capture as jest.Mock).mock.calls[0][2] as SendOptions
+    expect(sendOptions.disallowedTools).toEqual(expect.arrayContaining(["bash", "write"]))
+  })
+
+  it("forwards the definition's effort dial", async () => {
+    const deps = setupDeps()
+    deps.capture = jest.fn(async () => captureResult())
+    await runCliSubagent(def({ effort: "high" }), "go", "parent", deps)
+    const sendOptions = (deps.capture as jest.Mock).mock.calls[0][2] as SendOptions
+    expect(sendOptions.effort).toBe("high")
+    await runCliSubagent(def(), "go", "parent", deps)
+    const plain = (deps.capture as jest.Mock).mock.calls[1][2] as SendOptions
+    expect(plain.effort).toBeUndefined()
+  })
+
+  it("tells a leaf it cannot delegate and a nesting child that it may", async () => {
+    const seen: string[] = []
+    const deps = setupDeps()
+    deps.resolveOptions = async (ctx) => {
+      seen.push(ctx.session?.systemPrompt ?? "")
+      return { provider: "opencode-go" } as unknown as SendOptions
+    }
+    deps.capture = jest.fn(async () => captureResult())
+    await runCliSubagent(def(), "go", "parent", deps)
+    expect(seen[0]).toContain("cannot dispatch subagents of your own")
+    deps.nesting = {
+      manifest: { name: "dispatch_agent" } as never,
+      register: () => {},
+      unregister: () => {},
+    }
+    await runCliSubagent(def(), "go", "parent", deps)
+    expect(seen[1]).toContain("`dispatch_agent`")
   })
 })

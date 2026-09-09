@@ -70,6 +70,7 @@ function projectPluginSubagent(entry: {
   if (entry.entry.model) def.model = entry.entry.model
   if (entry.entry.maxTurns !== undefined) def.maxTurns = entry.entry.maxTurns
   if (entry.entry.effort) def.effort = entry.entry.effort
+  if (entry.entry.color) def.color = entry.entry.color
   if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
   if (entry.entry.mcpServerIds?.length) def.mcpServerIds = entry.entry.mcpServerIds
   if (entry.entry.hidden) def.hidden = true

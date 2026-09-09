@@ -15,6 +15,7 @@ import { windowList } from "../list-window"
 import { panelColumns } from "../overlay-layout"
 import { OverlayFooter } from "../OverlayFooter"
 import { usePanelClick } from "../../input/use-panel-click"
+import { agentInkColor } from "../../theme/agent-color"
 import {
   agentRowBadge,
   agentRowHint,
@@ -170,7 +171,10 @@ export function AgentsPanel({
                 {selected ? "❯ " : "  "}
                 {indent}
                 {agentRow.depth ? <Text color={theme.muted}>└ </Text> : null}
-                <Text color={theme[badge.token]}>{badge.glyph}</Text> {agentRow.name}
+                <Text color={theme[badge.token]}>{badge.glyph}</Text>{" "}
+                <Text color={selected ? theme.accent : agentInkColor(agentRow.color, theme.accent)}>
+                  {agentRow.name}
+                </Text>
                 <Text color={theme.muted}>
                   {" "}
                   · {agentRowHint(agentRow, now)}
