@@ -1,12 +1,15 @@
 import {
+  HANDOFF_STOP_TOKEN,
   MAX_TURNS_PER_MEMBER_PER_ROUND,
   buildSupervisorRoster,
+  hasHandoffStopToken,
   parseDispatches,
   parseHandoffTargets,
   parseMentions,
   planAutoRound,
   routeTurn,
   stripDispatches,
+  stripHandoffStopToken,
 } from "./team-router"
 import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
 
@@ -367,6 +370,43 @@ describe("parseHandoffTargets", () => {
   })
 })
 
+describe("handoff stop token", () => {
+  it("recognises the token the prompt teaches", () => {
+    // The prompt is written from the constant, so a drift between the two
+    // would be a protocol nothing could catch: the member obeys, the chain
+    // runs to its ceiling anyway, and the transcript reads as if it worked.
+    expect(hasHandoffStopToken(`we are done ${HANDOFF_STOP_TOKEN}`)).toBe(true)
+  })
+
+  it("accepts the shapes a model actually writes", () => {
+    expect(hasHandoffStopToken("<stop-handoff>")).toBe(true)
+    expect(hasHandoffStopToken("</stop-handoff>")).toBe(true)
+    expect(hasHandoffStopToken("<stop-handoff />")).toBe(true)
+    expect(hasHandoffStopToken("< STOP-HANDOFF />")).toBe(true)
+  })
+
+  it("does not fire on prose about stopping", () => {
+    expect(hasHandoffStopToken("I think we should stop handoff rounds here")).toBe(false)
+    expect(hasHandoffStopToken("stop-handoff")).toBe(false)
+  })
+
+  it("keeps the answer and removes the plumbing", () => {
+    expect(stripHandoffStopToken(`Ship it.\n\n${HANDOFF_STOP_TOKEN}`)).toBe("Ship it.")
+  })
+
+  it("does not leave a hole where the tag was", () => {
+    const text = `First.\n\n${HANDOFF_STOP_TOKEN}\n\n\nSecond.`
+    expect(stripHandoffStopToken(text)).toBe("First.\n\nSecond.")
+  })
+
+  it("scans repeatedly without the regex losing its place", () => {
+    // A module-level /g regex keeps `lastIndex` between calls, which makes
+    // every second identical check answer false.
+    expect(hasHandoffStopToken(HANDOFF_STOP_TOKEN)).toBe(true)
+    expect(hasHandoffStopToken(HANDOFF_STOP_TOKEN)).toBe(true)
+  })
+})
+
 describe("planAutoRound", () => {
   it("queues the members a reply handed the floor to", () => {
     const result = plan({ replies: [{ characterId: "char_a", text: "@Ben your turn" }] })
@@ -425,6 +465,30 @@ describe("planAutoRound", () => {
       spokenIds: Array.from({ length: MAX_TURNS_PER_MEMBER_PER_ROUND }, () => "char_a"),
     })
     expect(result).toEqual({ targets: [], stop: "repeat" })
+  })
+
+  it("ends the chain when a member says the work is finished", () => {
+    const result = plan({
+      replies: [{ characterId: "char_a", text: "all yours @Ben", stopRequested: true }],
+    })
+    // The stop wins over the handoff in the same message: a member that closes
+    // the thread while naming somebody meant the closing.
+    expect(result).toEqual({ targets: [], stop: "token" })
+  })
+
+  it("reads the handoffs before the ceilings, so the reason is honest", () => {
+    // Ceilings used to be checked first, which reported "budget" for a room
+    // where nobody had handed the floor on at all. Nothing was cut off there,
+    // and telling the user it was is how a real signal gets ignored.
+    const quiet = plan({ maxAutoRounds: 0, replies: [{ characterId: "char_a", text: "done" }] })
+    expect(quiet.stop).toBe("no-handoff")
+
+    const capped = plan({
+      spokenCount: 4,
+      responseCap: 4,
+      replies: [{ characterId: "char_a", text: "nothing further" }],
+    })
+    expect(capped.stop).toBe("no-handoff")
   })
 
   it("distinguishes a room that went quiet from one that was throttled", () => {

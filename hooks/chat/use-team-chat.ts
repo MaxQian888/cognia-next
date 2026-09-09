@@ -48,8 +48,11 @@ import {
   parseDispatches,
   parseMentions,
   planAutoRound,
+  hasHandoffStopToken,
   routeTurn,
   stripDispatches,
+  stripHandoffStopToken,
+  type AutoRoundStop,
   type TeamReply,
 } from "@/lib/claude/team-router"
 import { canSendMessage, type RecentMessage } from "@/lib/ai/agent/team/message-guard"
@@ -588,6 +591,10 @@ export function useTeamChat() {
             useChatStore.getState().setSessionStatus(sessionId, "idle")
             return
           }
+          // One collector for the whole user turn: a member that closes the
+          // thread on the very first round has to be heard before any extra
+          // round is planned.
+          const stopRequests = new Set<string>()
           await runLinearTurn({
             session,
             sessionId,
@@ -603,6 +610,7 @@ export function useTeamChat() {
             turnEmbedding,
             turnMemoryDeps,
             turnUserMessage: userText,
+            stopRequests,
           })
           await runAutoRounds({
             session,
@@ -619,6 +627,7 @@ export function useTeamChat() {
             turnEmbedding,
             turnMemoryDeps,
             turnUserMessage: userText,
+            stopRequests,
           })
         }
 
@@ -902,6 +911,14 @@ interface RunCommonArgs {
 interface RunLinearArgs extends RunCommonArgs {
   content: SendContent
   targets: Character[]
+  /**
+   * Members that asked the room to stop, collected as their replies are
+   * persisted.
+   *
+   * The token has to be caught on its way past, because the same step strips
+   * it: by the time `readLastAssistantText` sees the message it is gone.
+   */
+  stopRequests?: Set<string>
 }
 
 async function runLinearTurn(args: RunLinearArgs): Promise<void> {
@@ -944,6 +961,12 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
         memberByCharId,
         sub,
         sendContent: args.content,
+        // The handoff protocol is between the members. A reader seeing
+        // `<stop-handoff/>` in a reply is reading our plumbing.
+        postProcessText: (text) => {
+          if (hasHandoffStopToken(text)) args.stopRequests?.add(character.id)
+          return stripHandoffStopToken(text)
+        },
         resolvers,
         turnTwinDeps,
         turnEmbedding,
@@ -984,6 +1007,7 @@ async function runAutoRounds(
   args: Omit<RunLinearArgs, "targets"> & { firstRoundTargets: Character[] }
 ): Promise<void> {
   const { sessionId, team, members, interruptedRef, firstRoundTargets } = args
+  const stopRequests = args.stopRequests ?? new Set<string>()
   const maxAutoRounds = Math.max(0, Math.trunc(team.maxAutoRounds ?? 0))
   if (maxAutoRounds === 0) return
 
@@ -995,13 +1019,23 @@ async function runAutoRounds(
   // and pair checks do real work.
   const recentMessages: RecentMessage[] = []
 
-  for (let round = 0; round < maxAutoRounds; round++) {
+  // Unbounded on purpose: `planAutoRound` owns the round budget now, so the
+  // loop ends on a reported reason rather than on a silent counter. That is
+  // the difference between a room that stops and a room that can say why.
+  for (let round = 0; ; round++) {
     if (interruptedRef.current.has(sessionId)) return
 
     const replies: TeamReply[] = []
     for (const member of lastRoundTargets) {
+      const stopRequested = stopRequests.has(member.id)
       const text = await readLastAssistantText(sessionId, member.id)
-      if (!text.trim()) continue
+      if (!text.trim()) {
+        // A member whose whole reply was the stop tag reads as empty once the
+        // tag is stripped. Dropping it here would spend every remaining round
+        // on a room that had already said it was finished.
+        if (stopRequested) replies.push({ characterId: member.id, text: "", stopRequested: true })
+        continue
+      }
       const decision = canSendMessage({
         senderId: member.id,
         content: text,
@@ -1010,7 +1044,7 @@ async function runAutoRounds(
       })
       if (!decision.allow) continue
       recentMessages.push({ senderId: member.id, content: text, createdAt: Date.now() })
-      replies.push({ characterId: member.id, text })
+      replies.push({ characterId: member.id, text, stopRequested })
     }
 
     const plan = planAutoRound({
@@ -1022,12 +1056,35 @@ async function runAutoRounds(
       maxAutoRounds,
       spokenIds,
     })
-    if (plan.targets.length === 0) return
+    if (plan.targets.length === 0) {
+      reportChainCapped(sessionId, plan.stop)
+      return
+    }
 
     await runLinearTurn({ ...args, targets: plan.targets })
     spokenIds.push(...plan.targets.map((member) => member.id))
     lastRoundTargets = plan.targets
   }
+}
+
+/**
+ * Say so when the room was cut off mid-conversation.
+ *
+ * Only for the stops that mean "they wanted to keep going": the round budget,
+ * the reply cap, and the per-member limit. A chain that ended because nobody
+ * handed the floor on, or because a member closed it deliberately, finished
+ * the way it was supposed to and needs no notice. Announcing those as well is
+ * how a useful signal becomes one people learn to ignore.
+ */
+function reportChainCapped(sessionId: string, stop: AutoRoundStop | null): void {
+  if (stop !== "budget" && stop !== "cap" && stop !== "repeat") return
+  useChatStore.getState().setSessionDiagnostic(
+    sessionId,
+    createDiagnostic("handoffChainCapped", {
+      source: "agent-team",
+      meta: { sessionId, extra: { stop } },
+    })
+  )
 }
 
 // ---- Supervisor orchestration --------------------------------------------
@@ -1296,6 +1353,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
       role: memberByCharId.get(member.id)?.role,
     })),
     scratchpad: session.scratchpad,
+    handoffEnabled: (args.team.maxAutoRounds ?? 0) > 0,
   })
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
     .filter((p) => p && p.trim())

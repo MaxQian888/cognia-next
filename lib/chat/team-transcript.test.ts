@@ -1,3 +1,5 @@
+import { HANDOFF_STOP_TOKEN } from "@/lib/claude/team-router"
+
 import {
   DEFAULT_TEAM_TRANSCRIPT_BUDGET,
   buildTeamTranscript,
@@ -360,5 +362,43 @@ describe("buildTeamTranscript", () => {
       })
       expect(transcript).toContain("[5 earlier turns not shown]")
     })
+  })
+})
+
+describe("the handoff protocol paragraph", () => {
+  const messages = [userTurn("who wants this?"), agentTurn("char_b", "I can take it")]
+
+  it("is absent for a room that does not continue on its own", () => {
+    // Teaching it here would be worse than silence: a member would address a
+    // teammate, believe the floor was passed, and end its turn on a question
+    // nobody is going to answer.
+    const transcript = buildTeamTranscript({
+      messages,
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+    })
+    expect(transcript).not.toContain(HANDOFF_STOP_TOKEN)
+    expect(transcript).not.toContain("hand them the floor")
+  })
+
+  it("teaches the exact token the router accepts", () => {
+    const transcript = buildTeamTranscript({
+      messages,
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+      handoffEnabled: true,
+    })
+    expect(transcript).toContain(HANDOFF_STOP_TOKEN)
+    expect(transcript).toContain("hand them the floor")
+  })
+
+  it("keeps the turns readable underneath it", () => {
+    const transcript = buildTeamTranscript({
+      messages,
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+      handoffEnabled: true,
+    })
+    expect(transcript).toContain("Ben: I can take it")
   })
 })

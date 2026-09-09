@@ -562,6 +562,17 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "squads" }],
     icon: "settings",
   },
+  // The members were still passing the conversation to each other when one of
+  // the room's ceilings ran out. Not a fault: the ceilings are there on
+  // purpose, and this is the room telling the truth about being interrupted
+  // rather than presenting a cut-off exchange as a finished one.
+  handoffChainCapped: {
+    severity: "info",
+    retryable: false,
+    persistent: false,
+    actions: [{ kind: "open-settings", section: "squads" }],
+    icon: "settings",
+  },
   supervisorNotMember: {
     severity: "error",
     retryable: false,

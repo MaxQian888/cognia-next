@@ -233,10 +233,57 @@ export function parseHandoffTargets(
 export interface TeamReply {
   characterId: string
   text: string
+  /**
+   * The member asked the group to stop, via {@link HANDOFF_STOP_TOKEN}.
+   *
+   * A flag rather than a scan of `text`, because the orchestrator strips the
+   * token before the message is stored. Reading it back off the transcript
+   * would find nothing, and the room would run to its ceiling while looking
+   * as though the protocol worked.
+   */
+  stopRequested?: boolean
+}
+
+/**
+ * What a member writes to end the handoff chain.
+ *
+ * The three ceilings below are the room's budget, not its judgement. They can
+ * only ever say "that is enough spending", never "we are finished", so a team
+ * that reached an answer in one exchange still burned every round it was
+ * allowed. This is the other half: the members decide when the work is done,
+ * and the ceilings remain there for when they do not.
+ *
+ * A tag rather than a bare word (AutoGen's convention is a plain `TERMINATE`)
+ * because these members write prose to each other, and a plain word appears in
+ * ordinary sentences about stopping. It matches the `<dispatch>` shape the
+ * supervisor protocol in this same file already uses.
+ */
+export const HANDOFF_STOP_TOKEN = "<stop-handoff/>"
+
+const HANDOFF_STOP_RE = /<\s*\/?\s*stop-handoff\s*\/?\s*>/gi
+
+/** Whether a reply asked for the chain to end. */
+export function hasHandoffStopToken(text: string): boolean {
+  HANDOFF_STOP_RE.lastIndex = 0
+  return HANDOFF_STOP_RE.test(text)
+}
+
+/**
+ * Remove the token from what the reader sees.
+ *
+ * The message is stored and rendered like any other, so leaving the tag in
+ * would put a piece of the room's internal protocol in front of the user.
+ * Same reason `stripDispatches` exists a few lines up.
+ */
+export function stripHandoffStopToken(text: string): string {
+  return text
+    .replace(HANDOFF_STOP_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
 }
 
 /** Why the room stopped continuing on its own. `null` means it did not. */
-export type AutoRoundStop = "budget" | "cap" | "repeat" | "no-handoff"
+export type AutoRoundStop = "budget" | "cap" | "repeat" | "no-handoff" | "token"
 
 export interface AutoRoundPlan {
   /** Members to run next, in the order they were first addressed. */
@@ -282,9 +329,13 @@ export interface PlanAutoRoundArgs {
 export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
   const { replies, members, spokenCount, responseCap, round, maxAutoRounds, spokenIds } = args
 
-  if (maxAutoRounds <= 0 || round >= maxAutoRounds) return { targets: [], stop: "budget" }
-  const remaining = responseCap - spokenCount
-  if (remaining <= 0) return { targets: [], stop: "cap" }
+  // Read the round first, then decide whether the room may pay for it. The
+  // ceilings used to be checked up front, which made every stop reason mean
+  // the same thing: the chain ended. Asking who was handed the floor first is
+  // what lets `no-handoff` (the room finished) be told apart from `budget`
+  // and `cap` (the room was cut off), and only the second kind is worth
+  // telling anyone about.
+  if (replies.some((reply) => reply.stopRequested)) return { targets: [], stop: "token" }
 
   const spokenTally = new Map<string, number>()
   for (const id of spokenIds) spokenTally.set(id, (spokenTally.get(id) ?? 0) + 1)
@@ -307,7 +358,11 @@ export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
   if (picked.length === 0) {
     return { targets: [], stop: blockedByRepeat ? "repeat" : "no-handoff" }
   }
+  if (maxAutoRounds <= 0 || round >= maxAutoRounds) return { targets: [], stop: "budget" }
+  const remaining = responseCap - spokenCount
+  if (remaining <= 0) return { targets: [], stop: "cap" }
+
   // Truncating is not a stop: the members that did fit still speak, and the
-  // cap check at the top of the next round is what ends the chain.
+  // next round's checks are what end the chain.
   return { targets: picked.slice(0, remaining), stop: null }
 }

@@ -40,6 +40,7 @@ import {
   mergeRoomParticipants,
   type RoomParticipant,
 } from "./room-roster"
+import { HANDOFF_STOP_TOKEN } from "@/lib/claude/team-router"
 import { bareToolName } from "./tool-summary"
 import {
   makeSpeaker,
@@ -96,6 +97,15 @@ export interface BuildTeamTranscriptInput {
   scratchpad?: string | undefined
   /** Omitted means {@link DEFAULT_TEAM_TRANSCRIPT_BUDGET}. */
   budget?: TeamTranscriptBudget | undefined
+  /**
+   * Whether this team runs extra rounds on its own (`Team.maxAutoRounds`).
+   *
+   * Gates the paragraph that teaches the handoff protocol. Teaching it to a
+   * room where it does nothing would be worse than saying nothing: a member
+   * would address a teammate, believe the floor was passed, and end its turn
+   * on a question no one is going to answer.
+   */
+  handoffEnabled?: boolean | undefined
 }
 
 /** Concatenate the text parts of a message. Non-text parts carry no transcript line. */
@@ -142,6 +152,21 @@ export function nonTextPartMarkers(parts: readonly unknown[]): string[] {
   return markers
 }
 
+/**
+ * How a member passes the floor, and how the room agrees it is finished.
+ *
+ * Written from `HANDOFF_STOP_TOKEN` rather than repeating the literal, because
+ * a prompt that teaches one spelling while the parser accepts another is a
+ * failure nothing would catch: the member does as it was told, the chain runs
+ * to its ceiling anyway, and the transcript reads as if it worked.
+ */
+const HANDOFF_PROTOCOL =
+  "This room continues on its own for a few rounds. Address a teammate by name with " +
+  "`@Name` to hand them the floor and they will answer next. When the group has " +
+  `finished, write ${HANDOFF_STOP_TOKEN} anywhere in your reply and no further rounds ` +
+  "run. The tag is removed before anyone reads the message, so write your answer normally " +
+  "around it. Do not use it to end your own turn early, only to end the group's work."
+
 export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
   const { messages, respondingCharacterId, members, scratchpad } = input
   const sections: string[] = []
@@ -164,6 +189,7 @@ export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
           "`User:` is the person you are talking to when nobody else is named, and every other " +
           "label names a participant from the roster above. " +
           "Reply only with your next turn (no transcript, no prefix).",
+        ...(input.handoffEnabled ? ["", HANDOFF_PROTOCOL] : []),
         "",
         lines.join("\n"),
       ].join("\n")

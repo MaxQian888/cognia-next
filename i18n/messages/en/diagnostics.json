@@ -384,6 +384,10 @@
     "workspaceUnavailable": {
       "label": "Workspace unavailable",
       "hint": "This conversation's workspace can't be resolved on this device — retry, or bind it to a folder from the session's workspace panel."
+    },
+    "handoffChainCapped": {
+      "hint": "The members were still handing the conversation to each other when this team ran out of follow-up rounds. Raise the limit in the team's settings to let them finish.",
+      "label": "The room stopped short"
     }
   },
   "detail": {

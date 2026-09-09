@@ -287,6 +287,7 @@ export type DiagnosticCode =
   | "squadDispatchFailed"
   | "squadNotReady"
   | "squadAlreadyRunning"
+  | "handoffChainCapped"
   // --- Unified execution layer ---
   | "capabilityUnsatisfied"
   | "hostUnavailable"
