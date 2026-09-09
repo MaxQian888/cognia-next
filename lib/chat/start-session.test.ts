@@ -419,11 +419,17 @@ describe("startNewSession", () => {
       ).toBe("local")
     })
 
-    it("keeps the managed identity when there is no local filesystem", async () => {
+    it("records the refusal when there is no local filesystem, keeping the managed identity", async () => {
       // A browser with no paired host: provisioning answers `unavailable` and
       // the durable managed identity is still the right answer.
       const session = await startNewSession()
       expect(session.executionContext?.workspaceBinding?.kind).toBe("managed")
+      // ...but the refusal has to be RECORDED, not swallowed. An empty catch
+      // left this undefined, which reads downstream as "never attempted", so
+      // the failure only resurfaced one step later on the first turn, as
+      // `ensureSessionExecutionBundle` throwing the name of an internal object
+      // behind a Retry that re-ran the same refusal.
+      expect(session.executionContext?.managedWorkspace?.availability).toBe("missing-on-device")
     })
   })
 

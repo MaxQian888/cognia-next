@@ -4,7 +4,13 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { ChatSession } from "@cognia/agent-config-types"
-import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
+import type {
+  SessionExecutionContext,
+  SessionExecutionLocation,
+  SessionWorkspaceBaseSpec,
+} from "@/types/execution-context"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 import {
   defaultEnsureDefaultWorkspaceDeps,
   ensureDefaultWorkspace,
@@ -205,9 +211,33 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
       try {
         const materialized = await materializeManagedWorkspace(session.id)
         session = { ...session, executionContext: materialized }
-      } catch {
-        // The durable identity is still valid. This device must explicitly
-        // rebind/import before execution, rather than guessing a directory.
+      } catch (error) {
+        // The durable identity is still valid, and this device must explicitly
+        // rebind/import before execution rather than guessing a directory. What
+        // must NOT be lost is the fact that materialization was ATTEMPTED and
+        // refused: an empty catch left `managedWorkspace` undefined, which reads
+        // downstream as "never tried". The refusal then resurfaced one full step
+        // later, on the first turn, as `ensureSessionExecutionBundle` throwing
+        // "managed workspace is not available on this device" -- the name of an
+        // internal object, raised long after the setup that actually failed,
+        // behind a Retry that re-runs the same refusal.
+        //
+        // `missing-on-device` is the state portable sync already reconstructs
+        // for exactly this situation (`portableExecutionContext`), so recording
+        // it here needs no new vocabulary and lets the surface offer
+        // `rebindManagedWorkspace` instead of a dead Retry.
+        const unavailable: SessionExecutionContext = {
+          ...executionContext,
+          managedWorkspace: { availability: "missing-on-device" },
+        }
+        await updateSession(session.id, { executionContext: unavailable })
+        session = { ...session, executionContext: unavailable }
+        dispatchDiagnostic(
+          createDiagnostic("workspaceUnavailable", {
+            source: "chat.startSession",
+            message: error instanceof Error ? error.message : String(error),
+          })
+        )
       }
     }
   } else if (ownerProjectId) {
