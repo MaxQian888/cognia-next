@@ -17,6 +17,7 @@ import { cliEsbuildOptions, loadEsbuild } from "./esbuild-shared.mjs"
 import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
+import { pruneSidecarResidue } from "./lib/prune-sidecar-residue.mjs"
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/../.."
 const entry = path.join(root, "cli/src/cli/entry.ts")
@@ -34,6 +35,10 @@ const esbuild = await loadEsbuild()
 // (scripts/build/esbuild-shared.mjs), so both go through one definition.
 await esbuild.build(cliEsbuildOptions({ root, entry, outdir, entryNames: "cognia-agent" }))
 
+// A bundled sidecar host left under `dist/sidecar/` by an older packaging
+// layout shadows the repo's `sidecar/` in the runtime walk-up, so every dev
+// run would keep using a host frozen at that build. Sweep it before staging.
+pruneSidecarResidue({ outDir: outdir, log: (line) => console.log(line) })
 stageAstGrep({ outDir: outdir })
 
 if (jsOnly) {
