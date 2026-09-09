@@ -304,6 +304,16 @@ export function ProviderDetailHost({
             )}
             <ProviderConfigTab
               providerId={selectedId}
+              authSlot={
+                <>
+                  {/* Both self-gate on the catalog (`supportsOAuth`, and whether
+                      the provider has a console page or a validation probe), so
+                      mounting them for every built-in is safe and any provider
+                      that grows one picks it up for free. */}
+                  <OAuthLoginButton providerId={selectedId} />
+                  <KeyLoginRow providerId={selectedId} apiKey={selectedSettings?.apiKey} />
+                </>
+              }
               settings={
                 selectedSettings ?? {
                   providerId: selectedId,
@@ -367,29 +377,18 @@ export function ProviderDetailHost({
               onRotationStrategyChange={(strategy) =>
                 void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
               }
-            />
-            {/* Self-gates on the catalog's `supportsOAuth` and renders
-            null otherwise, so mounting it for every built-in is
-            safe and picks up any future OAuth provider for free.
-            Until now nothing rendered it, which left
-            `oauthConnected` / `oauthExpiresAt` unreachable from the
-            UI even though both are persisted on the settings row. */}
-            <OAuthLoginButton providerId={selectedId} />
-            {/* Guided key login. Self-gates on whether the provider
-            has a console page or a validation probe, so mounting it
-            for every built-in is safe and every provider that grows
-            one picks it up for free. */}
-            <KeyLoginRow providerId={selectedId} apiKey={selectedSettings?.apiKey} />
-            {/* Provider-specific panels. Both shipped with a catalog
-            entry and a full settings schema but were never mounted,
-            so every field they expose was unreachable. */}
-            {selectedId === "openrouter" && (
-              <>
-                <OpenRouterSettings />
-                <OpenRouterKeyManagement />
-              </>
-            )}
-            {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+            >
+              {/* Provider-specific panels. Both shipped with a catalog entry and
+                  a full settings schema but were never mounted, so every field
+                  they expose was unreachable. */}
+              {selectedId === "openrouter" && (
+                <>
+                  <OpenRouterSettings />
+                  <OpenRouterKeyManagement />
+                </>
+              )}
+              {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+            </ProviderConfigTab>
             {parametersBlock}
           </div>
         ) : (

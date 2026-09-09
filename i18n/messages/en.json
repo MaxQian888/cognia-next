@@ -24626,6 +24626,14 @@
     "backToList": "Back",
     "baseURL": "Base URL",
     "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
+    "browserStreaming": {
+      "gatewayDescription": "This provider points at a custom endpoint. Streaming works only if that endpoint allows requests from a browser origin.",
+      "gatewayTitle": "Custom endpoint, streaming unverified",
+      "supportedDescription": "Responses arrive token by token, straight from the provider, with no desktop app in between.",
+      "supportedTitle": "Streams directly from this browser",
+      "unsupportedDescription": "This provider's endpoint may refuse browser requests. Replies can arrive all at once instead of streaming, or fail outright.",
+      "unsupportedTitle": "May not stream from a browser"
+    },
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseURLPlaceholderAnthropic": "https://api.anthropic.com/v1",
     "baseURLPlaceholderGemini": "https://generativelanguage.googleapis.com/v1beta",

@@ -43,6 +43,14 @@
   "backToList": "返回",
   "baseURL": "基础 URL",
   "baseURLHint": "使用代理 URL 或自托管端点。留空使用默认值。",
+  "browserStreaming": {
+    "gatewayDescription": "这个提供商指向了自定义端点。只有该端点允许来自浏览器的跨域请求，流式才能生效。",
+    "gatewayTitle": "自定义端点，流式未经验证",
+    "supportedDescription": "回复逐字返回，直接来自提供商，中间不经过桌面端。",
+    "supportedTitle": "可以从当前浏览器直连流式",
+    "unsupportedDescription": "这个提供商的端点可能拒绝浏览器发起的请求。回复可能一次性返回而非逐字流式，也可能直接失败。",
+    "unsupportedTitle": "可能无法在浏览器里流式"
+  },
   "baseURLPlaceholder": "https://api.example.com/v1",
   "baseURLPlaceholderAnthropic": "https://api.anthropic.com/v1",
   "baseURLPlaceholderGemini": "https://generativelanguage.googleapis.com/v1beta",

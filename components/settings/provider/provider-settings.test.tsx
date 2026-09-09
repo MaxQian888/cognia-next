@@ -608,6 +608,10 @@ jest.mock("./provider-config-tab", () => ({
       >
         strategy
       </button>
+      {/* Both slots have to render, or the assertions about WHERE the auth rows
+          and the provider-specific panels land would pass on an empty stub. */}
+      <div data-testid="mock-config-tab-auth-slot">{props.authSlot as React.ReactNode}</div>
+      <div data-testid="mock-config-tab-extras-slot">{props.children as React.ReactNode}</div>
     </div>
   ),
 }))
@@ -937,6 +941,16 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       // for every built-in and decides for itself whether to render.
       selectProvider("openai", "OpenAI")
       expect(screen.getByTestId("oauth-login-openai")).toBeInTheDocument()
+    })
+
+    // Signing in is an alternative to typing a key, so it belongs above the
+    // field that asks for one. These rows used to be appended after the whole
+    // tab, which put them roughly 400px below the box they replace.
+    it("puts the ways in that are not a key above the credentials form", () => {
+      selectProvider("openai", "OpenAI")
+      expect(screen.getByTestId("mock-config-tab-auth-slot")).toContainElement(
+        screen.getByTestId("oauth-login-openai")
+      )
     })
 
     it("exposes provider config import/export from the sidebar header", async () => {

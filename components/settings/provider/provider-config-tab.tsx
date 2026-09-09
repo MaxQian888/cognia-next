@@ -12,6 +12,9 @@
  *
  * Blocks, in order:
  *  0. Anthropic auth extras (subscription reuse) — provider-gated
+ *  0.5 `authSlot` — OAuth / guided key login, the ways in that are not typing
+ *     a key. Above the credentials block because they replace it.
+ *  0.6 Browser-direct streaming notice — standalone sessions only
  *  1. Credentials — API key / Bedrock auth + base URL, verify action in the
  *     header, connection status at the foot. Everything one request needs.
  *  2. Default model — what a new chat picks under this provider
@@ -73,6 +76,7 @@ import {
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import { useDraftField } from "@/hooks/settings/use-draft-field"
 import { BedrockSettingsFields } from "./bedrock-settings-fields"
+import { BrowserStreamingNotice } from "./browser-streaming-notice"
 import { TransportHeadersEditor } from "./transport-headers-editor"
 import { DeploymentProfileCard } from "./deployment-profile-card"
 import { DeploymentCertificationPanel } from "./deployment-certification-panel"
@@ -121,7 +125,15 @@ export interface ProviderConfigTabProps {
   onReorderApiKeys?: (from: number, to: number) => void
   onToggleRotation?: (enabled: boolean) => void
   onRotationStrategyChange?: (strategy: ApiKeyRotationStrategy) => void
-  // Extra content slot
+  /**
+   * Ways to obtain a credential without typing one: OAuth, guided key login,
+   * subscription reuse. Rendered ABOVE the credentials block, because they are
+   * alternatives to it. The host used to append them as siblings after the
+   * whole tab, which put "sign in instead" roughly 400px below the box asking
+   * for a key.
+   */
+  authSlot?: React.ReactNode
+  // Extra content slot, rendered after key rotation.
   children?: React.ReactNode
 }
 
@@ -408,6 +420,7 @@ export function ProviderConfigTab({
   onReorderApiKeys,
   onToggleRotation,
   onRotationStrategyChange,
+  authSlot,
   children,
 }: ProviderConfigTabProps) {
   const t = useTranslations("providers")
@@ -519,6 +532,19 @@ export function ProviderConfigTab({
           <AnthropicSubscriptionReuseCard />
         </div>
       )}
+
+      {/* ── 0.5 Ways in that are not "type a key here" ────────────────────
+          OAuth, guided key login and subscription reuse belong above the field
+          they replace, not below it. */}
+      {authSlot ? (
+        <div className="min-w-0 space-y-4" data-testid="provider-auth-slot">
+          {authSlot}
+        </div>
+      ) : null}
+
+      {/* ── 0.6 Browser-direct streaming ───────────────────────────────────
+          Standalone sessions only. Self-hides everywhere else. */}
+      <BrowserStreamingNotice providerId={providerId} baseURL={settings.baseURL} />
 
       {/* ── 1. Credentials + reachability ─────────────────────────────────
           Credentials, endpoint, verify action and status live together: these

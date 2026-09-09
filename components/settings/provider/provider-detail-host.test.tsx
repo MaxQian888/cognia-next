@@ -38,8 +38,22 @@ jest.mock("./provider-detail-panel", () => ({
 
 // `jest.mock` factories are hoisted above every const in the file, so the
 // stub has to be built inside each factory rather than shared from one.
+// The stub must render both slots. The tab is the thing that decides WHERE
+// the auth rows and the provider-specific panels go, so a stub that drops them
+// would leave those assertions passing while testing nothing.
 jest.mock("./provider-config-tab", () => ({
-  ProviderConfigTab: () => <div data-testid="config-tab" />,
+  ProviderConfigTab: ({
+    authSlot,
+    children,
+  }: {
+    authSlot?: React.ReactNode
+    children?: React.ReactNode
+  }) => (
+    <div data-testid="config-tab">
+      <div data-testid="config-tab-auth-slot">{authSlot}</div>
+      <div data-testid="config-tab-extras-slot">{children}</div>
+    </div>
+  ),
 }))
 jest.mock("./provider-models-tab", () => ({
   ProviderModelsTab: () => <div data-testid="models-tab" />,
@@ -152,10 +166,14 @@ describe("ProviderDetailHost", () => {
     // Both panels shipped with a catalog entry and a full settings schema but
     // were never mounted, so every field they expose was unreachable. They
     // self-gate, so mounting them for every built-in is safe.
-    it("always mounts the OAuth and guided-key rows so they can self-gate", () => {
+    // Above the credentials block, not after the whole tab: they are the ways
+    // in that do NOT involve typing a key, so they belong over the field they
+    // replace rather than 400px below it.
+    it("feeds the OAuth and guided-key rows through the tab's auth slot", () => {
       renderHost()
-      expect(screen.getByTestId("oauth-login")).toBeInTheDocument()
-      expect(screen.getByTestId("key-login")).toBeInTheDocument()
+      const authSlot = screen.getByTestId("config-tab-auth-slot")
+      expect(authSlot).toContainElement(screen.getByTestId("oauth-login"))
+      expect(authSlot).toContainElement(screen.getByTestId("key-login"))
     })
 
     // These panels are `next/dynamic`, so they arrive a tick after mount and
@@ -168,6 +186,9 @@ describe("ProviderDetailHost", () => {
       renderHost({ selectedId: "openrouter" })
       expect(await screen.findByTestId("openrouter-settings")).toBeInTheDocument()
       expect(await screen.findByTestId("openrouter-keys")).toBeInTheDocument()
+      expect(screen.getByTestId("config-tab-extras-slot")).toContainElement(
+        screen.getByTestId("openrouter-settings")
+      )
     })
 
     it("mounts the CLIProxyAPI panel only for cliproxyapi", async () => {
@@ -177,6 +198,9 @@ describe("ProviderDetailHost", () => {
 
       renderHost({ selectedId: "cliproxyapi" })
       expect(await screen.findByTestId("cliproxyapi-settings")).toBeInTheDocument()
+      expect(screen.getByTestId("config-tab-extras-slot")).toContainElement(
+        screen.getByTestId("cliproxyapi-settings")
+      )
     })
 
     it("gets the models tab and a usage tab", () => {
