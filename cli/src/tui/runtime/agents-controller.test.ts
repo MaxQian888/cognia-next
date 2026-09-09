@@ -18,12 +18,25 @@ jest.mock("../../agent/builtin-agents", () => ({
 }))
 
 import {
+  agentFilePath,
   agentsDispatch,
+  agentsEditEffect,
   agentsList,
   agentsModelsPanel,
+  agentsNew,
   agentsPanel,
+  agentsRemove,
   agentsStop,
+  parseAgentsRunArgs,
+  renderStarterAgentFile,
+  type AgentAuthoringFs,
 } from "./agents-controller"
+import { parseMarkdownAgent } from "@/lib/claude/agents/markdown-agents"
+import {
+  __clearLiveSubagentsForTesting,
+  getLiveSubagent,
+  listLiveSubagents,
+} from "../../agent/subagent-live-output"
 import type { AgentSummary } from "../../agent/discover-agents"
 import type { ResolvedConfig } from "../../config/schema"
 import type { CliBackgroundRunInfo } from "../../agent/subagent-background-tasks"
@@ -423,5 +436,249 @@ describe("agents cancellation boundaries", () => {
     expect(actions.at(-1)).toMatchObject({
       message: expect.stringContaining("No cancellable background run"),
     })
+  })
+})
+
+afterEach(() => {
+  __clearLiveSubagentsForTesting()
+})
+
+describe("parseAgentsRunArgs", () => {
+  it("splits the id from the prompt and reads the --bg flag in either spelling", () => {
+    expect(parseAgentsRunArgs("reviewer check it")).toEqual({
+      background: false,
+      id: "reviewer",
+      prompt: "check it",
+    })
+    expect(parseAgentsRunArgs("--bg reviewer check it")).toEqual({
+      background: true,
+      id: "reviewer",
+      prompt: "check it",
+    })
+    expect(parseAgentsRunArgs("  --background   reviewer  go ")).toMatchObject({
+      background: true,
+      id: "reviewer",
+      prompt: "go",
+    })
+    expect(parseAgentsRunArgs("--bg")).toEqual({ background: true, id: "", prompt: "" })
+  })
+})
+
+describe("agentsDispatch, live panel and background", () => {
+  it("streams a manual run into a live entry that settles done, tinted by the agent colour", async () => {
+    const { dispatch } = recorder()
+    const coloured: AgentSummary = {
+      ...agent("scout"),
+      def: { ...agent("scout").def, color: "cyan" },
+    }
+    let liveDuringRun: ReturnType<typeof listLiveSubagents> = []
+    await agentsDispatch("scout look around", {
+      dispatch,
+      cwd: "/w",
+      sessionId: "s1",
+      list: async () => [coloured],
+      dispatchAgent: async (_def, _prompt, opts) => {
+        liveDuringRun = listLiveSubagents("s1")
+        opts.onEvent?.({ type: "text-delta", delta: "hello" } as never)
+        return { text: "found it" }
+      },
+    })
+    expect(liveDuringRun).toHaveLength(1)
+    expect(liveDuringRun[0]).toMatchObject({ name: "scout", task: "look around", color: "cyan" })
+    const settled = getLiveSubagent(liveDuringRun[0].liveId, "s1")
+    expect(settled?.status).toBe("done")
+    expect(settled?.text).toContain("hello")
+  })
+
+  it("settles the live entry to error when the run throws or is refused", async () => {
+    const { dispatch } = recorder()
+    await agentsDispatch("reviewer go", {
+      dispatch,
+      cwd: "/w",
+      sessionId: "s2",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => {
+        throw new Error("boom")
+      },
+    })
+    expect(listLiveSubagents("s2")[0]?.status).toBe("error")
+    await agentsDispatch("reviewer go", {
+      dispatch,
+      cwd: "/w",
+      sessionId: "s3",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => ({
+        text: "",
+        rejection: { reason: "max-depth", message: "too deep" },
+      }),
+    })
+    expect(listLiveSubagents("s3")[0]?.status).toBe("error")
+  })
+
+  it("detaches a --bg run into the background registry and returns immediately", async () => {
+    const { dispatch, actions } = recorder()
+    const startBackground = jest.fn()
+    let release!: () => void
+    const run = jest.fn(
+      () =>
+        new Promise<{ text: string }>((resolve) => {
+          release = () => resolve({ text: "later" })
+        })
+    )
+    await agentsDispatch("--bg reviewer long task", {
+      dispatch,
+      cwd: "/w",
+      sessionId: "s4",
+      home: "/home/.cognia",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: run,
+      startBackground,
+      hasBackground: () => false,
+      mintRunId: () => "bg-manual",
+    })
+    // Returned before the run settled, with the runId and the stop hint.
+    expect(actions.at(-1)).toMatchObject({
+      type: "NOTICE",
+      message: expect.stringContaining("runId: bg-manual"),
+    })
+    expect((actions.at(-1) as { message: string }).message).toContain("/agents stop bg-manual")
+    expect(actions.some((a) => a.type === "ACTIVITY_START")).toBe(false)
+    expect(startBackground).toHaveBeenCalledTimes(1)
+    const [runId, meta, promise] = startBackground.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+      Promise<{ text: string; error?: string }>,
+    ]
+    expect(runId).toBe("bg-manual")
+    expect(meta).toMatchObject({
+      kind: "subagent",
+      subagentId: "reviewer",
+      prompt: "long task",
+      sessionId: "s4",
+      host: "cli",
+      mode: "background",
+      home: "/home/.cognia",
+    })
+    // The live entry shares the background runId so the panel shows one row.
+    expect(getLiveSubagent("bg-manual", "s4")?.status).toBe("running")
+    release()
+    await expect(promise).resolves.toMatchObject({ text: expect.stringContaining("later") })
+    expect(getLiveSubagent("bg-manual", "s4")?.status).toBe("done")
+  })
+
+  it("refuses a --bg run whose minted id is already taken", async () => {
+    const { dispatch, actions } = recorder()
+    const startBackground = jest.fn()
+    await agentsDispatch("--bg reviewer go", {
+      dispatch,
+      cwd: "/w",
+      list: async () => [agent("reviewer")],
+      dispatchAgent: async () => ({ text: "x" }),
+      startBackground,
+      hasBackground: () => true,
+      mintRunId: () => "bg-dup",
+    })
+    expect(startBackground).not.toHaveBeenCalled()
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("already exists") })
+  })
+})
+
+function memAuthoringFs(initial: Record<string, string> = {}) {
+  const files = new Map(Object.entries(initial))
+  const dirs = new Set<string>()
+  const fs: AgentAuthoringFs = {
+    exists: async (p) => files.has(p),
+    mkdir: async (p) => {
+      dirs.add(p)
+    },
+    writeText: async (p, text) => {
+      files.set(p, text)
+    },
+    unlink: async (p) => {
+      files.delete(p)
+    },
+  }
+  return { fs, files, dirs }
+}
+
+describe("agentsNew / agentsRemove / agentsEditEffect", () => {
+  it("scaffolds a parseable agent file with the optional-field guide", async () => {
+    const { dispatch, actions } = recorder()
+    const mem = memAuthoringFs()
+    await agentsNew("code-reviewer reviews diffs for bugs", { dispatch, cwd: "/proj", fs: mem.fs })
+    const file = agentFilePath("/proj", "code-reviewer")
+    expect(mem.dirs.has("/proj/.cognia/agents")).toBe(true)
+    const text = mem.files.get(file)!
+    expect(text).toContain("description: reviews diffs for bugs")
+    expect(text).toContain("# color: cyan")
+    const parsed = parseMarkdownAgent("code-reviewer", text)
+    if (!("def" in parsed)) throw new Error("expected a parseable agent file")
+    expect(parsed.id).toBe("code-reviewer")
+    expect(parsed.def.description).toBe("reviews diffs for bugs")
+    expect(parsed.def.prompt).toContain("You are code-reviewer")
+    expect(parsed.unsupportedFields).toEqual([])
+    expect(actions.at(-1)).toMatchObject({
+      message: expect.stringContaining("/agents edit code-reviewer"),
+    })
+  })
+
+  it("defaults the description and rejects bad ids or an existing file", async () => {
+    const { dispatch, actions } = recorder()
+    const mem = memAuthoringFs()
+    await agentsNew("scout", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(mem.files.get(agentFilePath("/proj", "scout"))).toContain(
+      "description: Custom subagent scout"
+    )
+    await agentsNew("scout", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("already exists") })
+    await agentsNew("bad!id", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(actions.at(-1)).toMatchObject({
+      message: expect.stringContaining("not a valid agent id"),
+    })
+    await agentsNew("", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(actions.at(-1)).toMatchObject({ message: "Usage: /agents new <id> [description]" })
+    expect(mem.files.size).toBe(1)
+  })
+
+  it("removes only a project file and explains what it will not touch", async () => {
+    const { dispatch, actions } = recorder()
+    const file = agentFilePath("/proj", "scout")
+    const mem = memAuthoringFs({ [file]: "---\ndescription: x\n---\nbody" })
+    await agentsRemove("ghost", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("Built-in agents") })
+    await agentsRemove("scout", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(mem.files.has(file)).toBe(false)
+    expect(actions.at(-1)).toMatchObject({ message: expect.stringContaining("Removed") })
+    await agentsRemove("", { dispatch, cwd: "/proj", fs: mem.fs })
+    expect(actions.at(-1)).toMatchObject({ message: "Usage: /agents rm <id>" })
+  })
+
+  it("opens the project file, falls back to the home root, else explains shadowing", () => {
+    const project = agentFilePath("/proj", "scout")
+    const home = agentFilePath("/home/.cognia", "scout")
+    expect(
+      agentsEditEffect("scout", {
+        cwd: "/proj",
+        home: "/home/.cognia",
+        exists: (p) => p === project,
+      })
+    ).toEqual({ kind: "openFile", file: project })
+    expect(
+      agentsEditEffect("scout", { cwd: "/proj", home: "/home/.cognia", exists: (p) => p === home })
+    ).toEqual({ kind: "openFile", file: home })
+    expect(
+      agentsEditEffect("Explore", { cwd: "/proj", home: "/home/.cognia", exists: () => false })
+    ).toMatchObject({ kind: "notice", message: expect.stringContaining("/agents new Explore") })
+    expect(agentsEditEffect("", { cwd: "/proj", exists: () => true })).toMatchObject({
+      kind: "notice",
+      message: "Usage: /agents edit <id>",
+    })
+  })
+
+  it("renderStarterAgentFile keeps the guide inside the frontmatter fence", () => {
+    const text = renderStarterAgentFile("x", "d")
+    const [, frontmatter, body] = text.split("---\n")
+    expect(frontmatter).toContain("# Optional fields")
+    expect(body.trim().startsWith("You are x")).toBe(true)
   })
 })

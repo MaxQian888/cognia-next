@@ -44,6 +44,8 @@ export interface AgentPanelRow {
   toolUses?: number
   /** Token spend — exact once the run's usage lands, else a live estimate. */
   tokens?: number
+  /** Whether `tokens` is the exact end-of-turn usage (else a live estimate). */
+  tokensExact?: boolean
   /** Dispatching subagent's live id (the tree edge) — live rows only. */
   parentLiveId?: string
   /** Indent level for nested runs (0 = dispatched by the chat turn), stamped
@@ -85,7 +87,7 @@ function compareRows(a: AgentPanelRow, b: AgentPanelRow): number {
 /** Project one live-output entry into its panel row (shared by build + refresh). */
 function liveEntryRow(entry: SubagentLiveEntry, bgRunIds: Set<string>): AgentPanelRow {
   const isBackground = bgRunIds.has(entry.liveId)
-  const { tokens } = liveTokenCount(entry)
+  const { tokens, exact } = liveTokenCount(entry)
   return {
     id: isBackground ? `bg:${entry.liveId}` : `live:${entry.liveId}`,
     kind: isBackground ? "background" : "inflight",
@@ -101,6 +103,7 @@ function liveEntryRow(entry: SubagentLiveEntry, bgRunIds: Set<string>): AgentPan
     ...(entry.color ? { color: entry.color } : {}),
     toolUses: entry.toolUseCount,
     tokens,
+    tokensExact: exact,
   }
 }
 
@@ -381,14 +384,14 @@ export function buildLiveAgentTreeRows(entries: SubagentLiveEntry[]): LiveAgentT
   const visit = (entry: SubagentLiveEntry, depth: number): void => {
     if (seen.has(entry.liveId)) return // defensive cycle break
     seen.add(entry.liveId)
-    const { tokens } = liveTokenCount(entry)
+    const { tokens, exact } = liveTokenCount(entry)
     const uses = entry.toolUseCount
     rows.push({
       liveId: entry.liveId,
       name: entry.name,
       task: entry.task,
       depth,
-      stats: `${uses} tool use${uses === 1 ? "" : "s"} · ${formatTokenCount(tokens)} tokens`,
+      stats: `${uses} tool use${uses === 1 ? "" : "s"} · ${exact ? "" : "~"}${formatTokenCount(tokens)} tokens`,
       activity: liveAgentActivity(entry),
       ...(entry.color ? { color: entry.color } : {}),
     })
@@ -406,10 +409,24 @@ export interface AgentBadge {
   token: "success" | "muted" | "danger" | "warning" | "accent"
 }
 
-export function agentRowBadge(status: AgentRowStatus): AgentBadge {
+/**
+ * Frames a running row's glyph cycles through when the caller passes a tick
+ * (the panel's one-second clock), so a live run visibly breathes instead of
+ * sitting behind the same static diamond as a queued one. Without a tick the
+ * glyph is the static diamond, which is what text renderers and tests see.
+ */
+export const RUNNING_BADGE_FRAMES = ["◆", "◇", "◆", "◈"] as const
+
+export function agentRowBadge(status: AgentRowStatus, tick?: number): AgentBadge {
   switch (status) {
     case "running":
-      return { glyph: "◆", token: "accent" }
+      return {
+        glyph:
+          tick === undefined
+            ? "◆"
+            : RUNNING_BADGE_FRAMES[Math.abs(Math.floor(tick)) % RUNNING_BADGE_FRAMES.length],
+        token: "accent",
+      }
     case "done":
       return { glyph: "●", token: "success" }
     case "error":
@@ -435,8 +452,10 @@ export function agentRowHint(row: AgentPanelRow, now: number): string {
   const parts: string[] = [row.kind === "inflight" ? "in-turn" : "background"]
   if (row.startedAt !== undefined) parts.push(formatElapsed(now - row.startedAt))
   if (row.toolUses !== undefined && row.toolUses > 0) parts.push(`${row.toolUses} tools`)
+  // A live estimate (~4 chars per token) is marked so it never reads as the
+  // exact spend the run page shows once the usage lands.
   if (row.tokens !== undefined && row.tokens > 0)
-    parts.push(`↓ ${formatTokenCount(row.tokens)} tok`)
+    parts.push(`↓ ${row.tokensExact === false ? "~" : ""}${formatTokenCount(row.tokens)} tok`)
   return parts.join(" · ")
 }
 
@@ -476,4 +495,4 @@ export function agentRowTask(row: AgentPanelRow, now: number, columns: number): 
   return room < MIN_TASK_COLUMNS ? "" : truncateToWidth(task, room)
 }
 
-export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view · s stop native task · esc close"
+export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view · s stop · esc close"

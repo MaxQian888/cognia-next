@@ -223,3 +223,26 @@ describe("COGNIA_COMMANDS", () => {
     ).toEqual({ kind: "planRefine", feedback: "keep the existing API" })
   })
 })
+
+describe("/agents subcommands", () => {
+  it("registers stop, new, edit and rm beside panel, list, models and run", () => {
+    const agents = COGNIA_COMMANDS.find((c) => c.name === "agents")!
+    expect(agents.argumentHint).toBeTruthy()
+    expect((agents.subcommands ?? []).map((s) => s.name).sort()).toEqual(
+      ["edit", "list", "models", "new", "panel", "rm", "run", "stop"].sort()
+    )
+  })
+
+  it("edit resolves synchronously to a notice when no agent file exists", () => {
+    const agents = COGNIA_COMMANDS.find((c) => c.name === "agents")!
+    const edit = (agents.subcommands ?? []).find((s) => s.name === "edit")!
+    const effect = edit.handler!({
+      ...ctx("definitely-not-an-agent"),
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: "/nonexistent-cwd-for-test" },
+    })
+    expect(effect).toMatchObject({
+      kind: "notice",
+      message: expect.stringContaining("/agents new"),
+    })
+  })
+})

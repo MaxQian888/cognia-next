@@ -161,7 +161,7 @@ export function AgentsPanel({
           {visible.map((agentRow, i) => {
             const row = win.start + i
             const selected = row === safeIndex
-            const badge = agentRowBadge(agentRow.status)
+            const badge = agentRowBadge(agentRow.status, Math.floor(now / 1000))
             const task = agentRowTask(agentRow, now, rowColumns)
             // Nested dispatches indent under their parent row (the hierarchical
             // ordering pass stamped `depth` and seated children below parents).

@@ -16,6 +16,7 @@
  */
 
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 
 import { type ResolvedConfig } from "../config/schema"
 import { loadMcpServers } from "../mcp/load-mcp-config"
@@ -57,7 +58,12 @@ export function buildAgentsRunDispatch(ctx: AgentsRunDispatchCtx) {
   return async (
     def: PluginSubagentDef,
     prompt: string,
-    opts: { cwd?: string; abortSignal?: AbortSignal }
+    opts: {
+      cwd?: string
+      abortSignal?: AbortSignal
+      /** Live-output sink so the run streams into the `/agents` panel. */
+      onEvent?: (event: CaptureStreamEvent) => void
+    }
   ): Promise<AgentsRunResult> => {
     const { config, home } = ctx
     const gate = createPermissionGate({ yes: config.permissionMode === "bypassPermissions" })
@@ -72,6 +78,7 @@ export function buildAgentsRunDispatch(ctx: AgentsRunDispatchCtx) {
       mcpServers,
       approvedTools: readToolApprovals(home, undefined, opts.cwd ?? config.cwd),
       disabledMcpTools: readDisabledTools(home),
+      ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
     })
     const totalTokens = (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0)
     return {

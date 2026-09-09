@@ -8,7 +8,15 @@ import type { RuntimeRequest } from "../commands/types"
 import type { ResolvedConfig } from "../../config/schema"
 import type { ToolCell, TuiAction, UsageInfo } from "../state/types"
 import os from "node:os"
-import { agentsDispatch, agentsList, agentsModelsPanel, agentsPanel } from "./agents-controller"
+import {
+  agentsDispatch,
+  agentsList,
+  agentsModelsPanel,
+  agentsNew,
+  agentsPanel,
+  agentsRemove,
+  agentsStop,
+} from "./agents-controller"
 import { inflightSubagentRows } from "../format/subagent"
 import { agentModeList } from "./agent-mode-controller"
 import { buildAgentsRunDispatch } from "../../agent/agents-run-dispatch"
@@ -153,6 +161,9 @@ export interface RuntimeImpl {
   agentsDispatch: typeof agentsDispatch
   agentsPanel: typeof agentsPanel
   agentsModelsPanel: typeof agentsModelsPanel
+  agentsStop: typeof agentsStop
+  agentsNew: typeof agentsNew
+  agentsRemove: typeof agentsRemove
   agentModeList: typeof agentModeList
   teamList: typeof teamList
   teamShow: typeof teamShow
@@ -254,6 +265,9 @@ const REAL: RuntimeImpl = {
   agentsDispatch,
   agentsPanel,
   agentsModelsPanel,
+  agentsStop,
+  agentsNew,
+  agentsRemove,
   agentModeList,
   teamList,
   teamShow,
@@ -376,11 +390,16 @@ export async function runRuntimeRequest(
         })
       if (req.action === "models")
         return impl.agentsModelsPanel({ dispatch, cwd, roots: deps.roots, config, signal })
+      if (req.action === "stop") return impl.agentsStop(arg, { dispatch, sessionId })
+      if (req.action === "new") return impl.agentsNew(arg, { dispatch, cwd })
+      if (req.action === "rm") return impl.agentsRemove(arg, { dispatch, cwd })
       const ad = {
         dispatch,
         cwd,
         roots: deps.roots,
         signal,
+        sessionId,
+        home: deps.home,
         // The override map is read by the row builder for the panel, but the
         // list/run paths overlay it so `/agents run` honours a saved choice.
         ...(config.subagentModels ? { subagentModels: config.subagentModels } : {}),

@@ -3,6 +3,11 @@
  * `/workflow`, `/agents`, `/team`, `/memory`). Each handler is pure — it returns
  * a `runtime` {@link CommandEffect} the App routes to `runtime/index.ts`.
  */
+import fs from "node:fs"
+import os from "node:os"
+
+import { resolveHome } from "../../config/load"
+import { agentsEditEffect } from "../runtime/agents-controller"
 import { rt } from "./runtime-handler"
 import { loopCommand } from "./loop-command"
 import { planTitle } from "../runtime/plan"
@@ -117,8 +122,9 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
   },
   {
     name: "agents",
-    description: "view running subagents, list, and dispatch",
+    description: "view running subagents, list, dispatch, and author them",
     category: "cognia",
+    argumentHint: "[panel|list|run|stop|models|new|edit|rm]",
     handler: rt("agents", "panel"),
     subcommands: [
       {
@@ -134,9 +140,38 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
       },
       {
         name: "run",
-        description: "dispatch a subagent: run <id> <prompt>",
-        argumentHint: "<id> <prompt>",
+        description: "dispatch a subagent: run [--bg] <id> <prompt> (--bg detaches it)",
+        argumentHint: "[--bg] <id> <prompt>",
         handler: rt("agents", "run"),
+      },
+      {
+        name: "stop",
+        description: "stop a background subagent run by its runId",
+        argumentHint: "<runId>",
+        handler: rt("agents", "stop"),
+      },
+      {
+        name: "new",
+        description: "scaffold a new agent file under .cognia/agents",
+        argumentHint: "<id> [description]",
+        handler: rt("agents", "new"),
+      },
+      {
+        name: "edit",
+        description: "open an agent file in your editor",
+        argumentHint: "<id>",
+        handler: (ctx) =>
+          agentsEditEffect(ctx.args, {
+            cwd: ctx.config.cwd,
+            home: resolveHome(process.env, os.homedir()),
+            exists: (p) => fs.existsSync(p),
+          }),
+      },
+      {
+        name: "rm",
+        description: "remove a project agent file",
+        argumentHint: "<id>",
+        handler: rt("agents", "rm"),
       },
     ],
   },

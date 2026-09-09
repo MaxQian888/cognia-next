@@ -346,7 +346,7 @@ describe("buildLiveAgentTreeRows", () => {
     expect(rows.map((r) => r.liveId)).toEqual(["a", "b"])
     expect(rows[0].name).toBe("Finder: Rust")
     expect(rows[0].depth).toBe(0)
-    expect(rows[0].stats).toBe("1 tool use · 1.0k tokens")
+    expect(rows[0].stats).toBe("1 tool use · ~1.0k tokens")
     expect(rows[0].activity).toBe("Searching for 1 pattern…")
     expect(rows[1].stats).toBe("13 tool uses · 130.8k tokens")
   })
@@ -578,5 +578,52 @@ describe("display colour propagation", () => {
     const rows = buildAgentPanelRows(sources({ live: [liveEntry({ liveId: "live-n" })] }))
     expect(rows[0]).not.toHaveProperty("color")
     expect(buildLiveAgentTreeRows([liveEntry({ liveId: "live-n" })])[0]).not.toHaveProperty("color")
+  })
+})
+
+describe("running badge animation and token estimate markers", () => {
+  it("cycles the running glyph with the tick and stays static without one", () => {
+    expect(agentRowBadge("running").glyph).toBe("◆")
+    const seen = new Set([0, 1, 2, 3].map((tick) => agentRowBadge("running", tick).glyph))
+    expect(seen.size).toBeGreaterThan(1)
+    expect(agentRowBadge("running", 4).glyph).toBe(agentRowBadge("running", 0).glyph)
+    expect(agentRowBadge("done", 3).glyph).toBe("●")
+  })
+
+  it("marks an estimated token count with a tilde in the hint and the tree", () => {
+    const estimate = agentRowHint(
+      {
+        id: "e",
+        kind: "inflight",
+        name: "n",
+        task: "",
+        status: "running",
+        tokens: 2_000,
+        tokensExact: false,
+      },
+      0
+    )
+    expect(estimate).toContain("↓ ~2.0k tok")
+    const exact = agentRowHint(
+      {
+        id: "x",
+        kind: "inflight",
+        name: "n",
+        task: "",
+        status: "running",
+        tokens: 2_000,
+        tokensExact: true,
+      },
+      0
+    )
+    expect(exact).toContain("↓ 2.0k tok")
+    expect(exact).not.toContain("~")
+    const rows = buildAgentPanelRows(sources({ live: [liveEntry({ approxChars: 8_000 })] }))
+    expect(rows[0]).toMatchObject({ tokens: 2_000, tokensExact: false })
+    const tree = buildLiveAgentTreeRows([liveEntry({ approxChars: 8_000 })])
+    expect(tree[0].stats).toContain("~2.0k tokens")
+    const exactTree = buildLiveAgentTreeRows([liveEntry({ usageTokens: 2_000 })])
+    expect(exactTree[0].stats).toContain(" 2.0k tokens")
+    expect(exactTree[0].stats).not.toContain("~")
   })
 })
