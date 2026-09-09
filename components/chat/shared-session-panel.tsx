@@ -54,7 +54,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
 import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
-import { isSharedChatClientEnabled } from "@/lib/collab/shared-chat-feature"
+import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { resolveCurrentCollabContext, type CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { syncSharedSession, sharedChatCacheKey } from "@/lib/collab/shared-chat-sync"
 import { getDb } from "@/lib/db/schema"
@@ -451,7 +451,7 @@ export function SharedSessionPanel({ session }: Props) {
   }
 
   const isShared = Boolean(session.collaboration)
-  const featureEnabled = isSharedChatClientEnabled()
+  const featureEnabled = useSharedChatEnabled()
   return (
     <Sheet
       open={open}

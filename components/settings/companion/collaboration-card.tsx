@@ -16,6 +16,15 @@
  * session the card above this one establishes, and the org comes from the
  * sign-in binding — asking somebody to type their own org id is asking them to
  * get it wrong, and it would be a second place for that fact to be stale.
+ *
+ * # The shared-chat switch
+ *
+ * Shared conversations rode on a build-time flag alone, which meant the whole
+ * plane could only be reached by rebuilding the app. The switch below is the
+ * in-app half of that decision. It is rendered even when the build says no,
+ * disabled and with the reason spelled out, because hiding it would merge
+ * "this machine opted out" (one click away) into "this build never carried it"
+ * (nothing you can do here), and those two ask different things of the reader.
  */
 
 import { useCallback, useEffect, useState } from "react"
@@ -26,7 +35,13 @@ import { Button } from "@/components/ui/button"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import {
+  isSharedChatBuildEnabled,
+  readSharedChatPreference,
+  writeSharedChatPreference,
+} from "@/lib/collab/shared-chat-feature"
 import {
   forgetCollabConnection,
   loadCollabConnection,
@@ -36,11 +51,20 @@ import { refreshCollabPlane, type RefreshCollabPlaneResult } from "@/lib/collab/
 
 export function CollaborationCard() {
   const t = useTranslations("mobile.companion.collaboration")
+  // The switch reads from the shared-chat feature's own namespace rather than
+  // this card's, because `chatCollaboration` is where the panel it governs
+  // already keeps its words, including the sentence for the off state.
+  const tShared = useTranslations("chatCollaboration")
   const [baseUrl, setBaseUrl] = useState("")
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<RefreshCollabPlaneResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sharedChatOn, setSharedChatOn] = useState(true)
+  // Read once at mount rather than on every render: the value is a build
+  // constant for the life of the process, and calling it in the render body
+  // would make the static export's prerender pass disagree with the client.
+  const [buildEnabled, setBuildEnabled] = useState(true)
 
   useEffect(() => {
     // Deferred rather than read in a lazy `useState` initializer: this is a
@@ -53,7 +77,21 @@ export function CollaborationCard() {
       const stored = loadCollabConnection(getActiveAccountId())
       setBaseUrl(stored?.baseUrl ?? "")
       setSaved(Boolean(stored))
+      setBuildEnabled(isSharedChatBuildEnabled())
+      setSharedChatOn(readSharedChatPreference() !== false)
     })
+  }, [])
+
+  /**
+   * Flip the local half of the switch.
+   *
+   * Written straight through rather than staged behind the Save button: the
+   * URL field below has a save step because a half-typed address is not a
+   * decision, while a switch is one the moment it moves.
+   */
+  const toggleSharedChat = useCallback((next: boolean) => {
+    setSharedChatOn(next)
+    writeSharedChatPreference(next)
   }, [])
 
   const save = useCallback(() => {
@@ -103,6 +141,24 @@ export function CollaborationCard() {
       contentClassName="space-y-3"
     >
       <p className="text-xs text-muted-foreground">{t("help")}</p>
+
+      <div className="flex items-start justify-between gap-4 rounded-lg border p-3">
+        <div className="min-w-0 space-y-1">
+          <Label className="text-xs" htmlFor="collab-shared-chat">
+            {tShared("switchLabel")}
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            {buildEnabled ? tShared("switchHelp") : tShared("switchBuildDisabled")}
+          </p>
+        </div>
+        <Switch
+          id="collab-shared-chat"
+          checked={buildEnabled && sharedChatOn}
+          disabled={!buildEnabled}
+          onCheckedChange={toggleSharedChat}
+          data-testid="collaboration-shared-chat"
+        />
+      </div>
 
       <div className="space-y-1.5">
         <Label className="text-xs" htmlFor="collab-base-url">

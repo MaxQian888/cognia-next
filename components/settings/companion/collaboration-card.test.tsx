@@ -22,6 +22,11 @@ jest.mock("@/lib/accounts/active-account-id", () => ({
 }))
 
 import { loadCollabConnection, saveCollabConnection } from "@/lib/collab/connection"
+import {
+  isSharedChatClientEnabled,
+  readSharedChatPreference,
+  writeSharedChatPreference,
+} from "@/lib/collab/shared-chat-feature"
 import { CollaborationCard } from "./collaboration-card"
 
 describe("CollaborationCard", () => {
@@ -117,5 +122,62 @@ describe("CollaborationCard", () => {
   it("cannot refresh before an address is saved", () => {
     render(<CollaborationCard />)
     expect(screen.getByTestId("collaboration-test")).toBeDisabled()
+  })
+})
+
+describe("CollaborationCard shared-chat switch", () => {
+  const buildFlag = process.env.NEXT_PUBLIC_SHARED_CHAT_ENABLED
+
+  beforeEach(() => {
+    localStorage.clear()
+    refreshCollabPlane.mockReset()
+  })
+
+  afterEach(() => {
+    if (buildFlag === undefined) delete process.env.NEXT_PUBLIC_SHARED_CHAT_ENABLED
+    else process.env.NEXT_PUBLIC_SHARED_CHAT_ENABLED = buildFlag
+  })
+
+  it("starts on for a machine that has never chosen", async () => {
+    render(<CollaborationCard />)
+    await waitFor(() => expect(screen.getByTestId("collaboration-shared-chat")).toBeChecked())
+    expect(isSharedChatClientEnabled()).toBe(true)
+  })
+
+  it("turns the plane off for this machine, and back on", async () => {
+    // The gate the panel, the sync pulls and the run coordinator all consult
+    // has to move with the switch. A control that only changes its own
+    // appearance is the failure this batch exists to remove.
+    const user = userEvent.setup({ delay: null })
+    render(<CollaborationCard />)
+    await waitFor(() => expect(screen.getByTestId("collaboration-shared-chat")).toBeEnabled())
+
+    await user.click(screen.getByTestId("collaboration-shared-chat"))
+    expect(readSharedChatPreference()).toBe(false)
+    expect(isSharedChatClientEnabled()).toBe(false)
+
+    await user.click(screen.getByTestId("collaboration-shared-chat"))
+    expect(readSharedChatPreference()).toBe(true)
+    expect(isSharedChatClientEnabled()).toBe(true)
+  })
+
+  it("shows the switch disabled, with the reason, when the build says no", async () => {
+    process.env.NEXT_PUBLIC_SHARED_CHAT_ENABLED = "false"
+    render(<CollaborationCard />)
+
+    const toggle = await screen.findByTestId("collaboration-shared-chat")
+    await waitFor(() => expect(toggle).toBeDisabled())
+    expect(toggle).not.toBeChecked()
+    // Rendered rather than hidden: "you switched it off" and "this build never
+    // carried it" need different actions from whoever is reading.
+    expect(screen.getByText("switchBuildDisabled")).toBeInTheDocument()
+  })
+
+  it("never lets a local yes overrule a build that says no", async () => {
+    writeSharedChatPreference(true)
+    process.env.NEXT_PUBLIC_SHARED_CHAT_ENABLED = "false"
+    render(<CollaborationCard />)
+    await waitFor(() => expect(screen.getByTestId("collaboration-shared-chat")).not.toBeChecked())
+    expect(isSharedChatClientEnabled()).toBe(false)
   })
 })

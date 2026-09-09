@@ -21,7 +21,12 @@ jest.mock("@/lib/collab/shared-chat-sync", () => ({
   syncSharedSession: (...args: unknown[]) => mockSync(...args),
 }))
 jest.mock("@/lib/collab/shared-chat-feature", () => ({
+  // The component reads the gate through `useSharedChatEnabled`, which needs
+  // all three: the build answer for its first paint, the resolved answer after
+  // mount, and a subscription so the settings switch reaches an open surface.
+  isSharedChatBuildEnabled: () => mockEnabled,
   isSharedChatClientEnabled: () => mockEnabled,
+  subscribeSharedChatPreference: () => () => {},
 }))
 jest.mock("@/stores/chat", () => ({
   useChatStore: { getState: () => ({ setActiveSession: mockActivate }) },

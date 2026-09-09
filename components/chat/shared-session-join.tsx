@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { resolveCurrentCollabContext } from "@/lib/collab/runtime-client"
-import { isSharedChatClientEnabled } from "@/lib/collab/shared-chat-feature"
+import { useSharedChatEnabled } from "@/hooks/collab/use-shared-chat-enabled"
 import { syncSharedSession } from "@/lib/collab/shared-chat-sync"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -28,7 +28,8 @@ export function SharedSessionJoin() {
   const [open, setOpen] = useState(false)
   const [token, setToken] = useState("")
   const [busy, setBusy] = useState(false)
-  if (!isSharedChatClientEnabled()) return null
+  const featureEnabled = useSharedChatEnabled()
+  if (!featureEnabled) return null
 
   const join = async () => {
     if (busy || !token.trim()) return
