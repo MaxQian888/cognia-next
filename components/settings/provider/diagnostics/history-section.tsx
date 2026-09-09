@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { formatMs } from "@/lib/provider-diagnostics/format"
 import { trendDurationMs, type ProviderDiagnosticTrend } from "@/lib/provider-diagnostics/analysis"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type { ProviderDiagnosticSample } from "@cognia/provider-types"
 
 /** Rows listed under the trend chart; the export carries the full log. */
@@ -36,14 +36,14 @@ export function HistorySection({
   const t = useTranslations("providers.diagnostics")
 
   return (
-    <ProviderSection
+    <SettingsBlock
       collapsible
       defaultOpen={false}
-      icon={History}
+      icon={<History />}
       title={t("history.title")}
       description={t("history.description")}
-      data-testid="diagnostics-history"
-      actions={
+      testid="diagnostics-history"
+      action={
         <>
           <Button
             variant="outline"
@@ -109,6 +109,6 @@ export function HistorySection({
           </div>
         </>
       )}
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

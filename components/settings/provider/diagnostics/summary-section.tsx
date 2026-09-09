@@ -3,7 +3,7 @@
 import { Activity, CheckCircle2, Gauge, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type { ProviderDiagnosticSample } from "@cognia/provider-types"
 
 interface SummarySectionProps {
@@ -23,12 +23,12 @@ export function SummarySection({ providerName, latestSample }: SummarySectionPro
   const authenticated = latestSample?.probe?.authenticated
 
   return (
-    <ProviderSection
-      icon={Activity}
+    <SettingsBlock
+      icon={<Activity />}
       title={t("summary.title")}
       description={t("summary.description", { provider: providerName })}
       contentClassName="grid grid-cols-1 gap-2 @sm/diagnostics:grid-cols-3"
-      data-testid="diagnostics-summary"
+      testid="diagnostics-summary"
     >
       <div className="rounded-lg border p-2 text-center">
         <Server className="mx-auto mb-1 h-4 w-4" />
@@ -55,6 +55,6 @@ export function SummarySection({ providerName, latestSample }: SummarySectionPro
           {latestSample?.status === "completed" ? t("status.completed") : t("status.unverified")}
         </Badge>
       </div>
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

@@ -38,7 +38,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { ProviderSection, ProviderSectionStack } from "./provider-section"
+import { SettingsBlock, SettingsStack } from "@/components/settings/common/settings-block"
 import {
   Select,
   SelectContent,
@@ -1678,10 +1678,10 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                     />
                   }
                   advancedTab={
-                    <ProviderSectionStack>
-                      <ProviderSection
+                    <SettingsStack>
+                      <SettingsBlock
                         collapsible
-                        icon={SlidersHorizontal}
+                        icon={<SlidersHorizontal />}
                         title={t("tabs.parameters")}
                       >
                         <ProviderParametersTab
@@ -1709,8 +1709,8 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
                               : setProviderConfig(selectedId, patch)
                           }
                         />
-                      </ProviderSection>
-                    </ProviderSectionStack>
+                      </SettingsBlock>
+                    </SettingsStack>
                   }
                 />
               )}

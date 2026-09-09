@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type { ResolvedProviderBalanceSource } from "@/lib/provider-diagnostics/balance"
 import type { ProviderBalanceSnapshot } from "@cognia/provider-types"
 
@@ -88,13 +88,13 @@ export function BalanceSection({
   }
 
   return (
-    <ProviderSection
+    <SettingsBlock
       collapsible
-      icon={Coins}
+      icon={<Coins />}
       title={t("balance.title")}
       description={t("balance.description")}
       contentClassName="space-y-3"
-      data-testid="diagnostics-balance"
+      testid="diagnostics-balance"
     >
       {sources.map((source) => {
         const snapshot = snapshots.find((item) => item.sourceId === source.id)
@@ -314,6 +314,6 @@ export function BalanceSection({
           </div>
         </CollapsibleContent>
       </Collapsible>
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

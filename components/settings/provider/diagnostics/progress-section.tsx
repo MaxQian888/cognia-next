@@ -4,7 +4,7 @@ import { Ban, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type { ResolvedProviderDiagnosticTarget } from "@/lib/provider-diagnostics/service"
 
 export interface ProgressSectionProps {
@@ -36,11 +36,11 @@ export function ProgressSection({
   const t = useTranslations("providers.diagnostics")
 
   return (
-    <ProviderSection
-      icon={Loader2}
+    <SettingsBlock
+      icon={<Loader2 />}
       title={t("progress.title")}
-      className="[&>div_svg.lucide-loader-circle]:animate-spin motion-reduce:[&>div_svg.lucide-loader-circle]:animate-none"
-      actions={
+      className="[&_svg.lucide-loader-circle]:animate-spin motion-reduce:[&_svg.lucide-loader-circle]:animate-none"
+      action={
         <Button
           variant="destructive"
           size="sm"
@@ -84,6 +84,6 @@ export function ProgressSection({
           ))}
         </div>
       </div>
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

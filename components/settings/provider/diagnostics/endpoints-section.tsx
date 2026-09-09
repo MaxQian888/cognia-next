@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { formatMs } from "@/lib/provider-diagnostics/format"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type { compareProviderEndpointsFree } from "@/lib/provider-diagnostics/endpoints"
 import type { ProviderEndpointCandidate, ProviderEndpointChange } from "@cognia/provider-types"
 
@@ -68,13 +68,13 @@ export function EndpointsSection({
   const t = useTranslations("providers.diagnostics")
 
   return (
-    <ProviderSection
+    <SettingsBlock
       collapsible
-      icon={Server}
+      icon={<Server />}
       title={t("endpoints.title")}
       description={t("endpoints.description")}
       contentClassName="space-y-3"
-      data-testid="diagnostics-endpoints"
+      testid="diagnostics-endpoints"
     >
       <div className="flex gap-2">
         <Input
@@ -161,6 +161,6 @@ export function EndpointsSection({
           </span>
         </Button>
       ))}
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

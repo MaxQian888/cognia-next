@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Spinner } from "@/components/ui/spinner"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type {
   ProviderDiagnosticCapability,
   ProviderDiagnosticMode,
@@ -86,9 +86,9 @@ export function RunComposer({
   const t = useTranslations("providers.diagnostics")
 
   return (
-    <ProviderSection
+    <SettingsBlock
       collapsible
-      icon={SlidersHorizontal}
+      icon={<SlidersHorizontal />}
       title={t("composer.title")}
       description={t("composer.description")}
     >
@@ -237,6 +237,6 @@ export function RunComposer({
           {t("composer.reviewRun")}
         </Button>
       </div>
-    </ProviderSection>
+    </SettingsBlock>
   )
 }

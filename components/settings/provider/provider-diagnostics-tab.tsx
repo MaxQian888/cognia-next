@@ -58,7 +58,7 @@ import {
 } from "@cognia/provider-types"
 import { getProviderConfig } from "@cognia/provider-types/provider"
 
-import { ProviderSectionStack } from "./provider-section"
+import { SettingsStack } from "@/components/settings/common/settings-block"
 import { BalanceSection, type BalanceScriptDraft } from "./diagnostics/balance-section"
 import { EndpointDiffDialog } from "./diagnostics/endpoint-diff-dialog"
 import { EndpointsSection } from "./diagnostics/endpoints-section"
@@ -514,7 +514,7 @@ export function ProviderDiagnosticsTab({
         </div>
       )}
 
-      <ProviderSectionStack>
+      <SettingsStack>
         <SummarySection providerName={providerName} latestSample={latestSample} />
 
         <RunComposer
@@ -609,7 +609,7 @@ export function ProviderDiagnosticsTab({
           onClear={() => void clearProviderDiagnosticHistory({ providerId })}
           clearDisabled={pairedClient}
         />
-      </ProviderSectionStack>
+      </SettingsStack>
 
       <RunConfirmDialog
         open={confirmOpen}

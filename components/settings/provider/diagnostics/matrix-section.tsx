@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { formatCostUsd, formatMs, formatNumber } from "@/lib/provider-diagnostics/format"
-import { ProviderSection } from "../provider-section"
+import { SettingsBlock } from "@/components/settings/common/settings-block"
 import type {
   ProviderDiagnosticFilters,
   ProviderDiagnosticMatrixRow,
@@ -58,12 +58,12 @@ export function MatrixSection({
     onFiltersChange({ ...filters, ...next })
 
   return (
-    <ProviderSection
-      icon={ArrowDownUp}
+    <SettingsBlock
+      icon={<ArrowDownUp />}
       title={t("matrix.title")}
       description={t("matrix.description")}
-      data-testid="diagnostics-matrix"
-      actions={
+      testid="diagnostics-matrix"
+      action={
         <Select
           value={filters.status}
           onValueChange={(value) => patch({ status: value as ProviderDiagnosticFilters["status"] })}
@@ -270,6 +270,6 @@ export function MatrixSection({
           </div>
         </>
       )}
-    </ProviderSection>
+    </SettingsBlock>
   )
 }
