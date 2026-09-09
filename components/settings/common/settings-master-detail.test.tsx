@@ -7,8 +7,11 @@ import userEvent from "@testing-library/user-event"
 import {
   SETTINGS_LIST_DETAIL_COLLAPSE,
   SETTINGS_PANE_TIERS,
+  SettingsListDetail,
   SettingsMasterDetail,
   densityForWidth,
+  listDensityForWidth,
+  useSettingsListDensity,
   useSettingsPaneDensity,
 } from "./settings-master-detail"
 
@@ -179,6 +182,92 @@ describe("SettingsMasterDetail", () => {
     await user.click(screen.getByRole("button", { name: "navigate from sheet" }))
     await screen.findByText("panel b")
     expect(screen.queryByTestId("nav-sheet")).not.toBeInTheDocument()
+  })
+})
+
+describe("listDensityForWidth", () => {
+  it("treats an unmeasured pane as split", () => {
+    // Same sentinel as `densityForWidth`. jsdom has no layout, so every test
+    // measures 0, and a `stacked` default would put every list-detail pane in
+    // its narrow shape for the whole suite.
+    expect(listDensityForWidth(0)).toBe("split")
+  })
+
+  it("splits exactly at the collapse threshold", () => {
+    expect(listDensityForWidth(SETTINGS_LIST_DETAIL_COLLAPSE)).toBe("split")
+    expect(listDensityForWidth(SETTINGS_LIST_DETAIL_COLLAPSE - 1)).toBe("stacked")
+  })
+
+  it("agrees with the CSS variant the frame actually ships", () => {
+    // The class string below spells the threshold as a literal
+    // `@[560px]/settings-pane`. If these two ever disagree, a caller opens its
+    // drawer at a width where the grid is still two columns.
+    expect(SETTINGS_LIST_DETAIL_COLLAPSE).toBe(560)
+  })
+})
+
+describe("SettingsListDetail", () => {
+  it("renders both cells into one pane container", () => {
+    const { container } = render(
+      <SettingsListDetail data-testid="list-pane">
+        <div data-testid="master">master</div>
+        <div data-testid="detail">detail</div>
+      </SettingsListDetail>
+    )
+    expect(screen.getByTestId("master")).toBeInTheDocument()
+    expect(screen.getByTestId("detail")).toBeInTheDocument()
+    expect(container.querySelector(".\\@container\\/settings-pane")).not.toBeNull()
+  })
+
+  it("sizes the master column from listWidth", () => {
+    const { container } = render(
+      <SettingsListDetail listWidth={340}>
+        <div />
+        <div />
+      </SettingsListDetail>
+    )
+    const grid = container.querySelector<HTMLElement>("[style*='--settings-rail-w']")
+    expect(grid?.style.getPropertyValue("--settings-rail-w")).toBe("340px")
+    expect(grid?.className).toContain(
+      "@[560px]/settings-pane:grid-cols-[clamp(200px,30cqi,var(--settings-rail-w))"
+    )
+  })
+
+  it("scopes the split to the pane, not the viewport", () => {
+    // The defect this frame exists to fix. A `md:` variant here reads the
+    // window, which this pane never gets.
+    const { container } = render(
+      <SettingsListDetail>
+        <div />
+        <div />
+      </SettingsListDetail>
+    )
+    const grid = container.querySelector<HTMLElement>("[style*='--settings-rail-w']")
+    expect(grid?.className).not.toMatch(/(?:^|\s)(?:sm|md|lg|xl):grid-cols/)
+  })
+
+  it("publishes its density on the root and through the hook", () => {
+    const Probe = () => <span data-testid="probe">{useSettingsListDensity()}</span>
+    render(
+      <SettingsListDetail data-testid="list-pane">
+        <Probe />
+        <div />
+      </SettingsListDetail>
+    )
+    // jsdom measures 0, which is the unmeasured sentinel, so both the
+    // attribute and the hook report the widest tier.
+    expect(screen.getByTestId("list-pane")).toHaveAttribute("data-settings-list-density", "split")
+    expect(screen.getByTestId("probe")).toHaveTextContent("split")
+  })
+})
+
+describe("useSettingsListDensity", () => {
+  it("reports split outside a frame", () => {
+    // Panels also render on their own routes, where there is no frame to
+    // measure and nothing should degrade into a drawer.
+    const Probe = () => <span>{useSettingsListDensity()}</span>
+    render(<Probe />)
+    expect(screen.getByText("split")).toBeInTheDocument()
   })
 })
 
