@@ -1,12 +1,50 @@
-import { E2BWorkspaceBackend, resolveSandboxConnection } from "./workspace-backend"
+import {
+  adaptSdkSandbox,
+  E2BWorkspaceBackend,
+  gitCredentialEnv,
+  resolveSandboxConnection,
+} from "./workspace-backend"
+
+/** The env-support probe the backend runs before it will send a credential. */
+const PROBE = /^printf %s "\$([A-Z0-9_]+)"$/
+
+/**
+ * Answer the probe the way a facade that honours `envs` would: echo back
+ * exactly what the caller put in the environment. A mock that ignored `envs`
+ * would return an empty string here, which is the failure the probe exists to
+ * catch, so this helper is also the definition of "supports envs".
+ */
+function probeAnswer(cmd: string, envs?: Record<string, string>) {
+  const match = PROBE.exec(cmd)
+  if (!match) return undefined
+  return { stdout: envs?.[match[1]] ?? "", stderr: "", exitCode: 0 }
+}
 
 function makeSandbox(id: string) {
-  const exec = jest.fn(async ({ cmd }: { cmd: string }) => {
-    if (cmd.startsWith("git log")) {
-      return { stdout: "abc123def\n", stderr: "", exitCode: 0 }
+  const exec = jest.fn(
+    async ({ cmd, envs }: { cmd: string; cwd?: string; envs?: Record<string, string> }) => {
+      const probe = probeAnswer(cmd, envs)
+      if (probe) return probe
+      if (cmd.startsWith("git log")) {
+        return { stdout: "abc123def\n", stderr: "", exitCode: 0 }
+      }
+      return { stdout: "", stderr: "", exitCode: 0 }
     }
-    return { stdout: "", stderr: "", exitCode: 0 }
-  })
+  )
+  const close = jest.fn(async () => undefined)
+  return { id, exec, close }
+}
+
+/** A facade from an older SDK: it accepts the field and silently drops it. */
+function makeSandboxThatIgnoresEnv(id: string) {
+  const exec = jest.fn(
+    async ({ cmd }: { cmd: string; cwd?: string; envs?: Record<string, string> }) => {
+      if (cmd.startsWith("git log")) {
+        return { stdout: "abc123def\n", stderr: "", exitCode: 0 }
+      }
+      return { stdout: "", stderr: "", exitCode: 0 }
+    }
+  )
   const close = jest.fn(async () => undefined)
   return { id, exec, close }
 }
@@ -30,10 +68,14 @@ describe("E2BWorkspaceBackend", () => {
     const calls = sandbox.exec.mock.calls.map((c) => c[0].cmd as string)
     expect(calls.some((c) => c.startsWith("mkdir -p"))).toBe(true)
     expect(calls.some((c) => c.includes("git clone"))).toBe(true)
-    expect(calls.some((c) => c.includes("ghs_test"))).toBe(true)
+    // ADR-0176: the credential travels in the environment. A token on argv is
+    // readable by anything inside the microVM that can list processes, and git
+    // echoes the remote URL back verbatim in its own failures.
+    expect(calls.some((c) => c.includes("ghs_test"))).toBe(false)
+    const clone = calls.find((c) => c.includes("git clone"))!
+    expect(clone).toContain("https://github.com/octo/hello-world.git")
     // Never shallow: a truncated history cannot be rebased past its boundary,
     // which is what a stacked branch has to do when the branch below it moves.
-    const clone = calls.find((c) => c.includes("git clone"))!
     expect(clone).not.toContain("--depth")
     expect(clone).toContain("--filter=blob:none")
   })
@@ -88,11 +130,11 @@ describe("E2BWorkspaceBackend", () => {
 
   it("cleans up the sandbox when clone exec fails", async () => {
     const sandbox = makeSandbox("sb-2")
-    sandbox.exec.mockImplementation(async () => ({
-      stdout: "",
-      stderr: "permission denied",
-      exitCode: 1,
-    }))
+    sandbox.exec.mockImplementation(async ({ cmd, envs }) => {
+      const probe = probeAnswer(cmd, envs)
+      if (probe) return probe
+      return { stdout: "", stderr: "permission denied", exitCode: 1 }
+    })
     const sandboxFactory = jest.fn(async () => sandbox)
     const backend = new E2BWorkspaceBackend({ sandboxFactory })
     await expect(
@@ -104,7 +146,11 @@ describe("E2BWorkspaceBackend", () => {
 
   it("surfaces cleanup failure when a failed clone cannot close the sandbox", async () => {
     const sandbox = makeSandbox("sb-leaked")
-    sandbox.exec.mockResolvedValueOnce({ stdout: "", stderr: "clone failed", exitCode: 1 })
+    sandbox.exec.mockImplementation(async ({ cmd, envs }) => {
+      const probe = probeAnswer(cmd, envs)
+      if (probe) return probe
+      return { stdout: "", stderr: "clone failed", exitCode: 1 }
+    })
     sandbox.close.mockRejectedValueOnce(new Error("close failed"))
     const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
 
@@ -124,6 +170,7 @@ describe("E2BWorkspaceBackend", () => {
     const sha = await backend.commitAndPush({
       workspace: handle,
       message: "feat: add thing",
+      token: "ghs_push",
     })
     expect(sha).toBe("abc123def")
     const pushCall = sandbox.exec.mock.calls.find((c) =>
@@ -141,11 +188,114 @@ describe("E2BWorkspaceBackend", () => {
       workspace: handle,
       message: "m",
       remoteBranch: "cognia/issue-7",
+      token: "ghs_push",
     })
     const pushCall = sandbox.exec.mock.calls.find((c) =>
       String(c[0].cmd).includes("git push origin")
     )
     expect(String(pushCall?.[0].cmd)).toContain("cognia/issue-7")
+  })
+
+  it("never lets the token reach a sandbox command line", async () => {
+    const sandbox = makeSandbox("sb-secret")
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+    const handle = await backend.clone({
+      repoFullName: "octo/hello-world",
+      branch: "main",
+      token: "ghs_SECRET",
+    })
+    await backend.commitAndPush({ workspace: handle, message: "m", token: "ghs_SECRET" })
+
+    const calls = sandbox.exec.mock.calls.map((c) => c[0])
+    expect(calls.length).toBeGreaterThan(0)
+    for (const call of calls) {
+      expect(String(call.cmd)).not.toContain("ghs_SECRET")
+      expect(String(call.cwd ?? "")).not.toContain("ghs_SECRET")
+    }
+    // It reached the sandbox, just out of band: base64, keyed on the origin.
+    const authed = calls.filter((c) => c.envs?.GIT_CONFIG_VALUE_0)
+    expect(authed.length).toBe(2)
+    for (const call of authed) {
+      expect(call.envs?.GIT_CONFIG_KEY_0).toBe("http.https://github.com/.extraheader")
+      expect(call.envs?.GIT_CONFIG_VALUE_0).toBe(
+        `Authorization: Basic ${btoa("x-access-token:ghs_SECRET")}`
+      )
+    }
+  })
+
+  it("refuses to clone through a facade that drops the environment", async () => {
+    const sandbox = makeSandboxThatIgnoresEnv("sb-no-env")
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+
+    await expect(
+      backend.clone({ repoFullName: "o/r", branch: "main", token: "ghs_SECRET" })
+    ).rejects.toThrow(/does not forward per-command environment variables/)
+
+    // Refused, not degraded: nothing was cloned and the token never appeared.
+    const calls = sandbox.exec.mock.calls.map((c) => String(c[0].cmd))
+    expect(calls.some((c) => c.includes("git clone"))).toBe(false)
+    expect(calls.some((c) => c.includes("ghs_SECRET"))).toBe(false)
+    expect(sandbox.close).toHaveBeenCalled()
+  })
+
+  it("refuses to push without a token rather than failing inside git", async () => {
+    const sandbox = makeSandbox("sb-no-token")
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+    const handle = await backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
+
+    await expect(backend.commitAndPush({ workspace: handle, message: "m" })).rejects.toThrow(
+      /requires a GitHub token/
+    )
+    const calls = sandbox.exec.mock.calls.map((c) => String(c[0].cmd))
+    expect(calls.some((c) => c.includes("git push"))).toBe(false)
+  })
+
+  it("probes each sandbox once, not once per command", async () => {
+    const sandbox = makeSandbox("sb-probe-once")
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+    const handle = await backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
+    await backend.commitAndPush({ workspace: handle, message: "m", token: "t" })
+
+    const probes = sandbox.exec.mock.calls.filter((c) => PROBE.test(String(c[0].cmd)))
+    expect(probes).toHaveLength(1)
+  })
+
+  it("keys the credential on the remote and refuses a non-https one", () => {
+    expect(gitCredentialEnv("https://ghe.example.com/o/r.git", "t").GIT_CONFIG_KEY_0).toBe(
+      "http.https://ghe.example.com/.extraheader"
+    )
+    expect(() => gitCredentialEnv("git@github.com:o/r.git", "t")).toThrow(/no https origin/)
+    expect(() => gitCredentialEnv("http://insecure.example/o/r.git", "t")).toThrow(
+      /no https origin/
+    )
+  })
+
+  it("adapts the real SDK's commands.run, including its envs and non-zero exits", async () => {
+    const run = jest.fn(async (cmd: string, opts?: { envs?: Record<string, string> }) => {
+      if (cmd === "boom") {
+        throw Object.assign(new Error("nope"), { exitCode: 2, stderr: "nope" })
+      }
+      return { stdout: opts?.envs?.WANTED ?? "", stderr: "", exitCode: 0 }
+    })
+    const kill = jest.fn(async () => undefined)
+    const facade = adaptSdkSandbox({ sandboxId: "sb-sdk", commands: { run }, kill })
+
+    expect(facade.id).toBe("sb-sdk")
+    await expect(facade.exec({ cmd: "echo", envs: { WANTED: "here" } })).resolves.toEqual({
+      stdout: "here",
+      stderr: "",
+      exitCode: 0,
+    })
+    // A rejection that carries an exit code is a failed command, not a broken
+    // sandbox: `execChecked` is the single place that decides what a non-zero
+    // exit means.
+    await expect(facade.exec({ cmd: "boom" })).resolves.toMatchObject({ exitCode: 2 })
+    await facade.close()
+    expect(kill).toHaveBeenCalled()
+  })
+
+  it("rejects an SDK object with no commands.run instead of returning a broken facade", () => {
+    expect(() => adaptSdkSandbox({ commands: {} } as never)).toThrow(/commands\.run/)
   })
 
   it("remove closes the sandbox and forgets it", async () => {
@@ -197,6 +347,7 @@ describe("E2BWorkspaceBackend", () => {
           createdAt: 0,
         },
         message: "m",
+        token: "ghs_push",
       })
     ).rejects.toThrow(/no live sandbox/)
   })
@@ -205,7 +356,7 @@ describe("E2BWorkspaceBackend", () => {
     const sandbox = makeSandbox("sb-5")
     const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
     const handle = await backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
-    await backend.commitAndPush({ workspace: handle, message: "it's fine" })
+    await backend.commitAndPush({ workspace: handle, message: "it's fine", token: "t" })
     const commitCall = sandbox.exec.mock.calls.find((c) =>
       String(c[0].cmd).includes("git commit -m")
     )

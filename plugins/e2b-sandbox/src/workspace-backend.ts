@@ -29,6 +29,17 @@ export interface E2BSandboxFacade {
     cmd: string
     cwd?: string
     timeoutMs?: number
+    /**
+     * Environment for this one command (ADR-0176).
+     *
+     * The GitHub credential travels here and nowhere else. A token on the
+     * command line is readable by any process that can list processes inside
+     * the microVM, which includes everything the agent runs, and it is echoed
+     * back verbatim in git's own error messages. A facade that silently drops
+     * this field would put the token back on argv, so the backend probes for
+     * support and refuses rather than falling back.
+     */
+    envs?: Record<string, string>
   }): Promise<{ stdout: string; stderr: string; exitCode: number }>
   /** Close + destroy the microVM. */
   close(): Promise<void>
@@ -100,14 +111,25 @@ export class E2BWorkspaceBackend implements E2BBackend {
       const stamp = `${this.opts.now().toString(36)}-${sandbox.id}`
       const safeRepo = opts.repoFullName.replace(/[^a-zA-Z0-9._-]/g, "_")
       const cwd = `/tmp/cognia/${safeRepo}/${stamp.replace(/[^a-zA-Z0-9._-]/g, "_")}`
+      // Before anything is cloned: a facade that drops `envs` cannot be given
+      // the credential safely, and the answer is to refuse, never to fall back
+      // to a token on the command line.
+      await assertSandboxCarriesEnv(sandbox)
       await execChecked(sandbox, { cmd: `mkdir -p ${shellEscape(cwd)}` })
-      const remote = `https://x-access-token:${opts.token}@github.com/${opts.repoFullName}.git`
+      // Credential-FREE remote (ADR-0176). `git clone` writes whatever URL it
+      // is given verbatim into `<workspace>/.git/config` and leaves it there,
+      // and this workspace is then handed to an agent with shell tools. A
+      // token in the URL would be readable with a plain `cat .git/config` by
+      // anything that agent runs, including instructions injected through an
+      // issue body. The credential is supplied per-invocation instead.
+      const remote = `https://github.com/${opts.repoFullName}.git`
       // Partial, not shallow: a `--depth`-truncated history cannot be rebased
       // past its boundary, which is what a branch sitting on top of another
       // branch has to do whenever the one below it moves. `--filter=blob:none`
       // keeps the full commit graph and fetches file contents on demand.
       await execChecked(sandbox, {
         cmd: `git clone --branch ${shellEscape(opts.branch)} --single-branch --filter=blob:none ${shellEscape(remote)} ${shellEscape(cwd)}`,
+        envs: gitCredentialEnv(remote, opts.token),
       })
       this.pool.addWorkspace(cwd, sandbox, "on")
       return {
@@ -134,12 +156,26 @@ export class E2BWorkspaceBackend implements E2BBackend {
     workspace: WorkspaceHandle
     message: string
     remoteBranch?: string
+    token?: string
   }): Promise<string> {
     const sandbox = this.sandboxForHandle(opts.workspace)
     const branch = opts.remoteBranch ?? opts.workspace.branch
+    // `origin` is credential-free since the clone, so the push has no way to
+    // authenticate without a token. Refusing here names the cause. Letting git
+    // run would fail with `could not read Username`, which reads like a broken
+    // sandbox rather than a missing credential.
+    if (!opts.token) {
+      throw new Error(
+        "E2B workspace push requires a GitHub token: the clone stores a credential-free remote, " +
+          "so the credential is supplied per push. Pass `token` to commitAndPush."
+      )
+    }
+    await assertSandboxCarriesEnv(sandbox)
+    const remote = `https://github.com/${opts.workspace.repoFullName}.git`
     await execChecked(sandbox, {
       cmd: `git add . && git commit -m ${shellEscape(opts.message)} && git push origin ${shellEscape(branch)} --set-upstream`,
       cwd: opts.workspace.path,
+      envs: gitCredentialEnv(remote, opts.token),
     })
     const log = await execChecked(sandbox, {
       cmd: `git log -1 --pretty=%H`,
@@ -170,12 +206,92 @@ export class E2BWorkspaceBackend implements E2BBackend {
   }
 }
 
+/**
+ * The credential, as environment (ADR-0176).
+ *
+ * `GIT_CONFIG_COUNT` / `_KEY_n` / `_VALUE_n` is git's env-based config
+ * override. It is the same policy the desktop host uses
+ * (`cognia_git_mirror::credential::auth_env`), and it is additive: it does not
+ * disable the sandbox's own git configuration, so the commit identity the
+ * image ships with still applies.
+ *
+ * The header is keyed on the remote's origin rather than on `http.extraheader`
+ * globally, so a redirect to another host is not handed the token.
+ */
+export function gitCredentialEnv(remote: string, token: string): Record<string, string> {
+  const origin = originOf(remote)
+  if (!origin) {
+    throw new Error(`Refusing to send a credential to a remote with no https origin: ${remote}`)
+  }
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: `http.${origin}.extraheader`,
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${basicAuth(token)}`,
+    // Fail fast instead of blocking forever on a prompt no one can answer.
+    GIT_TERMINAL_PROMPT: "0",
+  }
+}
+
+/** `https://github.com/o/r.git` -> `https://github.com/`. `undefined` if not https. */
+function originOf(remote: string): string | undefined {
+  try {
+    const url = new URL(remote)
+    if (url.protocol !== "https:") return undefined
+    return `${url.origin}/`
+  } catch {
+    return undefined
+  }
+}
+
+function basicAuth(token: string): string {
+  const raw = `x-access-token:${token}`
+  // Tokens are ASCII, so `btoa` is exact here. It is also the only base64 that
+  // exists in both of this plugin's runtimes (renderer and the jsdom tests).
+  return btoa(raw)
+}
+
+const ENV_PROBE_VAR = "COGNIA_GIT_ENV_PROBE"
+
+/** Facades already proven to carry `envs`, so the probe runs once per sandbox. */
+const sandboxesWithVerifiedEnv = new WeakSet<E2BSandboxFacade>()
+
+/**
+ * Prove the facade actually passes `envs` through to the command.
+ *
+ * `exec` is a plain function, so a facade that ignores the field fails
+ * silently: the clone would run with no credential and, worse, an
+ * implementation that "helpfully" fell back would put the token on argv. There
+ * is no type that can tell us, so we ask the sandbox.
+ *
+ * One extra command per sandbox, which is nothing next to a clone.
+ */
+export async function assertSandboxCarriesEnv(sandbox: E2BSandboxFacade): Promise<void> {
+  if (sandboxesWithVerifiedEnv.has(sandbox)) return
+  const nonce = `probe-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+  const result = await sandbox.exec({
+    cmd: `printf %s "$${ENV_PROBE_VAR}"`,
+    envs: { [ENV_PROBE_VAR]: nonce },
+  })
+  if (result.exitCode !== 0 || result.stdout.trim() !== nonce) {
+    throw new Error(
+      "This E2B sandbox facade does not forward per-command environment variables, " +
+        "so a GitHub credential cannot be delivered to it safely. Refusing to clone: " +
+        "the alternative is a token on the command line, readable by everything the agent runs. " +
+        "Upgrade @e2b/sdk, or supply a sandboxFactory whose exec() honours `envs`."
+    )
+  }
+  sandboxesWithVerifiedEnv.add(sandbox)
+}
+
 async function execChecked(
   sandbox: E2BSandboxFacade,
-  opts: { cmd: string; cwd?: string; timeoutMs?: number }
+  opts: { cmd: string; cwd?: string; timeoutMs?: number; envs?: Record<string, string> }
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await sandbox.exec(opts)
   if (result.exitCode !== 0) {
+    // `opts.cmd` is safe to echo: the credential lives in `opts.envs`, which is
+    // deliberately not interpolated here. git still repeats the remote URL in
+    // its own stderr, which is why that URL is credential-free to begin with.
     throw new Error(
       `E2B exec failed (${result.exitCode}): ${opts.cmd}\n${result.stderr || result.stdout}`
     )
@@ -234,9 +350,85 @@ async function defaultSandboxFactory(opts: E2BSandboxConnection): Promise<E2BSan
     )
   }
   const SandboxCtor = mod?.Sandbox as
-    { create?: (opts: unknown) => Promise<E2BSandboxFacade> } | undefined
+    { create?: (opts: unknown) => Promise<E2BSdkSandbox> } | undefined
   if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
     throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
   }
-  return SandboxCtor.create(opts)
+  return adaptSdkSandbox(await SandboxCtor.create(opts))
+}
+
+/** The part of the real `@e2b/sdk` Sandbox this adapter drives. */
+interface E2BSdkSandbox {
+  sandboxId?: string
+  id?: string
+  commands: {
+    run(
+      cmd: string,
+      opts?: { cwd?: string; timeoutMs?: number; envs?: Record<string, string> }
+    ): Promise<{ stdout?: string; stderr?: string; exitCode?: number }>
+  }
+  kill?(): Promise<unknown>
+  close?(): Promise<unknown>
+}
+
+/**
+ * Adapt the SDK's `commands.run(cmd, { envs })` to our facade (ADR-0176).
+ *
+ * The default factory used to hand the raw SDK object back cast as an
+ * `E2BSandboxFacade`, which has no `exec` at all. Writing the adapter is what
+ * makes `envs` reach a real sandbox rather than a mock, and the probe in
+ * `assertSandboxCarriesEnv` is what proves it did.
+ *
+ * `commands.run` rejects on a non-zero exit in some SDK versions and resolves
+ * with the code in others, so both shapes are normalised to a resolved result:
+ * `execChecked` is the one place that decides a non-zero exit is an error.
+ */
+export function adaptSdkSandbox(sandbox: E2BSdkSandbox): E2BSandboxFacade {
+  if (!sandbox?.commands || typeof sandbox.commands.run !== "function") {
+    throw new Error("@e2b/sdk Sandbox has no `commands.run` — incompatible SDK version")
+  }
+  return {
+    id: sandbox.sandboxId ?? sandbox.id ?? "e2b-sandbox",
+    async exec({ cmd, cwd, timeoutMs, envs }) {
+      try {
+        const result = await sandbox.commands.run(cmd, {
+          ...(cwd ? { cwd } : {}),
+          ...(timeoutMs ? { timeoutMs } : {}),
+          ...(envs ? { envs } : {}),
+        })
+        return {
+          stdout: result.stdout ?? "",
+          stderr: result.stderr ?? "",
+          exitCode: result.exitCode ?? 0,
+        }
+      } catch (error) {
+        const failure = error as {
+          exitCode?: number
+          stdout?: string
+          stderr?: string
+          message?: string
+        }
+        if (typeof failure?.exitCode === "number") {
+          return {
+            stdout: failure.stdout ?? "",
+            stderr: failure.stderr ?? failure.message ?? "",
+            exitCode: failure.exitCode,
+          }
+        }
+        throw error
+      }
+    },
+    async close() {
+      // `kill` is the current name; older builds called it `close`.
+      if (typeof sandbox.kill === "function") {
+        await sandbox.kill()
+        return
+      }
+      if (typeof sandbox.close === "function") {
+        await sandbox.close()
+        return
+      }
+      throw new Error("@e2b/sdk Sandbox has neither `kill` nor `close`")
+    },
+  }
 }

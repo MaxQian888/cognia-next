@@ -143,7 +143,26 @@ ever being handed a credential. Getting it backwards is a defect that only shows
 up after the agent has finished its work, so it is a parameter with a name
 rather than a default.
 
-### 7. The network clone kills what it started
+### 7. The sandbox follows the same credential policy
+
+The E2B backend put the token in the clone URL and therefore on a command line
+inside the microVM, readable by anything the agent runs that can list
+processes, and left in `<workspace>/.git/config` for a plain `cat` afterwards.
+That workspace is handed to an agent acting on an issue body anyone can file.
+
+It now clones a credential-free `https://github.com/<repo>.git` and supplies the
+same `GIT_CONFIG_COUNT` extraheader triple per command, keyed on the remote's
+origin. Because a facade that silently drops a per-command environment would
+put the token back on argv, the backend **probes** for support (one echo of a
+nonce it planted in the environment) and refuses to clone if the probe fails.
+There is no fallback: the alternative to refusing is the leak.
+
+The default factory now adapts the SDK's `commands.run(cmd, { envs })` rather
+than casting the raw SDK object to a facade shape it does not have. Pushing
+takes the credential per call too, so a workspace that outlives the
+installation token it was cloned with can still push after a rotation.
+
+### 8. The network clone kills what it started
 
 `exec::run_within` spawns the child, keeps the handle, and ends the budget with
 a `kill` and a `wait`. The caller deleting the half-written destination is now
@@ -190,3 +209,5 @@ messages are unchanged.
 | Workspace clone adapter | `src-tauri/src/github/workspace.rs` |
 | Guarded clone | `crates/cognia-git/src/repo.rs::clone_from_mirror` |
 | Killing timeout | `crates/cognia-git/src/exec.rs::run_within` |
+| Sandbox credential | `plugins/e2b-sandbox/src/workspace-backend.ts` |
+| Push credential forwarding | `lib/github/workspace.ts::commitAndPush` |

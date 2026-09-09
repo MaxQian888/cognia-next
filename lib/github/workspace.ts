@@ -45,6 +45,16 @@ export interface E2BBackend {
     workspace: WorkspaceHandle
     message: string
     remoteBranch?: string
+    /**
+     * PAT / installation token for this push (ADR-0176).
+     *
+     * Optional on the interface so a backend that authenticates some other way
+     * stays valid, but the sandbox backend requires it: its clone stores a
+     * credential-FREE remote, and a long-running workspace outlives the
+     * installation token it was cloned with. Passing the credential per push is
+     * what lets a rotated token reach a workspace that already exists.
+     */
+    token?: string
   }): Promise<string>
   remove(handle: WorkspaceHandle): Promise<boolean>
 }
@@ -151,6 +161,7 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
       workspace: opts.workspace,
       message: opts.message,
       remoteBranch: opts.remoteBranch,
+      token: opts.token,
     })
   }
 

@@ -120,7 +120,22 @@ fetch 之后才在上游创建的分支。每一条的代价是一次慢克隆�
 不接触任何凭据的情况下对私有仓库执行 `git fetch origin` 的原因。搞反了是一个只会在
 agent 干完活之后才暴露的缺陷，所以它是一个有名字的参数，而不是一个默认值。
 
-### 7. 网络克隆会杀掉自己起的进程
+### 7. 沙箱遵循同一套凭据策略
+
+E2B 后端此前把 token 放进克隆 URL，因而也放到了 microVM 内部的命令行上，任何 agent
+跑起来的、能列进程的东西都读得到，事后还留在 `<workspace>/.git/config` 里等着被
+`cat`。而那个工作区正是交给 agent 去处理「任何人都能提」的 issue 正文的。
+
+现在它克隆的是无凭据的 `https://github.com/<repo>.git`，并按命令下发同一套
+`GIT_CONFIG_COUNT` extraheader 三元组，键控在远端 origin 上。由于一个悄悄丢掉
+「按命令环境变量」的门面会把 token 重新推回 argv，后端会**探测**支持情况（回显一个
+它塞进环境的 nonce），探测失败就拒绝克隆。没有回落：拒绝的替代项就是泄漏。
+
+默认工厂现在真正适配 SDK 的 `commands.run(cmd, { envs })`，而不是把裸 SDK 对象强转
+成一个它并不具备的门面形状。推送同样按次携带凭据，于是一个活得比克隆时那枚
+installation token 更久的工作区，在轮转之后依然推得动。
+
+### 8. 网络克隆会杀掉自己起的进程
 
 `exec::run_within` 自己 spawn 子进程、持有句柄，并以 `kill` 加 `wait` 结束预算。调用方
 删除半成品目标目录时，删的已经是没人在写的目录。stderr 由独立任务抽干，因为克隆很
@@ -157,3 +172,5 @@ agent 干完活之后才暴露的缺陷，所以它是一个有名字的参数�
 | 工作区克隆适配器 | `src-tauri/src/github/workspace.rs` |
 | 受控克隆 | `crates/cognia-git/src/repo.rs::clone_from_mirror` |
 | 会杀进程的超时 | `crates/cognia-git/src/exec.rs::run_within` |
+| 沙箱凭据 | `plugins/e2b-sandbox/src/workspace-backend.ts` |
+| 推送凭据转发 | `lib/github/workspace.ts::commitAndPush` |

@@ -232,6 +232,27 @@ describe("commitAndPush", () => {
     })
     expect(call).not.toHaveBeenCalled()
   })
+
+  it("forwards the push credential to the E2B backend", async () => {
+    // ADR-0176. The sandbox clone stores a credential-free remote, so the
+    // token has to arrive per push. It was accepted here and dropped on the
+    // way to the backend, which left a sandbox workspace unable to push at all
+    // once its installation token rotated.
+    const backend: E2BBackend = {
+      clone: jest.fn(),
+      commitAndPush: jest.fn(async () => "deadbeef"),
+      remove: jest.fn(async () => true),
+    }
+    registerPluginE2B(backend)
+    await commitAndPush({
+      workspace: { ...handle, backend: "e2b", path: "sb-id" },
+      message: "msg",
+      token: "ghs_rotated",
+    })
+    expect(backend.commitAndPush).toHaveBeenCalledWith(
+      expect.objectContaining({ token: "ghs_rotated" })
+    )
+  })
 })
 
 describe("removeWorkspace + statWorkspace", () => {
