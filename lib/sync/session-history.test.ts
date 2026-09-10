@@ -32,6 +32,11 @@ function createTransport(call: jest.Mock, capabilities?: { version: number }): T
   }
 }
 
+/** Drain the microtask queue so an in-flight negotiation reaches its first RPC. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 describe("hydrateSessionHistory", () => {
   beforeEach(async () => {
     __resetHydratedSessionHistoryForTests()
@@ -65,14 +70,104 @@ describe("hydrateSessionHistory", () => {
       .mockResolvedValue({ items: [] })
     const transport = createTransport(call, { version: 1 })
     const pending = hydrateSessionHistory(transport, "s1")
-    await Promise.resolve()
+    await flush()
     invalidateSessionHistory("s1")
-    resolve({ items: [] })
-    await expect(pending).rejects.toThrow("session_history_scope_changed")
     expect(getSessionHistoryMode("s1")).toBeNull()
-    await expect(hydrateSessionHistory(transport, "s1")).resolves.toMatchObject({
-      mode: "timeline",
+    resolve({ items: [] })
+
+    // The stale answer is discarded, and the question it was asking is re-put
+    // to the Host rather than reported as a failed transcript load.
+    await expect(pending).resolves.toMatchObject({ mode: "timeline" })
+    expect(call).toHaveBeenCalledTimes(2)
+    expect(getSessionHistoryMode("s1")).toBe("timeline")
+  })
+
+  // The reported defect: two `session_history_scope_changed` errors on every
+  // web boot, and a chat pane left on an error card with an empty transcript.
+  // A companion transport publishes `reconnecting` then `connected` while the
+  // first pane is already negotiating, and `watchConnection` invalidates on
+  // both — so the negotiation that was going to answer "timeline" died, and
+  // nothing re-ran it (the mode the pane subscribes to never left `null`).
+  it("re-negotiates when the transport settles its own connection mid-flight", async () => {
+    let resolveTimeline: (value: unknown) => void = () => {}
+    const call = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveTimeline = done
+          })
+      )
+      .mockResolvedValue({ items: [] })
+    let connectionChanged: (state: string) => void = () => {}
+    const transport = {
+      ...createTransport(call, { version: 1 }),
+      onConnectionStateChange: (listener: (state: string) => void) => {
+        connectionChanged = listener
+        return jest.fn()
+      },
+    }
+
+    const pending = hydrateSessionHistory(transport, "s1")
+    await flush()
+    connectionChanged("reconnecting")
+    connectionChanged("connected")
+    resolveTimeline({ items: [] })
+
+    await expect(pending).resolves.toEqual({ applied: 0, total: 0, mode: "timeline" })
+    expect(getSessionHistoryMode("s1")).toBe("timeline")
+  })
+
+  it("keeps a later caller on the same hydration after a supersession", async () => {
+    let resolveFirst: (value: unknown) => void = () => {}
+    let resolveSecond: (value: unknown) => void = () => {}
+    const call = jest
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveFirst = done
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveSecond = done
+          })
+      )
+    const transport = createTransport(call, { version: 1 })
+
+    const first = hydrateSessionHistory(transport, "s1")
+    await flush()
+    invalidateSessionHistory("s1")
+    resolveFirst({ items: [] })
+    await flush()
+
+    expect(hydrateSessionHistory(transport, "s1")).toBe(first)
+    resolveSecond({ items: [] })
+    await expect(first).resolves.toMatchObject({ mode: "timeline" })
+    expect(call).toHaveBeenCalledTimes(2)
+  })
+
+  it("reports failure rather than re-asking forever when nothing settles", async () => {
+    let connectionChanged: (state: string) => void = () => {}
+    const call = jest.fn(async () => {
+      connectionChanged("reconnecting")
+      return { items: [] }
     })
+    const transport = {
+      ...createTransport(call, { version: 1 }),
+      onConnectionStateChange: (listener: (state: string) => void) => {
+        connectionChanged = listener
+        return jest.fn()
+      },
+    }
+
+    await expect(hydrateSessionHistory(transport, "s1")).rejects.toThrow(
+      "session_history_scope_changed"
+    )
+    expect(call).toHaveBeenCalledTimes(6)
+    expect(getSessionHistoryMode("s1")).toBeNull()
   })
 
   it("scopes ownership by account and routing generation", async () => {

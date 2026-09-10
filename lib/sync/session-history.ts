@@ -11,6 +11,37 @@ const DEFAULT_PAGE_SIZE = 200
 const MAX_PAGE_SIZE = 500
 const MAX_PAGES = 10_000
 
+/**
+ * A negotiation that is overtaken while it is still in flight is superseded,
+ * not failed: nothing it read may be published, but the question it was asking
+ * is still open and the answer is one round trip away.
+ *
+ * Minted with a `code` rather than recognized by message text so a Host that
+ * happens to answer this string cannot be mistaken for our own supersession.
+ */
+const SUPERSEDED_CODE = "session_history_scope_changed"
+
+/**
+ * How many times one hydration may be overtaken before it reports failure.
+ *
+ * The bound exists for a Host whose connection flaps without settling; the
+ * ordinary boot spends two of these (`offline → reconnecting → connected`,
+ * each of which invalidates through `watchConnection`).
+ */
+const MAX_SUPERSEDED_ATTEMPTS = 6
+
+function supersededError(): Error {
+  return Object.assign(new Error(SUPERSEDED_CODE), { code: SUPERSEDED_CODE })
+}
+
+function isSuperseded(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === SUPERSEDED_CODE
+  )
+}
+
 interface SessionHistoryPage {
   rows: StoredMessage[]
   total?: number
@@ -118,26 +149,66 @@ export function hydrateSessionHistory(
   options: { pageSize?: number } = {}
 ): Promise<SessionHistoryHydration> {
   watchConnection(transport)
-  const scope = currentScope()
-  const key = scopedSession(sessionId)
+  let key = scopedSession(sessionId)
   if (owners.has(key) && owners.get(key) !== transport) invalidateSessionHistory(sessionId)
   owners.set(key, transport)
   const completedMode = hydrated.get(key)
   if (completedMode) return Promise.resolve({ applied: 0, total: 0, mode: completedMode })
   const existing = inflight.get(key)
   if (existing) return existing
-  const generation = generations.get(key) ?? 0
-  const assertCurrent = () => {
-    if (scope !== currentScope() || generation !== (generations.get(key) ?? 0)) {
-      throw new Error("session_history_scope_changed")
-    }
-  }
   const pageSize = Math.min(Math.max(1, options.pageSize ?? DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
-  const task = negotiateAndHydrate(transport, sessionId, pageSize, assertCurrent).then((result) => {
-    assertCurrent()
-    publishMode(key, result.mode)
-    return result
-  })
+
+  /**
+   * Re-take the coalescing slot after a supersession.
+   *
+   * `invalidateSessionHistory` drops the in-flight entry so a stale answer
+   * cannot be handed out, and a scope switch moves the key the entry is filed
+   * under. Without re-taking it, the very next caller — the chat pane and the
+   * session hook negotiate the same conversation — opens a second, parallel
+   * hydration of a session this one is already re-asking about.
+   */
+  const reclaim = () => {
+    const next = scopedSession(sessionId)
+    if (next !== key) {
+      if (inflight.get(key) === task) inflight.delete(key)
+      key = next
+    }
+    owners.set(key, transport)
+    if (!inflight.has(key)) inflight.set(key, task)
+  }
+
+  /**
+   * Being overtaken mid-negotiation is the ordinary case, not a failure.
+   *
+   * `watchConnection` invalidates on every connection state change, and a
+   * companion transport walks `offline → reconnecting → connected` while the
+   * first pane is already asking who owns the transcript. Reporting that as an
+   * error reached the chat pane as "listMessages failed" and latched an error
+   * card over a conversation whose transcript was one round trip away — the
+   * pane had nothing left to re-trigger it, because the mode it subscribes to
+   * never left `null`. So ask again against the settled scope instead, and
+   * only surface a failure once the ground refuses to stop moving.
+   */
+  const task: Promise<SessionHistoryHydration> = (async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      const scope = currentScope()
+      const generation = generations.get(key) ?? 0
+      const assertCurrent = () => {
+        if (scope !== currentScope() || generation !== (generations.get(key) ?? 0)) {
+          throw supersededError()
+        }
+      }
+      try {
+        const result = await negotiateAndHydrate(transport, sessionId, pageSize, assertCurrent)
+        assertCurrent()
+        publishMode(key, result.mode)
+        return result
+      } catch (error) {
+        if (!isSuperseded(error) || attempt >= MAX_SUPERSEDED_ATTEMPTS) throw error
+        reclaim()
+      }
+    }
+  })()
   inflight.set(key, task)
   const finished = () => {
     if (inflight.get(key) === task) inflight.delete(key)
