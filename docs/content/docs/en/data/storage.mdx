@@ -1,276 +1,107 @@
 ---
-title: Storage (Dexie schema)
-description: The IndexedDB schema, version evolution, and how to add or migrate tables safely.
+title: Local storage and database governance
+description: Database ownership, retention, recovery, and performance boundaries across browser, Headless, and native storage.
 ---
 
-# Storage (Dexie schema)
-
-<Status variant="stable">v150</Status>
+# Local storage and database governance
 
 <TLDR>
-All browser-side state lives in IndexedDB via Dexie under the database name `cognia-claude`. Schema versions are append-only — every release adds new `.version(n)` blocks; old ones are never edited. Migrations are idempotent and run on every database open.
+  Cognia uses several local stores. The account data database, browser credentials, Headless
+  persistence, and native SQLite databases have different owners and recovery rules. The core table
+  catalog governs CogniaDB tables; it is not a registry of every local database.
 </TLDR>
 
-<StatGrid>
-  <Stat label="Schema version" value="150" hint="current" />
-  <Stat label="Governed tables" value="234" hint="catalog coverage" />
-  <Stat label="Database name" value="cognia-claude" hint="historical, kept stable" />
-  <Stat label="Singletons" value="1" hint="settings table" />
-</StatGrid>
+## Core data and schema
 
-All browser-side state is persisted in **IndexedDB via Dexie**. The schema is defined in `lib/db/schema.ts` and is currently at **v150**. Schema versions are append-only — never mutate an existing `.version(n).stores({...})` block.
+`lib/db/schema.ts` declares `CURRENT_SCHEMA_VERSION` and the cumulative `CURRENT_SCHEMA`. The constructor registers one current schema declaration. The old append-only version chain is no longer the implementation: do not assume historical row migrations run on every open.
 
-The machine-readable governance authority is `lib/data-governance/table-catalog.ts`. Its generated summary is `docs/data-governance.generated.json`; `pnpm audit:data-governance` blocks schema/catalog, TypeScript/Rust sync, version-order, or generated-document drift.
+Database identity comes from the account/runtime initialization path. `cognia-claude` is the legacy/default constructor name, not the name of every account database. Use `lib/accounts/account-db.ts` and existing runtime selectors instead of inventing or renaming databases.
 
-## Database identity
+`lib/db/storage-layout.ts` checks the storage-layout marker before opening existing account data. A missing marker store, different layout, or newer schema is refused; the data stays on disk. Reset is a separate explicit user action. Lower schema versions within the supported layout can acquire new stores, but this does not transform old row shapes automatically.
 
-```ts
-super("cognia-claude")
+The policy authority is `lib/data-governance/table-catalog.ts`: table role, protection, account scope, backup/sync participation, retention owner, cascade relationships, and query budgets. `docs/data-governance.generated.json` records current schema and sync coverage. Run:
+
+```bash
+pnpm db:governance:write
+pnpm audit:data-governance
+pnpm audit:data-governance:test
 ```
 
-The Dexie database name is `cognia-claude` (the original codename — kept stable to avoid migrating existing installations). Don't change it. If you ever absolutely must, write a migration that copies from `cognia-claude` to the new name on first run, then deletes the old database.
+When adding a core table, extend the existing domain module, declare its row type and `Table` field, update `CURRENT_SCHEMA`, increase `CURRENT_SCHEMA_VERSION`, and register its policies in the catalog. Check backup, sync, deletion, and retention callers. Test supported reopening and failure behavior; a schema bump alone is not a data migration.
 
-## Tables — original v15 baseline
+## Browser and mobile ownership
 
-| Table                 | Type                      | Indexed columns                                    | Purpose                                     |
-| --------------------- | ------------------------- | -------------------------------------------------- | ------------------------------------------- |
-| `sessions`            | `ChatSession`             | `id`, `updatedAt`, `createdAt`                     | Chat sessions                               |
-| `messages`            | `StoredMessage`           | `id`, `sessionId`, `[sessionId+createdAt]`         | Chat messages                               |
-| `settings`            | `AppSettings` (singleton) | `id` (always `"singleton"`)                        | App-wide settings                           |
-| `promptPresets`       | `SystemPromptPreset`      | `id`, `category`, `updatedAt`                      | Reusable prompt snippets                    |
-| `mcpServers`          | `McpServer`               | `id`, `enabled`, `updatedAt`                       | MCP server definitions                      |
-| `characters`          | `Character`               | `id`, `name`, `isBuiltIn`, `updatedAt`             | Character personas                          |
-| `skills`              | `Skill`                   | `id`, `name`, `category`, `isBuiltIn`, `updatedAt` | Skill definitions                           |
-| `skillResources`      | `SkillResource`           | `id`, `skillId`, `[skillId+name]`                  | Skill attachments (files, URLs)             |
-| `teams`               | `Team`                    | `id`, `name`, `updatedAt`                          | Multi-character teams                       |
-| `trustedWorkspaces`   | `TrustedWorkspace`        | `id`, `path`, `lastUsedAt`                         | Workspaces allowed for shell-tool execution |
-| `backupHistory`       | `BackupHistoryRow`        | `id`, `completedAt`, `status`                      | Capped at 50 newest                         |
-| `canvasDocuments`     | `CanvasDocumentRow`       | `id`, `sessionId`, `updatedAt`                     | Long-form artifacts                         |
-| `canvasVersions`      | `CanvasVersionRow`        | `id`, `documentId`, `[documentId+createdAt]`       | Version history                             |
-| `canvasComments`      | `CanvasCommentRow`        | `id`, `documentId`, `createdAt`                    | Legacy Canvas compatibility projection      |
-| `canvasSessions`      | `CanvasSessionRow`        | `id`, `documentId`, `updatedAt`                    | Per-session canvas state                    |
-| `a2uiApps`            | `A2UIAppRow`              | `id`, `name`, `updatedAt`                          | A2UI app instances                          |
-| `a2uiSurfaces`        | `A2UISurfaceRow`          | `id`, `appId`, `[appId+createdAt]`                 | A2UI rendered surfaces                      |
-| `a2uiTemplates`       | `A2UITemplateRow`         | `id`, `category`, `updatedAt`                      | A2UI surface templates                      |
-| `a2uiEventHistory`    | `A2UIEventHistoryRow`     | `id`, `surfaceId`, `[surfaceId+createdAt]`         | A2UI event audit log                        |
-| `twinSources`         | `TwinSource`              | `id`, `twinId`, `[twinId+status]`, `updatedAt`     | Raw user-supplied twin sources              |
-| `twinChunks`          | `TwinChunk`               | `id`, `sourceId`, `[sourceId+chunkIdx]`, `twinId`  | Embedded chunks                             |
-| `twinProfile`         | `TwinProfile`             | `id`, `twinId`                                     | Distilled profile (one per twin)            |
-| `twinDrafts`          | `TwinDraft`               | `id`, `twinId`, `status`, `[twinId+createdAt]`     | Pending Character/Skill drafts              |
-| `twinJobs`            | `TwinJob`                 | `id`, `twinId`, `kind`, `status`, `createdAt`      | Ingest + distill job queue                  |
-| `plugins`             | `PluginRow`               | `id`, `enabled`, `updatedAt`                       | Installed plugins                           |
-| `pluginPermissions`   | `PluginPermissionRow`     | `[pluginId+permission]` (composite key)            | Granted permissions                         |
-| `pluginReviews`       | `PluginReviewRow`         | `[pluginId+rating]` (composite key)                | Marketplace review cache                    |
-| `pluginAnalytics`     | `PluginAnalyticsRow`      | `[pluginId+day]` (composite key)                   | Per-day plugin stats                        |
+| Store family                                  | Source owner                                                                        | Governance boundary                                                                  |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Account content and dynamic plugin tables     | `lib/db/schema.ts`, `lib/plugin/dexie/`                                             | Account selection, content encryption, catalog policies, transactional domain writes |
+| Account registry                              | `lib/accounts/account-db.ts`                                                        | Account metadata and binding/profile state; independent of content reset             |
+| Runtime target registry                       | `lib/runtime/target-registry.ts`                                                    | Target definitions and active target per account                                     |
+| Browser vault                                 | `lib/runtime/browser-vault.ts`                                                      | Credential material; do not treat it as a disposable cache                           |
+| Target migration and mobile adoption journals | `lib/runtime/target-database-migration.ts`, `lib/companion/mobile-host-adoption.ts` | Resume/recovery evidence; not ordinary TTL data                                      |
+| Quick unlock and browser keyring              | `lib/accounts/quick-unlock/device-pepper.ts`, `lib/keyring/index.ts`                | Device-bound unlock material and credential storage                                  |
+| Wallpaper blobs                               | `lib/appearance/wallpaper-storage.ts`                                               | Separate raw IndexedDB storage                                                       |
+| Companion pairing configuration               | `lib/tauri/companion-storage.ts`                                                    | Platform-specific secure storage and browser fallback                                |
+| Persisted UI preferences                      | `stores/persist-storage.ts`                                                         | Web Storage adapter; not the authoritative account database                          |
 
-## Version history
+The legacy scheduler adapter in `lib/scheduler/scheduler-db.ts` now accesses account data. Check its current implementation before treating SchedulerDB as a separate writable database.
 
-```mermaid
-timeline
-  title Dexie schema evolution
-  v1 : sessions · messages · settings
-  v2 : + promptPresets · mcpServers
-  v3 : + characters · skills
-  v4 : + skillResources · teams
-  v5 : + characters.name index (backfill)
-  v6 : + trustedWorkspaces
-  v7 : + skills.category index (backfill)
-  v8 : + messages [sessionId+createdAt] (backfill)
-  v9 : + backupHistory
-  v10 : + canvasDocuments · canvasVersions
-  v11 : + canvasComments · canvasSessions
-  v12 : + a2uiApps · a2uiSurfaces · a2uiTemplates (seed bridge MCP)
-  v13 : + a2uiEventHistory
-  v14 : + twinSources · twinChunks · twinProfile · twinDrafts · twinJobs
-  v15 : + plugins · pluginPermissions · pluginReviews · pluginAnalytics · pluginScheduledJobs
-```
+## Headless durability and recovery
 
-Every `.version(n)` block in `lib/db/schema.ts`:
+`cli/src/db/bootstrap.ts` restores the default per-table snapshot format: a manifest and one JSON file per table. Dirty-table flushing avoids serializing unrelated tables, but still reads and serializes the whole dirty table. Production snapshot-v3 file operations are asynchronous while keeping file-sync, backup, replacement and directory-sync ordering. Whole-table JSON serialization remains on the JavaScript thread; async file I/O does not make serialization incremental.
 
-| Version | Adds                                                                                                            |
-| ------- | --------------------------------------------------------------------------------------------------------------- |
-| **v1**  | `sessions`, `messages`, `settings`. Original baseline.                                                          |
-| **v2**  | `promptPresets`, `mcpServers`.                                                                                  |
-| **v3**  | `characters`, `skills`.                                                                                         |
-| **v4**  | `skillResources`, `teams`.                                                                                      |
-| **v5**  | Adds index `name` to `characters`. (Has upgrade hook to backfill.)                                              |
-| **v6**  | `trustedWorkspaces`.                                                                                            |
-| **v7**  | Adds index `category` to `skills`; backfill upgrade.                                                            |
-| **v8**  | Schema-only upgrade for `messages`; backfill `[sessionId+createdAt]` index.                                     |
-| **v9**  | `backupHistory`.                                                                                                |
-| **v10** | `canvasDocuments`, `canvasVersions`.                                                                            |
-| **v11** | `canvasComments`, `canvasSessions`.                                                                             |
-| **v12** | A2UI tables (`a2uiApps`, `a2uiSurfaces`, `a2uiTemplates`); upgrade hook seeds the built-in MCP A2UI bridge row. |
-| **v13** | `a2uiEventHistory`; index reshuffle.                                                                            |
-| **v14** | Twin tables — `twinSources`, `twinChunks`, `twinProfile`, `twinDrafts`, `twinJobs`.                             |
-| **v15** | Plugin tables — `plugins`, `pluginPermissions`, `pluginReviews`, `pluginAnalytics`, `pluginScheduledJobs`.      |
-| **v113** | Retired the unused `pluginScheduledJobs` table; plugin schedules are `type: "plugin"` tasks in SchedulerDB. |
-| **v16–v112** | Subsequent additions: workflow tables, goal tracker, OCR results, subscription usage, sync cursors, share links, agent-team persistence, character pack overlays, GitHub delivery state, ext. agent configs, mobile sync, perf samples, terminal sessions, etc. Read `lib/db/schema.ts` for the exact diffs. |
-| **v115** | Adds `contextComments` as the writable cross-resource comment table and idempotently backfills Canvas comments. Existing historical version blocks remain unchanged. |
-| **v116–v150** | Sites, execution journals, memory governance, account/runtime-target isolation, template platform, Knowledge Bases, single-Agent tasks, immutable workflow deployments, replayable workflow event sequences, and the global agent-trace time index. Exact policy and counts are generated from the catalog. |
+Snapshots use temporary files, file sync, a previous-generation backup, and replacement. Invalid or incompatible snapshots are quarantined. When the canonical file is absent and a quarantine generation remains, startup continues to refuse the store until a compatible canonical snapshot is restored; a supervisor restart must not turn corruption into a fresh empty database. A repaired canonical snapshot takes precedence over older quarantined generations.
 
-### Resource comments (v115)
+The ledger path in `cli/src/serve/persistence/` has its own snapshot/journal and optional SQLite backends. Compaction must include commits accepted while the checkpoint is being prepared, preserve sequence continuity, and be awaited by shutdown. Backend selection is a separate runtime decision; changing its implementation does not switch an existing installation automatically.
 
-`contextComments` indexes resource kind/id, parent, resolution, creation time, and project scope. It stores resource-level, text/line-range, and workflow node/edge anchors plus revision and stale-anchor metadata. Canvas stores, plugin APIs, legacy Canvas UI, and backup/import compatibility use adapters over this table so there is one writable source of truth.
+## Native SQLite ownership
 
-<Callout type="info" title="Idempotent upgrades">
-Each version is idempotent — opening an old database upgrades it through every intermediate version automatically. Dexie applies them in order. **Never modify a previous `.version(n)` block.**
-</Callout>
+| Store family                                    | Source owner                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------- |
+| Vectors and payloads                            | `crates/cognia-vector/src/db.rs`                              |
+| Agent sessions, transcripts and summaries       | `crates/cognia-agent-state/src/agent_session_store/`          |
+| Provider profiles and catalog revisions         | `crates/cognia-agent-state/src/provider_profiles/`            |
+| Jobs and monitors                               | `crates/cognia-jobs/src/store.rs`                             |
+| Scheduler metadata                              | `crates/cognia-scheduling/src/scheduler/metadata_store.rs`    |
+| Workflow runs, waitpoints, cursors and events   | `crates/cognia-scheduling/src/workflow/run_mirror.rs`         |
+| Integration spool and deadletters               | `crates/cognia-scheduling/src/workflow/integration_spool.rs`  |
+| Task workspace registry, bundles and blob files | `crates/cognia-task-workspace/src/store.rs`                   |
+| Per-plugin SQL and managed IDE state            | `crates/cognia-plugin-runtime/src/api_bridge.rs`              |
+| Companion messages and sessions                 | `src-tauri/src/companion_api/store.rs`                        |
+| Companion security state                        | `src-tauri/src/companion_api/security_store.rs`               |
+| Signaling registrations                         | `src-tauri/src/companion_api/signaling/registration_store.rs` |
+| RPC idempotency receipts                        | `src-tauri/src/companion_api/idempotency.rs`                  |
 
-## Upgrade hooks
+The integration spool shares the workflow mirror database path. Companion AppStore and SecurityStore can also share a file. Count owners and files separately; changing connection settings can affect another owner. WAL does not make operations parallel when callers still share one connection mutex.
 
-Some versions have a `.upgrade(tx => { ... })` hook. The hook runs once during the migration to that version. Common patterns:
+External agent-session, CCSwitch, and browser-cookie imports read databases owned by other applications. They are outside Cognia's write/retention authority.
 
-- **Backfill an index** — read every existing row, write a derived field, re-put.
-- **Seed built-in rows** — insert built-in characters/skills/MCP servers if missing.
-- **Migrate a row shape** — translate old fields to new.
+Native vector Tauri commands dispatch database initialization, SQLite work, mutex waits and filesystem metadata through a blocking worker. Cloned `VectorState` values share the same lazy store and reset lock. This protects the async executor; it does not parallelize the underlying connection or change search results. Already-started work continues if its caller cancels the wait.
 
-Hooks must be:
+## Deletion and retention
 
-- **Idempotent** — running them twice is safe (in case the user clears + re-imports).
-- **Synchronous-ish** — Dexie wraps them in a transaction; long async work is OK but blocks other writes.
-- **Tested** — every upgrade hook has a sibling test (see `seed.test.ts`, `schema.test.ts`).
+Use the domain deletion entry points, including `lib/db/sessions.ts` and `lib/db/project-scope.ts`. Deleting parent rows must also clean their owned projections and references in a transaction and record applicable sync tombstones. Ordinary conversation branches and shared media have independent ownership.
 
-## Settings table
+Media cleanup uses reference hashes and the existing grace period in `lib/db/message-media-refs.ts`. A small candidate list must not scan the entire media library. A failed post-commit garbage collection must not report that an already-committed parent deletion rolled back.
 
-`settings` is a singleton — exactly one row, keyed `"singleton"`. The shape is `AppSettings` (`lib/claude/types.ts`). It includes:
+Draft revision allocation and writes share a transaction with the parent/deletion-marker check. An optimistic draft may precede its parent; a known-deleted missing parent cannot receive a late draft. Unread writes require an existing parent. Project deletion captures membership and commits deletion markers in the same transaction, including rollback if the markers cannot be written.
 
-- API key references (the actual keys live in the OS keyring; this table holds metadata).
-- Default character / model / skill IDs.
-- UI preferences (theme, locale, font size, density).
-- Scheduler enable flags.
-- Backup schedule + folder.
-- Vector backend choice + connection.
-- Twin runtime defaults.
-- Telemetry consent.
-- …
+The governed tombstone sweep reconciles historical draft, unread, input-history, transcript and media-reference rows only when an explicit session deletion marker exists and both the session and its message history are absent. It reads marker pages of 250 and candidate blobs individually. Shared media, in-flight upload grace periods and retry evidence survive; a missing parent without a marker is preserved. Markers normally expire after 90 days; unfinished reconciliation keeps the evidence it still needs. No database scan is run merely by editing this code.
 
-`SettingsSyncProvider` is the React provider that mounts the row, caches it in memory, and exposes an updater that batch-writes back to Dexie.
+Plugin SQL uses one cached connection per plugin. Host-owned managed IDE state has a separate cache and file, with existing scope partitions. Both caches reject a locked/unbound account and clear on account change and teardown. This prevents stale cache reuse; it does not cancel SQL that already obtained a connection.
 
-## Adding a new table
+`lib/storage/retention.ts` runs existing retention executors. Extend the owning policy/executor when adding high-write tables. Audit history, deadletters, migration journals, and consumed upload receipts are not automatically disposable: document retention and retry requirements before pruning them.
 
-<Steps>
-  <Step>
-    ### Define the row type
+## Performance and validation
 
-    Create a new file under `lib/db/<name>.ts` and export the row type:
-
-    ```ts
-    export interface MyNewRow {
-      id: string
-      indexedField: string
-      otherField: number
-      // ...
-    }
-    ```
-
-  </Step>
-  <Step>
-    ### Import into schema.ts
-
-    Add `import type { MyNewRow } from "./<name>"` near the top of `lib/db/schema.ts`.
-
-  </Step>
-  <Step>
-    ### Add a Table field
-
-    Add `myNewTable!: Table<MyNewRow, string>` inside the `CogniaDB` class.
-
-  </Step>
-  <Step>
-    ### Bump the schema version
-
-    ```ts
-    // Use the next free integer; check the latest `.version(n)` in schema.ts
-    this.version(55).stores({
-      myNewTable: "id, indexedField, [indexedField+otherField]",
-      // include only the NEW table; existing tables are inherited
-    })
-    ```
-
-  </Step>
-  <Step>
-    ### (Optional) Add an upgrade hook
-
-    If you need to seed built-in rows or backfill from existing tables:
-
-    ```ts
-    this.version(55).stores({...}).upgrade(async tx => {
-      // idempotent migration
-    })
-    ```
-
-  </Step>
-  <Step>
-    ### Write the test
-
-    `lib/db/<name>.test.ts` covering insert / update / delete / query, plus
-    upgrade idempotence if you added a hook.
-
-  </Step>
-  <Step>
-    ### Update this docs page
-
-    Add the table to the table list above.
-
-  </Step>
-</Steps>
-
-<Callout type="error" title="Never modify a previous version block">
-  If you realise an existing index is wrong, add a **new** version that re-declares the table with
-  the corrected index list. Mutating an old block would orphan users who already migrated past that
-  version.
-</Callout>
-
-## Composite keys
-
-Dexie supports composite primary keys via array syntax. Cognia uses them for the plugin permissions / reviews / analytics tables:
-
-```ts
-pluginPermissions: "[pluginId+permission], pluginId"
-//                   ^ primary key      ^ secondary index
-```
-
-This makes "the user revoked permission X on plugin Y" a single `delete([pluginId, permission])` operation — no scan needed.
-
-## Capped tables
-
-Some tables are capped to prevent unbounded growth:
-
-| Table              | Cap                       | Pruning                                        |
-| ------------------ | ------------------------- | ---------------------------------------------- |
-| `backupHistory`    | 50 newest                 | `pruneBackupHistory()` runs after every insert |
-| `a2uiEventHistory` | per-surface cap (~200)    | Trim on insert when over cap                   |
-| `canvasVersions`   | unbounded but compactable | Manual "compact history" action in canvas UI   |
-
-When you add a new high-write table, decide upfront whether it needs a cap.
-
-## Querying tips
-
-- Prefer indexed queries — `db.messages.where("[sessionId+createdAt]").between([sid, 0], [sid, Date.now()])`.
-- Avoid `Collection.toArray()` on large tables; use `.each(callback)` to stream.
-- Wrap multi-table writes in `db.transaction("rw", tableA, tableB, async () => {...})` so a partial failure rolls back.
-- Live queries (`useLiveQuery` from `dexie-react-hooks`) automatically re-render when the underlying data changes.
-
-## Clearing data
-
-`lib/data/clear.ts` exposes:
-
-- `clearAll()` — wipe every Dexie table. Used by the Maintenance tab "Reset" action.
-- `clearTables(names)` — wipe specific tables.
-
-Both run in a single Dexie transaction so the database stays consistent.
-
-## Tests
-
-- `lib/db/schema.test.ts` — opens the DB, runs every upgrade, verifies row counts.
-- `lib/db/seed.test.ts` — built-in seeding is idempotent.
-- Per-table tests (`messages.test.ts`, `characters.test.ts`, …) — CRUD coverage.
-
-## Next
+- Use indexes and bounded pages on interactive reads; loading a whole encrypted table also pays decode/decrypt costs for every row.
+- Prepare batch SQLite statements once within the transaction, while retaining rollback and payload/vector consistency.
+- Test overlapping writes, shutdown, failed writes, recovery retries, shared references, and account boundaries.
+- Measure controlled before/after fixtures separately from real desktop/mobile latency. Unit tests and temporary SQLite benchmarks do not establish end-user performance.
 
 <Cards>
-  <Card title="Backup & data transfer" href="./backup-and-data" description="Builds backup payloads from these tables." />
-  <Card title="Plugin system" href="../subsystems/plugin-system" description="Uses the v15 plugin tables." />
-  <Card title="Employee Digital Twin" href="../subsystems/employee-twin" description="Uses the v14 twin tables." />
+  <Card
+    title="Backup & data transfer"
+    href="./backup-and-data"
+    description="Backup and import behavior."
+  />
 </Cards>

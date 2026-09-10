@@ -27,6 +27,7 @@ pub mod schema;
 pub mod types;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use log::error;
 use parking_lot::Mutex;
@@ -58,17 +59,18 @@ enum LazyStore {
 /// queries are all user-initiated — so building it eagerly only blocked the
 /// synchronous Tauri `setup()`/builder path. The `Mutex` serialises the
 /// one-time open and the (rare) `reset`.
+#[derive(Clone)]
 pub struct VectorState {
     /// SQLite path; `None` in web mode / tests with no backing file.
     path: Option<PathBuf>,
-    store: Mutex<LazyStore>,
+    store: Arc<Mutex<LazyStore>>,
 }
 
 impl VectorState {
     pub fn new(path: Option<PathBuf>) -> Self {
         Self {
             path,
-            store: Mutex::new(LazyStore::Uninit),
+            store: Arc::new(Mutex::new(LazyStore::Uninit)),
         }
     }
 
@@ -159,6 +161,15 @@ impl<'a> std::fmt::Debug for VectorStoreGuard<'a> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn clones_share_the_lazy_slot() {
+        let state = VectorState::default();
+        let clone = state.clone();
+        assert!(Arc::ptr_eq(&state.store, &clone.store));
+        assert!(state.store().is_err());
+        assert!(matches!(*clone.store.lock(), LazyStore::Unavailable));
+    }
 
     #[test]
     fn state_with_valid_path_yields_store() {

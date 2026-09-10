@@ -450,22 +450,23 @@ impl VectorStore {
 
         conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
         let result = (|| -> Result<()> {
+            let mut upsert_point = conn.prepare(upsert_point_sql).map_err(map_sql_err)?;
+            let mut delete_vec = conn.prepare(&delete_vec_sql).map_err(map_sql_err)?;
+            let mut insert_vec = conn.prepare(&insert_vec_sql).map_err(map_sql_err)?;
             for p in points {
                 let (content, payload_json) = split_payload(&p.payload);
-                let rowid: i64 = conn
-                    .query_row(
-                        upsert_point_sql,
-                        params![p.id, collection_id, content, payload_json],
-                        |r| r.get(0),
-                    )
+                let rowid: i64 = upsert_point
+                    .query_row(params![p.id, collection_id, content, payload_json], |r| {
+                        r.get(0)
+                    })
                     .map_err(map_sql_err)?;
 
                 let blob = vector_to_blob(&p.vector);
                 // Idempotent: delete any prior row for this rowid (no-op
                 // on first insert), then insert the fresh embedding.
-                conn.execute(&delete_vec_sql, params![rowid])
-                    .map_err(map_sql_err)?;
-                conn.execute(&insert_vec_sql, params![rowid, blob])
+                delete_vec.execute(params![rowid]).map_err(map_sql_err)?;
+                insert_vec
+                    .execute(params![rowid, blob])
                     .map_err(map_sql_err)?;
             }
             Self::refresh_point_count(&conn, collection_id)?;
@@ -494,20 +495,23 @@ impl VectorStore {
 
         conn.execute_batch("BEGIN;").map_err(map_sql_err)?;
         let result = (|| -> Result<()> {
+            let mut lookup_point = conn
+                .prepare("SELECT rowid FROM points WHERE collection_id = ?1 AND id = ?2")
+                .map_err(map_sql_err)?;
+            let mut delete_point = conn
+                .prepare("DELETE FROM points WHERE rowid = ?1")
+                .map_err(map_sql_err)?;
+            let mut delete_vec = conn
+                .prepare(&format!("DELETE FROM {table} WHERE rowid = ?1"))
+                .map_err(map_sql_err)?;
             for id in ids {
-                let rowid: Option<i64> = conn
-                    .query_row(
-                        "SELECT rowid FROM points WHERE collection_id = ?1 AND id = ?2",
-                        params![collection_id, id],
-                        |r| r.get(0),
-                    )
+                let rowid: Option<i64> = lookup_point
+                    .query_row(params![collection_id, id], |r| r.get(0))
                     .optional()
                     .map_err(map_sql_err)?;
                 if let Some(r) = rowid {
-                    conn.execute("DELETE FROM points WHERE rowid = ?1", params![r])
-                        .map_err(map_sql_err)?;
-                    let del_vec = format!("DELETE FROM {table} WHERE rowid = ?1");
-                    conn.execute(&del_vec, params![r]).map_err(map_sql_err)?;
+                    delete_point.execute(params![r]).map_err(map_sql_err)?;
+                    delete_vec.execute(params![r]).map_err(map_sql_err)?;
                 }
             }
             Self::refresh_point_count(&conn, collection_id)?;
@@ -1463,67 +1467,102 @@ mod tests {
 
     #[test]
     fn upsert_rolls_back_on_mid_transaction_failure() {
-        // Exercise the actual BEGIN/ROLLBACK path in upsert_points.
-        //
-        // Strategy: pre-populate 2 points so the collection is non-empty,
-        // then build a second batch where the THIRD point has a wrong dimension.
-        // Because all dimension checks happen in the pre-validation loop
-        // (before BEGIN), this path cannot be reached with a dim mismatch.
-        //
-        // The vec0 virtual table enforces its own blob-size constraint at
-        // INSERT time; however, there is currently no public API to bypass
-        // the pre-validation and inject a malformed blob directly. A future
-        // refactor that exposes an injectable error hook would let us do this
-        // with a real mid-transaction failure.
-        //
-        // For now we verify the closest observable thing: a batch that passes
-        // pre-validation but would need to atomically commit all-or-nothing
-        // does so correctly when no mid-transaction error occurs (the happy
-        // path is already covered by `upsert_replaces_on_conflict`). The
-        // true rollback path is structurally sound (see the ROLLBACK branch in
-        // `upsert_points`) but requires an injectable failure point to test
-        // without a mock.
-        //
-        // TODO: needs an injectable failure point (e.g. a wrapper around
-        //       `conn.execute` that returns an error on the Nth call) to
-        //       exercise the ROLLBACK branch without faking a dim mismatch.
-        //
-        // This test is marked #[ignore] until that hook is available.
-        //
-        // For the time being, assert the atomicity guarantee at the
-        // observable level: a successful batch either commits fully or not
-        // at all; we cannot produce a partial commit without a mid-tx error.
         let (_dir, store) = open_store("v.sqlite");
         store
-            .create_collection("c", 4, None, None, None, None)
-            .expect("create");
-
-        // Upsert 5 valid points — all should land.
-        let first_batch = vec![
-            pt("p1", vec![0.1, 0.2, 0.3, 0.4], json!({"content": "a"})),
-            pt("p2", vec![0.2, 0.3, 0.4, 0.5], json!({"content": "b"})),
-            pt("p3", vec![0.3, 0.4, 0.5, 0.6], json!({"content": "c"})),
-            pt("p4", vec![0.4, 0.5, 0.6, 0.7], json!({"content": "d"})),
-            pt("p5", vec![0.5, 0.6, 0.7, 0.8], json!({"content": "e"})),
-        ];
-        store.upsert_points("c", &first_batch).expect("first batch");
-        let info = store.get_collection("c").expect("get after first");
-        assert_eq!(info.document_count, 5, "all 5 points should be stored");
-
-        // A second valid batch replaces some points — confirms atomicity on
-        // the success path (all-or-nothing commit).
-        let second_batch = vec![
-            pt("p1", vec![0.9, 0.8, 0.7, 0.6], json!({"content": "a2"})),
-            pt("p6", vec![0.6, 0.7, 0.8, 0.9], json!({"content": "f"})),
-        ];
-        store
-            .upsert_points("c", &second_batch)
-            .expect("second batch");
-        let info2 = store.get_collection("c").expect("get after second");
-        assert_eq!(
-            info2.document_count, 6,
-            "6 distinct points expected after upsert"
+            .create_collection("c", 3, None, None, None, None)
+            .unwrap();
+        let original = pt(
+            "existing",
+            vec![0.1, 0.2, 0.3],
+            json!({"content": "original"}),
         );
+        store.upsert_points("c", &[original.clone()]).unwrap();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_point_insert BEFORE INSERT ON points
+             WHEN NEW.id = 'fail' BEGIN SELECT RAISE(ABORT, 'injected insert failure'); END;",
+            )
+            .unwrap();
+
+        let error = store
+            .upsert_points(
+                "c",
+                &[
+                    pt(
+                        "existing",
+                        vec![0.9, 0.8, 0.7],
+                        json!({"content": "changed"}),
+                    ),
+                    pt("new", vec![0.2, 0.2, 0.2], json!({"content": "new"})),
+                    pt("fail", vec![0.3, 0.3, 0.3], json!({"content": "fail"})),
+                ],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("injected insert failure"));
+        let points = store
+            .get_points("c", &["existing".into(), "new".into()])
+            .unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].vector, original.vector);
+        assert_eq!(points[0].payload, original.payload);
+        assert_eq!(store.get_collection("c").unwrap().document_count, 1);
+        assert!(store.conn.lock().is_autocommit());
+        store
+            .conn
+            .lock()
+            .execute_batch("DROP TRIGGER fail_point_insert;")
+            .unwrap();
+        store
+            .upsert_points("c", &[pt("after", vec![0.4; 3], json!({}))])
+            .unwrap();
+        assert_eq!(store.get_collection("c").unwrap().document_count, 2);
+    }
+
+    #[test]
+    fn delete_batch_rolls_back_then_handles_duplicate_and_missing_ids() {
+        let (_dir, store) = open_store("v.sqlite");
+        store
+            .create_collection("c", 3, None, None, None, None)
+            .unwrap();
+        store
+            .upsert_points(
+                "c",
+                &[
+                    pt("a", vec![0.1; 3], json!({"content": "a"})),
+                    pt("b", vec![0.2; 3], json!({"content": "b"})),
+                ],
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_point_delete BEFORE DELETE ON points
+             WHEN OLD.id = 'b' BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;",
+            )
+            .unwrap();
+        let ids = vec!["a".into(), "missing".into(), "a".into(), "b".into()];
+        let error = store.delete_points("c", &ids).unwrap_err();
+        assert!(error.to_string().contains("injected delete failure"));
+        let points = store.get_points("c", &["a".into(), "b".into()]).unwrap();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].vector, vec![0.1; 3]);
+        assert_eq!(points[1].vector, vec![0.2; 3]);
+        assert_eq!(store.get_collection("c").unwrap().document_count, 2);
+        assert!(store.conn.lock().is_autocommit());
+        store
+            .conn
+            .lock()
+            .execute_batch("DROP TRIGGER fail_point_delete;")
+            .unwrap();
+        store.delete_points("c", &ids).unwrap();
+        assert_eq!(store.get_collection("c").unwrap().document_count, 0);
+        assert!(store
+            .get_points("c", &["a".into(), "b".into()])
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

@@ -23,6 +23,24 @@ use super::types::{
 use super::VectorState;
 use super::{ScrollPage, VectorBackend};
 
+/// Dispatch a native operation with owned state. Store guards must remain
+/// inside the operation so they never cross the asynchronous boundary.
+/// Once started, a worker finishes even if its async caller is cancelled.
+async fn blocking_native<T, F>(
+    label: &'static str,
+    state: &VectorState,
+    operation: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&VectorState) -> Result<T, String> + Send + 'static,
+{
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || operation(&state))
+        .await
+        .map_err(|error| format!("{label}: blocking worker failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn vector_create_collection(
     state: State<'_, VectorState>,
@@ -33,26 +51,29 @@ pub async fn vector_create_collection(
     embedding_model: Option<String>,
     embedding_provider: Option<String>,
 ) -> Result<(), String> {
-    debug!(
-        "vector_create_collection: name={}, dim={}, model={:?}",
-        name, dimension, embedding_model
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    store
-        .create_collection(
-            &name,
-            dimension,
-            description.as_deref(),
-            embedding_model.as_deref(),
-            embedding_provider.as_deref(),
-            metadata.as_ref(),
-        )
-        .map_err(|e| {
-            error!("vector_create_collection failed: {}", e);
-            e.to_string()
-        })?;
-    info!("vector_create_collection ok: {}", name);
-    Ok(())
+    blocking_native("vector_create_collection", state.inner(), move |state| {
+        debug!(
+            "vector_create_collection: name={}, dim={}, model={:?}",
+            name, dimension, embedding_model
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        store
+            .create_collection(
+                &name,
+                dimension,
+                description.as_deref(),
+                embedding_model.as_deref(),
+                embedding_provider.as_deref(),
+                metadata.as_ref(),
+            )
+            .map_err(|e| {
+                error!("vector_create_collection failed: {}", e);
+                e.to_string()
+            })?;
+        info!("vector_create_collection ok: {}", name);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -60,28 +81,34 @@ pub async fn vector_delete_collection(
     state: State<'_, VectorState>,
     name: String,
 ) -> Result<(), String> {
-    debug!("vector_delete_collection: name={}", name);
-    let store = state.store().map_err(|e| e.to_string())?;
-    store.delete_collection(&name).map_err(|e| {
-        error!("vector_delete_collection failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_delete_collection ok: {}", name);
-    Ok(())
+    blocking_native("vector_delete_collection", state.inner(), move |state| {
+        debug!("vector_delete_collection: name={}", name);
+        let store = state.store().map_err(|e| e.to_string())?;
+        store.delete_collection(&name).map_err(|e| {
+            error!("vector_delete_collection failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_delete_collection ok: {}", name);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn vector_list_collections(
     state: State<'_, VectorState>,
 ) -> Result<Vec<Collection>, String> {
-    debug!("vector_list_collections");
-    let store = state.store().map_err(|e| e.to_string())?;
-    let list = store.list_collections().map_err(|e| {
-        error!("vector_list_collections failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_list_collections ok: {} collection(s)", list.len());
-    Ok(list)
+    blocking_native("vector_list_collections", state.inner(), move |state| {
+        debug!("vector_list_collections");
+        let store = state.store().map_err(|e| e.to_string())?;
+        let list = store.list_collections().map_err(|e| {
+            error!("vector_list_collections failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_list_collections ok: {} collection(s)", list.len());
+        Ok(list)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -89,14 +116,17 @@ pub async fn vector_get_collection(
     state: State<'_, VectorState>,
     name: String,
 ) -> Result<Collection, String> {
-    debug!("vector_get_collection: name={}", name);
-    let store = state.store().map_err(|e| e.to_string())?;
-    let c = store.get_collection(&name).map_err(|e| {
-        error!("vector_get_collection failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_get_collection ok: {}", name);
-    Ok(c)
+    blocking_native("vector_get_collection", state.inner(), move |state| {
+        debug!("vector_get_collection: name={}", name);
+        let store = state.store().map_err(|e| e.to_string())?;
+        let c = store.get_collection(&name).map_err(|e| {
+            error!("vector_get_collection failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_get_collection ok: {}", name);
+        Ok(c)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -106,22 +136,25 @@ pub async fn vector_upsert_points(
     points: Vec<Point>,
 ) -> Result<(), String> {
     let _perf = cognia_instrument::guard("vector.upsert");
-    debug!(
-        "vector_upsert_points: collection={}, count={}",
-        collection,
-        points.len()
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    store.upsert_points(&collection, &points).map_err(|e| {
-        error!("vector_upsert_points failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_upsert_points ok: collection={}, count={}",
-        collection,
-        points.len()
-    );
-    Ok(())
+    blocking_native("vector_upsert_points", state.inner(), move |state| {
+        debug!(
+            "vector_upsert_points: collection={}, count={}",
+            collection,
+            points.len()
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        store.upsert_points(&collection, &points).map_err(|e| {
+            error!("vector_upsert_points failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_upsert_points ok: collection={}, count={}",
+            collection,
+            points.len()
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -130,22 +163,25 @@ pub async fn vector_delete_points(
     collection: String,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    debug!(
-        "vector_delete_points: collection={}, count={}",
-        collection,
-        ids.len()
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    store.delete_points(&collection, &ids).map_err(|e| {
-        error!("vector_delete_points failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_delete_points ok: collection={}, count={}",
-        collection,
-        ids.len()
-    );
-    Ok(())
+    blocking_native("vector_delete_points", state.inner(), move |state| {
+        debug!(
+            "vector_delete_points: collection={}, count={}",
+            collection,
+            ids.len()
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        store.delete_points(&collection, &ids).map_err(|e| {
+            error!("vector_delete_points failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_delete_points ok: collection={}, count={}",
+            collection,
+            ids.len()
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -153,17 +189,20 @@ pub async fn vector_delete_all_points(
     state: State<'_, VectorState>,
     collection: String,
 ) -> Result<usize, String> {
-    debug!("vector_delete_all_points: collection={}", collection);
-    let store = state.store().map_err(|e| e.to_string())?;
-    let count = store.delete_all_points(&collection).map_err(|e| {
-        error!("vector_delete_all_points failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_delete_all_points ok: collection={}, deleted={}",
-        collection, count
-    );
-    Ok(count)
+    blocking_native("vector_delete_all_points", state.inner(), move |state| {
+        debug!("vector_delete_all_points: collection={}", collection);
+        let store = state.store().map_err(|e| e.to_string())?;
+        let count = store.delete_all_points(&collection).map_err(|e| {
+            error!("vector_delete_all_points failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_delete_all_points ok: collection={}, deleted={}",
+            collection, count
+        );
+        Ok(count)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -172,22 +211,25 @@ pub async fn vector_get_points(
     collection: String,
     ids: Vec<String>,
 ) -> Result<Vec<Point>, String> {
-    debug!(
-        "vector_get_points: collection={}, count={}",
-        collection,
-        ids.len()
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    let pts = store.get_points(&collection, &ids).map_err(|e| {
-        error!("vector_get_points failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_get_points ok: collection={}, returned={}",
-        collection,
-        pts.len()
-    );
-    Ok(pts)
+    blocking_native("vector_get_points", state.inner(), move |state| {
+        debug!(
+            "vector_get_points: collection={}, count={}",
+            collection,
+            ids.len()
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        let pts = store.get_points(&collection, &ids).map_err(|e| {
+            error!("vector_get_points failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_get_points ok: collection={}, returned={}",
+            collection,
+            pts.len()
+        );
+        Ok(pts)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -203,34 +245,37 @@ pub async fn vector_search_points(
     filters: Option<Vec<Filter>>,
     filter_mode: Option<FilterMode>,
 ) -> Result<SearchResponse, String> {
-    debug!(
-        "vector_search_points: collection={}, top_k={}, filters={}",
-        collection,
-        top_k,
-        filters.as_ref().map(|f| f.len()).unwrap_or(0)
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    let resp = store
-        .search_points(
-            &collection,
-            &vector,
+    blocking_native("vector_search_points", state.inner(), move |state| {
+        debug!(
+            "vector_search_points: collection={}, top_k={}, filters={}",
+            collection,
             top_k,
-            score_threshold,
-            offset,
-            limit,
-            filters.as_deref(),
-            filter_mode,
-        )
-        .map_err(|e| {
-            error!("vector_search_points failed: {}", e);
-            e.to_string()
-        })?;
-    info!(
-        "vector_search_points ok: collection={}, hits={}",
-        collection,
-        resp.results.len()
-    );
-    Ok(resp)
+            filters.as_ref().map(|f| f.len()).unwrap_or(0)
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        let resp = store
+            .search_points(
+                &collection,
+                &vector,
+                top_k,
+                score_threshold,
+                offset,
+                limit,
+                filters.as_deref(),
+                filter_mode,
+            )
+            .map_err(|e| {
+                error!("vector_search_points failed: {}", e);
+                e.to_string()
+            })?;
+        info!(
+            "vector_search_points ok: collection={}, hits={}",
+            collection,
+            resp.results.len()
+        );
+        Ok(resp)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -238,25 +283,31 @@ pub async fn vector_truncate_collection(
     state: State<'_, VectorState>,
     name: String,
 ) -> Result<(), String> {
-    debug!("vector_truncate_collection: name={}", name);
-    let store = state.store().map_err(|e| e.to_string())?;
-    store.truncate_collection(&name).map_err(|e| {
-        error!("vector_truncate_collection failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_truncate_collection ok: {}", name);
-    Ok(())
+    blocking_native("vector_truncate_collection", state.inner(), move |state| {
+        debug!("vector_truncate_collection: name={}", name);
+        let store = state.store().map_err(|e| e.to_string())?;
+        store.truncate_collection(&name).map_err(|e| {
+            error!("vector_truncate_collection failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_truncate_collection ok: {}", name);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn vector_reset_store(state: State<'_, VectorState>) -> Result<(), String> {
-    debug!("vector_reset_store");
-    state.reset().map_err(|e| {
-        error!("vector_reset_store failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_reset_store ok");
-    Ok(())
+    blocking_native("vector_reset_store", state.inner(), move |state| {
+        debug!("vector_reset_store");
+        state.reset().map_err(|e| {
+            error!("vector_reset_store failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_reset_store ok");
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -264,17 +315,20 @@ pub async fn vector_count_points(
     state: State<'_, VectorState>,
     collection: String,
 ) -> Result<usize, String> {
-    debug!("vector_count_points: collection={}", collection);
-    let store = state.store().map_err(|e| e.to_string())?;
-    let count = store.count_points(&collection).map_err(|e| {
-        error!("vector_count_points failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_count_points ok: collection={}, count={}",
-        collection, count
-    );
-    Ok(count)
+    blocking_native("vector_count_points", state.inner(), move |state| {
+        debug!("vector_count_points: collection={}", collection);
+        let store = state.store().map_err(|e| e.to_string())?;
+        let count = store.count_points(&collection).map_err(|e| {
+            error!("vector_count_points failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_count_points ok: collection={}, count={}",
+            collection, count
+        );
+        Ok(count)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -282,17 +336,20 @@ pub async fn vector_get_stats(
     state: State<'_, VectorState>,
     collection: String,
 ) -> Result<CollectionStats, String> {
-    debug!("vector_get_stats: collection={}", collection);
-    let store = state.store().map_err(|e| e.to_string())?;
-    let stats = store.collection_stats(&collection).map_err(|e| {
-        error!("vector_get_stats failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_get_stats ok: collection={}, count={}, dim={}, size_bytes={}",
-        collection, stats.count, stats.dim, stats.size_bytes
-    );
-    Ok(stats)
+    blocking_native("vector_get_stats", state.inner(), move |state| {
+        debug!("vector_get_stats: collection={}", collection);
+        let store = state.store().map_err(|e| e.to_string())?;
+        let stats = store.collection_stats(&collection).map_err(|e| {
+            error!("vector_get_stats failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_get_stats ok: collection={}, count={}, dim={}, size_bytes={}",
+            collection, stats.count, stats.dim, stats.size_bytes
+        );
+        Ok(stats)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -302,24 +359,27 @@ pub async fn vector_scroll_points(
     cursor: Option<String>,
     limit: usize,
 ) -> Result<ScrollPage, String> {
-    debug!(
-        "vector_scroll_points: collection={}, cursor={:?}, limit={}",
-        collection, cursor, limit
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    let page = store
-        .scroll_points(&collection, cursor.as_deref(), limit)
-        .map_err(|e| {
-            error!("vector_scroll_points failed: {}", e);
-            e.to_string()
-        })?;
-    info!(
-        "vector_scroll_points ok: collection={}, returned={}, has_more={}",
-        collection,
-        page.points.len(),
-        page.has_more
-    );
-    Ok(page)
+    blocking_native("vector_scroll_points", state.inner(), move |state| {
+        debug!(
+            "vector_scroll_points: collection={}, cursor={:?}, limit={}",
+            collection, cursor, limit
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        let page = store
+            .scroll_points(&collection, cursor.as_deref(), limit)
+            .map_err(|e| {
+                error!("vector_scroll_points failed: {}", e);
+                e.to_string()
+            })?;
+        info!(
+            "vector_scroll_points ok: collection={}, returned={}, has_more={}",
+            collection,
+            page.points.len(),
+            page.has_more
+        );
+        Ok(page)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -328,14 +388,17 @@ pub async fn vector_rename_collection(
     from: String,
     to: String,
 ) -> Result<(), String> {
-    debug!("vector_rename_collection: from={}, to={}", from, to);
-    let store = state.store().map_err(|e| e.to_string())?;
-    store.rename_collection(&from, &to).map_err(|e| {
-        error!("vector_rename_collection failed: {}", e);
-        e.to_string()
-    })?;
-    info!("vector_rename_collection ok: {} → {}", from, to);
-    Ok(())
+    blocking_native("vector_rename_collection", state.inner(), move |state| {
+        debug!("vector_rename_collection: from={}, to={}", from, to);
+        let store = state.store().map_err(|e| e.to_string())?;
+        store.rename_collection(&from, &to).map_err(|e| {
+            error!("vector_rename_collection failed: {}", e);
+            e.to_string()
+        })?;
+        info!("vector_rename_collection ok: {} → {}", from, to);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -343,18 +406,21 @@ pub async fn vector_export_collection(
     state: State<'_, VectorState>,
     collection: String,
 ) -> Result<String, String> {
-    debug!("vector_export_collection: collection={}", collection);
-    let store = state.store().map_err(|e| e.to_string())?;
-    let jsonl = store.export_collection_to_jsonl(&collection).map_err(|e| {
-        error!("vector_export_collection failed: {}", e);
-        e.to_string()
-    })?;
-    info!(
-        "vector_export_collection ok: collection={}, bytes={}",
-        collection,
-        jsonl.len()
-    );
-    Ok(jsonl)
+    blocking_native("vector_export_collection", state.inner(), move |state| {
+        debug!("vector_export_collection: collection={}", collection);
+        let store = state.store().map_err(|e| e.to_string())?;
+        let jsonl = store.export_collection_to_jsonl(&collection).map_err(|e| {
+            error!("vector_export_collection failed: {}", e);
+            e.to_string()
+        })?;
+        info!(
+            "vector_export_collection ok: collection={}, bytes={}",
+            collection,
+            jsonl.len()
+        );
+        Ok(jsonl)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -364,54 +430,60 @@ pub async fn vector_import_collection(
     jsonl: String,
     overwrite: Option<bool>,
 ) -> Result<ImportStats, String> {
-    debug!(
-        "vector_import_collection: collection={}, bytes={}, overwrite={:?}",
-        collection,
-        jsonl.len(),
-        overwrite
-    );
-    let store = state.store().map_err(|e| e.to_string())?;
-    let stats = store
-        .import_collection_from_jsonl(&collection, &jsonl, overwrite.unwrap_or(false))
-        .map_err(|e| {
-            error!("vector_import_collection failed: {}", e);
-            e.to_string()
-        })?;
-    info!(
-        "vector_import_collection ok: collection={}, imported={}",
-        collection, stats.imported
-    );
-    Ok(stats)
+    blocking_native("vector_import_collection", state.inner(), move |state| {
+        debug!(
+            "vector_import_collection: collection={}, bytes={}, overwrite={:?}",
+            collection,
+            jsonl.len(),
+            overwrite
+        );
+        let store = state.store().map_err(|e| e.to_string())?;
+        let stats = store
+            .import_collection_from_jsonl(&collection, &jsonl, overwrite.unwrap_or(false))
+            .map_err(|e| {
+                error!("vector_import_collection failed: {}", e);
+                e.to_string()
+            })?;
+        info!(
+            "vector_import_collection ok: collection={}, imported={}",
+            collection, stats.imported
+        );
+        Ok(stats)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn vector_get_store_size(state: State<'_, VectorState>) -> Result<u64, String> {
-    debug!("vector_get_store_size");
-    // When the store failed to initialise (web mode shouldn't reach this,
-    // but other startup failures may), report 0 instead of erroring so the
-    // storage breakdown can still render.
-    let store = match state.store() {
-        Ok(s) => s,
-        Err(_) => {
-            info!("vector_get_store_size: store unavailable, reporting 0");
-            return Ok(0);
+    blocking_native("vector_get_store_size", state.inner(), move |state| {
+        debug!("vector_get_store_size");
+        // When the store failed to initialise (web mode shouldn't reach this,
+        // but other startup failures may), report 0 instead of erroring so the
+        // storage breakdown can still render.
+        let store = match state.store() {
+            Ok(s) => s,
+            Err(_) => {
+                info!("vector_get_store_size: store unavailable, reporting 0");
+                return Ok(0);
+            }
+        };
+        let path = store.path().to_path_buf();
+        drop(store);
+        let mut total: u64 = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        // sqlite WAL/SHM siblings hold pending writes; include them so the
+        // figure matches what an `ls -la` of the cognia data dir would show.
+        for ext in ["-wal", "-shm"] {
+            let mut sibling = path.as_os_str().to_owned();
+            sibling.push(ext);
+            let sibling_path = std::path::PathBuf::from(sibling);
+            if let Ok(meta) = std::fs::metadata(&sibling_path) {
+                total += meta.len();
+            }
         }
-    };
-    let path = store.path().to_path_buf();
-    drop(store);
-    let mut total: u64 = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    // sqlite WAL/SHM siblings hold pending writes; include them so the
-    // figure matches what an `ls -la` of the cognia data dir would show.
-    for ext in ["-wal", "-shm"] {
-        let mut sibling = path.as_os_str().to_owned();
-        sibling.push(ext);
-        let sibling_path = std::path::PathBuf::from(sibling);
-        if let Ok(meta) = std::fs::metadata(&sibling_path) {
-            total += meta.len();
-        }
-    }
-    info!("vector_get_store_size ok: {} bytes", total);
-    Ok(total)
+        info!("vector_get_store_size ok: {} bytes", total);
+        Ok(total)
+    })
+    .await
 }
 
 // ============================================================================
@@ -667,7 +739,152 @@ mod tests {
     //! `Result<T, VectorError>` → `Result<T, String>` mapping.
 
     use super::super::{VectorState, VectorStore};
+    use super::blocking_native;
     use tempfile::tempdir;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_operation_runs_outside_the_async_executor() {
+        let state = VectorState::default();
+        let executor = std::thread::current().id();
+        let worker = blocking_native("thread-check", &state, |_| Ok(std::thread::current().id()))
+            .await
+            .expect("worker result");
+        assert_ne!(
+            executor, worker,
+            "synchronous vector work must leave the executor"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_worker_roundtrip_preserves_lazy_open_and_shared_reset() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("worker.sqlite");
+        let state = VectorState::new(Some(path.clone()));
+        let clone = state.clone();
+        assert!(!path.exists(), "cloning state must not open SQLite");
+        blocking_native("seed", &state, |state| {
+            let store = state.store().map_err(String::from)?;
+            store.create_collection("c", 3, None, None, None, None)?;
+            store.upsert_points(
+                "c",
+                &[super::super::Point {
+                    id: "point".into(),
+                    vector: vec![1.0, 0.0, 0.0],
+                    payload: None,
+                }],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("seed");
+        assert!(path.exists());
+        let hits = blocking_native("search", &clone, |state| {
+            state
+                .store()
+                .map_err(String::from)?
+                .search_points("c", &[1.0, 0.0, 0.0], 1, None, None, None, None, None)
+                .map_err(String::from)
+        })
+        .await
+        .expect("search");
+        assert_eq!(hits.results[0].id, "point");
+        blocking_native("reset", &clone, |state| state.reset().map_err(String::from))
+            .await
+            .expect("reset");
+        let collections = blocking_native("list", &state, |state| {
+            state
+                .store()
+                .map_err(String::from)?
+                .list_collections()
+                .map_err(String::from)
+        })
+        .await
+        .expect("list");
+        assert!(collections.is_empty(), "clones must share the reset state");
+    }
+
+    #[tokio::test]
+    async fn native_worker_preserves_business_errors() {
+        let state = VectorState::default();
+        let error = blocking_native("missing-store", &state, |state| {
+            state.store().map(|_| ()).map_err(String::from)
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Vector store not available: vector store not initialised"
+        );
+        let error: Result<(), String> = blocking_native("business-error", &state, |_| {
+            Err("Collection not found: original".into())
+        })
+        .await;
+        assert_eq!(error.unwrap_err(), "Collection not found: original");
+    }
+
+    #[tokio::test]
+    async fn native_worker_panic_returns_error_and_releases_store_lock() {
+        let dir = tempdir().expect("tempdir");
+        let state = VectorState::new(Some(dir.path().join("panic.sqlite")));
+        let result: Result<(), String> = blocking_native("panic-check", &state, |state| {
+            let _store = state.store().map_err(String::from)?;
+            panic!("worker failed while holding the store");
+        })
+        .await;
+        let error = result.unwrap_err();
+        assert!(error.starts_with("panic-check: blocking worker failed:"));
+        assert!(error.contains("worker failed while holding the store"));
+        blocking_native("after-panic", &state, |state| {
+            state.store().map(|_| ()).map_err(String::from)
+        })
+        .await
+        .expect("the store lock must be released during unwinding");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelling_native_caller_does_not_interrupt_started_write() {
+        let dir = tempdir().expect("tempdir");
+        let state = VectorState::new(Some(dir.path().join("cancel.sqlite")));
+        let worker_state = state.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let caller = tokio::spawn(async move {
+            blocking_native("cancel-check", &worker_state, move |state| {
+                let store = state.store().map_err(String::from)?;
+                let _ = started_tx.send(());
+                release_rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .map_err(|error| error.to_string())?;
+                let result = store
+                    .create_collection("completed", 3, None, None, None, None)
+                    .map_err(String::from);
+                drop(store);
+                let _ = finished_tx.send(result.clone());
+                result
+            })
+            .await
+        });
+        started_rx.await.expect("worker started");
+        caller.abort();
+        release_tx.send(()).expect("release worker");
+        finished_rx
+            .await
+            .expect("worker finished")
+            .expect("write completed");
+        assert!(caller.await.unwrap_err().is_cancelled());
+        let names = blocking_native("after-cancel", &state, |state| {
+            state
+                .store()
+                .map_err(String::from)?
+                .list_collections()
+                .map_err(String::from)
+        })
+        .await
+        .expect("store remains accessible");
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].name, "completed");
+    }
 
     #[test]
     fn vector_state_with_path_initializes_store() {
