@@ -5,9 +5,18 @@
       "type": "object",
       "required": ["applied", "skipped", "failed"],
       "properties": {
-        "applied": { "type": "integer", "minimum": 0 },
-        "skipped": { "type": "integer", "minimum": 0 },
-        "failed": { "type": "integer", "minimum": 0 },
+        "applied": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
         "reason": {
           "type": "string",
           "enum": ["federated-read-only", "runtime-owned", "illegal-transition"]
@@ -19,14 +28,18 @@
       "type": "object",
       "required": ["id", "identifier"],
       "properties": {
-        "id": { "type": "string" },
-        "identifier": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "AgentReadResult": {
       "type": "object",
-      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all \u2014 the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
+      "x-cognia-wire-source": "crate::agents::commands::AgentReadResult. NOTE: no rename_all — the fields stay snake_case on the wire, and only parse_error is renamed (to parseError) alongside skip_serializing_if.",
       "required": ["path", "exists", "writable", "format", "raw", "parsed"],
       "properties": {
         "path": {
@@ -45,7 +58,7 @@
           "type": "string"
         },
         "parsed": {
-          "x-cognia-opaque-reason": "serde_json::Value \u2014 the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
+          "x-cognia-opaque-reason": "serde_json::Value — the agent's own config tree, whose shape is owned by that vendor's format, not by this contract. Deliberately unconstrained; the envelope around it is not."
         },
         "parseError": {
           "type": "string"
@@ -108,31 +121,67 @@
         "error"
       ],
       "properties": {
-        "id": { "type": "string" },
-        "ts": { "type": "integer" },
-        "surface": { "$ref": "#/$defs/AutomationSurface" },
-        "pluginId": { "type": ["string", "null"] },
-        "command": { "type": "string" },
-        "processName": { "type": ["string", "null"] },
-        "windowTitle": { "type": ["string", "null"] },
-        "decision": { "type": "string", "enum": ["allow", "deny", "consent"] },
-        "reason": { "type": ["string", "null"] },
-        "durationMs": { "type": "integer", "minimum": 0 },
-        "error": { "type": ["string", "null"] }
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer"
+        },
+        "surface": {
+          "$ref": "#/$defs/AutomationSurface"
+        },
+        "pluginId": {
+          "type": ["string", "null"]
+        },
+        "command": {
+          "type": "string"
+        },
+        "processName": {
+          "type": ["string", "null"]
+        },
+        "windowTitle": {
+          "type": ["string", "null"]
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["allow", "deny", "consent"]
+        },
+        "reason": {
+          "type": ["string", "null"]
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
       },
       "additionalProperties": false
     },
     "AutomationAuditEntryList": {
       "type": "array",
-      "items": { "$ref": "#/$defs/AutomationAuditEntry" }
+      "items": {
+        "$ref": "#/$defs/AutomationAuditEntry"
+      }
     },
     "AutomationWhitelist": {
       "type": "object",
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.",
       "required": ["processNames", "windowTitlePatterns"],
       "properties": {
-        "processNames": { "type": "array", "items": { "type": "string" } },
-        "windowTitlePatterns": { "type": "array", "items": { "type": "string" } }
+        "processNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "windowTitlePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -141,9 +190,18 @@
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the global one applies.",
       "required": ["tier", "whitelist"],
       "properties": {
-        "tier": { "$ref": "#/$defs/AutomationTier" },
+        "tier": {
+          "$ref": "#/$defs/AutomationTier"
+        },
         "whitelist": {
-          "oneOf": [{ "$ref": "#/$defs/AutomationWhitelist" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AutomationWhitelist"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -153,13 +211,24 @@
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs PluginSurfacePolicy. perPluginOverrides is keyed by plugin id.",
       "required": ["tier", "whitelist", "perPluginOverrides"],
       "properties": {
-        "tier": { "$ref": "#/$defs/AutomationTier" },
+        "tier": {
+          "$ref": "#/$defs/AutomationTier"
+        },
         "whitelist": {
-          "oneOf": [{ "$ref": "#/$defs/AutomationWhitelist" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AutomationWhitelist"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "perPluginOverrides": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/AutomationSurfacePolicy" }
+          "additionalProperties": {
+            "$ref": "#/$defs/AutomationSurfacePolicy"
+          }
         }
       },
       "additionalProperties": false
@@ -169,10 +238,18 @@
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs PerSurfacePolicies.",
       "required": ["workflow", "computerUse", "mcp", "plugin"],
       "properties": {
-        "workflow": { "$ref": "#/$defs/AutomationSurfacePolicy" },
-        "computerUse": { "$ref": "#/$defs/AutomationSurfacePolicy" },
-        "mcp": { "$ref": "#/$defs/AutomationSurfacePolicy" },
-        "plugin": { "$ref": "#/$defs/AutomationPluginSurfacePolicy" }
+        "workflow": {
+          "$ref": "#/$defs/AutomationSurfacePolicy"
+        },
+        "computerUse": {
+          "$ref": "#/$defs/AutomationSurfacePolicy"
+        },
+        "mcp": {
+          "$ref": "#/$defs/AutomationSurfacePolicy"
+        },
+        "plugin": {
+          "$ref": "#/$defs/AutomationPluginSurfacePolicy"
+        }
       },
       "additionalProperties": false
     },
@@ -181,8 +258,13 @@
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs AuditSettings.",
       "required": ["retentionDays", "exportEnabled"],
       "properties": {
-        "retentionDays": { "type": "integer", "minimum": 0 },
-        "exportEnabled": { "type": "boolean" }
+        "retentionDays": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exportEnabled": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -191,9 +273,17 @@
       "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs ScreenshotScalingSettings.",
       "required": ["enabled", "maxWidth", "maxHeight"],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "maxWidth": { "type": "integer", "minimum": 0 },
-        "maxHeight": { "type": "integer", "minimum": 0 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxHeight": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
@@ -214,17 +304,41 @@
         "consentTimeoutMs"
       ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "defaultTier": { "$ref": "#/$defs/AutomationTier" },
-        "whitelist": { "$ref": "#/$defs/AutomationWhitelist" },
-        "perSurface": { "$ref": "#/$defs/AutomationPerSurfacePolicies" },
-        "audit": { "$ref": "#/$defs/AutomationAuditSettings" },
-        "redactScreenshots": { "type": "boolean" },
-        "screenshotScaling": { "$ref": "#/$defs/AutomationScreenshotScalingSettings" },
-        "screenshotDedup": { "type": "boolean" },
-        "alwaysHidePictureInPicture": { "type": "boolean" },
-        "pasteThresholdChars": { "type": "integer", "minimum": 0 },
-        "consentTimeoutMs": { "type": "integer", "minimum": 0 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "defaultTier": {
+          "$ref": "#/$defs/AutomationTier"
+        },
+        "whitelist": {
+          "$ref": "#/$defs/AutomationWhitelist"
+        },
+        "perSurface": {
+          "$ref": "#/$defs/AutomationPerSurfacePolicies"
+        },
+        "audit": {
+          "$ref": "#/$defs/AutomationAuditSettings"
+        },
+        "redactScreenshots": {
+          "type": "boolean"
+        },
+        "screenshotScaling": {
+          "$ref": "#/$defs/AutomationScreenshotScalingSettings"
+        },
+        "screenshotDedup": {
+          "type": "boolean"
+        },
+        "alwaysHidePictureInPicture": {
+          "type": "boolean"
+        },
+        "pasteThresholdChars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "consentTimeoutMs": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
@@ -1672,7 +1786,7 @@
     },
     "FleetSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent \u2014 not empty arrays \u2014 on a quiet host.",
+      "x-cognia-wire-source": "crate::fleet::registry::FleetSnapshot (rename_all = camelCase), via rpc/diagnostics.rs `to_json(runtime().snapshot_for_tenant(..))`. hosts and runtimeCapabilities carry skip_serializing_if = Vec::is_empty, so both are absent — not empty arrays — on a quiet host.",
       "x-cognia-fixes": "Previously LegacyList, which requires an ARRAY. FleetSnapshot is a struct and always serializes as an object, so the enforced output contract rejected every fleet_get_snapshot response with contract_output_violation. The helper directly above the dispatch arm (fleet_event_payload) already asserted 'fleet snapshot must serialize as an object'.",
       "required": ["sessions", "liveness", "generatedAt"],
       "properties": {
@@ -2323,7 +2437,7 @@
     },
     "GitStackBranchPairList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<(String, String)> \u2014 a Rust tuple serialises as a two-element JSON array, not an object.",
+      "x-cognia-wire-source": "Vec<(String, String)> — a Rust tuple serialises as a two-element JSON array, not an object.",
       "items": {
         "type": "array",
         "items": {
@@ -3102,7 +3216,7 @@
     },
     "LarkEntryToken": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone \u2014 so only `token` is guaranteed.",
+      "x-cognia-wire-source": "lark_entry::rpc_entry_issue. Two branches: kind=entry returns token+jti+expiresAt, kind=surface returns token alone — so only `token` is guaranteed.",
       "required": ["token"],
       "properties": {
         "token": {
@@ -3119,7 +3233,7 @@
     },
     "LarkMetricAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_metrics_record \u2014 json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
+      "x-cognia-wire-source": "lark_entry::rpc_metrics_record — json!({ \"ok\": true }). An unknown metric name is an Err, so `ok` is only ever literal true.",
       "required": ["ok"],
       "properties": {
         "ok": {
@@ -3130,7 +3244,7 @@
     },
     "LarkResultAck": {
       "type": "object",
-      "x-cognia-wire-source": "lark_entry::rpc_result_complete \u2014 json!({ \"accepted\": bool }).",
+      "x-cognia-wire-source": "lark_entry::rpc_result_complete — json!({ \"accepted\": bool }).",
       "required": ["accepted"],
       "properties": {
         "accepted": {
@@ -3414,11 +3528,11 @@
       "additionalProperties": false
     },
     "MessagePage": {
-      "description": "One page of messages. The Rust direct store returns compact MessageRow values with total + nextOffset; the indexed desktop bridge returns raw StoredMessage values with next_offset and omits a full count.",
       "type": "object",
-      "required": ["rows"],
+      "description": "One page of messages (ADR-0175 B3). The direct store returns compact MessageRow values and the indexed desktop bridge raw StoredMessage ones; the arm folds both into this envelope.",
+      "required": ["items"],
       "properties": {
-        "rows": {
+        "items": {
           "type": "array",
           "items": {
             "oneOf": [
@@ -3431,20 +3545,15 @@
             ]
           }
         },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        },
         "total": {
           "type": "integer",
           "minimum": 0
-        },
-        "nextOffset": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "next_offset": {
-          "type": "integer",
-          "minimum": 0
         }
-      },
-      "additionalProperties": false
+      }
     },
     "MessageRow": {
       "type": "object",
@@ -3536,7 +3645,7 @@
                 "type": "string"
               },
               "fields": {
-                "x-cognia-opaque-reason": "serde_json::Value \u2014 arbitrary structured fields captured at the log call site."
+                "x-cognia-opaque-reason": "serde_json::Value — arbitrary structured fields captured at the log call site."
               }
             },
             "additionalProperties": false
@@ -3812,7 +3921,7 @@
     },
     "NullableStringResult": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> \u2014 null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
+      "x-cognia-wire-source": "Option<String> — null means absent-at-that-ref or binary, which is an ordinary answer rather than an error."
     },
     "OcrModelFileStatus": {
       "type": "object",
@@ -4337,7 +4446,7 @@
     },
     "PluginRuntimeSnapshot": {
       "type": "object",
-      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all \u2014 the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
+      "x-cognia-wire-source": "crates/cognia-plugin-runtime/src/lib.rs PluginRuntimeSnapshot. NOTE: no rename_all — the fields stay snake_case on the wire. The two Option fields carry no skip_serializing_if, so they are always present as null.",
       "required": ["plugin_id", "version", "status", "last_error", "loaded_at", "install_path"],
       "properties": {
         "plugin_id": {
@@ -4464,7 +4573,7 @@
     "RawWorkspaceEntry": {
       "type": "object",
       "x-cognia-wire-source": "lib/files/types.ts RawWorkspaceEntry",
-      "description": "snake_case on the wire \u2014 the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
+      "description": "snake_case on the wire — the Rust side does not rename these; the client maps them via fromRawWorkspaceEntry.",
       "required": ["rel_path", "absolute_path", "is_dir", "size"],
       "properties": {
         "rel_path": {
@@ -4764,7 +4873,7 @@
     },
     "SecretValue": {
       "type": ["string", "null"],
-      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent \u2014 a successful read, not an error.",
+      "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
       "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
     },
     "SessionAttachmentUploadChunk": {
@@ -4828,37 +4937,26 @@
       "additionalProperties": false
     },
     "SessionPage": {
-      "description": "One page of sessions. Two data planes serve `session_list` and they page differently: the Rust direct store (`companion_api/store.rs::SessionPage`) counts the whole table and returns `total` + `nextOffset`, while the indexed bridge (`lib/companion/desktop-message-source.ts::readSessionPage`) reads one row past the page and returns `next_offset` + `has_more` rather than paying for a full count. `rows` is the only field both always send, and the consumer type (`lib/claude/ipc.ts::SessionListPage`) already declares the rest optional. Requiring `total` and naming only `nextOffset` described neither implementation: it made every bridge-served `session_list` a 500 `contract_output_violation` the moment the command became device-reachable.",
       "type": "object",
-      "required": ["rows"],
+      "description": "One page of sessions (ADR-0175 B3). Both data planes page by offset underneath, and the arm folds either legacy answer into this envelope, so `rows`, `nextOffset`, `next_offset` and `has_more` no longer reach the wire.",
+      "required": ["items"],
       "properties": {
-        "rows": {
+        "items": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/SessionRow"
           }
         },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        },
         "total": {
           "type": "integer",
           "minimum": 0,
-          "description": "Whole-table count. Direct store only; the bridge omits it."
-        },
-        "nextOffset": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Direct store's next-page cursor (camelCase via serde `rename_all`)."
-        },
-        "next_offset": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "The bridge's next-page cursor. Same meaning as `nextOffset`, different spelling, because the two planes were written apart."
-        },
-        "has_more": {
-          "type": "boolean",
-          "description": "Bridge only: whether a row existed past this page."
+          "description": "Whole-table count. The direct store carries it; the indexed bridge omits it rather than paying for a full count."
         }
-      },
-      "additionalProperties": false
+      }
     },
     "SessionRow": {
       "type": "object",
@@ -4923,22 +5021,19 @@
     },
     "SessionTurnMessagesPage": {
       "type": "object",
+      "description": "One page of a turn's messages (ADR-0175 B3). `approximateBytes` is what the host measured against `maxTurnMessagePageBytes`, so a short page can be a byte-budget cut rather than the end of the turn; `nextPageToken` is what says which.",
       "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts",
-      "description": "`approximateBytes` is what the host measured against `maxTurnMessagePageBytes`, so a short page is a byte-budget cut rather than the end of the turn. `hasMore` says which.",
-      "required": [
-        "messages",
-        "revision",
-        "detailRevision",
-        "total",
-        "approximateBytes",
-        "hasMore"
-      ],
+      "required": ["items"],
       "properties": {
-        "messages": {
+        "items": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/TranscriptMessage"
           }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
         },
         "revision": {
           "type": "integer"
@@ -4951,19 +5046,12 @@
         },
         "approximateBytes": {
           "type": "integer"
-        },
-        "nextCursor": {
-          "type": "string"
-        },
-        "hasMore": {
-          "type": "boolean"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "SidecarStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus \u2014 derives Serialize with NO rename_all, and has exactly one field.",
+      "x-cognia-wire-source": "crate::claude::commands::SidecarStatus — derives Serialize with NO rename_all, and has exactly one field.",
       "required": ["ready"],
       "properties": {
         "ready": {
@@ -5446,7 +5534,7 @@
     },
     "TerminalHostStatus": {
       "type": "object",
-      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms \u2014 provisioning a device descriptor has no remote path.",
+      "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
       "required": ["running", "endpoint", "settings"],
       "properties": {
         "running": {
@@ -5463,7 +5551,7 @@
     },
     "TerminalKilledPidList": {
       "type": "array",
-      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port \u2014 the PIDs actually signalled, possibly empty when nothing was listening.",
+      "x-cognia-wire-source": "Vec<u32> from cognia_terminal::commands::terminal_kill_port — the PIDs actually signalled, possibly empty when nothing was listening.",
       "items": {
         "type": "integer",
         "minimum": 0
@@ -5487,15 +5575,26 @@
       }
     },
     "TerminalPathExecutableList": {
-      "type": "array",
-      "x-cognia-wire-source": "Vec<String> \u2014 cognia_terminal::path_scan::list_path_executables_inner.",
-      "items": {
-        "type": "string"
+      "type": "object",
+      "description": "One page of executable names found on PATH (ADR-0175 B3).",
+      "x-cognia-wire-source": "Vec<String> — cognia_terminal::path_scan::list_path_executables_inner, paged by companion_api::paging::Page::slice_all.",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        }
       }
     },
     "TerminalProfileSyncResult": {
       "type": "object",
-      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` \u2014 how many profiles the device now owns on the host.",
+      "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
       "required": ["installed"],
       "properties": {
         "installed": {
@@ -5507,7 +5606,7 @@
     },
     "TerminalSession": {
       "type": "object",
-      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null \u2014 the two ssh_host_key_* fields are the exception and do skip.",
+      "x-cognia-wire-source": "cognia_terminal::host::HostSessionInfo (serde rename_all = camelCase), returned by rpc/terminal.rs via DispatchHost::terminal_list_all. Option fields carry no skip_serializing_if, so they are always present as null — the two ssh_host_key_* fields are the exception and do skip.",
       "required": [
         "id",
         "hostId",
@@ -6526,11 +6625,21 @@
           "type": "string",
           "enum": ["ok", "missing", "unreadable", "tampered", "unpinned"]
         },
-        "path": { "type": "string" },
-        "sha256": { "type": "string" },
-        "detail": { "type": "string" },
-        "expected": { "type": "string" },
-        "actual": { "type": "string" }
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "actual": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
@@ -6725,6 +6834,60 @@
         "warnings"
       ],
       "additionalProperties": false
+    },
+    "IngressDeadletterPage": {
+      "type": "object",
+      "description": "One page of ingress dead letters (ADR-0175 B3). The spool answers its newest 500 at most and the page walks them. Item shape stays owned by the workflow domain.",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyResult"
+          },
+          "x-cognia-opaque-reason": "The page envelope is the contract; the items are an existing domain collection whose compatibility remains owned by that domain."
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        }
+      }
+    },
+    "TaskWorkspaceMaintenanceEventPage": {
+      "type": "object",
+      "description": "One page of task-workspace maintenance events (ADR-0175 B3). Item shape stays owned by the task-workspace domain.",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyResult"
+          },
+          "x-cognia-opaque-reason": "The page envelope is the contract; the items are an existing domain collection whose compatibility remains owned by that domain."
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        }
+      }
+    },
+    "TaskWorkspaceResourceEventPage": {
+      "type": "object",
+      "description": "One page of a run's task-workspace resource events (ADR-0175 B3). Item shape stays owned by the task-workspace domain.",
+      "required": ["items"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyResult"
+          },
+          "x-cognia-opaque-reason": "The page envelope is the contract; the items are an existing domain collection whose compatibility remains owned by that domain."
+        },
+        "nextPageToken": {
+          "type": "string",
+          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
+        }
+      }
     }
   },
   "commands": {
@@ -6915,8 +7078,12 @@
       "description": "`replayed` is false when the row was no longer dead-lettered, which is what a duplicated request produces.",
       "required": ["deliveryId", "replayed"],
       "properties": {
-        "deliveryId": { "type": "string" },
-        "replayed": { "type": "boolean" }
+        "deliveryId": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -6925,8 +7092,12 @@
       "description": "`created` is false when the idempotency key matched an existing delivery, i.e. this was a retry replay rather than a second run.",
       "required": ["deliveryId", "created"],
       "properties": {
-        "deliveryId": { "type": "string" },
-        "created": { "type": "boolean" }
+        "deliveryId": {
+          "type": "string"
+        },
+        "created": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -6935,9 +7106,15 @@
       "description": "The value the host settled on. Echoed back so a client can reconcile its optimistic flip.",
       "required": ["installationId", "triggerId", "armed"],
       "properties": {
-        "installationId": { "type": "string" },
-        "triggerId": { "type": "string" },
-        "armed": { "type": "boolean" }
+        "installationId": {
+          "type": "string"
+        },
+        "triggerId": {
+          "type": "string"
+        },
+        "armed": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -7213,7 +7390,7 @@
     },
     "connector_enqueue_outbound": {
       "type": "object",
-      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job \u2014 i.e. this was a retry replay, not a second send.",
+      "description": "What the host did with the relayed reply (ADR-0131). `reused` is true when the idempotency key matched an existing job — i.e. this was a retry replay, not a second send.",
       "required": ["jobId", "messageId", "reused"],
       "properties": {
         "jobId": {
@@ -8047,7 +8224,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "integration_ingress_deadletters": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/IngressDeadletterPage"
     },
     "integration_ingress_get_url": {
       "$ref": "#/$defs/NullableString"
@@ -8475,13 +8652,27 @@
     "provider_catalog_search": {
       "$ref": "#/$defs/ProviderSearch"
     },
-    "gateway_list_models": { "$ref": "#/$defs/GatewayModelCatalog" },
-    "gateway_list_route_tickets": { "$ref": "#/$defs/GatewayRouteTicketList" },
-    "gateway_mint_route_ticket": { "$ref": "#/$defs/GatewayMintedRouteTicket" },
-    "gateway_probe_upstream": { "$ref": "#/$defs/GatewayUpstreamProbeRows" },
-    "gateway_provider_capabilities": { "$ref": "#/$defs/GatewayProviderCapabilities" },
-    "gateway_revoke_route_ticket": { "$ref": "#/$defs/GatewayTicketRevocation" },
-    "gateway_status": { "$ref": "#/$defs/GatewayStatusReport" },
+    "gateway_list_models": {
+      "$ref": "#/$defs/GatewayModelCatalog"
+    },
+    "gateway_list_route_tickets": {
+      "$ref": "#/$defs/GatewayRouteTicketList"
+    },
+    "gateway_mint_route_ticket": {
+      "$ref": "#/$defs/GatewayMintedRouteTicket"
+    },
+    "gateway_probe_upstream": {
+      "$ref": "#/$defs/GatewayUpstreamProbeRows"
+    },
+    "gateway_provider_capabilities": {
+      "$ref": "#/$defs/GatewayProviderCapabilities"
+    },
+    "gateway_revoke_route_ticket": {
+      "$ref": "#/$defs/GatewayTicketRevocation"
+    },
+    "gateway_status": {
+      "$ref": "#/$defs/GatewayStatusReport"
+    },
     "provider_catalog_status": {
       "$ref": "#/$defs/LegacyRecord"
     },
@@ -8782,7 +8973,7 @@
       "$ref": "#/$defs/LegacyList"
     },
     "task_workspace_list_resource_events": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskWorkspaceResourceEventPage"
     },
     "task_workspace_list_resources": {
       "$ref": "#/$defs/LegacyResult"
@@ -8791,7 +8982,7 @@
       "$ref": "#/$defs/LegacyList"
     },
     "task_workspace_maintenance_events": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/TaskWorkspaceMaintenanceEventPage"
     },
     "task_workspace_maintenance_run": {
       "$ref": "#/$defs/LegacyRecord"
@@ -9552,7 +9743,9 @@
     "video_cleanup_analysis": {
       "type": "null"
     },
-    "plugin_media_read_analysis_frame": { "$ref": "#/$defs/MediaTransfer" },
+    "plugin_media_read_analysis_frame": {
+      "$ref": "#/$defs/MediaTransfer"
+    },
     "plugin_media_read_chunk": {
       "type": "array",
       "maxItems": 65536,
