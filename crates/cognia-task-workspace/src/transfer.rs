@@ -12,10 +12,16 @@ use std::{
 };
 use uuid::Uuid;
 
-pub const MAX_TRANSFER_CHUNK_BYTES: usize = 24 * 1024;
+pub const MAX_TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
+const LEGACY_TRANSFER_CHUNK_BYTES: usize = 24 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn legacy_transfer_chunk_bytes() -> usize {
+    LEGACY_TRANSFER_CHUNK_BYTES
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct DownloadHandle {
     pub handle_id: String,
     pub path: String,
@@ -23,18 +29,26 @@ pub struct DownloadHandle {
     pub hash: String,
     pub media_type: String,
     pub sensitive: bool,
+    #[serde(default = "legacy_transfer_chunk_bytes")]
+    #[schemars(range(min = 1, max = 65536))]
+    pub chunk_bytes: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct UploadHandle {
     pub handle_id: String,
     pub path: String,
     pub expected_size: u64,
+    #[serde(default = "legacy_transfer_chunk_bytes")]
+    #[schemars(range(min = 1, max = 65536))]
+    pub chunk_bytes: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TransferChunk {
     pub offset: u64,
     pub next_offset: u64,
@@ -117,6 +131,7 @@ impl TransferRegistry {
             hash,
             media_type: media_type_for(rel_path, true).to_string(),
             sensitive,
+            chunk_bytes: MAX_TRANSFER_CHUNK_BYTES,
         })
     }
 
@@ -139,24 +154,29 @@ impl TransferRegistry {
             ));
         }
         let limit = length
-            .unwrap_or(MAX_TRANSFER_CHUNK_BYTES)
+            .unwrap_or(LEGACY_TRANSFER_CHUNK_BYTES)
             .clamp(1, MAX_TRANSFER_CHUNK_BYTES);
         let available = download.size.saturating_sub(offset).min(limit as u64) as usize;
-        let mut file = File::open(&download.path)
-            .map_err(|error| format!("open download {}: {error}", download.path.display()))?;
+        let path = download.path.clone();
+        let size = download.size;
+        download.expires_at = Instant::now() + self.ttl;
+        // Independent byte-range reads do not hold the registry mutex while
+        // opening, reading, hashing or encoding a file.
+        drop(state);
+        let mut file = File::open(&path)
+            .map_err(|error| format!("open download {}: {error}", path.display()))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|error| format!("seek download: {error}"))?;
         let mut bytes = vec![0_u8; available];
         file.read_exact(&mut bytes)
             .map_err(|error| format!("read download: {error}"))?;
         let next_offset = offset + bytes.len() as u64;
-        download.expires_at = Instant::now() + self.ttl;
         Ok(TransferChunk {
             offset,
             next_offset,
             data_base64: STANDARD.encode(&bytes),
             chunk_hash: hash_bytes(&bytes),
-            eof: next_offset == download.size,
+            eof: next_offset == size,
         })
     }
 
@@ -211,6 +231,7 @@ impl TransferRegistry {
             handle_id,
             path: rel_path.to_string(),
             expected_size,
+            chunk_bytes: MAX_TRANSFER_CHUNK_BYTES,
         })
     }
 
@@ -423,6 +444,52 @@ mod tests {
     }
 
     #[test]
+    fn transfer_handles_negotiate_larger_chunks_and_decode_legacy_shapes() {
+        let root = TempDir::new().unwrap();
+        let registry = TransferRegistry::new(Duration::from_secs(60));
+        let bytes = vec![7; MAX_TRANSFER_CHUNK_BYTES + 1];
+        let handle = registry
+            .open_upload(
+                root.path(),
+                "large.bin",
+                bytes.len() as u64,
+                &sha(&bytes),
+                false,
+            )
+            .unwrap();
+        assert_eq!(handle.chunk_bytes, MAX_TRANSFER_CHUNK_BYTES);
+        let first = &bytes[..MAX_TRANSFER_CHUNK_BYTES];
+        assert_eq!(
+            registry
+                .write_chunk(&handle.handle_id, 0, &STANDARD.encode(first), &sha(first))
+                .unwrap(),
+            MAX_TRANSFER_CHUNK_BYTES as u64
+        );
+        let last = &bytes[MAX_TRANSFER_CHUNK_BYTES..];
+        registry
+            .write_chunk(
+                &handle.handle_id,
+                MAX_TRANSFER_CHUNK_BYTES as u64,
+                &STANDARD.encode(last),
+                &sha(last),
+            )
+            .unwrap();
+        assert_eq!(
+            registry.commit_upload(&handle.handle_id).unwrap(),
+            sha(&bytes)
+        );
+        assert_eq!(fs::read(root.path().join("large.bin")).unwrap(), bytes);
+
+        let legacy: UploadHandle = serde_json::from_value(
+            serde_json::json!({"handleId":"old", "path":"file", "expectedSize":3}),
+        )
+        .unwrap();
+        assert_eq!(legacy.chunk_bytes, LEGACY_TRANSFER_CHUNK_BYTES);
+        let legacy: DownloadHandle = serde_json::from_value(serde_json::json!({"handleId":"old", "path":"file", "size":3,"hash":"abc", "mediaType":"text/plain", "sensitive":false})).unwrap();
+        assert_eq!(legacy.chunk_bytes, LEGACY_TRANSFER_CHUNK_BYTES);
+    }
+
+    #[test]
     fn download_is_resumable_bounded_and_hash_verified() {
         let root = TempDir::new().unwrap();
         let bytes = vec![b'x'; MAX_TRANSFER_CHUNK_BYTES + 7];
@@ -435,7 +502,15 @@ mod tests {
         assert_eq!(handle.size, bytes.len() as u64);
         assert_eq!(handle.hash, sha(&bytes));
 
-        let first = registry.read_chunk(&handle.handle_id, 0, None).unwrap();
+        assert_eq!(handle.chunk_bytes, MAX_TRANSFER_CHUNK_BYTES);
+        let legacy = registry.read_chunk(&handle.handle_id, 0, None).unwrap();
+        assert_eq!(
+            STANDARD.decode(&legacy.data_base64).unwrap().len(),
+            LEGACY_TRANSFER_CHUNK_BYTES
+        );
+        let first = registry
+            .read_chunk(&handle.handle_id, 0, Some(handle.chunk_bytes))
+            .unwrap();
         let first_bytes = STANDARD.decode(&first.data_base64).unwrap();
         assert_eq!(first_bytes.len(), MAX_TRANSFER_CHUNK_BYTES);
         assert_eq!(first.chunk_hash, sha(&first_bytes));

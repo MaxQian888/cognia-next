@@ -699,37 +699,73 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
 
+// Matches cognia-task-workspace's bounded byte-range contract. Older hosts
+// return no chunk-size metadata; requests still carry an explicit length.
+const TRANSFER_CHUNK_BYTES = 24 * 1024
+const MAX_TRANSFER_CHUNK_BYTES = 64 * 1024
+const DOWNLOAD_WINDOW = 4
+
 export async function downloadTaskResource(
   runId: string,
   relPath: string,
-  allowSensitive = false
+  allowSensitive = false,
+  signal?: AbortSignal
 ): Promise<Blob> {
+  signal?.throwIfAborted()
   const handle = await transport.call<DownloadHandle>("task_resource_download_open", {
     runId,
     relPath,
     allowSensitive,
   })
-  const chunks: Uint8Array[] = []
-  let offset = 0
   try {
-    while (offset < handle.size) {
-      const chunk = await transport.call<TransferChunk>("task_resource_download_read_chunk", {
-        handleId: handle.handleId,
-        offset,
-      })
-      const bytes = decodeBase64(chunk.dataBase64)
-      if (bytes.byteLength !== chunk.length || (await sha256Hex(bytes)) !== chunk.chunkHash) {
-        throw new Error("task resource chunk integrity check failed")
-      }
-      chunks.push(bytes)
-      offset = chunk.nextOffset ?? handle.size
+    signal?.throwIfAborted()
+    if (!Number.isSafeInteger(handle.size) || handle.size < 0) {
+      throw new Error("task resource download size is invalid")
+    }
+    const chunkBytes = handle.chunkBytes ?? TRANSFER_CHUNK_BYTES
+    if (
+      !Number.isSafeInteger(chunkBytes) ||
+      chunkBytes < 1 ||
+      chunkBytes > MAX_TRANSFER_CHUNK_BYTES
+    ) {
+      throw new Error("task resource download chunk size is invalid")
     }
     const body = new Uint8Array(handle.size)
-    let cursor = 0
-    for (const chunk of chunks) {
-      body.set(chunk, cursor)
-      cursor += chunk.byteLength
+    for (let start = 0; start < handle.size; start += chunkBytes * DOWNLOAD_WINDOW) {
+      signal?.throwIfAborted()
+      const reads: Promise<void>[] = []
+      for (let index = 0; index < DOWNLOAD_WINDOW; index++) {
+        const offset = start + index * chunkBytes
+        if (offset >= handle.size) break
+        const length = Math.min(chunkBytes, handle.size - offset)
+        reads.push(
+          (async () => {
+            const chunk = await transport.call<TransferChunk>("task_resource_download_read_chunk", {
+              handleId: handle.handleId,
+              offset,
+              length,
+            })
+            signal?.throwIfAborted()
+            const bytes = decodeBase64(chunk.dataBase64)
+            if (
+              chunk.offset !== offset ||
+              chunk.nextOffset !== offset + length ||
+              bytes.byteLength !== length ||
+              (chunk.length !== undefined && chunk.length !== length) ||
+              (await sha256Hex(bytes)) !== chunk.chunkHash
+            ) {
+              throw new Error("task resource chunk integrity check failed")
+            }
+            body.set(bytes, offset)
+          })()
+        )
+      }
+      // Drain every in-flight read before closing a failed/cancelled handle.
+      const results = await Promise.allSettled(reads)
+      const failure = results.find((result) => result.status === "rejected")
+      if (failure?.status === "rejected") throw failure.reason
     }
+    signal?.throwIfAborted()
     if ((await sha256Hex(body)) !== handle.hash) {
       throw new Error("task resource integrity check failed")
     }
@@ -751,10 +787,13 @@ export async function uploadTaskResource(
   runId: string,
   relPath: string,
   file: Blob,
-  allowSensitive = false
+  allowSensitive = false,
+  signal?: AbortSignal
 ): Promise<string> {
+  signal?.throwIfAborted()
   const bytes = new Uint8Array(await file.arrayBuffer())
   const expectedHash = await sha256Hex(bytes)
+  signal?.throwIfAborted()
   const handle = await transport.call<UploadHandle>("task_resource_upload_open", {
     runId,
     relPath,
@@ -763,16 +802,37 @@ export async function uploadTaskResource(
     allowSensitive,
   })
   try {
-    let offset = handle.nextOffset
+    signal?.throwIfAborted()
+    let offset = handle.nextOffset ?? 0
+    const chunkBytes = handle.chunkBytes ?? TRANSFER_CHUNK_BYTES
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > bytes.byteLength ||
+      !Number.isSafeInteger(chunkBytes) ||
+      chunkBytes < 1 ||
+      chunkBytes > MAX_TRANSFER_CHUNK_BYTES ||
+      handle.expectedSize !== bytes.byteLength
+    ) {
+      throw new Error("task resource upload handle is invalid")
+    }
+    // The host enforces append-only offsets. Keep writes ordered; download
+    // byte ranges above can safely run concurrently.
     while (offset < bytes.byteLength) {
-      const chunk = bytes.slice(offset, offset + handle.chunkBytes)
-      offset = await transport.call<number>("task_resource_upload_write_chunk", {
+      signal?.throwIfAborted()
+      const chunk = bytes.subarray(offset, offset + chunkBytes)
+      const nextOffset = await transport.call<number>("task_resource_upload_write_chunk", {
         handleId: handle.handleId,
         offset,
         dataBase64: encodeBase64(chunk),
         chunkHash: await sha256Hex(chunk),
       })
+      if (nextOffset !== offset + chunk.byteLength) {
+        throw new Error("task resource upload offset is invalid")
+      }
+      offset = nextOffset
     }
+    signal?.throwIfAborted()
     return await transport.call<string>("task_resource_upload_commit", {
       handleId: handle.handleId,
     })

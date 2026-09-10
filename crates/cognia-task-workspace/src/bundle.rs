@@ -47,8 +47,9 @@ use uuid::Uuid;
 /// The composer resolves each entry into either a shared-worktree lease
 /// (when another `RootRequest` shares the same `common_dir`) or a dedicated
 /// physical worktree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct RootRequest {
     /// Stable id the caller uses to refer to this root. The composer
     /// preserves it verbatim on the emitted lease.
@@ -203,8 +204,9 @@ pub fn plan_bundle_composition(
 /// shadow). The caller materializes one worktree per group and inserts one
 /// Registry row per group; the `workspace_id` field is populated by
 /// [`plan_bundle_composition`] after grouping.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PhysicalLeaseGroup {
     pub bundle_id: String,
     /// Either the shared git common dir path or a synthetic

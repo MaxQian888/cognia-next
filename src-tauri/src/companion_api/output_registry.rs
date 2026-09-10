@@ -144,6 +144,8 @@ mod tests {
         ("claude_set_mode", OutputShape::Scalar(ScalarShape::Null)),
         ("claude_approve", OutputShape::Scalar(ScalarShape::Null)),
         ("claude_close_session", OutputShape::Scalar(ScalarShape::Null)),
+        ("claude_session_control", OutputShape::Scalar(ScalarShape::Null)),
+        ("agent_session_api", OutputShape::Scalar(ScalarShape::Null)),
         ("claude_plugin_tool_response", OutputShape::Scalar(ScalarShape::Null)),
         ("claude_tool_result_decision", OutputShape::Scalar(ScalarShape::Null)),
         ("claude_protocol_adapter_message", OutputShape::Scalar(ScalarShape::Null)),
@@ -419,9 +421,23 @@ mod tests {
         ("integration_ingress_deadletters", OutputShape::Declared(RootType::Object)),
         ("integration_ingress_deadletter", OutputShape::Opaque(RootType::Any)),
         ("integration_ingress_requeue", OutputShape::Scalar(ScalarShape::Bool)),
+        ("workflow_register_trigger", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_unregister_trigger", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_file_watch_ack", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_get_webhook_url", OutputShape::Scalar(ScalarShape::NullableText)),
+        ("workflow_webhook_respond", OutputShape::Scalar(ScalarShape::Bool)),
+        ("workflow_persist_run_state", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_reload_in_flight_runs", OutputShape::Declared(RootType::Array)),
+        ("workflow_ack_completed", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_waitpoint_create", OutputShape::Declared(RootType::Object)),
+        ("workflow_waitpoint_get", OutputShape::Declared(RootType::NullableObject)),
+        ("workflow_waitpoint_list_pending", OutputShape::Declared(RootType::Array)),
+        ("workflow_waitpoint_decide", OutputShape::Scalar(ScalarShape::Bool)),
+        ("workflow_wait_event_persist", OutputShape::Scalar(ScalarShape::Null)),
+        ("workflow_wait_event_prune", OutputShape::Scalar(ScalarShape::Integer)),
         ("github_workspace_clone", OutputShape::Opaque(RootType::Object)),
         ("github_workspace_commit_and_push", OutputShape::Scalar(ScalarShape::Text)),
-        ("task_workspace_remote_source_ensure", OutputShape::Declared(RootType::Object)),
+        ("task_workspace_remote_source_ensure", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::RemoteSourceCheckout", schema: schema_of::<cognia_task_workspace::RemoteSourceCheckout> })),
         ("github_workspace_remove", OutputShape::Scalar(ScalarShape::Bool)),
         ("github_workspace_stat", OutputShape::Opaque(RootType::Any)),
         ("integration_ingress_ack", OutputShape::Scalar(ScalarShape::Null)),
@@ -597,63 +613,63 @@ mod tests {
         ("fs_read_workspace_file", OutputShape::Scalar(ScalarShape::Text)),
         ("fs_write_workspace_file", OutputShape::Scalar(ScalarShape::Null)),
         ("project_environment_execute", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_status", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_begin", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_begin", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_turn_begin", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_turn_settle", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_turn_abort", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_turn_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_managed_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_managed_list", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_environment_list", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_bundle_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_bundle_list", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_bundle_acquire", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_apply", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_handoff_retry", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_handoff_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_bundle_handoff_undo", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_bundle_handoff_undo_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_reconcile", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_policy_get", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_policy_set", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_maintenance_run", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_maintenance_events", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_managed_pin", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_managed_permanent", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_managed_archive", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_managed_adopt", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_environment_adopt", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_environment_create_branch", OutputShape::Opaque(RootType::Object)),
-        ("task_workspace_managed_restore", OutputShape::Opaque(RootType::Object)),
+        ("task_workspace_status", OutputShape::Derived(DerivedOutput { rust_type: "crate::task_workspace::TaskWorkspaceStatus", schema: schema_of::<crate::task_workspace::TaskWorkspaceStatus> })),
+        ("task_workspace_begin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskRun", schema: schema_of::<cognia_task_workspace::TaskRun> })),
+        ("task_workspace_bundle_begin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskRun", schema: schema_of::<cognia_task_workspace::TaskRun> })),
+        ("task_workspace_bundle_turn_begin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceBundleTurnLease", schema: schema_of::<cognia_task_workspace::WorkspaceBundleTurnLease> })),
+        ("task_workspace_bundle_turn_settle", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceBundleTurnOutcome", schema: schema_of::<cognia_task_workspace::WorkspaceBundleTurnOutcome> })),
+        ("task_workspace_bundle_turn_abort", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceBundleTurnOutcome", schema: schema_of::<cognia_task_workspace::WorkspaceBundleTurnOutcome> })),
+        ("task_workspace_bundle_turn_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::WorkspaceBundleTurnLease>", schema: schema_of::<Option<cognia_task_workspace::WorkspaceBundleTurnLease>> })),
+        ("task_workspace_managed_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::WorkspaceRecord>", schema: schema_of::<Option<cognia_task_workspace::WorkspaceRecord>> })),
+        ("task_workspace_managed_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::WorkspaceRecord>", schema: schema_of::<Vec<cognia_task_workspace::WorkspaceRecord>> })),
+        ("task_workspace_environment_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::WorkspaceEnvironmentSummary>", schema: schema_of::<Vec<cognia_task_workspace::WorkspaceEnvironmentSummary>> })),
+        ("task_workspace_bundle_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::WorkspaceBundle>", schema: schema_of::<Option<cognia_task_workspace::WorkspaceBundle>> })),
+        ("task_workspace_bundle_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::WorkspaceBundle>", schema: schema_of::<Vec<cognia_task_workspace::WorkspaceBundle>> })),
+        ("task_workspace_bundle_acquire", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceBundle", schema: schema_of::<cognia_task_workspace::WorkspaceBundle> })),
+        ("task_workspace_bundle_apply", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::BundleHandoffOutcome", schema: schema_of::<cognia_task_workspace::BundleHandoffOutcome> })),
+        ("task_workspace_bundle_handoff_retry", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::BundleHandoffOutcome", schema: schema_of::<cognia_task_workspace::BundleHandoffOutcome> })),
+        ("task_workspace_bundle_handoff_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::BundleHandoffOutcome>", schema: schema_of::<Option<cognia_task_workspace::BundleHandoffOutcome>> })),
+        ("task_workspace_bundle_handoff_undo", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::BundleHandoffUndoOutcome", schema: schema_of::<cognia_task_workspace::BundleHandoffUndoOutcome> })),
+        ("task_workspace_bundle_handoff_undo_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::BundleHandoffUndoOutcome>", schema: schema_of::<Option<cognia_task_workspace::BundleHandoffUndoOutcome>> })),
+        ("task_workspace_reconcile", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ReconcileOutcome", schema: schema_of::<cognia_task_workspace::ReconcileOutcome> })),
+        ("task_workspace_policy_get", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceLifecyclePolicy", schema: schema_of::<cognia_task_workspace::WorkspaceLifecyclePolicy> })),
+        ("task_workspace_policy_set", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceLifecyclePolicy", schema: schema_of::<cognia_task_workspace::WorkspaceLifecyclePolicy> })),
+        ("task_workspace_maintenance_run", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceMaintenanceResult", schema: schema_of::<cognia_task_workspace::WorkspaceMaintenanceResult> })),
+        ("task_workspace_maintenance_events", OutputShape::Derived(DerivedOutput { rust_type: "cognia_problem::paging::Page<cognia_task_workspace::WorkspaceMaintenanceEvent>", schema: schema_of::<cognia_problem::paging::Page<cognia_task_workspace::WorkspaceMaintenanceEvent>> })),
+        ("task_workspace_managed_pin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_managed_permanent", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_managed_archive", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_managed_adopt", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_environment_adopt", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_environment_create_branch", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
+        ("task_workspace_managed_restore", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::WorkspaceRecord", schema: schema_of::<cognia_task_workspace::WorkspaceRecord> })),
         ("task_workspace_managed_delete", OutputShape::Scalar(ScalarShape::Null)),
-        ("task_workspace_settle", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_get", OutputShape::Opaque(RootType::NullableObject)),
-        ("task_workspace_list", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_list_runs", OutputShape::Opaque(RootType::Array)),
-        ("task_workspace_list_resources", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_list_resource_events", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_get_resource_summary", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_record_tool_event", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_export_resource_manifest", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_get_resource", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_get_patch_set", OutputShape::Opaque(RootType::Any)),
+        ("task_workspace_settle", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::ResourceChange>", schema: schema_of::<Vec<cognia_task_workspace::ResourceChange>> })),
+        ("task_workspace_get", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::TaskWorkspace>", schema: schema_of::<Option<cognia_task_workspace::TaskWorkspace>> })),
+        ("task_workspace_list", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::TaskWorkspace>", schema: schema_of::<Vec<cognia_task_workspace::TaskWorkspace>> })),
+        ("task_workspace_list_runs", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::TaskRun>", schema: schema_of::<Vec<cognia_task_workspace::TaskRun>> })),
+        ("task_workspace_list_resources", OutputShape::Derived(DerivedOutput { rust_type: "Vec<cognia_task_workspace::ResourceChange>", schema: schema_of::<Vec<cognia_task_workspace::ResourceChange>> })),
+        ("task_workspace_list_resource_events", OutputShape::Derived(DerivedOutput { rust_type: "cognia_problem::paging::Page<cognia_task_workspace::ResourceEvent>", schema: schema_of::<cognia_problem::paging::Page<cognia_task_workspace::ResourceEvent>> })),
+        ("task_workspace_get_resource_summary", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskResourceSummary", schema: schema_of::<cognia_task_workspace::TaskResourceSummary> })),
+        ("task_workspace_record_tool_event", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ResourceEvent", schema: schema_of::<cognia_task_workspace::ResourceEvent> })),
+        ("task_workspace_export_resource_manifest", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskResourceManifest", schema: schema_of::<cognia_task_workspace::TaskResourceManifest> })),
+        ("task_workspace_get_resource", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::ResourceChange>", schema: schema_of::<Option<cognia_task_workspace::ResourceChange>> })),
+        ("task_workspace_get_patch_set", OutputShape::Derived(DerivedOutput { rust_type: "Option<cognia_task_workspace::PatchSet>", schema: schema_of::<Option<cognia_task_workspace::PatchSet>> })),
         ("task_resource_read_diff", OutputShape::Scalar(ScalarShape::Text)),
-        ("task_resource_read_text", OutputShape::Opaque(RootType::Any)),
-        ("task_resource_download_open", OutputShape::Opaque(RootType::Object)),
-        ("task_resource_download_read_chunk", OutputShape::Opaque(RootType::Any)),
+        ("task_resource_read_text", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ResourceRead", schema: schema_of::<cognia_task_workspace::ResourceRead> })),
+        ("task_resource_download_open", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::DownloadHandle", schema: schema_of::<cognia_task_workspace::DownloadHandle> })),
+        ("task_resource_download_read_chunk", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TransferChunk", schema: schema_of::<cognia_task_workspace::TransferChunk> })),
         ("task_resource_download_close", OutputShape::Scalar(ScalarShape::Null)),
-        ("task_resource_upload_open", OutputShape::Opaque(RootType::Object)),
+        ("task_resource_upload_open", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::UploadHandle", schema: schema_of::<cognia_task_workspace::UploadHandle> })),
         ("task_resource_upload_write_chunk", OutputShape::Scalar(ScalarShape::Integer)),
         ("task_resource_upload_commit", OutputShape::Scalar(ScalarShape::Text)),
         ("task_resource_upload_abort", OutputShape::Scalar(ScalarShape::Null)),
-        ("task_workspace_apply", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_undo", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_restore_snapshot", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_pin", OutputShape::Opaque(RootType::Any)),
-        ("task_workspace_resolve_conflict", OutputShape::Declared(RootType::Object)),
-        ("task_workspace_prune", OutputShape::Opaque(RootType::Any)),
+        ("task_workspace_apply", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ApplyOutcome", schema: schema_of::<cognia_task_workspace::ApplyOutcome> })),
+        ("task_workspace_undo", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ApplyOutcome", schema: schema_of::<cognia_task_workspace::ApplyOutcome> })),
+        ("task_workspace_restore_snapshot", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskRun", schema: schema_of::<cognia_task_workspace::TaskRun> })),
+        ("task_workspace_pin", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::TaskWorkspace", schema: schema_of::<cognia_task_workspace::TaskWorkspace> })),
+        ("task_workspace_resolve_conflict", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::ApplyOutcome", schema: schema_of::<cognia_task_workspace::ApplyOutcome> })),
+        ("task_workspace_prune", OutputShape::Derived(DerivedOutput { rust_type: "cognia_task_workspace::PruneOutcome", schema: schema_of::<cognia_task_workspace::PruneOutcome> })),
         ("fs_workspace_roots", OutputShape::Declared(RootType::Object)),
         ("fs_list_workspace_dir", OutputShape::Declared(RootType::Array)),
         ("fs_stat_workspace_file", OutputShape::Opaque(RootType::Object)),
@@ -836,14 +852,20 @@ mod tests {
         ("browser_find_clear", OutputShape::Opaque(RootType::Any)),
     ];
 
-    // ── The ledger, which may only fall ─────────────────────────────────────
+    // ── The ledger ──────────────────────────────────────────────────────────
     //
-    // The JS side ratchets the same debt from the emitted specs
-    // (`opaque-response-schema` in `scripts/gates/rpc-semantic-parity-baseline.json`).
-    // This one counts the arms rather than the schemas, and it is the number a
-    // conversion moves.
-    const HAND_WRITTEN_CEILING: usize = 253;
-    const OPAQUE_CEILING: usize = 203;
+    // Two numbers, in the two directions that mean progress. The JS side
+    // ratchets the same debt from the emitted specs (`opaque-response-schema`
+    // in `scripts/gates/rpc-semantic-parity-baseline.json`); these count arms
+    // rather than schemas, and they are what a conversion moves.
+    //
+    // There is deliberately no ceiling on `Declared`. A command that ships
+    // with a hand-written schema is the ordinary case today, and a ceiling
+    // there would make every new command fight this file for a reason that has
+    // nothing to do with the command. `Opaque` is the one worth refusing,
+    // because it is where an arm escapes having a shape at all.
+    const OPAQUE_CEILING: usize = 158;
+    const DERIVED_FLOOR: usize = 57;
 
     // ── Reading a JSON Schema down to what a client can break on ────────────
 
@@ -1083,26 +1105,26 @@ mod tests {
     }
 
     #[test]
-    fn the_hand_written_and_opaque_ledgers_only_fall() {
-        let hand_written = OUTPUT_SHAPES
-            .iter()
-            .filter(|(_, shape)| matches!(shape, OutputShape::Declared(_)))
-            .count();
+    fn the_opaque_ledger_only_falls_and_the_derived_one_only_rises() {
         let opaque = OUTPUT_SHAPES
             .iter()
             .filter(|(_, shape)| matches!(shape, OutputShape::Opaque(_)))
             .count();
+        let derived = OUTPUT_SHAPES
+            .iter()
+            .filter(|(_, shape)| matches!(shape, OutputShape::Derived(_)))
+            .count();
 
-        assert!(
-            hand_written <= HAND_WRITTEN_CEILING,
-            "{hand_written} arms still answer a hand-written schema, up from \
-             {HAND_WRITTEN_CEILING}. A new arm declares the Rust type it returns."
-        );
         assert!(
             opaque <= OPAQUE_CEILING,
             "{opaque} arms answer a deliberately shapeless payload, up from \
              {OPAQUE_CEILING}. Opaque is for a payload another domain defines, \
              not for one that has not been typed yet."
+        );
+        assert!(
+            derived >= DERIVED_FLOOR,
+            "{derived} arms derive their schema from the Rust type, down from \
+             {DERIVED_FLOOR}. A conversion is not undone by hand."
         );
     }
 
@@ -1157,6 +1179,92 @@ mod tests {
             leaked.is_empty(),
             "these arms answer an opaque schema without being registered as \
              opaque, so they are not counted by the ledger: {leaked:?}"
+        );
+    }
+
+    /// Write the derived half of the published contract to `target/`.
+    ///
+    /// Ignored by default, because it writes a file rather than checking one:
+    /// `cargo test -p cognia-next --lib companion_api::output_registry -- \
+    /// --ignored derived_schema_slice`. Merging the slice into
+    /// `protocol/companion-response-schemas.json` is still a hand step, and
+    /// stays one until `companion-contract-emit` owns the whole file. The
+    /// merge is not what keeps the two honest either way, this module's
+    /// `derived_schemas_match_the_published_contract` is.
+    #[test]
+    #[ignore = "writes target/derived-response-schemas.json rather than checking anything"]
+    fn derived_schema_slice() {
+        let mut commands = serde_json::Map::new();
+        let mut defs = serde_json::Map::new();
+
+        for (arm, output) in OUTPUT_SHAPES {
+            let OutputShape::Derived(derived) = output else {
+                continue;
+            };
+            let mut generated =
+                serde_json::to_value((derived.schema)()).expect("a schemars schema serialises");
+            let object = generated
+                .as_object_mut()
+                .expect("a schema is a JSON object here");
+            object.remove("$schema");
+            let title = object
+                .remove("title")
+                .and_then(|title| title.as_str().map(str::to_string));
+            if let Some(Value::Object(own)) = object.remove("$defs") {
+                for (name, definition) in own {
+                    if let Some(existing) = defs.get(&name) {
+                        assert_eq!(
+                            existing, &definition,
+                            "two Rust types both want the $def name {name}"
+                        );
+                    }
+                    defs.insert(name, definition);
+                }
+            }
+
+            // A struct root is worth a name, because several arms answer the
+            // same one. A `Vec` or an `Option` wrapper is not: it is one line
+            // that points at the named thing inside it.
+            let root = Value::Object(object.clone());
+            let entry = match (root.get("type").and_then(Value::as_str), title) {
+                (Some("object"), Some(name)) => {
+                    // No `x-cognia-wire-source` note: the `$def` is named for
+                    // the Rust type, and a nested `$ref` to the same type
+                    // produces the same definition, which this compares whole.
+                    //
+                    // The check is load-bearing rather than defensive. A
+                    // generic wire type is titled by its bare name unless it
+                    // says otherwise, so `Page<A>` and `Page<B>` both arrived
+                    // here as `Page` and the second silently published its
+                    // items for both.
+                    if let Some(existing) = defs.get(&name) {
+                        assert_eq!(
+                            existing, &root,
+                            "{} and an earlier type both want the $def name {name}. A generic \
+                             needs #[schemars(rename = \"Name_of_{{T}}\")].",
+                            derived.rust_type
+                        );
+                    }
+                    defs.insert(name.clone(), root);
+                    serde_json::json!({ "$ref": format!("#/$defs/{name}") })
+                }
+                _ => root,
+            };
+            commands.insert((*arm).to_string(), entry);
+        }
+
+        let slice = serde_json::json!({ "$defs": defs, "commands": commands });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../target/derived-response-schemas.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&slice).expect("serialisable"),
+        )
+        .expect("target/ is writable");
+        eprintln!(
+            "wrote {} command(s) to {}",
+            slice["commands"].as_object().unwrap().len(),
+            path.display()
         );
     }
 

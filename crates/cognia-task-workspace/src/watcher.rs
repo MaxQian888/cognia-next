@@ -15,7 +15,7 @@ const DEBOUNCE: Duration = Duration::from_millis(200);
 const ECHO_TTL: Duration = Duration::from_secs(1);
 const MAX_EVENT_PATH_BYTES: usize = 24 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceEventKind {
     Created,
@@ -27,8 +27,9 @@ pub enum ResourceEventKind {
     Resync,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceEventChange {
     pub path: String,
     pub kind: ResourceEventKind,
@@ -36,8 +37,9 @@ pub struct ResourceEventChange {
     pub old_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskWorkspaceResourceEvent {
     pub task_id: String,
     pub run_id: String,

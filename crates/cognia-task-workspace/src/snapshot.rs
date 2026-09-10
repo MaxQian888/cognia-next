@@ -12,15 +12,16 @@ use std::{
     process::Command,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum EntryKind {
     File,
     Symlink,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct SnapshotEntry {
     pub path: String,
     pub kind: EntryKind,
@@ -32,8 +33,9 @@ pub struct SnapshotEntry {
     pub sensitive: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct GeneratedSnapshotEntry {
     pub path: String,
     pub kind: ResourceKind,
@@ -52,7 +54,7 @@ pub struct GeneratedSnapshotEntry {
 /// base the bytes of unmodified tracked files are left in the object database
 /// and the entry hash *is* their blob id, so a blob lookup that misses the
 /// store must fall back to the repository.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum SnapshotBase {
     /// Every entry's bytes are in the blob store. The shape of every snapshot
@@ -65,7 +67,8 @@ pub enum SnapshotBase {
     GitCommit { commit: String },
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceSnapshot {
     pub entries: BTreeMap<String, SnapshotEntry>,
     #[serde(default)]

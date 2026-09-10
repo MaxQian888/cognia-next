@@ -41,15 +41,15 @@ pub use cognia_git_mirror::plan::{
 };
 // ADR-0176. Supplying a workspace from a remote, for a host with nobody at a
 // terminal to clone it first.
-pub use remote_source::{
-    ensure_remote_source, extra_refspecs_for, EnsureRemoteSource, RemoteSourceCheckout,
-    REMOTE_SUPPLY_BUDGET, UPSTREAM_REMOTE,
-};
 pub use registry::{
     compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,
     plan_snapshot_expiration, validate_state_transition, DirectoryReclaimCandidate,
     DirectoryReclaimReason, ImportedWorkspaceHint, ReconcileOutcome, RegistryError,
     SnapshotExpirationCandidate, SnapshotExpirationReason, WorkspaceRegistry,
+};
+pub use remote_source::{
+    ensure_remote_source, extra_refspecs_for, EnsureRemoteSource, RemoteSourceCheckout,
+    REMOTE_SUPPLY_BUDGET, UPSTREAM_REMOTE,
 };
 pub use resource::{
     is_sensitive_resource, read_text_resource, ResourceEncoding, ResourceRead,
@@ -89,6 +89,41 @@ pub use worker_cli::run_worker_cli;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0175 B4. `closed_object` says every declared property is written.
+    /// A field that carries `skip_serializing_if`, `skip_serializing` or
+    /// `serde(flatten)` breaks that, and the published output contract would
+    /// then demand a key the host does not always send, which the enforcing
+    /// planes answer with `contract_output_violation`. The transform cannot
+    /// see the contradiction at runtime because the omitted field is simply
+    /// absent from the schema it receives, so the pairing is checked here,
+    /// against this crate's own sources.
+    #[test]
+    fn no_wire_struct_claims_every_field_while_omitting_one() {
+        let source_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut scanned = 0usize;
+        let mut violations = Vec::new();
+        for entry in std::fs::read_dir(&source_dir).expect("the crate has a src directory") {
+            let path = entry.expect("readable directory entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("readable source file");
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            scanned += 1;
+            violations.extend(
+                cognia_problem::wire_schema::closed_object_pairing_violations(name, &source),
+            );
+        }
+        assert!(
+            scanned > 10,
+            "only {scanned} source files scanned, the walk is broken and this test proves nothing"
+        );
+        assert!(violations.is_empty(), "{}", violations.join("\n"));
+    }
 
     #[test]
     fn tracking_contract_is_exported_from_the_crate_root() {

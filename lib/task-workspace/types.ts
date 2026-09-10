@@ -173,7 +173,7 @@ export interface BundleHandoffUndoOutcome {
   bundleId: string
   reverted: string[]
   reApplied: string[]
-  conflicts: PatchConflict[]
+  conflicts: ApplyOutcome["conflicts"]
   state: ManagedWorkspaceState
 }
 
@@ -445,31 +445,29 @@ export interface ResourceRead {
 
 export interface DownloadHandle {
   handleId: string
+  path: string
   size: number
   hash: string
   mediaType: string
   sensitive: boolean
-  chunkBytes: number
+  chunkBytes?: number
 }
 
 export interface TransferChunk {
-  handleId: string
   offset: number
   dataBase64: string
-  length: number
+  length?: number
   chunkHash: string
-  nextOffset: number | null
-  complete: boolean
-  etag: string
+  nextOffset: number
+  eof: boolean
 }
 
 export interface UploadHandle {
   handleId: string
-  nextOffset: number
+  path: string
+  nextOffset?: number
   expectedSize: number
-  expectedHash: string
-  chunkBytes: number
-  expiresInMs: number
+  chunkBytes?: number
 }
 
 export interface TaskWorkspaceResourceEvent {

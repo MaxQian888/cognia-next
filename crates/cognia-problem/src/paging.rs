@@ -156,8 +156,15 @@ impl PageRequest {
 }
 
 /// One page of a collection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// Sparse rather than closed: `nextPageToken` is absent on the last page, and
+/// that absence is the signal a client reads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = crate::wire_schema::closed_sparse_object)]
+// Without this every instantiation is titled `Page`, and a contract emitter
+// keyed on that name publishes whichever one it hoisted last for all of them.
+#[schemars(rename = "Page_of_{T}")]
 pub struct Page<T> {
     pub items: Vec<T>,
     /// Present exactly when another page exists.
@@ -310,6 +317,26 @@ impl Page<Value> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn each_page_instantiation_gets_its_own_schema_name() {
+        // `Page<T>` is titled by its bare name unless it is told otherwise,
+        // and a contract emitter keyed on that title publishes whichever
+        // instantiation it hoisted last for every one of them.
+        #[derive(serde::Serialize, schemars::JsonSchema)]
+        struct Left {
+            left: u32,
+        }
+        #[derive(serde::Serialize, schemars::JsonSchema)]
+        struct Right {
+            right: u32,
+        }
+        let left = serde_json::to_value(schemars::schema_for!(Page<Left>)).unwrap();
+        let right = serde_json::to_value(schemars::schema_for!(Page<Right>)).unwrap();
+        assert_eq!(left["title"], "Page_of_Left");
+        assert_eq!(right["title"], "Page_of_Right");
+        assert_ne!(left["title"], right["title"]);
+    }
     use super::*;
     use serde_json::json;
 

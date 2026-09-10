@@ -69,6 +69,10 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+# ADR-0175 B4: wire types derive their own JSON Schema so the published output
+# contract cannot disagree with the struct that fills it, and
+# `companion_api::output_registry` generates a `Derived` row from the type.
+schemars = "1"
 # Shared signaling wire protocol (ADR-0021). Single source of truth for the
 # frame/envelope types, also consumed by the standalone signaling-server and
 # its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
@@ -517,11 +521,6 @@ cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
 wiremock = "0.6"
-# ADR-0175 B4: `companion_api::output_registry` holds each arm's declared
-# output shape against the published contract, and a `Derived` row generates
-# its schema from the Rust type. The derives themselves are production
-# attributes on the wire types, in the crates that own them.
-schemars = "1"
 
 # ADR-0024 — standard desktop builds include PaddleOCR; other native OCR
 # bindings remain explicit opt-ins. Placeholder registrations keep the

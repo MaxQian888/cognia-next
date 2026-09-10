@@ -37,6 +37,7 @@ jest.mock("./abandoned-turns", () => ({
 }))
 
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
+import * as workspaceClient from "./client"
 import {
   acquireWorkspaceBundle,
   acquireWorkspaceBundleFromRemote,
@@ -64,6 +65,8 @@ import {
   listWorkspaceBundles,
   getWorkspaceLifecyclePolicy,
   deleteManagedWorkspace,
+  downloadTaskResource,
+  uploadTaskResource,
   createWorkspaceBranch,
   makeManagedWorkspacePermanent,
   setWorkspaceLifecyclePolicy,
@@ -78,6 +81,307 @@ import {
   settleWorkspaceBundleTurn,
   taskIdForMessage,
 } from "./client"
+
+describe("task resource transfer wire contracts", () => {
+  beforeEach(() => call.mockReset())
+
+  const hash = async (bytes: Uint8Array) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.buffer as ArrayBuffer)))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+
+  it("downloads the Rust TransferChunk shape without invented length fields", async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const digest = await hash(bytes)
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open") {
+        return {
+          handleId: "download",
+          path: "file",
+          size: 3,
+          hash: digest,
+          mediaType: "application/octet-stream",
+          sensitive: false,
+        }
+      }
+      if (command === "task_resource_download_read_chunk") {
+        return { offset: 0, nextOffset: 3, dataBase64: "AQID", chunkHash: digest, eof: true }
+      }
+      return null
+    })
+    expect((await downloadTaskResource("run", "file")).size).toBe(3)
+    expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
+  })
+
+  it("uploads from offset zero with the Rust UploadHandle shape", async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const digest = await hash(bytes)
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_upload_open")
+        return { handleId: "upload", path: "file", expectedSize: 3 }
+      if (command === "task_resource_upload_write_chunk") return 3
+      if (command === "task_resource_upload_commit") return digest
+      return null
+    })
+    const file = { arrayBuffer: async () => bytes.buffer } as Blob
+    await expect(uploadTaskResource("run", "file", file)).resolves.toBe(digest)
+    expect(call).toHaveBeenCalledWith(
+      "task_resource_upload_write_chunk",
+      expect.objectContaining({ offset: 0, dataBase64: "AQID" })
+    )
+  })
+
+  it("assembles out-of-order download ranges in a bounded four-request window", async () => {
+    const bytes = new Uint8Array(5 * 24 * 1024 + 3).map((_, index) => index % 251)
+    const digest = await hash(bytes)
+    const pending: Array<() => void> = []
+    let notifyWindow!: () => void
+    const windowReady = new Promise<void>((resolve) => {
+      notifyWindow = resolve
+    })
+    let active = 0
+    let maximumActive = 0
+    call.mockImplementation(async (command: string, args: { offset: number; length: number }) => {
+      if (command === "task_resource_download_open")
+        return {
+          handleId: "download",
+          size: bytes.length,
+          hash: digest,
+          mediaType: "application/octet-stream",
+        }
+      if (command === "task_resource_download_read_chunk") {
+        active++
+        maximumActive = Math.max(active, maximumActive)
+        if (args.offset < 4 * 24 * 1024) {
+          await new Promise<void>((resolve) => {
+            pending.push(resolve)
+            if (pending.length === 4) notifyWindow()
+          })
+        }
+        const part = bytes.slice(args.offset, args.offset + args.length)
+        active--
+        return {
+          offset: args.offset,
+          nextOffset: args.offset + part.length,
+          dataBase64: Buffer.from(part).toString("base64"),
+          chunkHash: await hash(part),
+          eof: args.offset + part.length === bytes.length,
+        }
+      }
+      return null
+    })
+    const result = downloadTaskResource("run", "file")
+    await windowReady
+    expect(pending).toHaveLength(4)
+    pending.reverse().forEach((resolve) => resolve())
+    const blob = await result
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes)
+    expect(maximumActive).toBe(4)
+    expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
+  })
+
+  it.each([
+    { offset: 1 },
+    { nextOffset: 2 },
+    { length: 2 },
+    { dataBase64: "AQI=" },
+    { chunkHash: "wrong" },
+  ])("rejects inconsistent ranges or hashes and releases the handle: %j", async (override) => {
+    const digest = await hash(new Uint8Array([1, 2, 3]))
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: 3, hash: digest }
+      if (command === "task_resource_download_read_chunk")
+        return { offset: 0, nextOffset: 3, dataBase64: "AQID", chunkHash: digest, ...override }
+      return null
+    })
+    await expect(downloadTaskResource("run", "file")).rejects.toThrow("integrity check failed")
+    expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
+  })
+
+  it("rejects an incorrect whole-file hash even when every chunk is valid", async () => {
+    const digest = await hash(new Uint8Array([1, 2, 3]))
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: 3, hash: "wrong" }
+      if (command === "task_resource_download_read_chunk")
+        return { offset: 0, nextOffset: 3, dataBase64: "AQID", chunkHash: digest }
+      return null
+    })
+    await expect(downloadTaskResource("run", "file")).rejects.toThrow(
+      "task resource integrity check failed"
+    )
+  })
+
+  it.each([-1, 1.5, NaN])("closes an invalid download size %s", async (size) => {
+    call.mockResolvedValueOnce({ handleId: "download", size }).mockResolvedValueOnce(null)
+    await expect(downloadTaskResource("run", "file")).rejects.toThrow("size is invalid")
+    expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
+  })
+
+  it("waits for outstanding reads before closing a cancelled download", async () => {
+    const controller = new AbortController()
+    const pending: Array<() => void> = []
+    let notifyWindow!: () => void
+    const windowReady = new Promise<void>((resolve) => {
+      notifyWindow = resolve
+    })
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: 2 * 24 * 1024 }
+      if (command === "task_resource_download_read_chunk")
+        return new Promise<void>((resolve) => {
+          pending.push(resolve)
+          if (pending.length === 2) notifyWindow()
+        })
+      return null
+    })
+    const result = downloadTaskResource("run", "file", false, controller.signal)
+    const rejected = expect(result).rejects.toThrow("cancelled")
+    await windowReady
+    controller.abort(new Error("cancelled"))
+    pending[0]()
+    await Promise.resolve()
+    expect(call).not.toHaveBeenCalledWith("task_resource_download_close", expect.anything())
+    pending[1]()
+    await rejected
+    expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
+  })
+
+  it("keeps upload writes ordered across the host's chunk limit", async () => {
+    const bytes = new Uint8Array(24 * 1024 + 1).fill(7)
+    const digest = await hash(bytes)
+    const offsets: number[] = []
+    call.mockImplementation(
+      async (command: string, args: { offset: number; dataBase64: string }) => {
+        if (command === "task_resource_upload_open")
+          return { handleId: "upload", expectedSize: bytes.length }
+        if (command === "task_resource_upload_write_chunk") {
+          offsets.push(args.offset)
+          return args.offset + atob(args.dataBase64).length
+        }
+        return digest
+      }
+    )
+    await expect(
+      uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+    ).resolves.toBe(digest)
+    expect(offsets).toEqual([0, 24 * 1024])
+  })
+
+  it.each([0, -1, 4, NaN])("aborts when the upload acknowledgement is %s", async (ack) => {
+    const bytes = new Uint8Array([1, 2, 3])
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_upload_open") return { handleId: "upload", expectedSize: 3 }
+      if (command === "task_resource_upload_write_chunk") return ack
+      return null
+    })
+    await expect(
+      uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+    ).rejects.toThrow("offset is invalid")
+    expect(call).toHaveBeenLastCalledWith("task_resource_upload_abort", { handleId: "upload" })
+    expect(call).not.toHaveBeenCalledWith("task_resource_upload_commit", expect.anything())
+  })
+
+  it.each([
+    { nextOffset: -1 },
+    { nextOffset: 4 },
+    { chunkBytes: 0 },
+    { chunkBytes: 65537 },
+    { expectedSize: 4 },
+  ])("aborts invalid upload metadata: %j", async (override) => {
+    const bytes = new Uint8Array([1, 2, 3])
+    call
+      .mockResolvedValueOnce({ handleId: "upload", expectedSize: 3, ...override })
+      .mockResolvedValueOnce(null)
+    await expect(
+      uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+    ).rejects.toThrow("handle is invalid")
+    expect(call).toHaveBeenLastCalledWith("task_resource_upload_abort", { handleId: "upload" })
+  })
+
+  it("does not open handles after cancellation", async () => {
+    const controller = new AbortController()
+    controller.abort(new Error("cancelled"))
+    await expect(downloadTaskResource("run", "file", false, controller.signal)).rejects.toThrow(
+      "cancelled"
+    )
+    await expect(
+      uploadTaskResource("run", "file", {} as Blob, false, controller.signal)
+    ).rejects.toThrow("cancelled")
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it("uses negotiated 64 KiB blocks for upload while preserving write order", async () => {
+    const bytes = new Uint8Array(65_537).fill(7)
+    const lengths: number[] = []
+    call.mockImplementation(
+      async (command: string, args: { offset: number; dataBase64: string }) => {
+        if (command === "task_resource_upload_open")
+          return { handleId: "upload", expectedSize: bytes.length, chunkBytes: 65_536 }
+        if (command === "task_resource_upload_write_chunk") {
+          const length = atob(args.dataBase64).length
+          lengths.push(length)
+          return args.offset + length
+        }
+        return "hash"
+      }
+    )
+    await uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+    expect(lengths).toEqual([65_536, 1])
+  })
+
+  it("uses negotiated download blocks and validates the declared maximum", async () => {
+    const bytes = new Uint8Array(65_536).fill(7)
+    const digest = await hash(bytes)
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: bytes.length, hash: digest, chunkBytes: 65_536 }
+      if (command === "task_resource_download_read_chunk")
+        return {
+          offset: 0,
+          nextOffset: bytes.length,
+          dataBase64: Buffer.from(bytes).toString("base64"),
+          chunkHash: digest,
+        }
+      return null
+    })
+    expect((await downloadTaskResource("run", "file")).size).toBe(bytes.length)
+    expect(call).toHaveBeenCalledWith("task_resource_download_read_chunk", {
+      handleId: "download",
+      offset: 0,
+      length: 65_536,
+    })
+    call
+      .mockReset()
+      .mockResolvedValueOnce({ handleId: "download", size: 0, chunkBytes: 65_537 })
+      .mockResolvedValueOnce(null)
+    await expect(downloadTaskResource("run", "file")).rejects.toThrow("chunk size is invalid")
+  })
+
+  it("aborts after an in-flight upload is cancelled without committing", async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const controller = new AbortController()
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_upload_open") return { handleId: "upload", expectedSize: 3 }
+      if (command === "task_resource_upload_write_chunk") {
+        controller.abort(new Error("cancelled"))
+        return 3
+      }
+      return null
+    })
+    await expect(
+      uploadTaskResource(
+        "run",
+        "file",
+        { arrayBuffer: async () => bytes.buffer } as Blob,
+        false,
+        controller.signal
+      )
+    ).rejects.toThrow("cancelled")
+    expect(call).toHaveBeenLastCalledWith("task_resource_upload_abort", { handleId: "upload" })
+  })
+})
 
 describe("task workspace client", () => {
   beforeEach(() => {
@@ -855,6 +1159,20 @@ describe("settling a bundle turn", () => {
 })
 
 describe("the lookups that answer null", () => {
+  beforeEach(() => call.mockReset())
+
+  it("preserves the host's absent workspace, bundle, turn, and patch values", async () => {
+    call.mockResolvedValue(null)
+    for (const lookup of [
+      workspaceClient.getTaskWorkspace,
+      workspaceClient.getManagedWorkspace,
+      workspaceClient.getWorkspaceBundle,
+      workspaceClient.getWorkspaceBundleTurn,
+      workspaceClient.getTaskPatchSet,
+    ]) {
+      await expect(lookup("absent")).resolves.toBeNull()
+    }
+  })
   /**
    * Six task-workspace getters are `T | null` in TypeScript and `Option` in
    * Rust, and the client is built around that: `getWorkspaceBundle` answering
@@ -866,12 +1184,14 @@ describe("the lookups that answer null", () => {
   it("keeps null in the response contract for every nullable getter", async () => {
     const { readFileSync } = await import("node:fs")
     const { join } = await import("node:path")
+    const { default: Ajv } = await import("ajv")
     const contract = JSON.parse(
       readFileSync(join(process.cwd(), "protocol/companion-response-schemas.json"), "utf8")
     ) as {
-      $defs: Record<string, { type?: unknown }>
-      commands: Record<string, { $ref?: string }>
+      $defs: Record<string, object>
+      commands: Record<string, object>
     }
+    const ajv = new Ajv({ strict: false, validateFormats: false })
 
     for (const command of [
       "task_workspace_bundle_get",
@@ -881,10 +1201,121 @@ describe("the lookups that answer null", () => {
       "task_workspace_bundle_handoff_get",
       "task_workspace_bundle_handoff_undo_get",
     ]) {
-      const ref = contract.commands[command]?.$ref
-      expect(ref).toBe("#/$defs/NullableLegacyRecord")
+      const validate = ajv.compile({ $defs: contract.$defs, ...contract.commands[command] })
+      expect(validate(null)).toBe(true)
     }
-    expect(contract.$defs.NullableLegacyRecord.type).toEqual(["object", "null"])
+  })
+})
+
+describe("resource queries and host refusals", () => {
+  beforeEach(() => {
+    call.mockReset()
+    useTaskWorkspaceStore.getState().clear()
+  })
+
+  it("preserves range and sensitive-file authorization on resource reads", async () => {
+    const refusal = new Error("sensitive resource requires authorization")
+    call.mockRejectedValue(refusal)
+    await expect(workspaceClient.readTaskResource("run", ".env.local")).rejects.toBe(refusal)
+    await expect(workspaceClient.readTaskResourceDiff("run", ".env.local")).rejects.toBe(refusal)
+    const page = { content: "part", truncated: true, nextOffset: 4096 }
+    call.mockResolvedValue(page)
+    await expect(
+      workspaceClient.readTaskResource("run", ".env.local", {
+        offset: 2048,
+        maxBytes: 2048,
+        allowSensitive: true,
+      })
+    ).resolves.toBe(page)
+    expect(call).toHaveBeenLastCalledWith("task_resource_read_text", {
+      runId: "run",
+      relPath: ".env.local",
+      offset: 2048,
+      maxBytes: 2048,
+      allowSensitive: true,
+    })
+  })
+
+  it("preserves empty resource histories and bounded prune results", async () => {
+    call.mockResolvedValue([])
+    await expect(workspaceClient.listTaskRuns("task")).resolves.toEqual([])
+    await expect(workspaceClient.listTaskResources("task")).resolves.toEqual([])
+    const report = { removedTaskIds: [], removedBlobCount: 0, reclaimedBytes: 0 }
+    call.mockResolvedValue(report)
+    await expect(workspaceClient.pruneTaskWorkspaces()).resolves.toBe(report)
+    const refusal = new Error("workspace is in use")
+    call.mockRejectedValue(refusal)
+    await expect(workspaceClient.pinTaskWorkspace("task", false)).rejects.toBe(refusal)
+  })
+
+  it("does not hide a settle failure or turn a successful undo into an accounting failure", async () => {
+    const refusal = new Error("unknown run")
+    call.mockRejectedValue(refusal)
+    await expect(workspaceClient.settleTaskWorkspaceRun("absent")).rejects.toBe(refusal)
+    call.mockReset().mockResolvedValueOnce([])
+    await expect(workspaceClient.settleTaskWorkspaceRunWithProjection("run")).resolves.toEqual([])
+    const undo = { state: "reverted" }
+    call
+      .mockReset()
+      .mockResolvedValueOnce(undo)
+      .mockRejectedValueOnce(new Error("accounting unavailable"))
+    await expect(workspaceClient.undoTaskWorkspace("run")).resolves.toBe(undo)
+  })
+
+  it.each(["forbidden", new Error("unknown command"), new Error("disk failed")])(
+    "only defers authorization/unavailable-host errors when beginning work: %s",
+    async (failure) => {
+      const input = {
+        taskId: "task",
+        sessionId: "session",
+        runId: "run",
+        workspaceRoot: "/repo",
+        agentId: "built-in",
+        agentKind: "in-app",
+        base: { kind: "gitRef", gitRef: "main" },
+      } as Parameters<typeof beginTaskWorkspaceTurn>[0]
+      call.mockRejectedValue(failure)
+      const unexpected = failure instanceof Error && failure.message === "disk failed"
+      for (const operation of [
+        () => beginTaskWorkspaceTurn(input),
+        () => beginTaskWorkspaceBundleTurn("bundle", "root", input),
+      ]) {
+        if (unexpected) await expect(operation()).rejects.toBe(failure)
+        else await expect(operation()).resolves.toBeNull()
+      }
+    }
+  )
+
+  it("retains execution trace metadata when a task or bundle root is activated", async () => {
+    const input = {
+      taskId: "task",
+      sessionId: "session",
+      runId: "run",
+      workspaceRoot: "/repo",
+      agentId: "built-in",
+      agentKind: "in-app",
+      base: { kind: "gitRef", gitRef: "main" },
+      executionRunId: "execution",
+      traceId: "trace",
+      traceSpanId: "span",
+      surface: "chat",
+    } as Parameters<typeof beginTaskWorkspaceTurn>[0]
+    call.mockResolvedValue({
+      taskId: "task",
+      runId: "run",
+      executionRoot: "/isolated",
+      state: "running",
+    })
+    await beginTaskWorkspaceTurn(input)
+    await beginTaskWorkspaceBundleTurn("bundle", "root", input)
+    expect(useTaskWorkspaceStore.getState().activeByRun.run).toEqual(
+      expect.objectContaining({
+        executionRunId: "execution",
+        traceId: "trace",
+        traceSpanId: "span",
+        surface: "chat",
+      })
+    )
   })
 })
 

@@ -246,8 +246,9 @@ pub fn service() -> Result<Arc<TaskWorkspaceService>, String> {
         .ok_or_else(|| "task workspace service is not initialized".to_string())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskWorkspaceStatus {
     pub available: bool,
     pub event_name: &'static str,

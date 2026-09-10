@@ -158,8 +158,9 @@ pub fn parse_lock_reason(reason: &str) -> Option<&str> {
 
 /// Outcome of one reconcile pass. Callers persist the changes; the
 /// planner itself does not mutate.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ReconcileOutcome {
     /// Rows the Registry already knew about and which passed signature
     /// verification. Nothing changes for these.
@@ -178,8 +179,9 @@ pub struct ReconcileOutcome {
 /// The planner records only the source root + execution root so callers can
 /// insert a signed `WorkspaceRecord` with `owner_type = Imported` after
 /// verifying paths.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ImportedWorkspaceHint {
     pub source_root: String,
     pub execution_root: String,
@@ -188,8 +190,9 @@ pub struct ImportedWorkspaceHint {
 }
 
 /// One directory-reclaim proposal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct DirectoryReclaimCandidate {
     pub workspace_id: String,
     pub execution_root: String,
@@ -198,7 +201,7 @@ pub struct DirectoryReclaimCandidate {
 }
 
 /// Why the planner is proposing to reclaim a workspace directory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum DirectoryReclaimReason {
     /// The active-managed directory cap was exceeded; this is the
@@ -209,8 +212,9 @@ pub enum DirectoryReclaimReason {
 }
 
 /// One snapshot-expiration proposal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct SnapshotExpirationCandidate {
     pub workspace_id: String,
     pub snapshot_task_id: String,
@@ -219,7 +223,7 @@ pub struct SnapshotExpirationCandidate {
 }
 
 /// Why the planner is proposing to expire a snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum SnapshotExpirationReason {
     /// The snapshot is older than `snapshot_retention_days` days.

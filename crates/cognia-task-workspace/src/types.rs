@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskWorkspaceState {
     Active,
@@ -10,7 +10,7 @@ pub enum TaskWorkspaceState {
     Expired,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum RunState {
     Running,
@@ -20,14 +20,14 @@ pub enum RunState {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum IsolationKind {
     GitWorktree,
     Shadow,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
     Created,
@@ -36,7 +36,7 @@ pub enum ChangeKind {
     Renamed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ContributionOrigin {
     Agent,
@@ -44,14 +44,16 @@ pub enum ContributionOrigin {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceKind {
     File,
     Symlink,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceCaptureClass {
     #[default]
@@ -59,8 +61,9 @@ pub enum ResourceCaptureClass {
     Generated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceTrackingPolicy {
     #[serde(default)]
     pub generated_output_roots: Vec<String>,
@@ -77,7 +80,7 @@ impl Default for ResourceTrackingPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceEventEvidence {
     Watcher,
@@ -85,7 +88,7 @@ pub enum ResourceEventEvidence {
     Reconcile,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceTimelineCompleteness {
     Complete,
@@ -93,7 +96,7 @@ pub enum ResourceTimelineCompleteness {
     Reconciled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PatchState {
     Ready,
@@ -102,7 +105,7 @@ pub enum PatchState {
     Conflict,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ConflictResolution {
     RetryMerge,
@@ -110,8 +113,9 @@ pub enum ConflictResolution {
     KeepCurrent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BeginTaskRun {
     pub task_id: String,
     pub session_id: String,
@@ -140,8 +144,9 @@ pub struct BeginTaskRun {
     pub tracking_policy: ResourceTrackingPolicy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskWorkspace {
     pub task_id: String,
     pub session_id: String,
@@ -153,8 +158,9 @@ pub struct TaskWorkspace {
     pub pinned: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskRun {
     pub run_id: String,
     pub task_id: String,
@@ -190,8 +196,9 @@ pub struct TaskRun {
     pub settled_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceChange {
     pub run_id: String,
     pub path: String,
@@ -217,8 +224,9 @@ pub struct ResourceChange {
     pub content_captured: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceEvent {
     pub event_id: String,
     pub task_id: String,
@@ -243,8 +251,9 @@ pub struct ResourceEvent {
     pub reconciled: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceEventCounts {
     pub created: u64,
     pub modified: u64,
@@ -254,8 +263,9 @@ pub struct ResourceEventCounts {
     pub generated: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskResourceSummary {
     pub run_id: String,
     pub counts: ResourceEventCounts,
@@ -264,8 +274,9 @@ pub struct TaskResourceSummary {
     pub completeness: ResourceTimelineCompleteness,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TaskResourceManifest {
     pub schema_version: u32,
     pub exported_at: i64,
@@ -276,8 +287,9 @@ pub struct TaskResourceManifest {
     pub summaries: Vec<TaskResourceSummary>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PatchHunk {
     pub id: String,
     pub header: String,
@@ -291,8 +303,9 @@ pub struct PatchHunk {
     pub deletions: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PatchFile {
     pub path: String,
     pub old_path: Option<String>,
@@ -306,8 +319,9 @@ pub struct PatchFile {
     pub hunks: Vec<PatchHunk>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct AppliedFile {
     pub path: String,
     pub before_apply_hash: Option<String>,
@@ -319,8 +333,9 @@ pub struct AppliedFile {
     pub binary: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PatchSet {
     pub patch_id: String,
     pub task_id: String,
@@ -346,31 +361,35 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PatchSelection {
     pub path: String,
     /// Empty means the whole file. Non-empty IDs select textual hunks.
     pub hunk_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PatchConflict {
     pub path: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ApplyOutcome {
     pub state: PatchState,
     pub revision: u64,
     pub conflicts: Vec<PatchConflict>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PruneOutcome {
     pub removed_task_ids: Vec<String>,
     pub removed_blob_count: u64,
@@ -393,7 +412,7 @@ pub struct PruneOutcome {
 ///
 /// `Imported` is reserved for worktrees discovered on disk that the Registry
 /// cannot verify as its own — those rows never participate in auto-prune.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceOwnerType {
     User,
@@ -404,7 +423,9 @@ pub enum WorkspaceOwnerType {
 }
 
 /// Product lifecycle of a physical execution environment.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceEnvironmentKind {
     #[default]
@@ -426,7 +447,7 @@ pub enum WorkspaceEnvironmentKind {
 /// - `Removing → Removed`
 ///
 /// `Removed` is terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceState {
     Provisioning,
@@ -454,7 +475,7 @@ impl WorkspaceState {
 /// Interactive worktrees default to `WorkingState` (dirty local content is
 /// carried into the isolated root). Background and scheduled Git tasks
 /// default to `RemoteDefault` and refresh `origin/HEAD` at fire time.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WorkspaceBaseSpec {
     /// Snapshot of the current working tree, including uncommitted edits.
@@ -564,7 +585,7 @@ impl WorkspaceBaseSpec {
 
 /// Storage-side discriminant for `WorkspaceBaseSpec`. Kept as its own enum so
 /// SQLite rows encode a stable short string independent of the JSON shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceBaseKind {
     WorkingState,
@@ -580,8 +601,9 @@ pub enum WorkspaceBaseKind {
 /// `execution_root` is the on-disk path handed to executors. For Git
 /// workspaces it is the worktree path; for `Shadow` it is the materialized
 /// scratch directory. Trust is a separate axis and is not encoded here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct WorkspaceRecord {
     pub workspace_id: String,
     #[serde(default)]
@@ -623,7 +645,7 @@ pub struct WorkspaceRecord {
 /// This is intentionally distinct from [`WorkspaceOwnerType`]: it describes
 /// which lifecycle controller owns the directory, not which product actor
 /// requested it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceEnvironmentOwnership {
     Main,
@@ -634,7 +656,7 @@ pub enum WorkspaceEnvironmentOwnership {
 }
 
 /// Server-authoritative actions that may be offered for an environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceEnvironmentAction {
     Open,
@@ -662,8 +684,9 @@ pub enum WorkspaceEnvironmentAction {
 /// Canonical inventory row joining Git's worktree porcelain with Registry
 /// ownership. Callers must use `allowed_actions` rather than reimplementing
 /// lifecycle policy in a UI or transport adapter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct WorkspaceEnvironmentSummary {
     pub environment_id: String,
     pub workspace_id: Option<String>,
@@ -704,8 +727,9 @@ pub struct WorkspaceEnvironmentSummary {
 
 /// A worker-local mapping from a stable repository ref to a trusted Git root.
 /// Paths never leave the worker; remote callers use `binding_ref` only.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceSourceBinding {
     pub binding_ref: String,
     pub source_root: String,
@@ -719,7 +743,7 @@ pub struct WorkspaceSourceBinding {
 ///
 /// Exactly one lease must be `Primary`; the rest are `Additional` (forwarded
 /// as `additionalDirectories` when the executor spawns).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceRootRole {
     Primary,
@@ -732,8 +756,9 @@ pub enum WorkspaceRootRole {
 /// `alias_path` is the path executors see. Multiple leases may point at the
 /// same physical worktree when they share a Git common dir — the Bundle
 /// composer collapses roots by `git_common_dir` before creating worktrees.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceRootLease {
     pub bundle_id: String,
     pub workspace_id: String,
@@ -743,8 +768,9 @@ pub struct WorkspaceRootLease {
 }
 
 /// One logical root requested for transactional bundle acquisition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleRootInput {
     pub logical_root_id: String,
     pub role: WorkspaceRootRole,
@@ -758,8 +784,9 @@ pub struct WorkspaceBundleRootInput {
 /// Both halves are repository-relative and are re-validated host-side; a
 /// declaration arriving over the wire is never trusted to have been checked by
 /// whoever wrote it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceCacheLink {
     pub source: String,
     pub target: String,
@@ -770,8 +797,9 @@ pub struct WorkspaceCacheLink {
 /// Applied only to a Git worktree isolation — a shadow workspace already
 /// materializes an explicit snapshot, so narrowing it or linking into it would
 /// contradict the snapshot it was built from.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceProvisioning {
     /// Cone-mode sparse-checkout paths. Empty means a full checkout.
     #[serde(default)]
@@ -792,8 +820,9 @@ impl WorkspaceProvisioning {
 }
 
 /// Filesystem-bound request to provision every writable root for one task.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_sparse_object)]
 pub struct AcquireWorkspaceBundle {
     pub owner_type: WorkspaceOwnerType,
     pub owner_ref: Option<String>,
@@ -819,8 +848,9 @@ pub struct AcquireWorkspaceBundle {
 /// The Registry acquires a Bundle in one call; on failure it rolls back every
 /// lease it already provisioned. See `bundle.rs` for the acquisition and
 /// atomic-apply implementations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundle {
     pub bundle_id: String,
     #[serde(default)]
@@ -836,8 +866,9 @@ pub struct WorkspaceBundle {
 
 /// Outcome of a `WorkspaceBundle` apply. On compensation failure the bundle
 /// ends up in `state = Conflict` and `conflicts` is non-empty.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleOutcome {
     pub bundle_id: String,
     pub applied: Vec<String>,
@@ -846,8 +877,9 @@ pub struct WorkspaceBundleOutcome {
     pub state: WorkspaceState,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BundleHandoffRootSelection {
     pub workspace_id: String,
     pub logical_root_id: String,
@@ -855,8 +887,9 @@ pub struct BundleHandoffRootSelection {
     pub selection: Vec<PatchSelection>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BundleHandoffRequest {
     pub bundle_turn_id: String,
     #[serde(default)]
@@ -865,16 +898,18 @@ pub struct BundleHandoffRequest {
     pub allow_irreversible: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BundleHandoffOutcome {
     pub bundle_turn_id: String,
     pub request: BundleHandoffRequest,
     pub outcome: WorkspaceBundleOutcome,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BundleHandoffUndoOutcome {
     pub bundle_turn_id: String,
     pub bundle_id: String,
@@ -887,15 +922,17 @@ pub struct BundleHandoffUndoOutcome {
 /// Request to begin one execution turn across every unique physical
 /// workspace in a Bundle. The service derives collision-free task/run ids
 /// from the supplied template and persists the resulting group.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct BeginWorkspaceBundleTurn {
     pub primary_logical_root_id: String,
     pub run: BeginTaskRun,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleTurnRunLease {
     pub workspace_id: String,
     pub logical_root_ids: Vec<String>,
@@ -903,8 +940,9 @@ pub struct WorkspaceBundleTurnRunLease {
 }
 
 /// Persisted grouping for all TaskRuns opened for one Bundle turn.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleTurnLease {
     pub bundle_turn_id: String,
     pub bundle_id: String,
@@ -917,8 +955,9 @@ pub struct WorkspaceBundleTurnLease {
     pub settled_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleTurnRunOutcome {
     pub workspace_id: String,
     pub logical_root_ids: Vec<String>,
@@ -927,8 +966,9 @@ pub struct WorkspaceBundleTurnRunOutcome {
     pub resources: Vec<ResourceChange>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceBundleTurnOutcome {
     pub bundle_turn_id: String,
     pub bundle_id: String,
@@ -939,15 +979,16 @@ pub struct WorkspaceBundleTurnOutcome {
 }
 
 /// Retention policy inputs. All three knobs are user-adjustable in settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceLifecyclePolicy {
     pub active_directory_cap: u32,
     pub snapshot_retention_days: u32,
     pub blob_budget_bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceMaintenanceEventKind {
     Reconciled,
@@ -956,8 +997,9 @@ pub enum WorkspaceMaintenanceEventKind {
     Failed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceMaintenanceEvent {
     pub event_id: String,
     pub kind: WorkspaceMaintenanceEventKind,
@@ -966,14 +1008,16 @@ pub struct WorkspaceMaintenanceEvent {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceMaintenanceRequest {
     pub now: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorkspaceMaintenanceResult {
     pub started_at: i64,
     pub finished_at: i64,

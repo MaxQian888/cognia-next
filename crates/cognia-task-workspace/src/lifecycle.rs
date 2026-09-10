@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::types::{IsolationKind, WorkspaceBaseSpec, WorkspaceOwnerType, WorkspaceRecord};
 
 /// Which lifecycle edge fired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorktreeLifecycleKind {
     Created,
@@ -30,8 +30,9 @@ pub enum WorktreeLifecycleKind {
 /// The payload handed to hook subscribers. Field names are the wire names the
 /// hook catalog documents (`worktree_path`, `owner_type`, …); everything the
 /// registry knows that a hook could act on, nothing it would have to guess.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct WorktreeLifecycleEvent {
     pub kind: WorktreeLifecycleKind,
     /// Registry id of the managed workspace.

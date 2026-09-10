@@ -26,6 +26,10 @@ cognia-instrument = { path = "../cognia-instrument" }
 # to a leaf so `cognia-git` could reach it too, and is re-exported from
 # `lib.rs` under the same `mirror_*` names.
 cognia-git-mirror = { path = "../cognia-git-mirror" }
+# ADR-0175 B4. The wire types this crate answers with derive their own JSON
+# Schema, and `wire_schema::closed_object` states the two things schemars
+# leaves looser than the enforced output contract.
+cognia-problem = { path = "../cognia-problem" }
 flate2 = "1"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hex = "0.4"
@@ -33,6 +37,7 @@ ignore = "0.4"
 notify = "8"
 parking_lot = "0.12"
 rusqlite = { version = "0.37", features = ["bundled"] }
+schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"

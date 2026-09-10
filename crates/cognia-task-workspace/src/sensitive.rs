@@ -21,7 +21,7 @@ use std::{
 
 /// Reason a sensitive-path decision was taken. Recorded on every grant and
 /// every refusal so audit history is complete.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum SensitiveDecision {
     /// User explicitly authorized this path from an interactive surface.
@@ -48,7 +48,7 @@ impl SensitiveDecision {
 
 /// Reason an include pattern was rejected. Distinguishes escape attempts so
 /// UI can display a specific error.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "value")]
 pub enum IncludePatternError {
     /// Pattern was empty or whitespace-only.
@@ -147,8 +147,9 @@ pub fn validate_include_pattern(
 }
 
 /// One recorded sensitive-path grant. Stored per workspace + logical path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct SensitiveGrant {
     pub workspace_id: String,
     pub relative_path: String,
@@ -158,8 +159,9 @@ pub struct SensitiveGrant {
 }
 
 /// One audit row appended on every decision. Persisted, never mutated.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct SensitiveAuditEntry {
     pub audit_id: String,
     pub workspace_id: String,

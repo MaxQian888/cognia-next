@@ -9,15 +9,16 @@ use std::{
 pub const DEFAULT_TEXT_PREVIEW_BYTES: usize = 1024 * 1024;
 pub const MAX_EDITOR_BYTES: usize = 5 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceEncoding {
     Utf8,
     Binary,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct ResourceRead {
     pub content: Option<String>,
     pub encoding: ResourceEncoding,

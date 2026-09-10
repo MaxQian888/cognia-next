@@ -54,8 +54,9 @@ pub const REMOTE_SUPPLY_BUDGET: Duration = Duration::from_secs(10 * 60);
 pub const UPSTREAM_REMOTE: &str = "upstream";
 
 /// Supply the source checkout for `remote_url`, creating it if absent.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct EnsureRemoteSource {
     /// The real remote. https for anything that needs a credential.
     pub remote_url: String,
@@ -88,8 +89,9 @@ impl fmt::Debug for EnsureRemoteSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct RemoteSourceCheckout {
     /// The non-bare git root a bundle can now be acquired over.
     pub source_root: String,
