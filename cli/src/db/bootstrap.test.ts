@@ -100,6 +100,165 @@ describe("ensureCliDb", () => {
     expect(goals.rows).toEqual([{ id: "seed" }])
   })
 
+  it.each([
+    ["legacy", "corrupt"],
+    ["legacy", "incompatible"],
+    ["table manifest", "corrupt"],
+    ["table manifest", "incompatible"],
+  ])(
+    "keeps refusing a quarantined %s (%s) on restart until the canonical snapshot is repaired",
+    async (kind, reason) => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-recovery-"))
+      const tableDirectory = path.join(home, "db.json.tables")
+      const file =
+        kind === "legacy" ? path.join(home, "db.json") : path.join(tableDirectory, "manifest.json")
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      const original =
+        reason === "corrupt"
+          ? "{truncated"
+          : JSON.stringify(
+              kind === "legacy"
+                ? { version: 81, tables: { goals: [{ id: "original" }] } }
+                : { snapshotFormat: 3, dbs: { CogniaDB: { version: 81, tables: ["goals"] } } }
+            )
+      fs.writeFileSync(file, original, "utf8")
+      const goals = new FakeTable("goals", [{ id: "seed" }])
+      const opts = {
+        home,
+        getDatabase: () => ({ verno: 82, name: "CogniaDB", tables: [goals] }),
+        installGlobals: jest.fn(async () => {}),
+        whenReady: async () => {},
+        schedule: () => () => {},
+      }
+      try {
+        await expect(ensureCliDb(opts)).rejects.toThrow(reason)
+        await expect(ensureCliDb(opts)).rejects.toThrow(/requires recovery/)
+        expect(opts.installGlobals).toHaveBeenCalledTimes(1)
+        expect(fs.readFileSync(`${file}.${reason}-1`, "utf8")).toBe(original)
+        expect(fs.existsSync(`${file}.${reason}-2`)).toBe(false)
+        expect(fs.existsSync(file)).toBe(false)
+        if (kind === "legacy") {
+          fs.writeFileSync(
+            file,
+            JSON.stringify({ version: 82, tables: { goals: [{ id: "recovered" }] } })
+          )
+        } else {
+          fs.writeFileSync(
+            path.join(tableDirectory, "CogniaDB--goals.json"),
+            JSON.stringify([{ id: "recovered" }])
+          )
+          fs.writeFileSync(
+            file,
+            JSON.stringify({
+              snapshotFormat: 3,
+              dbs: { CogniaDB: { version: 82, tables: ["goals"] } },
+            })
+          )
+        }
+        const handle = await ensureCliDb(opts)
+        expect(goals.rows).toEqual([{ id: "recovered" }])
+        await handle.dispose()
+      } finally {
+        __resetCliDbForTesting()
+        fs.rmSync(home, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.each([
+    ["missing table", undefined],
+    ["truncated table", "{truncated"],
+    ["non-array table", "{}"],
+  ])(
+    "keeps refusing a %s across restarts without overwriting its data",
+    async (_label, contents) => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-table-recovery-"))
+      const directory = path.join(home, "db.json.tables")
+      const manifestFile = path.join(directory, "manifest.json")
+      const tableFile = path.join(directory, "CogniaDB--goals.json")
+      fs.mkdirSync(directory)
+      const manifest = JSON.stringify({
+        snapshotFormat: 3,
+        dbs: { CogniaDB: { version: 82, tables: ["goals"] } },
+      })
+      fs.writeFileSync(manifestFile, manifest)
+      if (contents !== undefined) fs.writeFileSync(tableFile, contents)
+      const goals = new FakeTable("goals", [{ id: "seed" }])
+      const opts = {
+        home,
+        getDatabase: () => ({ verno: 82, name: "CogniaDB", tables: [goals] }),
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: () => () => {},
+      }
+      try {
+        await expect(ensureCliDb(opts)).rejects.toThrow(/corrupt/)
+        await expect(ensureCliDb(opts)).rejects.toThrow(/requires recovery/)
+        expect(fs.readFileSync(`${manifestFile}.corrupt-1`, "utf8")).toBe(manifest)
+        expect(goals.rows).toEqual([{ id: "seed" }])
+        if (contents !== undefined) expect(fs.readFileSync(tableFile, "utf8")).toBe(contents)
+        else expect(fs.existsSync(tableFile)).toBe(false)
+        fs.writeFileSync(tableFile, "[]")
+        fs.writeFileSync(manifestFile, manifest)
+        const handle = await ensureCliDb(opts)
+        expect(goals.rows).toEqual([])
+        await handle.dispose()
+      } finally {
+        __resetCliDbForTesting()
+        fs.rmSync(home, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.each([
+    null,
+    [],
+    { snapshotFormat: 2, dbs: {} },
+    { snapshotFormat: 3, dbs: null },
+    { snapshotFormat: 3, dbs: { CogniaDB: [] } },
+    { snapshotFormat: 3, dbs: { CogniaDB: { version: "82", tables: [] } } },
+    { snapshotFormat: 3, dbs: { CogniaDB: { version: 82, tables: null } } },
+    { snapshotFormat: 3, dbs: { CogniaDB: { version: 82, tables: [1] } } },
+  ])("preserves invalid manifest structure %# and refuses restart", async (manifest) => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-manifest-recovery-"))
+    const directory = path.join(home, "db.json.tables")
+    fs.mkdirSync(directory)
+    const file = path.join(directory, "manifest.json")
+    const text = JSON.stringify(manifest)
+    fs.writeFileSync(file, text)
+    const opts = {
+      home,
+      getDatabase: () => ({ verno: 82, name: "CogniaDB", tables: [] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+    }
+    try {
+      await expect(ensureCliDb(opts)).rejects.toThrow(/corrupt/)
+      await expect(ensureCliDb(opts)).rejects.toThrow(/requires recovery/)
+      expect(fs.readFileSync(`${file}.corrupt-1`, "utf8")).toBe(text)
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("does not treat an unrelated backup filename as a quarantined snapshot", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-backup-name-"))
+    fs.writeFileSync(path.join(home, "db.json.corrupt-not-a-generation"), "unrelated")
+    try {
+      const handle = await ensureCliDb({
+        home,
+        getDatabase: () => ({ verno: 82, name: "CogniaDB", tables: [] }),
+        installGlobals: async () => {},
+        whenReady: async () => {},
+      })
+      await handle.dispose()
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("preserves and surfaces a truncated snapshot instead of allowing a flush", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-corrupt-"))
     const file = path.join(home, "db.json")
@@ -251,9 +410,7 @@ describe("ensureCliDb", () => {
           return () => {}
         },
       })
-      mkdir = jest.spyOn(fs, "mkdirSync").mockImplementationOnce(() => {
-        throw full
-      })
+      mkdir = jest.spyOn(fs.promises, "mkdir").mockRejectedValueOnce(full)
       handle.scheduleFlush()
       await expect(Promise.resolve(scheduled[0]())).resolves.toBeUndefined()
       expect(getRecentErrorLogs()).toEqual(
@@ -361,6 +518,162 @@ describe("ensureCliDb", () => {
       ])
       expect(fs.readFileSync(path.join(tableDir, sessionsFile), "utf8")).toBe(sessionsBefore)
     } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it.each([process.platform, "win32"])(
+    "yields during durable table writes and serializes queued flushes on %s",
+    async (platform) => {
+      const realPlatform = process.platform
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-async-"))
+      const goals = new FakeTable("goals", [{ id: "initial" }])
+      const handle = await ensureCliDb({
+        home,
+        getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [goals] }),
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: () => () => {},
+      })
+      await handle.flush()
+      const file = path.join(home, "db.json.tables", "CogniaDB--goals.json")
+      const initial = fs.readFileSync(file, "utf8")
+      const firstRows = [
+        { id: "first", text: "会话 🔐" },
+        undefined,
+        new Date(0),
+        {
+          toJSON(key: string) {
+            return { key }
+          },
+        },
+      ]
+      goals.rows = firstRows
+      handle.scheduleTableFlush("CogniaDB", "goals")
+
+      let release!: () => void
+      let signal!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const entered = new Promise<"syncing">((resolve) => {
+        signal = () => resolve("syncing")
+      })
+      const open = fs.promises.open.bind(fs.promises)
+      const openSpy = jest.spyOn(fs.promises, "open").mockImplementationOnce(async (...args) => {
+        const descriptor = await open(...args)
+        const sync = descriptor.sync.bind(descriptor)
+        jest.spyOn(descriptor, "sync").mockImplementationOnce(async () => {
+          signal()
+          await gate
+          await sync()
+        })
+        return descriptor
+      })
+      Object.defineProperty(process, "platform", { value: platform, configurable: true })
+      const first = handle.flush()
+      try {
+        expect(await Promise.race([entered, first.then(() => "completed")])).toBe("syncing")
+        expect(fs.readFileSync(file, "utf8")).toBe(initial)
+        goals.rows = [{ id: "second" }]
+        handle.scheduleTableFlush("CogniaDB", "goals")
+        const second = handle.flush()
+        release()
+        await Promise.all([first, second])
+        expect(fs.readFileSync(`${file}.bak`, "utf8")).toBe(JSON.stringify(firstRows))
+        expect(fs.readFileSync(file, "utf8")).toBe(JSON.stringify(goals.rows))
+        expect(fs.existsSync(`${file}.tmp`)).toBe(false)
+        expect(fs.existsSync(`${file}.bak.tmp`)).toBe(false)
+      } finally {
+        release()
+        openSpy.mockRestore()
+        await first.catch(() => {})
+        Object.defineProperty(process, "platform", { value: realPlatform, configurable: true })
+        __resetCliDbForTesting()
+        fs.rmSync(home, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it("closes a failed sync handle and retries without replacing the canonical table", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-sync-failure-"))
+    const goals = new FakeTable("goals", [{ id: "original" }])
+    const handle = await ensureCliDb({
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [goals] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: () => () => {},
+    })
+    await handle.flush()
+    const file = path.join(home, "db.json.tables", "CogniaDB--goals.json")
+    goals.rows = [{ id: "pending" }]
+    handle.scheduleTableFlush("CogniaDB", "goals")
+    const open = fs.promises.open.bind(fs.promises)
+    let closeSpy: jest.SpyInstance | undefined
+    const error = new Error("fsync failed")
+    const openSpy = jest.spyOn(fs.promises, "open").mockImplementationOnce(async (...args) => {
+      const descriptor = await open(...args)
+      closeSpy = jest.spyOn(descriptor, "close")
+      jest.spyOn(descriptor, "sync").mockRejectedValueOnce(error)
+      return descriptor
+    })
+    try {
+      await expect(handle.flush()).rejects.toBe(error)
+      expect(closeSpy).toHaveBeenCalledTimes(1)
+      expect(fs.readFileSync(file, "utf8")).toBe(JSON.stringify([{ id: "original" }]))
+      expect(fs.existsSync(`${file}.bak`)).toBe(false)
+      openSpy.mockRestore()
+      await handle.flush()
+      expect(fs.readFileSync(file, "utf8")).toBe(JSON.stringify(goals.rows))
+      expect(fs.readFileSync(`${file}.bak`, "utf8")).toBe(JSON.stringify([{ id: "original" }]))
+      if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+      await handle.dispose()
+    } finally {
+      openSpy.mockRestore()
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it("retries every dirty table after a later table replacement fails", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-partial-"))
+    const goals = new FakeTable("goals", [{ id: "g0" }])
+    const sessions = new FakeTable("sessions", [{ id: "s0" }])
+    const handle = await ensureCliDb({
+      home,
+      getDatabase: () => ({ name: "CogniaDB", verno: 82, tables: [goals, sessions] }),
+      installGlobals: async () => {},
+      whenReady: async () => {},
+      schedule: () => () => {},
+    })
+    await handle.flush()
+    const tableDir = path.join(home, "db.json.tables")
+    const goalsFile = path.join(tableDir, "CogniaDB--goals.json")
+    const sessionsFile = path.join(tableDir, "CogniaDB--sessions.json")
+    goals.rows = [{ id: "g1" }]
+    sessions.rows = [{ id: "s1" }]
+    handle.scheduleFlush()
+    const rename = fs.promises.rename.bind(fs.promises)
+    const renameSpy = jest
+      .spyOn(fs.promises, "rename")
+      .mockImplementation(async (source, target) => {
+        if (target === sessionsFile) throw new Error("replace failed")
+        await rename(source, target)
+      })
+    try {
+      await expect(handle.flush()).rejects.toThrow("replace failed")
+      expect(JSON.parse(fs.readFileSync(goalsFile, "utf8"))).toEqual([{ id: "g1" }])
+      expect(JSON.parse(fs.readFileSync(sessionsFile, "utf8"))).toEqual([{ id: "s0" }])
+      renameSpy.mockRestore()
+      goals.rows = [{ id: "g2" }]
+      await handle.flush()
+      expect(JSON.parse(fs.readFileSync(goalsFile, "utf8"))).toEqual([{ id: "g2" }])
+      expect(JSON.parse(fs.readFileSync(sessionsFile, "utf8"))).toEqual([{ id: "s1" }])
+      await handle.dispose()
+    } finally {
+      renameSpy.mockRestore()
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }
@@ -714,6 +1027,76 @@ describe("installFakeIndexedDb", () => {
     } finally {
       Dexie.dependencies.indexedDB = savedIdb
       Dexie.dependencies.IDBKeyRange = savedRange
+    }
+  })
+})
+
+jest.mock("@/lib/plugin/core/browser-builtin-registry", () => ({
+  getBrowserBuiltinRegistry: () => [
+    { manifest: { id: "plugin-a", dexie: { tables: [{ name: "x", schema: "++id" }] } } },
+    { manifest: { id: "plugin-b", dexie: { tables: [{ name: "y", schema: "&id" }] } } },
+  ],
+}))
+
+jest.mock("@/lib/plugin/dexie/bridge", () => ({
+  restorePluginTables: jest.fn(async () => [] as string[]),
+}))
+
+describe("built-in plugin schema preparation", () => {
+  /**
+   * The headless brain writes its snapshot at the version runtime registration
+   * reached: base + one bump PER table-owning plugin. The consolidated restore
+   * declares every one of those tables in a single bump, so without a floor it
+   * opens below its own snapshot and `restoreTableStore` rejects it. That
+   * rejection moves the manifest aside and the supervisor reboots the brain on
+   * an empty database, which is silent, total data loss on every restart.
+   */
+  it("asks the restore to land on the version the snapshot was written at", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-cli-db-plugin-schema-"))
+    const goals = new FakeTable("goals", [])
+    const db: DbLike = { verno: 225, tables: [goals], name: "CogniaDB" }
+    const tableDir = path.join(home, "db.json.tables")
+    fs.mkdirSync(tableDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(tableDir, "manifest.json"),
+      JSON.stringify({
+        snapshotFormat: 3,
+        dbs: { CogniaDB: { version: 227, tables: ["goals"] } },
+      })
+    )
+    fs.writeFileSync(path.join(tableDir, "CogniaDB--goals.json"), JSON.stringify([{ id: "kept" }]))
+
+    const { restorePluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+      restorePluginTables: jest.Mock
+    }
+    restorePluginTables.mockClear()
+    // Stand in for the real bump: the restore raises the live version to the
+    // floor it was given, which is what makes the snapshot restorable.
+    restorePluginTables.mockImplementation(async (_source, _manifests, options) => {
+      db.verno = options.minimumVersion
+      return ["plugin-a:x", "plugin-b:y"]
+    })
+
+    try {
+      await ensureCliDb({
+        home,
+        getDatabase: () => db,
+        installGlobals: async () => {},
+        whenReady: async () => {},
+        schedule: () => () => {},
+      })
+
+      expect(restorePluginTables).toHaveBeenCalledTimes(1)
+      expect(restorePluginTables.mock.calls[0][2]).toMatchObject({
+        registerMissing: true,
+        minimumVersion: 227,
+      })
+      // Restored rather than moved aside: the manifest is still where it was.
+      expect(fs.existsSync(path.join(tableDir, "manifest.json"))).toBe(true)
+      expect(goals.rows).toEqual([{ id: "kept" }])
+    } finally {
+      __resetCliDbForTesting()
+      fs.rmSync(home, { recursive: true, force: true })
     }
   })
 })

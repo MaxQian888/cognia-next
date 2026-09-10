@@ -5,10 +5,13 @@ jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
   tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
 }))
 
+import Dexie from "dexie"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import { getSettings, saveSettings } from "./settings"
 import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
+import { loggers } from "@cognia/logging"
+import { commitTranscriptIndexPage } from "./chat-transcript-index"
 
 const projectDepsMock = tryBuildProjectKnowledgeDeps as jest.Mock
 import {
@@ -104,6 +107,196 @@ describe("project-scope helper", () => {
   })
 
   describe("deleteProjectCascade", () => {
+    it("records deletion markers for project sessions, messages and unread state atomically", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      await deleteProjectCascade("A")
+      for (const [table, id] of [
+        ["sessions", "session-A"],
+        ["messages", "message-A"],
+        ["sessionState", "session-A"],
+      ]) {
+        expect(await db.syncTombstones.get([table, id])).toMatchObject({ table, id })
+      }
+      expect(await db.syncTombstones.get(["sessions", "session-B"])).toBeUndefined()
+    })
+
+    it("rolls back the project cascade when deletion evidence cannot be written", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      const fail = jest
+        .spyOn(db.syncTombstones, "bulkPut")
+        .mockRejectedValueOnce(new Error("marker write failed"))
+      try {
+        await expect(deleteProjectCascade("A")).rejects.toThrow("marker write failed")
+        expect(await db.sessions.get("session-A")).toBeDefined()
+        expect(await db.messages.get("message-A")).toBeDefined()
+        expect(await db.messageMediaRefs.where("sessionId").equals("session-A").count()).toBe(3)
+        expect(await db.syncTombstones.get(["sessions", "session-A"])).toBeUndefined()
+      } finally {
+        fail.mockRestore()
+      }
+    })
+
+    it("uses transaction-time membership for both deletion and markers", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      const transaction = db.transaction.bind(db)
+      const intercept = jest.spyOn(db, "transaction").mockImplementationOnce((...args: unknown[]) =>
+        Dexie.Promise.resolve(
+          Dexie.ignoreTransaction(async () => {
+            await db.sessions.update("session-A", { projectId: "B" })
+            await db.messages.update("message-A", { projectId: "B" })
+            await db.sessions.put({
+              id: "arrived",
+              projectId: "A",
+              createdAt: 1,
+              updatedAt: 1,
+              title: "new",
+            } as never)
+            await db.sessionState.put({ sessionId: "arrived", lastReadAt: 1, unreadCount: 0 })
+            return Reflect.apply(transaction, db, args)
+          })
+        )
+      )
+      try {
+        await deleteProjectCascade("A")
+        expect(await db.sessions.get("session-A")).toMatchObject({ projectId: "B" })
+        expect(await db.messageMediaRefs.where("sessionId").equals("session-A").count()).toBe(3)
+        expect(await db.syncTombstones.get(["sessions", "session-A"])).toBeUndefined()
+        expect(await db.sessions.get("arrived")).toBeUndefined()
+        expect(await db.sessionState.get("arrived")).toBeUndefined()
+        expect(await db.syncTombstones.get(["sessions", "arrived"])).toBeDefined()
+      } finally {
+        intercept.mockRestore()
+      }
+    })
+
+    async function seedProjectMedia() {
+      const db = getDb()
+      for (const projectId of ["A", "B"]) {
+        const sessionId = `session-${projectId}`
+        await db.sessions.put({
+          id: sessionId,
+          projectId,
+          title: projectId,
+          kind: "direct",
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        await db.messages.put({
+          id: `message-${projectId}`,
+          sessionId,
+          projectId,
+          role: "user",
+          parts: [],
+          createdAt: 1,
+        } as never)
+        await db.messageMediaRefs.bulkPut(
+          (projectId === "A" ? ["exclusive", "shared", "recent"] : ["shared"]).map((hash) => ({
+            sessionId,
+            messageId: `message-${projectId}`,
+            hash,
+          }))
+        )
+        await commitTranscriptIndexPage({
+          sessionId,
+          revision: 1,
+          complete: true,
+          items: [
+            {
+              kind: "completed-turn",
+              itemKey: "turn",
+              turnKey: "turn",
+              revision: 1,
+              detailRevision: 1,
+              status: "completed",
+              userMessages: [],
+              startedAt: 1,
+              collapsed: { exists: false, messageCount: 1, trailingCount: 0, mediaCount: 0 },
+            },
+          ],
+        })
+      }
+      for (const hash of ["exclusive", "shared", "recent", "unrelated-orphan"]) {
+        await db.messageMedia.put({
+          hash,
+          mediaType: "image/png",
+          width: 1,
+          height: 1,
+          blob: new Blob(["image"]),
+          byteSize: 5,
+          createdAt: hash === "recent" ? Date.now() : 1,
+          lastUsedAt: 1,
+        })
+      }
+    }
+
+    it("removes derived session indexes and only unreferenced candidate media", async () => {
+      await seedProjectMedia()
+      await deleteProjectCascade("A")
+
+      const db = getDb()
+      expect(await db.messageMediaRefs.toArray()).toEqual([
+        { sessionId: "session-B", messageId: "message-B", hash: "shared" },
+      ])
+      expect((await db.chatTurnSummaries.toArray()).map((row) => row.sessionId)).toEqual([
+        "session-B",
+      ])
+      expect((await db.chatTranscriptIndexState.toArray()).map((row) => row.sessionId)).toEqual([
+        "session-B",
+      ])
+      expect((await db.messageMedia.toArray()).map((row) => row.hash).sort()).toEqual([
+        "recent",
+        "shared",
+        "unrelated-orphan",
+      ])
+      expect(await db.messages.get("message-B")).toBeDefined()
+    })
+
+    it("rolls back project and derived rows when the cascade fails", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      const failDelete = () => {
+        throw new Error("derived delete failed")
+      }
+      db.chatTranscriptIndexState.hook("deleting", failDelete)
+      try {
+        await expect(deleteProjectCascade("A")).rejects.toThrow("derived delete failed")
+      } finally {
+        db.chatTranscriptIndexState.hook("deleting").unsubscribe(failDelete)
+      }
+      expect(await db.sessions.get("session-A")).toBeDefined()
+      expect(await db.messages.get("message-A")).toBeDefined()
+      expect(await db.messageMediaRefs.count()).toBe(4)
+      expect(await db.chatTurnSummaries.count()).toBe(2)
+      expect(await db.chatTranscriptIndexState.count()).toBe(2)
+      expect(await db.messageMedia.count()).toBe(4)
+    })
+
+    it("does not report a committed project cascade as failed when media GC fails", async () => {
+      await seedProjectMedia()
+      const db = getDb()
+      const failDelete = () => {
+        throw new Error("media unavailable")
+      }
+      db.messageMedia.hook("deleting", failDelete)
+      const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => {})
+      try {
+        await expect(deleteProjectCascade("A")).resolves.toBeUndefined()
+        expect(warn).toHaveBeenCalledWith("project media cleanup failed", {
+          projectId: "A",
+          error: "Error: media unavailable",
+        })
+      } finally {
+        db.messageMedia.hook("deleting").unsubscribe(failDelete)
+        warn.mockRestore()
+      }
+      expect(await db.sessions.get("session-A")).toBeUndefined()
+      expect(await db.messageMediaRefs.where("sessionId").equals("session-A").count()).toBe(0)
+      expect(await db.messageMedia.get("exclusive")).toBeDefined()
+    })
+
     it("removes every scoped row + session-child row for the project, leaving others intact", async () => {
       const db = getDb()
       // Project A data.

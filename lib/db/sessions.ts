@@ -5,6 +5,8 @@ import { getDb, withDbReopenRetry } from "./schema"
 import { getDefaultPreset, recordPresetUsage } from "./prompt-presets"
 import { buildAutoApplySessionPatch } from "@/lib/presets/apply-to-session"
 import { invalidatePersistSnapshot } from "./messages"
+import { collectUnreferencedMessageMedia } from "./message-media-refs"
+import { clearDraft } from "./chat-drafts"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
@@ -754,7 +756,8 @@ async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> 
 /**
  * Bulk variant of `deleteSession` for the channel-list batch toolbar.
  * Expands parent-owned attached descendants, then removes their session,
- * message, peer-message, goal and loop rows in one Dexie `rw` transaction so
+ * message, media-reference, draft, unread, history, peer-message, goal and loop
+ * rows in one Dexie `rw` transaction so
  * a mid-cascade failure rolls back atomically. Missing ids are silently
  * skipped. Scheduler tasks and persisted UI stores are external systems and
  * are cleaned up best-effort after the database commit.
@@ -765,11 +768,18 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
   const requestedIds = [...new Set(ids)]
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
+  const orphanCandidates = new Set<string>()
   await db.transaction(
     "rw",
     [
       db.sessions,
       db.messages,
+      db.messageMediaRefs,
+      db.sessionState,
+      db.chatDrafts,
+      db.chatInputHistory,
+      db.chatTurnSummaries,
+      db.chatTranscriptIndexState,
       db.sessionUsage,
       db.sessionPeerMessages,
       db.chatGoals,
@@ -835,6 +845,14 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
       }
 
       const allMessageIds: string[] = []
+      const mediaRefs = await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).toArray()
+      for (const ref of mediaRefs) orphanCandidates.add(ref.hash)
+      await db.messageMediaRefs.where("sessionId").anyOf(deletedIds).delete()
+      await db.sessionState.bulkDelete(deletedIds)
+      await db.chatDrafts.bulkDelete(deletedIds)
+      await db.chatInputHistory.where("sessionId").anyOf(deletedIds).delete()
+      await db.chatTurnSummaries.where("sessionId").anyOf(deletedIds).delete()
+      await db.chatTranscriptIndexState.bulkDelete(deletedIds)
       for (const id of deletedIds) {
         const msgIds = (await db.messages.where("sessionId").equals(id).primaryKeys()) as string[]
         allMessageIds.push(...msgIds)
@@ -847,8 +865,21 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
         .delete()
       await recordTombstones("sessions", deletedIds, at)
       await recordTombstones("messages", allMessageIds, at)
+      await recordTombstones("sessionState", deletedIds, at)
     }
   )
+  if (orphanCandidates.size > 0) {
+    try {
+      // Shared media survives the indexed reference re-check; recent uploads
+      // retain the collector's grace period. A failed GC cannot undo a delete.
+      await collectUnreferencedMessageMedia(orphanCandidates)
+    } catch (error) {
+      loggers.store.warn("session media cleanup failed", {
+        sessionIds: deletedIds,
+        error: String(error),
+      })
+    }
+  }
   await cleanupScheduledLoopTasks(scheduledTaskIds)
   const sandboxReleaseErrors: unknown[] = []
   for (const id of deletedIds) {
@@ -859,6 +890,16 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     }
     invalidatePersistSnapshot(id)
     markSessionRemoved(id)
+    try {
+      // Cancel composer debounce timers after commit so they cannot restore
+      // the draft row removed above. Do not enqueue a remote draft write.
+      await clearDraft(id, { hostAlreadyCleared: true })
+    } catch (error) {
+      loggers.store.warn("session draft cleanup failed", {
+        sessionId: id,
+        error: String(error),
+      })
+    }
     // Post-commit, alongside the other derived-view cleanups. Every citation
     // captured in this conversation now points at nothing, so the claims that
     // rested on it must stop being injected; the arithmetic that follows runs

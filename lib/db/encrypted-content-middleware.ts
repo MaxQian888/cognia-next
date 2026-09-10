@@ -241,38 +241,27 @@ function wrapCursor(
     stop: { value: (value?: unknown) => cursor.stop(value) },
     fail: { value: (error: Error) => cursor.fail(error) },
     start: {
-      value: (callback: () => void) =>
-        cursor.start(() => {
-          // The one place the hold is not optional. `callback()` runs
-          // `cursor.continue()` a microtask later, so without a keep-alive
-          // request the transaction commits underneath the iteration and
-          // `continue()` throws `TransactionInactiveError` from inside this
-          // handler, where nothing settles the `each()` promise: the caller
-          // hangs to its timeout instead of failing. Falling back to the bare
-          // promise is right for the row-at-a-time reads above, whose rows are
-          // already in hand, and wrong here.
-          const decrypting = decryptRow(cursor.value, cursor.primaryKey)
-          const hold = tryHoldTransaction(decrypting)
-          if (!hold.ok) {
-            // `decrypting` was already running when the hold threw, and this
-            // branch is the only exit that never awaits it. Adopting its
-            // rejection keeps a bad envelope or a locked cipher from surfacing
-            // as an unhandled rejection with no owner. The cursor still fails
-            // by the name of the real problem, which is the finished
-            // transaction rather than whatever the row turned out to contain.
-            void decrypting.catch(() => undefined)
-            cursor.fail(hold.error instanceof Error ? hold.error : new Error(String(hold.error)))
-            return
-          }
-          void hold.work.then(
-            (value) => {
+      value: (callback: () => void) => {
+        // Hold once, while start() still runs in the caller's transaction
+        // scope. Later native cursor callbacks can run in another concurrent
+        // query's scope; acquiring per-row holds there can deadlock the queries.
+        const work = cursor.start(() => {
+          void decryptRow(cursor.value, cursor.primaryKey)
+            .then((value) => {
               currentValue = value
               callback()
-            },
-            (error: unknown) =>
+            })
+            .catch((error: unknown) =>
               cursor.fail(error instanceof Error ? error : new Error(String(error)))
-          )
-        }),
+            )
+        })
+        const hold = tryHoldTransaction(work)
+        if (!hold.ok) {
+          cursor.fail(hold.error instanceof Error ? hold.error : new Error(String(hold.error)))
+          return work
+        }
+        return hold.work
+      },
     },
     next: {
       value: () => {

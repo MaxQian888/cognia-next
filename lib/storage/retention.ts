@@ -24,6 +24,7 @@ import { deleteExpiredEvalArtifacts } from "@/lib/db/eval-lab"
 import { purgeOcrCacheOlderThan } from "@/lib/db/ocr-results"
 import { pruneExpiredWorkSubmissionPayloads } from "@/lib/db/work-submissions"
 import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
+import { pruneTombstones } from "@/lib/sync/tombstones"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds, policyForTable } from "@/lib/data-governance/table-catalog"
 import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-service"
@@ -60,6 +61,10 @@ export interface RetentionTarget {
 const SETTLED_QUEUE_RETENTION_DAYS = 7
 
 const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
+  syncTombstones: {
+    policy: "row-expiry",
+    prune: () => pruneTombstones(),
+  },
   // ADR-0115's memory and retrieval control planes. Both prune functions were
   // written, tested, and then never called from anywhere, so `memoryJobs`,
   // `memoryAuditEvents`, `retrievalJobs` and `retrievalTraces` grew without

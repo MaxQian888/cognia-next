@@ -130,28 +130,6 @@ export interface SetDraftOptions {
   foldedLinks?: Record<string, string> | null
 }
 
-/**
- * Serializes the read-modify-write of a session's draft revision. A plain
- * promise chain rather than a Dexie transaction: draft saves are debounced and
- * uncontended in practice, and a transaction here would not settle under the
- * frozen timers the debounce tests run on.
- */
-const draftRevisionLocks = new Map<string, Promise<void>>()
-
-function withDraftRevisionLock(sessionId: string, run: () => Promise<void>): Promise<void> {
-  const previous = draftRevisionLocks.get(sessionId) ?? Promise.resolve()
-  const next = previous.then(run, run)
-  // Keep the chain alive on failure so one rejected save cannot wedge the rest.
-  draftRevisionLocks.set(
-    sessionId,
-    next.then(
-      () => undefined,
-      () => undefined
-    )
-  )
-  return next
-}
-
 export async function getDraft(sessionId: string): Promise<ChatDraftRow | null> {
   const row = await getDb().chatDrafts.get(sessionId)
   return row ?? null
@@ -185,40 +163,55 @@ export async function setDraft(
   // to continue the row's own sequence — deriving it from a wall clock (or from
   // a module-global that never observes the authority's writes) lets a local
   // edit land *below* what the Host already published, which regresses the
-  // channel and makes the next broadcast reuse a revision. Serialized per
-  // session so concurrent saves cannot read the same revision and both claim it.
-  await withDraftRevisionLock(sessionId, async () => {
-    const previous = await db.chatDrafts.get(sessionId)
-    const revision = options.revision ?? (previous?.revision ?? 0) + 1
-    // Omitted means keep; `null` means clear. See `SetDraftOptions`.
-    const templateBinding =
-      options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
-    const foldedLinks =
-      options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
-    await db.chatDrafts.put({
-      sessionId,
-      text,
-      updatedAt: Date.now(),
-      revision,
-      ...(templateBinding ? { templateBinding } : {}),
-      ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
-      ...(options.originClientId || hostStateRow?.clientId
-        ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
-        : {}),
-      // The content hash rides along so a draft restored after a restart can
-      // rejoin its upload instead of re-hashing and re-sending the file.
-      attachmentRefs: attachments.map(({ name, mediaType, size, hash }) => ({
-        name,
-        mediaType,
-        size,
-        ...(hash ? { hash } : {}),
-      })),
-      ...(attachments.length > 0 ? { attachments } : {}),
-    })
-  })
+  // channel and makes the next broadcast reuse a revision. The transaction
+  // serializes revision allocation across tabs and orders saves with deletes.
+  const written = await db.transaction(
+    "rw",
+    db.sessions,
+    db.syncTombstones,
+    db.chatDrafts,
+    async () => {
+      // Some callers seed a draft before their optimistic session is persisted.
+      // Reject only a known deletion, while allowing an explicitly recreated row.
+      if (
+        (await db.sessions.where("id").equals(sessionId).count()) === 0 &&
+        (await db.syncTombstones.get(["sessions", sessionId]))
+      ) {
+        return false
+      }
+      const previous = await db.chatDrafts.get(sessionId)
+      const revision = options.revision ?? (previous?.revision ?? 0) + 1
+      // Omitted means keep; `null` means clear. See `SetDraftOptions`.
+      const templateBinding =
+        options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
+      const foldedLinks =
+        options.foldedLinks === undefined ? previous?.foldedLinks : options.foldedLinks
+      await db.chatDrafts.put({
+        sessionId,
+        text,
+        updatedAt: Date.now(),
+        revision,
+        ...(templateBinding ? { templateBinding } : {}),
+        ...(foldedLinks && Object.keys(foldedLinks).length > 0 ? { foldedLinks } : {}),
+        ...(options.originClientId || hostStateRow?.clientId
+          ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
+          : {}),
+        // The content hash rides along so a draft restored after a restart can
+        // rejoin its upload instead of re-hashing and re-sending the file.
+        attachmentRefs: attachments.map(({ name, mediaType, size, hash }) => ({
+          name,
+          mediaType,
+          size,
+          ...(hash ? { hash } : {}),
+        })),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      })
+      return true
+    }
+  )
   // Enforce AFTER the write so the row just saved counts toward the total and
   // is the one protected from eviction.
-  if (attachments.some((a) => a.bytes)) await enforceDraftAttachmentQuota(sessionId)
+  if (written && attachments.some((a) => a.bytes)) await enforceDraftAttachmentQuota(sessionId)
 }
 
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -271,24 +264,28 @@ function rowBytes(row: ChatDraftRow): number {
  */
 export async function enforceDraftAttachmentQuota(keepSessionId?: string): Promise<void> {
   const db = getDb()
-  // `updatedAt` is indexed, so this walks oldest-first without a full sort.
-  const rows = await db.chatDrafts.orderBy("updatedAt").toArray()
-  let total = rows.reduce((sum, row) => sum + rowBytes(row), 0)
-  if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) return
+  // A quota sweep rewrites existing rows. Keep its read and write together so
+  // it cannot restore a deleted draft from an older snapshot.
+  await db.transaction("rw", db.chatDrafts, async () => {
+    // `updatedAt` is indexed, so this walks oldest-first without a full sort.
+    const rows = await db.chatDrafts.orderBy("updatedAt").toArray()
+    let total = rows.reduce((sum, row) => sum + rowBytes(row), 0)
+    if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) return
 
-  const stripped: ChatDraftRow[] = []
-  for (const row of rows) {
-    if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) break
-    if (row.sessionId === keepSessionId) continue
-    const freed = rowBytes(row)
-    if (freed === 0) continue
-    stripped.push({
-      ...row,
-      attachments: (row.attachments ?? []).map(({ bytes: _bytes, ...rest }) => rest),
-    })
-    total -= freed
-  }
-  if (stripped.length > 0) await db.chatDrafts.bulkPut(stripped)
+    const stripped: ChatDraftRow[] = []
+    for (const row of rows) {
+      if (total <= DRAFT_ATTACHMENT_QUOTA_BYTES) break
+      if (row.sessionId === keepSessionId) continue
+      const freed = rowBytes(row)
+      if (freed === 0) continue
+      stripped.push({
+        ...row,
+        attachments: (row.attachments ?? []).map(({ bytes: _bytes, ...rest }) => rest),
+      })
+      total -= freed
+    }
+    if (stripped.length > 0) await db.chatDrafts.bulkPut(stripped)
+  })
 }
 
 /**

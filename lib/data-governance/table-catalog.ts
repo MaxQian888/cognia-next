@@ -1320,6 +1320,14 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     enforcement: "domain",
     reason: "The unattended-execution audit writer trims oldest rows after append.",
   },
+  syncTombstones: {
+    mode: "ttl",
+    days: 90,
+    enforcement: "central",
+    executorId: "syncTombstones",
+    reason:
+      "The central sweep reconciles explicitly deleted session data before expiring deletion markers; missing parents without deletion evidence are preserved.",
+  },
   sessionUsage: {
     mode: "ttl",
     days: 90,

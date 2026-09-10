@@ -12,6 +12,8 @@ import {
   updateSession,
   setSessionActiveBranchSelection,
   listSessions,
+  countSessions,
+  assignSessionToFolder,
   listAgentThreadSessions,
   listScopedSessions,
   deleteSession,
@@ -42,6 +44,8 @@ import {
   listSessionOutbox,
 } from "./session-peer-messages"
 import { loggers } from "@cognia/logging"
+import * as chatDrafts from "./chat-drafts"
+import { commitTranscriptIndexPage } from "./chat-transcript-index"
 
 // The /loop cascade tears down backing scheduler tasks via a dynamic
 // import — mock the scheduler singleton so no real timing engine spins up.
@@ -636,6 +640,203 @@ describe("updateSession + listSessions", () => {
 })
 
 describe("bulkDeleteSessions", () => {
+  async function seedOwnedState(sessionId: string, hashes: string[]) {
+    const db = getDb()
+    await db.messages.put({
+      id: `message-${sessionId}`,
+      sessionId,
+      role: "user",
+      parts: hashes.map((hash) => ({ type: "image", ref: `cognia-media:${hash}` })),
+      createdAt: 1,
+    } as never)
+    await db.messageMediaRefs.bulkPut(
+      hashes.map((hash) => ({ messageId: `message-${sessionId}`, sessionId, hash }))
+    )
+    await db.sessionState.put({ sessionId, lastReadAt: 1, unreadCount: 2 })
+    await db.chatDrafts.put({ sessionId, text: "unsent", updatedAt: 1 })
+    await db.chatInputHistory.add({ sessionId, text: "sent", createdAt: 1 })
+    await commitTranscriptIndexPage({
+      sessionId,
+      revision: 1,
+      complete: true,
+      items: [
+        {
+          kind: "completed-turn",
+          itemKey: "turn",
+          turnKey: "turn",
+          revision: 1,
+          detailRevision: 1,
+          status: "completed",
+          userMessages: [],
+          collapsed: { exists: false, messageCount: 1, trailingCount: 0, mediaCount: 0 },
+          startedAt: 1,
+        },
+      ],
+    })
+  }
+
+  async function seedMedia(hash: string, createdAt = 1) {
+    await getDb().messageMedia.put({
+      hash,
+      mediaType: "image/png",
+      width: 1,
+      height: 1,
+      blob: new Blob(["image"]),
+      byteSize: 5,
+      createdAt,
+      lastUsedAt: createdAt,
+    })
+  }
+
+  it("deletes owned state and only unreferenced candidate media, preserving ordinary branches", async () => {
+    const parent = await createSession({ title: "parent" })
+    const child = await createSession({
+      parentSessionId: parent.id,
+      attachedChild: {
+        parentSessionId: parent.id,
+        lifecycleOwnerSessionId: parent.id,
+        status: "running",
+        context: { mode: "none" },
+        workspace: "shared",
+        createdAt: 1,
+      },
+    })
+    const branch = await createSession({ parentSessionId: parent.id })
+    await assignSessionToFolder(branch.id, "surviving-folder")
+    await seedOwnedState(parent.id, ["exclusive", "shared", "recent"])
+    await seedOwnedState(child.id, ["child-only"])
+    await seedOwnedState(branch.id, ["shared"])
+    for (const hash of ["exclusive", "shared", "child-only", "unrelated-orphan"]) {
+      await seedMedia(hash)
+    }
+    await seedMedia("recent", Date.now())
+    expect(await countSessions()).toBe(3)
+
+    await bulkDeleteSessions([parent.id, parent.id, "missing"])
+
+    const db = getDb()
+    expect(await countSessions()).toBe(1)
+    expect((await getSession(branch.id))?.folderId).toBe("surviving-folder")
+    for (const sessionId of [parent.id, child.id]) {
+      expect(await db.messages.where("sessionId").equals(sessionId).count()).toBe(0)
+      expect(await db.messageMediaRefs.where("sessionId").equals(sessionId).count()).toBe(0)
+      expect(await db.sessionState.get(sessionId)).toBeUndefined()
+      expect(await db.chatDrafts.get(sessionId)).toBeUndefined()
+      expect(await db.chatInputHistory.where("sessionId").equals(sessionId).count()).toBe(0)
+      expect(await db.chatTurnSummaries.where("sessionId").equals(sessionId).count()).toBe(0)
+      expect(await db.chatTranscriptIndexState.get(sessionId)).toBeUndefined()
+    }
+    expect(await db.sessionState.get(branch.id)).toBeDefined()
+    expect(await db.chatDrafts.get(branch.id)).toBeDefined()
+    expect(await db.chatInputHistory.where("sessionId").equals(branch.id).count()).toBe(1)
+    expect(await db.chatTurnSummaries.where("sessionId").equals(branch.id).count()).toBe(1)
+    expect(await db.chatTranscriptIndexState.get(branch.id)).toBeDefined()
+    expect(await db.messageMediaRefs.toArray()).toEqual([
+      { messageId: `message-${branch.id}`, sessionId: branch.id, hash: "shared" },
+    ])
+    expect((await db.messageMedia.toArray()).map((row) => row.hash).sort()).toEqual([
+      "recent",
+      "shared",
+      "unrelated-orphan",
+    ])
+    expect(
+      (await db.syncTombstones.where("table").equals("sessionState").toArray())
+        .map((row) => row.id)
+        .sort()
+    ).toEqual([parent.id, child.id].sort())
+  })
+
+  it("rolls back all owned state when the delete transaction fails", async () => {
+    const session = await createSession()
+    await seedOwnedState(session.id, ["rollback"])
+    await seedMedia("rollback")
+    const db = getDb()
+    const failDelete = () => {
+      throw new Error("session delete failed")
+    }
+    db.sessions.hook("deleting", failDelete)
+    try {
+      await expect(deleteSession(session.id)).rejects.toThrow("session delete failed")
+    } finally {
+      db.sessions.hook("deleting").unsubscribe(failDelete)
+    }
+    expect(await getSession(session.id)).toBeDefined()
+    expect(await db.messages.where("sessionId").equals(session.id).count()).toBe(1)
+    expect(await db.messageMediaRefs.where("sessionId").equals(session.id).count()).toBe(1)
+    expect(await db.messageMedia.get("rollback")).toBeDefined()
+    expect(await db.sessionState.get(session.id)).toBeDefined()
+    expect(await db.chatDrafts.get(session.id)).toBeDefined()
+    expect(await db.chatInputHistory.where("sessionId").equals(session.id).count()).toBe(1)
+    expect(await db.chatTurnSummaries.where("sessionId").equals(session.id).count()).toBe(1)
+    expect(await db.chatTranscriptIndexState.get(session.id)).toBeDefined()
+    expect(await db.syncTombstones.count()).toBe(0)
+    expect(markSessionRemovedMock).not.toHaveBeenCalled()
+  })
+
+  it("reports deletion as committed when candidate media cleanup fails", async () => {
+    const session = await createSession()
+    await seedOwnedState(session.id, ["cleanup-failure"])
+    await seedMedia("cleanup-failure")
+    const db = getDb()
+    const failDelete = () => {
+      throw new Error("media unavailable")
+    }
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => {})
+    db.messageMedia.hook("deleting", failDelete)
+    try {
+      await expect(deleteSession(session.id)).resolves.toBeUndefined()
+      expect(warn).toHaveBeenCalledWith("session media cleanup failed", {
+        sessionIds: [session.id],
+        error: "Error: media unavailable",
+      })
+    } finally {
+      db.messageMedia.hook("deleting").unsubscribe(failDelete)
+      warn.mockRestore()
+    }
+    expect(await getSession(session.id)).toBeUndefined()
+    expect(await db.messageMediaRefs.count()).toBe(0)
+    expect(await db.messageMedia.get("cleanup-failure")).toBeDefined()
+    expect(markSessionRemovedMock).toHaveBeenCalledWith(session.id)
+  })
+
+  it("cancels a pending draft save after deleting its session", async () => {
+    const session = await createSession()
+    const setTimer = jest.spyOn(globalThis, "setTimeout")
+    chatDrafts.setDraftDebounced(session.id, "must not return", [], 1000)
+    const timer = setTimer.mock.results.at(-1)?.value
+    setTimer.mockRestore()
+    const clearTimer = jest.spyOn(globalThis, "clearTimeout")
+    try {
+      await deleteSession(session.id)
+      expect(clearTimer).toHaveBeenCalledWith(timer)
+      expect(await getDb().chatDrafts.get(session.id)).toBeUndefined()
+    } finally {
+      clearTimer.mockRestore()
+      await chatDrafts.clearDraft(session.id, { hostAlreadyCleared: true })
+    }
+  })
+
+  it("keeps a committed deletion successful when draft timer cleanup fails", async () => {
+    const session = await createSession()
+    await seedOwnedState(session.id, [])
+    const clearDraft = jest
+      .spyOn(getDb().chatDrafts, "delete")
+      .mockRejectedValueOnce(new Error("closed"))
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => {})
+    try {
+      await expect(deleteSession(session.id)).resolves.toBeUndefined()
+      expect(await getSession(session.id)).toBeUndefined()
+      expect(await getDb().chatDrafts.get(session.id)).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith("session draft cleanup failed", {
+        sessionId: session.id,
+        error: "Error: closed",
+      })
+    } finally {
+      clearDraft.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
   it("revokes the claims that cited each deleted conversation", async () => {
     // Post-commit, alongside the other derived-view cleanups: a claim whose
     // whole source conversation is gone must stop being injected.

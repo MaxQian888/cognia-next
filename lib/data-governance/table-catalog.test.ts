@@ -143,6 +143,7 @@ describe("DataTableCatalog", () => {
       "retrievalControl",
       "workflowAppData",
       "siteArtifacts",
+      "syncTombstones",
     ])
     expect(policyForTable("ocrResults")?.retentionPolicy).toMatchObject({
       mode: "ttl",
@@ -298,7 +299,7 @@ describe("thread-handoff journal", () => {
       retentionPolicy: { mode: "permanent", enforcement: "explicit-delete" },
       cleanupPolicy: "protected",
     })
-    expect(policyForTable("threadHandoffTickets").retentionPolicy.reason).toMatch(
+    expect(policyForTable("threadHandoffTickets")?.retentionPolicy.reason).toMatch(
       /retired in place/
     )
     expect(COMPANION_SYNC_TABLES.has("threadHandoffTickets")).toBe(false)

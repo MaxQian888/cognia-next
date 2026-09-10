@@ -1,4 +1,6 @@
 import "fake-indexeddb/auto"
+import { spawnSync } from "node:child_process"
+import { buildSync } from "esbuild"
 
 import Dexie, {
   type DBCore,
@@ -16,6 +18,116 @@ import { createEncryptedContentMiddleware } from "./encrypted-content-middleware
 import { CogniaDB } from "./schema"
 
 const DATABASE_NAME = "cognia-account-acct_crypto"
+
+it("settles concurrent encrypted cursor reads in the native headless runtime", () => {
+  // Jest's crypto/Promise environment does not reproduce the Node transaction
+  // scope interleaving that stalled scheduler startup after restoring rows.
+  const bundle = buildSync({
+    stdin: {
+      resolveDir: process.cwd(),
+      contents: `
+        import "fake-indexeddb/auto";
+        import Dexie from "dexie";
+        import { AccountContentCipher, activateAccountContentCipher } from "./lib/accounts/content-cipher";
+        import { createEncryptedContentMiddleware } from "./lib/db/encrypted-content-middleware";
+        Dexie.dependencies.indexedDB = indexedDB;
+        Dexie.dependencies.IDBKeyRange = IDBKeyRange;
+        const name = "cognia-account-native-cursor";
+        activateAccountContentCipher(await AccountContentCipher.createForTesting("native-cursor", name));
+        const db = new Dexie(name);
+        db.version(1).stores({ messages: "id, sessionId, createdAt" });
+        db.use(createEncryptedContentMiddleware(name));
+        await db.open();
+        await db.table("messages").bulkPut(Array.from({ length: 8 }, (_, index) => ({
+          id: String(index), sessionId: "s", createdAt: index,
+          content: index % 2 ? "skip" : "keep"
+        })));
+        const matching = () => db.table("messages").where("sessionId").equals("s")
+          .filter(row => row.content === "keep");
+        const timer = setTimeout(() => { console.error("cursor reads did not settle"); process.exit(1); }, 3000);
+        const result = await Promise.all([
+          db.table("messages").toArray().then(rows => rows.length),
+          matching().count(),
+          matching().sortBy("createdAt").then(rows => rows.map(row => row.id))
+        ]);
+        clearTimeout(timer);
+        db.close();
+        console.log(JSON.stringify(result));
+      `,
+    },
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    packages: "external",
+    write: false,
+  })
+  const result = spawnSync(process.execPath, ["--input-type=module"], {
+    input: bundle.outputFiles[0].text,
+    encoding: "utf8",
+    timeout: 5000,
+    env: { ...process.env, NODE_ENV: "test" },
+  })
+  expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: "" })
+  expect(JSON.parse(result.stdout.trim())).toEqual([8, 4, ["0", "2", "4", "6"]])
+})
+
+it("filters and sorts encrypted cursor rows without hanging", async () => {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+  )
+  const db = new CogniaDB(DATABASE_NAME, "encrypted-content-test")
+  await db.open()
+  try {
+    await db.messages.bulkPut([
+      { id: "cursor_1", sessionId: "cursor", role: "user", content: "keep", createdAt: 200 },
+      { id: "cursor_2", sessionId: "cursor", role: "user", content: "skip", createdAt: 100 },
+      { id: "cursor_3", sessionId: "cursor", role: "user", content: "keep", createdAt: 300 },
+    ])
+    await expect(
+      Promise.all([
+        db.messages.toArray().then((rows) => rows.length),
+        db.messages
+          .where("sessionId")
+          .equals("cursor")
+          .filter((row) => row.content === "keep")
+          .count(),
+        db.messages
+          .where("sessionId")
+          .equals("cursor")
+          .filter((row) => row.content === "keep")
+          .sortBy("createdAt"),
+      ])
+    ).resolves.toMatchObject([3, 2, [{ id: "cursor_1" }, { id: "cursor_3" }]])
+  } finally {
+    db.close()
+  }
+})
+
+it("rejects a throwing encrypted-row filter instead of leaving its query pending", async () => {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+  )
+  const db = new CogniaDB(DATABASE_NAME, "encrypted-content-test")
+  await db.open()
+  try {
+    await db.messages.put({
+      id: "filter-error",
+      sessionId: "filter-error",
+      role: "user",
+      content: "encrypted",
+      createdAt: 100,
+    })
+    await expect(
+      db.messages
+        .filter(() => {
+          throw new Error("invalid filter")
+        })
+        .toArray()
+    ).rejects.toThrow("invalid filter")
+  } finally {
+    db.close()
+  }
+})
 
 beforeEach(async () => {
   __resetAccountContentCipherForTesting()

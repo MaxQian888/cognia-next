@@ -144,6 +144,31 @@ describe("createDualWriteBackend", () => {
     expect(shadow.compacted).toBe(1)
     expect(primary.closed && shadow.closed).toBe(true)
   })
+
+  it("preserves a dual write made before compaction resolves in both backends", async () => {
+    const root = tempRoot()
+    writeCheckpoint(root, "gen-0001", state())
+    const primary = openBackend("journal-v4", root)
+    const shadow = openBackend("sqlite-v5", root)
+    try {
+      await primary.load()
+      await shadow.compact(state())
+      const dual = createDualWriteBackend(primary, shadow)
+      dual.commitSync(commit(1, "s:a", { id: "a" }))
+      const snapshot = await dual.load()
+
+      const compacting = dual.compact(snapshot)
+      dual.commitSync(commit(2, "s:b", { id: "b" }))
+      await compacting
+      expect(await shadow.load()).toEqual(await primary.load())
+      dual.commitSync(commit(3, "s:c", { id: "c" }))
+      expect((await shadow.load()).sequence).toBe(3)
+    } finally {
+      await primary.close()
+      await shadow.close()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("resolveBackend", () => {

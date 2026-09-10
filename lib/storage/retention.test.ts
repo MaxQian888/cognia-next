@@ -7,7 +7,7 @@ import {
 } from "./retention"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
-import { saveSettings, getSettings } from "@/lib/db/settings"
+import { saveSettings, getSettings, DEFAULTS } from "@/lib/db/settings"
 import { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
 
 // Wrap getSettings so one test can force the read to reject; every other call
@@ -126,6 +126,7 @@ describe("pruneRetainedTables", () => {
       { id: "retrievalControl", removed: 0 },
       { id: "workflowAppData", removed: 0 },
       { id: "siteArtifacts", removed: 0 },
+      { id: "syncTombstones", removed: 0 },
     ])
     expect((await getDb().agentTraces.toArray()).map((r) => r.id)).toEqual(["fresh"])
   })
@@ -284,4 +285,50 @@ describe("startStorageRetentionSweeper", () => {
       clearSpy.mockRestore()
     }
   })
+})
+
+it("reconciles explicitly deleted draft rows through the governed sweep even with trace keep-forever", async () => {
+  const db = getDb()
+  await db.chatDrafts.put({
+    sessionId: "deleted-draft",
+    text: "orphan",
+    revision: 1,
+    updatedAt: 1,
+  } as never)
+  await db.syncTombstones.put({ table: "sessions", id: "deleted-draft", deletedAt: 1 })
+  const result = await pruneRetainedTables(0)
+  expect(result).toContainEqual({ id: "syncTombstones", removed: 2 })
+  expect(await db.chatDrafts.get("deleted-draft")).toBeUndefined()
+})
+
+it("uses safe fallback windows when legacy settings and optional defaults omit retention fields", async () => {
+  const traceDefaults = DEFAULTS.storageRetention
+  const ocrDefaults = DEFAULTS.ocrSettings
+  const now = Date.now()
+  await getDb().agentTraces.bulkPut([
+    span("old-fallback", now - 90 * MS_PER_DAY),
+    span("keep-fallback", now),
+  ])
+  await getDb().ocrResults.put({
+    id: "old-fallback",
+    fileSha: "old-fallback",
+    providerId: "ocr",
+    langs: "en",
+    result: "{}",
+    createdAt: now - 90 * MS_PER_DAY,
+    bytesIn: 1,
+  })
+  ;(getSettings as jest.Mock).mockResolvedValueOnce({})
+  try {
+    DEFAULTS.storageRetention = undefined
+    DEFAULTS.ocrSettings = undefined
+    const stop = await startStorageRetentionSweeper()
+    stop()
+    expect(await getDb().agentTraces.get("old-fallback")).toBeUndefined()
+    expect(await getDb().agentTraces.get("keep-fallback")).toBeDefined()
+    expect(await getDb().ocrResults.get("old-fallback")).toBeUndefined()
+  } finally {
+    DEFAULTS.storageRetention = traceDefaults
+    DEFAULTS.ocrSettings = ocrDefaults
+  }
 })

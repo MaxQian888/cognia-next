@@ -1,3 +1,4 @@
+import { decodeBase64Url, encodeBase64Url } from "@/lib/share/encoding"
 import { assertAccountId } from "./account-types"
 
 export interface EncryptedContentEnvelope {
@@ -191,18 +192,6 @@ function randomBytes(length: number): Uint8Array {
 function subtle(): SubtleCrypto {
   if (!globalThis.crypto?.subtle) throw new Error("Web Crypto API is required.")
   return globalThis.crypto.subtle
-}
-
-function encodeBase64Url(bytes: Uint8Array): string {
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-}
-
-function decodeBase64Url(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
-  const binary = atob(`${normalized}${"=".repeat((4 - (normalized.length % 4)) % 4)}`)
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
 function toBufferSource(bytes: Uint8Array): BufferSource {

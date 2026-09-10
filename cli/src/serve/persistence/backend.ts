@@ -71,8 +71,10 @@ export function createDualWriteBackend(
     },
     lastSequence: () => primary.lastSequence(),
     async compact(state) {
-      const result = await primary.compact(state)
-      await shadow.compact(state)
+      // Both backends publish their checkpoint synchronously. Invoke both
+      // before yielding so a dual write cannot land between the primary's
+      // checkpoint and a stale shadow replacement.
+      const [result] = await Promise.all([primary.compact(state), shadow.compact(state)])
       return result
     },
     async close() {

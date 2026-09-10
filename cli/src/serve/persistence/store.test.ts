@@ -361,6 +361,201 @@ describe("openDurabilityStore", () => {
     await reopened.close()
   })
 
+  it("preserves a commit that overlaps compaction and accepts the next sequence", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a" }] })
+
+    const compacting = store.compact()
+    await source.db.commit("sessions", { type: "put", values: [{ id: "b" }] })
+    await compacting
+    expect(store.backend.lastSequence()).toBe(store.sequence())
+    await source.db.commit("sessions", { type: "put", values: [{ id: "c" }] })
+    await store.close()
+
+    const revived = makeSource()
+    const reopened = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [revived],
+    })
+    expect(await revived.db.tables[0].toArray()).toEqual([{ id: "a" }, { id: "b" }, { id: "c" }])
+    expect(reopened.sequence()).toBe(3)
+    await reopened.close()
+  })
+
+  it("coalesces manual compactions and waits for them before closing", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    const compact = store.backend.compact.bind(store.backend)
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const compactSpy = jest.spyOn(store.backend, "compact").mockImplementation(async (state) => {
+      const result = await compact(state)
+      entered()
+      await gate
+      return result
+    })
+    const closeSpy = jest.spyOn(store.backend, "close")
+
+    const first = store.compact()
+    await started
+    const second = store.compact()
+    expect(second).toBe(first)
+    const closing = store.close()
+    expect(store.close()).toBe(closing)
+    await Promise.resolve()
+    expect(closeSpy).not.toHaveBeenCalled()
+    release()
+    await Promise.all([first, second, closing])
+    expect(compactSpy).toHaveBeenCalledTimes(1)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+    await store.compact()
+    expect(compactSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("folds writes during snapshot acquisition without reading live tables or retrying", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a" }] })
+    const load = store.backend.load.bind(store.backend)
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const loadSpy = jest.spyOn(store.backend, "load").mockImplementationOnce(async () => {
+      const snapshot = await load()
+      entered()
+      await gate
+      return snapshot
+    })
+    const tableReads = source.db.tables.map((table) => jest.spyOn(table, "toArray"))
+
+    const compacting = store.compact()
+    await started
+    const row = { id: "b", n: 2 }
+    await source.db.commit("sessions", { type: "put", values: [row] })
+    row.n = 999
+    await source.db.commit("sessions", { type: "delete", keys: ["a"] })
+    release()
+    await compacting
+    expect(loadSpy).toHaveBeenCalledTimes(1)
+    for (const read of tableReads) expect(read).not.toHaveBeenCalled()
+    expect(store.backend.lastSequence()).toBe(3)
+    await source.db.commit("sessions", { type: "put", values: [{ id: "c" }] })
+    await store.close()
+
+    const backend = openBackend("journal-v4", path.join(home, "durability", "acct"))
+    expect((await backend.load()).dbs.CogniaDB.rows.sessions).toEqual({
+      [encodeKey("b")]: { id: "b", n: 2 },
+      [encodeKey("c")]: { id: "c" },
+    })
+    await backend.close()
+  })
+
+  it("can compact again after snapshot acquisition fails", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    jest.spyOn(store.backend, "load").mockRejectedValueOnce(new Error("unreadable snapshot"))
+    await expect(store.compact()).rejects.toThrow("unreadable snapshot")
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a" }] })
+    await store.compact()
+    await store.close()
+    const backend = openBackend("journal-v4", path.join(home, "durability", "acct"))
+    expect((await backend.load()).dbs.CogniaDB.rows.sessions).toEqual({
+      [encodeKey("a")]: { id: "a" },
+    })
+    await backend.close()
+  })
+
+  it("keeps dynamic schema changes while folding overlapping writes into the checkpoint", async () => {
+    const source = makeSource()
+    const store = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [source],
+      compactEveryCommits: 0,
+    })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a", n: 0 }] })
+    ;(source.db as { verno: number }).verno = 142
+    source.db.tables.push(new FakeTable("pluginRows"))
+    await source.db.commit("pluginRows", {
+      type: "put",
+      values: [{ id: "plugin-row" }, { id: "kept-plugin-row" }],
+    })
+    const read = source.db.tables[0].toArray.bind(source.db.tables[0])
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    jest.spyOn(source.db.tables[0], "toArray").mockImplementationOnce(async () => {
+      entered()
+      await gate
+      return read()
+    })
+
+    const compacting = store.compact()
+    await started
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a", n: 1 }] })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "a", n: 2 }] })
+    await source.db.commit("pluginRows", { type: "delete", keys: ["plugin-row"] })
+    await source.db.commit("sessions", { type: "put", values: [{ id: "b" }] })
+    release()
+    await compacting
+    await source.db.commit("sessions", { type: "put", values: [{ id: "c" }] })
+    await store.close()
+
+    const revived = makeSource("CogniaDB", 142)
+    revived.db.tables.push(new FakeTable("pluginRows"))
+    const reopened = await openDurabilityStore({
+      home,
+      accountId: "acct",
+      getSources: async () => [revived],
+    })
+    expect(await revived.db.tables[0].toArray()).toEqual([
+      { id: "a", n: 2 },
+      { id: "b" },
+      { id: "c" },
+    ])
+    expect(await revived.db.tables[2].toArray()).toEqual([{ id: "kept-plugin-row" }])
+    expect(reopened.sequence()).toBe(7)
+    await reopened.close()
+  })
+
   it("exposes the live state for parity tooling", async () => {
     const source = makeSource()
     const store = await openDurabilityStore({

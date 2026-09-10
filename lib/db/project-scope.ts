@@ -11,6 +11,8 @@ import { getDb } from "./schema"
 import { getSettings, saveSettings } from "./settings"
 import { buildDefaultProject, DEFAULT_PROJECT_ID } from "./project-defaults"
 import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
+import { loggers } from "@cognia/logging"
+import { collectUnreferencedMessageMedia } from "./message-media-refs"
 
 export { DEFAULT_PROJECT_ID } from "./project-defaults"
 
@@ -143,6 +145,9 @@ const SESSION_CHILD_TABLES = [
   "chatDrafts",
   "chatInputHistory",
   "sessionState",
+  "messageMediaRefs",
+  "chatTurnSummaries",
+  "chatTranscriptIndexState",
   // Staged remote attachments for a session that is going away. The bytes are
   // the whole point of the row, so leaving them behind would keep a deleted
   // workspace's files on disk with nothing left that can reference them.
@@ -211,40 +216,46 @@ export async function detachProjectContents(projectId: string): Promise<string> 
 
 export async function deleteProjectCascade(projectId: string): Promise<void> {
   const db = getDb()
-  const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
-  const sessionIds = projectSessions.map((session) => session.id)
-  const overrideConversationKeys = (await scopedWhere(
-    db.conversationOverrides,
-    projectId
-  ).primaryKeys()) as string[]
-  const inboundConversationKeys = Array.from(
-    new Set([
-      ...overrideConversationKeys,
-      ...projectSessions.flatMap((session) =>
-        session.platformBinding?.conversationKey ? [session.platformBinding.conversationKey] : []
-      ),
-    ])
-  )
-
-  // Collect parent ids for the project so child/event tables can be dropped by
-  // foreign key (covers child rows that never had a `projectId` stamped).
-  const parentIds = new Map<string, string[]>()
-  for (const { parentTable } of CHILD_TABLES) {
-    if (parentIds.has(parentTable)) continue
-    parentIds.set(
-      parentTable,
-      (await db.table(parentTable).where("projectId").equals(projectId).primaryKeys()) as string[]
-    )
-  }
 
   const tableNames = new Set<string>([
     ...PROJECT_SCOPED_TABLES,
     ...CHILD_TABLES.map((c) => c.table),
     ...SESSION_CHILD_TABLES,
   ])
-  const tables = [...tableNames, "connectorInboundJobs"].map((t) => db.table(t))
+  const tables = [...tableNames, "connectorInboundJobs", "syncTombstones"].map((t) => db.table(t))
+  const orphanCandidates = new Set<string>()
 
   await db.transaction("rw", tables, async () => {
+    const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
+    const sessionIds = projectSessions.map((session) => session.id)
+    const overrideConversationKeys = (await scopedWhere(
+      db.conversationOverrides,
+      projectId
+    ).primaryKeys()) as string[]
+    const inboundConversationKeys = Array.from(
+      new Set([
+        ...overrideConversationKeys,
+        ...projectSessions.flatMap((session) =>
+          session.platformBinding?.conversationKey ? [session.platformBinding.conversationKey] : []
+        ),
+      ])
+    )
+
+    // Collect parent ids for the project so child/event tables can be dropped by
+    // foreign key (covers child rows that never had a `projectId` stamped).
+    const parentIds = new Map<string, string[]>()
+    for (const { parentTable } of CHILD_TABLES) {
+      if (parentIds.has(parentTable)) continue
+      parentIds.set(
+        parentTable,
+        (await db.table(parentTable).where("projectId").equals(projectId).primaryKeys()) as string[]
+      )
+    }
+    const deletedMessageIds = await db.messages.where("projectId").equals(projectId).primaryKeys()
+    if (sessionIds.length > 0) {
+      const refs = await db.messageMediaRefs.where("sessionId").anyOf(sessionIds).toArray()
+      for (const ref of refs) orphanCandidates.add(ref.hash)
+    }
     for (const { table, parentTable, fk } of CHILD_TABLES) {
       const ids = parentIds.get(parentTable) ?? []
       if (ids.length > 0) await db.table(table).where(fk).anyOf(ids).delete()
@@ -260,7 +271,28 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
     if (inboundConversationKeys.length > 0) {
       await db.connectorInboundJobs.where("conversationKey").anyOf(inboundConversationKeys).delete()
     }
+    const at = Date.now()
+    // Keep deletion evidence on this captured database and fail the cascade if
+    // it cannot be committed; a delayed draft must not resurrect deleted data.
+    await db.syncTombstones.bulkPut([
+      ...sessionIds.map((id) => ({ table: "sessions" as const, id, deletedAt: at })),
+      ...sessionIds.map((id) => ({ table: "sessionState" as const, id, deletedAt: at })),
+      ...deletedMessageIds.map((id) => ({ table: "messages" as const, id, deletedAt: at })),
+    ])
   })
+
+  if (orphanCandidates.size > 0) {
+    try {
+      // Re-check shared references after commit, keeping the normal upload
+      // grace period. Failed media GC must not misreport a completed cascade.
+      await collectUnreferencedMessageMedia(orphanCandidates)
+    } catch (error) {
+      loggers.store.warn("project media cleanup failed", {
+        projectId,
+        error: String(error),
+      })
+    }
+  }
 
   // Content-addressed runtime objects have no projectId by design because a
   // digest may be referenced by more than one run. Collect live references

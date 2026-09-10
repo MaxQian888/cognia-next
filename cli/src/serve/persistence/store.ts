@@ -13,10 +13,16 @@
  * has nothing to compact, and one that is hot should fold its journal on write
  * volume rather than wall clock.
  */
-import { decodeKey, encodeKey } from "./canonical"
+import { canonicalJson, decodeKey, encodeKey } from "./canonical"
 import { installTransactionCapture, type CaptureDexieLike, type CaptureHandle } from "./capture"
 import { durabilityRoot, resolveBackend, type ResolvedBackend } from "./backend"
-import type { DurabilityMutation, DurabilityState, HeadlessDurabilityBackend } from "./types"
+import { applyCommits } from "./journal"
+import type {
+  DurabilityCommit,
+  DurabilityMutation,
+  DurabilityState,
+  HeadlessDurabilityBackend,
+} from "./types"
 
 /** Dexie `Table` surface the store needs. */
 export interface DurabilityTableLike {
@@ -176,24 +182,26 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
   const captures: CaptureHandle[] = []
 
   let compacting: Promise<void> | null = null
+  let compactionTail: DurabilityCommit[] | null = null
+  let closing: Promise<void> | null = null
 
   function onCommit(mutations: DurabilityMutation[]): void {
     const backend = backendRef
     if (!backend) return
     sequence += 1
-    backend.commitSync({ sequence, committedAt: now(), mutations })
+    const commit = { sequence, committedAt: now(), mutations }
+    backend.commitSync(commit)
+    // Match the bytes already committed, rather than retaining mutable Dexie
+    // values while the authoritative snapshot's promise settles.
+    compactionTail?.push(JSON.parse(canonicalJson(commit)) as DurabilityCommit)
     commits += 1
     sinceCompaction += 1
     // Compaction is off the commit path on purpose: the transaction is already
     // durable, so folding it into a checkpoint is background work. A failure
     // here is not data loss — the journal still holds every commit — so it is
     // swallowed rather than propagated into an event listener.
-    if (compactEvery > 0 && sinceCompaction >= compactEvery && !compacting) {
-      compacting = compact()
-        .catch(() => {})
-        .finally(() => {
-          compacting = null
-        })
+    if (compactEvery > 0 && sinceCompaction >= compactEvery && !compacting && !closing) {
+      void compact().catch(() => {})
     }
   }
 
@@ -231,12 +239,55 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
 
   await withAllSuppressed(captures, () => restoreState(sources, resolved.state))
 
-  async function compact(): Promise<void> {
+  function compact(): Promise<void> {
+    if (compacting) return compacting
     const backend = backendRef
-    if (!backend) return
-    const live = await readSourcesState(sources, sequence)
-    await backend.compact(live)
-    sinceCompaction = 0
+    if (!backend || closing) return Promise.resolve()
+    compacting = (async () => {
+      compactionTail = []
+      // Independently reading live Dexie tables can straddle transactions and
+      // overwrite commits made after the first table was read. Fold only the
+      // durable snapshot and any commits made while load() was resolving.
+      // This avoids retrying (and starving) compaction under continuous writes.
+      let checkpoint = await backend.load()
+      const schemaChanged = sources.some((source) => {
+        const persisted = checkpoint.dbs[source.name]?.schema
+        const tables = includedTables(source)
+          .map((table) => table.name)
+          .sort()
+        return (
+          persisted?.version !== source.db.verno ||
+          JSON.stringify(persisted.tables) !== JSON.stringify(tables)
+        )
+      })
+      // Runtime plugin registration can add tables after the backend opened.
+      // Keep the previous schema-repinning behavior for that exceptional path;
+      // replaying the captured tail also makes these live reads consistent.
+      if (schemaChanged) checkpoint = await readSourcesState(sources, checkpoint.sequence)
+      applyCommits(
+        checkpoint,
+        compactionTail.filter((commit) => commit.sequence > checkpoint.sequence)
+      )
+      compactionTail = null
+      await backend.compact(checkpoint)
+      sinceCompaction = sequence - checkpoint.sequence
+    })().finally(() => {
+      compactionTail = null
+      compacting = null
+    })
+    return compacting
+  }
+
+  function close(): Promise<void> {
+    if (closing) return closing
+    closing = (async () => {
+      // Compaction failures are reported to explicit callers; they must not
+      // prevent shutdown from releasing the still-durable backend.
+      if (compacting) await compacting.catch(() => {})
+      await resolved.backend.close()
+      backendRef = null
+    })()
+    return closing
   }
 
   return {
@@ -244,15 +295,9 @@ export async function openDurabilityStore(opts: DurabilityStoreOptions): Promise
     sources,
     sequence: () => sequence,
     commitCount: () => commits,
-    async compact() {
-      await compact()
-    },
+    compact,
     readLiveState: () => readSourcesState(sources, sequence),
-    async close() {
-      if (compacting) await compacting
-      await resolved.backend.close()
-      backendRef = null
-    },
+    close,
   }
 }
 

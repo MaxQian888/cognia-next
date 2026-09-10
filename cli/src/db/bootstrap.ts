@@ -159,6 +159,46 @@ export function writeSnapshotAtomically(file: string, data: string): void {
   syncParentDirectory(file)
 }
 
+async function replaceFileAsync(source: string, destination: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.promises.rm(destination, { force: true }).catch(() => {})
+  }
+  await fs.promises.rename(source, destination)
+}
+
+async function syncFileAsync(file: string): Promise<void> {
+  const descriptor = await fs.promises.open(file, "r")
+  try {
+    await descriptor.sync()
+  } finally {
+    await descriptor.close()
+  }
+}
+
+/** Same commit order as the synchronous seam, without blocking the serving loop on disk I/O. */
+async function writeSnapshotAtomicallyAsync(file: string, data: string): Promise<void> {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true })
+  const temporary = `${file}.tmp`
+  const backup = `${file}.bak`
+  const backupTemporary = `${backup}.tmp`
+  const descriptor = await fs.promises.open(temporary, "w", 0o600)
+  try {
+    await descriptor.writeFile(data, "utf8")
+    await descriptor.sync()
+  } finally {
+    await descriptor.close()
+  }
+  if (fs.existsSync(file)) {
+    await fs.promises.copyFile(file, backupTemporary)
+    await fs.promises.chmod(backupTemporary, 0o600)
+    await syncFileAsync(backupTemporary)
+    await replaceFileAsync(backupTemporary, backup)
+  }
+  await replaceFileAsync(temporary, file)
+  await fs.promises.chmod(file, 0o600)
+  if (process.platform !== "win32") await syncFileAsync(path.dirname(file))
+}
+
 function nextPreservedPath(file: string, label: "corrupt" | "incompatible"): string {
   let generation = 1
   let candidate = `${file}.${label}-${generation}`
@@ -190,6 +230,24 @@ function preserveUnsafeSnapshot(
       null
     )
   }
+}
+
+function assertNoPendingSnapshotRecovery(file: string): void {
+  if (fs.existsSync(file) || !fs.existsSync(path.dirname(file))) return
+  const name = path.basename(file)
+  const preserved = fs.readdirSync(path.dirname(file)).find((entry) =>
+    ["corrupt", "incompatible"].some((label) => {
+      const prefix = `${name}.${label}-`
+      return entry.startsWith(prefix) && /^[1-9]\d*$/.test(entry.slice(prefix.length))
+    })
+  )
+  if (!preserved) return
+  const preservedPath = path.join(path.dirname(file), preserved)
+  throw new CliDbSnapshotError(
+    `Database snapshot requires recovery. A snapshot was preserved at ${preservedPath}; restore a compatible snapshot at ${file} before restarting. No data was overwritten.`,
+    file,
+    preservedPath
+  )
 }
 
 interface TableStoreManifest {
@@ -317,7 +375,7 @@ async function flushDirtyTables(
     const table = source?.db.tables.find((candidate) => candidate.name === tableName)
     if (!source || !table || source.excludeTables?.includes(tableName)) continue
     const rows = await table.toArray()
-    writeSnapshotAtomically(
+    await writeSnapshotAtomicallyAsync(
       path.join(tableDirectory, tableFileName(databaseName, tableName)),
       JSON.stringify(rows)
     )
@@ -336,7 +394,7 @@ async function flushDirtyTables(
       ),
     }
   }
-  writeSnapshotAtomically(
+  await writeSnapshotAtomicallyAsync(
     manifestFile,
     JSON.stringify({ snapshotFormat: 3, dbs } satisfies TableStoreManifest)
   )
@@ -378,7 +436,8 @@ async function prepareBuiltinPluginSchema(
   snapshotVersions: Readonly<Record<string, number>>
 ): Promise<void> {
   const primary = sources[0]
-  if (!primary || (snapshotVersions[primary.name] ?? primary.db.verno) <= primary.db.verno) return
+  const snapshotVersion = snapshotVersions[primary?.name ?? ""] ?? primary?.db.verno ?? 0
+  if (!primary || snapshotVersion <= primary.db.verno) return
 
   const [{ getBrowserBuiltinRegistry }, { restorePluginTables }] = await Promise.all([
     import("@/lib/plugin/core/browser-builtin-registry"),
@@ -393,8 +452,16 @@ async function prepareBuiltinPluginSchema(
       )
   )
   if (manifestDexie.size === 0) return
+  // `minimumVersion` is what makes the restore land on the SAME number the
+  // snapshot was written at. Runtime registration bumps once per table-owning
+  // plugin, while this consolidated re-declaration bumps once in total, so
+  // without the floor the database opens one or more versions below its own
+  // snapshot and `restoreTableStore` rejects it as incompatible. On the
+  // headless brain that rejection is silent data loss: the manifest is moved
+  // aside and the supervisor reboots the brain on an empty database.
   await restorePluginTables(() => primary.db as unknown as import("dexie").default, manifestDexie, {
     registerMissing: true,
+    minimumVersion: snapshotVersion,
   })
 }
 
@@ -423,6 +490,10 @@ function create(opts: EnsureCliDbOptions): CliDbHandle {
   let flushTail: Promise<void> = Promise.resolve()
 
   const ready = (async () => {
+    if (useTableStore) assertNoPendingSnapshotRecovery(manifestFile)
+    if (opts.readSnapshot === undefined && !(useTableStore && fs.existsSync(manifestFile))) {
+      assertNoPendingSnapshotRecovery(file)
+    }
     await installGlobals()
     sources = await getDatabases()
     await waitReady()

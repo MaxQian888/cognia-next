@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import {
   clearActiveRuntimeTargetContext,
@@ -38,6 +39,73 @@ afterEach(() => {
 })
 
 describe("chat-drafts", () => {
+  it("preserves an optimistic draft before its parent session has been persisted", async () => {
+    await setDraft("optimistic-session", "new conversation")
+    expect(await getDb().sessions.get("optimistic-session")).toBeUndefined()
+    expect((await getDraft("optimistic-session"))?.text).toBe("new conversation")
+  })
+
+  it("does not write a draft for a tombstoned missing session", async () => {
+    await getDb().syncTombstones.put({ table: "sessions", id: "deleted-session", deletedAt: 1 })
+    await setDraft("deleted-session", "late save")
+    expect(await getDraft("deleted-session")).toBeNull()
+  })
+
+  it("allows a recreated parent to own a draft despite an older tombstone", async () => {
+    const sessionId = "recreated-session"
+    await getDb().syncTombstones.put({ table: "sessions", id: sessionId, deletedAt: 1 })
+    await getDb().sessions.put({
+      id: sessionId,
+      projectId: "p",
+      kind: "direct",
+      title: "recreated",
+      createdAt: 2,
+      updatedAt: 2,
+    })
+    await setDraft(sessionId, "new generation")
+    expect((await getDraft(sessionId))?.text).toBe("new generation")
+  })
+
+  it("does not resurrect a draft whose session deletion commits during the save", async () => {
+    const db = getDb()
+    const sessionId = "delete-race"
+    await db.sessions.put({
+      id: sessionId,
+      projectId: "p",
+      kind: "direct",
+      title: "delete",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await setDraft(sessionId, "existing")
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const deletion = db.transaction(
+      "rw",
+      db.sessions,
+      db.chatDrafts,
+      db.syncTombstones,
+      async () => {
+        await db.sessions.delete(sessionId)
+        await db.chatDrafts.delete(sessionId)
+        await db.syncTombstones.put({ table: "sessions", id: sessionId, deletedAt: 2 })
+        started()
+        await Dexie.waitFor(gate)
+      }
+    )
+    await ready
+    const save = Dexie.ignoreTransaction(() => setDraft(sessionId, "late save"))
+    release()
+    await Promise.all([deletion, save])
+    expect(await Dexie.ignoreTransaction(() => getDraft(sessionId))).toBeNull()
+  })
+
   it("getDraft returns null when no row exists", async () => {
     expect(await getDraft("ses_missing")).toBeNull()
   })
@@ -126,6 +194,13 @@ describe("chat-drafts", () => {
 
     await clearDraft(sessionId, { hostAlreadyCleared: true })
     expect(await getDb().mobileOutboundQueue.count()).toBe(1)
+
+    // The local projection guard does not cancel an intent already persisted
+    // for the Host to authorize against its own current state.
+    await getDb().syncTombstones.put({ table: "sessions", id: sessionId, deletedAt: 2 })
+    await setDraft(sessionId, "awaiting host decision")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(2)
+    expect(await getDraft(sessionId)).toBeNull()
   })
 
   it("continues the row's revision instead of regressing below an authority write", async () => {
@@ -143,6 +218,22 @@ describe("chat-drafts", () => {
     await setDraft("ses_a", "seed")
     await Promise.all([setDraft("ses_a", "one"), setDraft("ses_a", "two")])
     expect((await getDraft("ses_a"))?.revision).toBe(3)
+  })
+
+  it("does not consume a revision or block later saves after a failed transaction", async () => {
+    await setDraft("ses_a", "existing")
+    const failUpdate = () => {
+      throw new Error("draft write failed")
+    }
+    getDb().chatDrafts.hook("updating", failUpdate)
+    try {
+      await expect(setDraft("ses_a", "failed")).rejects.toThrow("draft write failed")
+    } finally {
+      getDb().chatDrafts.hook("updating").unsubscribe(failUpdate)
+    }
+    expect((await getDraft("ses_a"))?.revision).toBe(1)
+    await setDraft("ses_a", "retry")
+    expect(await getDraft("ses_a")).toMatchObject({ text: "retry", revision: 2 })
   })
 
   it("setDraft keeps drafts isolated per sessionId", async () => {
@@ -287,6 +378,44 @@ describe("chat-drafts", () => {
 })
 
 describe("draft attachment binaries + quota", () => {
+  it("does not restore a draft deleted while quota eviction is reading it", async () => {
+    const db = getDb()
+    const sessionId = "quota-race"
+    await db.chatDrafts.put({
+      sessionId,
+      text: "old draft",
+      updatedAt: 1,
+      attachments: [
+        {
+          name: "file",
+          mediaType: "image/png",
+          size: DRAFT_ATTACHMENT_QUOTA_BYTES + 1,
+          bytes: new Uint8Array([1]),
+        },
+      ],
+    })
+    let deletion: Promise<unknown> | undefined
+    const scheduleDelete = (row: import("./chat-drafts").ChatDraftRow) => {
+      if (row.sessionId === sessionId && !deletion) {
+        deletion = Dexie.ignoreTransaction(() =>
+          db.transaction("rw", db.chatDrafts, async () => {
+            await db.chatDrafts.delete(sessionId)
+          })
+        )
+      }
+      return row
+    }
+    db.chatDrafts.hook("reading", scheduleDelete)
+    try {
+      await enforceDraftAttachmentQuota()
+      expect(deletion).toBeDefined()
+      await deletion
+    } finally {
+      db.chatDrafts.hook("reading").unsubscribe(scheduleDelete)
+    }
+    expect(await getDraft(sessionId)).toBeNull()
+  })
+
   // A token payload. `size` is what the quota accounting reads (deliberately —
   // see `rowBytes`), so a test can declare a huge attachment without allocating
   // one; the jest structuredClone polyfill is JSON-based and cannot survive a

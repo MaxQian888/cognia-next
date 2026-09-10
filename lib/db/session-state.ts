@@ -39,18 +39,23 @@ export async function listSessionStates(): Promise<SessionStateRow[]> {
 /** Mark a session as read — clears unread count and bumps the read pointer. */
 export async function markSessionRead(sessionId: string): Promise<void> {
   const now = Date.now()
-  await getDb().sessionState.put({
-    sessionId,
-    lastReadAt: now,
-    unreadCount: 0,
-    updatedAt: now,
+  const db = getDb()
+  await db.transaction("rw", db.sessions, db.sessionState, async () => {
+    if ((await db.sessions.where("id").equals(sessionId).count()) === 0) return
+    await db.sessionState.put({
+      sessionId,
+      lastReadAt: now,
+      unreadCount: 0,
+      updatedAt: now,
+    })
   })
 }
 
 /** Increment a session's unread counter by one. */
 export async function bumpUnread(sessionId: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.sessionState, async () => {
+  await db.transaction("rw", db.sessions, db.sessionState, async () => {
+    if ((await db.sessions.where("id").equals(sessionId).count()) === 0) return
     const cur = await db.sessionState.get(sessionId)
     await db.sessionState.put({
       sessionId,
