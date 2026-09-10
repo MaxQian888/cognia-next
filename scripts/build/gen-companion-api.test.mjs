@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
@@ -87,6 +88,61 @@ test("publishes the concrete raw result contract in OpenAPI and the host catalog
     true,
   )
   assert.equal(validate({ rows: [], next_offset: 1, has_more: true }), false)
+})
+
+test("declares every request schema instead of reading one back out of a match arm", () => {
+  const inspected = inspectCommittedContract()
+
+  // ADR-0175 B4. A shape recovered by parsing `required(&args, "x")` calls is
+  // whatever the arm happened to compile to, not a contract anybody reviewed,
+  // and it silently changes shape when the arm is refactored. The generator
+  // refuses one now, so this asserts the refusal is not merely available but
+  // currently satisfied.
+  const inferred = inspected.errors.filter((error) =>
+    error.includes("inferred from the dispatch arm"),
+  )
+  assert.deepEqual(inferred, [])
+
+  const sources = new Set()
+  for (const path of Object.values(inspected.desiredHeadlessSpec.paths)) {
+    for (const operation of Object.values(path)) {
+      const source = operation?.["x-cognia-request-schema-source"]
+      if (source) sources.add(source)
+    }
+  }
+  assert.deepEqual([...sources].sort(), ["contract", "zod-contract"])
+})
+
+test("gives the service plane its own request shape only where the planes differ", () => {
+  const catalog = JSON.parse(
+    readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8"),
+  )
+  const servicePlane = catalog.servicePlaneCommands ?? {}
+  const inspected = inspectCommittedContract()
+
+  // The device plane confines a git command to a workspace: `repoPath` and the
+  // other absolute host paths are replaced by `workspaceId` plus a path
+  // relative to it. The loopback brain runs on the host and names the path
+  // directly, so its shape is not the device one with fields added — it is the
+  // one the confinement was applied to. Any command whose planes agree must
+  // NOT be listed here, or the entry silently becomes the only definition.
+  for (const [name, schema] of Object.entries(servicePlane)) {
+    const device = catalog.commands[name]
+    assert.ok(device, `service-plane shape without a device shape: ${name}`)
+    assert.notDeepEqual(
+      schema,
+      device,
+      `${name} lists a service-plane shape identical to its device shape`,
+    )
+    assert.ok(
+      inspected.desiredHeadlessSpec.paths[`/internal/_rpc/${name}`],
+      `service-plane shape for a command the service plane does not serve: ${name}`,
+    )
+  }
+  assert.deepEqual(
+    Object.keys(servicePlane).filter((name) => !name.startsWith("git_")),
+    [],
+  )
 })
 
 test("merges compatible closed-object allOf request schemas", () => {

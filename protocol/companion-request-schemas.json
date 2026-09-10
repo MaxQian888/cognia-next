@@ -131,7 +131,7 @@
           }
         },
         "trigger": {
-          "description": "Full inbound gating policy for this bot. Replaces the stored policy wholesale \u2014 the editor always sends every rule and blocker, because a per-rule patch has nothing stable to address (rules carry no id and their order is not meaningful).",
+          "description": "Full inbound gating policy for this bot. Replaces the stored policy wholesale — the editor always sends every rule and blocker, because a per-rule patch has nothing stable to address (rules carry no id and their order is not meaningful).",
           "type": "object",
           "required": [
             "rules",
@@ -1188,14 +1188,14 @@
             "allow_always",
             "deny"
           ],
-          "description": "`allow` proceeds once; `allow_always` proceeds and persists a standing\npermission for this tool/rule for the session; `deny` rejects with the\noptional `message` shown to the model. To edit-and-allow, send\n`decision: allow` together with `updated_input` (the substituted tool\narguments) \u2014 there is no separate `edit` decision value.\n"
+          "description": "`allow` proceeds once; `allow_always` proceeds and persists a standing\npermission for this tool/rule for the session; `deny` rejects with the\noptional `message` shown to the model. To edit-and-allow, send\n`decision: allow` together with `updated_input` (the substituted tool\narguments) — there is no separate `edit` decision value.\n"
         },
         "message": {
           "type": "string",
           "description": "Optional rejection reason or note (denial only)."
         },
         "updated_input": {
-          "description": "Replacement tool input \u2014 substituted for the original arguments when sent (typically with `decision: allow`).",
+          "description": "Replacement tool input — substituted for the original arguments when sent (typically with `decision: allow`).",
           "oneOf": [
             {
               "type": "object",
@@ -1444,7 +1444,7 @@
           "description": "Logical session id chosen by the caller (Dexie row key)."
         },
         "prompt": {
-          "description": "Either a plain string or an array of content blocks (text + image) \u2014 forwarded\nverbatim to the Claude Agent SDK. Image blocks follow Anthropic's content-block format.\n",
+          "description": "Either a plain string or an array of content blocks (text + image) — forwarded\nverbatim to the Claude Agent SDK. Image blocks follow Anthropic's content-block format.\n",
           "oneOf": [
             {
               "type": "string"
@@ -1461,7 +1461,7 @@
         "options": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Per-call options forwarded verbatim to the Claude Agent SDK (or the\nAI SDK dispatch path for non-Anthropic providers). Unrecognised\nfields ride along under `extra` (serde flatten). `null` is rejected\nfor optional fields \u2014 use `undefined`/missing instead, otherwise the\nSDK's option parser crashes with \"Cannot read properties of null\".\n",
+          "description": "Per-call options forwarded verbatim to the Claude Agent SDK (or the\nAI SDK dispatch path for non-Anthropic providers). Unrecognised\nfields ride along under `extra` (serde flatten). `null` is rejected\nfor optional fields — use `undefined`/missing instead, otherwise the\nSDK's option parser crashes with \"Cannot read properties of null\".\n",
           "properties": {
             "cwd": {
               "type": "string"
@@ -1538,7 +1538,7 @@
             },
             "strictMcpConfig": {
               "type": "boolean",
-              "description": "When true, only `mcpServers` from this object are loaded \u2014 settings.json is ignored."
+              "description": "When true, only `mcpServers` from this object are loaded — settings.json is ignored."
             },
             "effort": {
               "type": "string",
@@ -1994,7 +1994,7 @@
           "minimum": 0
         },
         "id": {
-          "description": "JSON-RPC request id \u2014 string or number."
+          "description": "JSON-RPC request id — string or number."
         },
         "result": {
           "description": "Present on success."
@@ -2761,7 +2761,7 @@
         },
         "segments": {
           "type": "array",
-          "description": "Edited segments replacing the draft's own (ADR-0131 \u2014 the phone's draft editor sends what the operator actually approved).",
+          "description": "Edited segments replacing the draft's own (ADR-0131 — the phone's draft editor sends what the operator actually approved).",
           "items": {
             "type": "object",
             "additionalProperties": true
@@ -3027,7 +3027,7 @@
         },
         "nonce": {
           "type": "string",
-          "description": "Deterministic dedupe nonce (\u226425 chars); Discord returns the already-created message on a retry."
+          "description": "Deterministic dedupe nonce (≤25 chars); Discord returns the already-created message on a retry."
         }
       },
       "additionalProperties": false
@@ -9907,14 +9907,14 @@
         "deviceId": {
           "type": "string",
           "deprecated": true,
-          "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach \u2014 and collect another device's approval prompts \u2014 under a borrowed id."
+          "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach — and collect another device's approval prompts — under a borrowed id."
         },
         "mode": {
           "enum": [
             "observe",
             "control"
           ],
-          "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` \u2014 the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
+          "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` — the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
         },
         "attention": {
           "enum": [
@@ -9957,7 +9957,7 @@
         },
         "dataBase64": {
           "type": "string",
-          "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned \u2014 the RPC body ceiling is what bounds it, not the file."
+          "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned — the RPC body ceiling is what bounds it, not the file."
         }
       },
       "additionalProperties": false
@@ -10705,7 +10705,7 @@
             "botInstallations",
             "botEventDeliveries"
           ],
-          "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror \u2014\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
+          "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
         "since": {
           "type": "integer",
@@ -11511,6 +11511,117 @@
         },
         "toolCallId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_remote_source_ensure": {
+      "description": "Supply the source checkout for `remoteUrl`, creating it if absent (cognia_task_workspace::EnsureRemoteSource). Service plane only: it takes a GitHub installation token, and a credential a `service.internal` caller is trusted with must not become addressable from a paired device.",
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": [
+            "remoteUrl"
+          ],
+          "properties": {
+            "remoteUrl": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The real remote. https for anything that needs a credential."
+            },
+            "base": {
+              "description": "The base a managed workspace is materialized against. Externally tagged on `kind` (cognia_task_workspace::WorkspaceBaseSpec). Only `pullRequest` changes what is fetched: GitHub does not advertise `refs/pull/*`, so the ref has to be asked for by name.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "kind"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "workingState",
+                        "localHead",
+                        "remoteDefault"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "gitRef"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "gitRef"
+                    },
+                    "gitRef": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "provider",
+                    "repo",
+                    "number"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "pullRequest"
+                    },
+                    "provider": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repo": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "number": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "fetchRef": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "headSha": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "credential": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "PAT or installation token for the mirror fetch. Never serialized back out, in a response, a log line, or a persisted job payload."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -13082,6 +13193,1306 @@
             "type": "string"
           },
           "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "servicePlaneCommands": {
+    "git_blame": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "rev": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_branches": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_checkout_branch": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_cherry_pick": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "sha"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_clone": {
+      "type": "object",
+      "required": [
+        "remoteUrl",
+        "destination"
+      ],
+      "properties": {
+        "remoteUrl": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_clone_guarded": {
+      "type": "object",
+      "required": [
+        "remoteUrl",
+        "destination"
+      ],
+      "properties": {
+        "remoteUrl": {
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "guards": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_commit": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "message",
+        "amend",
+        "signoff"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "amend": {
+          "type": "boolean"
+        },
+        "signoff": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_commit_files": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "sha"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_conflicts": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_create_branch": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name",
+        "checkout"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "checkout": {
+          "type": "boolean"
+        },
+        "from": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_create_tag": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_default_branch": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_delete_branch": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name",
+        "force"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_delete_tag": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_commit": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "sha",
+        "path"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_file": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path",
+        "staged"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "staged": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_refs_file": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "base",
+        "target",
+        "path"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_refs_files": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "base",
+        "target"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_staged_all": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_diff_stat": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_discard": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "paths"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hunkPatch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_discard_all": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "includeUntracked"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "includeUntracked": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_fetch": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "prune": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_file_history": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path",
+        "maxCount"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "maxCount": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_identity": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_ignore_add": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "pattern"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_init": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_interactive_rebase": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "base",
+        "entries"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_is_repo": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_log": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "maxCount",
+        "skip"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "maxCount": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        },
+        "skip": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_merge": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "branch"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_merge_abort": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_pull": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "rebase": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_push": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "setUpstream": {
+          "type": "boolean"
+        },
+        "forceWithLease": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_push_tag": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "remote",
+        "name"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_read_blob_at_ref": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "gitRef",
+        "path"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "gitRef": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_rebase": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "onto"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "onto": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_rebase_commits": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "base"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_refs": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_remote_add": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name",
+        "url"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_remote_remove": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_remotes": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_rename_branch": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "newName"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "old": {
+          "type": "string"
+        },
+        "newName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_repo_state": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_reset": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "mode",
+        "target"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_resolve_conflict": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "mergedContent": {
+          "type": "string"
+        },
+        "side": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_restore": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "paths",
+        "staged"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "staged": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_revert": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "sha"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_sequencer_abort": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_sequencer_continue": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_set_identity": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "name",
+        "email"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "global": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_capabilities": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_history": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "branch"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_parents": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_push": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "remote",
+        "branches"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "remote": {
+          "type": "string"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_restack": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "onto",
+        "branches"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "onto": {
+          "type": "string"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_revert": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "branch",
+        "historyRef"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "historyRef": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_set_parent": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "branch"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stack_validate": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "branches"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stage": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "paths"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hunkPatch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stash_apply": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "index"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stash_drop": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "index"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stash_list": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stash_pop": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "index"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_stash_push": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "includeUntracked": {
+          "type": "boolean"
+        },
+        "keepIndex": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_status": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_sync": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_tags": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_unstage": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "paths"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hunkPatch": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_worktree_add": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path",
+        "branch"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "baseRef": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_worktree_commit": {
+      "type": "object",
+      "required": [
+        "worktreePath",
+        "message"
+      ],
+      "properties": {
+        "worktreePath": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_worktree_list": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_worktree_prune": {
+      "type": "object",
+      "required": [
+        "repoPath"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git_worktree_remove": {
+      "type": "object",
+      "required": [
+        "repoPath",
+        "path",
+        "force"
+      ],
+      "properties": {
+        "repoPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "deleteBranch": {
+          "type": "string"
         }
       },
       "additionalProperties": false

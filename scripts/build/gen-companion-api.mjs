@@ -93,6 +93,14 @@ const routeContractSchema = z.object({
 const requestSchemaCatalogSchema = z.object({
   schemaVersion: z.literal(1),
   commands: z.record(z.string(), z.record(z.string(), z.unknown())),
+  // The service plane's own request shape, for the commands whose two planes
+  // genuinely differ (ADR-0175 B4). `commands` is device-shaped: a paired
+  // client names a workspace and a path inside it. The loopback brain runs on
+  // the host and names the path directly, so its shape cannot be derived from
+  // the device one by adding fields — it removes the confinement.
+  servicePlaneCommands: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional(),
 })
 
 const responseSchemaCatalogSchema = z.object({
@@ -3518,10 +3526,14 @@ export function inspectCommittedContract() {
     argumentSchemas.set(name, { source: "zod-contract", schema: withAliases(name, schema) })
   }
   const headlessArgumentSchemas = new Map(argumentSchemas)
-  for (const [name, schema] of inferredArgumentSchemas) {
-    if (name.startsWith("git_")) {
-      headlessArgumentSchemas.set(name, { source: "runtime-inferred", schema })
-    }
+  // The service plane's shape is declared, not read back out of the dispatch
+  // arms (ADR-0175 B4). Only the git family needs its own entry: everywhere
+  // else both planes take the same request, so `argumentSchemas` already
+  // describes the loopback shape.
+  for (const [name, schema] of Object.entries(
+    requestSchemaCatalog.servicePlaneCommands ?? {},
+  )) {
+    headlessArgumentSchemas.set(name, { source: "contract", schema: withAliases(name, schema) })
   }
   const promotedRequestSchemas = Object.fromEntries(
     Object.entries(requestSchemaCatalog.commands).map(([name, schema]) => [
@@ -3544,6 +3556,13 @@ export function inspectCommittedContract() {
       commands: Object.fromEntries(
         Object.entries(promotedRequestSchemas).sort(([left], [right]) =>
           left.localeCompare(right),
+        ),
+      ),
+      // Hand-written, and passed through so a regeneration cannot silently
+      // drop the plane it describes.
+      servicePlaneCommands: Object.fromEntries(
+        Object.entries(requestSchemaCatalog.servicePlaneCommands ?? {}).sort(
+          ([left], [right]) => left.localeCompare(right),
         ),
       ),
     },
@@ -3650,6 +3669,24 @@ export function inspectCommittedContract() {
   }
   for (const name of Object.keys(requestSchemaCatalog.commands)) {
     if (!classified.byName.has(name)) errors.push(`request schema has no command descriptor: ${name}`)
+  }
+  for (const name of Object.keys(requestSchemaCatalog.servicePlaneCommands ?? {})) {
+    if (!classified.byName.has(name)) {
+      errors.push(`service-plane request schema has no command descriptor: ${name}`)
+    }
+  }
+  // ADR-0175 B4: a request shape read back out of a Rust match arm is not a
+  // contract. Every dispatchable command declares its own, in this catalog or
+  // in a Zod contract, and a new command that declares neither fails here
+  // rather than shipping a schema nobody reviewed.
+  for (const [name, entry] of headlessArgumentSchemas) {
+    if (entry.source !== "runtime-inferred") continue
+    if (!classified.internalNames.includes(name)) continue
+    errors.push(
+      `request schema is inferred from the dispatch arm: ${name}. Declare it in ` +
+        `${REQUEST_SCHEMA_CATALOG_PATH} (\`servicePlaneCommands\` when the service ` +
+        `plane's shape differs) or in a Zod contract.`,
+    )
   }
   for (const name of zodRequestSchemas.keys()) {
     if (!classified.byName.has(name)) errors.push(`Zod request schema has no command descriptor: ${name}`)
