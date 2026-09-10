@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cognia · 系列海报</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #101b30; color: #f3f6ff; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: clamp(20px, 4vw, 64px); }
+      header { max-width: 1600px; margin: 0 auto 36px; }
+      h1 { font-size: clamp(32px, 4vw, 56px); margin: 0 0 12px; letter-spacing: -.03em; }
+      header p { color: #b9c7de; line-height: 1.7; margin: 0; }
+      main { max-width: 1600px; margin: auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+      figure { margin: 0; min-width: 0; }
+      img { display: block; width: 100%; height: auto; border-radius: 12px; }
+      figcaption { padding: 16px 0; }
+      h2 { font-size: 18px; margin: 0 0 10px; }
+      a { color: #94e8ee; text-underline-offset: 4px; }
+      a:focus-visible { outline: 3px solid #94e8ee; outline-offset: 5px; border-radius: 4px; }
+      figcaption p { display: flex; gap: 18px; margin: 0; font-size: 14px; }
+      footer { max-width: 1600px; margin: 40px auto 0; font-size: 14px; color: #b9c7de; }
+      @media (max-width: 1000px) { main { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 520px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Cognia · 系列海报</h1>
+      <p>统一工作空间、数字分身、可视化工作流与跨设备连接。点击海报查看 PNG 原图。</p>
+    </header>
+    <main>
+      <figure>
+        <a href="01-workspace.png"><img src="01-workspace.webp" width="1024" height="1536" alt="Cognia 海报：把想法变成成果。角色连接对话、代码与文档产出。"></a>
+        <figcaption><h2>01 · 把想法变成成果</h2><p><a href="01-workspace.png" download>PNG 原图</a><a href="01-workspace.webp" download>WebP 轻量版</a></p></figcaption>
+      </figure>
+      <figure>
+        <a href="02-digital-twin.png"><img src="02-digital-twin.webp" width="1024" height="1536" alt="Cognia 海报：让知识拥有分身。角色面对玻璃中的数字镜像。"></a>
+        <figcaption><h2>02 · 让知识拥有分身</h2><p><a href="02-digital-twin.png" download>PNG 原图</a><a href="02-digital-twin.webp" download>WebP 轻量版</a></p></figcaption>
+      </figure>
+      <figure>
+        <a href="03-workflows.png"><img src="03-workflows.webp" width="1024" height="1536" alt="Cognia 海报：把步骤连成工作流。角色编排对话、工具、分支与结果节点。"></a>
+        <figcaption><h2>03 · 把步骤连成工作流</h2><p><a href="03-workflows.png" download>PNG 原图</a><a href="03-workflows.webp" download>WebP 轻量版</a></p></figcaption>
+      </figure>
+      <figure>
+        <a href="04-connected.png"><img src="04-connected.webp" width="1024" height="1536" alt="Cognia 海报：让工作跨越设备。角色连接桌面显示器和手机。"></a>
+        <figcaption><h2>04 · 让工作跨越设备</h2><p><a href="04-connected.png" download>PNG 原图</a><a href="04-connected.webp" download>WebP 轻量版</a></p></figcaption>
+      </figure>
+    </main>
+    <footer>概念宣传插画，并非产品界面截图。<a href="prompts.md">查看生成提示词</a></footer>
+  </body>
+</html>

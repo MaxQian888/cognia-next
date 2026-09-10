@@ -1,134 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="486" viewBox="0 0 1200 486"
-     role="img" aria-labelledby="capTitle capDesc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
-  <title id="capTitle">What Cognia does</title>
-  <desc id="capDesc">Eight capability surfaces: Claude Code client, plugin runtime, visual workflows, employee digital twin, IM connectors, computer use, OCR pipeline, and mobile plus WAN.</desc>
-
-  <defs>
-    <linearGradient id="capAccent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#5B9BFF"/>
-      <stop offset="1" stop-color="#33E1F2"/>
-    </linearGradient>
-  </defs>
-
-  <rect width="1200" height="486" rx="24" fill="#0A0E1A"/>
-  <rect x="1" y="1" width="1198" height="484" rx="23" fill="none" stroke="#1B2740"/>
-
-  <!-- header -->
-  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
-    <rect x="56" y="34" width="8" height="8" rx="2" fill="#37E0F5"/>
-    <text x="76" y="42" font-size="14" letter-spacing="3" fill="#7FD9E8">WHAT&#160;COGNIA&#160;DOES</text>
-    <text x="1144" y="42" text-anchor="end" font-size="12.5" fill="#4E5F80">8 surfaces · one core</text>
-  </g>
-  <line x1="56" y1="58" x2="1144" y2="58" stroke="#1B2740"/>
-
-  <!-- =============== ROW 1 =============== -->
-  <!-- 1. Claude Code client -->
-  <g transform="translate(56 74)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 26)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <path d="M0 4 h26 v18 h-18 l-8 7 v-7 h0 z"/>
-      <path d="M6 11 h14 M6 16 h9" stroke-width="1.4"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Claude Code client</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">Chat, slash commands, agents,</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">skills, MCP &amp; hooks.</text>
-  </g>
-
-  <!-- 2. Plugin runtime -->
-  <g transform="translate(333 74)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 24)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <path d="M4 4 h9 v-3 a3 3 0 0 1 6 0 v3 h9 v9 h3 a3 3 0 0 1 0 6 h-3 v9 h-24 z"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Plugin runtime</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">20+ first-party plugins on a</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">WASM host (wasmtime + WIT).</text>
-  </g>
-
-  <!-- 3. Visual workflows -->
-  <g transform="translate(610 74)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 24)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <rect x="2" y="2" width="12" height="9" rx="2"/>
-      <rect x="18" y="21" width="12" height="9" rx="2"/>
-      <circle cx="26" cy="6.5" r="4"/>
-      <path d="M14 6.5 H22 M8 11 V25 a1 1 0 0 0 1 1 H18" stroke-width="1.4"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Visual workflows</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">React Flow editor over a hybrid</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">TypeScript / Rust runtime.</text>
-  </g>
-
-  <!-- 4. Digital Twin -->
-  <g transform="translate(887 74)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 24)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <circle cx="12" cy="9" r="6"/>
-      <path d="M1 30 a11 11 0 0 1 22 0" stroke-width="1.5"/>
-      <path d="M26 3 l2.2 4.8 L33 10 l-4.8 2.2 L26 17 l-2.2-4.8 L19 10 l4.8-2.2 z" fill="#33E1F2" stroke="none"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Employee Digital Twin</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">Staged ingest, runtime RAG +</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">style few-shot, PII-gated.</text>
-  </g>
-
-  <!-- =============== ROW 2 =============== -->
-  <!-- 5. IM connectors -->
-  <g transform="translate(56 270)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 25)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <path d="M2 4 h18 v13 h-11 l-5 5 v-5 h-2 z"/>
-      <path d="M12 12 h16 v13 h-2 v5 l-5-5 h-9 z" stroke="#33E1F2"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">IM connectors</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">11 platforms behind one</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">ConnectorBus + A2UI bridge.</text>
-  </g>
-
-  <!-- 6. Computer Use -->
-  <g transform="translate(333 270)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 24)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <rect x="1" y="2" width="30" height="20" rx="2.5"/>
-      <path d="M14 27 h4 M16 22 v5" stroke-width="1.4"/>
-      <path d="M13 9 l10 4 -4 1.6 -1.6 4 z" fill="#33E1F2" stroke="none"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Computer Use</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">Native tool calls &#8594; per-OS</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">automation, HITL consent.</text>
-  </g>
-
-  <!-- 7. OCR -->
-  <g transform="translate(610 270)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 23)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <path d="M4 1 h16 l8 8 v22 h-24 z"/>
-      <path d="M20 1 v8 h8" stroke-width="1.4"/>
-      <path d="M9 17 h14 M9 22 h14 M9 27 h9" stroke="#33E1F2" stroke-width="1.4"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">OCR pipeline</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">17 providers behind one</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">extract() API, Dexie cache.</text>
-  </g>
-
-  <!-- 8. Mobile + WAN -->
-  <g transform="translate(887 270)">
-    <rect width="257" height="176" rx="15" fill="#0E1729" stroke="#22314F"/>
-    <circle cx="241" cy="16" r="2.5" fill="#37E0F5"/>
-    <g transform="translate(24 23)" stroke="#8FD0FF" stroke-width="1.7" fill="none">
-      <rect x="2" y="2" width="18" height="30" rx="3"/>
-      <circle cx="11" cy="27" r="1.4" fill="#8FD0FF" stroke="none"/>
-      <path d="M24 12 a9 9 0 0 1 8 8 M25 19 a4 4 0 0 1 4 4" stroke="#33E1F2" stroke-width="1.5"/>
-    </g>
-    <text x="24" y="92" font-size="16.5" font-weight="700" fill="#EAF1FD">Mobile + WAN</text>
-    <text x="24" y="118" font-size="12.5" fill="#8A9BBC">LAN/WAN client, mDNS +</text>
-    <text x="24" y="137" font-size="12.5" fill="#8A9BBC">JWT pairing, WebRTC tier.</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="656" viewBox="0 0 1200 656"
+     role="img" aria-labelledby="title desc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+  <title id="title">Cognia capability map</title>
+  <desc id="desc">Eight capabilities: Claude Code, plugins, workflows, digital twin, connectors, computer use, OCR, and mobile plus WAN.</desc>
+  <rect x="0" y="0" width="1200" height="656" rx="24" fill="#101B30" stroke="none"/>
+  <text x="56" y="65" font-size="38" font-weight="650" fill="#F3F6FF" text-anchor="start">A workspace with room to grow.</text>
+  <text x="56" y="108" font-size="24" font-weight="400" fill="#A8B8D1" text-anchor="start">Chat at the center. Extend it with the tools your work needs.</text>
+  <rect x="56" y="144" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(79 166)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect width="60" height="42" rx="10"/><path d="M14 42v12l16-12M14 14h30M14 26h19"/></g>
+  <text x="168" y="187" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Claude Code</text>
+  <text x="168" y="222" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Chat · skills · MCP</text>
+  <rect x="616" y="144" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(639 166)" fill="none" stroke="#A5B7FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h18V5a7 7 0 0 1 14 0v7h18v17h7a7 7 0 0 1 0 14h-7v14H4z"/></g>
+  <text x="728" y="187" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Plugins</text>
+  <text x="728" y="222" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Extend your workspace</text>
+  <rect x="56" y="264" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(79 286)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" rx="5"/><rect x="42" y="36" width="20" height="20" rx="5"/><path d="M20 10h30v26M10 20v26h32"/></g>
+  <text x="168" y="307" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Workflows</text>
+  <text x="168" y="342" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Connect steps visually</text>
+  <rect x="616" y="264" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(639 286)" fill="none" stroke="#A5B7FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="20" cy="16" r="12"/><path d="M0 54c0-24 40-24 40 0M45 5l4 10 10 4-10 4-4 10-4-10-10-4 10-4z"/></g>
+  <text x="728" y="307" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Digital Twin</text>
+  <text x="728" y="342" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Knowledge + working style</text>
+  <rect x="56" y="384" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(79 406)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect y="4" width="24" height="20" rx="6"/><rect x="38" y="34" width="24" height="20" rx="6"/><path d="M24 14h26v20M38 44H12V24"/></g>
+  <text x="168" y="427" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Connectors</text>
+  <text x="168" y="462" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Bring conversations together</text>
+  <rect x="616" y="384" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(639 406)" fill="none" stroke="#A5B7FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect width="62" height="42" rx="7"/><path d="M20 56h22M31 42v14M24 12v21l7-7 9-3z"/></g>
+  <text x="728" y="427" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Computer Use</text>
+  <text x="728" y="462" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Tools with human oversight</text>
+  <rect x="56" y="504" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(79 526)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 0h32l16 16v42H6zM38 0v16h16M17 29h25M17 40h25M17 51h16"/></g>
+  <text x="168" y="547" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">OCR</text>
+  <text x="168" y="582" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Documents into text</text>
+  <rect x="616" y="504" width="528" height="104" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(639 526)" fill="none" stroke="#A5B7FF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" width="32" height="58" rx="7"/><path d="M13 47h10M44 8c13 0 18 9 18 18M44 20c6 0 7 4 7 6"/></g>
+  <text x="728" y="547" font-size="28" font-weight="650" fill="#F3F6FF" text-anchor="start">Mobile + WAN</text>
+  <text x="728" y="582" font-size="22" font-weight="400" fill="#A8B8D1" text-anchor="start">Connect to your desktop</text>
 </svg>

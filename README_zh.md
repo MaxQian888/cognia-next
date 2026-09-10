@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%"
+  <img src="./assets/readme/workspace-cover.webp" width="100%"
        alt="Cognia —— 面向 Claude Code 的 AI 桌面客户端。同一份 Next.js 代码同时交付浏览器、Tauri 桌面与 Capacitor 移动端，底层由 Rust 核心与 Node agent sidecar 支撑。">
 </p>
 
@@ -15,21 +15,56 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
+  <a href="#能力总览">能力总览</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#架构">架构</a> ·
   <a href="./docs/content/docs/zh/adr/">架构决策记录</a> ·
   <a href="./CLAUDE.md">工作规则</a>
 </p>
 
-**Cognia** 是一个桌面优先的 **Claude Code** AI 客户端。它把 Claude Agent SDK 包进原生应用，并在其上
-扩展出插件运行时、可视化工作流、员工数字分身、IM 连接器、Computer Use 自动化与 OCR —— 再用**同一份**
-Next.js 代码把**同一套**界面交付给浏览器、桌面与移动端。
+**Cognia** 是一个桌面优先的 **Claude Code** AI 工作空间，把对话、工具与可视化工作流放在一起。
+通过插件扩展能力，用数字分身连接知识与工作风格，再从桌面、浏览器或移动端进入同一套界面。
 
 > [!WARNING]
 > **当前项目正在经历重大重构。** API、数据结构与各项功能随时可能变更或损坏，现阶段**不保障可用性**。
 > 如有依赖，请固定到一个已知可用的提交。
 
 ## 能力总览
+
+以下为基于 Cognia 原有美术重新生成的概念插图，并非产品界面截图。
+
+### 对话与知识，在同一处相遇
+
+<p align="center">
+  <img src="./assets/readme/context-and-twin.webp" width="100%"
+       alt="Cognia 角色面对数字分身镜像，对话与文档连接到记忆面板。">
+</p>
+
+- **对话与工具** — 把聊天、斜杠命令、Skills 与 MCP 放进同一个工作空间。
+- **员工数字分身** — 摄取知识与工作风格，在共享 PII 脱敏机制下用于对话。
+
+### 把想法连接成可执行的步骤
+
+<p align="center">
+  <img src="./assets/readme/workflow-studio.webp" width="100%"
+       alt="Cognia 角色连接对话、工具、分支和文档节点，展示工作流与自动化概念。">
+</p>
+
+- **可视化工作流** — 连接执行步骤，通过定时、Webhook 或对话触发任务。
+- **Computer Use** — 调用原生自动化工具，并通过权限与人工确认控制执行。
+
+### 让工作空间跨越设备与渠道
+
+<p align="center">
+  <img src="./assets/readme/connected-devices.webp" width="100%"
+       alt="Cognia 角色通过九点核心连接桌面显示器、手机与消息气泡。">
+</p>
+
+- **连接沟通渠道** — 通过统一连接器接入飞书、Slack、Telegram 等平台。
+- **桌面与移动端** — 移动端通过 LAN 或 WAN 连接桌面核心，延伸工作空间。
+
+<details>
+<summary><strong>展开完整能力清单与技术说明</strong></summary>
 
 <p align="center">
   <img src="./assets/readme/capabilities.svg" width="100%"
@@ -54,31 +89,22 @@ Next.js 代码把**同一套**界面交付给浏览器、桌面与移动端。
   WebRTC 层，搭配独立信令服务器。
 - **零知识公共分享链** —— Cloudflare Worker + R2/KV，密钥放在 URL fragment，仅在查看器中解密。
 
-## 架构
+</details>
+
+### 从请求到结果
 
 <p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%"
-       alt="同一份 Next.js 静态导出驱动三种外壳 —— 浏览器、Tauri 桌面与 Capacitor 移动端。桌面外壳内嵌 Rust 核心（axum HTTP、调度器、向量存储、自动化、OCR、MCP 服务器）与 Node agent sidecar；移动外壳是该核心的 LAN/WAN 客户端。两个独立服务各自独立部署。">
+  <img src="./assets/readme/task-flow.svg" width="100%"
+       alt="任务路径示意：带入问题、文档或对话上下文，使用 Skills、MCP、插件与工作流，最后检查回复和产出。">
 </p>
 
-同一份 Next.js 16 **静态导出**（`out/`）是 UI、i18n 与业务逻辑的唯一来源。浏览器直接托管它；
-**Tauri 2** 把它包进桌面窗口，底层是 Rust 核心（axum HTTP、调度器、`sqlite-vec` 向量存储、自动化、
-OCR、MCP 服务器）加托管 Claude Agent SDK 的 **Node sidecar**；**Capacitor 8** 在移动端包裹同一份
-`out/`，并通过 LAN/WAN 接入该 Rust 核心。
-
-`services/` 下有两个独立服务，各自是独立的部署产物（自带 `Cargo.lock`、Dockerfile、Fly.io 配置）：
-
-- `services/signaling-server/` —— WebRTC 信令汇合（axum + workers-rs）。
-- `services/share-server/` —— Cloudflare Worker + Vite 查看器，承载公共分享链。
-
-完整子系统目录与一对一的 ADR 见
-[`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/)。
+**带入上下文 → 使用工具执行 → 检查结果。** 这张图展示能力如何组合；具体步骤取决于任务、已配置的工具与权限。
 
 ## 快速开始
 
 <p align="center">
   <img src="./assets/readme/section-quickstart.svg" width="100%"
-       alt="快速开始 —— 三条命令完成克隆、安装并启动开发服务器。">
+       alt="快速开始：克隆仓库、安装依赖、启动开发服务器。">
 </p>
 
 ```bash
@@ -109,6 +135,9 @@ pnpm mobile:sync:ios          # iOS（构建并同步，再用 mobile:open:ios �
 可选：自托管 WebRTC 时的 TURN 凭据、
 构建 `ocr-tesseract` Cargo 特性时的 CMake/C++ 工具链。
 
+<details>
+<summary>可选：macOS Agent 强制代理</summary>
+
 **Agent 强制代理（macOS）** —— 启动任意支持 HTTP 代理变量的 CLI Agent，并由 Seatbelt 将其
 整个进程树的网络出口限制到一个本地代理端口：
 
@@ -123,6 +152,28 @@ AGENT_PROXY_URL=http://127.0.0.1:7890 pnpm agent:proxy --check
 验证 HTTP CONNECT 隧道，并确认另一个本地端口已被阻断。不读取代理变量的 Agent 会失败关闭，
 不会回退直连。可用 `AGENT_PROXY_CHECK_TARGET=host:port` 修改支持 TLS 的预检目标。工具有意拒绝
 SOCKS 和远程代理端点。
+
+</details>
+
+## 架构
+
+<p align="center">
+  <img src="./assets/readme/architecture.svg" width="100%"
+       alt="同一份 Next.js 静态导出驱动三种外壳 —— 浏览器、Tauri 桌面与 Capacitor 移动端。桌面外壳内嵌 Rust 核心（axum HTTP、调度器、向量存储、自动化、OCR、MCP 服务器）与 Node agent sidecar；移动外壳是该核心的 LAN/WAN 客户端。两个独立服务各自独立部署。">
+</p>
+
+同一份 Next.js 16 **静态导出**（`out/`）是 UI、i18n 与业务逻辑的唯一来源。浏览器直接托管它；
+**Tauri 2** 把它包进桌面窗口，底层是 Rust 核心（axum HTTP、调度器、`sqlite-vec` 向量存储、自动化、
+OCR、MCP 服务器）加托管 Claude Agent SDK 的 **Node sidecar**；**Capacitor 8** 在移动端包裹同一份
+`out/`，并通过 LAN/WAN 接入该 Rust 核心。
+
+`services/` 下有两个独立服务，各自是独立的部署产物（自带 `Cargo.lock`、Dockerfile、Fly.io 配置）：
+
+- `services/signaling-server/` —— WebRTC 信令汇合（axum + workers-rs）。
+- `services/share-server/` —— Cloudflare Worker + Vite 查看器，承载公共分享链。
+
+完整子系统目录与一对一的 ADR 见
+[`docs/content/docs/zh/adr/`](./docs/content/docs/zh/adr/)。
 
 ## 开发
 

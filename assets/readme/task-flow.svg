@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="436" viewBox="0 0 1200 436"
+     role="img" aria-labelledby="title desc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+  <title id="title">A task through Cognia</title>
+  <desc id="desc">Conceptual sequence: bring a question, document, or conversation; work with skills, MCP, plugins, and workflows; review the response and output.</desc>
+  <rect x="0" y="0" width="1200" height="436" rx="24" fill="#101B30" stroke="none"/>
+  <text x="56" y="66" font-size="38" font-weight="650" fill="#F3F6FF" text-anchor="start">From a request to a useful result.</text>
+  <text x="56" y="108" font-size="24" font-weight="400" fill="#A8B8D1" text-anchor="start">A conceptual task path through the Cognia workspace.</text>
+  <rect x="56" y="150" width="340" height="242" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(82 178)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect width="60" height="42" rx="10"/><path d="M14 42v12l16-12M14 14h30M14 26h19"/></g>
+  <text x="82" y="288" font-size="29" font-weight="650" fill="#F3F6FF" text-anchor="start">Bring context</text>
+  <text x="82" y="329" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">A question, a document,</text>
+  <text x="82" y="359" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">or a connected conversation.</text>
+  <path d="M400 269h26m-8-8 8 8-8 8" fill="none" stroke="#74E2D5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="430" y="150" width="340" height="242" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(456 178)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" rx="5"/><rect x="42" y="36" width="20" height="20" rx="5"/><path d="M20 10h30v26M10 20v26h32"/></g>
+  <text x="456" y="288" font-size="29" font-weight="650" fill="#F3F6FF" text-anchor="start">Work with tools</text>
+  <text x="456" y="329" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">Use skills, MCP, plugins,</text>
+  <text x="456" y="359" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">and visual workflows.</text>
+  <path d="M774 269h26m-8-8 8 8-8 8" fill="none" stroke="#74E2D5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="804" y="150" width="340" height="242" rx="18" fill="#192840" stroke="none"/>
+  <g transform="translate(830 178)" fill="none" stroke="#74E2D5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 0h32l16 16v42H6zM38 0v16h16M17 37l8 8 17-19"/></g>
+  <text x="830" y="288" font-size="29" font-weight="650" fill="#F3F6FF" text-anchor="start">Review the result</text>
+  <text x="830" y="329" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">Read the response, inspect</text>
+  <text x="830" y="359" font-size="21" font-weight="400" fill="#A8B8D1" text-anchor="start">the output, choose what is next.</text>
+</svg>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%"
+  <img src="./assets/readme/workspace-cover.webp" width="100%"
        alt="Cognia — an AI desktop client for Claude Code. One Next.js codebase shipped to browser, Tauri desktop, and Capacitor mobile, over a Rust core and a Node agent sidecar.">
 </p>
 
@@ -15,16 +15,16 @@
 
 <p align="center">
   <a href="./README_zh.md">中文</a> ·
+  <a href="#what-cognia-does">Explore features</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#how-it-works">Architecture</a> ·
   <a href="./docs/content/docs/en/adr/">ADRs</a> ·
   <a href="./CLAUDE.md">Working rules</a>
 </p>
 
-**Cognia** is a desktop-first AI client for **Claude Code**. It wraps the Claude Agent SDK in a
-native app and extends it with a plugin runtime, visual workflows, an employee digital twin, IM
-connectors, computer-use automation, and OCR — then ships the _same_ interface to the browser, the
-desktop, and mobile from a single Next.js codebase.
+**Cognia** is a desktop-first AI workspace for **Claude Code** that brings conversations, tools,
+and visual workflows together. Extend it with plugins, connect knowledge and working style with
+a digital twin, and use the same interface on desktop, web, and mobile.
 
 > [!WARNING]
 > **This project is undergoing a major refactoring.** APIs, data schemas, and features may change
@@ -32,6 +32,41 @@ desktop, and mobile from a single Next.js codebase.
 > known-good commit if you depend on it.
 
 ## What Cognia does
+
+Concept illustrations regenerated from Cognia’s original artwork, not product screenshots.
+
+### Conversations meet knowledge
+
+<p align="center">
+  <img src="./assets/readme/context-and-twin.webp" width="100%"
+       alt="The Cognia character faces her digital twin as conversations and documents connect to a memory pane.">
+</p>
+
+- **Chat with tools** — Bring chat, slash commands, skills, and MCP into one workspace.
+- **Employee Digital Twin** — Bring knowledge and working style into conversations through a shared PII gate.
+
+### Turn ideas into connected steps
+
+<p align="center">
+  <img src="./assets/readme/workflow-studio.webp" width="100%"
+       alt="The Cognia character connects conversation, tool, branch, and document blocks to illustrate workflows and automation.">
+</p>
+
+- **Visual workflows** — Connect steps and trigger work from schedules, webhooks, or chat.
+- **Computer Use** — Use native automation with permission controls and human oversight.
+
+### Connect devices and conversations
+
+<p align="center">
+  <img src="./assets/readme/connected-devices.webp" width="100%"
+       alt="The Cognia character connects a desktop, phone, and conversation bubbles through a nine-light hub.">
+</p>
+
+- **Connected conversations** — Connect Lark, Slack, Telegram, and more through a shared connector layer.
+- **Across your devices** — Connect the mobile client to your desktop core over LAN or WAN.
+
+<details>
+<summary><strong>Explore the full capability map and technical details</strong></summary>
 
 <p align="center">
   <img src="./assets/readme/capabilities.svg" width="100%"
@@ -58,35 +93,23 @@ desktop, and mobile from a single Next.js codebase.
 - **Zero-knowledge share links** — a Cloudflare Worker + R2/KV backend; the key lives in the URL
   fragment and is decrypted in the viewer.
 
-## How it works
+</details>
+
+### From a request to a result
 
 <p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%"
-       alt="One Next.js static export feeds three shells — browser, Tauri desktop, and Capacitor mobile. The desktop shell embeds a Rust core (axum HTTP, scheduler, vector store, automation, OCR, MCP server) and a Node agent sidecar; the mobile shell is a LAN/WAN client of that core. Two standalone services deploy independently.">
+  <img src="./assets/readme/task-flow.svg" width="100%"
+       alt="Conceptual task path: bring a question, document, or conversation; use skills, MCP, plugins, and workflows; review the response and output.">
 </p>
 
-One Next.js 16 **static export** (`out/`) is the single source of UI, i18n, and business logic.
-The browser serves it directly; **Tauri 2** wraps it in a desktop window backed by a Rust core
-(axum HTTP, scheduler, `sqlite-vec` vector store, automation, OCR, MCP server) plus a **Node
-sidecar** that hosts the Claude Agent SDK; **Capacitor 8** wraps the same `out/` on mobile and
-talks to the Rust core over LAN/WAN.
-
-Two standalone services live under `services/`, each an independent deploy artifact with its own
-`Cargo.lock`, Dockerfile, and Fly.io config:
-
-- `services/signaling-server/` — WebRTC rendezvous (axum + workers-rs).
-- `services/share-server/` — Cloudflare Worker + Vite viewer for public share links.
-
-The Architecture Decision Record (ADR) catalogue for major cross-cutting
-decisions lives under [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
-Current behavior is documented in the subsystem pages and verified against the
-implementation and tests; an ADR records why a decision was made.
+**Bring context → work with tools → review the result.** This illustrates how capabilities fit
+together; the actual steps depend on the task, configured tools, and permissions.
 
 ## Quick start
 
 <p align="center">
   <img src="./assets/readme/section-quickstart.svg" width="100%"
-       alt="Quick start — clone, install, and run the dev server in three commands.">
+       alt="Quick start: clone the repository, install dependencies, and launch the dev server.">
 </p>
 
 ```bash
@@ -116,6 +139,9 @@ pnpm mobile:sync:ios          # iOS (build + sync, then mobile:open:ios)
 
 Optional: TURN credentials for self-hosted WebRTC, CMake/C++ for the `ocr-tesseract` Cargo feature.
 
+<details>
+<summary>Optional: fail-closed agent proxy on macOS</summary>
+
 **Fail-closed agent proxy (macOS)** — launch any HTTP-proxy-aware CLI agent while Seatbelt limits
 its entire process tree to one local proxy port:
 
@@ -131,6 +157,32 @@ The launcher injects upper- and lower-case `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL
 Agents that ignore HTTP proxy variables fail closed instead of connecting directly. Use
 `AGENT_PROXY_CHECK_TARGET=host:port` to change the TLS-capable preflight destination. SOCKS and
 remote proxy endpoints are intentionally rejected.
+
+</details>
+
+## How it works
+
+<p align="center">
+  <img src="./assets/readme/architecture.svg" width="100%"
+       alt="One Next.js static export feeds three shells — browser, Tauri desktop, and Capacitor mobile. The desktop shell embeds a Rust core (axum HTTP, scheduler, vector store, automation, OCR, MCP server) and a Node agent sidecar; the mobile shell is a LAN/WAN client of that core. Two standalone services deploy independently.">
+</p>
+
+One Next.js 16 **static export** (`out/`) is the single source of UI, i18n, and business logic.
+The browser serves it directly; **Tauri 2** wraps it in a desktop window backed by a Rust core
+(axum HTTP, scheduler, `sqlite-vec` vector store, automation, OCR, MCP server) plus a **Node
+sidecar** that hosts the Claude Agent SDK; **Capacitor 8** wraps the same `out/` on mobile and
+talks to the Rust core over LAN/WAN.
+
+Two standalone services live under `services/`, each an independent deploy artifact with its own
+`Cargo.lock`, Dockerfile, and Fly.io config:
+
+- `services/signaling-server/` — WebRTC rendezvous (axum + workers-rs).
+- `services/share-server/` — Cloudflare Worker + Vite viewer for public share links.
+
+The Architecture Decision Record (ADR) catalogue for major cross-cutting
+decisions lives under [`docs/content/docs/en/adr/`](./docs/content/docs/en/adr/).
+Current behavior is documented in the subsystem pages and verified against the
+implementation and tests; an ADR records why a decision was made.
 
 ## Development
 
