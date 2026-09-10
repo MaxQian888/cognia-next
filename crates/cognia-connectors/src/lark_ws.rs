@@ -126,8 +126,9 @@ impl Frame {
 }
 
 /// Build the client's keepalive ping (a Control frame with `type=ping`).
-fn ping_frame() -> Frame {
+fn ping_frame(service: i32) -> Frame {
     Frame {
+        service,
         method: METHOD_CONTROL,
         headers: vec![Header {
             key: H_TYPE.to_string(),
@@ -217,13 +218,90 @@ struct EndpointData {
     client_config: Option<ClientConfig>,
 }
 
-#[derive(Deserialize, Clone, Default)]
+#[derive(Deserialize, Clone)]
+#[serde(default)]
 struct ClientConfig {
-    #[serde(rename = "PingInterval", default)]
+    #[serde(rename = "PingInterval")]
     ping_interval: i32,
+    #[serde(rename = "ReconnectCount")]
+    reconnect_count: i32,
+    #[serde(rename = "ReconnectInterval")]
+    reconnect_interval: i32,
+    #[serde(rename = "ReconnectNonce")]
+    reconnect_nonce: i32,
 }
 
-async fn fetch_endpoint(app_id: &str, app_secret: &str) -> Result<(String, ClientConfig), String> {
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            ping_interval: 120,
+            reconnect_count: -1,
+            reconnect_interval: 120,
+            reconnect_nonce: 30,
+        }
+    }
+}
+
+impl ClientConfig {
+    fn can_reconnect(&self, attempts: u32) -> bool {
+        self.reconnect_count < 0 || attempts < self.reconnect_count as u32
+    }
+
+    fn ping_duration(&self) -> Duration {
+        if self.ping_interval > 0 {
+            Duration::from_secs(self.ping_interval as u64)
+        } else {
+            Duration::from_millis(DEFAULT_PING_INTERVAL_MS)
+        }
+    }
+}
+
+#[derive(Default)]
+struct ConnectionPolicy {
+    config: ClientConfig,
+    reconnect_attempts: u32,
+    fatal_error: bool,
+}
+
+fn endpoint_service_id(endpoint: &str) -> Result<i32, String> {
+    let parsed = url::Url::parse(endpoint).map_err(|e| format!("invalid WS URL: {e}"))?;
+    parsed
+        .query_pairs()
+        .find(|(key, _)| key == "service_id")
+        .ok_or_else(|| "WS URL missing service_id".to_string())?
+        .1
+        .parse()
+        .map_err(|_| "WS URL invalid service_id".to_string())
+}
+
+fn apply_control_config(frame: &Frame, config: &mut ClientConfig) -> Result<bool, String> {
+    if frame.method != METHOD_CONTROL
+        || frame.header(H_TYPE) != Some("pong")
+        || frame.payload.is_empty()
+    {
+        return Ok(false);
+    }
+    let next = serde_json::from_slice(&frame.payload)
+        .map_err(|e| format!("invalid PONG ClientConfig: {e}"))?;
+    *config = next;
+    Ok(true)
+}
+
+// Mirrors the official SDK's distinction between ClientException (terminal)
+// and ServerException (retryable), including the WS connection-limit code.
+fn endpoint_error_is_fatal(http_status: u16, code: i32) -> bool {
+    http_status == 200 && !matches!(code, 0 | 1 | 1000040343)
+}
+
+fn handshake_error_is_fatal(status: Option<&str>, auth_code: Option<&str>) -> bool {
+    status == Some("403") || (status == Some("514") && auth_code == Some("1000040350"))
+}
+
+async fn fetch_endpoint(
+    app_id: &str,
+    app_secret: &str,
+    fatal_error: &mut bool,
+) -> Result<(String, ClientConfig), String> {
     let builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
     let (builder, _) = proxy_config::apply_reqwest_policy(builder, ENDPOINT_URL)
         .map_err(|error| error.to_string())?;
@@ -237,14 +315,19 @@ async fn fetch_endpoint(app_id: &str, app_secret: &str) -> Result<(String, Clien
         .send()
         .await
         .map_err(|e| format!("ws endpoint request failed: {e}"))?;
+    let status = resp.status().as_u16();
     let body = resp
         .text()
         .await
         .map_err(|e| format!("ws endpoint body read failed: {e}"))?;
 
+    if status != 200 {
+        return Err(format!("ws endpoint HTTP {status}"));
+    }
     let parsed: EndpointResp = serde_json::from_str(&body)
         .map_err(|e| format!("ws endpoint parse failed: {e}: {body}"))?;
     if parsed.code != 0 {
+        *fatal_error = endpoint_error_is_fatal(status, parsed.code);
         return Err(format!("ws endpoint code {}: {}", parsed.code, parsed.msg));
     }
     let data = parsed.data.ok_or("ws endpoint missing data")?;
@@ -293,27 +376,36 @@ pub async fn open(emitter: Arc<dyn EventEmitter>, adapter_id: String) -> Result<
 
     let hid = handle_id.clone();
     tokio::spawn(async move {
-        let mut attempts: u32 = 0;
+        let mut policy = ConnectionPolicy::default();
         while is_live(&hid) {
-            match connect_and_run(emitter.as_ref(), &hid, &app_id, &app_secret, &cancel).await {
-                Ok(()) => {
-                    // Clean shutdown via cancel — loop guard below stops us.
-                    attempts = 0;
-                }
-                Err(e) => {
-                    log::warn!("[lark-ws] {hid} connection ended: {e}");
-                    attempts = attempts.saturating_add(1);
-                }
+            let result = tokio::select! {
+                _ = cancel.notified() => break,
+                result = connect_and_run(emitter.as_ref(), &hid, &app_id, &app_secret, &cancel, &mut policy) => result,
+            };
+            if let Err(e) = result {
+                log::warn!("[lark-ws] {hid} connection ended: {e}");
             }
-            if !is_live(&hid) {
+            if !is_live(&hid)
+                || policy.fatal_error
+                || !policy.config.can_reconnect(policy.reconnect_attempts)
+            {
                 break;
             }
-            let backoff = (1000u64 * 2u64.pow(attempts.min(5))).min(32_000);
-            let sleep = tokio::time::sleep(Duration::from_millis(backoff));
+            // The endpoint (and subsequent PONGs) controls retry policy.
+            // Jitter precedes the first retry; subsequent failures use the
+            // configured fixed interval, as in the official SDK.
+            let delay = if policy.reconnect_attempts == 0 {
+                Duration::from_secs_f64(
+                    rand::random::<f64>() * policy.config.reconnect_nonce.max(0) as f64,
+                )
+            } else {
+                Duration::from_secs(policy.config.reconnect_interval.max(0) as u64)
+            };
             tokio::select! {
                 _ = cancel.notified() => break,
-                _ = sleep => {}
+                _ = tokio::time::sleep(delay) => {}
             }
+            policy.reconnect_attempts = policy.reconnect_attempts.saturating_add(1);
         }
         emitter.emit(
             &format!("connectors://lark-ws/{hid}/close"),
@@ -360,8 +452,12 @@ async fn connect_and_run(
     app_id: &str,
     app_secret: &str,
     cancel: &Notify,
+    policy: &mut ConnectionPolicy,
 ) -> Result<(), String> {
-    let (url, cfg) = fetch_endpoint(app_id, app_secret).await?;
+    policy.fatal_error = false;
+    let (url, cfg) = fetch_endpoint(app_id, app_secret, &mut policy.fatal_error).await?;
+    policy.config = cfg;
+    let service_id = endpoint_service_id(&url)?;
     log::info!("[lark-ws] {handle_id} endpoint resolved, dialing");
 
     // Dial (proxy-aware) — mirrors `ws_client::open_ws`.
@@ -392,10 +488,23 @@ async fn connect_and_run(
         let boxed: Box<dyn AsyncReadWrite + Send + Unpin> = Box::new(tcp);
         boxed
     };
-    let (ws_stream, _) = client_async_tls(request, raw)
-        .await
-        .map_err(|e| format!("WS handshake failed: {e}"))?;
+    let (ws_stream, _) = client_async_tls(request, raw).await.map_err(|e| {
+        if let tokio_tungstenite::tungstenite::Error::Http(response) = &e {
+            let header = |name: &str| {
+                response
+                    .headers()
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+            };
+            policy.fatal_error = handshake_error_is_fatal(
+                header("handshake-status"),
+                header("handshake-autherrcode"),
+            );
+        }
+        format!("WS handshake failed: {e}")
+    })?;
     log::info!("[lark-ws] {handle_id} connected (ws handshake ok), entering read loop");
+    policy.reconnect_attempts = 0;
     let (mut sink, mut stream) = ws_stream.split();
 
     // Single outbound pump (pings + acks). Mirrors `ws_client`'s mpsc pattern.
@@ -408,28 +517,20 @@ async fn connect_and_run(
         }
     });
 
-    // Keepalive ping timer.
-    let ping_ms = if cfg.ping_interval > 0 {
-        cfg.ping_interval as u64 * 1000
-    } else {
-        DEFAULT_PING_INTERVAL_MS
-    };
-    let tx_ping = tx.clone();
-    let ping = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(ping_ms));
-        interval.tick().await; // fire immediately-elapsed first tick
-        loop {
-            interval.tick().await;
-            let frame = ping_frame();
-            if tx_ping
-                .send(Message::Binary(frame.encode_to_vec().into()))
-                .await
-                .is_err()
-            {
-                break;
-            }
+    // Cancellation may drop this entire connection future while dialing or
+    // reading. Ensure its outbound task cannot outlive the connection.
+    struct AbortPumpOnDrop(tokio::task::AbortHandle);
+    impl Drop for AbortPumpOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
         }
-    });
+    }
+    let _pump_guard = AbortPumpOnDrop(pump.abort_handle());
+
+    // Poll the ping timer with inbound frames so PONG configuration changes
+    // take effect immediately instead of leaving a detached timer stale.
+    let ping = tokio::time::sleep(Duration::ZERO);
+    tokio::pin!(ping);
 
     let mut reasm = Reassembler::default();
     let cancelled = cancel.notified();
@@ -438,11 +539,24 @@ async fn connect_and_run(
     let result = loop {
         tokio::select! {
             _ = &mut cancelled => break Ok(()),
+            _ = &mut ping => {
+                if tx.send(Message::Binary(ping_frame(service_id).encode_to_vec().into())).await.is_err() {
+                    break Err("ws writer stopped".to_string());
+                }
+                ping.as_mut().reset(tokio::time::Instant::now() + policy.config.ping_duration());
+            },
             item = stream.next() => {
                 match item {
                     Some(Ok(Message::Binary(bytes))) => {
                         match Frame::decode(bytes.as_ref()) {
-                            Ok(frame) => handle_frame(emitter, handle_id, frame, &mut reasm, &tx).await,
+                            Ok(frame) => {
+                                match apply_control_config(&frame, &mut policy.config) {
+                                    Ok(true) => ping.as_mut().reset(tokio::time::Instant::now() + policy.config.ping_duration()),
+                                    Ok(false) => {},
+                                    Err(e) => log::warn!("[lark-ws] {handle_id} {e}"),
+                                }
+                                handle_frame(emitter, handle_id, frame, &mut reasm, &tx).await;
+                            },
                             Err(e) => {
                                 // Elevated from debug: a decode failure on a real
                                 // inbound frame is the silent drop we must see. The
@@ -483,14 +597,13 @@ async fn connect_and_run(
         }
     };
 
-    ping.abort();
     drop(tx);
+    pump.abort();
     let _ = pump.await;
     result
 }
 
-/// Decode + dispatch one inbound frame: control frames update nothing we act
-/// on (server ping); data frames are reassembled, emitted, and acked.
+/// Dispatch data frames after the connection loop has applied control configuration.
 async fn handle_frame(
     emitter: &dyn EventEmitter,
     handle_id: &str,
@@ -512,8 +625,7 @@ async fn handle_frame(
         frame.payload_encoding,
     );
     if frame.method == METHOD_CONTROL {
-        // Server ping/pong — the SDK only reads config out of these and never
-        // replies. We keepalive on our own timer, so nothing to do.
+        // PONG configuration is applied by the connection loop before dispatch.
         return;
     }
     if frame.method != METHOD_DATA {
@@ -668,9 +780,92 @@ mod tests {
 
     #[test]
     fn ping_frame_is_control_with_ping_type() {
-        let f = ping_frame();
+        let f = ping_frame(42);
         assert_eq!(f.method, METHOD_CONTROL);
         assert_eq!(f.header(H_TYPE), Some(T_PING));
+    }
+
+    #[test]
+    fn server_errors_retry_but_client_errors_stop_reconnecting() {
+        assert!(endpoint_error_is_fatal(200, 1000040344));
+        assert!(endpoint_error_is_fatal(200, 403));
+        assert!(!endpoint_error_is_fatal(200, 1));
+        assert!(!endpoint_error_is_fatal(200, 1000040343));
+        assert!(!endpoint_error_is_fatal(503, 403));
+        assert!(handshake_error_is_fatal(Some("403"), None));
+        assert!(handshake_error_is_fatal(Some("514"), Some("1000040350")));
+        assert!(!handshake_error_is_fatal(Some("514"), Some("other")));
+        assert!(!handshake_error_is_fatal(None, None));
+    }
+
+    #[test]
+    fn endpoint_service_id_is_used_in_ping() {
+        let service =
+            endpoint_service_id("wss://example.com/ws?device_id=d&service_id=42").unwrap();
+        assert_eq!(ping_frame(service).service, 42);
+        assert!(endpoint_service_id("wss://example.com/ws").is_err());
+        assert!(endpoint_service_id("wss://example.com/ws?service_id=bad").is_err());
+    }
+
+    #[test]
+    fn pong_updates_server_reconnect_and_ping_policy() {
+        let mut cfg = ClientConfig::default();
+        let frame = Frame {
+            method: METHOD_CONTROL,
+            headers: vec![Header { key: H_TYPE.into(), value: "pong".into() }],
+            payload: br#"{"PingInterval":30,"ReconnectCount":2,"ReconnectInterval":7,"ReconnectNonce":0}"#.to_vec(),
+            ..Default::default()
+        };
+        assert!(apply_control_config(&frame, &mut cfg).unwrap());
+        assert_eq!(cfg.ping_interval, 30);
+        assert_eq!(cfg.reconnect_interval, 7);
+        assert_eq!(cfg.reconnect_nonce, 0);
+        assert!(cfg.can_reconnect(1));
+        assert!(!cfg.can_reconnect(2));
+        let mut malformed = frame;
+        malformed.payload = b"bad".to_vec();
+        assert!(apply_control_config(&malformed, &mut cfg).is_err());
+        assert_eq!(cfg.ping_interval, 30);
+    }
+
+    #[test]
+    fn control_config_ignores_ping_empty_pong_and_data() {
+        let mut cfg = ClientConfig::default();
+        for (method, kind, payload) in [
+            (METHOD_CONTROL, "ping", b"bad".as_slice()),
+            (METHOD_CONTROL, "pong", b"".as_slice()),
+            (METHOD_DATA, "pong", b"bad".as_slice()),
+        ] {
+            let frame = Frame {
+                method,
+                headers: vec![Header {
+                    key: H_TYPE.into(),
+                    value: kind.into(),
+                }],
+                payload: payload.to_vec(),
+                ..Default::default()
+            };
+            assert!(!apply_control_config(&frame, &mut cfg).unwrap());
+        }
+        assert_eq!(cfg.ping_duration(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn zero_reconnect_count_stops_and_invalid_ping_uses_default() {
+        let cfg: ClientConfig =
+            serde_json::from_str(r#"{"ReconnectCount":0,"PingInterval":0}"#).unwrap();
+        assert!(!cfg.can_reconnect(0));
+        assert_eq!(cfg.ping_duration(), Duration::from_secs(120));
+        assert!(endpoint_service_id("not a URL").is_err());
+    }
+
+    #[test]
+    fn config_defaults_do_not_disable_reconnect() {
+        let cfg: ClientConfig = serde_json::from_str("{}").unwrap();
+        assert!(cfg.can_reconnect(u32::MAX));
+        assert_eq!(cfg.ping_interval, 120);
+        assert_eq!(cfg.reconnect_interval, 120);
+        assert_eq!(cfg.reconnect_nonce, 30);
     }
 
     #[test]

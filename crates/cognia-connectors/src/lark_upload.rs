@@ -177,6 +177,7 @@ mod tests {
     /// end-to-end test that runs against a fully-stubbed Lark server.
     #[tokio::test]
     async fn fetch_bytes_returns_body() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/source.opus"))
@@ -192,6 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_bytes_propagates_http_error() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/missing.opus"))

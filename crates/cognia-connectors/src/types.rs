@@ -140,6 +140,25 @@ pub struct ConnectorMediaUploadRequest {
     pub source_url: Option<String>,
     pub local_path: Option<String>,
     pub content_type: Option<String>,
+    pub multipart: Option<ConnectorMediaMultipart>,
+    pub response_mode: Option<MediaUploadResponseMode>,
+}
+
+/// One binary file plus platform-defined text fields, sent as multipart/form-data.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorMediaMultipart {
+    pub field_name: String,
+    pub filename: String,
+    #[serde(default)]
+    pub fields: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MediaUploadResponseMode {
+    ContentUri,
+    Http,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -160,6 +179,8 @@ impl From<MatrixEncryptedMediaUploadRequest> for ConnectorMediaUploadRequest {
             source_url: value.source_url,
             local_path: value.local_path,
             content_type: value.content_type,
+            multipart: None,
+            response_mode: None,
         }
     }
 }
@@ -183,6 +204,25 @@ pub struct MatrixEncryptedMediaFetchRequest {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn media_upload_optional_modes_preserve_legacy_requests() {
+        let req: super::ConnectorMediaUploadRequest = serde_json::from_str(
+            r#"{"uploadUrl":"https://example.com/upload","localPath":"/tmp/file"}"#,
+        )
+        .unwrap();
+        assert!(req.multipart.is_none());
+        assert!(req.response_mode.is_none());
+        let matrix: super::MatrixEncryptedMediaUploadRequest = serde_json::from_str(
+            r#"{"uploadUrl":"https://example.com/upload","localPath":"/tmp/file","multipart":{"fieldName":"x","filename":"f"},"responseMode":"http"}"#).unwrap();
+        let req: super::ConnectorMediaUploadRequest = matrix.into();
+        assert!(req.multipart.is_none());
+        assert!(req.response_mode.is_none());
+        assert!(serde_json::from_str::<super::ConnectorMediaUploadRequest>(
+            r#"{"uploadUrl":"https://example.com","responseMode":"unknown"}"#
+        )
+        .is_err());
+    }
+
     use super::*;
     use reqwest::Method;
     use std::time::Duration;

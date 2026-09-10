@@ -39,6 +39,40 @@ pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigErr
     }
 }
 
+/// Authenticate the original HTTP body using Lark's SHA-256 request signature.
+/// URL verification is exempted by the caller, matching the official SDK.
+/// Freshness applies to the signed request timestamp (seconds), never the
+/// event creation timestamp, so a newly signed delivery can contain old events.
+pub fn verify_signature(
+    timestamp: Option<&str>,
+    nonce: Option<&str>,
+    signature: Option<&str>,
+    encrypt_key: &str,
+    body: &[u8],
+    now_seconds: i64,
+) -> Result<(), SigError> {
+    let timestamp = timestamp
+        .filter(|v| !v.is_empty())
+        .ok_or(SigError::Missing)?;
+    let nonce = nonce.filter(|v| !v.is_empty()).ok_or(SigError::Missing)?;
+    let signature = signature.ok_or(SigError::Missing)?;
+    let provided = hex::decode(signature).map_err(|_| SigError::Mismatch)?;
+    let mut digest = Sha256::new();
+    digest.update(timestamp.as_bytes());
+    digest.update(nonce.as_bytes());
+    digest.update(encrypt_key.as_bytes());
+    digest.update(body);
+    let expected = digest.finalize();
+    if provided.len() != expected.len() || !bool::from(provided.ct_eq(expected.as_slice())) {
+        return Err(SigError::Mismatch);
+    }
+    let seconds: i64 = timestamp.parse().map_err(|_| SigError::Stale)?;
+    if now_seconds.abs_diff(seconds) > 300 {
+        return Err(SigError::Stale);
+    }
+    Ok(())
+}
+
 /// Maximum age (in milliseconds) of a Lark event we will accept. Lark event
 /// headers carry a `create_time` field (Unix epoch, milliseconds). Rejecting
 /// events outside this window — together with `event_id` de-duplication —
@@ -55,7 +89,7 @@ pub const LARK_REPLAY_WINDOW_MS: i64 = 5 * 60 * 1000;
 pub fn check_create_time(create_time: Option<&str>, now_ms: i64) -> Result<(), SigError> {
     let raw = create_time.ok_or(SigError::Stale)?;
     let ts: i64 = raw.trim().parse().map_err(|_| SigError::Stale)?;
-    if (now_ms - ts).abs() > LARK_REPLAY_WINDOW_MS {
+    if now_ms.abs_diff(ts) > LARK_REPLAY_WINDOW_MS as u64 {
         return Err(SigError::Stale);
     }
     Ok(())
@@ -129,6 +163,62 @@ mod tests {
         let mut combined = iv.to_vec();
         combined.extend_from_slice(&ciphertext);
         BASE64.encode(combined)
+    }
+
+    #[test]
+    fn request_signature_matches_independent_sha256_vector() {
+        let signature = "e06f89d30b42a294883535d92ef02efc4627e4052dc89d9f9ec7c1742c073b85";
+        let body = br#"{"event":"ok"}"#;
+        assert!(verify_signature(
+            Some("1700000000"),
+            Some("nonce"),
+            Some(signature),
+            "key",
+            body,
+            1700000000
+        )
+        .is_ok());
+        assert!(verify_signature(
+            Some("1700000000"),
+            Some("nonce"),
+            Some(signature),
+            "key",
+            b"{}",
+            1700000000
+        )
+        .is_err());
+        assert!(verify_signature(
+            Some("1700000000"),
+            Some("nonce"),
+            Some(signature),
+            "key",
+            body,
+            1700000301
+        )
+        .is_err());
+        assert!(verify_signature(
+            Some("1700000000"),
+            Some("nonce"),
+            Some(signature),
+            "key",
+            body,
+            i64::MIN
+        )
+        .is_err());
+        assert!(verify_signature(None, Some("nonce"), Some(signature), "key", body, 0).is_err());
+        assert!(
+            verify_signature(Some("1700000000"), None, Some(signature), "key", body, 0).is_err()
+        );
+        assert!(verify_signature(Some("1700000000"), Some("nonce"), None, "key", body, 0).is_err());
+        assert!(verify_signature(
+            Some("1700000000"),
+            Some("nonce"),
+            Some("not-hex"),
+            "key",
+            body,
+            0
+        )
+        .is_err());
     }
 
     // -------------------------------------------------------------------------

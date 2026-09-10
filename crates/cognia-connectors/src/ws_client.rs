@@ -15,8 +15,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use futures_util::{SinkExt, StreamExt};
+use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::{client_async_tls, tungstenite::Message};
 use uuid::Uuid;
 
@@ -33,6 +34,7 @@ type SendTx = mpsc::Sender<Message>;
 
 struct WsHandle {
     tx: SendTx,
+    cancel: Arc<Notify>,
 }
 
 static WS_HANDLES: OnceLock<Arc<Mutex<HashMap<String, WsHandle>>>> = OnceLock::new();
@@ -126,10 +128,20 @@ pub async fn open_ws_with_handle(
     let (mut sink, mut stream) = ws_stream.split();
     let (tx, mut rx) = mpsc::channel::<Message>(64);
 
-    handles()
-        .lock()
-        .unwrap()
-        .insert(id.clone(), WsHandle { tx });
+    let cancel = Arc::new(Notify::new());
+    {
+        let mut registry = handles().lock().unwrap();
+        if registry.contains_key(&id) {
+            return Err("WS handle is already open".into());
+        }
+        registry.insert(
+            id.clone(),
+            WsHandle {
+                tx,
+                cancel: cancel.clone(),
+            },
+        );
+    }
 
     let id_clone = id.clone();
     let emitter_clone = Arc::clone(&emitter);
@@ -138,60 +150,58 @@ pub async fn open_ws_with_handle(
         serde_json::Value::Null,
     );
 
-    // Pump outbound messages from the mpsc channel to the WS sink.
+    // One owner coordinates both halves. A failed writer, reader EOF, or
+    // explicit close always takes the same cleanup path and emits close once.
     tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if sink.send(msg).await.is_err() {
-                break;
-            }
+        let mut close_payload = close_event_payload(None);
+        let result: Result<(), String> = tokio::select! {
+            _ = cancel.notified() => Ok(()),
+            result = async {
+                loop {
+                    tokio::select! {
+                        outbound = rx.recv() => {
+                            let Some(message) = outbound else { break Ok(()); };
+                            tokio::time::timeout(Duration::from_secs(10), sink.send(message))
+                                .await.map_err(|_| "WS write timed out".to_string())?
+                                .map_err(|e| format!("WS write failed: {e}"))?;
+                        }
+                        inbound = stream.next() => match inbound {
+                            Some(Ok(Message::Text(value))) => emitter_clone.emit(
+                                &format!("connectors://ws/{id_clone}/message"),
+                                serde_json::Value::String(value.to_string())),
+                            Some(Ok(Message::Binary(value))) => emitter_clone.emit(
+                                &format!("connectors://ws/{id_clone}/binary"),
+                                serde_json::Value::String(binary_event_payload(&value))),
+                            Some(Ok(Message::Close(frame))) => {
+                                close_payload = close_event_payload(frame.as_ref());
+                                break Ok(());
+                            }
+                            Some(Err(error)) => break Err(error.to_string()),
+                            None => break Ok(()),
+                            _ => {},
+                        }
+                    }
+                }
+            } => result,
+        };
+        if let Err(error) = result {
+            emitter_clone.emit(
+                &format!("connectors://ws/{id_clone}/error"),
+                serde_json::Value::String(error),
+            );
         }
-    });
-
-    // Pump inbound messages from WS to Tauri events.
-    tokio::spawn(async move {
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(Message::Text(text)) => {
-                    emitter_clone.emit(
-                        &format!("connectors://ws/{id_clone}/message"),
-                        serde_json::Value::String(text.to_string()),
-                    );
-                }
-                Ok(Message::Binary(bytes)) => {
-                    // Binary frames ride a dedicated `/binary` topic as base64
-                    // so `/message` listeners keep receiving text only.
-                    log::debug!(
-                        "WS {id_clone}: binary frame ({} bytes) → /binary",
-                        bytes.len()
-                    );
-                    emitter_clone.emit(
-                        &format!("connectors://ws/{id_clone}/binary"),
-                        serde_json::Value::String(binary_event_payload(&bytes)),
-                    );
-                }
-                Ok(Message::Close(frame)) => {
-                    emitter_clone.emit(
-                        &format!("connectors://ws/{id_clone}/close"),
-                        close_event_payload(frame.as_ref()),
-                    );
-                    handles().lock().unwrap().remove(&id_clone);
-                    break;
-                }
-                Err(e) => {
-                    emitter_clone.emit(
-                        &format!("connectors://ws/{id_clone}/error"),
-                        serde_json::Value::String(e.to_string()),
-                    );
-                    emitter_clone.emit(
-                        &format!("connectors://ws/{id_clone}/close"),
-                        close_event_payload(None),
-                    );
-                    handles().lock().unwrap().remove(&id_clone);
-                    break;
-                }
-                _ => {}
-            }
+        // Do not let a peer that never completes the close handshake retain
+        // this task or block global connector teardown.
+        let _ = tokio::time::timeout(Duration::from_secs(1), sink.close()).await;
+        let mut registry = handles().lock().unwrap();
+        if registry
+            .get(&id_clone)
+            .is_some_and(|handle| Arc::ptr_eq(&handle.cancel, &cancel))
+        {
+            registry.remove(&id_clone);
         }
+        drop(registry);
+        emitter_clone.emit(&format!("connectors://ws/{id_clone}/close"), close_payload);
     });
 
     Ok(id)
@@ -242,34 +252,30 @@ pub async fn ws_send_binary(handle_id: &str, data: Vec<u8>) -> Result<(), String
 
 /// Close the WebSocket connection.
 pub async fn ws_close(handle_id: &str) -> Result<(), String> {
-    let tx = {
-        let mut map = handles().lock().unwrap();
-        map.remove(handle_id)
-            .map(|h| h.tx)
-            .ok_or_else(|| format!("WS handle '{handle_id}' not found"))?
-    };
-    let _ = tx.send(Message::Close(None)).await;
+    let handle = handles()
+        .lock()
+        .unwrap()
+        .remove(handle_id)
+        .ok_or_else(|| format!("WS handle '{handle_id}' not found"))?;
+    handle.cancel.notify_one();
     Ok(())
 }
 
-/// Close **every** live WS handle and return how many were closed.
-///
-/// Used on connector bootstrap to reap sockets leaked by a previous webview
-/// load whose JS cleanup never ran: a hard reload / Fast-Refresh full reload
-/// discards the renderer that owned the handle ids while the Rust core process
-/// — and these sockets — keep running. Without this, each reload piles up a
-/// zombie socket that keeps delivering duplicate inbound events.
-///
-/// Drains the registry under the lock, then sends `Close` outside it — the
-/// std `Mutex` guard must never be held across an `.await`.
+/// Cancel all sockets without waiting for a congested outbound queue.
 pub async fn close_all() -> usize {
-    let txs: Vec<SendTx> = {
-        let mut map = handles().lock().unwrap();
-        map.drain().map(|(_, h)| h.tx).collect()
-    };
-    let count = txs.len();
-    for tx in txs {
-        let _ = tx.send(Message::Close(None)).await;
+    close_handles(handles())
+}
+
+fn close_handles(registry: &Mutex<HashMap<String, WsHandle>>) -> usize {
+    let sockets: Vec<WsHandle> = registry
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, value)| value)
+        .collect();
+    let count = sockets.len();
+    for handle in sockets {
+        handle.cancel.notify_one();
     }
     count
 }
@@ -462,20 +468,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disconnected_peer_cleans_registry_and_emits_close_once() {
+        proxy_config::apply_current(Default::default()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let socket = accept_async(tcp).await.unwrap();
+            drop(socket); // Abrupt EOF, without a close frame.
+        });
+        let emitter = Arc::new(RecordingEmitter::default());
+        let id = open_ws(emitter.clone(), format!("ws://{address}"), None)
+            .await
+            .unwrap();
+        server.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !emitter
+                .events
+                .lock()
+                .iter()
+                .any(|(topic, _)| topic.ends_with("/close"))
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!handles().lock().unwrap().contains_key(&id));
+        assert_eq!(
+            emitter
+                .events
+                .lock()
+                .iter()
+                .filter(|(topic, _)| topic.ends_with("/close"))
+                .count(),
+            1
+        );
+        assert!(ws_send(&id, "after close".into()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn local_close_finishes_even_when_peer_never_reads() {
+        proxy_config::apply_current(Default::default()).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let _socket = accept_async(tcp).await.unwrap();
+            let _ = stopped.await;
+        });
+        let emitter = Arc::new(RecordingEmitter::default());
+        let id = open_ws(emitter.clone(), format!("ws://{address}"), None)
+            .await
+            .unwrap();
+        ws_close(&id).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !emitter
+                .events
+                .lock()
+                .iter()
+                .any(|(topic, _)| topic.ends_with("/close"))
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(()).unwrap();
+        server.await.unwrap();
+        assert!(!handles().lock().unwrap().contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn close_does_not_wait_for_full_outbound_queue() {
+        let (tx, _rx) = mpsc::channel(1);
+        tx.send(Message::Text("queued".into())).await.unwrap();
+        handles().lock().unwrap().insert(
+            "full-queue".into(),
+            WsHandle {
+                tx,
+                cancel: Arc::new(Notify::new()),
+            },
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            ws_close("full-queue"),
+        )
+        .await
+        .expect("shutdown must not await queue capacity")
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn close_all_drains_every_handle() {
-        // Reap any residue from a prior test so the count is deterministic.
-        close_all().await;
-        // Insert two synthetic handles directly into the global registry;
-        // keep the receivers alive so the Close send doesn't error.
+        let registry = Mutex::new(HashMap::new());
         let (tx1, _rx1) = mpsc::channel::<Message>(1);
         let (tx2, _rx2) = mpsc::channel::<Message>(1);
-        {
-            let mut map = handles().lock().unwrap();
-            map.insert("h1".into(), WsHandle { tx: tx1 });
-            map.insert("h2".into(), WsHandle { tx: tx2 });
-        }
-        let closed = close_all().await;
-        assert_eq!(closed, 2);
-        assert!(handles().lock().unwrap().is_empty());
+        let cancel = Arc::new(Notify::new());
+        registry.lock().unwrap().insert(
+            "h1".into(),
+            WsHandle {
+                tx: tx1,
+                cancel: cancel.clone(),
+            },
+        );
+        registry.lock().unwrap().insert(
+            "h2".into(),
+            WsHandle {
+                tx: tx2,
+                cancel: Arc::new(Notify::new()),
+            },
+        );
+        assert_eq!(close_handles(&registry), 2);
+        assert!(registry.lock().unwrap().is_empty());
+        tokio::time::timeout(Duration::from_millis(100), cancel.notified())
+            .await
+            .unwrap();
     }
 }

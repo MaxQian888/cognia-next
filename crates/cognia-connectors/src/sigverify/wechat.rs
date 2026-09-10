@@ -95,6 +95,12 @@ pub fn decrypt(encoding_aes_key: &str, encrypt_b64: &str) -> Result<(String, Str
     if pad == 0 || pad > 32 || pad > plain.len() {
         return Err(SigError::Mismatch);
     }
+    if plain[plain.len() - pad..]
+        .iter()
+        .any(|byte| *byte as usize != pad)
+    {
+        return Err(SigError::Mismatch);
+    }
     plain.truncate(plain.len() - pad);
 
     // Layout: random(16) ++ msg_len(4, big-endian) ++ msg ++ appid.
@@ -186,6 +192,16 @@ mod tests {
             verify_msg_signature(token, ts, nonce, encrypt, "nope").unwrap_err(),
             SigError::Mismatch
         ));
+    }
+
+    #[test]
+    fn decrypt_rejects_inconsistent_padding_bytes() {
+        let mut plaintext = vec![0u8; 20];
+        plaintext.extend_from_slice(&[12u8; 12]);
+        plaintext[20] = 7; // Last byte still claims twelve bytes of padding.
+        let ciphertext = Aes256CbcEnc::new(&[0u8; 32].into(), &[0u8; 16].into())
+            .encrypt_padded_vec::<NoPad>(&plaintext);
+        assert!(decrypt(&test_aes_key(), &BASE64.encode(ciphertext)).is_err());
     }
 
     #[test]

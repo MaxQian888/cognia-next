@@ -291,6 +291,8 @@ where
         bytes.extend_from_slice(&chunk);
     }
 
+    validate_wechat_media_response(&remote_ref, &bytes)?;
+
     // Encrypted Matrix media is transformed here, before the shared at-rest
     // encryption/cache write. Plain fetches pass the identity transform.
     let bytes = transform(bytes)?;
@@ -307,6 +309,27 @@ where
     write_envelope(&enc_path, &cache_key, &meta, &bytes)?;
 
     Ok(meta.into_ref(remote_ref, false))
+}
+
+/// WeChat reports invalid/expired media as HTTP 200 JSON. Caching that JSON
+/// would shadow the actual binary media until cache expiry.
+fn validate_wechat_media_response(remote_ref: &str, bytes: &[u8]) -> Result<(), String> {
+    if !remote_ref.starts_with("wechat-oa:media:") {
+        return Ok(());
+    }
+    if let Ok(body) = serde_json::from_slice::<serde_json::Value>(bytes) {
+        if let Some(code) = body
+            .get("errcode")
+            .and_then(|v| v.as_i64())
+            .filter(|code| *code != 0)
+        {
+            return Err(format!("WeChat media API error {code}"));
+        }
+        if body.get("video_url").is_some() {
+            return Err("WeChat video media requires resolving video_url before download".into());
+        }
+    }
+    Ok(())
 }
 
 /// Fetch encrypted Matrix media through the shared bounded downloader, verify
@@ -997,6 +1020,26 @@ fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wechat_media_errors_are_rejected_before_cache_write() {
+        assert!(super::validate_wechat_media_response(
+            "wechat-oa:media:m1",
+            br#"{"errcode":40007,"errmsg":"invalid media_id"}"#
+        )
+        .is_err());
+        assert!(super::validate_wechat_media_response(
+            "wechat-oa:media:m1",
+            br#"{"video_url":"https://example.com/v"}"#
+        )
+        .is_err());
+        assert!(
+            super::validate_wechat_media_response("wechat-oa:media:m1", b"binary image").is_ok()
+        );
+        assert!(
+            super::validate_wechat_media_response("other:file", br#"{"errcode":40007}"#).is_ok()
+        );
+    }
+
     use super::*;
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

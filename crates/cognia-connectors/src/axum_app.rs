@@ -377,7 +377,9 @@ enum SlackBody {
     /// field whose value is the URL-decoded JSON interaction.
     Interactivity(serde_json::Value),
     /// Slash-command form post (form-encoded, no `payload` field).
-    SlashCommand,
+    SlashCommand(serde_json::Value),
+    /// Slack periodically probes public slash-command endpoints.
+    SslCheck,
     /// Neither JSON nor a recognisable form body.
     Invalid,
 }
@@ -397,7 +399,25 @@ fn classify_slack_body(body: &[u8]) -> SlackBody {
             Ok(inner) => SlackBody::Interactivity(inner),
             Err(_) => SlackBody::Invalid,
         },
-        None => SlackBody::SlashCommand,
+        None => {
+            let mut fields: serde_json::Map<String, serde_json::Value> = pairs
+                .into_iter()
+                .map(|(key, value)| (key, serde_json::Value::String(value)))
+                .collect();
+            if fields.get("ssl_check").and_then(|v| v.as_str()) == Some("1") {
+                return SlackBody::SslCheck;
+            }
+            if !["command", "channel_id", "user_id"].iter().all(|key| {
+                fields
+                    .get(*key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|value| !value.is_empty())
+            }) {
+                return SlackBody::Invalid;
+            }
+            fields.insert("type".into(), serde_json::json!("slash_command"));
+            SlackBody::SlashCommand(serde_json::Value::Object(fields))
+        }
     }
 }
 
@@ -433,13 +453,11 @@ async fn slack_webhook_handler(
             emitter.emit_webhook(adapter_id, &inner);
             empty_ok_response()
         }
-        SlackBody::SlashCommand => {
-            // Slash-command form posts (no `payload` field) are ACK'd with an
-            // empty 200 and intentionally NOT emitted for now — cognia
-            // registers no slash commands, so forwarding would dead-letter in
-            // the renderer. Revisit when slash commands are supported.
+        SlackBody::SlashCommand(payload) => {
+            emitter.emit_webhook(adapter_id, &payload);
             empty_ok_response()
         }
+        SlackBody::SslCheck => empty_ok_response(),
         SlackBody::Invalid => error_response(StatusCode::BAD_REQUEST, "invalid body"),
     }
 }
@@ -532,30 +550,35 @@ async fn qq_official_webhook_handler(
     }
 }
 
-/// Decide the in-band Discord InteractionResponse for a webhook delivery.
-/// Returns `(response_type, should_emit)`:
-///   - PING (1)                          → (1 = PONG, false) — handshake, nothing to run.
-///   - component (3) / modal_submit (5)  → (6 = DEFERRED_UPDATE_MESSAGE, true)
-///   - everything else                   → (6, false) — ACK-and-ignore.
-///
-/// cognia only processes component clicks and modal submits, and for those
-/// type 6 (DEFERRED_UPDATE_MESSAGE) is the right ACK: it does NOT show a
-/// "thinking" placeholder and requires NO follow-up on the interaction token,
-/// so the assistant's reply can flow out as an ordinary channel message
-/// (unified with the gateway path). We deliberately do NOT use type 5
-/// (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE), which would leave a "thinking…"
-/// state hanging because we never edit the deferred response.
-///
-/// Slash commands (type 2) and autocomplete (type 4) are not registered by
-/// cognia and aren't handled by `parseDiscordInteraction`, so they are ACK'd
-/// (to avoid "This interaction failed") but not forwarded. Modal-open (type 9)
-/// cannot be answered here because the modal definition lives in the renderer's
-/// Dexie bindings — modal-open is gateway-only.
-fn discord_ack_for_interaction(interaction_type: u64) -> (u32, bool) {
-    match interaction_type {
-        1 => (1, false),
-        3 | 5 => (6, true),
-        _ => (6, false),
+/// Select an initial response compatible with the actual interaction type.
+/// Immediate ephemeral acknowledgments for commands and standalone modals
+/// leave no deferred loading state; their work continues through the event bus.
+fn discord_ack_for_interaction(payload: &serde_json::Value) -> Option<(serde_json::Value, bool)> {
+    match payload.get("type").and_then(|v| v.as_u64())? {
+        1 => Some((serde_json::json!({ "type": 1 }), false)),
+        3 => Some((serde_json::json!({ "type": 6 }), true)),
+        5 if payload
+            .get("message")
+            .is_some_and(|value| value.is_object()) =>
+        {
+            Some((serde_json::json!({ "type": 6 }), true))
+        }
+        2 | 5 => {
+            let content = match payload.get("locale").and_then(|v| v.as_str()) {
+                Some("zh-CN") => "已收到。",
+                Some("zh-TW") => "已收到。",
+                _ => "Received.",
+            };
+            Some((
+                serde_json::json!({ "type": 4, "data": { "content": content, "flags": 64 } }),
+                true,
+            ))
+        }
+        4 => Some((
+            serde_json::json!({ "type": 8, "data": { "choices": [] } }),
+            false,
+        )),
+        _ => None,
     }
 }
 
@@ -573,15 +596,13 @@ async fn discord_webhook_handler(
         Err((status, msg)) => return error_response(status, msg),
     };
 
-    let interaction_type = payload.get("type").and_then(|t| t.as_u64()).unwrap_or(0);
-    let (response_type, should_emit) = discord_ack_for_interaction(interaction_type);
+    let Some((response, should_emit)) = discord_ack_for_interaction(&payload) else {
+        return error_response(StatusCode::BAD_REQUEST, "unsupported interaction type");
+    };
     if should_emit {
         emitter.emit_webhook(adapter_id, &payload);
     }
-    json_response(
-        StatusCode::OK,
-        &serde_json::json!({ "type": response_type }),
-    )
+    json_response(StatusCode::OK, &response)
 }
 
 /// 200 OK with a JSON body (`application/json`).
@@ -746,7 +767,7 @@ pub async fn verify_webhook(
         "telegram" => verify_telegram(adapter_id, headers, body).await,
         "slack" => verify_slack(adapter_id, headers, body).await,
         "discord" => verify_discord(adapter_id, headers, body).await,
-        "lark" => verify_lark(adapter_id, body).await,
+        "lark" => verify_lark(adapter_id, headers, body).await,
         // Any other kind is a plugin connector. It has no hand-written arm
         // here, so it verifies through the scheme its manifest declared. With
         // no declaration this still refuses, which is the safe direction: an
@@ -887,6 +908,7 @@ async fn verify_discord(
 
 async fn verify_lark(
     adapter_id: &str,
+    headers: &HeaderMap,
     body: &[u8],
 ) -> Result<serde_json::Value, (StatusCode, &'static str)> {
     let expected_token = super::keyring::get(adapter_id, "verificationToken")
@@ -899,13 +921,17 @@ async fn verify_lark(
     let outer: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
 
-    // Encrypted events arrive as `{"encrypt":"<base64>"}` — decrypt then
-    // re-parse before reading the token field.
+    let encrypt_key = super::keyring::get(adapter_id, "encryptKey")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"))?
+        .filter(|key| !key.is_empty());
+
+    // Signatures cover the raw outer body; decryption only reveals the token
+    // and whether this is the URL verification exception.
     let payload = if let Some(enc) = outer.get("encrypt").and_then(|v| v.as_str()) {
-        let encrypt_key = super::keyring::get(adapter_id, "encryptKey")
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "keyring read failed"))?
+        let encrypt_key = encrypt_key
+            .as_deref()
             .ok_or((StatusCode::UNAUTHORIZED, "encrypt key not configured"))?;
-        let plaintext = super::sigverify::lark::decrypt_body(enc, &encrypt_key)
+        let plaintext = super::sigverify::lark::decrypt_body(enc, encrypt_key)
             .map_err(|_| (StatusCode::UNAUTHORIZED, "decryption failed"))?;
         serde_json::from_slice(&plaintext)
             .map_err(|_| (StatusCode::BAD_REQUEST, "decrypted body is not JSON"))?
@@ -924,30 +950,41 @@ async fn verify_lark(
     super::sigverify::lark::verify_token(provided_token, &expected_token)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
 
-    lark_replay_check(adapter_id, &payload)?;
+    let is_challenge = payload.get("type").and_then(|v| v.as_str()) == Some("url_verification")
+        && payload.get("challenge").and_then(|v| v.as_str()).is_some();
+    if !is_challenge {
+        if let Some(key) = encrypt_key.as_deref() {
+            let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+            super::sigverify::lark::verify_signature(
+                header("x-lark-request-timestamp"),
+                header("x-lark-request-nonce"),
+                header("x-lark-signature"),
+                key,
+                body,
+                chrono::Utc::now().timestamp(),
+            )
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "signature verification failed"))?;
+        }
+    }
+
+    lark_replay_check(adapter_id, &payload, encrypt_key.is_some())?;
 
     Ok(payload)
 }
 
-/// Replay protection for verified Lark events. Lark authenticates inbound
-/// events only with a static token (no per-body HMAC), so a captured valid
-/// event could be replayed indefinitely. Real schema-2.0 events carry
-/// `header.create_time` (epoch ms) and `header.event_id`; we enforce a
-/// freshness window on the former and de-duplicate on the latter.
-///
-/// The URL-verification handshake (`type == "url_verification"` / top-level
-/// `challenge`) carries neither field and must still pass — it is skipped.
-/// When a non-challenge event is *missing* both fields we fall back to
-/// token-only (lenient) rather than reject, so legacy/edge payloads are not
-/// broken; captured real events — which always include the fields — are still
-/// fully protected.
+/// Deduplicate authenticated events. For signed requests, freshness has already
+/// been checked against the signed HTTP timestamp, permitting delivery retries
+/// whose event creation time is old. Token-only legacy events retain their
+/// existing creation-time window. Exact URL verification payloads are exempt.
 fn lark_replay_check(
     adapter_id: &str,
     payload: &serde_json::Value,
+    signed_request: bool,
 ) -> Result<(), (StatusCode, &'static str)> {
     // URL-verification handshake — no replay state, let it through.
-    let is_url_verification = payload.get("challenge").is_some()
-        || payload.get("type").and_then(|v| v.as_str()) == Some("url_verification");
+    let is_url_verification = payload.get("type").and_then(|v| v.as_str())
+        == Some("url_verification")
+        && payload.get("challenge").and_then(|v| v.as_str()).is_some();
     if is_url_verification {
         return Ok(());
     }
@@ -960,7 +997,7 @@ fn lark_replay_check(
         .and_then(|h| h.get("event_id"))
         .and_then(|v| v.as_str());
 
-    if let Some(create_time) = create_time {
+    if let Some(create_time) = create_time.filter(|_| !signed_request) {
         let now_ms = chrono::Utc::now().timestamp_millis();
         super::sigverify::lark::check_create_time(Some(create_time), now_ms)
             .map_err(|_| (StatusCode::UNAUTHORIZED, "stale event timestamp"))?;
@@ -1634,22 +1671,98 @@ mod tests {
     }
 
     #[test]
-    fn discord_ack_ping_is_pong_and_not_emitted() {
-        assert_eq!(discord_ack_for_interaction(1), (1, false));
+    fn discord_ack_selects_valid_callback_for_each_interaction() {
+        for (kind, message, expected_type, emitted) in [
+            (1, false, 1, false),
+            (2, false, 4, true),
+            (3, true, 6, true),
+            (4, false, 8, false),
+            (5, true, 6, true),
+            (5, false, 4, true),
+        ] {
+            let mut payload = serde_json::json!({ "type": kind });
+            if message {
+                payload["message"] = serde_json::json!({ "id": "m1" });
+            }
+            let (ack, should_emit) = discord_ack_for_interaction(&payload).unwrap();
+            assert_eq!(ack["type"], expected_type);
+            assert_eq!(should_emit, emitted);
+            if expected_type == 4 {
+                assert_eq!(ack["data"]["flags"], 64);
+                assert!(!ack["data"]["content"].as_str().unwrap().is_empty());
+            }
+            if expected_type == 8 {
+                assert_eq!(ack["data"]["choices"], serde_json::json!([]));
+            }
+        }
+        assert!(discord_ack_for_interaction(&serde_json::json!({ "type": 99 })).is_none());
+        assert!(discord_ack_for_interaction(&serde_json::json!({})).is_none());
     }
 
-    #[test]
-    fn discord_ack_component_and_modal_submit_defer_update_and_emit() {
-        assert_eq!(discord_ack_for_interaction(3), (6, true));
-        assert_eq!(discord_ack_for_interaction(5), (6, true));
-    }
-
-    #[test]
-    fn discord_ack_unsupported_types_are_ackd_without_emit() {
-        // Slash command (2) and autocomplete (4) are not registered/handled by
-        // cognia — ACK to dismiss, but do not forward (no follow-up hang).
-        assert_eq!(discord_ack_for_interaction(2), (6, false));
-        assert_eq!(discord_ack_for_interaction(4), (6, false));
+    #[tokio::test]
+    async fn discord_http_ack_and_emit_match_interaction_type() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let id = "discord-http-response-types";
+        let signing = SigningKey::from_bytes(&[0x61; 32]);
+        super::super::keyring::set(
+            id,
+            "publicKey",
+            &hex::encode(signing.verifying_key().as_bytes()),
+        )
+        .unwrap();
+        for (kind, from_message, expected_type, emitted) in [
+            (1, false, 1, false),
+            (2, false, 4, true),
+            (3, true, 6, true),
+            (4, false, 8, false),
+            (5, true, 6, true),
+            (5, false, 4, true),
+            (99, false, 0, false),
+        ] {
+            let state = ConnectorsState::new();
+            register(&state, id, "discord");
+            let (app, emitter) = test_router_with(state);
+            let mut payload = serde_json::json!({ "type": kind, "id": "interaction-1" });
+            if from_message {
+                payload["message"] = serde_json::json!({ "id": "m1" });
+            }
+            let body = payload.to_string();
+            let timestamp = chrono::Utc::now().timestamp().to_string();
+            let mut signed = timestamp.as_bytes().to_vec();
+            signed.extend_from_slice(body.as_bytes());
+            let response = post_webhook(
+                app,
+                &format!("/webhook/discord/{id}"),
+                vec![
+                    ("x-signature-timestamp", timestamp),
+                    (
+                        "x-signature-ed25519",
+                        hex::encode(signing.sign(&signed).to_bytes()),
+                    ),
+                ],
+                body,
+            )
+            .await;
+            assert_eq!(
+                response.status(),
+                if kind == 99 {
+                    StatusCode::BAD_REQUEST
+                } else {
+                    StatusCode::OK
+                }
+            );
+            if kind != 99 {
+                let ack: serde_json::Value =
+                    serde_json::from_str(&body_string(response).await).unwrap();
+                assert_eq!(ack["type"], expected_type);
+            }
+            let events = emitter.events.lock();
+            assert_eq!(events.len(), usize::from(emitted));
+            if emitted {
+                assert_eq!(events[0].1, payload);
+            }
+        }
+        super::super::keyring::delete(id, "publicKey").unwrap();
     }
 
     #[tokio::test]
@@ -1712,13 +1825,96 @@ mod tests {
         let encoded = BASE64.encode(combined);
         let outer = serde_json::json!({ "encrypt": encoded }).to_string();
 
-        let payload = verify_webhook(&state, adapter_id, &HeaderMap::new(), outer.as_bytes())
-            .await
-            .unwrap();
+        let payload = verify_webhook(
+            &state,
+            adapter_id,
+            &lark_signature_headers(outer.as_bytes()),
+            outer.as_bytes(),
+        )
+        .await
+        .unwrap();
         assert_eq!(payload["header"]["token"], "vtok-2");
 
         super::super::keyring::delete(adapter_id, "verificationToken").unwrap();
         super::super::keyring::delete(adapter_id, "encryptKey").unwrap();
+    }
+
+    fn lark_signature_headers(body: &[u8]) -> HeaderMap {
+        use sha2::{Digest, Sha256};
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let nonce = "test-nonce";
+        let mut digest = Sha256::new();
+        digest.update(format!("{timestamp}{nonce}the-encrypt-key"));
+        digest.update(body);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-lark-request-timestamp", timestamp.parse().unwrap());
+        headers.insert("x-lark-request-nonce", nonce.parse().unwrap());
+        headers.insert(
+            "x-lark-signature",
+            hex::encode(digest.finalize()).parse().unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn verify_lark_configured_key_requires_body_signature() {
+        let id = "lark-requires-signature";
+        super::super::keyring::set(id, "verificationToken", "vtok").unwrap();
+        super::super::keyring::set(id, "encryptKey", "the-encrypt-key").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, id, "lark");
+        let body = br#"{"schema":"2.0","header":{"token":"vtok"}}"#;
+        assert!(verify_webhook(&state, id, &HeaderMap::new(), body)
+            .await
+            .is_err());
+        let headers = lark_signature_headers(body);
+        assert!(verify_webhook(&state, id, &headers, body).await.is_ok());
+        let tampered = br#"{"schema":"2.0","header":{"token":"vtok"},"challenge":"bypass"}"#;
+        assert!(verify_webhook(&state, id, &headers, tampered)
+            .await
+            .is_err());
+        super::super::keyring::delete(id, "verificationToken").unwrap();
+        super::super::keyring::delete(id, "encryptKey").unwrap();
+    }
+
+    #[tokio::test]
+    async fn verify_lark_url_validation_with_key_still_requires_token_but_not_signature() {
+        let id = "lark-signed-challenge";
+        super::super::keyring::set(id, "verificationToken", "vtok").unwrap();
+        super::super::keyring::set(id, "encryptKey", "the-encrypt-key").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, id, "lark");
+        let body = br#"{"type":"url_verification","challenge":"abc","token":"vtok"}"#;
+        assert!(verify_webhook(&state, id, &HeaderMap::new(), body)
+            .await
+            .is_ok());
+        let wrong = br#"{"type":"url_verification","challenge":"abc","token":"wrong"}"#;
+        assert!(verify_webhook(&state, id, &HeaderMap::new(), wrong)
+            .await
+            .is_err());
+        super::super::keyring::delete(id, "verificationToken").unwrap();
+        super::super::keyring::delete(id, "encryptKey").unwrap();
+    }
+
+    #[tokio::test]
+    async fn verify_lark_signed_retry_uses_request_time_not_event_creation_time() {
+        let id = "lark-signed-retry";
+        super::super::keyring::set(id, "verificationToken", "vtok").unwrap();
+        super::super::keyring::set(id, "encryptKey", "the-encrypt-key").unwrap();
+        let state = ConnectorsState::new();
+        register(&state, id, "lark");
+        let body = lark_event_body(
+            "vtok",
+            "signed-old-event",
+            chrono::Utc::now().timestamp_millis() - 3600_000,
+        );
+        assert!(
+            verify_webhook(&state, id, &lark_signature_headers(&body), &body)
+                .await
+                .is_ok()
+        );
+        super::super::keyring::delete(id, "verificationToken").unwrap();
+        super::super::keyring::delete(id, "encryptKey").unwrap();
     }
 
     fn lark_event_body(token: &str, event_id: &str, create_time_ms: i64) -> Vec<u8> {
@@ -1966,7 +2162,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slack_slash_command_form_is_acked_but_not_emitted() {
+    async fn slack_slash_command_form_is_acked_and_forwarded() {
         let adapter_id = "slack-slash-http";
         let secret = "slack-secret-slash";
         super::super::keyring::set(adapter_id, "signingSecret", secret).unwrap();
@@ -1979,6 +2175,8 @@ mod tests {
             ("command", "/cognia"),
             ("text", "hello"),
             ("user_id", "U123"),
+            ("channel_id", "C123"),
+            ("trigger_id", "trigger-1"),
         ])
         .unwrap();
         let resp = post_webhook(
@@ -1990,12 +2188,30 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_string(resp).await, "");
-        assert!(
-            emitter.events.lock().is_empty(),
-            "slash commands are not forwarded"
-        );
+        let events = emitter.events.lock();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1["type"], "slash_command");
+        assert_eq!(events[0].1["command"], "/cognia");
+        assert_eq!(events[0].1["text"], "hello");
+        assert_eq!(events[0].1["channel_id"], "C123");
+        assert_eq!(events[0].1["trigger_id"], "trigger-1");
 
         super::super::keyring::delete(adapter_id, "signingSecret").unwrap();
+    }
+
+    #[test]
+    fn slack_incomplete_slash_forms_are_invalid() {
+        assert!(matches!(
+            classify_slack_body(b"ssl_check=1&token=legacy"),
+            SlackBody::SslCheck
+        ));
+        for body in [
+            b"random=value".as_slice(),
+            b"command=%2Fcognia&channel_id=C1",
+            b"command=&user_id=U1&channel_id=C1",
+        ] {
+            assert!(matches!(classify_slack_body(body), SlackBody::Invalid));
+        }
     }
 
     #[test]
@@ -2009,8 +2225,8 @@ mod tests {
             SlackBody::Interactivity(_)
         ));
         assert!(matches!(
-            classify_slack_body(b"command=%2Fcognia&text=hi"),
-            SlackBody::SlashCommand
+            classify_slack_body(b"command=%2Fcognia&text=hi&channel_id=C1&user_id=U1"),
+            SlackBody::SlashCommand(_)
         ));
         // `payload` present but not JSON → invalid.
         assert!(matches!(

@@ -619,6 +619,8 @@ mod tests {
                 source_url: None,
                 local_path: Some(path.to_string_lossy().into_owned()),
                 content_type: Some("image/png".to_string()),
+                multipart: None,
+                response_mode: None,
             })
             .await
             .unwrap();
