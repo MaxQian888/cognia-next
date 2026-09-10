@@ -62,6 +62,7 @@ import {
   handleTeamTaskCreate,
   handleTeamTaskMove,
 } from "@/lib/companion/agent-team-write-handlers"
+import { roomSend, roomStop } from "@/lib/companion/room-write-handlers"
 import {
   handleExecutionRunControl,
   handleLegacyTeamRunControl,
@@ -455,6 +456,13 @@ export async function dispatchCommand(
       return sessionAttach(payload)
     case "session_detach":
       return sessionDetach(payload)
+    // Team rooms (ADR-0177). A companion never orchestrates a room; it asks
+    // this host to run the turn on the process-wide runner and streams the
+    // member events back. `room_send` answers on acceptance, not completion.
+    case "room_send":
+      return roomSend(payload)
+    case "room_stop":
+      return roomStop(payload)
     // Remote Session Control — chunked attachment upload (ADR-0005 §4.5). The
     // bytes of a file staged on a phone reach the Host only through these five
     // arms; `message.enqueue` carries the ref they mint and nothing else.

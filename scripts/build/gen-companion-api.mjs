@@ -577,8 +577,11 @@ const HOST_CATEGORIES = [
     title: "Agents and teams",
     description: "Agent runtimes, Claude sessions, teams, fleet controls, and goals.",
     skill: "cognia-host-agents",
+    // `room_` is here, not under `sessions`: a room turn is an orchestrated
+    // run of several agent members (ADR-0177), and the arm lives next to
+    // `claude_send`, not next to the transcript reads.
     pattern:
-      /^(agent_|claude_|codex_app_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|resolve_pi_extension$|fleet_|team_|goal_)/,
+      /^(agent_|claude_|codex_app_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|resolve_pi_extension$|fleet_|team_|goal_|room_)/,
   },
   {
     id: "tasks",

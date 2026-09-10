@@ -59,6 +59,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "device_capabilities_report",
     "session_attach",
     "session_detach",
+    "room_send",
+    "room_stop",
     "session_attachment_upload_init",
     "session_attachment_upload_chunk",
     "session_attachment_upload_commit",
@@ -745,6 +747,12 @@ pub(super) async fn dispatch(
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
         | "session_attach"
         | "session_detach"
+        // ADR-0177 team rooms — a companion hands a room turn to this host's
+        // process-wide runner (`lib/companion/room-write-handlers.ts`), which
+        // answers on acceptance and streams member events back. Both carry an
+        // explicit request schema in `protocol/companion-request-schemas.json`.
+        | "room_send"
+        | "room_stop"
         // Remote Session Control — chunked attachment upload. The chunk arm is
         // the only bridged command whose body is dominated by payload rather
         // than parameters; it is sized against the RPC body ceiling, not the

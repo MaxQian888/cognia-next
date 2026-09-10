@@ -24,6 +24,16 @@ describe("host feature manifest", () => {
       version: 1,
       operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
     })
+    expect(manifest.features["room.host-run"]).toEqual({
+      version: 1,
+      operations: ["room_send", "room_stop"],
+    })
+    expect(
+      buildLocalHostFeatureManifest({ platform: "headless" }).features["room.host-run"]
+    ).toEqual({
+      version: 1,
+      operations: ["room_send", "room_stop"],
+    })
     expect(manifest.limits).toMatchObject({
       maxHostStateSnapshotBytes: 512 * 1024,
       maxHostStateActionBatch: 50,
@@ -39,6 +49,8 @@ describe("host feature manifest", () => {
     for (const platform of ["web", "mobile"] as const) {
       const features = buildLocalHostFeatureManifest({ platform }).features
       expect(features["session.state-sync"]).toBeUndefined()
+      // A thin client never runs a team room; it hands the turn to a host.
+      expect(features["room.host-run"]).toBeUndefined()
       // Same reason: a thin client hosts no sessions, so it has no attachments
       // to lease and nothing to route a decision to.
       expect(features["session.remote-control"]).toBeUndefined()

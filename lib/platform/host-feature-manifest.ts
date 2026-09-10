@@ -38,6 +38,10 @@ export const HOST_FEATURE_IDS = [
   "session.remote-control",
   "session.attachment-upload",
   "session.thread-handoff",
+  // Team rooms run on this host (ADR-0177). A companion that sees it may hand
+  // a room turn over with `room_send` and only project the member events;
+  // without it the room is read-only from that device.
+  "room.host-run",
   "connectors.inbox-relay",
   // The Bot control plane's relayed writes: arm a trigger, run one now, replay
   // a dead letter. Advertised by a host that runs a delivery runner. The
@@ -302,6 +306,13 @@ export function buildLocalHostFeatureManifest({
     }
   }
   if (platform === "tauri" || platform === "headless") {
+    // Team rooms (ADR-0177). Both hosts install the `room_send` / `room_stop`
+    // arms through `lib/companion/desktop-write-source.ts` and run the turn on
+    // the process-wide `RoomRunner`; a companion shell never orchestrates.
+    features["room.host-run"] = {
+      version: 1,
+      operations: ["room_send", "room_stop"],
+    }
     // The renderer round-trips. A host that runs the sidecar asks whichever
     // client started the turn to execute the tools that live in a renderer
     // (plugin tools, artifacts, `web_fetch`, `ask_user`, `dispatch_agent`) and

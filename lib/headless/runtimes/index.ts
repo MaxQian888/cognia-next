@@ -53,6 +53,10 @@
  * - `plan-notification` — the ADR-0045 `plan.respond` notification command;
  *   approve/reject/start mutate the brain-side plan runtime, and an orchestrated
  *   plan starts running from here.
+ * - `room-runner` — team rooms (ADR-0177). The process-wide `RoomRunner` fed
+ *   from the sidecar event stream, with member status fanned out as
+ *   `room://member-status` host events, so a companion's `room_send` runs the
+ *   round here rather than on the phone.
  * - The bridge-owned `BridgeWorkerRpcPool` is the one sanctioned bootstrap
  *   exception: `serveCommand` creates it only after the authenticated bridge
  *   connects, injects that transport into the existing AgentTeam runtime, and
@@ -143,6 +147,7 @@ import "./workflow-trigger-bridge"
 import "./issue-tracker"
 import "./collab-refresh"
 import "./plan-notification"
+import "./room-runner"
 import "./sftp-transfer-pump"
 import "./bots"
 

@@ -6888,6 +6888,17 @@
           "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
         }
       }
+    },
+    "RoomSendResult": {
+      "type": "object",
+      "required": ["accepted"],
+      "properties": {
+        "accepted": {
+          "type": "boolean",
+          "description": "The host accepted the turn and runs it detached; the outcome arrives as member sub-session events."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -9757,6 +9768,12 @@
     },
     "plugin_media_close_transfer": {
       "type": "null"
+    },
+    "room_send": {
+      "$ref": "#/$defs/RoomSendResult"
+    },
+    "room_stop": {
+      "$ref": "#/$defs/NullResult"
     }
   }
 }

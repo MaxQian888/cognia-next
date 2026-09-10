@@ -22594,6 +22594,40 @@
       "longRunning": false,
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "room_send",
+      "resource": "room",
+      "verb": "send",
+      "arm": "room_send",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "room_stop",
+      "resource": "room",
+      "verb": "stop",
+      "arm": "room_stop",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "pagination": "none",
+      "longRunning": false,
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
     }
   ]
 }

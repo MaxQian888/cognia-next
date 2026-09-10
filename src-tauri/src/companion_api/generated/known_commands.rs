@@ -19,7 +19,7 @@ use super::{
 pub const CONTRACT_VERSION: u32 = 3;
 
 /// The sha256 of the Headless command catalog rendered from this contract.
-pub const CATALOG_HASH: &str = "5dda314a7ad8deb4b13df637ee35c1b4cbcb234ce7d6adbbbc53d032051d28fd";
+pub const CATALOG_HASH: &str = "1806b715f7f84b3f3f2c335e990a54e05b6d519629589fafcda6cc7f8ed00b19";
 
 /// Every command in the contract, in contract order.
 #[rustfmt::skip]
@@ -1353,6 +1353,8 @@ pub static WIRE_COMMANDS: &[WireCommand] = &[
     WireCommand { name: "plugin_media_close_transfer", arm: "plugin_media_close_transfer", resource: "media.transfer", verb: "close", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "host.observe", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_media_read_analysis_frame", arm: "plugin_media_read_analysis_frame", resource: "media.analysis_frame", verb: "read", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "host.observe", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
     WireCommand { name: "plugin_media_read_chunk", arm: "plugin_media_read_chunk", resource: "media", verb: "read_chunk", target: CommandTarget::Execution, operation: CommandOperation::Read, capability: "host.observe", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Structural, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::ByteRange, long_running: false },
+    WireCommand { name: "room_send", arm: "room_send", resource: "room", verb: "send", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "agent.run", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
+    WireCommand { name: "room_stop", arm: "room_stop", resource: "room", verb: "stop", target: CommandTarget::Execution, operation: CommandOperation::SideEffect, capability: "agent.run", risk: CommandRisk::Low, approval: CommandApproval::None, idempotency: CommandIdempotency::Required, transports: &[CommandTransport::Http, CommandTransport::Websocket, CommandTransport::Webrtc], input_schema: "#/components/schemas/RpcArgs", output_schema: "#/components/schemas/RpcResult", pagination: CommandPagination::None, long_running: false },
 ];
 
 /// Old wire name to its replacement, sorted by old name.

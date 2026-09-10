@@ -9793,6 +9793,67 @@
     "revoke_push_token": {
       "type": "object"
     },
+    "room_send": {
+      "type": "object",
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "The team room (ChatSession id) the turn is sent into."
+        },
+        "content": {
+          "description": "The user turn: a plain string or content blocks (text + image). Omitted only for `regenerate`, whose content the host already holds.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          ]
+        },
+        "webSearchContext": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Web-search results the composer attached, forwarded verbatim to every member turn."
+        },
+        "attachmentManifest": {
+          "type": "array",
+          "description": "Attachment refs minted by `session_attachment_upload_commit` on this host.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "regenerate": {
+          "type": "boolean",
+          "description": "Re-issue the room's last user turn instead of sending `content`; the old replies stay as branches."
+        },
+        "editMessageId": {
+          "type": "string",
+          "description": "Replace this user message with `content` and re-run the turn below it."
+        }
+      },
+      "additionalProperties": false
+    },
+    "room_stop": {
+      "type": "object",
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "secret_store_delete": {
       "type": "object",
       "required": [

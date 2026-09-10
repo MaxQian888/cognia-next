@@ -32430,6 +32430,118 @@
       "outputTyped": true
     },
     {
+      "name": "room_send",
+      "category": "agents",
+      "resource": "room",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "room_send (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "The team room (ChatSession id) the turn is sent into."
+          },
+          "content": {
+            "description": "The user turn: a plain string or content blocks (text + image). Omitted only for `regenerate`, whose content the host already holds.",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "example": {}
+                }
+              }
+            ]
+          },
+          "webSearchContext": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Web-search results the composer attached, forwarded verbatim to every member turn.",
+            "example": {}
+          },
+          "attachmentManifest": {
+            "type": "array",
+            "description": "Attachment refs minted by `session_attachment_upload_commit` on this host.",
+            "items": {
+              "type": "object",
+              "additionalProperties": {},
+              "example": {}
+            }
+          },
+          "regenerate": {
+            "type": "boolean",
+            "description": "Re-issue the room's last user turn instead of sending `content`; the old replies stay as branches."
+          },
+          "editMessageId": {
+            "type": "string",
+            "description": "Replace this user message with `content` and re-run the turn below it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "description": "The host accepted the turn and runs it detached; the outcome arrives as member sub-session events."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "room_stop",
+      "category": "agents",
+      "resource": "room",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "agent.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "room_stop (agent.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "scheduled_task_backfill",
       "category": "automation",
       "resource": "scheduled-tasks",
@@ -48919,5 +49031,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "a9bb594b472d6e44a66fe2fab46b4fb901ec141c8ba96a1a8d489361245abdb2"
+  "catalogHash": "1806b715f7f84b3f3f2c335e990a54e05b6d519629589fafcda6cc7f8ed00b19"
 }
