@@ -19,6 +19,8 @@ path = "src/lib.rs"
 [dependencies]
 cognia-core = { path = "../cognia-core" }
 cognia-secrets = { path = "../cognia-secrets" }
+# The page envelope desktop list commands answer (ADR-0175 B3).
+cognia-problem = { path = "../cognia-problem" }
 tauri = { version = "=2.11.5" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
 cron = "0.17"

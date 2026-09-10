@@ -20,6 +20,7 @@
  * path. Mirrors how `TerminalTabStrip` slots controls.
  */
 
+import { isPage } from "@/lib/tauri/companion-paging"
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronDownIcon, PlusIcon } from "lucide-react"
@@ -144,8 +145,8 @@ const defaultDetectShells: DetectShells = async (bins) => {
   await Promise.all(
     bins.map(async (bin) => {
       try {
-        const res = await invoke("terminal_list_path_executables", { prefix: bin, limit: 8 })
-        const names = Array.isArray(res) ? (res as string[]) : []
+        const res = await invoke("terminal_list_path_executables", { prefix: bin, pageSize: 8 })
+        const names = isPage(res) ? (res.items as string[]) : []
         if (names.some((n) => stem(n) === bin.toLowerCase())) found.add(bin.toLowerCase())
       } catch {
         /* scan unavailable — leave this bin undetected */

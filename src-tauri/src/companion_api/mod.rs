@@ -60,6 +60,10 @@ pub mod mesh;
 pub mod metrics;
 pub mod middleware;
 pub mod oidc;
+/// The one long-running operation document (ADR-0175 B3).
+pub mod operations;
+/// Page tokens and the page envelope (ADR-0175 B3).
+pub mod paging;
 mod problem_surface;
 pub mod push;
 pub mod push_creds;

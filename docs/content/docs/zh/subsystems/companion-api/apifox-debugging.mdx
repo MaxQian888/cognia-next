@@ -130,21 +130,21 @@ Authorization: Bearer {{serviceToken}}
 Content-Type: application/json
 
 {
-  "limit": 20,
-  "offset": 0
+  "pageSize": 20
 }
 ```
 
-空数据目录的成功响应为：
+全新的数据目录会返回：
 
 ```json
 {
-  "has_more": false,
-  "rows": []
+  "items": []
 }
 ```
 
-不能把 body 写成 `{}`：运行时要求 `limit` 和 `offset`，否则返回 `400 malformed_request`。
+body 写成 `{}` 也可以，按默认每页 50 条分页。数据多时答案里还会带 `nextPageToken`，把它原样作为
+`pageToken` 传回去就是下一页，不要解析它。旧的 `limit`、`offset` 参数名会被拒绝并返回
+`400 malformed_request`（ADR-0175）。
 
 ## 7. 配置 WebSocket
 

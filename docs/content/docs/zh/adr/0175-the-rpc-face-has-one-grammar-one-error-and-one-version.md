@@ -89,6 +89,8 @@ wire 名是 `<resource>[.<sub>...].<verb>`。每段是小写 snake_case。动词
 
 `list` 动词收 `pageSize` 与 `pageToken`，返回 `{items, nextPageToken}`（AIP-158）。`offset` 与 `length` 保留给 `read`、`write` 动词上的字节 I/O，其他地方一律拒绝。`limit`、`cursor`、`before`、`page` 不再是这个面上的参数名。
 
+分页令牌对调用方不透明。底层是 base64url 编码的 `o:<offset>`（按偏移分页的存储）或 `c:<cursor>`（按序号分页的存储），所以客户端永远不可能把一个平面的游标递给另一个平面。`pageSize` 可选且有上限（默认 50，最多 1000）。今天整体答案有界的 `list` 暂不接分页参数，仍整集返回；门禁对这些只报告，直到它们的 arm 迁移；但凡一个命令声称按令牌分页却还写着 `limit`、`offset`、`cursor` 或 `before`，门禁直接判失败。
+
 `longRunning` 的命令以 `202 Accepted` 返回 `Operation {id, done, error?, result?, metadata}`，`GET /api/operations/{id}` 与 `GET /internal/operations/{id}` 返回同一形状。run、job、batch、delivery 各家族的动词统一为 `start`、`cancel`、`get`、`list`。
 
 ### 5. 发现
@@ -120,7 +122,7 @@ wire 名是 `<resource>[.<sub>...].<verb>`。每段是小写 snake_case。动词
 | B0 | 本 ADR、契约 v3 文件、`check-command-grammar`（R2、R6、R8 强制，R1、R3 到 R5、R7 在各自批次前只报告）、`cli:api:check` 进 `check-all`、四处文档纠错 | `audit:command-grammar`、`audit:companion-command-manifest` |
 | B1 | `crates/cognia-problem` 与单一错误信封 | `problem_surface.rs`：每个错误响应都是 `application/problem+json` |
 | B2 | 生成的 `known_commands.rs`、`/api/catalog`、`/internal/catalog`、`contract-identity.ts` | `generated_table_matches_protocol_contract`、`device_catalog_equals_what_dispatch_admits` |
-| B3 | `Page`、`PageRequest`、`Operation` 辅助类型与 34 个分页 arm | R3、R4 转为强制 |
+| B3 | `Page`、`PageRequest`、`Operation` 辅助类型、今天真正分页的 10 个 arm、以及 202 与两条 operation 路由统一改答 `Operation` 文档 | R4 对 page-token 命令上的旧分页参数名转为失败，`companion-paging.test.ts`、`bridged_paging_translates_the_wire_shape_and_wraps_the_legacy_answer` |
 | B4 | 每个 arm 输出的 `schemars` derive、发射器、75 条缺失的请求契约 | `registry_covers_every_dispatchable_arm`、`emitted_catalog_matches_committed` |
 | B5 | 改名硬切：名字变为点号形式，`CONTRACT_VERSION` 3 生效，codemod，文档 | R1、R7 转为强制，`companion-api:check` |
 

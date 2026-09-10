@@ -220,6 +220,8 @@ export interface BrowserContextSubmissionSummaryV1 {
 
 export interface BrowserContextSubmissionSummaryPageV1 {
   items: BrowserContextSubmissionSummaryV1[]
+  /** Present when another page exists (ADR-0175 B3). Hand it back as `pageToken`. */
+  nextPageToken?: string
   /**
    * A digest of everything `browser_companion_capability` would answer.
    *

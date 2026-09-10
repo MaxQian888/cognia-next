@@ -55,7 +55,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
 let mockIsTauri = false
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
 
-const mockInvoke = jest.fn(async (..._args: unknown[]): Promise<unknown> => [])
+const mockInvoke = jest.fn(async (..._args: unknown[]): Promise<unknown> => ({ items: [] }))
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }))
@@ -76,7 +76,7 @@ beforeEach(() => {
   mockIsTauri = false
   mockHost = null
   mockInvoke.mockClear()
-  mockInvoke.mockResolvedValue([])
+  mockInvoke.mockResolvedValue({ items: [] })
 })
 
 /** No detection — exercises the platform list unchanged. */
@@ -366,13 +366,15 @@ describe("TerminalShellPicker", () => {
         const prefix = (args as { prefix: string }).prefix
         // Only zsh and bash are installed; `.exe` stems are matched loosely so
         // `cmd.exe` would satisfy a `cmd` probe on Windows.
-        return prefix === "zsh" ? ["zsh"] : prefix === "bash" ? ["BASH.exe"] : []
+        return {
+          items: prefix === "zsh" ? ["zsh"] : prefix === "bash" ? ["BASH.exe"] : [],
+        }
       })
       await renderPicker(<TerminalShellPicker onNew={jest.fn()} platform="macos" />)
 
       expect(mockInvoke).toHaveBeenCalledWith("terminal_list_path_executables", {
         prefix: "zsh",
-        limit: 8,
+        pageSize: 8,
       })
       expect(screen.getByTestId("terminal-shell-picker-shell-zsh")).toBeInTheDocument()
       expect(screen.getByTestId("terminal-shell-picker-shell-bash")).toBeInTheDocument()
@@ -383,7 +385,7 @@ describe("TerminalShellPicker", () => {
       mockIsTauri = true
       mockInvoke.mockImplementation(async (_cmd, args) => {
         const prefix = (args as { prefix: string }).prefix
-        if (prefix === "zsh") return ["zsh"]
+        if (prefix === "zsh") return { items: ["zsh"] }
         throw new Error("scan unavailable")
       })
       await renderPicker(<TerminalShellPicker onNew={jest.fn()} platform="macos" />)

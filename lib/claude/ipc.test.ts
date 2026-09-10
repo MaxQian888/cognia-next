@@ -808,9 +808,9 @@ describe("deleteMessage", () => {
 })
 
 describe("listSessions", () => {
-  it("forwards limit/offset/before and returns the SessionListPage", async () => {
+  it("forwards pageSize/pageToken/updatedBefore and returns the SessionListPage", async () => {
     const response = {
-      rows: [
+      items: [
         {
           id: "s1",
           title: "Cloud session",
@@ -819,31 +819,40 @@ describe("listSessions", () => {
           updatedAt: 2,
         },
       ],
-      next_offset: 20,
-      has_more: true,
+      nextPageToken: "bzoyMA",
     }
     callSpy.mockResolvedValueOnce(response)
-    const page = await listSessions({ limit: 20, offset: 0, before: 1700000000000 })
+    const page = await listSessions({
+      pageSize: 20,
+      pageToken: "bzow",
+      updatedBefore: 1700000000000,
+    })
     expect(page).toEqual(response)
     expect(page.total).toBeUndefined()
     expect(callSpy).toHaveBeenCalledWith("session_list", {
-      limit: 20,
-      offset: 0,
-      before: 1700000000000,
+      pageSize: 20,
+      pageToken: "bzow",
+      updatedBefore: 1700000000000,
     })
   })
 
-  it("works without an optional before cursor", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0, next_offset: undefined })
-    await listSessions({ limit: 10, offset: 0 })
-    expect(callSpy).toHaveBeenCalledWith("session_list", { limit: 10, offset: 0 })
+  it("works without a page token or an updatedBefore bound", async () => {
+    callSpy.mockResolvedValueOnce({ items: [], total: 0 })
+    await listSessions({ pageSize: 10 })
+    expect(callSpy).toHaveBeenCalledWith("session_list", { pageSize: 10 })
+  })
+
+  it("sends no paging fields at all when none are asked for", async () => {
+    callSpy.mockResolvedValueOnce({ items: [] })
+    await listSessions()
+    expect(callSpy).toHaveBeenCalledWith("session_list", {})
   })
 })
 
 describe("getMessagesBySession", () => {
   it("forwards session_id and returns raw StoredMessage rows", async () => {
     const response = {
-      rows: [
+      items: [
         {
           id: "m1",
           sessionId: "s1",
@@ -853,30 +862,28 @@ describe("getMessagesBySession", () => {
         },
       ],
       total: 101,
-      next_offset: 150,
+      nextPageToken: "bzoxNTA",
     }
     callSpy.mockResolvedValueOnce(response)
     const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
-    const page = await getMessagesBySession("s1", 50, 100)
+    const page = await getMessagesBySession("s1", { pageSize: 50, pageToken: "bzoxMDA" })
     expect(page).toEqual(response)
-    expect(page.rows[0]).toEqual(
+    expect(page.items[0]).toEqual(
       expect.objectContaining({ id: "m1", sessionId: "s1", createdAt: 1 })
     )
     expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
       session_id: "s1",
-      limit: 50,
-      offset: 100,
+      pageSize: 50,
+      pageToken: "bzoxMDA",
     })
   })
 
   it("works without pagination args", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    callSpy.mockResolvedValueOnce({ items: [], total: 0 })
     const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
     await getMessagesBySession("s1")
     expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
       session_id: "s1",
-      limit: undefined,
-      offset: undefined,
     })
   })
 })

@@ -760,7 +760,11 @@ pub(crate) async fn operation_handler(
             .operation(&context.account_id, &context.device_id, &operation_id)
             .map_err(store_error)
     }) {
-        Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
+        Ok(Some(operation)) => (
+            StatusCode::OK,
+            Json(super::operations::Operation::from(operation)),
+        )
+            .into_response(),
         Ok(None) => api_error(
             StatusCode::NOT_FOUND,
             "operation_not_found",
@@ -790,7 +794,11 @@ fn internal_operation_response(
             .operation(&context.account_id, &context.device_id, &operation_id)
             .map_err(store_error)
     }) {
-        Ok(Some(operation)) => (StatusCode::OK, Json(operation)).into_response(),
+        Ok(Some(operation)) => (
+            StatusCode::OK,
+            Json(super::operations::Operation::from(operation)),
+        )
+            .into_response(),
         Ok(None) => api_error(
             StatusCode::NOT_FOUND,
             "operation_not_found",
@@ -995,11 +1003,10 @@ pub async fn rpc_handler(
             observation.finish(super::metrics::RpcOutcome::Accepted);
             (
                 StatusCode::ACCEPTED,
-                Json(json!({
-                    "requestId": request_id,
-                    "operationId": operation_id,
-                    "status": "running",
-                })),
+                Json(super::operations::Operation::running(
+                    operation_id,
+                    request_id,
+                )),
             )
                 .into_response()
         }
@@ -1064,15 +1071,18 @@ pub async fn internal_rpc_handler(
             observation.finish(super::metrics::RpcOutcome::Completed);
             (StatusCode::OK, Json(result)).into_response()
         }
-        Ok(super::remote_execution::ExecutionOutcome::Accepted { operation_id, .. }) => {
+        Ok(super::remote_execution::ExecutionOutcome::Accepted {
+            request_id,
+            operation_id,
+        }) => {
             super::metrics::record_operation(super::metrics::OperationOutcome::Accepted);
             observation.finish(super::metrics::RpcOutcome::Accepted);
             (
                 StatusCode::ACCEPTED,
-                Json(json!({
-                    "operationId": operation_id,
-                    "status": "running",
-                })),
+                Json(super::operations::Operation::running(
+                    operation_id,
+                    request_id,
+                )),
             )
                 .into_response()
         }
@@ -2914,9 +2924,20 @@ mod tests {
         );
         assert_eq!(found.status(), StatusCode::OK);
         let found_body = response_json(found).await;
-        assert_eq!(found_body["operationId"], operation_id);
+        // The answer is the one Operation document (ADR-0175 B3): the
+        // receipt's refusal is surfaced as the same problem document a
+        // synchronous refusal would have been, keyed by `done` and `error`.
+        assert_eq!(found_body["id"], operation_id);
+        assert_eq!(found_body["done"], true);
         assert_eq!(found_body["status"], "failed");
-        assert_eq!(found_body["receipt"], receipt);
+        assert_eq!(found_body["error"]["code"], "operation_interrupted");
+        assert_eq!(found_body["error"]["status"], 500);
+        assert_eq!(found_body["error"]["retryable"], true);
+        assert_eq!(found_body["error"]["operationId"], operation_id);
+        assert!(found_body.get("result").is_none());
+        assert!(found_body.get("receipt").is_none());
+        assert_eq!(found_body["metadata"]["createdAt"], 10);
+        assert_eq!(found_body["metadata"]["updatedAt"], 12);
 
         let mut other_principal = context;
         other_principal.device_id = "service-b".into();

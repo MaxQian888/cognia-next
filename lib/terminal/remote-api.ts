@@ -15,6 +15,7 @@
  * plain paired reads.
  */
 
+import type { Page } from "@/lib/tauri/companion-paging"
 import { transport } from "@/lib/tauri"
 
 /** One-shot command capture — mirrors Rust `terminal::exec::ExecResult`. */
@@ -114,10 +115,11 @@ export async function listTerminalPathExecutables(options: {
   limit?: number
 }): Promise<string[]> {
   if (options.prefix.trim().length === 0) return []
-  return transport.call<string[]>("terminal_list_path_executables", {
+  const page = await transport.call<Page<string>>("terminal_list_path_executables", {
     prefix: options.prefix,
-    limit: options.limit,
+    pageSize: options.limit,
   })
+  return page.items
 }
 
 /**

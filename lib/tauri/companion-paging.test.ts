@@ -1,0 +1,38 @@
+import { collectPages, isOperation, isPage, type Page } from "./companion-paging"
+
+describe("companion paging (ADR-0175 B3)", () => {
+  it("recognises the page envelope and the operation document", () => {
+    expect(isPage({ items: [] })).toBe(true)
+    expect(isPage({ items: [1], nextPageToken: "t" })).toBe(true)
+    expect(isPage({ items: [1], nextPageToken: 5 })).toBe(false)
+    expect(isPage({ rows: [] })).toBe(false)
+    expect(isPage(null)).toBe(false)
+    expect(
+      isOperation({
+        id: "op",
+        done: false,
+        status: "running",
+        metadata: { createdAt: 1, updatedAt: 1 },
+      })
+    ).toBe(true)
+    expect(isOperation({ operationId: "op", status: "running" })).toBe(false)
+  })
+
+  it("walks pages to the end, hands each token back unchanged, and stops at the bound", async () => {
+    const pages: Record<string, Page<number>> = {
+      first: { items: [1, 2], nextPageToken: "second" },
+      second: { items: [3, 4], nextPageToken: "third" },
+      third: { items: [5] },
+    }
+    const seen: Array<string | undefined> = []
+    const fetchPage = async (token: string | undefined) => {
+      seen.push(token)
+      return pages[token ?? "first"]
+    }
+    await expect(collectPages(fetchPage)).resolves.toEqual([1, 2, 3, 4, 5])
+    expect(seen).toEqual([undefined, "second", "third"])
+
+    await expect(collectPages(fetchPage, { maxItems: 3 })).resolves.toEqual([1, 2, 3])
+    await expect(collectPages(fetchPage, { maxPages: 1 })).resolves.toEqual([1, 2])
+  })
+})

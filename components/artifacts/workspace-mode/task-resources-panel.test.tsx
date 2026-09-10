@@ -94,23 +94,25 @@ describe("TaskResourcesPanel", () => {
       nextOffset: null,
       sensitive: false,
     })
-    listEvents.mockResolvedValue([
-      {
-        eventId: "event-1",
-        runId: "run-1",
-        seq: 1,
-        observedAt: Date.now(),
-        path: "dist/transient.js",
-        oldPath: null,
-        kind: "deleted",
-        captureClass: "generated",
-        origin: "agent",
-        evidence: "watcher",
-        overflow: false,
-        resyncRequired: false,
-        reconciled: true,
-      },
-    ])
+    listEvents.mockResolvedValue({
+      items: [
+        {
+          eventId: "event-1",
+          runId: "run-1",
+          seq: 1,
+          observedAt: Date.now(),
+          path: "dist/transient.js",
+          oldPath: null,
+          kind: "deleted",
+          captureClass: "generated",
+          origin: "agent",
+          evidence: "watcher",
+          overflow: false,
+          resyncRequired: false,
+          reconciled: true,
+        },
+      ],
+    })
     getSummary.mockResolvedValue({
       runId: "run-1",
       counts: { created: 1, modified: 0, deleted: 1, renamed: 0, source: 0, generated: 2 },

@@ -8,6 +8,7 @@
  * the path/spec providers' turf.
  */
 
+import { isPage } from "@/lib/tauri/companion-paging"
 import { isTauri } from "@/lib/tauri"
 import { shellBuiltins } from "./shell-builtins"
 import { tokenAtCursor } from "./tokenize"
@@ -57,9 +58,9 @@ export function createExeCompletionProvider(
         try {
           const result = (await doInvoke("terminal_list_path_executables", {
             prefix,
-            limit: MAX_EXE_SUGGESTIONS * 2,
+            pageSize: MAX_EXE_SUGGESTIONS * 2,
           })) as unknown
-          exes = Array.isArray(result) ? (result as string[]) : []
+          exes = isPage(result) ? (result.items as string[]) : []
         } catch {
           exes = []
         }

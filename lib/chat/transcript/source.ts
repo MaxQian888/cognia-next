@@ -1,3 +1,4 @@
+import type { Page } from "@/lib/tauri/companion-paging"
 import type {
   SessionTimelinePage,
   SessionTimelineRequest,
@@ -135,14 +136,32 @@ export function createRemoteTranscriptSource(transport: Transport): TranscriptSo
     async turnMessages(request) {
       const supported = await capabilities()
       if (supported) {
-        return transport.call<SessionTurnMessagesPage>("session_turn_messages", {
+        // The wire pages by pageSize/pageToken and answers the page envelope
+        // (ADR-0175 B3). The transcript protocol keeps its own cursor words,
+        // so the token rides in `nextCursor` and comes back as `cursor`.
+        const page = await transport.call<
+          Page<SessionTurnMessagesPage["messages"][number]> &
+            Pick<
+              SessionTurnMessagesPage,
+              "revision" | "detailRevision" | "total" | "approximateBytes"
+            >
+        >("session_turn_messages", {
           session_id: request.sessionId,
           turn_key: request.turnKey,
           revision: request.revision,
           detail_revision: request.detailRevision,
-          cursor: request.cursor,
-          limit: request.limit,
+          pageSize: request.limit,
+          pageToken: request.cursor,
         })
+        return {
+          messages: page.items,
+          revision: page.revision,
+          detailRevision: page.detailRevision,
+          total: page.total,
+          approximateBytes: page.approximateBytes,
+          ...(page.nextPageToken ? { nextCursor: page.nextPageToken } : {}),
+          hasMore: Boolean(page.nextPageToken),
+        }
       }
       const rows = await loadLegacyMessages(transport, request.sessionId)
       const messages = rows.filter(

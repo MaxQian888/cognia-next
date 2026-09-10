@@ -131,7 +131,7 @@
           }
         },
         "trigger": {
-          "description": "Full inbound gating policy for this bot. Replaces the stored policy wholesale — the editor always sends every rule and blocker, because a per-rule patch has nothing stable to address (rules carry no id and their order is not meaningful).",
+          "description": "Full inbound gating policy for this bot. Replaces the stored policy wholesale \u2014 the editor always sends every rule and blocker, because a per-rule patch has nothing stable to address (rules carry no id and their order is not meaningful).",
           "type": "object",
           "required": [
             "rules",
@@ -965,14 +965,16 @@
     "browser_context_list": {
       "type": "object",
       "properties": {
-        "limit": {
+        "pageSize": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 50
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
         },
-        "cursor": {
+        "pageToken": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -1186,14 +1188,14 @@
             "allow_always",
             "deny"
           ],
-          "description": "`allow` proceeds once; `allow_always` proceeds and persists a standing\npermission for this tool/rule for the session; `deny` rejects with the\noptional `message` shown to the model. To edit-and-allow, send\n`decision: allow` together with `updated_input` (the substituted tool\narguments) — there is no separate `edit` decision value.\n"
+          "description": "`allow` proceeds once; `allow_always` proceeds and persists a standing\npermission for this tool/rule for the session; `deny` rejects with the\noptional `message` shown to the model. To edit-and-allow, send\n`decision: allow` together with `updated_input` (the substituted tool\narguments) \u2014 there is no separate `edit` decision value.\n"
         },
         "message": {
           "type": "string",
           "description": "Optional rejection reason or note (denial only)."
         },
         "updated_input": {
-          "description": "Replacement tool input — substituted for the original arguments when sent (typically with `decision: allow`).",
+          "description": "Replacement tool input \u2014 substituted for the original arguments when sent (typically with `decision: allow`).",
           "oneOf": [
             {
               "type": "object",
@@ -1442,7 +1444,7 @@
           "description": "Logical session id chosen by the caller (Dexie row key)."
         },
         "prompt": {
-          "description": "Either a plain string or an array of content blocks (text + image) — forwarded\nverbatim to the Claude Agent SDK. Image blocks follow Anthropic's content-block format.\n",
+          "description": "Either a plain string or an array of content blocks (text + image) \u2014 forwarded\nverbatim to the Claude Agent SDK. Image blocks follow Anthropic's content-block format.\n",
           "oneOf": [
             {
               "type": "string"
@@ -1459,7 +1461,7 @@
         "options": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Per-call options forwarded verbatim to the Claude Agent SDK (or the\nAI SDK dispatch path for non-Anthropic providers). Unrecognised\nfields ride along under `extra` (serde flatten). `null` is rejected\nfor optional fields — use `undefined`/missing instead, otherwise the\nSDK's option parser crashes with \"Cannot read properties of null\".\n",
+          "description": "Per-call options forwarded verbatim to the Claude Agent SDK (or the\nAI SDK dispatch path for non-Anthropic providers). Unrecognised\nfields ride along under `extra` (serde flatten). `null` is rejected\nfor optional fields \u2014 use `undefined`/missing instead, otherwise the\nSDK's option parser crashes with \"Cannot read properties of null\".\n",
           "properties": {
             "cwd": {
               "type": "string"
@@ -1536,7 +1538,7 @@
             },
             "strictMcpConfig": {
               "type": "boolean",
-              "description": "When true, only `mcpServers` from this object are loaded — settings.json is ignored."
+              "description": "When true, only `mcpServers` from this object are loaded \u2014 settings.json is ignored."
             },
             "effort": {
               "type": "string",
@@ -1992,7 +1994,7 @@
           "minimum": 0
         },
         "id": {
-          "description": "JSON-RPC request id — string or number."
+          "description": "JSON-RPC request id \u2014 string or number."
         },
         "result": {
           "description": "Present on success."
@@ -2759,7 +2761,7 @@
         },
         "segments": {
           "type": "array",
-          "description": "Edited segments replacing the draft's own (ADR-0131 — the phone's draft editor sends what the operator actually approved).",
+          "description": "Edited segments replacing the draft's own (ADR-0131 \u2014 the phone's draft editor sends what the operator actually approved).",
           "items": {
             "type": "object",
             "additionalProperties": true
@@ -3025,7 +3027,7 @@
         },
         "nonce": {
           "type": "string",
-          "description": "Deterministic dedupe nonce (≤25 chars); Discord returns the already-created message on a retry."
+          "description": "Deterministic dedupe nonce (\u226425 chars); Discord returns the already-created message on a retry."
         }
       },
       "additionalProperties": false
@@ -6972,10 +6974,16 @@
     "integration_ingress_deadletters": {
       "type": "object",
       "properties": {
-        "limit": {
+        "pageSize": {
           "type": "integer",
-          "format": "int64",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -7774,10 +7782,16 @@
             "character"
           ]
         },
-        "limit": {
+        "pageSize": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 200
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -7912,13 +7926,16 @@
         "session_id": {
           "type": "string"
         },
-        "limit": {
+        "pageSize": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
         },
-        "offset": {
-          "type": "integer",
-          "minimum": 0
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -9890,14 +9907,14 @@
         "deviceId": {
           "type": "string",
           "deprecated": true,
-          "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach — and collect another device's approval prompts — under a borrowed id."
+          "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach \u2014 and collect another device's approval prompts \u2014 under a borrowed id."
         },
         "mode": {
           "enum": [
             "observe",
             "control"
           ],
-          "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` — the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
+          "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` \u2014 the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
         },
         "attention": {
           "enum": [
@@ -9940,7 +9957,7 @@
         },
         "dataBase64": {
           "type": "string",
-          "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned — the RPC body ceiling is what bounds it, not the file."
+          "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned \u2014 the RPC body ceiling is what bounds it, not the file."
         }
       },
       "additionalProperties": false
@@ -10011,22 +10028,21 @@
     },
     "session_list": {
       "type": "object",
-      "required": [
-        "limit",
-        "offset"
-      ],
       "properties": {
-        "limit": {
+        "pageSize": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
         },
-        "offset": {
-          "type": "integer",
-          "minimum": 0
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         },
-        "before": {
+        "updatedBefore": {
           "type": "integer",
-          "description": "Optional ms-epoch upper bound (updatedAt <)."
+          "description": "Only sessions updated before this timestamp. A filter, not a page boundary."
         }
       },
       "additionalProperties": false
@@ -10084,13 +10100,16 @@
           "minimum": 0,
           "example": 0
         },
-        "cursor": {
-          "type": "string"
-        },
-        "limit": {
+        "pageSize": {
           "type": "integer",
-          "format": "int32",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -10686,7 +10705,7 @@
             "botInstallations",
             "botEventDeliveries"
           ],
-          "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
+          "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror \u2014\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
         "since": {
           "type": "integer",
@@ -11255,15 +11274,16 @@
           "type": "string",
           "example": ""
         },
-        "cursor": {
+        "pageSize": {
           "type": "integer",
-          "format": "int64",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
         },
-        "limit": {
-          "type": "integer",
-          "format": "int32",
-          "minimum": 0
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -11295,10 +11315,16 @@
     "task_workspace_maintenance_events": {
       "type": "object",
       "properties": {
-        "limit": {
+        "pageSize": {
           "type": "integer",
-          "format": "int32",
-          "minimum": 0
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -11956,8 +11982,16 @@
         "prefix": {
           "type": "string"
         },
-        "limit": {
-          "type": "integer"
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
+        },
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false
@@ -12897,11 +12931,16 @@
         "workflowId": {
           "type": "string"
         },
-        "limit": {
-          "type": "integer"
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "How many items to answer. Absent means the command's default."
         },
-        "offset": {
-          "type": "integer"
+        "pageToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The nextPageToken of the previous page, handed back unchanged."
         }
       },
       "additionalProperties": false

@@ -234,7 +234,10 @@ export function createHostClient({
         request as unknown as Record<string, unknown>
       ),
     list: (limit) =>
-      call<BrowserContextSubmissionSummaryPageV1>("browser_context_list", limit ? { limit } : {}),
+      call<BrowserContextSubmissionSummaryPageV1>(
+        "browser_context_list",
+        limit ? { pageSize: limit } : {}
+      ),
     get: (submissionId) =>
       call<BrowserContextSubmissionStatusV1>("browser_context_get", { submissionId }),
     result: (submissionId) =>

@@ -89,6 +89,8 @@ Every failure on every plane is one RFC 9457 problem document with `Content-Type
 
 `list` verbs take `pageSize` and `pageToken` and return `{items, nextPageToken}` (AIP-158). `offset` and `length` are reserved for byte I/O on `read` and `write` verbs and are refused everywhere else. `limit`, `cursor`, `before`, and `page` are not parameter names on this surface.
 
+A page token is opaque to the caller. Underneath it is a base64url `o:<offset>` for the offset-paged stores and `c:<cursor>` for the sequence-paged ones, so a client can never hand one plane the other plane's cursor. `pageSize` is optional and bounded (default 50, at most 1000). A `list` whose whole answer is bounded today takes no paging parameters yet and keeps answering the whole set. The gate reports those until their arms migrate, and fails any command that names `limit`, `offset`, `cursor` or `before` while claiming page tokens.
+
 A `longRunning` command returns `Operation {id, done, error?, result?, metadata}` with `202 Accepted`, and `GET /api/operations/{id}` and `GET /internal/operations/{id}` return the same shape. Run, job, batch and delivery families normalise their verbs to `start`, `cancel`, `get`, and `list`.
 
 ### 5. Discovery
@@ -120,7 +122,7 @@ The work lands in six batches, each independently committable and gate-green.
 | B0 | This ADR, contract v3 files, `check-command-grammar` (rules R2, R6, R8 enforcing, R1, R3 to R5, R7 reporting until their batch), `cli:api:check` in `check-all`, the four documentation corrections | `audit:command-grammar`, `audit:companion-command-manifest` |
 | B1 | `crates/cognia-problem` and the single error envelope | `problem_surface.rs`: every error response is `application/problem+json` |
 | B2 | Generated `known_commands.rs`, `/api/catalog`, `/internal/catalog`, `contract-identity.ts` | `generated_table_matches_protocol_contract`, `device_catalog_equals_what_dispatch_admits` |
-| B3 | `Page`, `PageRequest`, `Operation` helpers and the 34 paginating arms | R3 and R4 flip to enforcing |
+| B3 | `Page`, `PageRequest`, `Operation` helpers, the ten arms that page today, and the `Operation` document on 202 and both operation routes | R4 fails a legacy paging name on a page-token command, `companion-paging.test.ts`, `bridged_paging_translates_the_wire_shape_and_wraps_the_legacy_answer` |
 | B4 | `schemars` derives on every arm output, the emitter, the 75 missing request contracts | `registry_covers_every_dispatchable_arm`, `emitted_catalog_matches_committed` |
 | B5 | The rename cut: names become dotted, `CONTRACT_VERSION` 3 is live, codemod, docs | R1 and R7 flip to enforcing, `companion-api:check` |
 

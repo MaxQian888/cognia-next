@@ -299,19 +299,23 @@ pub fn integration_ingress_nack_for_state(
         .map_err(|error| error.to_string())
 }
 
+/// One page of dead letters (ADR-0175 B3). The spool answers its newest 500
+/// at most and the page walks them.
 #[tauri::command]
 pub async fn integration_ingress_deadletters(
     state: State<'_, WorkflowState>,
-    limit: Option<usize>,
-) -> Result<Vec<super::integration_spool::SpoolDeadLetter>, String> {
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<cognia_problem::paging::Page<super::integration_spool::SpoolDeadLetter>, String> {
+    let page = cognia_problem::paging::PageRequest::from_parts(page_size, page_token.as_deref())
+        .map_err(|error| error.to_string())?;
     let spool = state.integration_spool.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        spool
-            .deadletters(limit.unwrap_or(100).min(500))
-            .map_err(|error| error.to_string())
+    let all = tauri::async_runtime::spawn_blocking(move || {
+        spool.deadletters(500).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    cognia_problem::paging::Page::slice_all(all, &page, 100).map_err(|error| error.to_string())
 }
 
 pub fn integration_ingress_deadletters_for_state(

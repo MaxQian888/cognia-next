@@ -24,6 +24,8 @@ cognia-automation = { path = "../cognia-automation" }
 # SSH credentials are resolved inside the native process so passwords and
 # private-key passphrases never round-trip through the renderer.
 cognia-secrets = { path = "../cognia-secrets" }
+# The page envelope desktop list commands answer (ADR-0175 B3).
+cognia-problem = { path = "../cognia-problem" }
 # perf span guards (terminal.exec).
 cognia-instrument = { path = "../cognia-instrument" }
 tauri = { version = "=2.11.5" }

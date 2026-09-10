@@ -726,7 +726,7 @@ async fn headless_dispatch_serves_the_data_plane_from_the_store() {
     let state = test_state();
     let result = dispatch(
         "session_list",
-        json!({ "limit": 10, "offset": 0 }),
+        json!({ "pageSize": 10 }),
         &state,
         &headless_host(),
         "dev1",
@@ -735,7 +735,28 @@ async fn headless_dispatch_serves_the_data_plane_from_the_store() {
     )
     .await
     .expect("session_list must work on a headless host");
+    // The page envelope (ADR-0175 B3): the direct store counts the table,
+    // and an empty store issues no token.
+    assert_eq!(result["items"], json!([]));
     assert_eq!(result["total"], 0);
+    assert!(result.get("nextPageToken").is_none());
+    assert!(result.get("rows").is_none());
+
+    // The legacy spelling is refused up front and names the parameter.
+    let refused = dispatch(
+        "session_list",
+        json!({ "limit": 10, "offset": 0 }),
+        &state,
+        &headless_host(),
+        "dev1",
+        Some(ACCOUNT_ID),
+        Some("service"),
+    )
+    .await
+    .expect_err("limit/offset are not paging parameters any more");
+    assert_eq!(refused.0, StatusCode::BAD_REQUEST);
+    assert_eq!(refused.1 .0.code, "malformed_request");
+    assert!(refused.1 .0.message.contains("limit"));
 
     crate::companion_api::data_plane::install_headless_store(None);
 }

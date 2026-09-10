@@ -147,7 +147,9 @@ function networkFailure(error: unknown): CommandFailure {
 
 function successFromResponse(status: number, body: Record<string, unknown>): CommandSuccess {
   if (status === 202) {
-    const operationId = stringField(body, "operationId", "operation_id")
+    // The 202 body is the Operation document (ADR-0175 B3): `id` is the
+    // operation. Older hosts wrote `operationId`.
+    const operationId = stringField(body, "id", "operationId", "operation_id")
     return { ok: true, accepted: true, result: body, ...(operationId ? { operationId } : {}) }
   }
   return { ok: true, result: body }

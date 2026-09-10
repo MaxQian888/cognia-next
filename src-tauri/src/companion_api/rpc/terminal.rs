@@ -101,17 +101,19 @@ pub(super) async fn dispatch(
             // the 15-second cache inside means a burst of keystrokes costs one
             // walk, not one per character.
             let prefix: String = required(&args, "prefix")?;
-            let limit: Option<usize> = optional(&args, "limit")?;
+            let page = page_request(&args)?;
             tokio::task::spawn_blocking(move || {
                 let path_value = std::env::var("PATH").unwrap_or_default();
-                crate::terminal::path_scan::list_path_executables_inner(
+                let all = crate::terminal::path_scan::list_path_executables_inner(
                     &path_value,
                     &prefix,
-                    limit.unwrap_or(50),
-                )
+                    crate::companion_api::paging::MAX_PAGE_SIZE as usize,
+                );
+                crate::companion_api::paging::Page::slice_all(all, &page, 50)
             })
             .await
-            .map_err(|e| RpcError::internal(e.to_string()))
+            .map_err(|e| RpcError::internal(e.to_string()))?
+            .map_err(paging_error)
             .and_then(to_json)
         }
         "terminal_kill_port" => {

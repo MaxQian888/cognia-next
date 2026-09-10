@@ -2,6 +2,7 @@
 // module rather than touching @tauri-apps/api directly — every boundary
 // goes through `transport` from `@/lib/tauri`.
 
+import type { Page, PageRequest } from "@/lib/tauri/companion-paging"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "@/types"
 import { transport } from "@/lib/tauri"
@@ -601,31 +602,28 @@ export function resolveSdkSettings<T = unknown>(
 
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
 
+/** One row of `session_list`: a list projection, not the execution configuration. */
+export type SessionListRow = Pick<
+  ChatSession,
+  | "id"
+  | "title"
+  | "kind"
+  | "projectId"
+  | "characterId"
+  | "teamId"
+  | "lastMessagePreview"
+  | "lastMessageAt"
+  | "createdAt"
+  | "updatedAt"
+>
+
 /**
- * Page of sessions returned by `session_list`. Sorted desktop-side by
- * `updatedAt` descending. Rows are lightweight list projections rather than
- * full execution configuration. `next_offset`/`has_more` are set when more
- * rows remain; direct/degraded stores may additionally return `total`.
+ * Page of sessions returned by `session_list` (ADR-0175 B3): `items` sorted
+ * desktop-side by `updatedAt` descending, `nextPageToken` while more remain.
+ * Direct and degraded stores may additionally answer `total`.
  */
-export interface SessionListPage {
-  rows: Array<
-    Pick<
-      ChatSession,
-      | "id"
-      | "title"
-      | "kind"
-      | "projectId"
-      | "characterId"
-      | "teamId"
-      | "lastMessagePreview"
-      | "lastMessageAt"
-      | "createdAt"
-      | "updatedAt"
-    >
-  >
+export interface SessionListPage extends Page<SessionListRow> {
   total?: number
-  next_offset?: number
-  has_more?: boolean
 }
 
 /**
@@ -654,13 +652,12 @@ export async function deleteMessage(sessionId: string, messageId: string): Promi
 /**
  * Paginated read of the desktop's `sessions` table. Read-only —
  * structurally idempotent so the companion transport skips the
- * idempotency-key header.
+ * idempotency-key header. `updatedBefore` narrows to sessions updated before
+ * that time. Paging is `pageSize`/`pageToken`.
  */
-export async function listSessions(opts: {
-  limit: number
-  offset: number
-  before?: number
-}): Promise<SessionListPage> {
+export async function listSessions(
+  opts: PageRequest & { updatedBefore?: number } = {}
+): Promise<SessionListPage> {
   return transport.call<SessionListPage>("session_list", opts)
 }
 
@@ -673,22 +670,18 @@ export async function listSessions(opts: {
  * Returns rows sorted by `createdAt` ascending so the mobile client can
  * append them to its scrollback in order.
  */
-export interface MobileMessagesPage {
-  rows: StoredMessage[]
-  /** Present on legacy/direct-store responses; omitted by the indexed bridge. */
+export interface MobileMessagesPage extends Page<StoredMessage> {
+  /** Present on direct-store responses, which count the table. */
   total?: number
-  next_offset?: number
 }
 
 export async function getMessagesBySession(
   sessionId: string,
-  limit?: number,
-  offset?: number
+  page: PageRequest = {}
 ): Promise<MobileMessagesPage> {
   return transport.call<MobileMessagesPage>("message_get_by_session", {
     session_id: sessionId,
-    limit,
-    offset,
+    ...page,
   })
 }
 

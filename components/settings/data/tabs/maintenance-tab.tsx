@@ -226,15 +226,15 @@ function WorkspaceMaintenanceBlock() {
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    const next = await listWorkspaceMaintenanceEvents(20)
-    setEvents(next)
+    const next = await listWorkspaceMaintenanceEvents({ pageSize: 20 })
+    setEvents(next.items)
   }, [])
 
   useEffect(() => {
     let cancelled = false
-    void listWorkspaceMaintenanceEvents(20).then(
+    void listWorkspaceMaintenanceEvents({ pageSize: 20 }).then(
       (next) => {
-        if (!cancelled) setEvents(next)
+        if (!cancelled) setEvents(next.items)
       },
       (cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))

@@ -22,8 +22,10 @@
  *   R3 list verbs paginate by token; byte-range only on read/write heads
  *   R4 request schema: object root, additionalProperties:false, camelCase
  *      properties, no limit/offset/cursor/before outside byte-range
- *                                                (report until B3 lands paging)
- *   R5 longRunning commands return the Operation shape (report until B3)
+ *      (a legacy paging name on a page-token command fails since B3, the
+ *      rest report until the B5 casing cut)
+ *   R5 longRunning commands return the Operation shape (report until B4
+ *      registers the Operation output, no command declares longRunning yet)
  *   R6 arm is unique and has a dispatch arm in exactly one rpc source
  *   R7 no renamed old name survives as a string literal in client code
  *                                                (report until the rename cut)
@@ -218,7 +220,12 @@ export function auditContract({
       for (const prop of Object.keys(schema.properties ?? {})) {
         if (!CAMEL.test(prop)) sink.push(`R4 ${label}: property "${prop}" is not camelCase`)
         if (PAGING_PARAMS.has(prop) && c.pagination !== "byte-range") {
-          sink.push(`R4 ${label}: "${prop}" is not a paging parameter; use pageSize/pageToken`)
+          // A page-token command that still names a legacy parameter would
+          // publish two paging vocabularies at once, so that fails (B3). On
+          // a command that does not page yet it stays a report until its arm
+          // migrates.
+          const target = c.pagination === "page-token" ? failures : sink
+          target.push(`R4 ${label}: "${prop}" is not a paging parameter; use pageSize/pageToken`)
         }
       }
       if (c.pagination === "page-token") {

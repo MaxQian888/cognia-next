@@ -1,3 +1,4 @@
+import { collectPages } from "@/lib/tauri/companion-paging"
 import { createDiagnostic } from "@cognia/diagnostics"
 import { detectPlatform } from "@/lib/platform/detect"
 import { transport } from "@/lib/tauri"
@@ -159,9 +160,9 @@ export async function listIntegrationIngressDeadletters(
   )
   const routeId = account?.ingressEndpoint?.routeId
   if (!routeId) return []
-  const rows = await transport.call<IntegrationIngressDeadLetter[]>(
-    "integration_ingress_deadletters",
-    { limit: 500 }
+  const rows = await collectPages<IntegrationIngressDeadLetter>(
+    (pageToken) => transport.call("integration_ingress_deadletters", { pageSize: 500, pageToken }),
+    { maxItems: 500 }
   )
   return rows.filter((row) => row.routeId === routeId)
 }

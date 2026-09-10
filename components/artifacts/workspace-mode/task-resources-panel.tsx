@@ -61,7 +61,8 @@ export function TaskResourcesPanel({
   const [resources, setResources] = useState<ResourceChange[]>(cachedResources ?? [])
   const [events, setEvents] = useState<ResourceEvent[]>([])
   const [summary, setSummary] = useState<TaskResourceSummary | null>(null)
-  const [hasMoreEvents, setHasMoreEvents] = useState(false)
+  const [nextEventsPageToken, setNextEventsPageToken] = useState<string | undefined>(undefined)
+  const hasMoreEvents = nextEventsPageToken !== undefined
   const [selectedRunId, setSelectedRunId] = useState(active?.runId ?? "")
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [origin, setOrigin] = useState("all")
@@ -159,13 +160,13 @@ export function TaskResourcesPanel({
       return
     }
     void Promise.all([
-      listTaskResourceEvents(selectedRunId, undefined, 1000),
+      listTaskResourceEvents(selectedRunId, { pageSize: 1000 }),
       getTaskResourceSummary(selectedRunId),
     ])
-      .then(([nextEvents, nextSummary]) => {
+      .then(([page, nextSummary]) => {
         if (cancelled) return
-        setEvents(nextEvents)
-        setHasMoreEvents(nextEvents.length === 1000)
+        setEvents(page.items)
+        setNextEventsPageToken(page.nextPageToken)
         setSummary(nextSummary)
       })
       .catch((reason: unknown) => {
@@ -356,12 +357,15 @@ export function TaskResourcesPanel({
   }
 
   async function loadMoreEvents() {
-    if (!selectedRunId || events.length === 0) return
+    if (!selectedRunId || !nextEventsPageToken) return
     setLoading(true)
     try {
-      const next = await listTaskResourceEvents(selectedRunId, events[events.length - 1]?.seq, 1000)
-      setEvents((current) => [...current, ...next])
-      setHasMoreEvents(next.length === 1000)
+      const page = await listTaskResourceEvents(selectedRunId, {
+        pageSize: 1000,
+        pageToken: nextEventsPageToken,
+      })
+      setEvents((current) => [...current, ...page.items])
+      setNextEventsPageToken(page.nextPageToken)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {

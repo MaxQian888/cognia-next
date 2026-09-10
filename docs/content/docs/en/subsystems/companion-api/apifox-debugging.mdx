@@ -138,8 +138,7 @@ Authorization: Bearer {{serviceToken}}
 Content-Type: application/json
 
 {
-  "limit": 20,
-  "offset": 0
+  "pageSize": 20
 }
 ```
 
@@ -147,13 +146,13 @@ A fresh data directory returns:
 
 ```json
 {
-  "has_more": false,
-  "rows": []
+  "items": []
 }
 ```
 
-Do not send `{}`: the runtime requires `limit` and `offset`, otherwise it returns
-`400 malformed_request`.
+`{}` is accepted too and pages by the default size of 50. A fuller store also answers a
+`nextPageToken`. Send it back as `pageToken` for the next page, and treat it as opaque. The old
+`limit` and `offset` names are refused with `400 malformed_request` (ADR-0175).
 
 ## 7. Configure WebSocket debugging
 

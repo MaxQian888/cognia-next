@@ -52,7 +52,7 @@ beforeEach(() => {
   saveMock.mockClear()
   mockTrackEvent.mockClear()
   runWorkspaceMaintenanceMock.mockReset().mockResolvedValue({ events: [] })
-  listWorkspaceMaintenanceEventsMock.mockReset().mockResolvedValue([])
+  listWorkspaceMaintenanceEventsMock.mockReset().mockResolvedValue({ items: [] })
   getWorkspaceLifecyclePolicyMock.mockReset().mockResolvedValue({
     activeDirectoryCap: 25,
     snapshotRetentionDays: 14,
@@ -67,19 +67,23 @@ beforeEach(() => {
 
 describe("<MaintenanceTab /> managed workspace block", () => {
   it("runs host-owned maintenance and refreshes durable history", async () => {
-    listWorkspaceMaintenanceEventsMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        eventId: "event-1",
-        kind: "reconciled",
-        workspaceId: null,
-        occurredAt: 1,
-        detail: "registry checked",
-      },
-    ])
+    listWorkspaceMaintenanceEventsMock.mockResolvedValueOnce({ items: [] }).mockResolvedValueOnce({
+      items: [
+        {
+          eventId: "event-1",
+          kind: "reconciled",
+          workspaceId: null,
+          occurredAt: 1,
+          detail: "registry checked",
+        },
+      ],
+    })
     const user = userEvent.setup()
     render(<MaintenanceTab />)
 
-    await waitFor(() => expect(listWorkspaceMaintenanceEventsMock).toHaveBeenCalledWith(20))
+    await waitFor(() =>
+      expect(listWorkspaceMaintenanceEventsMock).toHaveBeenCalledWith({ pageSize: 20 })
+    )
     const block = screen.getByTestId("workspace-maintenance")
     await user.click(within(block).getByRole("button"))
 

@@ -138,11 +138,23 @@ pub fn __clear_cache_for_testing() {
     *cache_slot().lock().expect("cache") = None;
 }
 
-/// Tauri command — prefix-match executables on the current PATH.
+/// Tauri command: one page of the executables on the current PATH that
+/// start with `prefix` (ADR-0175 B3).
 #[tauri::command]
-pub fn terminal_list_path_executables(prefix: String, limit: Option<usize>) -> Vec<String> {
+pub fn terminal_list_path_executables(
+    prefix: String,
+    page_size: Option<u32>,
+    page_token: Option<String>,
+) -> Result<cognia_problem::paging::Page<String>, String> {
+    let page = cognia_problem::paging::PageRequest::from_parts(page_size, page_token.as_deref())
+        .map_err(|error| error.to_string())?;
     let path_value = std::env::var("PATH").unwrap_or_default();
-    list_path_executables_inner(&path_value, &prefix, limit.unwrap_or(50))
+    let all = list_path_executables_inner(
+        &path_value,
+        &prefix,
+        cognia_problem::paging::MAX_PAGE_SIZE as usize,
+    );
+    cognia_problem::paging::Page::slice_all(all, &page, 50).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

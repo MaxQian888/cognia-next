@@ -405,24 +405,46 @@ pub(super) async fn dispatch(
             Ok(result)
         }
 
+        // Paging (ADR-0175 B3): the wire takes pageSize and pageToken and
+        // answers {items, nextPageToken}. Both data planes still page by
+        // offset underneath, so the token carries the offset and the page
+        // keeps the count the direct store answers.
         "session_list" => {
-            let limit: u32 = required(&args, "limit")?;
-            let offset: u32 = required(&args, "offset")?;
-            let before: Option<i64> = optional(&args, "before")?;
+            let page = page_request(&args)?;
+            let updated_before: Option<i64> = optional(&args, "updatedBefore")?;
+            let offset = page.offset().map_err(paging_error)?;
+            let limit = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
             let dp = pick_data_plane(state)?;
-            dp.list_sessions(limit, offset, before)
+            let legacy = dp
+                .list_sessions(limit, wire_offset(offset)?, updated_before)
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::internal)?;
+            let (page, extras) = super::super::paging::Page::from_legacy_offset_page(
+                legacy,
+                "rows",
+                offset,
+                &["total"],
+            );
+            Ok(page.into_value_with(extras))
         }
 
         "message_get_by_session" => {
             let session_id: String = required(&args, "session_id")?;
-            let limit: Option<u32> = optional(&args, "limit")?;
-            let offset: Option<u32> = optional(&args, "offset")?;
+            let page = page_request(&args)?;
+            let offset = page.offset().map_err(paging_error)?;
+            let limit = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
             let dp = pick_data_plane(state)?;
-            dp.get_messages_by_session(session_id, limit, offset)
+            let legacy = dp
+                .get_messages_by_session(session_id, Some(limit), Some(wire_offset(offset)?))
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::internal)?;
+            let (page, extras) = super::super::paging::Page::from_legacy_offset_page(
+                legacy,
+                "rows",
+                offset,
+                &["total"],
+            );
+            Ok(page.into_value_with(extras))
         }
 
         "transcript_capabilities" => {
@@ -448,19 +470,28 @@ pub(super) async fn dispatch(
             let turn_key: String = required(&args, "turn_key")?;
             let revision: u64 = required(&args, "revision")?;
             let detail_revision: u64 = required(&args, "detail_revision")?;
-            let cursor: Option<String> = optional(&args, "cursor")?;
-            let limit: Option<u32> = optional(&args, "limit")?;
+            let page = page_request(&args)?;
+            let cursor = page.cursor().map_err(paging_error)?;
             let dp = pick_data_plane(state)?;
-            dp.session_turn_messages(
-                session_id,
-                turn_key,
-                revision,
-                detail_revision,
-                cursor,
-                limit,
-            )
-            .await
-            .map_err(RpcError::transcript)
+            let legacy = dp
+                .session_turn_messages(
+                    session_id,
+                    turn_key,
+                    revision,
+                    detail_revision,
+                    cursor,
+                    page.page_size,
+                )
+                .await
+                .map_err(RpcError::transcript)?;
+            let (page, extras) = super::super::paging::Page::from_legacy_cursor_page(
+                legacy,
+                "messages",
+                "nextCursor",
+                "hasMore",
+                &["revision", "detailRevision", "total", "approximateBytes"],
+            );
+            Ok(page.into_value_with(extras))
         }
 
         "message_send" => {
@@ -886,11 +917,15 @@ pub(super) async fn dispatch(
             } else {
                 args
             };
+            // Paging (ADR-0175 B3): the wire shape is pageSize/pageToken and
+            // {items, nextPageToken}. The TS arms behind the bridge still take
+            // limit/offset, so the translation lives here, on the host.
+            let (args, paging) = bridged_page_args(name, args)?;
             let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
             // Connected brain first, desktop WebView second (ADR-0059 R4/R5).
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
-            bridge
+            let result = bridge
                 .dispatch(
                     transport.as_ref(),
                     name,
@@ -898,7 +933,8 @@ pub(super) async fn dispatch(
                     crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
                 )
                 .await
-                .map_err(|error| map_desktop_write_bridge_error(name, error))
+                .map_err(|error| map_desktop_write_bridge_error(name, error))?;
+            Ok(bridged_page_result(name, paging, result))
         }
         "thread_handoff_offer"
         | "thread_handoff_preflight"
@@ -925,9 +961,163 @@ pub(super) async fn dispatch(
     result
 }
 
+/// An offset the bridge and the direct store can take.
+fn wire_offset(offset: u64) -> Result<u32, (StatusCode, Json<RpcError>)> {
+    u32::try_from(offset).map_err(|_| RpcError::malformed("pageToken is out of range".to_string()))
+}
+
+/// The bridged list arms that page, and the legacy member each answers its
+/// rows under. `browser_context_list` has no offset underneath, so it is one
+/// page and never issues a token.
+const BRIDGED_PAGED_ARMS: &[(&str, &str, bool)] = &[
+    ("workflow_run_list", "runs", true),
+    ("memory_list", "memories", false),
+    ("browser_context_list", "items", false),
+];
+
+struct BridgedPaging {
+    rows_key: &'static str,
+    offset: u64,
+    page_size: u32,
+    offset_paged: bool,
+}
+
+/// Translate pageSize/pageToken into the limit/offset the TS arm reads.
+fn bridged_page_args(
+    name: &str,
+    args: Value,
+) -> Result<(Value, Option<BridgedPaging>), (StatusCode, Json<RpcError>)> {
+    let Some((_, rows_key, offset_paged)) = BRIDGED_PAGED_ARMS
+        .iter()
+        .find(|(arm, _, _)| *arm == name)
+        .copied()
+    else {
+        return Ok((args, None));
+    };
+    let page = page_request(&args)?;
+    let offset = page.offset().map_err(paging_error)?;
+    let page_size = page.page_size_or(super::super::paging::DEFAULT_PAGE_SIZE);
+    let mut object = match args {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    object.remove("pageSize");
+    object.remove("pageToken");
+    object.insert("limit".to_string(), Value::from(page_size));
+    if offset_paged {
+        object.insert("offset".to_string(), Value::from(wire_offset(offset)?));
+    }
+    Ok((
+        Value::Object(object),
+        Some(BridgedPaging {
+            rows_key,
+            offset,
+            page_size,
+            offset_paged,
+        }),
+    ))
+}
+
+/// Wrap the TS arm's legacy answer into the page envelope. A refusal shape
+/// (`{ok: false}`) passes through untouched.
+fn bridged_page_result(name: &str, paging: Option<BridgedPaging>, result: Value) -> Value {
+    let Some(paging) = paging else {
+        return result;
+    };
+    if result.get("ok").is_some_and(|ok| ok == &Value::Bool(false)) {
+        return result;
+    }
+    let mut object = match result {
+        Value::Object(map) => map,
+        Value::Array(items) => {
+            let mut map = serde_json::Map::new();
+            map.insert(paging.rows_key.to_string(), Value::Array(items));
+            map
+        }
+        other => {
+            log::warn!("companion-api {name}: legacy page is not an object: {other}");
+            return other;
+        }
+    };
+    let items = match object.remove(paging.rows_key) {
+        Some(Value::Array(items)) => items,
+        _ => Vec::new(),
+    };
+    object.remove("ok");
+    let more = paging.offset_paged && items.len() as u32 >= paging.page_size;
+    let page = super::super::paging::Page::from_offset(items, paging.offset, more);
+    page.into_value_with(object)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bridged_paging_translates_the_wire_shape_and_wraps_the_legacy_answer() {
+        let token = super::super::super::paging::PageToken::Offset(20).encode();
+        let (args, paging) = bridged_page_args(
+            "workflow_run_list",
+            serde_json::json!({ "workflowId": "wf", "pageSize": 10, "pageToken": token }),
+        )
+        .unwrap();
+        assert_eq!(args["limit"], 10);
+        assert_eq!(args["offset"], 20);
+        assert_eq!(args["workflowId"], "wf");
+        assert!(args.get("pageSize").is_none() && args.get("pageToken").is_none());
+        let runs: Vec<Value> = (0..10).map(Value::from).collect();
+        let page = bridged_page_result(
+            "workflow_run_list",
+            paging,
+            serde_json::json!({ "runs": runs }),
+        );
+        assert_eq!(page["items"].as_array().unwrap().len(), 10);
+        assert_eq!(
+            page["nextPageToken"]
+                .as_str()
+                .map(super::super::super::paging::PageToken::decode),
+            Some(Ok(super::super::super::paging::PageToken::Offset(30)))
+        );
+
+        // memory_list has no offset underneath: one page, extras kept, and a
+        // refusal passes through.
+        let (args, paging) =
+            bridged_page_args("memory_list", serde_json::json!({ "pageSize": 5 })).unwrap();
+        assert_eq!(args["limit"], 5);
+        assert!(args.get("offset").is_none());
+        let page = bridged_page_result(
+            "memory_list",
+            paging,
+            serde_json::json!({ "ok": true, "memories": [1, 2, 3, 4, 5] }),
+        );
+        assert_eq!(page["items"].as_array().unwrap().len(), 5);
+        assert!(page.get("nextPageToken").is_none());
+        assert!(page.get("ok").is_none());
+        let (_, paging) = bridged_page_args("memory_list", serde_json::json!({})).unwrap();
+        let refusal = bridged_page_result(
+            "memory_list",
+            paging,
+            serde_json::json!({ "ok": false, "reason": "disabled" }),
+        );
+        assert_eq!(refusal["ok"], false);
+
+        // browser_context_list keeps capabilityRevision beside the items.
+        let (_, paging) = bridged_page_args("browser_context_list", serde_json::json!({})).unwrap();
+        let page = bridged_page_result(
+            "browser_context_list",
+            paging,
+            serde_json::json!({ "items": [], "capabilityRevision": "r1" }),
+        );
+        assert_eq!(page["capabilityRevision"], "r1");
+
+        // A legacy spelling is refused before anything crosses the bridge.
+        assert!(bridged_page_args("workflow_run_list", serde_json::json!({ "limit": 3 })).is_err());
+        // Other bridged commands are untouched.
+        let (args, paging) =
+            bridged_page_args("workflow_create", serde_json::json!({ "a": 1 })).unwrap();
+        assert!(paging.is_none());
+        assert_eq!(args["a"], 1);
+    }
 
     #[test]
     fn headless_hosts_route_approval_commands_to_the_ts_authority() {

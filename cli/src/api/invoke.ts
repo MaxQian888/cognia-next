@@ -185,21 +185,36 @@ export async function pollOperation(input: PollInput): Promise<CommandOutcome> {
       timeoutMs: input.timeoutMs,
     })
     if (!outcome.ok) return outcome
-    const receipt = outcome.result as Record<string, unknown>
-    const status = typeof receipt.status === "string" ? receipt.status : undefined
-    if (status === "completed" || status === "succeeded") {
-      return { ok: true, result: receipt.result ?? receipt }
-    }
-    if (status === "failed" || status === "error") {
+    // The route answers the Operation document (ADR-0175 B3): branch on
+    // `done`, then on `error`. Older hosts wrote a receipt with a status word.
+    const operation = outcome.result as Record<string, unknown>
+    const status = typeof operation.status === "string" ? operation.status : undefined
+    const done =
+      typeof operation.done === "boolean"
+        ? operation.done
+        : status === "completed" ||
+          status === "succeeded" ||
+          status === "failed" ||
+          status === "error"
+    if (!done) continue
+    const error = operation.error
+    if (error !== undefined && error !== null) {
+      const detail =
+        typeof error === "string"
+          ? error
+          : typeof error === "object" && typeof (error as { detail?: unknown }).detail === "string"
+            ? (error as { detail: string }).detail
+            : undefined
       return {
         ok: false,
         cause: "failed",
-        message:
-          typeof receipt.error === "string"
-            ? receipt.error
-            : `operation ${input.operationId} failed`,
+        message: detail ?? `operation ${input.operationId} failed`,
       }
     }
+    if (status === "failed" || status === "error") {
+      return { ok: false, cause: "failed", message: `operation ${input.operationId} failed` }
+    }
+    return { ok: true, result: operation.result ?? operation }
   }
 
   return {
