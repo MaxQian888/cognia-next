@@ -70,7 +70,8 @@
         "at_mention_required": "No @mention",
         "chat_allowlist": "Not on allowlist",
         "chat_blocklist": "Blocklist",
-        "other": "Other"
+        "other": "Other",
+        "room_asleep": "Room asleep"
       },
       "atGateTitle": "Inbound filter (24 h)",
       "atGateTotal": "{count} message(s) dropped by the at-gate.",

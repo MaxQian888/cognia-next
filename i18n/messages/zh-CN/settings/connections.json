@@ -70,7 +70,8 @@
         "at_mention_required": "未 @机器人",
         "chat_allowlist": "不在白名单",
         "chat_blocklist": "黑名单",
-        "other": "其他"
+        "other": "其他",
+        "room_asleep": "房间休眠"
       },
       "atGateTitle": "入站过滤（24 小时）",
       "atGateTotal": "at-gate 已丢弃 {count} 条消息。",

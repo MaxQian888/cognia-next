@@ -8,7 +8,11 @@ import {
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { deliveryTargetFromEvent, isReplyToSelf } from "@/types/connectors/event"
+import { findSessionByConversationKey } from "./session-bindings"
 import type { InboundActivationPolicy } from "@/types/connectors/policy"
+import { getSession } from "@/lib/db/sessions"
+import { resolveRoomSettings } from "@/lib/chat/room/settings"
+import type { RoomReplyMode } from "@/lib/chat/room/types"
 
 export const DEFAULT_TOPIC_ACTIVATION_TTL_MS = 24 * 60 * 60 * 1_000
 
@@ -40,6 +44,8 @@ export type ConversationAdmissionReason =
   | "delivery_unverified"
   | "topic_activation_required"
   | "topic_activation_expired"
+  /** The bound room's `replyMode` is `asleep` (ADR-0177 batch 3). */
+  | "room_asleep"
 
 export interface ConversationAdmissionDecision {
   allowed: boolean
@@ -121,11 +127,21 @@ export function evaluateAdmissionPolicy(input: {
   event: NormalizedInboundEvent
   adapter: Pick<AdapterInstanceRow, "type" | "deliveryReadiness"> & LegacyActivationSettings
   override?: Pick<ConversationOverrideRow, "inboundActivationPolicy"> | null
+  /**
+   * The bound room's `replyMode` (ADR-0177 batch 3), when the caller knows
+   * it. `asleep` denies outright, `mention_only` forces a mention whatever
+   * the operator configured, and `auto` (or unknown) defers to the policy.
+   */
+  roomReplyMode?: RoomReplyMode | null
 }): AdmissionPolicyOutcome {
   const { event, adapter } = input
   if (event.channel.kind === "private") return { kind: "allow" }
 
-  const policy = resolveInboundActivationPolicy(adapter, input.override ?? undefined)
+  if (input.roomReplyMode === "asleep") return { kind: "deny", reason: "room_asleep" }
+  const policy =
+    input.roomReplyMode === "mention_only"
+      ? "mention_each"
+      : resolveInboundActivationPolicy(adapter, input.override ?? undefined)
   // `delivery_unverified` tests `selfMentioned` ALONE: that gate is about
   // whether the platform will push unmentioned group events to us at all,
   // which a reply says nothing about.
@@ -156,6 +172,24 @@ export function evaluateAdmissionPolicy(input: {
   return { kind: "consult-activation" }
 }
 
+/**
+ * The `replyMode` of the room this conversation is bound to, or `null` when
+ * nothing is bound yet (a first contact has no room to be asleep in).
+ */
+export async function readRoomReplyMode(
+  conversationKey: string,
+  override: Pick<ConversationOverrideRow, "sessionId"> | undefined
+): Promise<RoomReplyMode | null> {
+  try {
+    const session = override?.sessionId
+      ? await getSession(override.sessionId)
+      : await findSessionByConversationKey(conversationKey)
+    return session ? resolveRoomSettings(session).replyMode : null
+  } catch {
+    return null
+  }
+}
+
 export async function admitConversationEvent(
   event: NormalizedInboundEvent,
   adapter: AdapterInstanceRow,
@@ -163,6 +197,8 @@ export async function admitConversationEvent(
     now?: number
     activationTtlMs?: number
     override?: ConversationOverrideRow | null
+    /** The bound room's `replyMode`. Looked up from the binding when absent. */
+    roomReplyMode?: RoomReplyMode | null
   } = {}
 ): Promise<ConversationAdmissionDecision> {
   if (event.kind && event.kind !== "create") return { allowed: true, activated: false }
@@ -172,9 +208,19 @@ export async function admitConversationEvent(
     options.override === undefined
       ? await readForResolution(event.conversationKey).catch(() => undefined)
       : (options.override ?? undefined)
+  // The room's own reply mode outranks every platform policy (ADR-0177
+  // batch 3): an asleep group keeps its messages and answers nobody, and a
+  // mention-only group needs the @ even where the operator said "always".
+  const roomReplyMode =
+    options.roomReplyMode === undefined
+      ? await readRoomReplyMode(event.conversationKey, override)
+      : options.roomReplyMode
+  if (roomReplyMode === "asleep") {
+    return { allowed: false, reason: "room_asleep", activated: false }
+  }
   // The stateless half. Shared verbatim with the plugin-facing predictor, so
   // the two cannot disagree about anything a database is not needed for.
-  const outcome = evaluateAdmissionPolicy({ event, adapter, override })
+  const outcome = evaluateAdmissionPolicy({ event, adapter, override, roomReplyMode })
   if (outcome.kind === "allow") return { allowed: true, activated: false }
   if (outcome.kind === "deny") {
     return { allowed: false, reason: outcome.reason, activated: false }
