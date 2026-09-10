@@ -39,7 +39,8 @@ import {
   type VideoTransitionDefinition,
 } from "./media-api"
 import { initializePluginPermissions } from "./permission-api"
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
+import { isTauri } from "@/lib/utils"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { generateProviderImage, generateProviderVideo } from "@/lib/ai/media/provider-generation"
 import {
@@ -47,8 +48,9 @@ import {
   getPluginPointDiagnostics,
 } from "../contracts/diagnostics-store"
 
-jest.mock("@tauri-apps/api/core", () => ({
-  invoke: jest.fn(),
+jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteEndpoint: jest.fn(() => null),
 }))
 
 jest.mock("@tauri-apps/api/event", () => ({
@@ -463,7 +465,7 @@ describe("Media Registry", () => {
 
   describe("Video API implementation", () => {
     beforeEach(() => {
-      ;(invoke as jest.Mock).mockImplementation(async (command: string) => {
+      ;(transport.call as jest.Mock).mockImplementation(async (command: string) => {
         if (command === "video_get_info") {
           return {
             durationMs: 12_000,
@@ -525,13 +527,70 @@ describe("Media Registry", () => {
       })
     })
 
+    it.each([new Uint8Array(4), new Uint8Array(8), new Uint8Array([1, 0, 0, 0, 1, 0, 0, 0])])(
+      "rejects malformed frame responses",
+      async (frame) => {
+        const api = createMediaAPI(testPluginId, {} as never)
+        const clip = await api.video.loadClip("/tmp/source.mp4")
+        jest.mocked(transport.call).mockResolvedValueOnce(frame)
+        await expect(api.video.getFrame(clip.id, 0)).rejects.toThrow("Native video frame response")
+      }
+    )
+
+    it("returns frame pixels in a headless runtime without ImageData", async () => {
+      const constructor = globalThis.ImageData
+      try {
+        Object.defineProperty(globalThis, "ImageData", {
+          value: undefined,
+          configurable: true,
+          writable: true,
+        })
+        const api = createMediaAPI(testPluginId, {} as never)
+        const clip = await api.video.loadClip("/tmp/source.mp4")
+        const frame = await api.video.getFrame(clip.id, 1)
+        expect(frame).toMatchObject({ width: 2, height: 2, colorSpace: "srgb" })
+        expect(frame.data).toBeInstanceOf(Uint8ClampedArray)
+      } finally {
+        Object.defineProperty(globalThis, "ImageData", {
+          value: constructor,
+          configurable: true,
+          writable: true,
+        })
+      }
+    })
+
+    it("publishes remote exports on the host and reports completion", async () => {
+      jest.mocked(isTauri).mockReturnValueOnce(false).mockReturnValueOnce(false)
+      const api = createMediaAPI(testPluginId, {} as never)
+      const clip = await api.video.loadClip("/tmp/source.mp4")
+      const onProgress = jest.fn()
+      await api.video.export([clip.id], {
+        format: "mp4",
+        resolution: "1080p",
+        fps: 30,
+        quality: "high",
+        destinationPath: "/workspace/export.mp4",
+        overwrite: false,
+        onProgress,
+      })
+      expect(transport.call).toHaveBeenCalledWith(
+        "plugin_media_export_video",
+        expect.objectContaining({
+          destinationPath: "/workspace/export.mp4",
+          overwrite: false,
+        })
+      )
+      expect(onProgress.mock.calls.map(([event]) => event.phase)).toEqual(["preparing", "complete"])
+      expect(jest.requireMock("@tauri-apps/plugin-fs").writeFile).not.toHaveBeenCalled()
+    })
+
     it("should provide a real frame extraction path", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
       const clip = await api.video.loadClip("/tmp/source.mp4")
       const imageData = await api.video.getFrame(clip.id, 1.5)
       expect(imageData).toBeInstanceOf(ImageData)
       expect(imageData.width).toBe(2)
-      expect(invoke).toHaveBeenCalledWith(
+      expect(transport.call).toHaveBeenCalledWith(
         "plugin_media_get_video_frame",
         expect.objectContaining({
           sourceToken: "authorized-source-token",
@@ -557,7 +616,7 @@ describe("Media Registry", () => {
           reason: "scene-change",
         })
       )
-      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+      expect(transport.call).toHaveBeenCalledWith("video_analyze", {
         options: {
           sourceToken: "authorized-source-token",
           mode: "scene",
@@ -569,7 +628,58 @@ describe("Media Registry", () => {
       })
 
       await api.video.cleanupAnalysis(manifest)
-      expect(invoke).toHaveBeenCalledWith("video_cleanup_analysis", {
+      expect(transport.call).toHaveBeenCalledWith("video_cleanup_analysis", {
+        outputDirectory: "/tmp/cognia-video/analysis-id",
+      })
+    })
+
+    it("hydrates remote analysis frames through bounded binary transfers", async () => {
+      jest.mocked(isTauri).mockReturnValueOnce(false)
+      const original = jest.mocked(transport.call).getMockImplementation()!
+      jest.mocked(transport.call).mockImplementation(async (command, args) => {
+        if (command === "plugin_media_read_analysis_frame")
+          return { transferId: args?.path, byteLength: 3 }
+        if (command === "plugin_media_read_chunk") return [255, 216, 255]
+        if (command === "plugin_media_close_transfer") return null
+        return original(command, args)
+      })
+      const manifest = await createMediaAPI(testPluginId, {} as never).video.analyze(
+        "/tmp/source.mp4"
+      )
+      expect(manifest.frames.map((frame) => frame.dataUrl)).toEqual([
+        "data:image/jpeg;base64,/9j/",
+        "data:image/jpeg;base64,/9j/",
+      ])
+      expect(manifest.frames[0].path).toBe("/tmp/cognia-video/analysis-id/frame-0001.jpg")
+      expect(transport.call).toHaveBeenCalledWith("plugin_media_read_analysis_frame", {
+        outputDirectory: "/tmp/cognia-video/analysis-id",
+        path: manifest.frames[0].path,
+      })
+      expect(
+        jest
+          .mocked(transport.call)
+          .mock.calls.filter(([command]) => command === "plugin_media_close_transfer")
+      ).toHaveLength(2)
+      expect(transport.call).not.toHaveBeenCalledWith("video_cleanup_analysis", expect.anything())
+    })
+
+    it("cleans up the analysis directory when a frame download fails", async () => {
+      jest.mocked(isTauri).mockReturnValueOnce(false)
+      const original = jest.mocked(transport.call).getMockImplementation()!
+      jest.mocked(transport.call).mockImplementation(async (command, args) => {
+        if (command === "plugin_media_read_analysis_frame")
+          return { transferId: "frame", byteLength: 3 }
+        if (command === "plugin_media_read_chunk") throw new Error("frame download failed")
+        if (command === "plugin_media_close_transfer") return null
+        return original(command, args)
+      })
+      await expect(
+        createMediaAPI(testPluginId, {} as never).video.analyze("/tmp/source.mp4")
+      ).rejects.toThrow("frame download failed")
+      expect(transport.call).toHaveBeenCalledWith("plugin_media_close_transfer", {
+        transferId: "frame",
+      })
+      expect(transport.call).toHaveBeenLastCalledWith("video_cleanup_analysis", {
         outputDirectory: "/tmp/cognia-video/analysis-id",
       })
     })
@@ -579,7 +689,7 @@ describe("Media Registry", () => {
 
       await api.video.analyze("/tmp/source.mp4")
 
-      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+      expect(transport.call).toHaveBeenCalledWith("video_analyze", {
         options: {
           sourceToken: "authorized-source-token",
         },
@@ -587,7 +697,7 @@ describe("Media Registry", () => {
     })
 
     it("should trim into a native-owned output without accepting a caller destination", async () => {
-      ;(invoke as jest.Mock).mockImplementation(async (command: string) => {
+      ;(transport.call as jest.Mock).mockImplementation(async (command: string) => {
         if (command === "video_get_info") {
           return {
             durationMs: 12_000,
@@ -610,7 +720,7 @@ describe("Media Registry", () => {
 
       await api.video.trim(clip.id, 1, 3)
 
-      expect(invoke).toHaveBeenCalledWith("video_trim", {
+      expect(transport.call).toHaveBeenCalledWith("video_trim", {
         options: {
           sourceToken: "authorized-source-token",
           startTime: 1,
@@ -626,7 +736,7 @@ describe("Media Registry", () => {
       const second = await api.video.loadClip("/tmp/second.mp4")
       const clip = await api.video.concatenate([first.id, second.id])
       expect(clip.sourceUrl).toBe("/tmp/merged.mp4")
-      expect(invoke).toHaveBeenCalledWith(
+      expect(transport.call).toHaveBeenCalledWith(
         "plugin_media_concatenate_videos",
         expect.objectContaining({
           clips: [
@@ -655,19 +765,19 @@ describe("Media Registry", () => {
         quality: "high",
       })
 
-      expect(invoke).toHaveBeenCalledWith("plugin_media_apply_video_effect", {
+      expect(transport.call).toHaveBeenCalledWith("plugin_media_apply_video_effect", {
         sourceToken: "authorized-source-token",
         effect: {
           id: "brightness-contrast",
           params: { brightness: 12 },
         },
       })
-      expect(invoke).toHaveBeenCalledWith("plugin_media_add_transition", {
+      expect(transport.call).toHaveBeenCalledWith("plugin_media_add_transition", {
         fromClip: expect.objectContaining({ sourceToken: "authorized-source-token" }),
         toClip: expect.objectContaining({ sourceToken: "authorized-source-token" }),
         transition: { type: "fade", duration: 1 },
       })
-      expect(invoke).toHaveBeenCalledWith(
+      expect(transport.call).toHaveBeenCalledWith(
         "plugin_media_export_video",
         expect.objectContaining({
           clips: [

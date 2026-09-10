@@ -57,14 +57,31 @@ export async function collectUnreferencedMessageMedia(
   options?: { graceMs?: number; now?: number }
 ): Promise<number> {
   const db = getDb()
-  const referencedHashes = new Set(await db.messageMediaRefs.orderBy("hash").uniqueKeys())
   if (candidates) {
-    const allowed = new Set<string>()
-    for (const candidate of candidates) allowed.add(parseMediaRef(candidate) ?? candidate)
-    await db.messageMedia.each((row) => {
-      if (!allowed.has(row.hash)) referencedHashes.add(row.hash)
+    const hashes = [
+      ...new Set(Array.from(candidates, (candidate) => parseMediaRef(candidate) ?? candidate)),
+    ]
+    if (hashes.length === 0) return 0
+    const { graceMs = 60_000, now = Date.now() } = options ?? {}
+
+    return db.transaction("rw", db.messageMediaRefs, db.messageMedia, async () => {
+      // Keep the reference check and deletion atomic while reading only candidate blobs.
+      const referencedHashes = new Set(
+        await db.messageMediaRefs.where("hash").anyOf(hashes).uniqueKeys()
+      )
+      const rows = await db.messageMedia.bulkGet(
+        hashes.filter((hash) => !referencedHashes.has(hash))
+      )
+      const doomed: string[] = []
+      for (const row of rows) {
+        if (!row || now - row.createdAt < graceMs) continue
+        doomed.push(row.hash)
+      }
+      if (doomed.length > 0) await db.messageMedia.bulkDelete(doomed)
+      return doomed.length
     })
   }
+  const referencedHashes = await db.messageMediaRefs.orderBy("hash").uniqueKeys()
   return collectOrphanedMedia(
     [...referencedHashes].map((hash) => `cognia-media:${String(hash)}`),
     options

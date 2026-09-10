@@ -1,10 +1,8 @@
-/**
- * Mocked at the `invoke` boundary, because that is the boundary these nodes
- * actually have. `crates/cognia-media` is reachable only through raw Tauri
- * commands, which is the whole reason the family needs its own capability id.
- */
+/** Media nodes use the selected execution-host transport. */
 const invoke = jest.fn(async (_c: string, _a?: unknown): Promise<unknown> => null)
-jest.mock("@tauri-apps/api/core", () => ({ invoke: (c: string, a?: unknown) => invoke(c, a) }))
+jest.mock("@/lib/tauri", () => ({ transport: { call: (c: string, a?: unknown) => invoke(c, a) } }))
+const isHeadlessHost = jest.fn(() => false)
+jest.mock("@/lib/platform/detect", () => ({ isHeadlessHost: () => isHeadlessHost() }))
 
 const encodePixelBuffer = jest.fn(
   async (_b: unknown, _o?: unknown): Promise<{ bytes: Uint8Array; mediaType: string }> => ({
@@ -68,6 +66,7 @@ function frameBytes(width: number, height: number): ArrayBuffer {
 beforeEach(() => {
   jest.clearAllMocks()
   getActiveAccountId.mockReturnValue("acc1")
+  isHeadlessHost.mockReturnValue(false)
   invoke.mockImplementation(async (command: string) => {
     if (command === "video_get_info") return INFO
     if (command === "plugin_media_get_video_frame") return frameBytes(2, 1)
@@ -88,8 +87,8 @@ describe("registration", () => {
   )
 
   it.each(["applyEffect", "addTransition", "export"])("registers no %s node", (op) => {
-    // The first two are no-ops in Rust today and the third reads up to 128 MiB
-    // over IPC. All three would be controls that do not do what they say.
+    // Effects/transitions are validated and applied during plugin export.
+    // Large exported video bytes are not workflow step outputs.
     expect(getExecutor(`action.media.${op}` as never, 1)).toBeUndefined()
   })
 })
@@ -202,6 +201,26 @@ describe("action.media.concat", () => {
 })
 
 describe("a machine with no ffmpeg", () => {
+  it("recognizes the structured remote missing-dependency code", async () => {
+    invoke.mockRejectedValue(
+      Object.assign(new Error("tool unavailable"), { code: "MISSING_DEPENDENCY" })
+    )
+    await expect(run("action.media.probe", { sourcePath: "/v.mp4" })).rejects.toMatchObject({
+      retryable: false,
+    })
+  })
+
+  it.each([
+    new Error("ffmpeg failed: invalid input"),
+    Object.assign(new Error("ffmpeg timed out"), { code: "TIMEOUT" }),
+    Object.assign(new Error("ffprobe failed to read input"), { code: "PROCESS_FAILED" }),
+  ])(
+    "preserves process and timeout errors instead of claiming the binary is missing",
+    async (error) => {
+      invoke.mockRejectedValue(error)
+      await expect(run("action.media.probe", { sourcePath: "/v.mp4" })).rejects.toBe(error)
+    }
+  )
   it.each([
     ["action.media.probe", { sourcePath: "/v.mp4" }],
     ["action.media.trim", { sourcePath: "/v.mp4", endSeconds: 2 }],
@@ -225,5 +244,42 @@ describe("decodeFrameResponse", () => {
     const truncated = new Uint8Array(frameBytes(4, 3)).slice(0, 20)
     expect(() => decodeFrameResponse(truncated)).toThrow(/pixel bytes where/)
     expect(() => decodeFrameResponse(new Uint8Array(4))).toThrow(/no dimension header/)
+  })
+})
+
+describe("headless frame encoding", () => {
+  it("stores host-encoded PNG bytes without canvas or ImageData", async () => {
+    isHeadlessHost.mockReturnValue(true)
+    const png = new Uint8Array(33)
+    png.set([137, 80, 78, 71, 13, 10, 26, 10])
+    png.set([73, 72, 68, 82], 12)
+    const header = new DataView(png.buffer)
+    header.setUint32(8, 13)
+    header.setUint32(16, 320)
+    header.setUint32(20, 180)
+    invoke.mockImplementation(async (command: string) =>
+      command === "video_get_info" ? INFO : Array.from(png)
+    )
+    await run("action.media.frame", { sourcePath: "/v.mp4", timeSeconds: 1 })
+    expect(invoke).toHaveBeenCalledWith("plugin_media_get_video_frame", {
+      sourceToken: "tok",
+      time: 1,
+      format: "png",
+    })
+    expect(encodePixelBuffer).not.toHaveBeenCalled()
+    expect(storeWorkflowBlob).toHaveBeenCalledWith(
+      expect.objectContaining({ bytes: png, mediaType: "image/png", width: 320, height: 180 })
+    )
+  })
+
+  it("rejects invalid host PNG without storing a corrupt artifact", async () => {
+    isHeadlessHost.mockReturnValue(true)
+    invoke.mockImplementation(async (command: string) =>
+      command === "video_get_info" ? INFO : [1, 2, 3]
+    )
+    await expect(
+      run("action.media.frame", { sourcePath: "/v.mp4", timeSeconds: 1 })
+    ).rejects.toThrow("invalid PNG")
+    expect(storeWorkflowBlob).not.toHaveBeenCalled()
   })
 })

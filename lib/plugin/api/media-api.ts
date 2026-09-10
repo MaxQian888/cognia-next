@@ -8,7 +8,10 @@
  * - Media export utilities
  */
 
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
+import { callMediaBinary } from "@/lib/media/transport"
+import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
+import { encodeBase64 } from "@/lib/share/encoding"
 import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
@@ -190,6 +193,7 @@ export interface VideoTransitionDefinition {
 }
 
 export interface VideoExportOptions {
+  abortSignal?: AbortSignal
   format: "mp4" | "webm" | "gif"
   resolution: "480p" | "720p" | "1080p" | "4k"
   fps: number
@@ -224,6 +228,8 @@ export interface VideoAnalysisOptions {
 
 export interface VideoAnalysisFrame {
   path: string
+  /** Readable image bytes for frames produced on a remote execution host. */
+  dataUrl?: string
   timestamp: number
   reason: "keyframe" | "scene-change" | "uniform-fallback"
 }
@@ -642,7 +648,7 @@ function ensurePathSource(source: string | Blob | File): string {
 }
 
 async function getNativeVideoInfo(sourcePath: string): Promise<NativeVideoInfo> {
-  return invoke<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
+  return transport.call<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
 }
 
 function buildVideoClip(sourcePath: string, info: NativeVideoInfo): VideoClip {
@@ -703,7 +709,7 @@ function requireClip(clipId: string): LocalVideoClipEntry {
   return entry
 }
 
-function frameResponseToImageData(response: ArrayBuffer | Uint8Array): ImageData {
+function frameResponseToImageData(response: ArrayBuffer | Uint8Array | number[]): ImageData {
   const bytes = response instanceof Uint8Array ? response : new Uint8Array(response)
   if (bytes.byteLength < 8) {
     throw new Error("Native video frame response is missing its dimension header")
@@ -711,13 +717,20 @@ function frameResponseToImageData(response: ArrayBuffer | Uint8Array): ImageData
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const width = view.getUint32(0, true)
   const height = view.getUint32(4, true)
+  if (width === 0 || height === 0) {
+    throw new Error("Native video frame response has invalid dimensions")
+  }
   const expectedLength = width * height * 4
   if (bytes.byteLength !== expectedLength + 8) {
     throw new Error(
       `Native video frame response has ${bytes.byteLength - 8} pixels bytes; expected ${expectedLength}`
     )
   }
-  return new ImageData(new Uint8ClampedArray(bytes.slice(8)), width, height)
+  const data = new Uint8ClampedArray(bytes.slice(8))
+  // The headless plugin runtime can consume pixel buffers without a DOM constructor.
+  return typeof ImageData === "undefined"
+    ? { data, width, height, colorSpace: "srgb" }
+    : new ImageData(data, width, height)
 }
 
 function toBlobPart(bytes: Uint8Array): ArrayBuffer {
@@ -1029,8 +1042,22 @@ async function withTimelineProgress<T>(
   onProgress: VideoExportOptions["onProgress"],
   runner: () => Promise<T>
 ): Promise<T> {
-  if (!onProgress || !isTauri()) {
-    return runner()
+  if (!onProgress) return runner()
+  if (!isTauri() || getActiveRemoteEndpoint()) {
+    const startedAt = Date.now()
+    onProgress({ phase: "preparing", percent: 0 })
+    try {
+      const result = await runner()
+      onProgress({ phase: "complete", percent: 100, elapsedMs: Date.now() - startedAt })
+      return result
+    } catch (error) {
+      onProgress({
+        phase: "error",
+        percent: 0,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
   }
 
   const { listen } = await import("@tauri-apps/api/event")
@@ -1208,7 +1235,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         if (!entry.sourceToken) {
           throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
         }
-        const frame = await invoke<ArrayBuffer>("plugin_media_get_video_frame", {
+        const frame = await callMediaBinary("plugin_media_get_video_frame", {
           sourceToken: entry.sourceToken,
           time,
         })
@@ -1235,16 +1262,45 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       ): Promise<VideoAnalysisManifest> => {
         const filePath = ensurePathSource(source)
         const info = await getNativeVideoInfo(filePath)
-        return invoke<VideoAnalysisManifest>("video_analyze", {
+        const manifest = await transport.call<VideoAnalysisManifest>("video_analyze", {
           options: {
             sourceToken: info.sourceToken,
             ...options,
           },
         })
+        if (isTauri() && !getActiveRemoteEndpoint()) return manifest
+        try {
+          for (const frame of manifest.frames) {
+            const bytes = await callMediaBinary("plugin_media_read_analysis_frame", {
+              outputDirectory: manifest.outputDirectory,
+              path: frame.path,
+            })
+            frame.dataUrl = `data:image/jpeg;base64,${encodeBase64(bytes)}`
+          }
+          return manifest
+        } catch (error) {
+          // The caller cannot use a partially downloaded manifest; release its host artifacts.
+          await transport
+            .call("video_cleanup_analysis", {
+              outputDirectory: manifest.outputDirectory,
+            })
+            .catch((cleanupError: unknown) => {
+              recordSilentFailure(
+                pluginId,
+                {
+                  site: "media.video.analyze.cleanup",
+                  message: "Could not clean up incomplete remote video analysis",
+                  expected: false,
+                },
+                cleanupError
+              )
+            })
+          throw error
+        }
       },
 
       cleanupAnalysis: async (manifest: VideoAnalysisManifest): Promise<void> => {
-        await invoke<void>("video_cleanup_analysis", {
+        await transport.call<void>("video_cleanup_analysis", {
           outputDirectory: manifest.outputDirectory,
         })
       },
@@ -1256,7 +1312,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
         const safeStart = Math.max(0, startTime)
         const safeEnd = Math.max(safeStart, endTime)
-        const result = await invoke<{ outputPath: string }>("video_trim", {
+        const result = await transport.call<{ outputPath: string }>("video_trim", {
           options: {
             sourceToken: entry.sourceToken,
             startTime: safeStart,
@@ -1273,9 +1329,12 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         if (clipIds.length === 0) {
           throw new Error("No clips provided for concatenation")
         }
-        const result = await invoke<{ outputPath: string }>("plugin_media_concatenate_videos", {
-          clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
-        })
+        const result = await transport.call<{ outputPath: string }>(
+          "plugin_media_concatenate_videos",
+          {
+            clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
+          }
+        )
         const info = await getNativeVideoInfo(result.outputPath)
         return persistClip(
           buildVideoClip(result.outputPath, info),
@@ -1294,7 +1353,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
           throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
         }
         const effect = { id: effectId, params: params ?? {} }
-        await invoke<void>("plugin_media_apply_video_effect", {
+        await transport.call<void>("plugin_media_apply_video_effect", {
           sourceToken: entry.sourceToken,
           effect,
         })
@@ -1319,7 +1378,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       ): Promise<void> => {
         const fromEntry = requireClip(fromClipId)
         const toEntry = requireClip(toClipId)
-        await invoke<void>("plugin_media_add_transition", {
+        await transport.call<void>("plugin_media_add_transition", {
           fromClip: toNativeVideoClip(fromEntry),
           toClip: toNativeVideoClip(toEntry),
           transition,
@@ -1339,28 +1398,36 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
           throw new Error("No clips provided for export")
         }
 
+        const localDesktop = isTauri() && !getActiveRemoteEndpoint()
         const bytes = await withTimelineProgress(options.onProgress, async () =>
-          invoke<ArrayBuffer | number[] | Uint8Array>("plugin_media_export_video", {
-            clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
-            options: {
-              format: options.format,
-              resolution: options.resolution,
-              fps: options.fps,
-              quality: options.quality,
-              codec: options.codec,
-              audioBitrate: options.audioBitrate,
-              videoBitrate: options.videoBitrate,
-              includeSubtitles: options.includeSubtitles ?? true,
-              subtitleMode: options.subtitleMode ?? "both",
-              overwrite: options.overwrite ?? true,
+          callMediaBinary(
+            "plugin_media_export_video",
+            {
+              clips: clipIds.map((clipId) => toNativeVideoClip(requireClip(clipId))),
+              options: {
+                format: options.format,
+                resolution: options.resolution,
+                fps: options.fps,
+                quality: options.quality,
+                codec: options.codec,
+                audioBitrate: options.audioBitrate,
+                videoBitrate: options.videoBitrate,
+                includeSubtitles: options.includeSubtitles ?? true,
+                subtitleMode: options.subtitleMode ?? "both",
+                overwrite: options.overwrite ?? true,
+              },
+              ...(!localDesktop && options.destinationPath
+                ? { destinationPath: options.destinationPath, overwrite: options.overwrite ?? true }
+                : {}),
             },
-          })
+            options.abortSignal
+          )
         )
 
-        const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+        const payload = bytes
         const blob = new Blob([toBlobPart(payload)], { type: `video/${options.format}` })
 
-        if (options.destinationPath) {
+        if (localDesktop && options.destinationPath) {
           const { writeFile, exists } = await import("@tauri-apps/plugin-fs")
           const fileExists = await exists(options.destinationPath).catch(() => false)
           if (fileExists && options.overwrite === false) {

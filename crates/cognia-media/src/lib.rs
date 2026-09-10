@@ -74,7 +74,8 @@ impl MediaSourceRegistry {
     }
 
     fn resolve(&self, token: &str) -> Result<PathBuf, VideoError> {
-        self.sources
+        let registered = self
+            .sources
             .read()
             .map_err(|_| VideoError::Io {
                 message: "media source registry lock is poisoned".to_string(),
@@ -83,7 +84,17 @@ impl MediaSourceRegistry {
             .cloned()
             .ok_or_else(|| VideoError::InvalidInput {
                 message: "media source token is unknown or expired".to_string(),
-            })
+            })?;
+        let current = registered.canonicalize().map_err(|error| VideoError::Io {
+            message: error.to_string(),
+        })?;
+        if current != registered || !current.is_file() {
+            return Err(VideoError::InvalidInput {
+                message: "media source changed its authorized location; import it again"
+                    .to_string(),
+            });
+        }
+        Ok(current)
     }
 }
 
@@ -432,7 +443,16 @@ async fn run_process(
     timeout: Duration,
 ) -> Result<Output, VideoError> {
     let mut command = Command::new(binary);
-    command.args(args).kill_on_drop(true);
+    if binary == "ffprobe" {
+        command.args(["-protocol_whitelist", "file,pipe"]);
+    }
+    for arg in args {
+        if binary == "ffmpeg" && arg == "-i" {
+            command.args(["-protocol_whitelist", "file,pipe"]);
+        }
+        command.arg(arg);
+    }
+    command.kill_on_drop(true);
     let output = tokio::time::timeout(timeout, command.output())
         .await
         .map_err(|_| VideoError::Timeout {
@@ -461,7 +481,13 @@ async fn run_process(
 }
 
 async fn probe_video(path: &Path) -> Result<NativeVideoInfo, VideoError> {
+    // Containers are self-contained. Playlist/concat demuxers may follow paths
+    // outside the authorized source root, even when network protocols are off.
     let args = [
+        OsString::from("-format_whitelist"),
+        OsString::from(
+            "mov,matroska,webm,avi,mpegts,mpeg,mpegvideo,flv,ogg,asf,rm,nut,gif,apng,ivf",
+        ),
         OsString::from("-v"),
         OsString::from("error"),
         OsString::from("-print_format"),
@@ -858,6 +884,15 @@ async fn extract_frame(
     metadata: &NativeVideoInfo,
     time: f64,
 ) -> Result<NativeVideoFrame, VideoError> {
+    extract_frame_encoded(input_path, metadata, time, false).await
+}
+
+async fn extract_frame_encoded(
+    input_path: &Path,
+    metadata: &NativeVideoInfo,
+    time: f64,
+    png: bool,
+) -> Result<NativeVideoFrame, VideoError> {
     let duration = metadata.duration_ms as f64 / 1000.0;
     if !time.is_finite() || time < 0.0 || time > duration {
         return Err(VideoError::InvalidInput {
@@ -871,7 +906,7 @@ async fn extract_frame(
             message: "video dimensions must be greater than zero".to_string(),
         });
     }
-    let args = vec![
+    let mut args = vec![
         OsString::from("-nostdin"),
         OsString::from("-v"),
         OsString::from("error"),
@@ -884,14 +919,19 @@ async fn extract_frame(
         OsString::from("-vf"),
         OsString::from(format!("scale={width}:{height},format=rgba")),
         OsString::from("-f"),
-        OsString::from("rawvideo"),
+        OsString::from(if png { "image2pipe" } else { "rawvideo" }),
         OsString::from("-pix_fmt"),
         OsString::from("rgba"),
-        OsString::from("pipe:1"),
     ];
+    if png {
+        args.extend([OsString::from("-c:v"), OsString::from("png")]);
+    }
+    args.push(OsString::from("pipe:1"));
     let output = run_process("ffmpeg", &args, FRAME_TIMEOUT).await?;
     let expected_length = width as usize * height as usize * 4;
-    if output.stdout.len() != expected_length {
+    if (!png && output.stdout.len() != expected_length)
+        || (png && !output.stdout.starts_with(b"\x89PNG\r\n\x1a\n"))
+    {
         return Err(VideoError::InvalidMetadata {
             message: format!(
                 "decoded frame contained {} bytes; expected {expected_length}",
@@ -1016,7 +1056,8 @@ fn pack_frame_response(frame: NativeVideoFrame) -> Vec<u8> {
     response
 }
 
-pub mod commands {
+/// Host-neutral media operations shared by desktop IPC and authenticated RPC.
+pub mod service {
     use super::{
         analyze_video, cleanup_analysis_directory, extract_frame, normalize_analysis_options,
         normalize_export_options, pack_frame_response, probe_video, resolve_media_file,
@@ -1025,12 +1066,9 @@ pub mod commands {
         VideoEditResult, VideoError, VideoExportCommandOptions, VideoTrimOptions, VideoTrimResult,
     };
     use crate::editing::{self, VideoEffectSpec, VideoTransitionSpec};
-    use tauri::ipc::Response;
-    use tauri::State;
 
-    #[tauri::command]
     pub async fn video_get_info(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         file_path: String,
     ) -> Result<NativeVideoInfo, VideoError> {
         let path = resolve_media_file(&file_path).await?;
@@ -1039,24 +1077,35 @@ pub mod commands {
         Ok(metadata)
     }
 
-    #[tauri::command]
     pub async fn plugin_media_get_video_frame(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         source_token: String,
         time: f64,
-    ) -> Result<Response, VideoError> {
+    ) -> Result<Vec<u8>, VideoError> {
         let path = state.resolve(&source_token)?;
         let metadata = probe_video(&path).await?;
         let frame = extract_frame(&path, &metadata, time).await?;
-        Ok(Response::new(pack_frame_response(frame)))
+        Ok(pack_frame_response(frame))
     }
 
-    #[tauri::command]
+    /// Encoded frames let the Node brain store images without a DOM canvas.
+    pub async fn video_frame_png(
+        state: &MediaSourceRegistry,
+        source_token: String,
+        time: f64,
+    ) -> Result<Vec<u8>, VideoError> {
+        let path = state.resolve(&source_token)?;
+        let metadata = probe_video(&path).await?;
+        Ok(super::extract_frame_encoded(&path, &metadata, time, true)
+            .await?
+            .data)
+    }
+
     pub async fn plugin_media_concatenate_videos(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         clips: Vec<AuthorizedVideoClipInput>,
     ) -> Result<VideoEditResult, VideoError> {
-        let (resolved, metadata) = resolve_render_clips(&state, &clips).await?;
+        let (resolved, metadata) = resolve_render_clips(state, &clips).await?;
         let first = metadata.first().ok_or_else(|| VideoError::InvalidInput {
             message: "at least one clip is required for concatenation".to_string(),
         })?;
@@ -1088,9 +1137,8 @@ pub mod commands {
         })
     }
 
-    #[tauri::command]
     pub async fn plugin_media_apply_video_effect(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         source_token: String,
         effect: VideoEffectSpec,
     ) -> Result<(), VideoError> {
@@ -1098,14 +1146,13 @@ pub mod commands {
         editing::validate_effect(&effect)
     }
 
-    #[tauri::command]
     pub async fn plugin_media_add_transition(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         from_clip: AuthorizedVideoClipInput,
         to_clip: AuthorizedVideoClipInput,
         transition: VideoTransitionSpec,
     ) -> Result<(), VideoError> {
-        let (resolved, _) = resolve_render_clips(&state, &[from_clip, to_clip]).await?;
+        let (resolved, _) = resolve_render_clips(state, &[from_clip, to_clip]).await?;
         let from_duration =
             (resolved[0].end_time - resolved[0].start_time) / resolved[0].playback_speed;
         let to_duration =
@@ -1113,13 +1160,12 @@ pub mod commands {
         editing::validate_transition(&transition, from_duration, to_duration)
     }
 
-    #[tauri::command]
     pub async fn plugin_media_export_video(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         clips: Vec<AuthorizedVideoClipInput>,
         options: VideoExportCommandOptions,
-    ) -> Result<Response, VideoError> {
-        let (resolved, _) = resolve_render_clips(&state, &clips).await?;
+    ) -> Result<Vec<u8>, VideoError> {
+        let (resolved, _) = resolve_render_clips(state, &clips).await?;
         let options = normalize_export_options(options)?;
         let output_path = super::media_temp_root().join("exports").join(format!(
             "{}.{}",
@@ -1159,12 +1205,11 @@ pub mod commands {
                 message: format!("{}: {error}", output_path.display()),
             })?;
         cleanup_guard.retain();
-        Ok(Response::new(bytes))
+        Ok(bytes)
     }
 
-    #[tauri::command]
     pub async fn video_analyze(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         options: VideoAnalysisOptions,
     ) -> Result<VideoAnalysisManifest, VideoError> {
         let path = state.resolve(&options.source_token)?;
@@ -1174,9 +1219,8 @@ pub mod commands {
         analyze_video(&path, metadata, normalized).await
     }
 
-    #[tauri::command]
     pub async fn video_trim(
-        state: State<'_, MediaSourceRegistry>,
+        state: &MediaSourceRegistry,
         options: VideoTrimOptions,
     ) -> Result<VideoTrimResult, VideoError> {
         let path = state.resolve(&options.source_token)?;
@@ -1184,9 +1228,97 @@ pub mod commands {
         trim_video(&path, &metadata, &options).await
     }
 
-    #[tauri::command]
     pub async fn video_cleanup_analysis(output_directory: String) -> Result<(), VideoError> {
         cleanup_analysis_directory(&output_directory).await
+    }
+}
+
+pub mod commands {
+    use super::{
+        AuthorizedVideoClipInput, MediaSourceRegistry, NativeVideoInfo, VideoAnalysisManifest,
+        VideoAnalysisOptions, VideoEditResult, VideoError, VideoExportCommandOptions,
+        VideoTrimOptions, VideoTrimResult,
+    };
+    use crate::editing::{VideoEffectSpec, VideoTransitionSpec};
+    use tauri::{ipc::Response, State};
+
+    #[tauri::command]
+    pub async fn video_get_info(
+        state: State<'_, MediaSourceRegistry>,
+        file_path: String,
+    ) -> Result<NativeVideoInfo, VideoError> {
+        super::service::video_get_info(state.inner(), file_path).await
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_get_video_frame(
+        state: State<'_, MediaSourceRegistry>,
+        source_token: String,
+        time: f64,
+    ) -> Result<Response, VideoError> {
+        super::service::plugin_media_get_video_frame(state.inner(), source_token, time)
+            .await
+            .map(Response::new)
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_concatenate_videos(
+        state: State<'_, MediaSourceRegistry>,
+        clips: Vec<AuthorizedVideoClipInput>,
+    ) -> Result<VideoEditResult, VideoError> {
+        super::service::plugin_media_concatenate_videos(state.inner(), clips).await
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_apply_video_effect(
+        state: State<'_, MediaSourceRegistry>,
+        source_token: String,
+        effect: VideoEffectSpec,
+    ) -> Result<(), VideoError> {
+        super::service::plugin_media_apply_video_effect(state.inner(), source_token, effect).await
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_add_transition(
+        state: State<'_, MediaSourceRegistry>,
+        from_clip: AuthorizedVideoClipInput,
+        to_clip: AuthorizedVideoClipInput,
+        transition: VideoTransitionSpec,
+    ) -> Result<(), VideoError> {
+        super::service::plugin_media_add_transition(state.inner(), from_clip, to_clip, transition)
+            .await
+    }
+
+    #[tauri::command]
+    pub async fn plugin_media_export_video(
+        state: State<'_, MediaSourceRegistry>,
+        clips: Vec<AuthorizedVideoClipInput>,
+        options: VideoExportCommandOptions,
+    ) -> Result<Response, VideoError> {
+        super::service::plugin_media_export_video(state.inner(), clips, options)
+            .await
+            .map(Response::new)
+    }
+
+    #[tauri::command]
+    pub async fn video_analyze(
+        state: State<'_, MediaSourceRegistry>,
+        options: VideoAnalysisOptions,
+    ) -> Result<VideoAnalysisManifest, VideoError> {
+        super::service::video_analyze(state.inner(), options).await
+    }
+
+    #[tauri::command]
+    pub async fn video_trim(
+        state: State<'_, MediaSourceRegistry>,
+        options: VideoTrimOptions,
+    ) -> Result<VideoTrimResult, VideoError> {
+        super::service::video_trim(state.inner(), options).await
+    }
+
+    #[tauri::command]
+    pub async fn video_cleanup_analysis(output_directory: String) -> Result<(), VideoError> {
+        super::service::video_cleanup_analysis(output_directory).await
     }
 }
 
@@ -1330,17 +1462,42 @@ mod tests {
     #[test]
     fn resolves_only_paths_registered_behind_an_opaque_source_token() {
         let registry = MediaSourceRegistry::default();
-        let path = Path::new("/tmp/source.mp4").to_path_buf();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().canonicalize().unwrap();
         let token = registry.register(path.clone()).expect("register source");
 
-        assert_eq!(registry.resolve(&token).expect("resolve source"), path);
         assert_eq!(
-            registry
-                .register(Path::new("/tmp/source.mp4").to_path_buf())
-                .expect("register same source"),
+            registry.resolve(&token).expect("resolve source"),
+            path.clone()
+        );
+        assert_eq!(
+            registry.register(path).expect("register same source"),
             token
         );
         assert!(registry.resolve("caller-controlled-path").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_tokens_reject_replaced_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.mp4");
+        std::fs::write(&source, b"source").unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let registry = MediaSourceRegistry::default();
+        let token = registry.register(source.canonicalize().unwrap()).unwrap();
+        std::fs::remove_file(&source).unwrap();
+        std::os::unix::fs::symlink(outside.path(), &source).unwrap();
+        assert!(registry.resolve(&token).is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_playlists_before_reading_secondary_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let playlist = dir.path().join("playlist.m3u8");
+        std::fs::write(&playlist, "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nfile:///outside-workspace.ts\n#EXT-X-ENDLIST\n").unwrap();
+        let error = probe_video(&playlist).await.unwrap_err();
+        assert!(error.to_string().contains("whitelist"), "{error}");
     }
 
     #[tokio::test]
@@ -1453,6 +1610,119 @@ mod tests {
         .expect("trim video");
         assert!(Path::new(&trimmed.output_path).is_file());
         assert!(trimmed.output_path.contains("cognia-video"));
+
+        // Exercise the exact host-neutral operations used by both IPC and RPC.
+        let registry = MediaSourceRegistry::default();
+        let info = super::service::video_get_info(&registry, source_path)
+            .await
+            .unwrap();
+        let token = info.source_token.clone();
+        let packed = super::service::plugin_media_get_video_frame(&registry, token.clone(), 1.0)
+            .await
+            .unwrap();
+        assert_eq!(packed.len(), 8 + 320 * 180 * 4);
+        let png = super::service::video_frame_png(&registry, token.clone(), 1.0)
+            .await
+            .unwrap();
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(super::service::plugin_media_get_video_frame(
+            &MediaSourceRegistry::default(),
+            token.clone(),
+            1.0
+        )
+        .await
+        .is_err());
+        assert!(
+            super::service::video_frame_png(&registry, token.clone(), -1.0)
+                .await
+                .is_err()
+        );
+        let effect = super::editing::VideoEffectSpec {
+            id: "grayscale".into(),
+            params: Default::default(),
+        };
+        super::service::plugin_media_apply_video_effect(&registry, token.clone(), effect.clone())
+            .await
+            .unwrap();
+        let clip = super::AuthorizedVideoClipInput {
+            source_token: token.clone(),
+            start_time: 0.0,
+            end_time: 1.0,
+            volume: 1.0,
+            playback_speed: 1.0,
+            effects: vec![effect],
+            transition_out: None,
+        };
+        super::service::plugin_media_add_transition(
+            &registry,
+            clip.clone(),
+            clip.clone(),
+            super::editing::VideoTransitionSpec {
+                kind: "fade".into(),
+                duration: 0.2,
+                parameters: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let joined = super::service::plugin_media_concatenate_videos(
+            &registry,
+            vec![clip.clone(), clip.clone()],
+        )
+        .await
+        .unwrap();
+        let joined_info = super::service::video_get_info(&registry, joined.output_path.clone())
+            .await
+            .unwrap();
+        assert!((1900..=2200).contains(&joined_info.duration_ms));
+        let exported = super::service::plugin_media_export_video(
+            &registry,
+            vec![clip],
+            super::VideoExportCommandOptions {
+                format: "mp4".into(),
+                resolution: "480p".into(),
+                fps: 12,
+                quality: "high".into(),
+                codec: None,
+                audio_bitrate: None,
+                video_bitrate: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(&exported[4..8], b"ftyp");
+        let analysis = super::service::video_analyze(
+            &registry,
+            VideoAnalysisOptions {
+                source_token: token.clone(),
+                mode: Some(VideoAnalysisMode::Keyframes),
+                start_time: Some(0.0),
+                end_time: Some(1.0),
+                max_frames: Some(2),
+                width: Some(160),
+                deduplicate: Some(false),
+                duplicate_threshold: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!analysis.frames.is_empty());
+        super::service::video_cleanup_analysis(analysis.output_directory)
+            .await
+            .unwrap();
+        let cut = super::service::video_trim(
+            &registry,
+            VideoTrimOptions {
+                source_token: token,
+                start_time: 0.0,
+                end_time: 1.0,
+                format: "mp4".into(),
+            },
+        )
+        .await
+        .unwrap();
+        tokio::fs::remove_file(cut.output_path).await.unwrap();
+        tokio::fs::remove_file(joined.output_path).await.unwrap();
 
         cleanup_analysis_directory(&manifest.output_directory)
             .await

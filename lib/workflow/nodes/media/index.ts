@@ -2,13 +2,8 @@
  * Native media action nodes: `action.media.{probe,frame,trim,concat}`
  * (`crates/cognia-media`, FFmpeg and FFprobe).
  *
- * `requires: ["media"]`, a tauri-only capability id added for exactly this.
- * The commands underneath are raw `invoke` with no companion RPC arm, no
- * command-manifest descriptor and no host-feature entry, so they are
- * unreachable from the cloud brain, from a companion, and from a remote host.
- * A bare `desktopOnly` would have resolved to `["shell"]`, which the
- * server-backed baseline holds, and these nodes would have preflighted green
- * on the brain and thrown mid-run.
+ * `requires: ["media"]` covers the desktop and headless FFmpeg surface.
+ * Calls use the selected host transport; source tokens remain host-owned.
  *
  * ffmpeg itself is an external dependency the capability system cannot see:
  * the Rust side does a bare PATH lookup and answers `MissingDependency`. Every
@@ -20,9 +15,9 @@
  *  - `applyEffect` and `addTransition` are no-ops in Rust today. They validate
  *    and return, and the effect only takes hold inside the export renderer, so
  *    a node for either would be a control that does nothing.
- *  - `export` renders to a temp file, reads up to 128 MiB into memory, deletes
- *    the file and returns the bytes over IPC. It needs a publish-to-workspace
- *    command before it is a node rather than a way to blow up a run.
+ *  - `export` is available through the plugin API, including a host workspace
+ *    destination. This node family still exposes the four existing actions;
+ *    it does not emit full video byte arrays into workflow step outputs.
  *
  * KNOWN LIMITATION, stated rather than hidden: `trim` and `concat` write into
  * the media temp root, which is outside every workspace root, so no
@@ -30,7 +25,9 @@
  * into `probe`, and that is all, until a publish-to-workspace command exists.
  */
 
-import { invoke } from "@tauri-apps/api/core"
+import { transport } from "@/lib/tauri"
+import { callMediaBinary } from "@/lib/media/transport"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import { encodePixelBuffer } from "@/lib/images/codec"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { storeWorkflowBlob } from "@/lib/workflow/blobs/store"
@@ -73,7 +70,11 @@ function num(p: Record<string, unknown>, key: string): number | undefined {
  */
 function translateMediaError(err: unknown, kind: string): never {
   const message = err instanceof Error ? err.message : String(err)
-  if (/MissingDependency|ffmpeg|ffprobe/i.test(message)) {
+  const code = err && typeof err === "object" && "code" in err ? err.code : undefined
+  if (
+    code === "MISSING_DEPENDENCY" ||
+    /MissingDependency|MISSING_DEPENDENCY|(?:ffmpeg|ffprobe).*not found on PATH/i.test(message)
+  ) {
     throw nonRetryable(
       `${kind}: this machine has no ffmpeg or ffprobe on PATH. Cognia does not bundle them, ` +
         `so install them and make sure the app's PATH can see them. (${message})`
@@ -84,7 +85,7 @@ function translateMediaError(err: unknown, kind: string): never {
 
 async function probe(sourcePath: string, kind: string): Promise<NativeVideoInfo> {
   try {
-    return await invoke<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
+    return await transport.call<NativeVideoInfo>("video_get_info", { filePath: sourcePath })
   } catch (err) {
     translateMediaError(err, kind)
   }
@@ -131,21 +132,29 @@ registerNodeExecutor({
     }
     const info = await probe(sourcePath, "action.media.frame")
 
-    let raw: ArrayBuffer
+    const headless = isHeadlessHost()
+    let raw: Uint8Array
     try {
-      raw = await invoke<ArrayBuffer>("plugin_media_get_video_frame", {
-        sourceToken: info.sourceToken,
-        time,
-      })
+      raw = await callMediaBinary(
+        "plugin_media_get_video_frame",
+        {
+          sourceToken: info.sourceToken,
+          time,
+          ...(headless ? { format: "png" } : {}),
+        },
+        ctx.signal
+      )
     } catch (err) {
       translateMediaError(err, "action.media.frame")
     }
 
-    const buffer = decodeFrameResponse(raw)
+    const buffer = headless ? decodePngDimensions(raw) : decodeFrameResponse(raw)
     // Raw RGBA is width * height * 4 bytes, which is nobody's idea of a step
     // output. Encode once and hand back a reference the image nodes and
     // `ocr.extract` already know how to read.
-    const encoded = await encodePixelBuffer(buffer, { format: "png" })
+    const encoded = headless
+      ? { bytes: raw, mediaType: "image/png" }
+      : await encodePixelBuffer(buffer as PixelBuffer, { format: "png" })
     const accountId = getActiveAccountId()
     if (!accountId) {
       throw nonRetryable(
@@ -181,7 +190,7 @@ registerNodeExecutor({
 
     let result: { outputPath: string }
     try {
-      result = await invoke<{ outputPath: string }>("video_trim", {
+      result = await transport.call<{ outputPath: string }>("video_trim", {
         options: {
           sourceToken: info.sourceToken,
           startTime,
@@ -226,7 +235,7 @@ registerNodeExecutor({
     const infos = await Promise.all(sourcePaths.map((path) => probe(path, "action.media.concat")))
     let result: { outputPath: string }
     try {
-      result = await invoke<{ outputPath: string }>("plugin_media_concatenate_videos", {
+      result = await transport.call<{ outputPath: string }>("plugin_media_concatenate_videos", {
         clips: infos.map((info) => ({
           sourceToken: info.sourceToken,
           startTime: 0,
@@ -259,7 +268,7 @@ registerNodeExecutor({
  * height header, not an encoded image, so the length check is the only thing
  * standing between a protocol change and a silently mis-shaped buffer.
  */
-export function decodeFrameResponse(response: ArrayBuffer | Uint8Array): PixelBuffer {
+export function decodeFrameResponse(response: ArrayBuffer | Uint8Array | number[]): PixelBuffer {
   const bytes = response instanceof Uint8Array ? response : new Uint8Array(response)
   if (bytes.byteLength < 8) {
     throw nonRetryable("action.media.frame: the native frame response has no dimension header")
@@ -275,4 +284,22 @@ export function decodeFrameResponse(response: ArrayBuffer | Uint8Array): PixelBu
     )
   }
   return { width, height, data: new Uint8ClampedArray(bytes.slice(8)) }
+}
+
+/** Read dimensions from the server-encoded PNG without requiring a canvas in Node. */
+function decodePngDimensions(bytes: Uint8Array): { width: number; height: number } {
+  if (
+    bytes.length < 33 ||
+    ![137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value) ||
+    ![73, 72, 68, 82].every((value, index) => bytes[index + 12] === value)
+  ) {
+    throw nonRetryable("action.media.frame: the host returned an invalid PNG frame")
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(16)
+  const height = view.getUint32(20)
+  if (view.getUint32(8) !== 13 || width === 0 || height === 0) {
+    throw nonRetryable("action.media.frame: the PNG frame has invalid dimensions")
+  }
+  return { width, height }
 }
