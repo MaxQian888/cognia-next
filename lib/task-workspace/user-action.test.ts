@@ -10,10 +10,10 @@ const issueLeaseMock = jest.fn()
 const snapshotMock = jest.fn()
 
 jest.mock("@/lib/tauri", () => ({
-  transport: { call: (...args: unknown[]) => callMock(...args) },
+  transport: { call: (...args: Parameters<typeof callMock>) => callMock(...args) },
 }))
 jest.mock("@/lib/tauri/admin-lease", () => ({
-  issueHostAdminLease: (...args: unknown[]) => issueLeaseMock(...args),
+  issueHostAdminLease: (...args: Parameters<typeof issueLeaseMock>) => issueLeaseMock(...args),
 }))
 jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
   getRuntimeSnapshot: () => snapshotMock(),
@@ -22,6 +22,9 @@ jest.mock("@/lib/runtime/runtime-snapshot-store", () => ({
 import {
   applyWorkspaceApproval,
   approvalAwareTransport,
+  bindApprovalScopeToTurn,
+  boundApprovalScopeTurnIds,
+  closeApprovalScopeForTurn,
   getWorkspaceOperationAvailability,
   openWorkspaceApprovalScope,
   runWorkspaceUserAction,
@@ -110,6 +113,8 @@ describe("runWorkspaceUserAction", () => {
       (cause: unknown) => cause as WorkspaceOperationUnavailableError
     )
 
+    if (!(error instanceof WorkspaceOperationUnavailableError))
+      throw new Error("Expected unavailable workspace operation")
     expect(error.availability).toMatchObject({
       state: "requires-grant",
       requiredGrant: "host.admin",
@@ -277,5 +282,86 @@ describe("openWorkspaceApprovalScope", () => {
       adminLease: "one-shot",
     })
     scope?.close()
+  })
+})
+
+/**
+ * A chat turn settles from the status edge in `lib/code-adoption/turn-tracker`,
+ * which never sees the lease object whose `settle`/`abort` are the only things
+ * that close the scope. The chat controller therefore closed nothing, and every
+ * managed turn on a companion left a 15-minute step-up token alive.
+ */
+describe("binding an approval scope to its turn", () => {
+  function turnCapableSnapshot() {
+    return companionSnapshot({
+      operations: [...WORKSPACE_TURN_COMMANDS, "host_admin_lease_issue"],
+    })
+  }
+
+  beforeEach(() => {
+    issueLeaseMock.mockResolvedValue({
+      token: "turn-lease",
+      operations: [...WORKSPACE_TURN_COMMANDS],
+      expiresAt: Date.now() + 15 * 60 * 1000,
+    })
+  })
+
+  afterEach(() => {
+    for (const turnId of boundApprovalScopeTurnIds()) closeApprovalScopeForTurn(turnId)
+  })
+
+  it("lets a settle path that never held the lease close its scope", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    const scope = await openWorkspaceApprovalScope()
+    bindApprovalScopeToTurn("wbt_1", scope)
+    expect(boundApprovalScopeTurnIds()).toEqual(["wbt_1"])
+
+    closeApprovalScopeForTurn("wbt_1")
+
+    // Closed for real, not merely unbound: the token stops covering the turn's
+    // commands, which is the whole point of closing it.
+    await approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+    expect(callMock).toHaveBeenCalledWith("task_workspace_record_tool_event", { taskId: "t1" })
+    expect(boundApprovalScopeTurnIds()).toEqual([])
+  })
+
+  it("is idempotent, so a lease that also closes its own scope costs nothing", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    bindApprovalScopeToTurn("wbt_1", await openWorkspaceApprovalScope())
+
+    closeApprovalScopeForTurn("wbt_1")
+    expect(() => closeApprovalScopeForTurn("wbt_1")).not.toThrow()
+    expect(() => closeApprovalScopeForTurn("never-bound")).not.toThrow()
+  })
+
+  // Nothing to approve on a native host, so nothing to leak and nothing to
+  // track. Binding must not invent an entry that a later close would have to
+  // reason about.
+  it("binds nothing when the shell approves itself", async () => {
+    snapshotMock.mockReturnValue(NATIVE_HOST_SNAPSHOT)
+    bindApprovalScopeToTurn("wbt_1", await openWorkspaceApprovalScope())
+
+    expect(boundApprovalScopeTurnIds()).toEqual([])
+  })
+
+  // Turn ids are minted per turn, so a repeat means the previous holder never
+  // closed. Orphaning it would leave exactly the token this fix removes.
+  it("closes the previous scope when a turn id is bound twice", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    bindApprovalScopeToTurn("wbt_1", await openWorkspaceApprovalScope())
+    issueLeaseMock.mockResolvedValue({
+      token: "second-lease",
+      operations: [...WORKSPACE_TURN_COMMANDS],
+      expiresAt: Date.now() + 15 * 60 * 1000,
+    })
+    bindApprovalScopeToTurn("wbt_1", await openWorkspaceApprovalScope())
+
+    await approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+
+    expect(callMock).toHaveBeenCalledWith("task_workspace_record_tool_event", {
+      taskId: "t1",
+      adminLease: "second-lease",
+    })
+    expect(boundApprovalScopeTurnIds()).toEqual(["wbt_1"])
   })
 })

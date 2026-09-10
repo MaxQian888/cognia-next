@@ -8,12 +8,14 @@ const userAction = jest.fn(
 // The real seam short-circuits on a native host and mints a lease on a
 // companion. Both are exercised in `user-action.test.ts`; here the point is
 // only that the settle goes THROUGH it rather than calling the Host bare.
+const closeTurnScope = jest.fn()
 jest.mock("./user-action", () => {
   const actual = jest.requireActual("./user-action")
   return {
     ...actual,
     runWorkspaceUserAction: (...args: unknown[]) =>
       userAction(...(args as [string, () => Promise<unknown>])),
+    closeApprovalScopeForTurn: (...args: unknown[]) => closeTurnScope(...args),
   }
 })
 
@@ -29,16 +31,19 @@ jest.mock("@/lib/tauri", () => ({
 const reclaim = jest.fn(async () => [] as string[])
 const remember = jest.fn()
 const forget = jest.fn()
+const release = jest.fn()
 jest.mock("./abandoned-turns", () => ({
   reclaimAbandonedBundleTurns: (...args: unknown[]) =>
     reclaim(...(args as [])) as Promise<string[]>,
   rememberOpenBundleTurn: (...args: unknown[]) => remember(...args),
   forgetOpenBundleTurn: (...args: unknown[]) => forget(...args),
+  releaseOpenBundleTurn: (...args: unknown[]) => release(...args),
 }))
 
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import * as workspaceClient from "./client"
 import {
+  abortWorkspaceBundleTurn,
   acquireWorkspaceBundle,
   acquireWorkspaceBundleFromRemote,
   archiveManagedWorkspace,
@@ -1349,6 +1354,37 @@ describe("the settle carries its own approval", () => {
     )
   })
 
+  it("closes the turn's standing scope once it settles", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:scoped",
+      runId: `${runIdForTurn("scoped", 1)}:ws-a`,
+      bundleTurnId: "turn-scoped",
+      sessionId: "scoped",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/a",
+      state: "running",
+    })
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-scoped", runs: [] })
+
+    await settleTaskWorkspaceTurn("scoped", 1)
+
+    // The chat controller drops the lease handle, so this is the only path that
+    // ever closes the scope opened for the turn.
+    expect(closeTurnScope).toHaveBeenCalledWith("turn-scoped")
+  })
+
+  // The reclaim path ends a turn by ABORTING it, and that is the path a wedged
+  // conversation takes. A leak here would hold a step-up token for the full TTL
+  // with nothing failing.
+  it("closes the turn's scope when the turn is aborted instead", async () => {
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-aborted", runs: [] })
+
+    await abortWorkspaceBundleTurn("turn-aborted")
+
+    expect(closeTurnScope).toHaveBeenCalledWith("turn-aborted")
+    expect(forget).toHaveBeenCalledWith("turn-aborted")
+  })
+
   it("wraps the legacy settle for the same reason", async () => {
     useTaskWorkspaceStore.getState().activate({
       taskId: "task-workspace:legacy",
@@ -1387,5 +1423,181 @@ describe("the settle request contract", () => {
     expect(bundle?.type).toBe("string")
     expect(bundle?.enum).toEqual(legacy?.enum)
     expect(bundle?.enum).toEqual(["ready", "failed", "cancelled"])
+  })
+})
+
+/**
+ * A settle is the only thing that releases a conversation's working copy. It
+ * was issued exactly once and its failure was discarded: `.catch(() => null)`
+ * made "nothing settled" and "the host still holds this working copy" the same
+ * answer. The run stayed `running`, the session's next send was refused with
+ * `pipeline workspace is already active`, and the real failure left no trace.
+ */
+describe("a settle that does not land", () => {
+  const restores: Array<() => void> = []
+  let reportedErrors: unknown[][]
+
+  beforeEach(() => {
+    // Per-describe, like every other block here: the shared `call` mock keeps a
+    // queue of `...Once` values, and an unconsumed one from an earlier test
+    // would be spent by the first attempt of these.
+    call.mockReset()
+    forget.mockReset()
+    release.mockReset()
+    closeTurnScope.mockReset()
+    reportedErrors = []
+    restores.push(
+      workspaceClient.__setSettleRetryWaitForTests(async () => {}),
+      (() => {
+        const spy = jest
+          .spyOn(console, "error")
+          .mockImplementation((...args: unknown[]) => void reportedErrors.push(args))
+        return () => spy.mockRestore()
+      })()
+    )
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:wedged",
+      runId: `${runIdForTurn("wedged", 1)}:ws-a`,
+      bundleTurnId: "turn-wedged",
+      sessionId: "wedged",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/a",
+      state: "running",
+    })
+  })
+
+  afterEach(() => {
+    while (restores.length) restores.pop()?.()
+  })
+
+  // A lease that had to be re-minted, a companion request that lost its
+  // connection: transient, and a single attempt turned them into a wedge.
+  it("retries a settle that fails once and keeps the run released", async () => {
+    call
+      .mockRejectedValueOnce(new Error("a current device-bound approval lease is required"))
+      .mockResolvedValueOnce({ bundleTurnId: "turn-wedged", runs: [] })
+
+    await expect(settleTaskWorkspaceTurn("wedged", 1)).resolves.toEqual([])
+
+    expect(call).toHaveBeenCalledTimes(2)
+    expect(forget).toHaveBeenCalledWith("turn-wedged")
+    expect(release).not.toHaveBeenCalled()
+    expect(reportedErrors).toEqual([])
+  })
+
+  it("gives up after a bounded number of attempts rather than retrying forever", async () => {
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await expect(settleTaskWorkspaceTurn("wedged", 1)).resolves.toBeNull()
+
+    expect(call).toHaveBeenCalledTimes(3)
+  })
+
+  // Pinned because the shape is the decision: short, because the failures worth
+  // retrying are transient, and a turn that is genuinely gone belongs to the
+  // reclaim path rather than to a longer wait.
+  it("backs off between attempts instead of hammering the host", async () => {
+    const waited: number[] = []
+    restores.push(workspaceClient.__setSettleRetryWaitForTests(async (ms) => void waited.push(ms)))
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await settleTaskWorkspaceTurn("wedged", 1)
+
+    expect(waited).toEqual([250, 1000])
+  })
+
+  // The unbundled path releases a working copy too, and it used to swallow just
+  // as silently.
+  it("retries the unbundled settle on the same schedule", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:unbundled-retry",
+      runId: runIdForTurn("unbundled-retry", 1),
+      sessionId: "unbundled-retry",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated",
+      state: "running",
+    })
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await expect(settleTaskWorkspaceTurn("unbundled-retry", 1)).resolves.toBeNull()
+
+    expect(call).toHaveBeenCalledTimes(3)
+  })
+
+  // The repair for the wedge: the document stops claiming a turn it cannot
+  // end, so the reclaim on the next refusal finds a turn nobody is driving and
+  // aborts it — instead of hearing this same document claim it.
+  it("hands a definitively failed turn to the reclaim path", async () => {
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await settleTaskWorkspaceTurn("wedged", 1)
+
+    expect(release).toHaveBeenCalledWith("turn-wedged")
+    // Released, NOT forgotten: the record is what the next refusal reclaims.
+    expect(forget).not.toHaveBeenCalledWith("turn-wedged")
+  })
+
+  it("reports the failure instead of discarding it", async () => {
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await settleTaskWorkspaceTurn("wedged", 1)
+
+    expect(reportedErrors).toHaveLength(1)
+    expect(reportedErrors[0][0]).toBe("task workspace bundle turn settle failed")
+    expect(reportedErrors[0][1]).toMatchObject({
+      bundleTurnId: "turn-wedged",
+      sessionId: "wedged",
+    })
+  })
+
+  it("closes the turn's scope even when the settle never lands", async () => {
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await settleTaskWorkspaceTurn("wedged", 1)
+
+    // Otherwise a turn that failed to settle keeps a step-up token alive for
+    // its full TTL — the exact leak the scope exists to bound.
+    expect(closeTurnScope).toHaveBeenCalledWith("turn-wedged")
+  })
+
+  // No bundle turn id means no turn record, so there is nothing for a later
+  // send to reclaim. Reporting is all this branch can do, and it must do it.
+  it("reports an unbundled settle failure too", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:unbundled",
+      runId: runIdForTurn("unbundled", 1),
+      sessionId: "unbundled",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated",
+      state: "running",
+    })
+    call.mockRejectedValue(new Error("host unreachable"))
+
+    await expect(settleTaskWorkspaceTurn("unbundled", 1)).resolves.toBeNull()
+
+    expect(reportedErrors).toHaveLength(1)
+    expect(reportedErrors[0][0]).toBe("task workspace settle failed")
+  })
+})
+
+describe("isWorkspaceBusyRefusal", () => {
+  // Shared with the chat surface so it can say this in the user's own language
+  // rather than printing the host's English sentence and its internal key.
+  it("recognises the host's refusal", () => {
+    expect(
+      workspaceClient.isWorkspaceBusyRefusal(
+        new Error("pipeline workspace is already active: s_abc")
+      )
+    ).toBe(true)
+  })
+
+  it("does not claim any other failure", () => {
+    expect(
+      workspaceClient.isWorkspaceBusyRefusal(new Error("workspace is not a directory: /repo"))
+    ).toBe(false)
+    expect(workspaceClient.isWorkspaceBusyRefusal("pipeline workspace is already active")).toBe(
+      true
+    )
+    expect(workspaceClient.isWorkspaceBusyRefusal(undefined)).toBe(false)
   })
 })

@@ -235,6 +235,60 @@ export async function openWorkspaceApprovalScope(
 }
 
 /**
+ * The scope opened for one bundle turn, keyed by that turn's id.
+ *
+ * `openWorkspaceApprovalScope`'s contract is that the caller MUST `close()` it,
+ * and the chat controller could not honour that: it takes the alias and run id
+ * off the lease and drops the handle, because a chat turn is settled from the
+ * status edge in `lib/code-adoption/turn-tracker.ts`, nowhere near the send
+ * call that opened the scope. So `settle`/`abort` — the only closures that
+ * close the scope — were never called, and every managed chat turn on a
+ * companion left a 15-minute step-up token covering all of
+ * {@link WORKSPACE_TURN_COMMANDS} usable by work the user never approved.
+ * Exactly what the lease exists to prevent.
+ *
+ * Keying the scope by turn id is what lets any settle path close it, rather
+ * than only the one that happens to still hold the lease object. The turn id is
+ * the right key because the scope's lifetime IS the turn's: it is opened to
+ * cover one turn's workspace calls and is worthless the moment that turn ends.
+ */
+const turnScopes = new Map<string, WorkspaceApprovalScope>()
+
+/**
+ * Hand a turn's scope to whoever ends that turn.
+ *
+ * A `null` scope (this shell is its own host, or its host does not gate these
+ * commands) binds nothing, so {@link closeApprovalScopeForTurn} stays a no-op
+ * for it.
+ */
+export function bindApprovalScopeToTurn(
+  bundleTurnId: string,
+  scope: WorkspaceApprovalScope | null
+): void {
+  if (!scope) return
+  // A turn id is minted per turn, so a collision means the previous turn under
+  // this id never closed. Close it rather than orphan it.
+  turnScopes.get(bundleTurnId)?.close()
+  turnScopes.set(bundleTurnId, scope)
+}
+
+/**
+ * Close the scope opened for one bundle turn. Idempotent, and safe for a turn
+ * that never had one.
+ */
+export function closeApprovalScopeForTurn(bundleTurnId: string): void {
+  const scope = turnScopes.get(bundleTurnId)
+  if (!scope) return
+  turnScopes.delete(bundleTurnId)
+  scope.close()
+}
+
+/** Which turns still hold an approval scope. Exported for its tests. */
+export function boundApprovalScopeTurnIds(): string[] {
+  return [...turnScopes.keys()]
+}
+
+/**
  * The live scope covering `command`, re-minting it when it is about to expire.
  *
  * A managed turn can outrun any single lease, and losing one mid-turn means the

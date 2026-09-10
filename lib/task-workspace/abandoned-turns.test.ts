@@ -3,6 +3,7 @@ import {
   forgetOpenBundleTurn,
   liveBundleTurnIds,
   reclaimAbandonedBundleTurns,
+  releaseOpenBundleTurn,
   rememberOpenBundleTurn,
   type AbandonedTurnChannel,
 } from "./abandoned-turns"
@@ -103,6 +104,19 @@ describe("recording what this document drives", () => {
     rememberOpenBundleTurn({ bundleTurnId: "wbt_1", sessionId: "s_1", openedAt: 2 })
     expect(h.records()).toHaveLength(1)
   })
+
+  // The settle that would have ended this turn did not land. The document is
+  // still open, so it is still the only one that knows about the turn, but it
+  // is no longer driving it — and the record is what the next refusal reclaims.
+  it("drops the claim on a released turn but keeps its record", () => {
+    h = harness()
+    rememberOpenBundleTurn({ bundleTurnId: "wbt_1", sessionId: "s_1", openedAt: 1 })
+
+    releaseOpenBundleTurn("wbt_1")
+
+    expect(liveBundleTurnIds()).toEqual([])
+    expect(h.records().map((r) => r.bundleTurnId)).toEqual(["wbt_1"])
+  })
 })
 
 describe("reclaiming", () => {
@@ -150,6 +164,48 @@ describe("reclaiming", () => {
     rememberOpenBundleTurn({ bundleTurnId: "wbt_1", sessionId: "s_1", openedAt: 1 })
     await expect(reclaimAbandonedBundleTurns("s_1")).resolves.toEqual([])
     expect(h.aborted).toEqual([])
+  })
+
+  // The wedge this whole module exists for, reached WITHOUT a reload. A turn
+  // whose settle failed used to stay in `live` for the life of the document, so
+  // the reclaim asked who still held it and this very document answered "I do".
+  // Nothing was ever released and the conversation was refused for good.
+  it("reclaims a turn this document opened but could not settle", async () => {
+    h = harness()
+    rememberOpenBundleTurn({ bundleTurnId: "wbt_1", sessionId: "s_1", openedAt: 1 })
+    // What a definitively failed settle does.
+    releaseOpenBundleTurn("wbt_1")
+
+    await expect(reclaimAbandonedBundleTurns("s_1")).resolves.toEqual(["wbt_1"])
+    expect(h.aborted).toEqual(["wbt_1"])
+    expect(h.records()).toEqual([])
+  })
+
+  // Releasing one turn must not hand a peer tab's live turn to the reclaim.
+  it("still refuses to reclaim a turn another tab claims after a release", async () => {
+    h = harness()
+    const peer = h.bus.open()
+    peer.addEventListener("message", (event) => {
+      const message = event.data as { kind?: string; nonce?: string; bundleTurnIds?: string[] }
+      if (message?.kind !== "cognia.bundle-turn.poll") return
+      const claimed = (message.bundleTurnIds ?? []).filter((id) => id === "wbt_peer")
+      if (claimed.length === 0) return
+      peer.postMessage({
+        kind: "cognia.bundle-turn.claim",
+        nonce: message.nonce,
+        bundleTurnIds: claimed,
+      })
+    })
+    h.seedRecords([
+      { bundleTurnId: "wbt_mine", sessionId: "s_1", openedAt: 1 },
+      { bundleTurnId: "wbt_peer", sessionId: "s_1", openedAt: 2 },
+    ])
+    rememberOpenBundleTurn({ bundleTurnId: "wbt_mine", sessionId: "s_1", openedAt: 1 })
+    releaseOpenBundleTurn("wbt_mine")
+
+    await expect(reclaimAbandonedBundleTurns("s_1")).resolves.toEqual(["wbt_mine"])
+    expect(h.aborted).toEqual(["wbt_mine"])
+    expect(h.records().map((r) => r.bundleTurnId)).toEqual(["wbt_peer"])
   })
 
   // Another conversation's abandoned turn is not this refusal's business, and

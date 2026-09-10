@@ -4,10 +4,15 @@ import { onTauriEvent } from "@/lib/tauri"
 // included. A read carries no pending lease so it is passed through untouched,
 // and routing all of them one way means a write cannot be added later that
 // silently skips the lease. See `./user-action.ts`.
-import { approvalAwareTransport as transport, runWorkspaceUserAction } from "./user-action"
+import {
+  approvalAwareTransport as transport,
+  closeApprovalScopeForTurn,
+  runWorkspaceUserAction,
+} from "./user-action"
 import {
   forgetOpenBundleTurn,
   reclaimAbandonedBundleTurns,
+  releaseOpenBundleTurn,
   rememberOpenBundleTurn,
 } from "./abandoned-turns"
 import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
@@ -149,6 +154,19 @@ export async function beginTaskWorkspaceBundleTurn(
  */
 const WORKSPACE_ALREADY_ACTIVE = /pipeline workspace is already active/i
 
+/**
+ * Whether a failure is the host refusing a turn because this conversation's
+ * working copy is still held.
+ *
+ * Exported so the chat surface can say so in the user's own language instead of
+ * printing the host's English sentence, without keeping a second copy of the
+ * pattern that would drift from this one.
+ */
+export function isWorkspaceBusyRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return WORKSPACE_ALREADY_ACTIVE.test(message)
+}
+
 export async function beginWorkspaceBundleTurn(
   bundleId: string,
   request: BeginWorkspaceBundleTurn
@@ -247,6 +265,10 @@ export async function settleWorkspaceBundleTurn(
     { bundleTurnId, finalState }
   )
   forgetOpenBundleTurn(bundleTurnId)
+  // The turn is over, so its standing approval is too. Closed here rather than
+  // only in `run-lease.ts` because a chat turn settles from the status edge,
+  // which never holds the lease object that owns that scope.
+  closeApprovalScopeForTurn(bundleTurnId)
   return reconcileWorkspaceBundleTurnOutcome(outcome)
 }
 
@@ -258,7 +280,49 @@ export async function abortWorkspaceBundleTurn(
     { bundleTurnId }
   )
   forgetOpenBundleTurn(bundleTurnId)
+  closeApprovalScopeForTurn(bundleTurnId)
   return reconcileWorkspaceBundleTurnOutcome(outcome)
+}
+
+/**
+ * The backoff between settle attempts. One entry per RETRY, so the number of
+ * attempts is this length plus one.
+ *
+ * A settle is the only thing that releases a conversation's working copy, and
+ * it used to be issued exactly once: a single refused or dropped call left the
+ * run `running` on the host with nothing scheduled to try again. Short delays
+ * because the failures worth retrying here are transient — a lease that had to
+ * be re-minted, a companion request that lost its connection — and a turn that
+ * is genuinely gone is better handed to the reclaim path than waited on.
+ */
+const SETTLE_RETRY_DELAYS_MS = [250, 1000] as const
+
+let waitBeforeSettleRetry = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Test seam, so a suite does not wait out the real backoff. */
+export function __setSettleRetryWaitForTests(next: (ms: number) => Promise<void>): () => void {
+  const previous = waitBeforeSettleRetry
+  waitBeforeSettleRetry = next
+  return () => {
+    waitBeforeSettleRetry = previous
+  }
+}
+
+/** Run one settle, retrying the transient failures, and rethrow the last one. */
+async function withSettleRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= SETTLE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      const delay = SETTLE_RETRY_DELAYS_MS[attempt]
+      if (delay === undefined) break
+      await waitBeforeSettleRetry(delay)
+    }
+  }
+  throw lastError
 }
 
 export function getWorkspaceBundleTurn(
@@ -300,25 +364,59 @@ export async function settleTaskWorkspaceTurn(
   const bundleTurnId = active.bundleTurnId
   if (bundleTurnId) {
     // Its own approval. This settle is driven by the chat status edge, not by
-    // `openWorkspaceBundleTurnLease`, so the turn scope that covered the rest of
-    // the turn is not open here and no one-shot lease is parked. Called bare,
-    // the Host answered `interactive_approval_required`, the `catch` below
-    // swallowed it, and the run stayed `running` after a turn that had
-    // completed perfectly — wedging the session's next turn.
-    const outcome = await runWorkspaceUserAction("task_workspace_bundle_turn_settle", () =>
-      settleWorkspaceBundleTurn(bundleTurnId, finalState)
-    ).catch(() => null)
-    if (!outcome) return null
+    // `openWorkspaceBundleTurnLease`, so no one-shot lease is parked for it.
+    // Called bare, the Host answered `interactive_approval_required`, the run
+    // stayed `running` after a turn that had completed perfectly, and the
+    // session's next turn was wedged.
+    //
+    // The turn's standing scope is also still open here — `run-lease.ts` binds
+    // it by turn id precisely so this path can close it — but it is deliberately
+    // not what authorizes this call. A one-shot lease minted for this exact
+    // command keeps the settle working for a turn whose scope was never bound,
+    // which is every non-companion host.
+    let outcome: WorkspaceBundleTurnOutcome
+    try {
+      outcome = await withSettleRetry(() =>
+        runWorkspaceUserAction("task_workspace_bundle_turn_settle", () =>
+          settleWorkspaceBundleTurn(bundleTurnId, finalState)
+        )
+      )
+    } catch (error) {
+      // A settle that will not land used to end here, silently: `.catch(() =>
+      // null)` returned "nothing settled" and "the host still holds this
+      // conversation's working copy" as the same answer. The run stayed
+      // `running`, the session's NEXT send was refused with `pipeline workspace
+      // is already active`, and the only trace of the real failure was 40
+      // seconds in the past with an unrelated message.
+      //
+      // Both halves of that are repaired here. `releaseOpenBundleTurn` drops
+      // this document's claim on the turn while keeping its record, so the
+      // reclaim on the next refusal finds a turn nobody is driving and aborts
+      // it instead of hearing this same document claim it — the conversation
+      // heals itself on the next send rather than staying wedged until the host
+      // restarts. And the failure is reported rather than discarded, so the
+      // next occurrence is diagnosable at the moment it happens.
+      closeApprovalScopeForTurn(bundleTurnId)
+      releaseOpenBundleTurn(bundleTurnId)
+      console.error(
+        "task workspace bundle turn settle failed",
+        { bundleTurnId, sessionId, finalState },
+        error
+      )
+      return null
+    }
     const resources = outcome.runs.flatMap((settled) => settled.resources)
     useTaskWorkspaceStore.getState().reconcile(sessionId, resources)
     return resources
   }
   try {
-    const resources = await runWorkspaceUserAction("task_workspace_settle", () =>
-      transport.call<ResourceChange[]>("task_workspace_settle", {
-        runId: active.runId,
-        finalState,
-      })
+    const resources = await withSettleRetry(() =>
+      runWorkspaceUserAction("task_workspace_settle", () =>
+        transport.call<ResourceChange[]>("task_workspace_settle", {
+          runId: active.runId,
+          finalState,
+        })
+      )
     )
     if (active.executionRunId || active.traceSpanId) {
       await getTaskResourceSummary(active.runId)
@@ -338,7 +436,16 @@ export async function settleTaskWorkspaceTurn(
     }
     useTaskWorkspaceStore.getState().reconcile(sessionId, resources)
     return resources
-  } catch {
+  } catch (error) {
+    // No bundle turn id, so there is no reclaim path to hand this to: an
+    // unbundled run has no turn record for a later send to abort. Reporting is
+    // all this branch can do, and it is still strictly more than the bare
+    // `catch { return null }` it replaces.
+    console.error(
+      "task workspace settle failed",
+      { runId: active.runId, sessionId, finalState },
+      error
+    )
     return null
   }
 }

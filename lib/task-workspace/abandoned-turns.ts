@@ -1,15 +1,23 @@
 /**
- * Release a workspace bundle turn whose client went away mid-turn.
+ * Release a workspace bundle turn that nothing is driving any more.
  *
  * A managed conversation holds exactly one execution root, and the host refuses
  * a second turn while one is `running` on it. That refusal is right: two turns
  * writing one working copy is the corruption the guard exists to prevent. What
  * was wrong is that nothing ever ended a turn whose client stopped driving it.
- * A page reload during a turn (a dev-server hot reload, a crash, a closed tab)
- * left the run `running` on the host forever, and every later send in that
+ * The run stayed `running` on the host forever, and every later send in that
  * conversation was refused with `pipeline workspace is already active`. The
  * conversation was wedged until the host itself restarted, which is when
  * `recover_incomplete_runs` settles the leftovers.
+ *
+ * A client stops driving a turn in two ways, and both end here:
+ *
+ *   - **It goes away.** A page reload during a turn (a dev-server hot reload, a
+ *     crash, a closed tab) takes the in-memory state with it.
+ *   - **It stays, and the settle fails.** The document is still open, but the
+ *     call that would have ended the turn did not land. See
+ *     {@link releaseOpenBundleTurn} — this case used to be invisible here,
+ *     because the document went on claiming a turn it could no longer end.
  *
  * The host cannot tell the two apart. For a locally driven turn the agent runs
  * on the client, so from the host's side an abandoned turn and a long one look
@@ -222,6 +230,31 @@ export function forgetOpenBundleTurn(bundleTurnId: string): void {
   live.delete(bundleTurnId)
   const records = readRecords().filter((entry) => entry.bundleTurnId !== bundleTurnId)
   writeRecords(records)
+  if (live.size === 0) responder?.stop()
+}
+
+/**
+ * Stop driving a turn without forgetting it.
+ *
+ * The gap this closes: {@link live} used to be left alone whenever a settle
+ * FAILED, because only a successful settle or abort called
+ * {@link forgetOpenBundleTurn}. So a document that opened a turn and then could
+ * not end it went on claiming that turn for the rest of its life — including in
+ * answer to its OWN later poll. The conversation was refused with `pipeline
+ * workspace is already active`, the reclaim asked who still held the turn, this
+ * very document said "I do", and nothing was ever released. That is a wedge no
+ * reload was needed to reach, and the reload-shaped recovery could not see it.
+ *
+ * Driving a turn and having a record of it are two different facts. A turn
+ * whose settle has definitively failed is no longer being driven by anyone,
+ * even though this document is still the one that knows about it — so the claim
+ * is dropped while the record is kept, and the next refusal can reclaim it.
+ *
+ * Called only once the settle is definitively over. Releasing before then would
+ * let a peer tab abort a turn whose settle is still in flight.
+ */
+export function releaseOpenBundleTurn(bundleTurnId: string): void {
+  live.delete(bundleTurnId)
   if (live.size === 0) responder?.stop()
 }
 
