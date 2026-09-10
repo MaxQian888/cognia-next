@@ -15,7 +15,8 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import type { VisualWorkflow, WorkflowRunEventRow } from "@/types/workflow/visual"
 import { workflowNodeCategory } from "@/types/workflow/visual"
-import { formatDurationMs } from "./format"
+import { formatDurationMs, buildSpans } from "./format"
+export { buildSpans, type StepSpan } from "./format"
 
 const CATEGORY_COLORS = {
   trigger: "bg-wf-trigger/70",
@@ -36,14 +37,6 @@ const CATEGORY_RAILS = {
   io: "bg-wf-io/15",
   annotation: "bg-wf-annotation/15",
 } as const
-
-interface StepSpan {
-  stepId: string
-  startTs: number
-  endTs: number
-  status: "running" | "succeeded" | "failed" | "skipped"
-  attemptCount: number
-}
 
 export function RunTimeline({
   events,
@@ -83,7 +76,7 @@ export function RunTimeline({
   }
 
   return (
-    <div className="flex flex-col gap-1.5" aria-label="Run timeline">
+    <div className="flex flex-col gap-1.5" aria-label={t("ariaLabel")}>
       {spans.map((span) => {
         const node = workflow.nodes.find((n) => n.id === span.stepId)
         const label = node?.data.label ?? span.stepId
@@ -163,55 +156,3 @@ export function RunTimeline({
     </div>
   )
 }
-
-/**
- * Roll the per-event log into one span per stepId. A span tracks the FIRST
- * `step_started` and the LAST terminal event — retries collapse into a
- * single bar with an attempt counter.
- */
-export function buildSpans(events: WorkflowRunEventRow[], fallbackEnd: number): StepSpan[] {
-  const byStep = new Map<string, StepSpan>()
-  for (const e of events) {
-    if (!e.stepId) continue
-    const existing = byStep.get(e.stepId)
-    if (e.type === "step_started") {
-      if (existing) {
-        // A retry — bump the attempt count but keep the original startTs.
-        existing.attemptCount += 1
-        existing.status = "running"
-        existing.endTs = fallbackEnd
-      } else {
-        byStep.set(e.stepId, {
-          stepId: e.stepId,
-          startTs: e.ts,
-          endTs: fallbackEnd,
-          status: "running",
-          attemptCount: 1,
-        })
-      }
-    } else if (e.type === "step_completed" && existing) {
-      existing.endTs = e.ts
-      existing.status = "succeeded"
-    } else if (e.type === "step_failed" && existing) {
-      existing.endTs = e.ts
-      existing.status = "failed"
-    } else if (e.type === "step_skipped") {
-      // Skips can arrive without a prior step_started.
-      if (existing) {
-        existing.endTs = e.ts
-        existing.status = "skipped"
-      } else {
-        byStep.set(e.stepId, {
-          stepId: e.stepId,
-          startTs: e.ts,
-          endTs: e.ts,
-          status: "skipped",
-          attemptCount: 0,
-        })
-      }
-    }
-  }
-  return [...byStep.values()].sort((a, b) => a.startTs - b.startTs)
-}
-
-export type { StepSpan }

@@ -11,6 +11,7 @@
  */
 
 import { useMemo, useState } from "react"
+import { RunGraph } from "./run-graph"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -320,6 +321,14 @@ function RunDetailInner({
         <div className="min-h-0 flex-1 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="px-4 py-4 sm:px-6">
+              <RunGraph
+                workflow={run.workflowSnapshot}
+                events={events}
+                startedAt={run.startedAt}
+                completedAt={run.completedAt}
+                selectedStepId={selectedStepId}
+                onSelectStep={setSelectedStepId}
+              />
               <RunTimeline
                 events={events}
                 workflow={run.workflowSnapshot}

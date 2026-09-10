@@ -13,6 +13,8 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { RunDetail } from "./run-detail"
 
+jest.mock("./run-graph", () => ({ RunGraph: () => <div aria-label="Workflow map" /> }))
+
 const routerPush = jest.fn()
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPush }),

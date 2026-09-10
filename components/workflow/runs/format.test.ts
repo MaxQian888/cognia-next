@@ -1,4 +1,4 @@
-import { formatDurationMs, formatRunDuration, formatRunStartedAt } from "./format"
+import { buildSpans, formatDurationMs, formatRunDuration, formatRunStartedAt } from "./format"
 
 describe("formatDurationMs", () => {
   it("formats sub-second values in ms", () => {
@@ -57,4 +57,18 @@ describe("formatRunStartedAt", () => {
   it("handles invalid input gracefully", () => {
     expect(formatRunStartedAt(Number.NaN)).toBe("—")
   })
+})
+
+it("keeps retry timing and terminal state in the shared span helper", () => {
+  expect(
+    buildSpans(
+      [
+        { id: "a", runId: "r", ts: 10, type: "step_started", stepId: "n" },
+        { id: "b", runId: "r", ts: 20, type: "step_failed", stepId: "n" },
+        { id: "c", runId: "r", ts: 30, type: "step_started", stepId: "n" },
+        { id: "d", runId: "r", ts: 40, type: "step_completed", stepId: "n" },
+      ],
+      50
+    )
+  ).toEqual([{ stepId: "n", startTs: 10, endTs: 40, status: "succeeded", attemptCount: 2 }])
 })

@@ -200,7 +200,20 @@
     "tokens": "Tokens (in / out)"
   },
   "timeline": {
+    "ariaLabel": "Run timeline",
     "retried": "{count, plural, one {Retried # time} other {Retried # times}}",
     "waiting": "Waiting for events…"
+  },
+  "graph": {
+    "title": "Workflow map",
+    "hint": "Select a node to inspect its records. Scroll to zoom; drag to pan.",
+    "pending": "Pending",
+    "running": "Running",
+    "succeeded": "Completed",
+    "failed": "Failed",
+    "skipped": "Skipped",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fit": "Fit workflow"
   }
 }
