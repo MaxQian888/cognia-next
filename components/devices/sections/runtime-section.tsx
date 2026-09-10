@@ -124,7 +124,7 @@ function Routing({ row }: { row: DeviceRow }) {
   // `ExecutionAuthorityConfig.hostId` is a `RemoteHost.id`, or null for self.
   // A phone or a worker cannot be named, so the control is only offered where
   // it can actually be honoured.
-  const canOwnTiming = row.kind === "local" || row.kind === "remote-host"
+  const canOwnTiming = row.kind === "local" || (row.kind === "remote-host" && Boolean(row.hostId))
   if (!canOwnTiming && !row.runtime.isRoutingTarget) return null
 
   const isAuthority = row.kind === "local" ? config.hostId === null : config.hostId === row.hostId

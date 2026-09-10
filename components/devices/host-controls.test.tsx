@@ -163,3 +163,20 @@ describe("connection health", () => {
     expect(screen.getByTestId("host-version-mismatch")).toHaveTextContent("0.9.1")
   })
 })
+
+it("routes Companion management to pairing without offering store-only actions", () => {
+  render(
+    <HostControls
+      row={row({
+        ref: "companion:paired-host",
+        hostId: undefined,
+        connectionState: "degraded",
+        connectionError: "connection lost",
+      })}
+    />
+  )
+  expect(screen.getByRole("link", { name: "Manage paired Host" })).toHaveAttribute("href", "/pair")
+  expect(screen.getByText("connection lost")).toBeInTheDocument()
+  expect(screen.queryByTestId("host-connect")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("host-rename")).not.toBeInTheDocument()
+})

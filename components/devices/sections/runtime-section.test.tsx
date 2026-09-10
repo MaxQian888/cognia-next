@@ -413,3 +413,14 @@ describe("RuntimeSection — machines", () => {
     expect(screen.getByTestId("device-machine-shell-blocked")).toBeInTheDocument()
   })
 })
+
+it("does not offer a remote-store timing switch for the active Companion Host", () => {
+  render(
+    <RuntimeSection
+      row={row({ kind: "remote-host", ref: "companion:paired-host", hostId: undefined })}
+    />
+  )
+  expect(screen.getByTestId("routing-target-note")).toBeInTheDocument()
+  expect(screen.queryByTestId("device-timing-authority")).not.toBeInTheDocument()
+  expect(screen.getByTestId("workspace-environment-list")).toBeInTheDocument()
+})

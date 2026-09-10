@@ -1,4 +1,20 @@
-import { render, screen } from "@testing-library/react"
+let mockNow = new Date("2026-09-09T08:00:00Z")
+const mockRelativeTime = jest.fn(() => "a minute ago")
+const mockUseNow = jest.fn((_options?: unknown) => mockNow)
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) =>
+    (
+      ({
+        "reachability.recently-active": "Recently active",
+        "adminState.revoked": "Revoked",
+        "grantState.partial": "Partial",
+      }) as Record<string, string>
+    )[key] ?? key,
+  useNow: (options: unknown) => mockUseNow(options),
+  useFormatter: () => ({ relativeTime: mockRelativeTime }),
+}))
+
+import { render, renderHook, screen } from "@testing-library/react"
 
 import {
   AdminStateBadge,
@@ -9,6 +25,7 @@ import {
   ReachabilityLabel,
   capabilityToneClass,
   shortenFingerprint,
+  useDeviceRelativeTime,
 } from "./device-visuals"
 
 describe("ReachabilityDot / ReachabilityLabel", () => {
@@ -102,5 +119,59 @@ describe("shortenFingerprint", () => {
   it("leaves short values alone and answers null for nothing", () => {
     expect(shortenFingerprint("abc")).toBe("abc")
     expect(shortenFingerprint(undefined)).toBeNull()
+  })
+})
+
+it("formats device timestamps against an explicit shared clock", () => {
+  const { result } = renderHook(() => useDeviceRelativeTime())
+  const timestamp = mockNow.getTime() - 60_000
+  result.current(timestamp)
+  expect(mockRelativeTime).toHaveBeenCalledWith(new Date(timestamp), {
+    now: mockNow,
+    unit: "minute",
+  })
+  for (const invalid of [undefined, 0, -1, NaN, Infinity]) {
+    expect(result.current(invalid)).toBe("never")
+  }
+})
+
+describe("quiet device timestamps", () => {
+  beforeEach(() => {
+    mockNow = new Date("2026-09-09T08:00:00Z")
+    jest.clearAllMocks()
+  })
+
+  it("uses a minute display clock instead of ticking every second", () => {
+    renderHook(() => useDeviceRelativeTime())
+    expect(mockUseNow).toHaveBeenCalledWith({ updateInterval: 60_000 })
+  })
+
+  it("keeps recent reports stable across polling and small clock differences", () => {
+    const { result, rerender } = renderHook(() => useDeviceRelativeTime())
+    const start = mockNow.getTime()
+    for (const age of [0, 1_000, 4_000, 59_999, -5_000]) {
+      expect(result.current(start - age)).toBe("justNow")
+    }
+    mockNow = new Date(start + 5_000)
+    rerender()
+    expect(result.current(start + 5_000)).toBe("justNow")
+    expect(mockRelativeTime).not.toHaveBeenCalled()
+  })
+
+  it("moves a stale report from just now to minutes, then hours", () => {
+    const timestamp = mockNow.getTime()
+    const { result, rerender } = renderHook(() => useDeviceRelativeTime())
+    expect(result.current(timestamp)).toBe("justNow")
+    mockNow = new Date(timestamp + 60_000)
+    rerender()
+    result.current(timestamp)
+    expect(mockRelativeTime).toHaveBeenLastCalledWith(new Date(timestamp), {
+      now: mockNow,
+      unit: "minute",
+    })
+    mockNow = new Date(timestamp + 3_600_000)
+    rerender()
+    result.current(timestamp)
+    expect(mockRelativeTime).toHaveBeenLastCalledWith(new Date(timestamp), mockNow)
   })
 })

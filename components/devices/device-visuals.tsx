@@ -24,7 +24,7 @@ import {
   TerminalIcon,
   type LucideIcon,
 } from "lucide-react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 
 import { FactList, FactRow } from "@/components/surface/fact-list"
 import { Badge } from "@/components/ui/badge"
@@ -222,10 +222,15 @@ export function GrantStateBadge({ state }: { state: DeviceGrantState }) {
  */
 export function useDeviceRelativeTime(): (value: number | undefined) => string {
   const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const t = useTranslations("devices")
   return (value) => {
     if (value === undefined || !Number.isFinite(value) || value <= 0) return t("never")
-    return format.relativeTime(new Date(value))
+    const elapsed = now.getTime() - value
+    // Polling can report a timestamp newer than this display clock. Keep recent
+    // activity stable instead of counting seconds or briefly showing a future time.
+    if (elapsed < 60_000) return t("justNow")
+    return format.relativeTime(new Date(value), elapsed < 3_600_000 ? { now, unit: "minute" } : now)
   }
 }
 

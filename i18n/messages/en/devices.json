@@ -148,7 +148,8 @@
       "platform-baseline": "platform baseline",
       "host-manifest": "host manifest",
       "local-probe": "probed here"
-    }
+    },
+    "browserLocalBody": "These are this browser's local capabilities. Execution capabilities belong to the paired Host; select its row in the device list to inspect them. The browser capability means an agent-controlled browser engine, not this browser window."
   },
   "ssh": {
     "title": "SSH",
@@ -358,7 +359,8 @@
       "ready": "Ready",
       "revoked": "This device was revoked",
       "versionMismatch": "Upgrade required"
-    }
+    },
+    "managePairing": "Manage paired Host"
   },
   "settingsLink": {
     "pairedTitle": "Paired devices",
@@ -421,5 +423,6 @@
     "title": "Files",
     "transfers": "Transfers",
     "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse."
-  }
+  },
+  "justNow": "just now"
 }

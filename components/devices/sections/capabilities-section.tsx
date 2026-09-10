@@ -185,6 +185,9 @@ export function CapabilitiesSection({ row }: { row: DeviceRow }) {
       meta={t("capabilities.reportedCount", { reported, total: row.capabilities.length })}
     >
       <div className="space-y-4" data-testid="device-capabilities">
+        {row.isSelf && row.platform === "web" ? (
+          <p className="text-xs text-muted-foreground">{t("capabilities.browserLocalBody")}</p>
+        ) : null}
         {row.capabilityReportMissing ? (
           /**
            * One explanatory banner instead of twenty `absent` rows. The device

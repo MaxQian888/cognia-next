@@ -22,6 +22,7 @@
  * reconnect for a transient failure, re-pair for a revoked device.
  */
 
+import Link from "next/link"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
@@ -70,6 +71,21 @@ export function HostControls({ row, onRepair }: HostControlsProps) {
   const [draft, setDraft] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
 
+  if (row.kind === "remote-host" && row.ref.startsWith("companion:")) {
+    return (
+      <DeviceSection id="host-controls" title={t("host.controls")} icon={SlidersHorizontalIcon}>
+        <p className="mb-2 text-xs text-muted-foreground">
+          {t(`host.state.${row.connectionState ?? "disconnected"}`)}
+        </p>
+        {row.connectionError ? (
+          <p className="mb-2 text-xs text-destructive">{row.connectionError}</p>
+        ) : null}
+        <Button size="sm" variant="secondary" asChild>
+          <Link href="/pair">{t("host.managePairing")}</Link>
+        </Button>
+      </DeviceSection>
+    )
+  }
   if (row.kind !== "remote-host" || !row.hostId) return null
   const hostId = row.hostId
   const connected = row.runtime.isRoutingTarget

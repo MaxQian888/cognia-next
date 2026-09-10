@@ -21,9 +21,14 @@
  * renders the mirror and admits what it is.
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useShallow } from "zustand/react/shallow"
+
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { companionCredentialBook } from "@/lib/companion/credential-book"
+import { isCapabilityId } from "@/lib/platform/capabilities"
+import { parseHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
 import { APP_VERSION } from "@/lib/app-version"
 import { buildDeviceRows, summarizeDeviceRows } from "@/lib/devices/build-device-rows"
@@ -168,10 +173,63 @@ function readPresence(deviceIds: readonly string[]): Map<string, DevicePresenceS
   return map
 }
 
+/** Read the active /pair Host without copying its credentials into the device directory. */
+async function readCompanionHost(
+  targetId: string,
+  connectionState: "online" | "connecting" | "offline"
+): Promise<RemoteHostInput | null> {
+  const record = await companionCredentialBook().get({
+    accountNamespace: getActiveAccountId(),
+    hostId: targetId,
+  })
+  if (!record) return null
+  const host: RemoteHostInput = {
+    id: record.hostId,
+    label: record.label,
+    addedAt: record.createdAt,
+    config: {
+      baseUrl: record.endpoints.baseUrl,
+      serverVersion: record.serverVersion,
+      serverFingerprint: record.tlsPin ?? undefined,
+    },
+    connectionState: connectionState === "connecting" ? "connecting" : "disconnected",
+  }
+  if (connectionState !== "online") return host
+
+  const [capabilities, manifest] = await Promise.allSettled([
+    transport.call<{ capabilities?: unknown }>("host_capabilities", {}),
+    transport.call<unknown>("host_feature_manifest", {}),
+  ])
+  const reportedAt = Date.now()
+  if (capabilities.status === "fulfilled" && Array.isArray(capabilities.value?.capabilities)) {
+    host.capabilities = capabilities.value.capabilities.filter(isCapabilityId).slice(0, 64)
+    host.capabilitiesAt = reportedAt
+  }
+  if (manifest.status === "fulfilled") {
+    const parsed = parseHostFeatureManifest(manifest.value)
+    // Pairing's server_id and the manifest's opaque Host id use different
+    // namespaces. The authenticated transport and refresh generation bind this
+    // reply to its target; string equality would discard valid headless reports.
+    if (parsed) {
+      host.featureManifest = parsed
+      host.featureManifestAt = reportedAt
+    }
+  }
+  const failure = [capabilities, manifest].find((result) => result.status === "rejected")
+  host.connectionState = host.capabilitiesAt && host.featureManifestAt ? "ready" : "degraded"
+  if (host.connectionState === "ready") host.lastConnectedAt = reportedAt
+  if (failure?.status === "rejected") host.connectionError = String(failure.reason)
+  return host
+}
+
 export function useDeviceRows(): UseDeviceRowsResult {
   const pairedDevices = useLiveQuery(() => listPairedDevices(), [], [])
   const { connections } = useSandboxConnections()
   const runtimeAvailability = useSandboxRuntimeAvailability()
+  const snapshot = useRuntimeSnapshot()
+  const companionTargetId = snapshot.target?.kind === "companion" ? snapshot.target.id : null
+  const [companionHost, setCompanionHost] = useState<RemoteHostInput | null>(null)
+  const refreshGeneration = useRef(0)
 
   const { hosts, activeHostId } = useRemoteHostStore(
     useShallow((state) => ({ hosts: state.hosts, activeHostId: state.activeHostId }))
@@ -229,30 +287,55 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
-    const [devices, workerRows, hostPerson] = await Promise.all([
+    const generation = ++refreshGeneration.current
+    const [devices, workerRows, hostPerson, companion] = await Promise.all([
       readHostDevices(),
       readWorkers(),
       readHostPersonId(),
+      companionTargetId && !activeHostId
+        ? readCompanionHost(companionTargetId, snapshot.connectionState).catch(() => null)
+        : Promise.resolve(null),
     ])
+    if (generation !== refreshGeneration.current) return
+    setCompanionHost((previous) =>
+      companion && previous?.id === companion.id
+        ? {
+            ...companion,
+            capabilities: companion.capabilities ?? previous.capabilities,
+            capabilitiesAt: companion.capabilitiesAt ?? previous.capabilitiesAt,
+            featureManifest: companion.featureManifest ?? previous.featureManifest,
+            featureManifestAt: companion.featureManifestAt ?? previous.featureManifestAt,
+            lastConnectedAt: companion.lastConnectedAt ?? previous.lastConnectedAt,
+          }
+        : companion
+    )
     setHostDevices(devices)
     setWorkers(workerRows)
     setHostPersonUserId(hostPerson)
     setOwnerNames(await readOwnerNames(devices))
     setLoading(false)
     setNow(Date.now())
-  }, [])
+  }, [activeHostId, companionTargetId, snapshot.connectionState])
 
   useEffect(() => {
     let cancelled = false
+    let pending = false
     const run = () => {
-      void refresh().catch(() => {
-        if (!cancelled) setLoading(false)
-      })
+      if (pending) return
+      pending = true
+      void refresh()
+        .catch(() => {
+          if (!cancelled) setLoading(false)
+        })
+        .finally(() => {
+          pending = false
+        })
     }
     run()
     const timer = setInterval(run, DEVICE_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
+      refreshGeneration.current += 1
       clearInterval(timer)
     }
   }, [refresh])
@@ -282,7 +365,32 @@ export function useDeviceRows(): UseDeviceRowsResult {
     // Presence lives in a plain in-process map with no subscription, so it is
     // re-read here on every `now` advance — the poll is the subscription.
     const deviceIds = (pairedDevices ?? []).map((row) => row.deviceId)
-    return buildDeviceRows({
+    const pairedHost =
+      !activeHostId && companionHost?.id === companionTargetId
+        ? {
+            ...companionHost,
+            connectionState:
+              snapshot.connectionState === "online"
+                ? companionHost.connectionState
+                : snapshot.connectionState === "connecting"
+                  ? ("connecting" as const)
+                  : ("disconnected" as const),
+          }
+        : null
+    const directoryHosts: readonly RemoteHostInput[] = pairedHost
+      ? [
+          ...hosts.filter(
+            (host) =>
+              host.featureManifest?.schemaVersion !== 2 ||
+              host.featureManifest.hostIdentity.id !==
+                (pairedHost.featureManifest?.schemaVersion === 2
+                  ? pairedHost.featureManifest.hostIdentity.id
+                  : pairedHost.id)
+          ),
+          pairedHost,
+        ]
+      : hosts
+    const deviceRows = buildDeviceRows({
       local: {
         ref: "local",
         label: getFriendlyDeviceLabel(),
@@ -294,7 +402,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
       },
       pairedDevices: pairedDevices ?? [],
       hostDevices: hostDevices ?? undefined,
-      remoteHosts: hosts as unknown as readonly RemoteHostInput[],
+      remoteHosts: directoryHosts,
       sshHosts: sshHosts ?? [],
       /**
        * Expiry and re-targeting are resolved here rather than in the builder.
@@ -309,7 +417,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
         ...connection,
         capabilities: projectSandboxConnectionCapabilities(connection, isTauri()),
       })),
-      activeHostId,
+      activeHostId: activeHostId ?? companionTargetId,
       // Only the Tauri desktop runs the signaling hub, so only it can say
       // whether a WAN connection is held, or start one.
       holdsWanConnections: isTauri(),
@@ -319,8 +427,28 @@ export function useDeviceRows(): UseDeviceRowsResult {
       ...(hostPersonUserId ? { hostPersonUserId } : {}),
       now,
     })
+    return deviceRows.map((row) => {
+      if (pairedHost && row.kind === "remote-host" && row.hostId === pairedHost.id) {
+        // /pair owns this Host. Store-only connect/rename/remove actions cannot address it.
+        return { ...row, ref: `companion:${pairedHost.id}`, hostId: undefined }
+      }
+      if (companionTargetId && !activeHostId && row.isSelf) {
+        return {
+          ...row,
+          runtime: {
+            ...row.runtime,
+            isRoutingTarget: false,
+            workspaces: { support: "unsupported" as const, reasonKey: "workspaceNotHosted" },
+          },
+        }
+      }
+      return row
+    })
   }, [
     pairedDevices,
+    companionHost,
+    companionTargetId,
+    snapshot.connectionState,
     hostDevices,
     hosts,
     sshHosts,

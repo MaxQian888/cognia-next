@@ -246,3 +246,17 @@ describe("CapabilitiesSection — where each answer came from", () => {
     for (const cell of rows) expect(cell.getAttribute("title")).toBeTruthy()
   })
 })
+
+it("explains why the local browser and its execution Host report different capabilities", () => {
+  render(
+    <CapabilitiesSection
+      row={row({
+        kind: "local",
+        isSelf: true,
+        platform: "web",
+        capabilities: [cell({ id: "webview" })],
+      })}
+    />
+  )
+  expect(screen.getByText(/These are this browser's local capabilities/)).toBeInTheDocument()
+})

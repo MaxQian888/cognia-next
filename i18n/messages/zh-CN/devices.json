@@ -148,7 +148,8 @@
       "platform-baseline": "平台基线",
       "host-manifest": "宿主清单",
       "local-probe": "本机探测"
-    }
+    },
+    "browserLocalBody": "这里显示浏览器本地能力。执行能力由已配对的 Host 提供，请在设备列表中选择对应 Host 查看。browser 能力指可由 Agent 操作的浏览器引擎，并非当前浏览器窗口。"
   },
   "ssh": {
     "title": "SSH",
@@ -358,7 +359,8 @@
       "ready": "就绪",
       "revoked": "该设备已被吊销",
       "versionMismatch": "需要升级"
-    }
+    },
+    "managePairing": "管理已配对的 Host"
   },
   "settingsLink": {
     "pairedTitle": "配对设备",
@@ -421,5 +423,6 @@
     "title": "文件",
     "transfers": "传输",
     "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。"
-  }
+  },
+  "justNow": "刚刚"
 }

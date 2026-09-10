@@ -54,6 +54,9 @@ export function DeviceConsole() {
   const setKindFilter = useDeviceConsoleStore((state) => state.setKindFilter)
 
   const selected = rows.find((row) => row.ref === selectedRef) ?? null
+  const companionHost = rows.find(
+    (row) => row.ref.startsWith("companion:") && row.runtime.isRoutingTarget
+  )
 
   /**
    * Standalone: no host of our own and none paired.
@@ -147,7 +150,22 @@ export function DeviceConsole() {
           /* Where this window's calls land, on the page that is about
              machines. The desktop status bar carries the same control; this is
              the copy a browser or a phone can see. */
-          context={<ExecutionHostChip onAddHost={() => setAddHostOpen(true)} />}
+          context={
+            companionHost ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 px-2.5 text-xs font-normal"
+                aria-label={t("executionHost.aria", { label: companionHost.label })}
+                onClick={() => select(companionHost.ref)}
+              >
+                <ServerIcon className="size-3.5" />
+                <span className="max-w-40 truncate">{companionHost.label}</span>
+              </Button>
+            ) : (
+              <ExecutionHostChip onAddHost={() => setAddHostOpen(true)} />
+            )
+          }
           status={
             /**
              * The one number a fleet is actually scanned for. It was computed

@@ -298,3 +298,19 @@ describe("DeviceConsole", () => {
     expect(push).toHaveBeenCalledWith(href)
   })
 })
+
+it("labels the browser's execution Host and opens its capability detail", async () => {
+  const companion = row({
+    ref: "companion:paired-host",
+    kind: "remote-host",
+    label: "Paired server",
+  })
+  companion.runtime.isRoutingTarget = true
+  rows = [LOCAL, companion]
+  renderConsole()
+  await userEvent.click(screen.getByRole("button", { name: "Execution host: Paired server" }))
+  expect(screen.getByTestId("detail")).toHaveTextContent("companion:paired-host")
+  expect(
+    screen.queryByRole("button", { name: "Execution host: This machine" })
+  ).not.toBeInTheDocument()
+})

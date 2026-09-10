@@ -11,9 +11,23 @@ import {
 } from "@/lib/devices/ssh-probe-store"
 import { resetWanWakeOverridesForTests, wakeDeviceForWan } from "@/lib/signaling/wan-wake-overrides"
 
+import { buildLocalHostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+
 import { useDeviceRows } from "./use-device-rows"
 
 const pairedRows: unknown[] = []
+let companionHost: unknown = null
+let remoteHosts: import("@/lib/devices/types").RemoteHostInput[] = []
+let activeRemoteHostId: string | null = null
+let runtimeSnapshot = {
+  target: null,
+  connectionState: "offline",
+  vaultState: "unlocked",
+} as import("@/lib/runtime/operation-availability").RuntimeSnapshot
+jest.mock("@/hooks/use-runtime-snapshot", () => ({ useRuntimeSnapshot: () => runtimeSnapshot }))
+jest.mock("@/lib/companion/credential-book", () => ({
+  companionCredentialBook: () => ({ get: async () => companionHost }),
+}))
 let listWorkersImpl: () => Promise<unknown[]> = async () => []
 let transportCallImpl: (name: string) => Promise<unknown> = async () => []
 let tauri = true
@@ -52,7 +66,7 @@ jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
 
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: (selector: (state: unknown) => unknown) =>
-    selector({ hosts: [], activeHostId: null }),
+    selector({ hosts: remoteHosts, activeHostId: activeRemoteHostId }),
 }))
 
 /**
@@ -79,6 +93,10 @@ jest.mock("@/lib/companion/device-presence-registry", () => ({
 
 beforeEach(() => {
   pairedRows.length = 0
+  companionHost = null
+  remoteHosts = []
+  activeRemoteHostId = null
+  runtimeSnapshot = { target: null, connectionState: "offline", vaultState: "unlocked" }
   tauri = true
   sshHostSettings = []
   webrtcEnabled = undefined
@@ -396,5 +414,202 @@ describe("useDeviceRows — SSH probe results", () => {
       target: sshProbeTarget({ ...PROFILE, port: 2222 }),
     })
     expect(await sshRow()).toMatchObject({ reachability: "unknown" })
+  })
+})
+
+describe("browser Companion Host inventory", () => {
+  beforeEach(() => {
+    tauri = false
+    companionHost = {
+      hostId: "paired-host",
+      label: "My paired Host",
+      createdAt: 1,
+      endpoints: { baseUrl: "http://127.0.0.1:27891" },
+      serverVersion: "1.0.0",
+    }
+    runtimeSnapshot = {
+      target: { id: "paired-host", kind: "companion", platform: "web", hostKind: "cloud" },
+      connectionState: "online",
+      vaultState: "unlocked",
+    }
+    transportCallImpl = async (name) =>
+      name === "host_capabilities"
+        ? { capabilities: ["shell", "pty", "sidecar"] }
+        : name === "host_feature_manifest"
+          ? buildLocalHostFeatureManifest({
+              platform: "headless",
+              hostId: "host-paired-host",
+              hostBuildId: "1.0.0",
+            })
+          : []
+  })
+
+  it("shows the paired execution Host separately from the browser", async () => {
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    const host = result.current.rows.find((row) => row.kind === "remote-host")!
+    expect(host.label).toBe("My paired Host")
+    expect(host.connectionState).toBe("ready")
+    expect(
+      host.capabilities.some((cell) => cell.group === "host-execution" && cell.state === "reported")
+    ).toBe(true)
+    expect(host.capabilities).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "sidecar", state: "reported" })])
+    )
+    expect(host.runtime.isRoutingTarget).toBe(true)
+    expect(host.hostId).toBeUndefined()
+    expect(result.current.rows[0].capabilities.find((cell) => cell.id === "sidecar")?.state).toBe(
+      "absent"
+    )
+    expect(result.current.rows[0].runtime.isRoutingTarget).toBe(false)
+  })
+
+  it("keeps a failed report unknown and exposes the failure", async () => {
+    transportCallImpl = async () => {
+      throw new Error("connection lost")
+    }
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    const host = result.current.rows.find((row) => row.kind === "remote-host")!
+    expect(host.capabilityReportMissing).toBe(true)
+    expect(host.capabilities.some((cell) => cell.state === "absent")).toBe(false)
+    expect(host.connectionError).toContain("connection lost")
+  })
+
+  it("stops reporting the Host online as soon as the connection goes offline", async () => {
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() =>
+      expect(result.current.rows.find((row) => row.kind === "remote-host")?.connectionState).toBe(
+        "ready"
+      )
+    )
+    runtimeSnapshot = { ...runtimeSnapshot, connectionState: "offline" }
+    rerender()
+    expect(result.current.rows.find((row) => row.kind === "remote-host")?.reachability).not.toBe(
+      "online"
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+  })
+
+  it("drops a probe that finishes after the target was changed", async () => {
+    let resolveCapabilities!: (value: unknown) => void
+    transportCallImpl = async (name) =>
+      name === "host_capabilities"
+        ? new Promise((resolve) => {
+            resolveCapabilities = resolve
+          })
+        : []
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(resolveCapabilities).toBeDefined())
+    runtimeSnapshot = { target: null, connectionState: "offline", vaultState: "unlocked" }
+    rerender()
+    await act(async () => {
+      resolveCapabilities({ capabilities: ["sidecar"] })
+    })
+    expect(result.current.rows).toHaveLength(1)
+  })
+
+  it("does not infer capabilities from a malformed response", async () => {
+    transportCallImpl = async () => ({ capabilities: "shell" })
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    const host = result.current.rows.find((row) => row.kind === "remote-host")!
+    expect(host.capabilityReportMissing).toBe(true)
+    expect(host.connectionState).toBe("degraded")
+    expect(host.capabilities.some((cell) => cell.state === "reported")).toBe(false)
+  })
+
+  it("deduplicates the same Host registered through both pairing paths", async () => {
+    remoteHosts = [
+      {
+        id: "remote-store-host",
+        label: "Saved Host",
+        addedAt: 1,
+        connectionState: "disconnected",
+        config: { baseUrl: "http://127.0.0.1:27891", serverVersion: "1.0.0" },
+        featureManifest: buildLocalHostFeatureManifest({
+          platform: "headless",
+          hostId: "host-paired-host",
+        }),
+      },
+    ]
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() =>
+      expect(result.current.rows.some((row) => row.ref === "companion:paired-host")).toBe(true)
+    )
+    expect(result.current.rows).toHaveLength(2)
+  })
+
+  it("does not attribute an active remote override's report to the Companion Host", async () => {
+    activeRemoteHostId = "override"
+    remoteHosts = [
+      {
+        id: "override",
+        label: "Override Host",
+        addedAt: 1,
+        connectionState: "ready",
+        config: { baseUrl: "https://other.example", serverVersion: "1.0.0" },
+      },
+    ]
+    const call = jest.fn(async () => [])
+    transportCallImpl = call
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows.some((row) => row.ref.startsWith("companion:"))).toBe(false)
+    expect(
+      result.current.rows.find((row) => row.hostId === "override")?.runtime.isRoutingTarget
+    ).toBe(true)
+    expect(call.mock.calls).not.toEqual(expect.arrayContaining([["host_capabilities"]]))
+  })
+
+  it("retains the last reported capabilities when a refresh fails", async () => {
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() =>
+      expect(result.current.rows.find((row) => row.kind === "remote-host")?.connectionState).toBe(
+        "ready"
+      )
+    )
+    const reportedAt = result.current.rows.find(
+      (row) => row.kind === "remote-host"
+    )?.capabilitiesReportedAt
+    transportCallImpl = async () => {
+      throw new Error("temporarily unavailable")
+    }
+    await act(async () => {
+      await result.current.refresh()
+    })
+    const host = result.current.rows.find((row) => row.kind === "remote-host")!
+    expect(host.connectionState).toBe("degraded")
+    expect(host.capabilitiesReportedAt).toBe(reportedAt)
+    expect(host.capabilities).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "sidecar", state: "reported" })])
+    )
+  })
+
+  it("does not probe while a Host is connecting", async () => {
+    runtimeSnapshot = { ...runtimeSnapshot, connectionState: "connecting" }
+    const call = jest.fn(async () => [])
+    transportCallImpl = call
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    expect(result.current.rows.find((row) => row.kind === "remote-host")?.connectionState).toBe(
+      "connecting"
+    )
+    expect(call.mock.calls).not.toEqual(expect.arrayContaining([["host_capabilities"]]))
+  })
+
+  it("does not fabricate a Host if its pairing record is unavailable", async () => {
+    companionHost = null
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows).toHaveLength(1)
+  })
+
+  it("removes the old Host immediately when the runtime target changes", async () => {
+    const { result, rerender } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.rows).toHaveLength(2))
+    runtimeSnapshot = { target: null, connectionState: "offline", vaultState: "unlocked" }
+    rerender()
+    expect(result.current.rows).toHaveLength(1)
   })
 })
