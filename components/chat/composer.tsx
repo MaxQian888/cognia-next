@@ -258,6 +258,9 @@ import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-acti
 import { CannedResponsePicker } from "@/components/inbox/canned-response-picker"
 import { EnhanceButton } from "./composer/enhance-button"
 import { WebSearchToggle } from "./composer/web-search-toggle"
+import { RoomTargetPicker } from "./composer/room-target-picker"
+import { clearComposerTyping, noteComposerTyping } from "@/stores/chat/composer-typing-store"
+import { roomTargetsOf } from "@/stores/chat/room-target-store"
 import { SkillPicker } from "./skill-picker"
 import { ComposerSessionProvider } from "./composer/composer-session-context"
 
@@ -2227,6 +2230,12 @@ function ComposerInner(props: InnerProps) {
     (e: ChangeEvent<HTMLTextAreaElement>) => {
       controller.textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
+      // A team room's members wait for the human to finish a sentence before
+      // an auto round (ADR-0177 batch 3). The runner polls this at round
+      // boundaries, so a keystroke here is the whole signal.
+      if (props.session?.kind === "team" && props.session.teamId) {
+        noteComposerTyping(props.session.id)
+      }
       // Re-mirror the scroll onto the chip + ghost overlays. Shrinking the text
       // (or clearing it) can reset the textarea's scrollTop WITHOUT firing a
       // scroll event, which would otherwise strand the overlays at a stale
@@ -2246,7 +2255,7 @@ function ComposerInner(props: InnerProps) {
         linkFolding.fold(e.target.value, e.target.selectionStart ?? e.target.value.length)
       }
     },
-    [controller.textInput, history, isComposing, linkFolding]
+    [controller.textInput, history, isComposing, linkFolding, props.session]
   )
 
   // Leaving the box settles every remaining URL, including one just pasted with
@@ -3006,6 +3015,7 @@ function ComposerCapabilityMenu({
           it is visible without opening a menu first. */}
       <div className="flex flex-wrap items-center gap-2" data-testid="composer-capability-menu">
         <WebSearchToggle disabled={controlsDisabled} />
+        <RoomTargetPicker session={session} disabled={controlsDisabled} />
         <Button
           type="button"
           size="icon"
@@ -3539,9 +3549,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // THIS pane's conversation and cleared after the send, like the cited
       // refs, so the chip is gone the moment the quoted turn is in the list.
       const replyTo = selectComposerReplyTo(useChatStore.getState(), session?.id ?? null)
+      // The standing member pick (ADR-0177 batch 3) rides every send in a
+      // team room until the user clears it, so it is read, not consumed.
+      const targetMemberIds =
+        session?.kind === "team" && session.teamId ? roomTargetsOf(session.id) : []
       const turnMetadata: ComposerTurnMetadata = {
         ...(webSearchContext ? { webSearchContext } : {}),
         ...(replyTo ? { replyTo } : {}),
+        ...(targetMemberIds.length > 0 ? { targetMemberIds } : {}),
       }
       if (Object.keys(turnMetadata).length > 0) {
         await onSend(content, attachmentResult.manifest, templateRun, turnMetadata)
@@ -3549,6 +3564,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         await onSend(content, attachmentResult.manifest, templateRun)
       }
       if (replyTo) useChatStore.getState().setReplyTo(null, session?.id ?? null)
+      if (session?.kind === "team" && session.teamId) clearComposerTyping(session.id)
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
       // Same lifetime as the chips they describe: the citations rode exactly

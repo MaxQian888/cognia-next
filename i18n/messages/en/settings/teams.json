@@ -23,6 +23,11 @@
     "avatarEmojiPlaceholder": "🧩",
     "description": "Description",
     "descriptionPlaceholder": "(optional)",
+    "handoffTargets": "May hand the floor to",
+    "handoffTargetsAnyone": "Anyone on the team.",
+    "handoffTargetsHelp": "Names this member is allowed to pass the conversation to. Anyone until you tick someone; no ticks means nobody.",
+    "handoffTargetsNobody": "Nobody: this member finishes its own contribution.",
+    "handoffTargetsReset": "Allow anyone",
     "inheritsFromTeam": "Inherits character / team subset.",
     "mcpEmpty": "No MCP servers configured.",
     "mcpSubsetOverride": "MCP subset override",
@@ -40,6 +45,12 @@
     "orchestration": "Orchestration",
     "overrideHelp": "Each override replaces the corresponding character default for this team only. Leave blank to inherit. Skills always apply on top.",
     "pickColor": "Pick color {color}",
+    "replyConcurrencies": {
+      "sequential": "One after another",
+      "parallel": "All at once"
+    },
+    "replyConcurrency": "Reply order",
+    "replyConcurrencyHelp": "One after another lets each member read the replies before it. All at once starts every member of a round together over the same transcript.",
     "responseCap": "Maximum Agent replies per turn",
     "responseCapHelp": "Limits fan-out and moderator dispatches. Duplicate replies and repeated dispatches are suppressed.",
     "role": "Role label",
@@ -49,7 +60,9 @@
     "supervisorHelpBefore": "The supervisor receives every user turn first and may either answer alone or emit ",
     "supervisorPlaceholder": "Pick a member to be the leader",
     "systemPromptOverride": "System prompt override",
-    "systemPromptOverridePlaceholder": "(inherits character system prompt)"
+    "systemPromptOverridePlaceholder": "(inherits character system prompt)",
+    "talkativeness": "Speaks up (%)",
+    "talkativenessHelp": "How often this member chimes in on an auto round when nobody addressed it. 0 means only when handed the floor or mentioned. Needs auto rounds above 0."
   },
   "emptyHint": "No teams yet. The built-in \"Brainstorm Squad\" should appear automatically.",
   "memberCount": "{count, plural, =1 {# member} other {# members}}: {names}",
@@ -75,6 +88,7 @@
     "nameRequired": "Name is required.",
     "responseCapInvalid": "The response cap must be an integer from 1 through 12.",
     "supervisorMustBeMember": "The supervisor must be one of the team's members.",
-    "supervisorRequired": "Supervisor mode requires a designated supervisor."
+    "supervisorRequired": "Supervisor mode requires a designated supervisor.",
+    "talkativenessInvalid": "Speaks up must be a percentage from 0 through 100."
   }
 }

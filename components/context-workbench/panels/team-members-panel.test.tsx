@@ -275,14 +275,14 @@ describe("room settings (ADR-0177)", () => {
     expect(screen.getByTestId("room-settings-toggle")).toHaveAttribute("aria-expanded", "true")
   })
 
-  it("stores the reply mode and says it is not live yet", () => {
+  it("stores the reply mode and explains what the chosen mode does", () => {
     render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
     open()
     const button = screen.getByTestId("room-reply-mode-mention_only")
-    // Dormant on purpose (batch 3 reads it): labelled inert and pinned here.
-    expect(button).toHaveAttribute("data-inert", "true")
-    expect(screen.getByTestId("room-settings-inert-note")).toHaveTextContent(
-      "desktop.memberList.roomSettings.inertNote"
+    // Live since batch 3: no inert label, and the hint names the mode's effect.
+    expect(button).not.toHaveAttribute("data-inert")
+    expect(screen.getByTestId("room-settings-reply-mode-hint")).toHaveTextContent(
+      "desktop.memberList.roomSettings.replyModeHints.auto"
     )
     fireEvent.click(button)
     expect(updateSession).toHaveBeenCalledWith("s-1", {
@@ -339,9 +339,15 @@ describe("room settings (ADR-0177)", () => {
     render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
     const badge = screen.getByTestId("team-member-muted-c-2")
     expect(badge).toHaveTextContent("desktop.memberList.roomSettings.muted")
-    expect(badge).toHaveAttribute("data-inert", "true")
+    expect(badge).not.toHaveAttribute("data-inert")
     expect(screen.queryByTestId("team-member-muted-c-1")).toBeNull()
     open()
+    expect(screen.getByTestId("room-settings-reply-mode-hint")).toHaveTextContent(
+      "desktop.memberList.roomSettings.replyModeHints.asleep"
+    )
+    expect(screen.getByTestId("room-muted-hint")).toHaveTextContent(
+      "desktop.memberList.roomSettings.mutedHint"
+    )
     fireEvent.click(screen.getByTestId("room-unmute-c-2"))
     expect(updateSession).toHaveBeenCalledWith("s-1", {
       roomSettings: { mutedMemberIds: [], replyMode: "asleep" },

@@ -2,7 +2,14 @@
 
 import { useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { BotIcon, CheckCircle2Icon, ChevronDownIcon, CircleAlertIcon, UserIcon } from "lucide-react"
+import {
+  BotIcon,
+  CheckCircle2Icon,
+  ChevronDownIcon,
+  CircleAlertIcon,
+  SquareIcon,
+  UserIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,6 +38,12 @@ export interface MessageShellProps {
    */
   speakerAvatar?: AvatarSubject
   isStreaming?: boolean
+  /**
+   * Stop this speaker alone (ADR-0177 batch 3). Set only while a room
+   * member is mid-reply, so the header offers the per-member interrupt
+   * exactly when there is one to make, and the rest of the room goes on.
+   */
+  onStopSpeaker?: () => void
   children: ReactNode
 }
 
@@ -64,6 +77,7 @@ export function MessageShell({
   speakerColor,
   speakerAvatar,
   isStreaming = false,
+  onStopSpeaker,
   children,
 }: MessageShellProps) {
   const t = useTranslations("chat.messageDisplay")
@@ -174,6 +188,20 @@ export function MessageShell({
                 <span style={speakerColor ? { color: speakerColor } : undefined}>{identity}</span>
               </span>
             )}
+            {onStopSpeaker ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onStopSpeaker}
+                aria-label={t("stopSpeaker", { name: identity })}
+                title={t("stopSpeaker", { name: identity })}
+                className="size-5 text-muted-foreground hover:text-destructive"
+                data-testid="message-stop-speaker"
+              >
+                <SquareIcon className="size-3 fill-current" />
+              </Button>
+            ) : null}
             {headerItems.map((item) => (
               <Badge key={item} variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
                 {item}

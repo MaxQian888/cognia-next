@@ -23,6 +23,11 @@
     "avatarEmojiPlaceholder": "🧩",
     "description": "描述",
     "descriptionPlaceholder": "（可选）",
+    "handoffTargets": "可交接给",
+    "handoffTargetsAnyone": "团队中的任何人。",
+    "handoffTargetsHelp": "该成员可以把对话交给谁。未勾选任何人前为所有人；全部取消勾选则为没有人。",
+    "handoffTargetsNobody": "没有人：该成员只完成自己的部分。",
+    "handoffTargetsReset": "允许任何人",
     "inheritsFromTeam": "继承角色 / 团队子集。",
     "mcpEmpty": "尚未配置 MCP 服务器。",
     "mcpSubsetOverride": "MCP 子集覆盖",
@@ -40,6 +45,12 @@
     "orchestration": "编排方式",
     "overrideHelp": "每个覆盖项仅替换该角色在本团队中的默认值。留空表示继承。技能始终在最上层叠加。",
     "pickColor": "选择颜色 {color}",
+    "replyConcurrencies": {
+      "sequential": "依次回复",
+      "parallel": "同时回复"
+    },
+    "replyConcurrency": "回复顺序",
+    "replyConcurrencyHelp": "依次回复时，每位成员都能读到它之前的回复；同时回复时，一轮里的所有成员基于同一份记录一起开始。",
     "responseCap": "每轮 Agent 回复上限",
     "responseCapHelp": "限制全体响应与主持人分派数量；重复回复和重复分派会被抑制。",
     "role": "角色标签",
@@ -49,7 +60,9 @@
     "supervisorHelpBefore": "监督者会先收到每一轮用户输入,可以独自回答,或发出 ",
     "supervisorPlaceholder": "选择一位成员作为领导",
     "systemPromptOverride": "系统提示词覆盖",
-    "systemPromptOverridePlaceholder": "（继承角色的系统提示词）"
+    "systemPromptOverridePlaceholder": "（继承角色的系统提示词）",
+    "talkativeness": "主动发言（%）",
+    "talkativenessHelp": "在没人点名时，该成员在自动轮次中插话的频率。0 表示只在被交接或被 @ 时发言。需要自动轮次大于 0。"
   },
   "emptyHint": "暂无团队。内置的「Brainstorm Squad」应该会自动出现。",
   "memberCount": "{count} 位成员：{names}",
@@ -75,6 +88,7 @@
     "nameRequired": "请填写名称。",
     "responseCapInvalid": "回复上限必须是 1 到 12 之间的整数。",
     "supervisorMustBeMember": "监督者必须是团队成员之一。",
-    "supervisorRequired": "监督者模式需要指定一位监督者。"
+    "supervisorRequired": "监督者模式需要指定一位监督者。",
+    "talkativenessInvalid": "主动发言必须是 0 到 100 之间的百分比。"
   }
 }

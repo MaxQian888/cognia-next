@@ -385,7 +385,6 @@
         "mention_only": "Replies only when mentioned",
         "asleep": "Asleep"
       },
-      "inertNote": "Reply mode and muting are stored now and take effect in a later release.",
       "instructions": "Room instructions",
       "instructionsPlaceholder": "Guidance every member reads at the top of each turn…",
       "memory": "Long-term memory",
@@ -397,7 +396,13 @@
       "noMuted": "Nobody is muted.",
       "mute": "Mute {name} in this room",
       "unmute": "Unmute {name}",
-      "muted": "Muted"
+      "muted": "Muted",
+      "replyModeHints": {
+        "auto": "Members reply as the team's orchestration says, and keep talking for the configured auto rounds.",
+        "mention_only": "Members reply only to a message that @mentions one of them, and never continue on their own.",
+        "asleep": "Messages are kept and nobody replies until the mode changes."
+      },
+      "mutedHint": "Muted members never reply on their own. An @mention or a pick in the composer still reaches them."
     },
     "sharedNotes": "Shared notes",
     "show": "Show members",

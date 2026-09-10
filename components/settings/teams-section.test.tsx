@@ -495,3 +495,66 @@ describe("TeamsSection — error handling", () => {
     })
   })
 })
+
+describe("TeamsSection — orchestration fields (ADR-0177 batch 3)", () => {
+  async function openEditorWithTwoMembers(name: string) {
+    const user = userEvent.setup()
+    render(<TeamsSection />)
+    const newBtn = await screen.findByRole("button", { name: /settings\.teams\.newTeam/ })
+    await waitFor(() => expect(newBtn).not.toBeDisabled())
+    await user.click(newBtn)
+    await user.type(screen.getByPlaceholderText("settings.teams.editor.namePlaceholder"), name)
+    await user.click(screen.getByRole("button", { name: /Coding Assistant/ }))
+    await user.click(screen.getByRole("button", { name: /Writing Editor/ }))
+    return user
+  }
+
+  it("persists the reply order, sequential by default", async () => {
+    const user = await openEditorWithTwoMembers("Together")
+    await user.click(screen.getByTestId("team-reply-concurrency"))
+    await user.click(
+      await screen.findByRole("option", {
+        name: /settings\.teams\.editor\.replyConcurrencies\.parallel/,
+      })
+    )
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+    await waitFor(async () => {
+      expect((await listTeams()).find((team) => team.name === "Together")?.replyConcurrency).toBe(
+        "parallel"
+      )
+    })
+  })
+
+  it("persists a member's talkativeness and handoff graph, and resets the graph to anyone", async () => {
+    const user = await openEditorWithTwoMembers("Graph")
+    await user.click(
+      screen.getByRole("button", { name: /settings\.teams\.editor\.memberOverrides/ })
+    )
+    const talkativeness = screen.getByTestId("member-talkativeness-char_builtin_coding")
+    await user.clear(talkativeness)
+    await user.type(talkativeness, "40")
+    // Both cards start at "anyone"; a tick narrows only this member's graph.
+    expect(screen.getAllByText("settings.teams.editor.handoffTargetsAnyone")).toHaveLength(2)
+    const chip = screen.getByTestId("member-handoff-char_builtin_coding-char_builtin_writer")
+    await user.click(chip)
+    expect(chip).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getAllByText("settings.teams.editor.handoffTargetsAnyone")).toHaveLength(1)
+    // Unticking the only target is "nobody", the reset is "anyone".
+    await user.click(chip)
+    expect(screen.getByText("settings.teams.editor.handoffTargetsNobody")).toBeInTheDocument()
+    await user.click(screen.getByTestId("member-handoff-char_builtin_coding-reset"))
+    expect(screen.getAllByText("settings.teams.editor.handoffTargetsAnyone")).toHaveLength(2)
+    await user.click(chip)
+
+    await user.click(screen.getByRole("button", { name: /settings\.teams\.create/ }))
+    await waitFor(async () => {
+      const created = (await listTeams()).find((team) => team.name === "Graph")
+      expect(created?.members[0]).toMatchObject({
+        characterId: "char_builtin_coding",
+        talkativeness: 0.4,
+        handoffTargets: ["char_builtin_writer"],
+      })
+      expect(created?.members[1]?.handoffTargets).toBeUndefined()
+    })
+  })
+})

@@ -606,6 +606,20 @@
       "removeAria": "移除引用 {path}"
     },
     "removePastedChip": "移除粘贴的文本",
+    "roomTargets": {
+      "asleepDisabled": "房间处于休眠，切换回复模式前没有人会回复。",
+      "chipLabel": "发给",
+      "clear": "让房间自行决定",
+      "clearChip": "清除选择",
+      "hint": {
+        "asleep": "房间处于休眠：消息会保留，但没有人回复。",
+        "manual": "选择由谁回复，或 @ 某位成员。",
+        "mention_only": "成员只在被 @ 时回复。"
+      },
+      "muted": "已静音",
+      "title": "由谁回复这条消息",
+      "trigger": "选择由谁回复"
+    },
     "sandboxShield": {
       "inheritedDetail": "本会话目前跟随角色或应用默认值。首次进入沙盒执行时，会固定为当时的层级。",
       "label": {
@@ -1710,6 +1724,7 @@
       "error": "失败",
       "streaming": "正在回复"
     },
+    "stopSpeaker": "停止 {name}",
     "story": {
       "assistantAnswer": "这是一个信息丰富但保持克制的长回答阅读界面。",
       "rendererOwnership": "助手内容仍由现有的富消息部件渲染器负责。",

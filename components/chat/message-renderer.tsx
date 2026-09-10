@@ -135,6 +135,8 @@ import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
 import { avatarColor, deterministicColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { resolveMessageSpeaker, type SpeakerSource } from "@/lib/chat/speaker"
+import { runMetadataOf } from "@/lib/chat/message-run-metadata"
+import { useMemberStatus } from "@/stores/ui"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
@@ -313,6 +315,28 @@ function MessageRendererInner({
     if (!senderId || !characterById) return null
     return characterById.get(senderId) ?? null
   }, [senderId, characterById])
+  // The per-member stop (ADR-0177 batch 3): offered on the reply a room
+  // member is writing right now, read off the member's live status rather
+  // than the row's streaming flag, so two members replying at once each get
+  // their own. A sealed reply has run metadata; a live one does not yet.
+  const memberStatus = useMemberStatus(branchSessionId ?? null, senderId ?? "")
+  const memberBusy =
+    Boolean(senderId) &&
+    message.role === "assistant" &&
+    memberStatus === "thinking" &&
+    !runMetadataOf(message)
+  const stopSpeaker = useMemo(() => {
+    if (!memberBusy || !branchSessionId || !senderId) return undefined
+    return () => {
+      // Lazy: the stop router reaches the process-wide runner, whose module
+      // graph has no place in a renderer that only shows text.
+      void import("@/lib/chat/room/stop-member").then(({ stopRoomMember }) =>
+        stopRoomMember(branchSessionId, senderId).catch((error: unknown) => {
+          loggers.chat.warn("stop member failed", { error: String(error) })
+        })
+      )
+    }
+  }, [memberBusy, branchSessionId, senderId])
   // Who authored this, through the one resolver the prompt side also uses
   // (`lib/chat/speaker.ts`). Two ad-hoc reads used to live here, one for a
   // shared session's `AuthorRef` and one for `senderId`, and neither knew about
@@ -659,6 +683,7 @@ function MessageRendererInner({
           speakerColor={speakerAvatar ? avatarColor(speakerAvatar) : undefined}
           speakerAvatar={speakerAvatar}
           isStreaming={isStreaming}
+          onStopSpeaker={stopSpeaker}
         >
           <PluginExtensionSlot point="chat.message.before" className="mb-1 empty:hidden" />
 

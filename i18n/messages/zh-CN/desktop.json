@@ -385,7 +385,6 @@
         "mention_only": "仅被 @ 时回复",
         "asleep": "休眠"
       },
-      "inertNote": "回复模式与静音现已保存，将在后续版本生效。",
       "instructions": "房间指令",
       "instructionsPlaceholder": "每位成员在每轮开始时都会读到的指引…",
       "memory": "长期记忆",
@@ -397,7 +396,13 @@
       "noMuted": "没有成员被静音。",
       "mute": "在此房间静音 {name}",
       "unmute": "取消静音 {name}",
-      "muted": "已静音"
+      "muted": "已静音",
+      "replyModeHints": {
+        "auto": "成员按团队编排方式回复，并按设定的自动轮次继续交谈。",
+        "mention_only": "成员只回复 @ 了其中某人的消息，绝不自行继续。",
+        "asleep": "消息会保留，切换模式前没有人回复。"
+      },
+      "mutedHint": "已静音的成员不会主动回复。@ 或在输入框中选中他们仍然有效。"
     },
     "sharedNotes": "共享笔记",
     "show": "显示成员",

@@ -30,6 +30,7 @@ import { MAX_AUTO_ROUNDS } from "@/lib/claude/team-primary-router"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import {
   TEAM_ORCHESTRATIONS,
+  TEAM_REPLY_CONCURRENCIES,
   createTeam,
   deleteTeam,
   duplicateTeam,
@@ -42,6 +43,7 @@ import type {
   Team,
   TeamMember,
   TeamOrchestration,
+  TeamReplyConcurrency,
 } from "@cognia/agent-config-types"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -165,6 +167,7 @@ export function TeamsSection() {
             orchestration: "mention_round_robin",
             responseCap: "4",
             autoRounds: "0",
+            replyConcurrency: "sequential",
             supervisorCharacterId: undefined,
             mcpServerIds: undefined,
           }}
@@ -226,6 +229,7 @@ function TeamRow({
           orchestration: team.orchestration,
           responseCap: (team.maxResponses ?? 4).toString(),
           autoRounds: (team.maxAutoRounds ?? 0).toString(),
+          replyConcurrency: team.replyConcurrency ?? "sequential",
           supervisorCharacterId: team.supervisorCharacterId,
           mcpServerIds: team.mcpServerIds,
         }}
@@ -338,6 +342,7 @@ type EditorState = {
   orchestration: TeamOrchestration
   responseCap: string
   autoRounds: string
+  replyConcurrency: TeamReplyConcurrency
   supervisorCharacterId: string | undefined
   mcpServerIds: string[] | undefined
 }
@@ -351,6 +356,7 @@ type EditorOutput = {
   orchestration: TeamOrchestration
   maxResponses?: number
   maxAutoRounds?: number
+  replyConcurrency?: TeamReplyConcurrency
   supervisorCharacterId?: string
   mcpServerIds?: string[]
 }
@@ -435,6 +441,16 @@ function TeamEditor({
       toast.error(t("validation.responseCapInvalid"))
       return
     }
+    if (
+      s.members.some(
+        (m) =>
+          m.talkativeness !== undefined &&
+          (!Number.isFinite(m.talkativeness) || m.talkativeness < 0 || m.talkativeness > 1)
+      )
+    ) {
+      toast.error(t("validation.talkativenessInvalid"))
+      return
+    }
     if (s.orchestration === "supervisor") {
       if (!s.supervisorCharacterId) {
         toast.error(t("validation.supervisorRequired"))
@@ -456,6 +472,7 @@ function TeamEditor({
         orchestration: s.orchestration,
         maxResponses: responseCap,
         maxAutoRounds: autoRounds,
+        replyConcurrency: s.replyConcurrency,
         supervisorCharacterId:
           s.orchestration === "supervisor" ? s.supervisorCharacterId : undefined,
         mcpServerIds: s.mcpServerIds,
@@ -619,6 +636,28 @@ function TeamEditor({
       )}
 
       <div className="space-y-1">
+        <Label className="text-xs" htmlFor="team-reply-concurrency">
+          {tEditor("replyConcurrency")}
+        </Label>
+        <Select
+          value={s.replyConcurrency}
+          onValueChange={(v) => setS({ ...s, replyConcurrency: v as TeamReplyConcurrency })}
+        >
+          <SelectTrigger id="team-reply-concurrency" data-testid="team-reply-concurrency">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TEAM_REPLY_CONCURRENCIES.map((mode) => (
+              <SelectItem key={mode} value={mode} data-testid={`team-reply-concurrency-${mode}`}>
+                {tEditor(`replyConcurrencies.${mode}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">{tEditor("replyConcurrencyHelp")}</p>
+      </div>
+
+      <div className="space-y-1">
         <Label className="text-xs">{tEditor("members")}</Label>
         <div className="flex flex-wrap gap-1.5">
           {characters.length === 0 ? (
@@ -721,6 +760,11 @@ function TeamEditor({
                   key={m.characterId}
                   character={c}
                   member={m}
+                  teammates={s.members.flatMap((slot) => {
+                    if (slot.characterId === m.characterId) return []
+                    const teammate = characters.find((x) => x.id === slot.characterId)
+                    return teammate ? [{ id: teammate.id, name: teammate.name }] : []
+                  })}
                   mcpServers={mcpServers}
                   onPatch={(patch) => updateMember(m.characterId, patch)}
                 />
@@ -790,6 +834,8 @@ function countOverrides(members: TeamMember[]): number {
     if (m.modelOverride && m.modelOverride.trim()) n++
     if (m.allowedToolsOverride && m.allowedToolsOverride.length > 0) n++
     if (m.mcpServerIdsOverride && m.mcpServerIdsOverride.length > 0) n++
+    if (m.talkativeness !== undefined && m.talkativeness > 0) n++
+    if (m.handoffTargets !== undefined) n++
   }
   return n
 }
@@ -797,12 +843,31 @@ function countOverrides(members: TeamMember[]): number {
 interface MemberOverrideProps {
   character: Character
   member: TeamMember
+  /** The other members, for the handoff graph (ADR-0177 batch 3). */
+  teammates: readonly { id: string; name: string }[]
   mcpServers: McpServer[]
   onPatch: (patch: Partial<Omit<TeamMember, "characterId">>) => void
 }
 
-function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOverrideProps) {
+function MemberOverrideCard({
+  character,
+  member,
+  teammates,
+  mcpServers,
+  onPatch,
+}: MemberOverrideProps) {
   const tEditor = useTranslations("settings.teams.editor")
+  const talkativenessPercent = Math.round((member.talkativeness ?? 0) * 100)
+  const handoffTargets = member.handoffTargets
+  const toggleHandoffTarget = (id: string) => {
+    // Absent means anyone. The first tick narrows the graph to that one
+    // member; unticking the last leaves an empty list, which is "nobody",
+    // and the reset link is how the room goes back to "anyone".
+    const current = new Set(handoffTargets ?? [])
+    if (current.has(id)) current.delete(id)
+    else current.add(id)
+    onPatch({ handoffTargets: [...current] })
+  }
   return (
     <Card className="space-y-2 border-dashed bg-muted/20 p-3">
       <div className="flex items-center gap-2">
@@ -846,6 +911,81 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
           placeholder={tEditor("systemPromptOverridePlaceholder")}
           className="text-xs"
         />
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label className="text-[11px]" htmlFor={`member-talkativeness-${character.id}`}>
+            {tEditor("talkativeness")}
+          </Label>
+          <Input
+            id={`member-talkativeness-${character.id}`}
+            type="number"
+            min={0}
+            max={100}
+            step={5}
+            value={talkativenessPercent}
+            onChange={(e) => {
+              const percent = Number(e.target.value)
+              onPatch({
+                talkativeness:
+                  Number.isFinite(percent) && percent > 0
+                    ? Math.min(100, Math.max(0, percent)) / 100
+                    : undefined,
+              })
+            }}
+            className="h-8 text-xs"
+            data-testid={`member-talkativeness-${character.id}`}
+          />
+          <p className="text-[10px] text-muted-foreground">{tEditor("talkativenessHelp")}</p>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[11px]">{tEditor("handoffTargets")}</Label>
+          <div className="flex flex-wrap gap-1" data-testid={`member-handoff-${character.id}`}>
+            {teammates.map((teammate) => {
+              const active = handoffTargets?.includes(teammate.id) ?? false
+              return (
+                <Button
+                  key={teammate.id}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={active}
+                  onClick={() => toggleHandoffTarget(teammate.id)}
+                  data-testid={`member-handoff-${character.id}-${teammate.id}`}
+                  className={
+                    "inline-flex items-center rounded-pill border px-2 py-0.5 text-[11px] transition-colors " +
+                    (active
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
+                  }
+                >
+                  {teammate.name}
+                </Button>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {handoffTargets === undefined
+              ? tEditor("handoffTargetsAnyone")
+              : handoffTargets.length === 0
+                ? tEditor("handoffTargetsNobody")
+                : null}
+            {handoffTargets !== undefined ? (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => onPatch({ handoffTargets: undefined })}
+                className="h-auto px-1 py-0 text-[10px]"
+                data-testid={`member-handoff-${character.id}-reset`}
+              >
+                {tEditor("handoffTargetsReset")}
+              </Button>
+            ) : null}
+          </p>
+          <p className="text-[10px] text-muted-foreground">{tEditor("handoffTargetsHelp")}</p>
+        </div>
       </div>
 
       <div className="space-y-1">

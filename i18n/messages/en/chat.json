@@ -606,6 +606,20 @@
       "removeAria": "Remove reference to {path}"
     },
     "removePastedChip": "Remove pasted text",
+    "roomTargets": {
+      "asleepDisabled": "The room is asleep. Nobody replies until the reply mode changes.",
+      "chipLabel": "To",
+      "clear": "Let the room decide",
+      "clearChip": "Clear the pick",
+      "hint": {
+        "asleep": "The room is asleep: messages are kept, nobody replies.",
+        "manual": "Pick who replies, or @mention a member.",
+        "mention_only": "Members reply only when @mentioned."
+      },
+      "muted": "Muted",
+      "title": "Who replies to this message",
+      "trigger": "Choose who replies"
+    },
     "sandboxShield": {
       "inheritedDetail": "This conversation follows the character or app default. It will be pinned to the tier it runs on the first time it uses the sandbox.",
       "label": {
@@ -1710,6 +1724,7 @@
       "error": "Failed",
       "streaming": "Responding"
     },
+    "stopSpeaker": "Stop {name}",
     "story": {
       "assistantAnswer": "A stable reading surface for a long answer with progressive technical detail.",
       "rendererOwnership": "Assistant content remains owned by the existing rich-part renderers.",

@@ -177,3 +177,31 @@ describe("MessageShell", () => {
     })
   })
 })
+
+describe("per-member stop (ADR-0177 batch 3)", () => {
+  it("offers the stop only while a named speaker is mid-reply, and names them", () => {
+    const onStopSpeaker = jest.fn()
+    const { rerender } = render(
+      <MessageShell
+        message={message}
+        display={resolveMessageDisplayOptions()}
+        speakerName="Ana"
+        isStreaming
+        onStopSpeaker={onStopSpeaker}
+      >
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const stop = screen.getByTestId("message-stop-speaker")
+    expect(stop).toHaveAttribute("aria-label", "Stop Ana")
+    fireEvent.click(stop)
+    expect(onStopSpeaker).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <MessageShell message={message} display={resolveMessageDisplayOptions()} speakerName="Ana">
+        <p>Hello</p>
+      </MessageShell>
+    )
+    expect(screen.queryByTestId("message-stop-speaker")).toBeNull()
+  })
+})

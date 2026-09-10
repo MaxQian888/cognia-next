@@ -20,9 +20,9 @@
  *   transcript each turn. Collapsible, debounced-persisted, unchanged.
  * - **Room settings** (ADR-0177). Reply mode, room instructions, the memory
  *   switch and the muted members, stored on `ChatSession.roomSettings`.
- *   Instructions reach every member's prompt and the memory switch is what
- *   the memory plane reads. Reply mode and muting are stored now and honoured
- *   by the router in a later batch, and the section says so.
+ *   Instructions reach every member's prompt, the memory switch is what the
+ *   memory plane reads, and the reply mode and the mute list are what the
+ *   room runner routes on (batch 3).
  * - **The members.** Each with its live status, its role in *this* team, the
  *   model it actually runs on (the member override, else the character's), and
  *   a supervisor marker when the team has a leader.
@@ -307,13 +307,13 @@ function persistRoomSettings(
 }
 
 /**
- * The room's own settings (ADR-0177, batch 1). Collapsed by default with a
- * one-line summary, because the members list is what the panel is for.
+ * The room's own settings (ADR-0177). Collapsed by default with a one-line
+ * summary, because the members list is what the panel is for.
  *
- * Reply mode and muting are the two dormant controls: their values are stored
- * on the row today and read by the router in batch 3. They render, they
- * persist, and the note under them says they do not yet steer a turn, which
- * is the label hard rule 7 asks for.
+ * Every control here is live. The reply mode's hint under the buttons says
+ * what the chosen mode does to the next turn, and the mute list's hint says
+ * what a mute does not do (an `@` or a composer pick still reaches the
+ * member), because those are the two rules a reader would otherwise guess.
  */
 function RoomSettingsSection({
   teamSessionId,
@@ -398,7 +398,6 @@ function RoomSettingsSection({
                   size="sm"
                   variant={resolved.replyMode === mode ? "secondary" : "outline"}
                   aria-pressed={resolved.replyMode === mode}
-                  data-inert="true"
                   data-testid={`room-reply-mode-${mode}`}
                   onClick={() => persistRoomSettings(teamSessionId, session, { replyMode: mode })}
                   className="h-7 px-2 text-xs"
@@ -407,8 +406,11 @@ function RoomSettingsSection({
                 </Button>
               ))}
             </div>
-            <p className="text-[11px] text-muted-foreground" data-testid="room-settings-inert-note">
-              {t("roomSettings.inertNote")}
+            <p
+              className="text-[11px] text-muted-foreground"
+              data-testid="room-settings-reply-mode-hint"
+            >
+              {t(`roomSettings.replyModeHints.${resolved.replyMode}`)}
             </p>
           </div>
 
@@ -464,7 +466,6 @@ function RoomSettingsSection({
                       type="button"
                       size="sm"
                       variant="outline"
-                      data-inert="true"
                       data-testid={`room-unmute-${id}`}
                       title={t("roomSettings.unmute", { name: nameOf(id) })}
                       aria-label={t("roomSettings.unmute", { name: nameOf(id) })}
@@ -481,6 +482,9 @@ function RoomSettingsSection({
                 ))}
               </ul>
             )}
+            <p className="text-[11px] text-muted-foreground" data-testid="room-muted-hint">
+              {t("roomSettings.mutedHint")}
+            </p>
           </div>
         </div>
       )}
@@ -585,7 +589,6 @@ function MemberRow({
                 {muted ? (
                   <span
                     className="shrink-0 rounded-sm bg-muted px-1 text-[10px] text-muted-foreground"
-                    data-inert="true"
                     data-testid={`team-member-muted-${character.id}`}
                   >
                     {t("roomSettings.muted")}
@@ -632,11 +635,7 @@ function MemberRow({
         <ContextMenuItem disabled={status !== "thinking"} onSelect={stop}>
           {t("stopMember")}
         </ContextMenuItem>
-        <ContextMenuItem
-          data-inert="true"
-          data-testid={`team-member-mute-${character.id}`}
-          onSelect={onToggleMute}
-        >
+        <ContextMenuItem data-testid={`team-member-mute-${character.id}`} onSelect={onToggleMute}>
           {muted
             ? t("roomSettings.unmute", { name: character.name })
             : t("roomSettings.mute", { name: character.name })}
