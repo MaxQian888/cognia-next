@@ -11,7 +11,7 @@ import { prefixReplyContext } from "@/lib/chat/reply-to"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
-import { externalAgentIdFromProviderId } from "@/lib/ai/agent/external/session-models"
+import { resolveExternalAgentModelAxis } from "@/lib/ai/agent/external/session-models"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
@@ -2358,21 +2358,17 @@ export function useClaudeChat() {
           // The model and the thinking level this turn runs on, resolved once
           // for BOTH executors.
           //
-          // The model is the one the picker persisted on this conversation,
-          // replayed onto whatever session the agent opens next. `select()`
-          // writes it through to a session that already exists, but a catalog
-          // pick made before the first turn has no session to write to, and
-          // every later turn opens against an agent that was never told. The
-          // row was being written and never read back, so the chip showed a
-          // model the turn did not run on.
-          //
-          // Guarded on the marker naming THIS agent rather than on the model
-          // being non-empty: the same column holds the provider model for a
-          // built-in lane, and `externalAgentIdFromProviderId` returns null for
-          // the legacy unscoped marker, which cannot be attributed to an agent
-          // and so must not be replayed at one. `extAgentId` is the
-          // configuration id on the host lane, which is also the id the picker
-          // stamps, so one guard covers both.
+          // The model is the one the picker persisted, replayed onto whatever
+          // session the agent opens next. `select()` writes it through to a
+          // session that already exists, but a catalog pick made before the
+          // first turn has no session to write to, and every later turn opens
+          // against an agent that was never told. The row was being written
+          // and never read back, so the chip showed a model the turn did not
+          // run on. `resolveExternalAgentModelAxis` owns both places the choice
+          // can live and the marker guard that keeps a built-in lane's model
+          // out of an agent's mouth. `extAgentId` is the configuration id on
+          // the host lane, which is also the id the picker stamps, so one call
+          // covers both lanes.
           //
           // The thinking level reached only the built-in runtime before this.
           // On an external agent the control was silently inert. Both fields
@@ -2392,11 +2388,20 @@ export function useClaudeChat() {
           // no model axis at all, so a conversation bound to a host
           // configuration ran on the agent's own default however loudly the
           // chip promised otherwise.
+          //
+          // `createSession` inherits the marked app default onto new rows, so
+          // the app-wide half read here is the backstop for rows created
+          // before that and for a default changed mid-conversation.
+          const appSettings = useSettingsStore.getState().settings
+          const externalModel = resolveExternalAgentModelAxis({
+            agentId: extAgentId,
+            sessionModel: session?.model,
+            sessionProviderOverride: session?.providerOverride,
+            defaultModel: appSettings?.defaultModel,
+            defaultProvider: appSettings?.defaultProvider,
+          })
           const externalModelAxes = {
-            ...(session?.model &&
-            externalAgentIdFromProviderId(session.providerOverride) === extAgentId
-              ? { model: session.model }
-              : {}),
+            ...(externalModel ? { model: externalModel } : {}),
             ...(sendOptions.requestedEffort || sendOptions.effort
               ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
               : {}),

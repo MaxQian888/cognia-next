@@ -68,6 +68,47 @@ export function externalAgentIdFromProviderId(providerId: string | undefined): s
   }
 }
 
+/** Where a turn's model choice can have been recorded, in precedence order. */
+export interface ExternalAgentModelAxisInput {
+  /** The agent this turn actually runs on. */
+  agentId: string
+  /** `ChatSession.model` and its provider stamp. */
+  sessionModel?: string
+  sessionProviderOverride?: string
+  /** `AppSettings.defaultModel` and its provider stamp. */
+  defaultModel?: string
+  defaultProvider?: string
+}
+
+/**
+ * The model a turn on THIS agent should replay, or `undefined` for "the agent
+ * keeps whatever it is on".
+ *
+ * Two places can hold the choice, and reading only the first is what made a
+ * picked model vanish. The conversation row is the normal home, written by the
+ * picker whenever a conversation exists. But the composer offers an agent's
+ * models on a brand-new chat too, and there is no row yet to write to, so the
+ * picker records it as the app-wide default instead. A send path that read
+ * only the row therefore dropped the very first turn's model and let the agent
+ * boot onto its own, with nothing anywhere saying so.
+ *
+ * Both sources are guarded on the marker naming this agent, never merely on
+ * being non-empty. The same two columns hold an ordinary provider's model for
+ * the built-in lane, and replaying one of those at an agent would ask for an
+ * id it has never heard of. The legacy unscoped marker resolves to `null` and
+ * is skipped for the same reason: it cannot be attributed to any agent.
+ */
+export function resolveExternalAgentModelAxis(
+  input: ExternalAgentModelAxisInput
+): string | undefined {
+  const owns = (model: string | undefined, providerId: string | undefined) =>
+    model && externalAgentIdFromProviderId(providerId) === input.agentId ? model : undefined
+  return (
+    owns(input.sessionModel, input.sessionProviderOverride) ??
+    owns(input.defaultModel, input.defaultProvider)
+  )
+}
+
 /**
  * What an agent offers on its THINKING axis, plus how a choice reaches it.
  *

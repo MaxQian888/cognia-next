@@ -561,6 +561,122 @@ describe("credential diagnostics", () => {
     expect(session.args).toContain("--no-approve")
     await adapter.disconnect()
   })
+
+  it("gives a CLI probe the same env a session gets", async () => {
+    // A probe that answers about the user's Pi has to run as the user's Pi
+    // runs. Provider credentials live in this env, so a probe without it can
+    // report a version or a credential verdict no real session would see.
+    const host = createFakeHost()
+    const withEnv: ExternalAgentConfig = {
+      ...config,
+      process: { command: "pi", args: ["--mode", "rpc"], env: { DEEPSEEK_API_KEY: "k" } },
+    }
+    const adapter = new PiRpcClientAdapter({ host })
+    const connecting = adapter.connect(withEnv)
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    expect(host.spawns[0].env).toEqual({ DEEPSEEK_API_KEY: "k" })
+    await adapter.disconnect()
+  })
+})
+
+describe("session-less model discovery", () => {
+  /** Start a discovery read and hand back the probe spawn it produced. */
+  async function startDiscovery(host: FakeHost, adapter: PiRpcClientAdapter) {
+    const reading = adapter.listAgentModelsViaRpc()
+    // One turn for the listeners, one for the spawn, one for the first write.
+    for (let i = 0; i < 4; i++) await Promise.resolve()
+    const probe = host.spawns.find((spawn) => spawn.args.includes("--no-session"))!
+    return { reading, probe }
+  }
+
+  it("asks over RPC, with the session's own flags and env, then kills the process", async () => {
+    // The whole point of moving off `--list-models`: a session reads its
+    // models through `get_available_models`, so discovery reading them any
+    // other way produces a differently shaped list of the same models.
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const { reading, probe } = await startDiscovery(host, adapter)
+    expect(probe.args).toEqual([
+      "--mode",
+      "rpc",
+      "--no-session",
+      "--no-extensions",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-approve",
+    ])
+    // No bundled extension and no tool floor: this process is asked one
+    // question and can neither run a tool nor write a session file.
+    expect(probe.args).not.toContain("-e")
+    expect(probe.args).not.toContain("--tools")
+    replyTo(host, "get_available_models", {
+      models: [
+        { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek V4 Pro" },
+        { id: "claude-opus-5", provider: "commandcode", name: "Claude Opus 5 (CC)" },
+      ],
+    })
+    await expect(reading).resolves.toEqual({
+      // No session, so no current model: the picker falls back to the
+      // conversation's stored choice, which is what the agent will be asked
+      // to run.
+      currentModelId: "",
+      availableModels: [
+        { modelId: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+        { modelId: "commandcode/claude-opus-5", name: "Claude Opus 5 (CC)" },
+      ],
+    })
+    expect(host.killed).toContain(probe.id)
+    await adapter.disconnect()
+  })
+
+  it("keeps Pi's own order and labels, which is what a session will show", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const { reading, probe } = await startDiscovery(host, adapter)
+    replyTo(host, "get_available_models", {
+      models: [
+        { id: "z-model", provider: "zeta", name: "Zeta Model" },
+        // Pi's ids can themselves be namespaced. The provider prefix goes in
+        // front of the whole thing, which is what `set_model` splits back off.
+        { id: "deepseek/deepseek-v4-flash", provider: "commandcode" },
+      ],
+    })
+    const state = await reading
+    expect(state?.availableModels).toEqual([
+      { modelId: "zeta/z-model", name: "Zeta Model" },
+      // No display name from Pi, so the id stands in for one.
+      {
+        modelId: "commandcode/deepseek/deepseek-v4-flash",
+        name: "commandcode/deepseek/deepseek-v4-flash",
+      },
+    ])
+    expect(host.killed).toContain(probe.id)
+    await adapter.disconnect()
+  })
+
+  it("answers null when the probe fails, and still kills the process", async () => {
+    // `null` is "asked and could not say", which the caller renders as absent
+    // rather than as "this agent has no models". The kill is what stops a
+    // failed read from leaving a Pi process behind on every retry.
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const { reading, probe } = await startDiscovery(host, adapter)
+    host.emitExit(probe.id, 1)
+    await expect(reading).resolves.toBeNull()
+    expect(host.killed).toContain(probe.id)
+    await adapter.disconnect()
+  })
+
+  it("answers null for an agent that lists nothing", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const { reading } = await startDiscovery(host, adapter)
+    replyTo(host, "get_available_models", { models: [] })
+    await expect(reading).resolves.toBeNull()
+    await adapter.disconnect()
+  })
   /**
    * Drive one non-RPC probe: wait for its spawn, answer it, and hand back both
    * the adapter's result and the argv it was actually launched with.

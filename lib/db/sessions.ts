@@ -11,6 +11,7 @@ import { recordTombstones } from "@/lib/sync/tombstones"
 import { resolveScopeProjectId } from "./project-scope"
 import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { revokeClaimsForDeletedSession } from "@/lib/memory/lifecycle/claim-deletion-closure"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
@@ -211,6 +212,47 @@ export async function createSession(
     }
   }
 
+  // A model picked from an external agent's own list, before this conversation
+  // existed to hold it.
+  //
+  // The composer offers that list on a brand-new chat, because the runtime
+  // lane is resolved from the app-wide selection when there is no row to ask.
+  // With no row, the picker's only place to record the choice is
+  // `AppSettings.defaultModel` plus the reserved provider marker. Nothing then
+  // carried it onto the row this function creates, and the external send path
+  // reads the ROW, so the very first turn ran on whatever model the agent
+  // happens to boot with. Silently: no surface claimed otherwise, because the
+  // agent's live model is the truth every surface shows.
+  //
+  // Only the marked pair is inherited. An ordinary provider default must keep
+  // following the app setting rather than freezing onto every new row, which
+  // is a different contract and not one this fix is entitled to change.
+  //
+  // Stamping it on a conversation that then runs on the built-in lane is
+  // harmless by construction: `resolveSendOptions` drops both columns when the
+  // marker names an agent this turn is not on, which is the whole reason the
+  // marker exists rather than a bare model id.
+  // The two halves are inherited together or not at all: a marker stamped
+  // beside a model that came from a preset would name an agent that never
+  // offered it.
+  let agentDefault: { model: string; providerOverride: string } | undefined
+  if (
+    partial?.model === undefined &&
+    partial?.providerOverride === undefined &&
+    autoApplied.model === undefined
+  ) {
+    try {
+      const settings = await getSettings()
+      const model = settings?.defaultModel?.trim()
+      const provider = settings?.defaultProvider
+      if (model && provider && isExternalAgentProviderId(provider)) {
+        agentDefault = { model, providerOverride: provider }
+      }
+    } catch (err) {
+      console.warn("createSession: external-agent default model lookup failed", err)
+    }
+  }
+
   const session: ChatSession = {
     // Everything the caller seeded. The signature promises
     // `Partial<Omit<ChatSession, …>>`, but it used to be honoured by a
@@ -231,7 +273,8 @@ export async function createSession(
     projectId,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
-    model: partial?.model ?? autoApplied.model,
+    model: partial?.model ?? autoApplied.model ?? agentDefault?.model,
+    ...(agentDefault ? { providerOverride: agentDefault.providerOverride } : {}),
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,
     permissionMode: partial?.permissionMode ?? autoApplied.permissionMode,

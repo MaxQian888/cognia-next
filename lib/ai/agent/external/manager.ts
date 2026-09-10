@@ -687,6 +687,31 @@ export class ExternalAgentManager {
     try {
       const pi = this.getPiRpcAdapter(agentId)
       if (pi) {
+        // The RPC first, because it is the one a live session will use. Both
+        // sources enumerate the same models, but only this one carries Pi's
+        // display names and Pi's ordering, so the list the user picks from
+        // before the first turn is the same list they see after it.
+        const viaRpc = await pi.listAgentModelsViaRpc()
+        if (viaRpc) {
+          const surface = resolveExternalAgentModels({ sessionModels: viaRpc })
+          return {
+            status: "ok",
+            data: {
+              models: {
+                ...surface,
+                currentModelId: null,
+                write: surface.choices.length ? { kind: "session-seed" } : { kind: "none" },
+              },
+              thinking: EMPTY_THINKING_SURFACE,
+            },
+          }
+        }
+        // The CLI listing as a floor. It reaches the same set through a
+        // different projection, so falling back costs display names and Pi's
+        // ordering, and it only happens when a discovery process could not be
+        // started at all, which is a state in which a real session would fare
+        // no better. Offering the models with worse labels beats telling the
+        // user this agent has none.
         const listing = await pi.listAgentModels()
         if (listing.status !== "ok") throw new Error("Pi's model listing was unreadable")
         return {
@@ -2434,7 +2459,8 @@ export class ExternalAgentManager {
         return
       }
       try {
-        await adapter.setConfigOption(session.id, modelOption.id, model)
+        const updated = await adapter.setConfigOption(session.id, modelOption.id, model)
+        this.assertModelLanded(updated, model)
         session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
       } catch (error) {
         externalAgentManagerLogger.warn("setConfigOption failed for model", {
@@ -2461,6 +2487,33 @@ export class ExternalAgentManager {
       })
       throw modelRefusedError(model, error)
     }
+  }
+
+  /**
+   * Refuse a write the agent accepted and did not perform.
+   *
+   * An adapter's `setConfigOption` answers with the option list as it stands
+   * AFTER the write, which makes the write checkable rather than merely
+   * attempted. That distinction is not theoretical on this rail: Pi accepts an
+   * unsupported thinking level, answers success and silently clamps to `off`,
+   * and an agent that did the same on its model axis would run the whole turn
+   * on a model nobody chose while every surface named the one they did.
+   *
+   * Only a positively contradictory read fails. An adapter that answers with
+   * no model option, or with no current value, has told us nothing, and
+   * refusing a turn over an unreadable answer would ground agents that are
+   * working fine.
+   */
+  private assertModelLanded(updated: AcpConfigOption[] | undefined, model: string): void {
+    const option = updated?.find(
+      (candidate): candidate is Extract<AcpConfigOption, { type: "select" }> =>
+        candidate.category === "model" && candidate.type === "select"
+    )
+    const landed = option?.currentValue
+    if (!landed || landed === model) return
+    throw new Error(
+      `the agent accepted the change and stayed on "${landed}", so it may not exist in this session's catalog`
+    )
   }
 
   /**

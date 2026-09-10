@@ -299,6 +299,17 @@ export function piExtensionVerdictReason(verdict: PiExtensionVerdict): string {
 /** Concurrent Pi processes per host before `resource_limit`. */
 export const PI_MAX_CONCURRENT_PROCESSES = 4
 
+/**
+ * How long a session-less model read may wait for Pi to come up and answer.
+ *
+ * Generous rather than tight: the process has to boot, resolve its providers
+ * and load whatever the extension policy allows before it reads stdin at all,
+ * and the alternative to waiting is a picker that reports "this agent has no
+ * models" about an agent that was merely slow. Measured at roughly a second
+ * and a half on a warm machine.
+ */
+const PI_MODEL_DISCOVERY_TIMEOUT_MS = 20000
+
 export interface PiRpcAdapterOptions {
   host?: PiRpcHost
   maxProcesses?: number
@@ -546,7 +557,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
     try {
       await this.host.invoke("spawn_external_agent", {
-        config: { id: probeId, command, args, cwd: config.process?.cwd },
+        config: {
+          id: probeId,
+          command,
+          args,
+          cwd: config.process?.cwd,
+          // A probe that answers about the user's Pi has to run as the user's
+          // Pi runs. Provider credentials and base URLs live in this env, so a
+          // probe without it can report a version, a provider set or a
+          // credential verdict that no real session would ever see.
+          env: config.process?.env,
+        },
       })
       await Promise.race([exited, delay(timeoutMs)])
       return { stdout, exitCode }
@@ -1483,6 +1504,123 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   /** Use the same extension policy for catalog discovery and actual sessions. */
   private listModelsArgs(): string[] {
     return ["--list-models", ...extensionPolicyArgs(this.extensionPolicy())]
+  }
+
+  /**
+   * Every model Pi can run, read through the SAME RPC a live session uses.
+   *
+   * `--list-models` answers the same SET, verified against Pi 0.85.1 as 75 ids
+   * on both sides with zero difference, but it is a different PROJECTION of
+   * it. The table has no display-name column, so a catalog built from it
+   * labels every row `provider/id` and orders them alphabetically by provider,
+   * while a session labels them with Pi's own `name` ("DeepSeek V4 Flash") in
+   * Pi's own order. The picker therefore changed shape the moment the first
+   * turn opened a session, which reads as the agent having offered a different
+   * list, and the row the user had picked from the first list was no longer
+   * where they left it.
+   *
+   * So discovery asks the way a session asks, on a process that exists only
+   * for the question: `--mode rpc --no-session`, with no bundled extension and
+   * no tool floor, so nothing here can run a tool or write a session file. The
+   * extension policy IS the configured one, because it decides which providers
+   * Pi can see at all, and a catalog read under a different policy would offer
+   * models the session then refuses.
+   *
+   * `null` means the probe could not answer, which the caller renders as
+   * "asked and could not say" rather than as "this agent has no models".
+   */
+  async listAgentModelsViaRpc(): Promise<AcpSessionModelState | null> {
+    const config = this._config
+    if (!config) return null
+    const probeId = `${config.id}:models-rpc-probe:${Date.now()}`
+    const peer = new PiRpcPeer({
+      writeRaw: (frame) =>
+        this.host
+          .invoke("send_to_external_agent", { agentId: probeId, message: frame })
+          .then(() => undefined),
+      // A discovery process is asked one question and answers it. Pi still
+      // emits startup events on the same stream. None of them belong to a
+      // session, so none of them are dispatched anywhere.
+      onEvent: () => {},
+      onOrphanResponse: () => {},
+      // The pending command below carries the failure through its own reject.
+      onProtocolError: () => {},
+    })
+    // Same two-framing latch as `startSession`: the Node backend emits base64
+    // on `stdout-raw`, the Rust host emits `\n`-stripped lines on `stdout`.
+    let framing: "unknown" | "raw" | "line" = "unknown"
+    const unlisten: Array<() => void> = []
+    try {
+      unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stdout-raw",
+          (payload) => {
+            if (payload.agentId !== probeId) return
+            framing = "raw"
+            peer.ingest(base64ToBytes(payload.data))
+          }
+        )
+      )
+      unlisten.push(
+        await this.host.listen<{ agentId: string; data: string }>(
+          "external-agent://stdout",
+          (payload) => {
+            if (payload.agentId !== probeId || framing === "raw") return
+            framing = "line"
+            peer.ingest(textToBytes(`${payload.data}\n`))
+          }
+        )
+      )
+      unlisten.push(
+        await this.host.listen<{ agentId: string; code?: number | null }>(
+          "external-agent://exit",
+          (payload) => {
+            if (payload.agentId !== probeId) return
+            peer.endOfStream()
+            peer.rejectAll(`Pi discovery process exited (code ${payload.code ?? "unknown"})`)
+          }
+        )
+      )
+
+      await this.host.invoke("spawn_external_agent", {
+        config: {
+          id: probeId,
+          command: config.process?.command ?? "pi",
+          args: ["--mode", "rpc", "--no-session", ...extensionPolicyArgs(this.extensionPolicy())],
+          cwd: config.process?.cwd,
+          // The same env a session gets. Provider credentials live here, and
+          // reading the catalog under a different environment is exactly how
+          // two lists of the same thing learn to disagree.
+          env: config.process?.env,
+          framing: "raw",
+        },
+      })
+      const reply = await peer.sendCommand<{
+        models?: Array<{ id?: string; provider?: string; name?: string }>
+      }>("get_available_models", {}, PI_MODEL_DISCOVERY_TIMEOUT_MS)
+      const models = reply.models ?? []
+      if (models.length === 0) return null
+      return {
+        // No session, so no current model. The picker falls back to the
+        // conversation's stored choice, which is what the agent will be asked
+        // to run. See `catalogModelSurface`.
+        currentModelId: "",
+        availableModels: models.map((model) => ({
+          modelId: qualifyModel(model),
+          name: model.name ?? qualifyModel(model),
+        })),
+      }
+    } catch {
+      return null
+    } finally {
+      peer.close("Pi model discovery finished")
+      for (const off of unlisten) off()
+      try {
+        await this.host.invoke("kill_external_agent", { agentId: probeId })
+      } catch {
+        // Already exited, or never started.
+      }
+    }
   }
 
   /**

@@ -59,6 +59,7 @@ import {
   type ExternalAgentLifecycleEvent,
 } from "./manager"
 import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
+import { PiRpcClientAdapter } from "./pi-rpc-client"
 import {
   __setModelSurfaceDepsForTests,
   cachedAgentModelSurface,
@@ -487,6 +488,104 @@ describe("fetchSessionModelSurface (the async twin the sync capabilities could n
     const manager = freshManager()
     await expect(manager.fetchSessionModelSurface("missing", "s")).resolves.toEqual({
       status: "unsupported",
+    })
+  })
+
+  describe("the Pi catalog reads what a Pi session will read", () => {
+    /**
+     * A real `PiRpcClientAdapter`, because the branch under test is selected
+     * by `instanceof`. Everything that would touch a process is overridden.
+     */
+    class FakePi extends PiRpcClientAdapter {
+      viaRpc: jest.Mock = jest.fn(async () => null)
+      viaCli: jest.Mock = jest.fn(async () => ({ status: "unreadable" }))
+      isConnected() {
+        return true
+      }
+      listAgentModelsViaRpc() {
+        return this.viaRpc() as ReturnType<PiRpcClientAdapter["listAgentModelsViaRpc"]>
+      }
+      listAgentModels() {
+        return this.viaCli() as ReturnType<PiRpcClientAdapter["listAgentModels"]>
+      }
+    }
+
+    let pi: FakePi
+
+    async function piManager(): Promise<ExternalAgentManager> {
+      const manager = freshManager()
+      pi = new FakePi()
+      protocolAdapterRegistry.register("pi-rpc", () => pi as never)
+      await manager.addAgent(buildBaseConfig({ id: "pi-1", protocol: "pi-rpc" }), {
+        connect: false,
+      })
+      return manager
+    }
+
+    afterEach(() => {
+      protocolAdapterRegistry.unregister("pi-rpc")
+    })
+
+    it("projects the RPC answer, with Pi's own names and order", async () => {
+      // The CLI table has no display-name column, so a catalog built from it
+      // labels every row `provider/id` and sorts by provider. The session
+      // labels them with Pi's `name` in Pi's order, and the picker therefore
+      // changed shape the moment the first turn opened a session.
+      const manager = await piManager()
+      pi.viaRpc.mockResolvedValueOnce({
+        currentModelId: "",
+        availableModels: [
+          { modelId: "zeta/z-model", name: "Zeta Model" },
+          { modelId: "commandcode/claude-opus-5", name: "Claude Opus 5 (CC)" },
+        ],
+      })
+      const result = await manager.fetchAgentModelCatalog("pi-1")
+      expect(result).toMatchObject({
+        status: "ok",
+        data: {
+          models: {
+            choices: [
+              { modelId: "zeta/z-model", name: "Zeta Model" },
+              { modelId: "commandcode/claude-opus-5", name: "Claude Opus 5 (CC)" },
+            ],
+            // No session yet, so the picker highlights the conversation's own
+            // stored choice rather than an agent default nobody picked.
+            currentModelId: null,
+            write: { kind: "session-seed" },
+          },
+        },
+      })
+      expect(pi.viaCli).not.toHaveBeenCalled()
+    })
+
+    it("falls back to the CLI listing when no discovery process can be started", async () => {
+      // Same models, worse labels. Offering them beats telling the user this
+      // agent has none, and it only happens in a state where a real session
+      // would fare no better.
+      const manager = await piManager()
+      pi.viaRpc.mockResolvedValueOnce(null)
+      pi.viaCli.mockResolvedValueOnce({
+        status: "ok",
+        models: [{ provider: "commandcode", id: "claude-opus-5" }],
+      })
+      await expect(manager.fetchAgentModelCatalog("pi-1")).resolves.toMatchObject({
+        status: "ok",
+        data: {
+          models: {
+            choices: [{ modelId: "commandcode/claude-opus-5", name: "commandcode/claude-opus-5" }],
+            write: { kind: "session-seed" },
+          },
+        },
+      })
+    })
+
+    it("reports an error rather than an empty catalog when both reads fail", async () => {
+      const manager = await piManager()
+      pi.viaRpc.mockResolvedValueOnce(null)
+      pi.viaCli.mockResolvedValueOnce({ status: "unreadable" })
+      await expect(manager.fetchAgentModelCatalog("pi-1")).resolves.toMatchObject({
+        status: "error",
+      })
     })
   })
 })
@@ -1431,6 +1530,64 @@ describe("execute — model selection", () => {
     await expect(
       m.execute("agent-1", "two", { sessionId: first.sessionId, model: "bogus-model" })
     ).rejects.toThrow(/refused the model "bogus-model" \(unknown model\)/)
+  })
+
+  it("fails the turn when the adapter accepts the model and stays on another", async () => {
+    // The other half of a refusal, and the quiet one. Pi accepts an
+    // unsupported thinking level, answers success and silently clamps, so an
+    // agent doing the same on its model axis would run the whole turn on a
+    // model nobody chose. `setConfigOption` answers with the list as it stands
+    // after the write, which is what makes the write checkable at all.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sid: string) => [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "deepseek/deepseek-v4-pro",
+        options: [
+          { value: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
+          { value: "commandcode/claude-opus-5", name: "Claude Opus 5" },
+        ],
+      },
+    ])
+    currentMock.setConfigOptionImpl.mockResolvedValueOnce([
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        // Accepted, and nothing moved.
+        currentValue: "deepseek/deepseek-v4-pro",
+        options: [],
+      },
+    ])
+
+    await expect(
+      m.execute("agent-1", "one", { model: "commandcode/claude-opus-5" })
+    ).rejects.toThrow(/stayed on "deepseek\/deepseek-v4-pro"/)
+  })
+
+  it("does not fail a turn over an answer it cannot read", async () => {
+    // Only a positively contradictory read refuses. An adapter that answers
+    // with no model option has told us nothing, and grounding a working agent
+    // over an unreadable reply is worse than the silence this guard replaced.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sid: string) => [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "deepseek/deepseek-v4-pro",
+        options: [{ value: "commandcode/claude-opus-5", name: "Claude Opus 5" }],
+      },
+    ])
+    currentMock.setConfigOptionImpl.mockResolvedValueOnce([])
+    await expect(
+      m.execute("agent-1", "one", { model: "commandcode/claude-opus-5" })
+    ).resolves.toMatchObject({ success: true })
   })
 
   it("books a turn that died while being prepared as a failed run", async () => {

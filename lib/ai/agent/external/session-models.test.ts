@@ -5,6 +5,7 @@ import {
   externalAgentProviderId,
   findModelConfigOption,
   isExternalAgentProviderId,
+  resolveExternalAgentModelAxis,
   resolveExternalAgentModels,
   EMPTY_THINKING_SURFACE,
   findThinkingConfigOption,
@@ -210,5 +211,80 @@ describe("findThinkingConfigOption", () => {
       currentValue: true,
     } as AcpConfigOption
     expect(findThinkingConfigOption([boolish])).toBeUndefined()
+  })
+})
+
+describe("resolveExternalAgentModelAxis", () => {
+  const AGENT = "pi-local"
+  const marker = externalAgentProviderId(AGENT)
+
+  it("replays the conversation's own pick", () => {
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        sessionModel: "commandcode/claude-opus-5",
+        sessionProviderOverride: marker,
+      })
+    ).toBe("commandcode/claude-opus-5")
+  })
+
+  it("falls back to the app default a pick made before the conversation existed", () => {
+    // The composer offers the agent's models on a brand-new chat, where the
+    // picker has no row to write to and saves the choice as the app default.
+    // Reading only the row is what made the first turn run on the agent's own
+    // model with nothing said about it.
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        defaultModel: "deepseek/deepseek-v4-pro",
+        defaultProvider: marker,
+      })
+    ).toBe("deepseek/deepseek-v4-pro")
+  })
+
+  it("prefers the conversation over the app default", () => {
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        sessionModel: "a/one",
+        sessionProviderOverride: marker,
+        defaultModel: "b/two",
+        defaultProvider: marker,
+      })
+    ).toBe("a/one")
+  })
+
+  it("never replays a model that belongs to another lane", () => {
+    // Same two columns, different vocabulary. A provider model asked of an
+    // agent is an id it has never heard of, and the legacy unscoped marker
+    // cannot be attributed to any agent at all.
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        sessionModel: "claude-sonnet-5",
+        sessionProviderOverride: "anthropic",
+        defaultModel: "gpt-5.5",
+        defaultProvider: "openai",
+      })
+    ).toBeUndefined()
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        sessionModel: "a/one",
+        sessionProviderOverride: "cognia:external-agent",
+      })
+    ).toBeUndefined()
+  })
+
+  it("never replays another agent's pick", () => {
+    expect(
+      resolveExternalAgentModelAxis({
+        agentId: AGENT,
+        sessionModel: "a/one",
+        sessionProviderOverride: externalAgentProviderId("codex-local"),
+        defaultModel: "b/two",
+        defaultProvider: externalAgentProviderId("codex-local"),
+      })
+    ).toBeUndefined()
   })
 })

@@ -271,6 +271,62 @@ describe("createSession — default thinking level", () => {
   })
 })
 
+describe("createSession — external-agent default model", () => {
+  const AGENT_MARKER = "cognia:external-agent:pi-local"
+
+  it("inherits a model picked from an agent's own list before this chat existed", async () => {
+    // The composer offers an external agent's catalog on a brand-new chat,
+    // where the picker has no row to write to and records the choice as the
+    // app default instead. Nothing carried it onto the row, and the external
+    // send path reads the row, so the first turn ran on whatever model the
+    // agent boots with while every surface said otherwise.
+    await saveSettings({
+      defaultModel: "commandcode/claude-opus-5",
+      defaultProvider: AGENT_MARKER,
+    })
+    const session = await createSession({ title: "t" })
+    expect(session.model).toBe("commandcode/claude-opus-5")
+    expect(session.providerOverride).toBe(AGENT_MARKER)
+    const stored = await getSession(session.id)
+    expect(stored?.model).toBe("commandcode/claude-opus-5")
+    expect(stored?.providerOverride).toBe(AGENT_MARKER)
+  })
+
+  it("leaves an ordinary provider default to keep following the app setting", async () => {
+    // A different contract. Freezing every new row onto the app's provider
+    // model would make changing the default stop reaching conversations that
+    // never chose anything, which is not what this inheritance is for.
+    await saveSettings({ defaultModel: "claude-sonnet-5", defaultProvider: "anthropic" })
+    const session = await createSession({ title: "t" })
+    expect(session.model).toBeUndefined()
+    expect(session.providerOverride).toBeUndefined()
+  })
+
+  it("lets an explicit model on the call win, marker and all", async () => {
+    await saveSettings({
+      defaultModel: "commandcode/claude-opus-5",
+      defaultProvider: AGENT_MARKER,
+    })
+    const session = await createSession({ title: "t", model: "a/one" })
+    expect(session.model).toBe("a/one")
+    expect(session.providerOverride).toBeUndefined()
+  })
+
+  it("never stamps the marker beside a model that came from a preset", async () => {
+    // The pair is inherited together or not at all. A marker naming an agent
+    // next to a preset's model would ask that agent for an id it never offered.
+    const preset = await createPreset({ name: "p", content: "sys", model: "preset/model" })
+    await setDefaultPreset(preset.id)
+    await saveSettings({
+      defaultModel: "commandcode/claude-opus-5",
+      defaultProvider: AGENT_MARKER,
+    })
+    const session = await createSession({ title: "t" })
+    expect(session.model).toBe("preset/model")
+    expect(session.providerOverride).toBeUndefined()
+  })
+})
+
 describe("forkSessionFromParent", () => {
   it("inherits the parent's message display override", async () => {
     const parent = await createSession({
