@@ -16,7 +16,7 @@ import {
   ShieldCheckIcon,
   Trash2Icon,
 } from "lucide-react"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 
 import {
   AlertDialog,
@@ -206,6 +206,7 @@ export function WorkspaceEnvironmentList({
   // but is forward-looking (it answers "Overdue" for anything in the past),
   // because it exists for next-run times.
   const format = useFormatter()
+  const now = useNow({ updateInterval: 60_000 })
   const router = useRouter()
   const [rows, setRows] = useState<WorkspaceEnvironmentSummary[] | null>(null)
   const [showAllProjects, setShowAllProjects] = useState(false)
@@ -531,7 +532,7 @@ export function WorkspaceEnvironmentList({
         */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 pt-0.5 text-[11px] text-muted-foreground">
           <span title={row.lastUsedAt ? new Date(row.lastUsedAt).toLocaleString() : undefined}>
-            {row.lastUsedAt ? format.relativeTime(new Date(row.lastUsedAt)) : t("neverUsed")}
+            {row.lastUsedAt ? format.relativeTime(new Date(row.lastUsedAt), now) : t("neverUsed")}
           </span>
           {row.sizeBytes !== undefined ? (
             <>

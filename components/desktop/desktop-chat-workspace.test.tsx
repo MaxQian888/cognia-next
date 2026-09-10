@@ -265,7 +265,7 @@ jest.mock("@/components/chat/chat-pane-group", () => ({
     // through it, so the stub has to fill it the way the real composer does.
     const ref = props.composerRef as { current: { insertMention: unknown } | null } | undefined
     if (ref) ref.current = { insertMention }
-    return <div data-testid="chat-pane-group" />
+    return <div data-testid="chat-pane-group">{props.runtimeNotice as React.ReactNode}</div>
   },
 }))
 jest.mock("@/components/chat/workspace-trust-gate", () => ({

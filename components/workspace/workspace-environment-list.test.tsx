@@ -1,11 +1,15 @@
 /** @jest-environment jsdom */
 
+const mockNow = new Date("2026-09-09T08:00:00Z")
+const mockRelativeTime = jest.fn(() => "relative-time")
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: { error?: string }) =>
     values?.error ? `${key}:${values.error}` : key,
   // The row reports when an environment was last used. A relative time needs
   // no locale data to be asserted on, so the mock returns a stable marker.
-  useFormatter: () => ({ relativeTime: () => "relative-time" }),
+  useFormatter: () => ({ relativeTime: mockRelativeTime }),
+  useNow: () => mockNow,
 }))
 
 const listMock = jest.fn()
@@ -539,4 +543,12 @@ describe("row pulse", () => {
     expect(dot).toHaveAttribute("data-pulse", "attention")
     expect(dot).toHaveAttribute("aria-label", "pulses.attention")
   })
+})
+
+it("formats last use against an explicit shared clock", async () => {
+  const lastUsedAt = mockNow.getTime() - 60_000
+  listMock.mockResolvedValue([{ ...managed, lastUsedAt }])
+  render(<WorkspaceEnvironmentList presentation="sheet" rootDir="/repo" />)
+  await screen.findByText("relative-time")
+  expect(mockRelativeTime).toHaveBeenCalledWith(new Date(lastUsedAt), mockNow)
 })

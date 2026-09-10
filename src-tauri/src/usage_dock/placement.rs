@@ -46,10 +46,6 @@ pub const SNAP_THRESHOLD_PX: f64 = 44.0;
 pub const MIN_SCALE: f64 = 0.6;
 pub const MAX_SCALE: f64 = 1.2;
 
-/// Rows the expanded rail will render. More than this and the rail stops being
-/// a glance and starts being a window the user has to read.
-pub const MAX_VISIBLE_ROWS: usize = 5;
-
 /// Round to a whole physical pixel.
 ///
 /// A window positioned on a fractional pixel is composited with a half-pixel
@@ -169,27 +165,6 @@ pub fn point_in_rect(point: (f64, f64), origin: (f64, f64), size: (f64, f64)) ->
         && point.0 < origin.0 + size.0
         && point.1 >= origin.1
         && point.1 < origin.1 + size.1
-}
-
-/// Logical size of the rail for a row count and user scale.
-///
-/// The collapsed rail shows one row. Expanding grows only along the long axis,
-/// so the rail never encroaches further into the screen than the user's chosen
-/// thickness, which is the property that makes an edge rail feel docked rather
-/// than like a floating window that happens to be near an edge.
-pub fn rail_size(edge: DockEdge, rows: usize, scale: f64) -> (f64, f64) {
-    const ROW: f64 = 34.0;
-    const THICKNESS: f64 = 56.0;
-    const PADDING: f64 = 8.0;
-    let scale = clamp_scale(scale);
-    let rows = rows.clamp(1, MAX_VISIBLE_ROWS) as f64;
-    let long = (ROW * rows + PADDING) * scale;
-    let short = THICKNESS * scale;
-    if edge.is_vertical() || edge == DockEdge::Floating {
-        (align(short), align(long))
-    } else {
-        (align(long), align(short))
-    }
 }
 
 #[cfg(test)]
@@ -385,41 +360,6 @@ mod tests {
         assert!(point_in_rect((0.0, 0.0), (0.0, 0.0), (10.0, 10.0)));
         assert!(!point_in_rect((10.0, 5.0), (0.0, 0.0), (10.0, 10.0)));
         assert!(!point_in_rect((-1.0, 5.0), (0.0, 0.0), (10.0, 10.0)));
-    }
-
-    #[test]
-    fn expanding_grows_only_along_the_long_axis() {
-        let (w1, h1) = rail_size(DockEdge::Right, 1, 1.0);
-        let (w5, h5) = rail_size(DockEdge::Right, 5, 1.0);
-        assert_eq!(w1, w5, "thickness must not change when rows are added");
-        assert!(h5 > h1);
-    }
-
-    #[test]
-    fn a_horizontal_rail_swaps_the_axes() {
-        let (vw, vh) = rail_size(DockEdge::Right, 3, 1.0);
-        let (hw, hh) = rail_size(DockEdge::Top, 3, 1.0);
-        assert_eq!((vw, vh), (hh, hw));
-    }
-
-    #[test]
-    fn rail_size_clamps_the_row_count_to_the_visible_maximum() {
-        assert_eq!(
-            rail_size(DockEdge::Right, 99, 1.0),
-            rail_size(DockEdge::Right, MAX_VISIBLE_ROWS, 1.0)
-        );
-        assert_eq!(
-            rail_size(DockEdge::Right, 0, 1.0),
-            rail_size(DockEdge::Right, 1, 1.0)
-        );
-    }
-
-    #[test]
-    fn rail_size_scales_and_stays_pixel_aligned() {
-        let (w, h) = rail_size(DockEdge::Right, 3, 0.73);
-        assert_eq!(w, w.round());
-        assert_eq!(h, h.round());
-        assert!(w < rail_size(DockEdge::Right, 3, 1.0).0);
     }
 
     #[test]

@@ -153,6 +153,8 @@
     "viewArchived": "Show archived conversations"
   },
   "chatRuntime": {
+    "connectionTitle": "Waiting for your host",
+    "connecting": "Reconnecting to the selected host. Check its address and make sure the service is running.",
     "actions": {
       "connectionSettings": "Connection settings",
       "pair": "Pair a host"
@@ -160,7 +162,7 @@
     "states": {
       "available": "Chat is available.",
       "incompatible": "The current host does not provide a compatible chat protocol.",
-      "offline": "The current host is offline. Drafts stay in this browser and are not sent automatically.",
+      "offline": "Cannot reach the selected host. Check its address and make sure the service is running.",
       "queued": "This action will be sent when the current host reconnects.",
       "readOnly": "Cached conversations remain available, but sending is disabled.",
       "requiresGrant": "This device is missing the host permission required for chat.",

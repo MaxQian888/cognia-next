@@ -2757,6 +2757,22 @@ describe("virtualized flat lists", () => {
     renderWith(many(400, "Chat"))
     expect(screen.queryByTestId("channel-list-virtual-rows")).toBeNull()
   })
+
+  test("requests scrolling when keyboard focus moves to an unmounted row", () => {
+    conversationSidebar = { groupBy: "none", sortBy: "title" }
+    const scrollTo = jest.fn()
+    const previous = HTMLElement.prototype.scrollTo
+    HTMLElement.prototype.scrollTo = scrollTo
+    try {
+      renderWith(many(400, "Chat"))
+      const list = screen.getByTestId("channel-list-virtual-rows")
+      scrollTo.mockClear()
+      fireEvent.keyDown(list, { key: "End" })
+      expect(scrollTo).toHaveBeenCalled()
+    } finally {
+      HTMLElement.prototype.scrollTo = previous
+    }
+  })
 })
 
 test("Canvas guild renders nothing (canvas has its own rail)", () => {
@@ -3172,6 +3188,9 @@ describe("title-bar projection", () => {
     expect(rail.className).toContain("border-l")
     expect(rail.className).not.toContain("border-r")
     const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    expect(handle).toHaveAttribute("data-edge-resize-handle")
+    expect(handle.className).toContain("touch-none")
+    expect(handle.querySelector(".edge-resize-grip")).toBeInTheDocument()
     expect(handle.className).toContain("left-0")
     expect(handle.className).not.toContain("right-0")
   })

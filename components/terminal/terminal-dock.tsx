@@ -95,7 +95,15 @@ import { TerminalTabStrip } from "./terminal-tab-strip"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { messagePermalinkQuery } from "@/lib/chat/message-permalink"
 
-export function TerminalDock() {
+export function TerminalDock({
+  keepVisible = false,
+  resizeBasisPx,
+}: {
+  /** The region owns exit teardown; keep xterm visible until it finishes. */
+  keepVisible?: boolean
+  /** The same parent axis used by the region to resolve stored percentages. */
+  resizeBasisPx?: number
+} = {}) {
   const t = useTranslations("terminal.dock")
   const panelOpen = useTerminalStore((s) => s.panelOpen)
   const setPanelOpen = useTerminalStore((s) => s.setPanelOpen)
@@ -341,8 +349,8 @@ export function TerminalDock() {
     async (sessionName: string) => {
       const { buildTmuxAttachCommand } = await import("@/lib/terminal/multiplexer")
       const spawned = await spawnWithFeedback({})
-      if (!spawned) return
-      const session = getLiveSession(spawned)
+      if (spawned.kind !== "spawned") return
+      const session = getLiveSession(spawned.sessionId)
       if (!session) return
       await session.write(`${buildTmuxAttachCommand(sessionName)}\n`)
     },
@@ -609,10 +617,10 @@ export function TerminalDock() {
     onReset: toggleMaximized,
     step: 2,
     edge: axis.edge,
-    scale: viewport > 0 ? 100 / viewport : 1,
+    scale: (resizeBasisPx ?? viewport) > 0 ? 100 / (resizeBasisPx ?? viewport) : 1,
   })
 
-  if (!panelOpen) return null
+  if (!panelOpen && !keepVisible) return null
 
   const right = panelPosition === "right"
   // The empty state's action depends on whether a session *can* be created,
@@ -650,10 +658,15 @@ export function TerminalDock() {
         tabIndex={0}
         aria-label={right ? t("resizeVertical") : t("resize")}
         data-testid="terminal-dock-resize-handle"
+        data-edge-resize-handle=""
+        data-dragging={resize.dragging || undefined}
+        aria-valuenow={axis.size}
+        aria-valuemin={axis.min}
+        aria-valuemax={axis.max}
         // 10px transparent hit zone (was a 4px sliver — too small to grab,
         // especially by touch) with a 2px visible line centred on the border.
         className={cn(
-          "group absolute z-10 flex items-center focus-visible:outline-none",
+          "group absolute z-10 flex touch-none select-none items-center focus-visible:outline-none",
           right
             ? "-left-1 bottom-0 top-0 w-2.5 cursor-col-resize justify-center"
             : "-top-1 left-0 right-0 h-2.5 cursor-row-resize"
@@ -661,16 +674,16 @@ export function TerminalDock() {
         onPointerDown={resize.onPointerDown}
         onPointerMove={resize.onPointerMove}
         onPointerUp={resize.onPointerUp}
+        onPointerCancel={resize.onPointerCancel}
+        onLostPointerCapture={resize.onLostPointerCapture}
         onKeyDown={resize.onKeyDown}
         onDoubleClick={resize.onDoubleClick}
       >
         <span
           aria-hidden
-          className={cn(
-            "bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary",
-            right ? "h-full w-0.5" : "h-0.5 w-full"
-          )}
+          className={cn("edge-resize-line", right ? "h-full w-0.5" : "h-0.5 w-full")}
         />
+        <span aria-hidden className="edge-resize-grip" />
       </div>
       <TerminalTabStrip
         tabs={tabs}

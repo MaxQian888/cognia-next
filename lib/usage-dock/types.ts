@@ -15,7 +15,7 @@ export const DOCK_EDGES: readonly DockEdge[] = ["left", "right", "top", "bottom"
 /** What the gauge on each row measures. */
 export type DockGaugeMode = "quota" | "budget"
 
-/** Rows the expanded rail will show. Mirrors `placement::MAX_VISIBLE_ROWS`. */
+/** Maximum rows rendered by the expanded rail; Rust receives its measured size. */
 export const MAX_DOCK_ROWS = 5
 
 /** Scale bounds. Mirrors `placement::MIN_SCALE` / `MAX_SCALE`. */

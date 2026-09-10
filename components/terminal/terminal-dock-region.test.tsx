@@ -10,7 +10,16 @@ import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { TerminalDockRegion } from "./terminal-dock-region"
 
 jest.mock("@/components/terminal/terminal-dock", () => ({
-  TerminalDock: () => <div data-testid="terminal-dock-stub" />,
+  TerminalDock: ({
+    keepVisible,
+    resizeBasisPx,
+  }: {
+    keepVisible?: boolean
+    resizeBasisPx?: number
+  }) =>
+    useTerminalStore.getState().panelOpen || keepVisible ? (
+      <div data-testid="terminal-dock-stub" data-resize-basis={resizeBasisPx} />
+    ) : null,
 }))
 
 const flowMotion = { reduce: false, durationScale: 1 }
@@ -99,6 +108,7 @@ describe("TerminalDockRegion", () => {
     // 40% of the measured 1000px parent, in px — so the inner surface can hold
     // still while the outer box animates.
     expect(region).toHaveStyle({ height: "400px" })
+    expect(screen.getByTestId("terminal-dock-stub")).toHaveAttribute("data-resize-basis", "1000")
     expect(region.className).toContain("transition-[width,height]")
     expect(region.className).toContain(SHELL_DOCK_TIMING_CLASS)
   })

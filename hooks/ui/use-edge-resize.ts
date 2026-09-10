@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react"
 
 /** Clamp `value` into `[min, max]`. */
@@ -52,6 +52,8 @@ export interface UseEdgeResizeResult {
   onPointerDown: (e: ReactPointerEvent) => void
   onPointerMove: (e: ReactPointerEvent) => void
   onPointerUp: (e: ReactPointerEvent) => void
+  onPointerCancel: (e: ReactPointerEvent) => void
+  onLostPointerCapture: (e: ReactPointerEvent) => void
   onKeyDown: (e: ReactKeyboardEvent) => void
   onDoubleClick: () => void
 }
@@ -77,11 +79,18 @@ export function useEdgeResize({
   // `"left"` and `"top"` handles sit on the near edge, so the panel grows as the
   // pointer moves toward negative coordinates.
   const inverted = edge === "left" || edge === "top"
-  const startRef = useRef<{ x: number; y: number; width: number } | null>(null)
+  const startRef = useRef<{
+    x: number
+    y: number
+    width: number
+    pointerId: number
+    target: Element
+  } | null>(null)
   const [dragging, setDragging] = useState(false)
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
+      if ((e.button != null && e.button !== 0) || startRef.current) return
       e.preventDefault()
       const target = e.currentTarget as Element
       if (typeof target.setPointerCapture === "function") {
@@ -91,7 +100,7 @@ export function useEdgeResize({
           // jsdom / unsupported — pointer capture is a best-effort nicety.
         }
       }
-      startRef.current = { x: e.clientX, y: e.clientY, width }
+      startRef.current = { x: e.clientX, y: e.clientY, width, pointerId: e.pointerId, target }
       setDragging(true)
     },
     [width]
@@ -100,7 +109,7 @@ export function useEdgeResize({
   const onPointerMove = useCallback(
     (e: ReactPointerEvent) => {
       const start = startRef.current
-      if (!start) return
+      if (!start || e.pointerId !== start.pointerId) return
       const delta = (vertical ? e.clientY - start.y : e.clientX - start.x) * scale
       const raw = inverted ? start.width - delta : start.width + delta
       onChange(clamp(raw, min, max))
@@ -108,19 +117,66 @@ export function useEdgeResize({
     [vertical, inverted, scale, min, max, onChange]
   )
 
-  const endDrag = useCallback((e: ReactPointerEvent) => {
-    if (!startRef.current) return
+  const finishDrag = useCallback(() => {
+    const start = startRef.current
+    if (!start) return
     startRef.current = null
     setDragging(false)
-    const target = e.currentTarget as Element
-    if (typeof target.releasePointerCapture === "function") {
-      try {
-        target.releasePointerCapture(e.pointerId)
-      } catch {
-        // best-effort — see onPointerDown.
-      }
+    try {
+      start.target.releasePointerCapture?.(start.pointerId)
+    } catch {
+      // Capture may already be lost after cancellation or window blur.
     }
   }, [])
+
+  const endDrag = useCallback(
+    (e: ReactPointerEvent) => {
+      if (startRef.current?.pointerId === e.pointerId) finishDrag()
+    },
+    [finishDrag]
+  )
+
+  useEffect(() => {
+    if (!dragging) return
+    const previous = document.body.getAttribute("data-edge-resizing")
+    document.body.setAttribute("data-edge-resizing", vertical ? "vertical" : "horizontal")
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !startRef.current) return
+      event.preventDefault()
+      onChange(clamp(startRef.current.width, min, max))
+      finishDrag()
+    }
+    // Native listeners also protect consumers that only bind down/move/up.
+    const target = startRef.current?.target
+    const cancelled = (event: Event) => {
+      if ((event as PointerEvent).pointerId === startRef.current?.pointerId) finishDrag()
+    }
+    target?.addEventListener?.("lostpointercapture", cancelled)
+    target?.addEventListener?.("pointercancel", cancelled)
+    window.addEventListener("blur", finishDrag)
+    window.addEventListener("keydown", cancel)
+    return () => {
+      window.removeEventListener("blur", finishDrag)
+      window.removeEventListener("keydown", cancel)
+      target?.removeEventListener?.("lostpointercapture", cancelled)
+      target?.removeEventListener?.("pointercancel", cancelled)
+      if (previous === null) document.body.removeAttribute("data-edge-resizing")
+      else document.body.setAttribute("data-edge-resizing", previous)
+    }
+  }, [dragging, vertical, finishDrag, onChange, min, max])
+
+  useEffect(
+    () => () => {
+      const start = startRef.current
+      startRef.current = null
+      try {
+        start?.target.releasePointerCapture?.(start.pointerId)
+      } catch {
+        // Unmount can follow the browser releasing capture itself.
+      }
+    },
+    []
+  )
 
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent) => {
@@ -131,12 +187,16 @@ export function useEdgeResize({
         : inverted
           ? (["ArrowLeft", "ArrowRight"] as const)
           : (["ArrowRight", "ArrowLeft"] as const)
+      const nudge = e.shiftKey ? step / 4 : step
       if (e.key === grow) {
         e.preventDefault()
-        onChange(clamp(width + step, min, max))
+        onChange(clamp(width + nudge, min, max))
       } else if (e.key === shrink) {
         e.preventDefault()
-        onChange(clamp(width - step, min, max))
+        onChange(clamp(width - nudge, min, max))
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault()
+        onChange(e.key === "Home" ? min : max)
       } else if ((e.key === "Enter" || e.key === " ") && onReset) {
         e.preventDefault()
         onReset()
@@ -147,5 +207,14 @@ export function useEdgeResize({
 
   const onDoubleClick = useCallback(() => onReset?.(), [onReset])
 
-  return { dragging, onPointerDown, onPointerMove, onPointerUp: endDrag, onKeyDown, onDoubleClick }
+  return {
+    dragging,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+    onLostPointerCapture: endDrag,
+    onKeyDown,
+    onDoubleClick,
+  }
 }

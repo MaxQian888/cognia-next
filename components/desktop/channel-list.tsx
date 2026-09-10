@@ -206,6 +206,7 @@ import { useTranslations } from "next-intl"
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -320,8 +321,10 @@ const VIRTUAL_ROW_ESTIMATE = 44
 function VirtualRows({
   sessions,
   renderRow,
+  focusedId,
 }: {
   sessions: ChatSession[]
+  focusedId: string | null
   /**
    * Renders one row, given the positioning the virtualizer needs on its `<li>`.
    * `SessionRow` already accepts both (`nodeRef` / `nodeStyle`) because a drag
@@ -333,6 +336,26 @@ function VirtualRows({
   ) => ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollMargin, setScrollMargin] = useState(0)
+  useLayoutEffect(() => {
+    const element = scrollRef.current
+    const viewport = element?.closest<HTMLElement>("[data-slot=scroll-area-viewport]")
+    if (!element || !viewport) return
+    // Section headings and pinned rows precede this list in the shared
+    // viewport. Virtual offsets must use that same coordinate system.
+    const measure = () =>
+      setScrollMargin(
+        element.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top +
+          viewport.scrollTop
+      )
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(viewport)
+    if (element.parentElement) observer.observe(element.parentElement)
+    if (element.parentElement?.parentElement) observer.observe(element.parentElement.parentElement)
+    return () => observer.disconnect()
+  }, [])
   // TanStack Virtual returns non-memoizable functions; the React Compiler
   // correctly skips it. Nothing to fix on our side.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -344,8 +367,15 @@ function VirtualRows({
       scrollRef.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]") ?? null,
     estimateSize: () => VIRTUAL_ROW_ESTIMATE,
     overscan: 8,
+    scrollMargin,
     getItemKey: (index) => sessions[index]!.id,
   })
+  const focusedIndex = focusedId ? sessions.findIndex((session) => session.id === focusedId) : -1
+  useEffect(() => {
+    // An unmounted row cannot run SessionRow's scrollIntoView effect.
+    // Materialize it first so Home/End and arrows cross the window boundary.
+    if (focusedIndex >= 0) virtualizer.scrollToIndex(focusedIndex, { align: "auto" })
+  }, [focusedIndex, virtualizer])
   const items = virtualizer.getVirtualItems()
   return (
     <div ref={scrollRef} data-testid="channel-list-virtual-rows">
@@ -366,7 +396,7 @@ function VirtualRows({
               top: 0,
               left: 0,
               width: "100%",
-              transform: `translateY(${item.start}px)`,
+              transform: `translateY(${item.start - scrollMargin}px)`,
             },
           })
         )}
@@ -651,17 +681,25 @@ function SidebarResizeHandle({
 }) {
   const t = useTranslations("desktop.channelList")
   const onRight = side === "right"
-  const { dragging, onPointerDown, onPointerMove, onPointerUp, onKeyDown, onDoubleClick } =
-    useEdgeResize({
-      width,
-      min: SIDEBAR_WIDTH_MIN,
-      max: SIDEBAR_WIDTH_MAX,
-      onChange,
-      onReset,
-      // A right-docked sidebar grows as the pointer moves *left*, so the hook
-      // has to invert the delta — that is exactly what its `edge` option is.
-      edge: onRight ? "left" : "right",
-    })
+  const {
+    dragging,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel,
+    onLostPointerCapture,
+    onKeyDown,
+    onDoubleClick,
+  } = useEdgeResize({
+    width,
+    min: SIDEBAR_WIDTH_MIN,
+    max: SIDEBAR_WIDTH_MAX,
+    onChange,
+    onReset,
+    // A right-docked sidebar grows as the pointer moves *left*, so the hook
+    // has to invert the delta — that is exactly what its `edge` option is.
+    edge: onRight ? "left" : "right",
+  })
   return (
     <div
       role="separator"
@@ -674,15 +712,21 @@ function SidebarResizeHandle({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onLostPointerCapture}
+      data-edge-resize-handle=""
+      data-dragging={dragging || undefined}
       onKeyDown={onKeyDown}
       onDoubleClick={onDoubleClick}
       className={cn(
-        "absolute inset-y-0 z-10 w-1.5 cursor-col-resize",
+        "absolute inset-y-0 z-10 flex w-2.5 touch-none select-none items-center justify-center cursor-col-resize",
         onRight ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2",
-        "hover:bg-primary/30 focus-visible:bg-primary/40 focus-visible:outline-none",
-        dragging && "bg-primary/40"
+        "focus-visible:outline-none"
       )}
-    />
+    >
+      <span aria-hidden className="edge-resize-line h-full w-0.5" />
+      <span aria-hidden className="edge-resize-grip" />
+    </div>
   )
 }
 
@@ -2871,7 +2915,11 @@ function ConversationSections({
           section.sessions.length > VIRTUAL_ROW_THRESHOLD
         const renderRow = section.kind === "search" ? renderStaticRow : renderSortableRow
         const rows = virtualize ? (
-          <VirtualRows sessions={section.sessions} renderRow={renderPositionedRow} />
+          <VirtualRows
+            sessions={section.sessions}
+            renderRow={renderPositionedRow}
+            focusedId={focusedId}
+          />
         ) : (
           <ul className="flex flex-col gap-0.5">
             {section.sessions.map((session) => renderRow(session))}

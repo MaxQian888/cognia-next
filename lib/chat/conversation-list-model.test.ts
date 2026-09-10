@@ -1096,6 +1096,23 @@ describe("sortBy", () => {
     expect(model.orderedIds).toEqual(["s2", "s10"])
   })
 
+  it("keeps locale-equivalent titles in deterministic activity and id order", () => {
+    const rows = [
+      session("z", { title: "Résumé 2" }),
+      session("a", { title: "resume 2" }),
+      session("new", { title: "RESUME 2", lastMessageAt: NOW + 1 }),
+      session("ten", { title: "resume 10" }),
+    ]
+    for (const input of [rows, [...rows].reverse()]) {
+      expect(buildConversationSections(input, [], opts({ sortBy: "title" })).orderedIds).toEqual([
+        "new",
+        "a",
+        "z",
+        "ten",
+      ])
+    }
+  })
+
   it("floats unread conversations without losing recency underneath", () => {
     expect(flat("unread", { unreadIds: new Set(["alpha"]) })).toEqual(["alpha", "gamma", "beta"])
   })

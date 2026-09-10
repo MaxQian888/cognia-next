@@ -62,6 +62,7 @@ import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-tar
 import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { cn } from "@/lib/utils"
+import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 import {
   SCHEDULED_ITEM_KINDS,
   type ScheduledItemKind,
@@ -396,15 +397,14 @@ export default function MobileSchedulerPage() {
 
       {/* FAB → create new task. Anchored to viewport so it stays visible while
           the list scrolls. The default FAB offset only clears the safe-area;
-          on `/me/*` the fixed `MobileTabBar` (h-14 + safe-area) is still
-          mounted, so lift the FAB above it — `theme(spacing.14)` matches the
-          shell's `pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]`
-          reservation — to stop it covering the bottom nav / "我" tab. */}
+          on `/me/*` the fixed `MobileTabBar` is still mounted, so lift the FAB
+          above it or it covers the bottom nav / "我" tab. The reserve is
+          stated once, in `lib/shell/compact-shell.ts`. */}
       {!showingDetail && (
         <FloatingActionButton
           aria-label={t("mobile.fabCreateAria") || t("createTask") || "Create task"}
           data-testid="mobile-scheduler-fab"
-          className="bottom-[calc(theme(spacing.14)+env(safe-area-inset-bottom,0px)+1rem)]"
+          className={COMPACT_ABOVE_TAB_BAR_BOTTOM}
           onClick={() => setShowCreateSheet(true)}
         />
       )}

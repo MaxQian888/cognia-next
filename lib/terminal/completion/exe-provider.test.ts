@@ -22,7 +22,7 @@ function ctx(
 const signal = new AbortController().signal
 
 function setup(exes: string[] | (() => Promise<unknown>), desktop = true) {
-  const invoke = jest.fn(typeof exes === "function" ? exes : async () => exes)
+  const invoke = jest.fn(typeof exes === "function" ? exes : async () => ({ items: exes }))
   const provider = createExeCompletionProvider({ invoke, isDesktop: () => desktop })
   return { invoke, provider }
 }
@@ -98,7 +98,7 @@ describe("exe completion provider", () => {
     const ac = new AbortController()
     const { provider } = setup(async () => {
       ac.abort()
-      return ["gitk"]
+      return { items: ["gitk"] }
     })
     expect(await provider.getCompletions(ctx("git"), ac.signal)).toEqual([])
   })

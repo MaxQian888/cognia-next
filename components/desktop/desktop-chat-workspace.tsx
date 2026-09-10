@@ -706,42 +706,6 @@ export function DesktopChatWorkspace() {
                     sessionId={activeSession?.id ?? null}
                     promptNonce={trustPromptNonce}
                   />
-                  {composerDisabled ? (
-                    <div
-                      className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/60 px-3 py-2 text-sm"
-                      role="status"
-                      data-testid="chat-runtime-notice"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium">{runtimeT("title")}</p>
-                        <p className="text-muted-foreground">
-                          {runtimeT(
-                            `states.${runtimeAvailabilityMessageKey(chatAvailability.state)}`
-                          )}
-                        </p>
-                      </div>
-                      {runtimeRecovery.kind !== "none" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (runtimeRecovery.kind === "route") {
-                              router.push(runtimeRecovery.href)
-                            } else if (runtimeRecovery.kind === "local-settings") {
-                              openSettings(runtimeRecovery.section)
-                            }
-                          }}
-                        >
-                          {runtimeT(
-                            chatAvailability.state === "requires-pairing"
-                              ? "actions.pair"
-                              : "actions.connectionSettings"
-                          )}
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {/* Concurrent chat workspace (direct AND team sessions):
                     optional split, each pane bound to its own session slice +
                     inline approval gate, dispatched by session kind. */}
@@ -779,6 +743,51 @@ export function DesktopChatWorkspace() {
                     recentSessions={recentSessions}
                     onResumeSession={handleSwitchToSession}
                     composerRef={composerRef}
+                    runtimeNotice={
+                      composerDisabled ? (
+                        <div
+                          className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-muted/20 p-4 text-sm"
+                          role="status"
+                          data-testid="chat-runtime-notice"
+                        >
+                          <div className="min-w-0 flex-1 basis-56">
+                            <p className="font-medium">
+                              {runtimeT(
+                                chatAvailability.state === "offline" ? "connectionTitle" : "title"
+                              )}
+                            </p>
+                            <p className="text-muted-foreground">
+                              {runtimeT(
+                                runtimeSnapshot.connectionState === "connecting" &&
+                                  chatAvailability.state === "offline"
+                                  ? "connecting"
+                                  : `states.${runtimeAvailabilityMessageKey(chatAvailability.state)}`
+                              )}
+                            </p>
+                          </div>
+                          {runtimeRecovery.kind !== "none" ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (runtimeRecovery.kind === "route") {
+                                  router.push(runtimeRecovery.href)
+                                } else if (runtimeRecovery.kind === "local-settings") {
+                                  openSettings(runtimeRecovery.section)
+                                }
+                              }}
+                            >
+                              {runtimeT(
+                                chatAvailability.state === "requires-pairing"
+                                  ? "actions.pair"
+                                  : "actions.connectionSettings"
+                              )}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null
+                    }
                     composerDisabled={composerDisabled}
                     onResumeAfterPlanApproval={resumeAfterPlanApproval}
                   />

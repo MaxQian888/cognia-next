@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -29,6 +30,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { DirectoryField } from "@/components/settings/common/directory-field"
+import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picker"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
+import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
+import { pickDirectory } from "@/lib/files/file-bridge"
+import { isTauri } from "@/lib/tauri"
 import {
   createApprovedWorkspaceDir,
   initApprovedGitRepository,
@@ -71,25 +77,50 @@ export function NewWorkspaceDialog({
   const [initGit, setInitGit] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
+  const gate = useWorkspaceCommandGate()
+  const createGate = gate("fs_create_workspace_dir")
+  const browseGate = gate("fs_list_workspace_dir")
+  const { describe } = useWorkspaceActionController()
 
   useEffect(() => {
     if (!open) return
     let alive = true
-    void resolveParent(configuredRoot).then((resolved) => {
-      if (alive && resolved) setParentDir((current) => current || resolved)
-    })
+    void resolveParent(configuredRoot).then(
+      (resolved) => {
+        if (alive && resolved) setParentDir((current) => current || resolved)
+      },
+      (cause) => {
+        if (alive) setError(describe(cause))
+      }
+    )
     return () => {
       alive = false
     }
-  }, [open, configuredRoot, resolveParent])
+  }, [open, configuredRoot, resolveParent, describe])
 
   const proposal = proposeWorkspacePath(parentDir, name)
-  const canSubmit = proposal.ok && !busy
+  const canSubmit = proposal.ok && !busy && createGate.available
+
+  async function browseParent(): Promise<string | null> {
+    setError(null)
+    if (!isTauri()) {
+      if (browseGate.available) setFolderPickerOpen(true)
+      return null
+    }
+    try {
+      return await pickDirectory(t("parentLabel"))
+    } catch (cause) {
+      setError(describe(cause))
+      return null
+    }
+  }
 
   function close() {
     if (busy) return
     setName("")
     setError(null)
+    setFolderPickerOpen(false)
     onOpenChange(false)
   }
 
@@ -100,15 +131,20 @@ export function NewWorkspaceDialog({
     try {
       const result = await createWorkspaceFromScratch({ parentDir, name, initGit }, deps)
       if (!result.ok) {
-        setError(t(`errors.${result.reason}`))
+        const detail = "cause" in result && result.cause ? describe(result.cause) : null
+        setError([t(`errors.${result.reason}`), detail].filter(Boolean).join(" "))
         return
       }
       // A workspace whose `git init` failed is still a workspace — say so
       // rather than pretending it is a repository.
-      if (result.gitInitError) setError(t("errors.gitInitFailed"))
+      if (result.gitInitError) {
+        toast.warning(t("errors.gitInitFailed"), { description: describe(result.gitInitError) })
+      }
       onCreated?.(result.project.id)
       setName("")
       onOpenChange(false)
+    } catch (cause) {
+      setError(describe(cause))
     } finally {
       setBusy(false)
     }
@@ -144,6 +180,8 @@ export function NewWorkspaceDialog({
               onCommit={setParentDir}
               ariaLabel={t("parentLabel")}
               browseLabel={t("browse")}
+              pick={browseParent}
+              hasPicker={() => isTauri() || browseGate.available}
               disabled={busy}
             />
           </div>
@@ -172,6 +210,11 @@ export function NewWorkspaceDialog({
               {error}
             </p>
           )}
+          {!createGate.available && createGate.reason && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {createGate.reason}
+            </p>
+          )}
         </div>
 
         <DialogFooter>
@@ -184,6 +227,15 @@ export function NewWorkspaceDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <WorkspaceFolderPicker
+        open={open && folderPickerOpen}
+        onOpenChange={setFolderPickerOpen}
+        initialPath={parentDir || undefined}
+        onSelect={(path) => {
+          setParentDir(path)
+          setFolderPickerOpen(false)
+        }}
+      />
     </Dialog>
   )
 }

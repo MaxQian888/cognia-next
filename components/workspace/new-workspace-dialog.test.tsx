@@ -1,6 +1,35 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { Project } from "@/types"
 
+const commandGate = jest.fn(() => ({ available: true, reason: null as string | null }))
+const nativePicker = jest.fn(async () => null as string | null)
+const desktop = jest.fn(() => false)
+jest.mock("@/lib/tauri", () => ({ isTauri: () => desktop() }))
+jest.mock("@/lib/files/file-bridge", () => ({ pickDirectory: () => nativePicker() }))
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => commandGate,
+}))
+jest.mock("@/hooks/use-workspace-action-controller", () => ({
+  useWorkspaceActionController: () => ({ describe: (error: Error) => error.message }),
+}))
+jest.mock("@/lib/workspace/host-approved-fs", () => ({
+  createApprovedWorkspaceDir: jest.fn(),
+  initApprovedGitRepository: jest.fn(),
+}))
+jest.mock("@/components/shell/workspace-folder-picker", () => ({
+  WorkspaceFolderPicker: ({
+    open,
+    onSelect,
+  }: {
+    open: boolean
+    onSelect: (path: string) => void
+  }) =>
+    open ? (
+      <button onClick={() => onSelect("/host/workspaces/team")}>Select host folder</button>
+    ) : null,
+}))
+jest.mock("sonner", () => ({ toast: { warning: jest.fn() } }))
+
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (sel: (s: { settings: { projectsRoot?: string } }) => unknown) =>
@@ -11,6 +40,7 @@ jest.mock("@/lib/git/commands", () => ({ gitInit: jest.fn() }))
 jest.mock("@/lib/workspace/open-folder", () => ({ openPathAsWorkspace: jest.fn() }))
 
 import { NewWorkspaceDialog } from "./new-workspace-dialog"
+import { toast } from "sonner"
 
 const project = { id: "project-new", name: "My App" } as unknown as Project
 
@@ -41,6 +71,54 @@ async function typeName(value: string) {
 }
 
 describe("NewWorkspaceDialog", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    desktop.mockReturnValue(false)
+    commandGate.mockReturnValue({ available: true, reason: null })
+  })
+
+  it("browses the host and creates in the selected parent from a web client", async () => {
+    const { deps } = setup()
+    fireEvent.click(screen.getByRole("button", { name: "browse" }))
+    // The lightweight picker stub is outside the parent Radix portal.
+    fireEvent.click(await screen.findByRole("button", { name: "Select host folder", hidden: true }))
+    expect(screen.getByLabelText("parentLabel")).toHaveValue("/host/workspaces/team")
+    await typeName("My App")
+    fireEvent.click(screen.getByRole("button", { name: "submit" }))
+    await waitFor(() =>
+      expect(deps.createDir).toHaveBeenCalledWith("/host/workspaces/team", "My App")
+    )
+    expect(nativePicker).not.toHaveBeenCalled()
+  })
+
+  it("explains why creation is unavailable before making any filesystem request", async () => {
+    commandGate.mockReturnValue({ available: false, reason: "Connect to your host" })
+    const { deps } = setup()
+    await typeName("My App")
+    expect(screen.getByRole("button", { name: "submit" })).toBeDisabled()
+    expect(screen.getByText("Connect to your host")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "browse" })).not.toBeInTheDocument()
+    expect(deps.createDir).not.toHaveBeenCalled()
+  })
+
+  it("keeps the git warning visible after the created workspace closes the dialog", async () => {
+    const { onOpenChange } = setup({
+      deps: {
+        createDir: jest.fn(async () => undefined),
+        initGit: jest.fn(async () => {
+          throw new Error("git missing")
+        }),
+        openAsWorkspace: jest.fn(() => project),
+      },
+    })
+    await typeName("My App")
+    fireEvent.click(screen.getByRole("button", { name: "submit" }))
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(toast.warning).toHaveBeenCalledWith("errors.gitInitFailed", {
+      description: "git missing",
+    })
+  })
+
   it("seeds the parent from the configured projects root", async () => {
     setup()
     await waitFor(() =>
@@ -92,6 +170,7 @@ describe("NewWorkspaceDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "submit" }))
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("errors.mkdir-failed"))
+    expect(screen.getByRole("alert")).toHaveTextContent("EACCES")
     expect(onCreated).not.toHaveBeenCalled()
   })
 

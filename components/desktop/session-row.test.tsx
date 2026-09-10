@@ -71,6 +71,57 @@ function setup(overrides: Partial<Parameters<typeof SessionRow>[0]> = {}) {
   return { ...utils, onSelect, onDelete, onRename }
 }
 
+test("restores DOM focus to a keyboard-focused row when it mounts", () => {
+  setup({ focused: true })
+  expect(screen.getByRole("button", { name: /Hello/ })).toHaveFocus()
+})
+
+test("does not take composer focus when a global shortcut highlights a row", () => {
+  const composer = document.createElement("textarea")
+  document.body.appendChild(composer)
+  composer.focus()
+  try {
+    setup({ focused: true })
+    expect(composer).toHaveFocus()
+  } finally {
+    composer.remove()
+  }
+})
+
+test("moves keyboard focus across sections in the same sidebar viewport", () => {
+  const viewport = document.createElement("div")
+  viewport.dataset.slot = "scroll-area-viewport"
+  const pinned = document.createElement("ul")
+  const pinnedRow = document.createElement("li")
+  pinnedRow.dataset.density = "comfortable"
+  const button = document.createElement("button")
+  pinnedRow.appendChild(button)
+  pinned.appendChild(pinnedRow)
+  viewport.appendChild(pinned)
+  const target = document.createElement("div")
+  viewport.appendChild(target)
+  document.body.appendChild(viewport)
+  button.focus()
+  try {
+    render(
+      <ul>
+        <SessionRow
+          session={baseSession}
+          active={false}
+          focused
+          onSelect={jest.fn()}
+          onDelete={jest.fn()}
+          onRename={jest.fn()}
+        />
+      </ul>,
+      { container: target }
+    )
+    expect(screen.getByRole("button", { name: /Hello/ })).toHaveFocus()
+  } finally {
+    viewport.remove()
+  }
+})
+
 test("renders title and clicking the row selects the session", async () => {
   const user = userEvent.setup()
   const { onSelect } = setup()

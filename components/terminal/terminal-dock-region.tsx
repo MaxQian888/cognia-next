@@ -123,6 +123,7 @@ export function TerminalDockRegion({ slot }: TerminalDockRegionProps) {
     <div
       ref={attach}
       data-testid="terminal-dock-region"
+      data-shell-edge-panel=""
       data-position={slot}
       data-open={open ? "true" : "false"}
       data-maximized={maximized ? "true" : "false"}
@@ -150,7 +151,9 @@ export function TerminalDockRegion({ slot }: TerminalDockRegionProps) {
         className={right ? "h-full" : "w-full"}
         style={right ? { width: fullSize } : { height: fullSize }}
       >
-        {contentMounted ? <TerminalDock /> : null}
+        {contentMounted ? (
+          <TerminalDock keepVisible resizeBasisPx={basisPx > 0 ? basisPx : undefined} />
+        ) : null}
       </div>
     </div>
   )

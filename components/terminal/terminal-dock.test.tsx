@@ -250,6 +250,45 @@ function seedProjectAndSession(
 }
 
 describe("TerminalDock", () => {
+  it.each(["bottom", "right"] as const)(
+    "resizes the %s dock against its measured parent",
+    (position) => {
+      seedProjectAndSession()
+      useTerminalStore.getState().setPanelPosition(position)
+      render(<TerminalDock resizeBasisPx={500} />)
+      const handle = screen.getByTestId("terminal-dock-resize-handle")
+      const before = Number(handle.getAttribute("aria-valuenow"))
+      function pointer(type: string, coordinate: number) {
+        const event = new MouseEvent(type, {
+          bubbles: true,
+          button: 0,
+          clientX: coordinate,
+          clientY: coordinate,
+        })
+        Object.defineProperty(event, "pointerId", { value: 1 })
+        fireEvent(handle, event)
+      }
+      pointer("pointerdown", 200)
+      pointer("pointermove", 150)
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBeCloseTo(before + 10)
+      expect(handle).toHaveAttribute("data-dragging", "true")
+      pointer("pointercancel", 150)
+      expect(handle).not.toHaveAttribute("data-dragging")
+      expect(document.body).not.toHaveAttribute("data-edge-resizing")
+    }
+  )
+
+  it("retains its actual content while the region animates closed", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    const { rerender } = render(<TerminalDock keepVisible />)
+    const dock = screen.getByTestId("terminal-dock")
+    act(() => useTerminalStore.getState().setPanelOpen(false))
+    expect(screen.getByTestId("terminal-dock")).toBe(dock)
+    expect(screen.getByTestId("terminal-dock-tabs")).toBeInTheDocument()
+    rerender(<TerminalDock />)
+    expect(screen.queryByTestId("terminal-dock")).toBeNull()
+  })
+
   it("does not render anything when panelOpen is false", () => {
     seedProjectAndSession()
     useTerminalStore.getState().setPanelOpen(false)

@@ -105,3 +105,23 @@ describe("useEdgePanelTransition", () => {
     expect(result.current).toBe(false)
   })
 })
+
+it("finishes on its own size transition, ignoring child and cosmetic transitions", () => {
+  const element = document.createElement("div")
+  const child = document.createElement("div")
+  element.append(child)
+  const { result, rerender } = renderHook(({ open }) => useEdgePanelTransition(open, { element }), {
+    initialProps: { open: false },
+  })
+  rerender({ open: true })
+  function ended(target: Element, propertyName: string) {
+    const event = new Event("transitionend", { bubbles: true })
+    Object.defineProperty(event, "propertyName", { value: propertyName })
+    act(() => target.dispatchEvent(event))
+  }
+  ended(child, "width")
+  ended(element, "opacity")
+  expect(result.current).toBe(true)
+  ended(element, "width")
+  expect(result.current).toBe(false)
+})

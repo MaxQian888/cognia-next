@@ -267,6 +267,7 @@ function SessionRowImpl({
   const [codexDispatching, setCodexDispatching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const liRef = useRef<HTMLLIElement>(null)
+  const selectButtonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -282,7 +283,23 @@ function SessionRowImpl({
 
   // Keep the keyboard-focused row visible as the user arrows through the list.
   useEffect(() => {
-    if (focused) liRef.current?.scrollIntoView({ block: "nearest" })
+    if (focused) {
+      liRef.current?.scrollIntoView({ block: "nearest" })
+      // Windowing can unmount the previously focused button. Keep subsequent
+      // keyboard events in the sidebar instead of dropping focus to <body>.
+      const activeElement = document.activeElement
+      // Global conversation shortcuts also set `focused`, but promise to keep
+      // the composer focused. Only move DOM focus that belongs to the list,
+      // or that fell to body when its previous virtual row unmounted.
+      const viewport = liRef.current?.closest("[data-slot=scroll-area-viewport]")
+      const focusIsOnRow =
+        activeElement instanceof HTMLButtonElement &&
+        activeElement.closest("li[data-density]") &&
+        (viewport ?? liRef.current?.parentElement)?.contains(activeElement)
+      if (activeElement === document.body || focusIsOnRow) {
+        selectButtonRef.current?.focus({ preventScroll: true })
+      }
+    }
   }, [focused])
 
   // Merge the caller's node ref (sortable, or the virtualizer's measurer) with
@@ -511,6 +528,7 @@ function SessionRowImpl({
         </div>
       ) : (
         <button
+          ref={selectButtonRef}
           type="button"
           onClick={handleSelect}
           onDoubleClick={() => setEditing(true)}

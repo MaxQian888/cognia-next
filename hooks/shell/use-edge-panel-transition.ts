@@ -79,7 +79,22 @@ export function useEdgePanelTransition(
     if (token === 0) return
     const node = element && "current" in element ? element.current : element
     const timer = window.setTimeout(() => setToken(0), shellDockAnimationMs(node))
-    return () => window.clearTimeout(timer)
+    const finish = (event: Event) => {
+      const transition = event as TransitionEvent
+      if (
+        event.target !== node ||
+        !["width", "height", "flex-basis"].includes(transition.propertyName)
+      )
+        return
+      setToken(0)
+    }
+    // Finish on the real edge transition (including reversed/reduced motion).
+    // The timer remains a fallback when the browser has no size delta to animate.
+    node?.addEventListener("transitionend", finish)
+    return () => {
+      window.clearTimeout(timer)
+      node?.removeEventListener("transitionend", finish)
+    }
     // `element` is deliberately not a dependency: it only supplies the motion
     // speed multiplier, and re-reading it mid-animation would restart the timer.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -5,6 +5,7 @@ import { useEdgeResize } from "./use-edge-resize"
 
 function pointer(clientX: number, pointerId = 1, clientY = 0): ReactPointerEvent {
   return {
+    button: 0,
     clientX,
     clientY,
     pointerId,
@@ -203,4 +204,84 @@ describe("useEdgeResize", () => {
     expect(() => act(() => result.current.onPointerDown(bare))).not.toThrow()
     expect(() => act(() => result.current.onPointerUp(bare))).not.toThrow()
   })
+})
+
+describe("resize gesture lifecycle", () => {
+  it("ignores secondary buttons and unrelated pointers", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() => useEdgeResize({ width: 256, min: 220, max: 420, onChange }))
+    act(() => result.current.onPointerDown({ ...pointer(100), button: 2 }))
+    expect(result.current.dragging).toBe(false)
+    act(() => result.current.onPointerDown(pointer(100)))
+    act(() => result.current.onPointerMove(pointer(200, 2)))
+    act(() => result.current.onPointerUp(pointer(200, 2)))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(result.current.dragging).toBe(true)
+  })
+
+  it.each(["onPointerCancel", "onLostPointerCapture"] as const)("cleans up on %s", (event) => {
+    const { result } = renderHook(() =>
+      useEdgeResize({ width: 256, min: 220, max: 420, onChange: jest.fn() })
+    )
+    act(() => result.current.onPointerDown(pointer(100)))
+    expect(document.body).toHaveAttribute("data-edge-resizing", "horizontal")
+    act(() => result.current[event](pointer(100)))
+    expect(result.current.dragging).toBe(false)
+    expect(document.body).not.toHaveAttribute("data-edge-resizing")
+  })
+
+  it("cancels with Escape and restores the starting size", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() => useEdgeResize({ width: 256, min: 220, max: 420, onChange }))
+    act(() => result.current.onPointerDown(pointer(100)))
+    act(() => result.current.onPointerMove(pointer(150)))
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })))
+    expect(onChange).toHaveBeenLastCalledWith(256)
+    expect(result.current.dragging).toBe(false)
+  })
+
+  it("cleans up on blur and unmount without losing existing body state", () => {
+    document.body.setAttribute("data-edge-resizing", "existing")
+    const { result, unmount } = renderHook(() =>
+      useEdgeResize({ width: 32, min: 15, max: 85, edge: "top", onChange: jest.fn() })
+    )
+    act(() => result.current.onPointerDown(pointer(100)))
+    expect(document.body).toHaveAttribute("data-edge-resizing", "vertical")
+    act(() => window.dispatchEvent(new Event("blur")))
+    expect(result.current.dragging).toBe(false)
+    expect(document.body).toHaveAttribute("data-edge-resizing", "existing")
+    act(() => result.current.onPointerDown(pointer(100)))
+    unmount()
+    expect(document.body).toHaveAttribute("data-edge-resizing", "existing")
+    document.body.removeAttribute("data-edge-resizing")
+  })
+
+  it("supports boundary keys and precise Shift nudges", () => {
+    const onChange = jest.fn()
+    const { result } = renderHook(() => useEdgeResize({ width: 256, min: 220, max: 420, onChange }))
+    act(() => result.current.onKeyDown(key("Home")))
+    expect(onChange).toHaveBeenLastCalledWith(220)
+    act(() => result.current.onKeyDown(key("End")))
+    expect(onChange).toHaveBeenLastCalledWith(420)
+    act(() => result.current.onKeyDown({ ...key("ArrowRight"), shiftKey: true }))
+    expect(onChange).toHaveBeenLastCalledWith(260)
+  })
+})
+
+it("handles native cancellation for consumers that only bind down/move/up", () => {
+  const target = document.createElement("div")
+  const { result } = renderHook(() =>
+    useEdgeResize({ width: 256, min: 220, max: 420, onChange: jest.fn() })
+  )
+  act(() => result.current.onPointerDown({ ...pointer(100), currentTarget: target }))
+  function cancel(pointerId: number) {
+    const event = new Event("pointercancel")
+    Object.defineProperty(event, "pointerId", { value: pointerId })
+    act(() => target.dispatchEvent(event))
+  }
+  cancel(2)
+  expect(result.current.dragging).toBe(true)
+  cancel(1)
+  expect(result.current.dragging).toBe(false)
+  expect(document.body).not.toHaveAttribute("data-edge-resizing")
 })

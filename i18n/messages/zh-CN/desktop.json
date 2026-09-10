@@ -153,6 +153,8 @@
     "viewArchived": "显示已归档会话"
   },
   "chatRuntime": {
+    "connectionTitle": "等待主机连接",
+    "connecting": "正在重新连接所选主机，请检查连接地址并确认服务已启动。",
     "actions": {
       "connectionSettings": "连接设置",
       "pair": "配对主机"
@@ -160,7 +162,7 @@
     "states": {
       "available": "聊天可用。",
       "incompatible": "当前主机未提供兼容的聊天协议。",
-      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
+      "offline": "无法连接所选主机，请检查连接地址并确认服务已启动。",
       "queued": "当前主机重连后将发送此操作。",
       "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
       "requiresGrant": "当前设备缺少主机授予的聊天权限。",

@@ -4315,3 +4315,65 @@ html[data-reduce-motion="true"] .boot-preview__block {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* Shared shell resize affordance: a quiet seam with a tactile centre grip. */
+[data-edge-resize-handle] .edge-resize-line {
+  background: transparent;
+  transition: background-color calc(140ms * var(--motion-duration-scale, 1)) ease;
+}
+
+[data-edge-resize-handle] .edge-resize-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.75);
+  transition:
+    opacity calc(140ms * var(--motion-duration-scale, 1)) ease,
+    transform calc(180ms * var(--motion-duration-scale, 1)) cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+[data-edge-resize-handle][aria-orientation="vertical"] .edge-resize-grip {
+  width: 3px;
+  height: 28px;
+}
+
+[data-edge-resize-handle]:is(:hover, :focus-visible, [data-dragging]) .edge-resize-line {
+  background: color-mix(in oklab, var(--primary) 35%, transparent);
+}
+
+[data-edge-resize-handle]:is(:hover, :focus-visible, [data-dragging]) .edge-resize-grip {
+  opacity: 0.85;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+[data-edge-resize-handle][data-dragging] .edge-resize-line {
+  background: color-mix(in oklab, var(--primary) 65%, transparent);
+}
+
+body[data-edge-resizing],
+body[data-edge-resizing] * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+body[data-edge-resizing="horizontal"],
+body[data-edge-resizing="horizontal"] * {
+  cursor: col-resize !important;
+}
+body[data-edge-resizing="vertical"],
+body[data-edge-resizing="vertical"] * {
+  cursor: row-resize !important;
+}
+body[data-edge-resizing] iframe {
+  pointer-events: none !important;
+}
+
+/* Grabbing a panel during its opening transition must track the pointer now. */
+body[data-edge-resizing] :is(#conversation-sidebar, [data-shell-edge-panel]) {
+  transition: none !important;
+}
