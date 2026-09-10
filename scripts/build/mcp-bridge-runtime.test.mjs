@@ -71,3 +71,24 @@ test("renderer-owned task wrappers preserve command, payload, and failure envelo
   delete globalThis.__mcpProxyCalls
   delete globalThis.__mcpProxyResult
 })
+
+test("usage and tracker wrappers forward their arguments to the host", async () => {
+  globalThis.__mcpProxyCalls = []
+  globalThis.__mcpProxyResult = { ok: true, items: [] }
+  const runtime = await loadRuntimeWithProxyProbe()
+  try {
+    for (const command of [
+      "usageQuery", "sessionHealth", "optimizationFindings",
+      "issuesList", "issuesGet", "issuesCreate", "issuesUpdate", "issuesComment",
+    ]) {
+      const input = { ref: "TASK-1", period: "7d" }
+      assert.deepEqual(await runtime[command](input), globalThis.__mcpProxyResult)
+      assert.deepEqual(globalThis.__mcpProxyCalls.at(-1), {
+        channel: "host", command, input: { arguments: [input] },
+      })
+    }
+  } finally {
+    delete globalThis.__mcpProxyCalls
+    delete globalThis.__mcpProxyResult
+  }
+})

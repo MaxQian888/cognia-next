@@ -11,9 +11,9 @@ import {
 test("parseArgs defaults to memory-safe shards with bounded parallelism", () => {
   assert.deepEqual(parseArgs([]), {
     shards: 8,
-    jobs: 2,
-    workers: 4,
-    maxOldSpaceSize: 16384,
+    jobs: 1,
+    workers: 2,
+    maxOldSpaceSize: 4096,
     out: "coverage",
     only: undefined,
   })

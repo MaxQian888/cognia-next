@@ -27,6 +27,15 @@ export const listScheduledTasks = (input: unknown) => rendererCall("list_schedul
 export const cancelScheduledTask = (input: unknown) => rendererCall("cancel_scheduled_task", input)
 export const spawnTask = (input: unknown) => rendererCall("spawn_task", input)
 
+export const usageQuery = (...args: unknown[]) => hostCall("usageQuery", ...args)
+export const sessionHealth = (...args: unknown[]) => hostCall("sessionHealth", ...args)
+export const optimizationFindings = (...args: unknown[]) => hostCall("optimizationFindings", ...args)
+export const issuesList = (...args: unknown[]) => hostCall("issuesList", ...args)
+export const issuesGet = (...args: unknown[]) => hostCall("issuesGet", ...args)
+export const issuesCreate = (...args: unknown[]) => hostCall("issuesCreate", ...args)
+export const issuesUpdate = (...args: unknown[]) => hostCall("issuesUpdate", ...args)
+export const issuesComment = (...args: unknown[]) => hostCall("issuesComment", ...args)
+
 export const connectorsListAdapters = (...args: unknown[]) =>
   hostCall("connectorsListAdapters", ...args)
 export const connectorsListConversations = (...args: unknown[]) =>

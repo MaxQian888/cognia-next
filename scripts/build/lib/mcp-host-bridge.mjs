@@ -15,6 +15,8 @@ const HOST_BRIDGED_IMPORTS = new Set([
   "../handlers/workflow",
   "../handlers/scheduling",
   "../handlers/spawn-task",
+  "../handlers/usage",
+  "../handlers/issues",
 ])
 
 const FORBIDDEN_OUTPUT_INPUTS = [

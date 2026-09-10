@@ -4,8 +4,9 @@
  *
  * A monolithic coverage process retains the union of thousands of instrumented
  * modules until exit and can exhaust the V8 heap even when workers recycle.
- * Separate shard processes release that memory between bounded waves while two
- * concurrent shards keep the machine busy. Thresholds are checked only after
+ * Separate shard processes release that memory between bounded waves. Defaults
+ * reserve room for the app and browsers; CI can explicitly raise parallelism.
+ * Thresholds are checked only after
  * merging because no individual shard owns the complete coverage map.
  */
 
@@ -23,8 +24,8 @@ const positiveInteger = (flag) =>
     .positive({ error: `${flag} requires a positive integer` })
 
 const cliSchema = z.object({
-  jobs: positiveInteger("--jobs").default(2),
-  maxOldSpaceSize: positiveInteger("--max-old-space-size").default(16384),
+  jobs: positiveInteger("--jobs").default(1),
+  maxOldSpaceSize: positiveInteger("--max-old-space-size").default(4096),
   only: z
     .string()
     .trim()
@@ -43,7 +44,7 @@ const cliSchema = z.object({
     .optional(),
   out: z.string().trim().min(1, "--out requires a directory").default("coverage"),
   shards: positiveInteger("--shards").default(8),
-  workers: positiveInteger("--workers").default(4),
+  workers: positiveInteger("--workers").default(2),
 })
 
 function createProgram() {
@@ -54,9 +55,13 @@ function createProgram() {
     .showHelpAfterError()
     .exitOverride()
     .option("--shards <count>", "Total Jest shard count.", "8")
-    .option("--jobs <count>", "Maximum concurrent shard processes.", "2")
-    .option("--workers <count>", "Jest workers per shard.", "4")
-    .option("--max-old-space-size <megabytes>", "Node.js heap limit per shard.", "16384")
+    .option("--jobs <count>", "Maximum concurrent shard processes.", "1")
+    .option("--workers <count>", "Jest workers per shard.", "2")
+    .option(
+      "--max-old-space-size <megabytes>",
+      "Heap limit per Node process, inherited by Jest workers (MB).",
+      "4096"
+    )
     .option("--out <directory>", "Coverage output directory.", "coverage")
     .option("--only <shards>", "Comma-separated shard numbers to rerun.")
 }
@@ -80,7 +85,7 @@ export function effectiveJobCount(shards, jobs) {
   return Math.min(shards, jobs)
 }
 
-export function buildCoveragePlan({ shards, workers = 4, out, only }) {
+export function buildCoveragePlan({ shards, workers = 2, out, only }) {
   const shardRoot = path.join(out, "shards")
   const shardPlans = Array.from({ length: shards }, (_, index) => {
     const shard = index + 1

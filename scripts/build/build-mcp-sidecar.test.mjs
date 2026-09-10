@@ -64,6 +64,14 @@ test("bundles the complete host-bridged MCP tool surface", async () => {
       "schedule_task",
       "list_scheduled_tasks",
       "cancel_scheduled_task",
+      "usage_query",
+      "session_health",
+      "optimization_findings",
+      "issues_list",
+      "issues_get",
+      "issues_create",
+      "issues_update",
+      "issues_comment",
     ]) {
       assert.equal(names.has(expected), true, `missing MCP tool: ${expected}`)
     }

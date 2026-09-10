@@ -376,6 +376,10 @@ const nextConfig: NextConfig = {
   },
   // Webpack (pnpm build): client-side fallbacks for Node built-ins.
   webpack: (config, { isServer, webpack }) => {
+    // Allow builds on disk-constrained machines without persisting the cache.
+    if (process.env.COGNIA_DISABLE_WEBPACK_CACHE === "1") {
+      config.cache = false
+    }
     // Platform extensions ahead of the plain ones, so `foo.mobile.tsx` wins
     // over `foo.tsx` on the Capacitor build only. Prepended (not replaced) so
     // Next's own extension list — including the server/client variants it adds

@@ -26,6 +26,8 @@ test("routes renderer-owned scheduling and task-spawn handlers to the host bridg
 
   assert.deepEqual(resolveWith(plugin, "../handlers/scheduling"), { path: bridgeRuntime })
   assert.deepEqual(resolveWith(plugin, "../handlers/spawn-task"), { path: bridgeRuntime })
+  assert.deepEqual(resolveWith(plugin, "../handlers/usage"), { path: bridgeRuntime })
+  assert.deepEqual(resolveWith(plugin, "../handlers/issues"), { path: bridgeRuntime })
   assert.equal(resolveWith(plugin, "../handlers/computer-use"), undefined)
 })
 

@@ -3,6 +3,9 @@ apply plugin: 'com.android.application'
 android {
     namespace "com.cognia.mobile"
     compileSdk rootProject.ext.compileSdkVersion
+    buildFeatures {
+        buildConfig true
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
