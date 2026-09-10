@@ -57,19 +57,22 @@ test("publishes the concrete raw result contract in OpenAPI and the host catalog
   assert.equal(command.outputSchemaSource, "contract")
   assert.deepEqual(responseSchema, command.outputSchema)
 
+  // Both data planes answer the one page envelope (ADR-0175 B3): the direct
+  // store adds `total`, the bridge does not, and neither leaks its offset.
   const validate = new Ajv2020().compile(command.outputSchema)
   assert.equal(
     validate({
-      rows: [
+      items: [
         { id: "direct", title: "Direct", kind: "direct", createdAt: 1, updatedAt: 2 },
       ],
+      nextPageToken: "bzoyMA",
       total: 1,
     }),
     true,
   )
   assert.equal(
     validate({
-      rows: [
+      items: [
         {
           id: "bridge",
           title: "Legacy bridge row",
@@ -80,11 +83,10 @@ test("publishes the concrete raw result contract in OpenAPI and the host catalog
           updatedAt: 2,
         },
       ],
-      next_offset: 1,
-      has_more: true,
     }),
     true,
   )
+  assert.equal(validate({ rows: [], next_offset: 1, has_more: true }), false)
 })
 
 test("merges compatible closed-object allOf request schemas", () => {
@@ -311,19 +313,16 @@ test("generates Apifox-ready parameters for the session_list request body", () =
   const schema = operation.requestBody.content["application/json"].schema
 
   assert.equal(operation["x-cognia-request-schema-source"], "contract")
-  assert.deepEqual(schema.required, ["limit", "offset"])
-  assert.deepEqual(schema.properties.limit, {
-    type: "integer",
-    minimum: 0,
-  })
-  assert.deepEqual(schema.properties.offset, {
-    type: "integer",
-    minimum: 0,
-  })
-  assert.deepEqual(schema.properties.before, {
-    type: "integer",
-    description: "Optional ms-epoch upper bound (updatedAt <).",
-  })
+  // Paging is pageSize/pageToken (ADR-0175 B3), both optional, and the old
+  // names are gone from the contract rather than merely deprecated.
+  assert.equal(schema.required, undefined)
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["pageSize", "pageToken", "updatedBefore"])
+  assert.equal(schema.properties.pageSize.type, "integer")
+  assert.equal(schema.properties.pageSize.minimum, 1)
+  assert.equal(schema.properties.pageSize.maximum, 1000)
+  assert.equal(schema.properties.pageToken.type, "string")
+  assert.equal(schema.properties.pageToken.minLength, 1)
+  assert.equal(schema.properties.updatedBefore.type, "integer")
   assert.equal(schema.additionalProperties, false)
 })
 
@@ -753,9 +752,10 @@ test("documents the canonical RPC completion and running envelopes", () => {
     genericResponses[200].content["application/json"].schema.$ref,
     "#/components/schemas/RpcCompletedResponse"
   )
+  // A still-running command answers with the Operation document (ADR-0175 B3).
   assert.equal(
     genericResponses[202].content["application/json"].schema.$ref,
-    "#/components/schemas/RpcRunningResponse"
+    "#/components/schemas/Operation"
   )
   assert.equal(genericResponses[415].$ref, "#/components/responses/PublicApiError")
   assert.equal(genericResponses[410].$ref, "#/components/responses/PublicApiError")
@@ -777,13 +777,42 @@ test("documents the canonical RPC completion and running envelopes", () => {
   ])
   assert.equal(
     concreteResponses[202].content["application/json"].schema.$ref,
-    "#/components/schemas/RpcRunningResponse"
+    "#/components/schemas/Operation"
   )
   assert.equal(
     desiredHeadlessSpec.paths["/internal/_rpc/{name}"].post.responses[202].content[
       "application/json"
     ].schema.$ref,
-    "#/components/schemas/InternalRpcRunningResponse"
+    "#/components/schemas/Operation"
+  )
+})
+
+test("documents one Operation document on both planes and keeps the old names as aliases", () => {
+  const { desiredPublicSpec, desiredHeadlessSpec } = inspectCommittedContract()
+  for (const spec of [desiredPublicSpec, desiredHeadlessSpec]) {
+    const operation = spec.components.schemas.Operation
+    assert.deepEqual(operation.required, ["id", "done", "status", "metadata"])
+    assert.equal(operation.additionalProperties, false)
+    assert.equal(operation.properties.error.$ref, "#/components/schemas/Problem")
+    assert.deepEqual(operation.properties.metadata.required, ["createdAt", "updatedAt"])
+    assert.ok(operation.properties.status.enum.includes("running"))
+    assert.ok(operation.properties.status.enum.includes("succeeded"))
+  }
+  const publicSchemas = desiredPublicSpec.components.schemas
+  assert.deepEqual(publicSchemas.RpcRunningResponse, { $ref: "#/components/schemas/Operation" })
+  assert.deepEqual(publicSchemas.OperationSummary, { $ref: "#/components/schemas/Operation" })
+  const internalSchemas = desiredHeadlessSpec.components.schemas
+  assert.deepEqual(internalSchemas.InternalRpcRunningResponse, {
+    $ref: "#/components/schemas/Operation",
+  })
+  assert.deepEqual(internalSchemas.InternalOperationSummary, {
+    $ref: "#/components/schemas/Operation",
+  })
+  assert.equal(
+    desiredHeadlessSpec.paths["/internal/operations/{operation_id}"].get.responses[200].content[
+      "application/json"
+    ].schema.$ref,
+    "#/components/schemas/Operation"
   )
 })
 
@@ -823,7 +852,7 @@ test("documents canonical identity and owner-management response shapes", () => 
     desiredPublicSpec.paths["/api/operations/{operation_id}"].get.responses[200].content[
       "application/json"
     ].schema.$ref,
-    "#/components/schemas/OperationSummary"
+    "#/components/schemas/Operation"
   )
 })
 

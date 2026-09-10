@@ -604,7 +604,7 @@ const HOST_CATEGORIES = [
     title: "Extensions and providers",
     description: "Plugins, skills, MCP servers, provider catalogs, the gateway plane, and diagnostics.",
     skill: "cognia-host-extensions",
-    pattern: /^(plugin_|skill_|skills_|mcp_|provider_|gateway_)/,
+    pattern: /^(plugin_(?!media_)|skill_|skills_|mcp_|provider_|gateway_)/,
   },
   {
     id: "knowledge",
@@ -1033,6 +1033,60 @@ function completedRpcSchema(resultSchema = {}) {
 const PROBLEM_CONTENT_TYPE = "application/problem+json"
 const PROBLEM_TYPE_BASE = "https://cognia.dev/problems/"
 
+/** The ledger states, in the order the durable operation ledger moves through them. */
+const OPERATION_STATUSES = [
+  "queued",
+  "running",
+  "waiting_input",
+  "cancelling",
+  "recovering",
+  "succeeded",
+  "failed",
+  "cancelled",
+]
+
+/**
+ * The one long-running operation document (ADR-0175 B3, after AIP-151).
+ * Mirrors `src-tauri/src/companion_api/operations.rs`. A `longRunning`
+ * command answers 202 with it, and both operation routes answer the same
+ * shape, so a client branches on `done`, `error` and `result` and never on
+ * which route it asked.
+ */
+function operationSchema() {
+  return {
+    type: "object",
+    description:
+      "One long-running operation. A command the durable ledger is still running answers 202 with " +
+      "`done: false`. GET /api/operations/{id} and GET /internal/operations/{id} answer the same " +
+      "document, which once done carries either `result` or an `error` that is the same problem " +
+      "document a synchronous refusal would have been. `status` is the ledger's own word, kept " +
+      "for operators.",
+    required: ["id", "done", "status", "metadata"],
+    additionalProperties: false,
+    properties: {
+      id: { type: "string", format: "uuid" },
+      done: { type: "boolean", description: "False while the ledger may still change the outcome." },
+      status: { type: "string", enum: OPERATION_STATUSES },
+      error: { $ref: "#/components/schemas/Problem" },
+      result: {},
+      metadata: {
+        type: "object",
+        required: ["createdAt", "updatedAt"],
+        additionalProperties: false,
+        properties: {
+          createdAt: { type: "integer", format: "int64", description: "Unix seconds." },
+          updatedAt: { type: "integer", format: "int64", description: "Unix seconds." },
+          requestId: {
+            type: "string",
+            format: "uuid",
+            description: "The request that started the operation, on the 202 answer itself.",
+          },
+        },
+      },
+    },
+  }
+}
+
 /**
  * The one error document (ADR-0175): RFC 9457 `application/problem+json`
  * plus the companion extensions. Mirrors `crates/cognia-problem`.
@@ -1280,16 +1334,10 @@ function genericRpcPath(command, audience, argumentSchemas = new Map()) {
           },
         },
         202: {
-          description: "Command is still running under the durable operation ledger.",
+          description:
+            "Command is still running under the durable operation ledger. The body is the Operation document.",
           content: {
-            "application/json": {
-              schema: {
-                $ref:
-                  audience === "public"
-                    ? "#/components/schemas/RpcRunningResponse"
-                    : "#/components/schemas/InternalRpcRunningResponse",
-              },
-            },
+            "application/json": { schema: { $ref: "#/components/schemas/Operation" } },
           },
         },
         ...rpcProblemResponses(),
@@ -1363,11 +1411,10 @@ export function reconcileRpcPaths({
               },
             },
             202: {
-              description: "Command is still running under the durable operation ledger.",
+              description:
+                "Command is still running under the durable operation ledger. The body is the Operation document.",
               content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/RpcRunningResponse" },
-                },
+                "application/json": { schema: { $ref: "#/components/schemas/Operation" } },
               },
             },
             400: { $ref: "#/components/responses/PublicApiError" },
@@ -1843,7 +1890,7 @@ function normalizePublicPaths(paths, contract) {
   }
   const operation = next["/api/operations/{operation_id}"]?.get
   if (operation) {
-    operation.responses[200] = schemaResponse("OperationSummary", "Durable operation status.")
+    operation.responses[200] = schemaResponse("Operation", "The operation document.")
     addPublicErrors(operation, [400, 401, 404, 409, 503])
   }
   const sessionMedia = next["/api/sessions/{session_id}/media/{hash}"]?.get
@@ -2144,16 +2191,7 @@ function ensurePublicComponents(components, publicNames) {
     RpcArgs: { type: "object", additionalProperties: true },
     RpcResult: {},
     RpcCompletedResponse: completedRpcSchema(),
-    RpcRunningResponse: {
-      type: "object",
-      required: ["requestId", "operationId", "status"],
-      additionalProperties: false,
-      properties: {
-        requestId: { type: "string", format: "uuid" },
-        operationId: { type: "string", format: "uuid" },
-        status: { type: "string", const: "running" },
-      },
-    },
+    RpcRunningResponse: { $ref: "#/components/schemas/Operation" },
     WhoamiResponse: {
       type: "object",
       required: [
@@ -2254,18 +2292,7 @@ function ensurePublicComponents(components, publicNames) {
         expiresAt: { type: "integer", format: "int64" },
       },
     },
-    OperationSummary: {
-      type: "object",
-      required: ["operationId", "status", "createdAt", "updatedAt"],
-      additionalProperties: false,
-      properties: {
-        operationId: { type: "string", format: "uuid" },
-        status: { type: "string" },
-        receipt: {},
-        createdAt: { type: "integer", format: "int64" },
-        updatedAt: { type: "integer", format: "int64" },
-      },
-    },
+    OperationSummary: { $ref: "#/components/schemas/Operation" },
     A2aAgentCard: {
       type: "object",
       required: [
@@ -2618,6 +2645,7 @@ function ensurePublicComponents(components, publicNames) {
       properties: { ticket: { type: "string" }, expiresIn: { type: "integer", const: 60 } },
     },
     Problem: problemSchema(),
+    Operation: operationSchema(),
     ...commandCatalogSchemas(),
   }
   next.schemas.RpcError = { $ref: "#/components/schemas/Problem" }
@@ -2766,7 +2794,7 @@ function headlessBaseSpec() {
           },
           responses: {
             200: { description: "Command result.", content: { "application/json": { schema: { $ref: "#/components/schemas/RpcResult" } } } },
-            202: { description: "Command is still running.", content: { "application/json": { schema: { $ref: "#/components/schemas/InternalRpcRunningResponse" } } } },
+            202: { description: "Command is still running. The body is the Operation document.", content: { "application/json": { schema: { $ref: "#/components/schemas/Operation" } } } },
             401: { $ref: "#/components/responses/ServiceTokenRejected" },
             403: { $ref: "#/components/responses/ServiceTokenRejected" },
             404: { $ref: "#/components/responses/HeadlessRpcError" },
@@ -2807,10 +2835,10 @@ function headlessBaseSpec() {
           ],
           responses: {
             200: {
-              description: "Durable operation status.",
+              description: "The operation document.",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/InternalOperationSummary" },
+                  schema: { $ref: "#/components/schemas/Operation" },
                 },
               },
             },
@@ -2889,31 +2917,10 @@ function headlessBaseSpec() {
       schemas: {
         RpcArgs: { type: "object", additionalProperties: true },
         RpcResult: {},
-        InternalRpcRunningResponse: {
-          type: "object",
-          required: ["operationId", "status"],
-          additionalProperties: false,
-          properties: {
-            operationId: { type: "string", format: "uuid" },
-            status: { type: "string", const: "running" },
-          },
-        },
-        InternalOperationSummary: {
-          type: "object",
-          required: ["operationId", "status", "createdAt", "updatedAt"],
-          additionalProperties: false,
-          properties: {
-            operationId: { type: "string", format: "uuid" },
-            status: {
-              type: "string",
-              enum: ["queued", "running", "waiting_input", "cancelling", "recovering", "succeeded", "failed", "cancelled"],
-            },
-            receipt: {},
-            createdAt: { type: "integer", format: "int64" },
-            updatedAt: { type: "integer", format: "int64" },
-          },
-        },
+        InternalRpcRunningResponse: { $ref: "#/components/schemas/Operation" },
+        InternalOperationSummary: { $ref: "#/components/schemas/Operation" },
         Problem: problemSchema(),
+        Operation: operationSchema(),
         RpcError: { $ref: "#/components/schemas/Problem" },
         ...commandCatalogSchemas(),
       },
