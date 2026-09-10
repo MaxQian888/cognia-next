@@ -161,3 +161,41 @@ describe("approval-registry", () => {
     })
   })
 })
+
+describe("approval ownership", () => {
+  it("closes only the ending owner's requests and removes its listener", async () => {
+    const owner = new AbortController()
+    const remove = jest.spyOn(owner.signal, "removeEventListener")
+    const expired = jest.fn()
+    const first = awaitApproval("s1", "owned", { signal: owner.signal, onExpire: expired })
+    const second = awaitApproval("s1", "other")
+    owner.abort()
+    await expect(first).resolves.toMatchObject({ decision: "deny" })
+    expect(expired).toHaveBeenCalledTimes(1)
+    expect(remove).toHaveBeenCalledWith("abort", expect.any(Function))
+    expect(pendingApprovalCount()).toBe(1)
+    resolveApproval("s1", "other", { decision: "allow" })
+    await expect(second).resolves.toEqual({ decision: "allow" })
+  })
+
+  it("cannot leave a delayed request waiting after its owner has ended", async () => {
+    const owner = new AbortController()
+    owner.abort()
+    const expired = jest.fn()
+    await expect(
+      awaitApproval("s", "r", { signal: owner.signal, onExpire: expired })
+    ).resolves.toMatchObject({ decision: "deny" })
+    expect(expired).toHaveBeenCalledTimes(1)
+    expect(pendingApprovalCount()).toBe(0)
+  })
+
+  it("does not expire a request already approved when its owner ends", async () => {
+    const owner = new AbortController()
+    const expired = jest.fn()
+    const result = awaitApproval("s", "r", { signal: owner.signal, onExpire: expired })
+    resolveApproval("s", "r", { decision: "allow" })
+    owner.abort()
+    await expect(result).resolves.toEqual({ decision: "allow" })
+    expect(expired).not.toHaveBeenCalled()
+  })
+})

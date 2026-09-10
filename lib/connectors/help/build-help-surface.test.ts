@@ -30,10 +30,10 @@ describe("buildHelpSurface", () => {
     expect(root.children).toContain("intro")
   })
 
-  it("renders a welcome-mode card with the bot name substituted into the title", () => {
+  it("renders a concise welcome without leaking the adapter configuration name", () => {
     const s = buildHelpSurface(base({ mode: "welcome", displayName: "Helper" }))
     const root = s.components.root as { title: string }
-    expect(root.title).toBe("你好，我是 Helper")
+    expect(root.title).toBe("👋 开始一个新任务")
   })
 
   it("uses operator welcomeText as the intro in welcome mode", () => {
@@ -45,7 +45,7 @@ describe("buildHelpSurface", () => {
   it("falls back to the default welcome intro when welcomeText is blank", () => {
     const s = buildHelpSurface(base({ mode: "welcome", displayName: "X", welcomeText: "   " }))
     const intro = s.components.intro as { text: string }
-    expect(intro.text).toContain("我是 X")
+    expect(intro.text).toContain("直接描述你的任务")
   })
 
   it("emits one button per quick command carrying the help_quick_command binding hint", () => {

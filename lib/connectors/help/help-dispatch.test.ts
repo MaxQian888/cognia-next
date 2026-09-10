@@ -188,3 +188,16 @@ describe("maybeSendWelcome", () => {
     expect(seg.plainTextMirror).toContain("欢迎光临")
   })
 })
+
+it("does not inject onboarding into a task topic", async () => {
+  const enqueue = jest.fn()
+  const recordWelcome = jest.fn()
+  expect(
+    await maybeSendWelcome(makeEvent({ conversationKey: "lark:ad1:oc_1:om_topic" }), makeRow(), {
+      enqueue,
+      recordWelcome,
+    })
+  ).toBe(false)
+  expect(enqueue).not.toHaveBeenCalled()
+  expect(recordWelcome).not.toHaveBeenCalled()
+})

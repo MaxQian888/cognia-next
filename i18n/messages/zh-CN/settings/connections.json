@@ -1838,7 +1838,7 @@
   "wechatPersonal": {
     "adapterCreated": "微信已连接。有联系人给机器人发消息后即可开始回复。",
     "adapterUpdated": "个人微信适配器已更新。",
-    "banRiskNote": "经 iLink 网关的非官方接入。个人账号自动化可能违反微信条款，存在真实的封号风险。请使用非主力账号。",
+    "banRiskNote": "通过腾讯 iLink 登录：使用微信扫码，并在手机上确认。登录会话过期后，请重新扫码连接。",
     "confirmedNoToken": "登录已确认，但网关未返回 bot token。请重新获取二维码后再试。",
     "create": "创建",
     "desktopOnly": "个人微信扫码登录仅在桌面运行时中可用。",
@@ -1865,7 +1865,19 @@
     "statusScaned": "已扫码——请在手机上确认…",
     "statusWaiting": "等待扫码…",
     "titleEdit": "配置个人微信（iLink）",
-    "titleNew": "添加个人微信（iLink）"
+    "titleNew": "添加个人微信（iLink）",
+    "statusLoading": "正在生成登录二维码…",
+    "statusVerifyCode": "输入微信中显示的配对码以继续。",
+    "statusVerifyBlocked": "配对码错误次数过多。请稍后重新获取二维码。",
+    "statusAlreadyBound": "此微信账号已经连接，本次未返回新的登录凭证。",
+    "verifyCodeLabel": "配对码",
+    "verifyCodeHint": "请输入手机微信中显示的数字。",
+    "verifyCodeRetry": "配对码不匹配，请查看手机后重新输入。",
+    "verifyCodeSubmit": "验证配对码",
+    "verifyCodeRequired": "请输入微信中显示的数字配对码。",
+    "redirectFailed": "登录服务器未提供跳转地址，请重新获取二维码。",
+    "unknownLoginStatus": "登录服务器返回了暂不支持的状态，请重新获取二维码。",
+    "pollFailed": "无法查询微信登录状态，请重新获取二维码后重试。"
   },
   "wecom": {
     "adapterCreated": "企业微信机器人已创建。启用后长连接将自动建立。",

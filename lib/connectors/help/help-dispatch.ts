@@ -21,6 +21,7 @@
  * Dexie / enqueue dependencies are injectable for tests.
  */
 
+import { parseConversationKey, deliveryTargetFromEvent } from "@/types/connectors/event"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
@@ -145,6 +146,7 @@ export async function maybeHandleHelpCommand(
     conversationKey: event.conversationKey,
     request: {
       conversationRef: event.conversationRef,
+      deliveryTarget: deliveryTargetFromEvent(event),
       segments: [segment],
       // Fresh key per /help so a repeat request always re-sends the card.
       metadata: { idempotencyKey: newIdempotencyKey() },
@@ -173,6 +175,8 @@ export async function maybeSendWelcome(
 ): Promise<boolean> {
   if (row.welcomeCardEnabled === false) return false
   if (!event.conversationKey) return false
+  // Topics are continuations of work, not new bot onboarding destinations.
+  if (parseConversationKey(event.conversationKey).threadId) return false
 
   const recordWelcome =
     deps.recordWelcome ??
@@ -197,6 +201,7 @@ export async function maybeSendWelcome(
     conversationKey: event.conversationKey,
     request: {
       conversationRef: event.conversationRef,
+      deliveryTarget: deliveryTargetFromEvent(event),
       segments: [segment],
       metadata: { idempotencyKey: `welcome:${event.conversationKey}` },
     },

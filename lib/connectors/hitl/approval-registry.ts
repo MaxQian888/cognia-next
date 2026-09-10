@@ -94,6 +94,8 @@ export function clearSessionBypass(sessionId: string): void {
 
 export interface AwaitApprovalOptions {
   ttlMs?: number
+  /** Close outstanding requests when their owning run ends. */
+  signal?: AbortSignal
   /** Invoked once if the approval times out (for an `expired` audit). */
   onExpire?: () => void
 }
@@ -108,6 +110,10 @@ export function awaitApproval(
   requestId: string,
   opts: AwaitApprovalOptions = {}
 ): Promise<CapturePermissionDecision> {
+  if (opts.signal?.aborted) {
+    opts.onExpire?.()
+    return Promise.resolve({ decision: "deny", message: "approval owner ended" })
+  }
   const k = key(sessionId, requestId)
   // Resolve any stale entry for the same key as a deny before replacing it.
   const prior = pending.get(k)
@@ -122,15 +128,27 @@ export function awaitApproval(
   // forever. There must always be a TTL backstop, so fall back to the default.
   const ttlMs = opts.ttlMs !== undefined && opts.ttlMs > 0 ? opts.ttlMs : DEFAULT_APPROVAL_TTL_MS
   const promise = new Promise<CapturePermissionDecision>((resolve) => {
+    const abort = () => {
+      if (
+        resolveApproval(sessionId, requestId, { decision: "deny", message: "approval owner ended" })
+      ) {
+        opts.onExpire?.()
+      }
+    }
+    const settle = (decision: CapturePermissionDecision) => {
+      opts.signal?.removeEventListener("abort", abort)
+      resolve(decision)
+    }
     const timer = setTimeout(() => {
       const entry = pending.get(k)
       if (!entry) return
       pending.delete(k)
       notify()
       entry.onExpire?.()
-      resolve({ decision: "deny", message: "approval timed out" })
+      settle({ decision: "deny", message: "approval timed out" })
     }, ttlMs)
-    pending.set(k, { sessionId, resolve, timer, onExpire: opts.onExpire })
+    pending.set(k, { sessionId, resolve: settle, timer, onExpire: opts.onExpire })
+    opts.signal?.addEventListener("abort", abort, { once: true })
   })
   // Notify after the entry is registered (the Promise executor runs
   // synchronously, so `pending` already holds the new entry here).

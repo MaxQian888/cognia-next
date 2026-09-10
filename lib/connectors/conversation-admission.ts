@@ -51,6 +51,7 @@ export interface ConversationAdmissionDecision {
   allowed: boolean
   reason?: ConversationAdmissionReason
   activated: boolean
+  threadContinuation?: boolean
 }
 
 type LegacyActivationSettings = Pick<
@@ -217,6 +218,21 @@ export async function admitConversationEvent(
       : options.roomReplyMode
   if (roomReplyMode === "asleep") {
     return { allowed: false, reason: "room_asleep", activated: false }
+  }
+  // Managed Feishu threads are explicit conversations. Once bound, an actual
+  // delivered follow-up continues that session without requiring another @.
+  // Explicit operator admission policies retain precedence.
+  if (
+    event.platform === "lark" &&
+    event.channel.kind === "thread" &&
+    event.channelData?.larkManagedThread === true &&
+    adapter.settings.replyInThread !== false &&
+    !adapter.inboundActivationPolicy &&
+    !override?.inboundActivationPolicy &&
+    adapter.atResponseStrategy !== "direct_only" &&
+    (await findSessionByConversationKey(event.conversationKey))
+  ) {
+    return { allowed: true, activated: false, threadContinuation: true }
   }
   // The stateless half. Shared verbatim with the plugin-facing predictor, so
   // the two cannot disagree about anything a database is not needed for.

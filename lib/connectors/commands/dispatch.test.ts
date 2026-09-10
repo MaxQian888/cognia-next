@@ -81,8 +81,14 @@ function harness(
       goalCalls.push({ arg: inp.arg })
       await inp.reply("goal-ok", "applied")
     }) as unknown as ControlCommandDeps["handleGoal"],
-    enqueue: (async (job: { request: { segments: Array<{ text?: string }> } }) => {
-      enqueued.push({ text: job.request.segments.map((s) => s.text ?? "").join("") })
+    enqueue: (async (job: {
+      request: { segments: Array<{ text?: string; card?: { payload: unknown } }> }
+    }) => {
+      enqueued.push({
+        text: job.request.segments
+          .map((s) => s.text ?? (s.card ? JSON.stringify(s.card.payload) : ""))
+          .join(""),
+      })
     }) as unknown as ControlCommandDeps["enqueue"],
     audit: (async (e: { kind: string; fields?: { command?: unknown } }) => {
       audits.push({ kind: e.kind, command: e.fields?.command })
@@ -202,8 +208,8 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.enqueued[0].text).toMatch(/mention_activates/)
-    expect(h.enqueued[0].text).toMatch(/queue depth: 2/)
+    expect(h.enqueued[0].text).toContain("mention\\\\_activates")
+    expect(h.enqueued[0].text).toMatch(/queue depth\*\*: 2/)
     expect(h.enqueued[0].text).toMatch(/run-1/)
   })
 

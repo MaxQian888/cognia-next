@@ -1838,7 +1838,7 @@
   "wechatPersonal": {
     "adapterCreated": "WeChat connected. Replies start once a contact messages the bot.",
     "adapterUpdated": "WeChat adapter updated.",
-    "banRiskNote": "Unofficial integration via the iLink gateway. Personal-account automation may violate WeChat's terms — there is a real account-ban risk. Use a non-primary account.",
+    "banRiskNote": "Sign in through Tencent iLink by scanning with WeChat and confirming on your phone. If the session expires, scan a new QR code to reconnect.",
     "confirmedNoToken": "Login confirmed, but the gateway returned no bot token. Request a new QR code and try again.",
     "create": "Create",
     "desktopOnly": "Personal WeChat QR login is only available in the desktop runtime.",
@@ -1865,7 +1865,19 @@
     "statusScaned": "Scanned — confirm on your phone…",
     "statusWaiting": "Waiting for scan…",
     "titleEdit": "Configure Personal WeChat (iLink)",
-    "titleNew": "Add Personal WeChat (iLink)"
+    "titleNew": "Add Personal WeChat (iLink)",
+    "statusLoading": "Preparing login QR…",
+    "statusVerifyCode": "Enter the code shown in WeChat to continue.",
+    "statusVerifyBlocked": "Too many incorrect codes. Request a new QR code and try again later.",
+    "statusAlreadyBound": "This WeChat account is already connected. No new credentials were issued.",
+    "verifyCodeLabel": "Pairing code",
+    "verifyCodeHint": "Enter the digits displayed on your phone in WeChat.",
+    "verifyCodeRetry": "The code did not match. Check your phone and try again.",
+    "verifyCodeSubmit": "Verify code",
+    "verifyCodeRequired": "Enter the numeric pairing code shown in WeChat.",
+    "redirectFailed": "The login server did not provide a redirect host. Request a new QR code.",
+    "unknownLoginStatus": "The login server returned an unsupported status. Request a new QR code.",
+    "pollFailed": "Could not check the WeChat login status. Request a new QR code and try again."
   },
   "wecom": {
     "adapterCreated": "WeCom bot created. The long connection starts once enabled.",

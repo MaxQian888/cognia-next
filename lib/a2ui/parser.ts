@@ -16,6 +16,7 @@ import type {
   A2UIMessageContent,
   A2UIWidgetMetadata,
 } from "@/types/a2ui/schema"
+import { isA2UIDataModel, isSafeDataModelKey } from "./data-model"
 
 /**
  * Result of parsing A2UI content
@@ -90,10 +91,18 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
   if (!message.type || typeof message.type !== "string") {
     return null
   }
+  if (typeof message.surfaceId !== "string" || !isSafeDataModelKey(message.surfaceId)) return null
 
   switch (message.type) {
     case "createSurface":
-      if (!message.surfaceId || typeof message.surfaceId !== "string") {
+      if (
+        (message.surfaceType !== undefined &&
+          !["inline", "dialog", "panel", "fullscreen"].includes(message.surfaceType as string)) ||
+        (message.title !== undefined && typeof message.title !== "string") ||
+        (message.catalogId !== undefined && typeof message.catalogId !== "string") ||
+        (message.widget !== undefined &&
+          (!message.widget || typeof message.widget !== "object" || Array.isArray(message.widget)))
+      ) {
         return null
       }
       return {
@@ -107,7 +116,19 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
       }
 
     case "updateComponents":
-      if (!message.surfaceId || !Array.isArray(message.components)) {
+      if (
+        !Array.isArray(message.components) ||
+        !message.components.every(
+          (component) =>
+            component &&
+            typeof component === "object" &&
+            !Array.isArray(component) &&
+            typeof component.id === "string" &&
+            isSafeDataModelKey(component.id) &&
+            typeof component.component === "string" &&
+            component.component.length > 0
+        )
+      ) {
         return null
       }
       return {
@@ -117,7 +138,10 @@ function validateMessage(msg: unknown): A2UIServerMessage | null {
       }
 
     case "dataModelUpdate":
-      if (!message.surfaceId || !message.data || typeof message.data !== "object") {
+      if (
+        !isA2UIDataModel(message.data) ||
+        (message.merge !== undefined && typeof message.merge !== "boolean")
+      ) {
         return null
       }
       return {
@@ -311,16 +335,29 @@ export function detectA2UIContent(content: string): boolean {
  * Parse simplified A2UI format into standard messages
  * Simplified format: { surface: {...}, components: [...], dataModel?: {...} }
  */
-function parseSimplifiedA2UI(json: Record<string, unknown>): A2UIServerMessage[] | null {
+function parseSimplifiedA2UI(
+  json: Record<string, unknown>,
+  options: A2UIParseInputOptions
+): A2UIServerMessage[] | null {
   const surface = json.surface as Record<string, unknown> | undefined
   const components = json.components as A2UIComponent[] | undefined
   const dataModel = json.dataModel as Record<string, unknown> | undefined
+
+  if (surface !== undefined && (!surface || typeof surface !== "object" || Array.isArray(surface)))
+    return null
+  if (
+    surface?.id !== undefined &&
+    (typeof surface.id !== "string" || !isSafeDataModelKey(surface.id))
+  )
+    return null
+  if (json.dataModel !== undefined && !isA2UIDataModel(json.dataModel)) return null
 
   if (!components || !Array.isArray(components)) {
     return null
   }
 
-  const surfaceId = (surface?.id as string) || `surface-${Date.now()}`
+  const surfaceId =
+    (surface?.id as string) || options.fallbackSurfaceId || `surface-${crypto.randomUUID()}`
   const surfaceType = (surface?.type as "inline" | "dialog" | "panel" | "fullscreen") || "inline"
   const title = surface?.title as string | undefined
   const widget = surface?.widget as A2UIWidgetMetadata | undefined
@@ -353,12 +390,12 @@ function parseSimplifiedA2UI(json: Record<string, unknown>): A2UIServerMessage[]
     surfaceId,
   })
 
-  return messages
+  return messages.every((message) => validateMessage(message) !== null) ? messages : null
 }
 
-function parseA2UIObject(input: unknown): A2UIParseResult {
-  if (input && typeof input === "object" && !Array.isArray(input)) {
-    const simplified = parseSimplifiedA2UI(input as Record<string, unknown>)
+function parseA2UIObject(input: unknown, options: A2UIParseInputOptions = {}): A2UIParseResult {
+  if (input && typeof input === "object" && !Array.isArray(input) && !("type" in input)) {
+    const simplified = parseSimplifiedA2UI(input as Record<string, unknown>, options)
     if (simplified && simplified.length > 0) {
       return {
         success: true,
@@ -443,11 +480,12 @@ export function parseA2UIInput(
       return emptyResult
     }
 
-    const extracted = extractA2UIFromResponse(input)
-    if (extracted?.messages.length) {
+    const blocks = extractA2UIBlocks(input, options)
+    if (blocks.length) {
+      const messages = blocks.flatMap((block) => block.content.messages)
       return {
-        surfaceId: resolveSurfaceId(extracted.messages, options.fallbackSurfaceId),
-        messages: extracted.messages,
+        surfaceId: resolveSurfaceId(messages, options.fallbackSurfaceId),
+        messages,
         errors: [],
       }
     }
@@ -468,7 +506,7 @@ export function parseA2UIInput(
     }
   }
 
-  const parsedObjectResult = parseA2UIObject(input)
+  const parsedObjectResult = parseA2UIObject(input, options)
   if (parsedObjectResult.success && parsedObjectResult.messages.length > 0) {
     return {
       surfaceId: resolveSurfaceId(parsedObjectResult.messages, options.fallbackSurfaceId),
@@ -491,7 +529,7 @@ export function parseA2UIInput(
     const textPayloads = collectA2UITextPayloads(payload)
     if (textPayloads.length > 0) {
       const mergedMessages: A2UIServerMessage[] = []
-      const mergedErrors: string[] = [...parsedObjectResult.errors]
+      const mergedErrors: string[] = []
 
       for (const textPayload of textPayloads) {
         const nestedResult = parseA2UIInput(textPayload, options)
@@ -533,93 +571,103 @@ export function parseA2UIInput(
  * - Standard A2UI protocol messages
  */
 export function extractA2UIFromResponse(response: string): A2UIMessageContent | null {
-  // Priority 1: Try to find A2UI-specific code blocks (```a2ui)
-  const a2uiBlockRegex = /```a2ui\s*\n?([\s\S]*?)\n?```/gi
-  let match = a2uiBlockRegex.exec(response)
-
-  if (match) {
-    const jsonContent = match[1].trim()
-    const result = tryParseA2UIContent(jsonContent)
-    if (result) return result
-  }
-
-  // Priority 2: Try to find JSON code blocks
-  const jsonBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g
-
-  while ((match = jsonBlockRegex.exec(response)) !== null) {
-    const jsonContent = match[1].trim()
-    if (detectA2UIContent(jsonContent)) {
-      const result = tryParseA2UIContent(jsonContent)
-      if (result) return result
-    }
-  }
-
-  // Priority 3: Try parsing raw JSON if no code blocks found
-  if (detectA2UIContent(response)) {
-    const jsonContent = extractJsonFromText(response)
-    if (jsonContent) {
-      const result = tryParseA2UIContent(jsonContent)
-      if (result) return result
-    }
-  }
-
-  return null
+  return extractA2UIBlocks(response)[0]?.content ?? null
 }
 
-/**
- * Try to parse A2UI content from JSON string
- */
-function tryParseA2UIContent(jsonContent: string): A2UIMessageContent | null {
+export interface A2UIExtractedBlock {
+  /** Exact source span, including code fences when present. */
+  start: number
+  end: number
+  content: A2UIMessageContent
+}
+
+/** Extract every valid payload without treating examples in other languages as UI. */
+export function extractA2UIBlocks(
+  response: string,
+  options: A2UIParseInputOptions = {}
+): A2UIExtractedBlock[] {
+  const blocks: A2UIExtractedBlock[] = []
+  const append = (start: number, end: number, payload: string) => {
+    const content = tryParseA2UIContent(payload, {
+      ...options,
+      fallbackSurfaceId:
+        options.fallbackSurfaceId && blocks.length > 0
+          ? `${options.fallbackSurfaceId}:${blocks.length}`
+          : options.fallbackSurfaceId,
+    })
+    if (content) blocks.push({ start, end, content })
+  }
+  const scanRaw = (start: number, end: number) => {
+    for (let index = start; index < end; index++) {
+      if (response[index] !== "{" && response[index] !== "[") continue
+      const jsonEnd = findJsonEnd(response, index, end)
+      if (jsonEnd === null) continue
+      append(index, jsonEnd, response.slice(index, jsonEnd))
+      index = jsonEnd - 1
+    }
+  }
+
+  const opening = /(`{3,}|~{3,})([^\r\n]*)\r?\n/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = opening.exec(response)) !== null) {
+    scanRaw(cursor, match.index)
+    const marker = match[1][0]
+    const closing = new RegExp(`^[ \t]{0,3}${marker}{${match[1].length},}[ \t]*(?=\r?$)`, "gm")
+    closing.lastIndex = opening.lastIndex
+    const close = closing.exec(response)
+    // An unfinished fence is streaming content, never a raw-JSON candidate.
+    if (!close) return blocks
+    const end = close.index + close[0].length
+    if (/^(?:a2ui|json|jsonl)?$/i.test(match[2].trim())) {
+      append(match.index, end, response.slice(opening.lastIndex, close.index))
+    }
+    cursor = end
+    opening.lastIndex = end
+  }
+  scanRaw(cursor, response.length)
+  return blocks
+}
+
+/** JSONL is accepted only when every nonblank line is a valid protocol event. */
+function tryParseA2UIContent(
+  jsonContent: string,
+  options: A2UIParseInputOptions
+): A2UIMessageContent | null {
+  let result: A2UIParseResult
   try {
-    const json = JSON.parse(jsonContent)
-
-    // Try standard + simplified A2UI protocol format
-    const parseResult = parseA2UIObject(json)
-    if (parseResult.success && parseResult.messages.length > 0) {
-      const surfaceId = resolveSurfaceId(parseResult.messages, "default") ?? "default"
-      return {
-        type: "a2ui",
-        surfaceId,
-        messages: parseResult.messages,
-      }
-    }
+    result = parseA2UIObject(JSON.parse(jsonContent), options)
   } catch {
-    // JSON parse failed, return null
+    result = parseA2UIJsonl(jsonContent)
   }
-  return null
+  if (!result.success || result.errors.length) return null
+  return {
+    type: "a2ui",
+    surfaceId: resolveSurfaceId(result.messages, options.fallbackSurfaceId) ?? "default",
+    messages: result.messages,
+  }
 }
 
-/**
- * Extract JSON object or array from text
- */
-function extractJsonFromText(text: string): string | null {
-  const jsonStart = text.indexOf("{")
-  const jsonArrayStart = text.indexOf("[")
-  const startIndex =
-    jsonStart >= 0 && jsonArrayStart >= 0
-      ? Math.min(jsonStart, jsonArrayStart)
-      : Math.max(jsonStart, jsonArrayStart)
-
-  if (startIndex < 0) return null
-
-  // Find matching end bracket
-  let depth = 0
-  let endIndex = startIndex
-
-  for (let i = startIndex; i < text.length; i++) {
-    const char = text[i]
-    if (char === "{" || char === "[") depth++
-    if (char === "}" || char === "]") depth--
-    if (depth === 0) {
-      endIndex = i
-      break
+/** Scan structural brackets while ignoring escaped quotes and brackets in strings. */
+function findJsonEnd(text: string, start: number, limit: number): number | null {
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+  for (let index = start; index < limit; index++) {
+    const char = text[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === "\\") escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === "{" || char === "[") stack.push(char)
+    else if (char === "}" || char === "]") {
+      if (stack.pop() !== (char === "}" ? "{" : "[")) return null
+      if (stack.length === 0) return index + 1
     }
   }
-
-  if (endIndex > startIndex) {
-    return text.substring(startIndex, endIndex + 1)
-  }
-
   return null
 }
 

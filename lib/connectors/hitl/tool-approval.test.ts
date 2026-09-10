@@ -1,3 +1,5 @@
+import { settleApprovalCard } from "./approval-card-state"
+jest.mock("./approval-card-state", () => ({ settleApprovalCard: jest.fn(async () => undefined) }))
 /**
  * Tests for lib/connectors/hitl/tool-approval.ts — the IM permission responder,
  * card builder, and callback applier.
@@ -144,6 +146,7 @@ describe("makeImPermissionResponder", () => {
     // Resolve via the registry → the suspended promise settles.
     resolveApproval("s1", "req_1", { decision: "allow" })
     await expect(pending).resolves.toEqual({ decision: "allow" })
+    expect(settleApprovalCard).toHaveBeenCalledWith(expect.objectContaining({ state: "approved" }))
   })
 
   it("carries the persisted delivery target onto the approval job", async () => {
@@ -257,4 +260,18 @@ describe("approval binding actor scope (plan 2026-07-24 Phase 2)", () => {
       expect(b.actorScope).toEqual({ mode: "operators" })
     }
   })
+})
+
+it("does not grant session bypass from an already resolved card", () => {
+  __resetApprovalRegistryForTesting()
+  expect(
+    applyToolApprovalCallback({
+      sessionId: "stale",
+      requestId: "old",
+      toolName: "Bash",
+      decision: "allow_session",
+      resolve: () => false,
+    })
+  ).toEqual({ granted: false, resolved: false })
+  expect(hasSessionBypass("stale", "Bash")).toBe(false)
 })

@@ -59,6 +59,7 @@ jest.mock("@/lib/connectors/hitl/media-grant", () => ({
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { listRecent } from "@/lib/db/connector-audit"
+import { createPlatformSession } from "./session-bindings"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetPruneCounterForTesting } from "./dedup"
 import { __resetSiblingBotCacheForTesting, type SiblingClassification } from "./sibling-bots"
@@ -507,5 +508,52 @@ describe("media model gate — asking for consent", () => {
     await bus.dispatchInboundFull(imageEvent(adapterId, "m2"))
     await bus.flushInboundTurns()
     expect(mockRequestMediaGrant).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("managed Feishu thread continuation", () => {
+  it("routes a bound unmentioned follow-up while retaining trigger blockers", async () => {
+    const adapterId = await seedAdapter({
+      type: "lark",
+      settings: { larkPrincipalRegistry: false },
+      inboundActivationPolicy: undefined,
+      trigger: {
+        rules: [{ kind: "self-mention" }],
+        blockers: [{ kind: "keyword-blocklist", words: ["blocked-word"] }],
+        storeUnmatchedInDraftMode: false,
+      },
+    })
+    const base = groupEvent(adapterId, "thread-followup")
+    const followup: NormalizedInboundEvent = {
+      ...base,
+      platform: "lark",
+      conversationKey: `lark:${adapterId}:oc-test:om-root`,
+      conversationRef: {
+        platform: "lark",
+        adapterId,
+        channelId: "oc-test",
+        threadTs: "om-root",
+        threadRootMessageId: "om-root",
+      },
+      channel: { id: "om-root", kind: "thread" },
+      channelData: { larkManagedThread: true },
+      mentions: { selfMentioned: false, users: [] },
+    }
+    await createPlatformSession(followup, undefined)
+    const bus = getBus()
+    const handler = jest.fn()
+    bus.routeHandler = handler
+    await bus.dispatchInboundFull(followup)
+    await bus.flushInboundTurns()
+    expect(await historyOnlyReasons()).toEqual([])
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0][1]).toBe("ai-run")
+    await bus.dispatchInboundFull({
+      ...followup,
+      messageId: "thread-blocked",
+      plainText: "blocked-word",
+    })
+    await bus.flushInboundTurns()
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })

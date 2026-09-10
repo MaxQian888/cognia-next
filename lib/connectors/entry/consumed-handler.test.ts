@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import { transport } from "@/lib/tauri"
 import {
   LARK_INTENT_TOPIC,
   handleLarkIntentFrame,
@@ -437,6 +438,41 @@ describe("isChatMember", () => {
 })
 
 describe("installLarkIntentHandler", () => {
+  it("completes operator intents with the transport receiver intact", async () => {
+    const receivers: unknown[] = []
+    const call = jest.spyOn(transport, "call").mockImplementation(function (this: unknown) {
+      receivers.push(this)
+      return Promise.resolve({ accepted: true }) as never
+    })
+    let captured: ((event: { payload: unknown }) => void) | undefined
+    const dispose = installLarkIntentHandler(
+      async (_topic, handler) => {
+        captured = handler
+        return () => undefined
+      },
+      { runAdmin: jest.fn(async () => ({ ok: true as const, result: {} })) }
+    )
+    try {
+      captured?.({
+        payload: {
+          kind: "principal_admin",
+          requestId: "req_receiver",
+          adapterId: "lk-1",
+          op: "list",
+        },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(call).toHaveBeenCalledWith("lark_result_complete", {
+        requestId: "req_receiver",
+        result: {},
+      })
+      expect(receivers).toEqual([transport])
+    } finally {
+      dispose()
+      call.mockRestore()
+    }
+  })
+
   it("routes principal_admin to the registry executor and answers the intent", async () => {
     const deps = makeDeps()
     await handleLarkIntentFrame(

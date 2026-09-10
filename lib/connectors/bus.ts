@@ -1,3 +1,4 @@
+import { settleApprovalCard, type ApprovalCardState } from "./hitl/approval-card-state"
 /**
  * ConnectorBus singleton — Tasks 25 & 28.
  *
@@ -101,7 +102,11 @@ import {
 import { handleUnresolvedPrincipal } from "./principal/unbound"
 import { bootstrapFeishuRegistry } from "./principal/bootstrap"
 import { recordConnectorMetric } from "./metrics"
-import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
+import {
+  authorizeConnectorCallback,
+  notifyCallbackDenied,
+  resolveLarkCallbackConversation,
+} from "./callback-authorization"
 import { invalidatePersistSnapshot } from "@/lib/db/messages"
 import { assertLocalMutationAllowed } from "@/lib/collab/shared-session-access"
 
@@ -857,7 +862,17 @@ export class ConnectorBus {
     const resolved = resolveBinding({ adapter: adapterRow, character, override })
 
     // ── Step 6: evaluate policy ───────────────────────────────────────────────
-    const evalResult = evaluatePolicy(resolved.trigger, event, this.policyState, now)
+    const trigger =
+      "threadContinuation" in admission && admission.threadContinuation
+        ? {
+            ...resolved.trigger,
+            rules: [
+              ...resolved.trigger.rules,
+              { kind: "channel-allowlist" as const, channelIds: [event.channel.id] },
+            ],
+          }
+        : resolved.trigger
+    const evalResult = evaluatePolicy(trigger, event, this.policyState, now)
 
     // ── Step 7: route ─────────────────────────────────────────────────────────
     // Routed from the composition axes, not from `mode`. `mode` cannot express
@@ -2383,6 +2398,16 @@ export class ConnectorBus {
     const isRunControl =
       Boolean(runId) && Number.isInteger(runRevision) && RUN_CONTROL_ACTIONS.has(runAction)
 
+    const cardConversation = await resolveLarkCallbackConversation(
+      event,
+      isRunControl ? runId : undefined,
+      resolvedBinding
+    )
+    if (cardConversation) {
+      event = { ...event, conversationKey: cardConversation }
+      resolvedConversationKey = cardConversation
+    }
+
     // ── Step 2.6: unified callback authorization (plan 2026-07-24 Phase 2)
     // One guard in front of EVERY consumer below — run controls, the
     // kind-specific short-circuits, and the generic bridge hand-off. Denied
@@ -2517,6 +2542,18 @@ export class ConnectorBus {
     // kind-specific short-circuit or the authoritative callbackHandler.
     this.notifyCallbackObservers(event, resolvedConversationKey)
 
+    const settleCallbackCard = async (state: ApprovalCardState) => {
+      if (!resolvedConversationKey || !event.originatingMessageId) return
+      await settleApprovalCard({
+        adapterId: event.adapterId,
+        conversationKey: resolvedConversationKey,
+        conversationRef: { platform: event.platform, adapterId: event.adapterId },
+        surfaceId: resolvedSurfaceId!,
+        messageId: event.originatingMessageId,
+        state,
+      })
+    }
+
     // ── Step 4-pre-b: wf_fanout_approve / wf_fanout_cancel short-circuit ──
     //
     // Companion to wf_approve/wf_cancel below. The fan-out flow writes
@@ -2539,7 +2576,9 @@ export class ConnectorBus {
           platform: event.platform,
           conversationKey: resolvedConversationKey ?? undefined,
         })
+        await settleCallbackCard(cancelled ? "denied" : "processed")
       } catch (err) {
+        await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
           kind: "workflow_fanout_failed",
@@ -2578,7 +2617,9 @@ export class ConnectorBus {
           platform: event.platform,
           conversationKey: resolvedConversationKey ?? undefined,
         })
+        await settleCallbackCard(cancelled ? "denied" : "processed")
       } catch (err) {
+        await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
           kind: "workflow_approval_failed",
@@ -2726,6 +2767,7 @@ export class ConnectorBus {
           provider,
           ...(grantSessionId ? { sessionId: grantSessionId } : {}),
         })
+        await settleCallbackCard(granted ? "approved" : "denied")
         await appendAudit({
           adapterId: event.adapterId,
           kind: granted ? "media_grant.granted" : "media_grant.denied",
@@ -2734,6 +2776,7 @@ export class ConnectorBus {
           fields: { provider, decision },
         })
       } catch (err) {
+        await settleCallbackCard("failed")
         await appendAudit({
           adapterId: event.adapterId,
           kind: "callback.handler_failed",

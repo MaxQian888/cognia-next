@@ -1,3 +1,5 @@
+import { buildLarkRunFallbackSegment } from "./lark-driver"
+import { resolveWebEntryBase } from "@/lib/connectors/entry/deep-links"
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
@@ -138,6 +140,19 @@ function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot 
     summary: snapshot.status === "completed" ? "Run completed" : undefined,
     error: snapshot.status === "failed" ? "Run failed; sensitive details are hidden." : undefined,
     waitingReason: snapshot.status === "waiting" ? "Waiting for a local review." : undefined,
+    ...(snapshot.workflowGraph
+      ? {
+          workflowGraph: {
+            workflowId: safeStableActivityId(snapshot.workflowGraph.workflowId),
+            sourceRunId: safeStableActivityId(snapshot.workflowGraph.sourceRunId),
+            nodes: snapshot.workflowGraph.nodes.map(safeStep),
+            edges: snapshot.workflowGraph.edges.map(({ source, target }) => ({
+              source: safeStableActivityId(source),
+              target: safeStableActivityId(target),
+            })),
+          },
+        }
+      : {}),
     activeSteps: snapshot.activeSteps.map(safeStep),
     recentSteps: snapshot.recentSteps.map(safeStep),
     pendingSteps: snapshot.pendingSteps.map(safeStep),
@@ -150,15 +165,16 @@ function imSafeSnapshot(snapshot: RunProjectionSnapshot): RunProjectionSnapshot 
       : {}),
     elapsedMs: snapshot.elapsedMs,
     detailsUrl: `/agent-runs?run=${encodeURIComponent(safeRunId)}`,
-    pendingInterrupt: snapshot.pendingInterrupt
-      ? {
-          id: safeStableActivityId(snapshot.pendingInterrupt.id),
-          title: "Approval required",
-          ...(snapshot.pendingInterrupt.expiresAt !== undefined
-            ? { expiresAt: snapshot.pendingInterrupt.expiresAt }
-            : {}),
-        }
-      : undefined,
+    pendingInterrupt:
+      snapshot.pendingInterrupt && !TERMINAL.has(snapshot.status)
+        ? {
+            id: safeStableActivityId(snapshot.pendingInterrupt.id),
+            title: "Approval required",
+            ...(snapshot.pendingInterrupt.expiresAt !== undefined
+              ? { expiresAt: snapshot.pendingInterrupt.expiresAt }
+              : {}),
+          }
+        : undefined,
     artifacts: snapshot.artifacts.map((artifact) => ({
       id: safeStableActivityId(artifact.id),
       title: "Artifact created",
@@ -425,7 +441,11 @@ async function deliverFallback(
     request: {
       conversationRef: deliveryConversationRef(binding),
       deliveryTarget: binding.deliveryTarget,
-      segments: [buildA2UISegment(`execution-run:${snapshot.runId}`, surface)],
+      segments: [
+        deliveryConversationRef(binding).platform === "lark"
+          ? buildLarkRunFallbackSegment(snapshot, resolveWebEntryBase())
+          : buildA2UISegment(`execution-run:${snapshot.runId}`, surface),
+      ],
       ...(editTargetMessageId ? { editTargetMessageId } : {}),
       metadata: {
         idempotencyKey: `execution-run:${binding.id}:${snapshot.revision}`,

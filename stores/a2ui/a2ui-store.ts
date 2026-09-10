@@ -107,6 +107,7 @@ function buildSnapshotUpdate(
     updatedStack[updatedStack.length - 1] = { ...lastEntry, timestamp: Date.now() }
     return {
       undoStacks: { ...state.undoStacks, [surfaceId]: updatedStack },
+      redoStacks: { ...state.redoStacks, [surfaceId]: [] },
     }
   }
 
@@ -478,6 +479,8 @@ function createRootLayoutId(components: Record<string, A2UIComponent>): string {
 /**
  * A2UI Store
  */
+const activeMessageStreams = new Map<string, Set<symbol>>()
+
 export const useA2UIStore = create<A2UIState & A2UIActions>()(
   subscribeWithSelector(
     persist(
@@ -486,25 +489,33 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Surface lifecycle
         createSurface: (surfaceId, type, options) => {
-          set((state) => ({
-            surfaces: {
-              ...state.surfaces,
-              [surfaceId]: {
-                id: surfaceId,
-                type,
-                catalogId: options?.catalogId,
-                title: options?.title,
-                widget: options?.widget,
-                components: {},
-                dataModel: {},
-                rootId: "root",
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                ready: false,
+          set((state) => {
+            const { [surfaceId]: _error, ...errors } = state.errors
+            const { [surfaceId]: _undo, ...undoStacks } = state.undoStacks
+            const { [surfaceId]: _redo, ...redoStacks } = state.redoStacks
+            return {
+              errors,
+              undoStacks,
+              redoStacks,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  id: surfaceId,
+                  type,
+                  catalogId: options?.catalogId,
+                  title: options?.title,
+                  widget: options?.widget,
+                  components: {},
+                  dataModel: {},
+                  rootId: "root",
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  ready: false,
+                },
               },
-            },
-            activeSurfaceId: state.activeSurfaceId ?? surfaceId,
-          }))
+              activeSurfaceId: state.activeSurfaceId ?? surfaceId,
+            }
+          })
         },
 
         restoreSurface: (surface) => {
@@ -539,13 +550,18 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
         },
 
         deleteSurface: (surfaceId) => {
+          activeMessageStreams.delete(surfaceId)
           set((state) => {
             const { [surfaceId]: _, ...remainingSurfaces } = state.surfaces
             const { [surfaceId]: __, ...remainingErrors } = state.errors
             const { [surfaceId]: ___, ...remainingLoading } = state.loadingSurfaces
             const { [surfaceId]: ____, ...remainingStreaming } = state.streamingSurfaces
+            const { [surfaceId]: _undo, ...undoStacks } = state.undoStacks
+            const { [surfaceId]: _redo, ...redoStacks } = state.redoStacks
 
             return {
+              undoStacks,
+              redoStacks,
               surfaces: remainingSurfaces,
               errors: remainingErrors,
               loadingSurfaces: remainingLoading,
@@ -576,6 +592,21 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               updatedComponents[component.id] = migrateLegacyComponent(component)
             }
 
+            // The first streamed batch may use a named root and list children
+            // before it. Subsequent patches must not replace an established root.
+            let rootId = surface.rootId
+            if (Object.keys(surface.components).length === 0 && components.length > 0) {
+              const referencedIds = new Set(
+                components.flatMap((component) =>
+                  getComponentChildReferences(component).map((reference) => reference.id)
+                )
+              )
+              rootId = updatedComponents.root
+                ? "root"
+                : (components.find((component) => !referencedIds.has(component.id))?.id ??
+                  components[0].id)
+            }
+
             return {
               ...snapshot,
               surfaces: {
@@ -583,6 +614,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                 [surfaceId]: {
                   ...surface,
                   components: updatedComponents,
+                  rootId,
                   updatedAt: Date.now(),
                 },
               },
@@ -1019,22 +1051,38 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
               surfaceIds.add((msg as { surfaceId: string }).surfaceId)
             }
           }
-          // Mark surfaces as streaming
+          // Each stream owns a token per surface. Removing a surface invalidates
+          // its old tokens, even if a replacement reuses the same surface id.
+          const token = Symbol("a2ui-message-stream")
           for (const sid of surfaceIds) {
+            const owners = activeMessageStreams.get(sid) ?? new Set<symbol>()
+            owners.add(token)
+            activeMessageStreams.set(sid, owners)
             setSurfaceStreaming(sid, true)
           }
           try {
             // Process messages with delay for progressive rendering
             for (let i = 0; i < messages.length; i++) {
-              processMessage(messages[i])
+              const message = messages[i]
+              if (
+                "surfaceId" in message &&
+                !activeMessageStreams.get(message.surfaceId)?.has(token)
+              ) {
+                continue
+              }
+              processMessage(message)
               if (delayMs > 0 && i < messages.length - 1) {
                 await new Promise((resolve) => setTimeout(resolve, delayMs))
               }
             }
           } finally {
-            // Always clear streaming state
+            // A completed or invalidated stream cannot clear another owner's flag.
             for (const sid of surfaceIds) {
-              setSurfaceStreaming(sid, false)
+              const owners = activeMessageStreams.get(sid)
+              if (owners?.delete(token) && owners.size === 0) {
+                activeMessageStreams.delete(sid)
+                setSurfaceStreaming(sid, false)
+              }
             }
           }
         },
@@ -1236,6 +1284,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
         },
 
         reset: () => {
+          activeMessageStreams.clear()
           set(initialState)
         },
       }),
@@ -1361,7 +1410,8 @@ export async function hydrateA2UISurfaceCache(): Promise<boolean> {
   const durableSnapshot = Object.fromEntries(
     rows.filter((row) => row.type !== "inline").map((row) => [row.id, fromDurableSurface(row)])
   )
-  syncDurableSurfaceChanges(cached, durableSnapshot)
+  // Cache eviction must never delete the durable source of an older surface.
+  syncDurableSurfaceChanges(merged, durableSnapshot)
   return true
 }
 

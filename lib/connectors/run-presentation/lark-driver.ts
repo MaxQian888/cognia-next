@@ -1,3 +1,5 @@
+import type { MessageSegment } from "@/types/connectors/segment"
+import { buildRunDetailsUrl } from "@/lib/connectors/entry/deep-links"
 import type {
   RunControlAction,
   RunPresentationDriver,
@@ -11,11 +13,16 @@ import {
   runTitleForPresentation,
 } from "@/lib/connectors/activity/activity-to-a2ui"
 import { resolveActivityI18n } from "@/lib/connectors/activity/i18n"
-import { safeStableActivityId } from "@/lib/execution/run-activity"
-import { buildFollowUpItems, RUN_ACTION_LABEL_EN, RUN_ACTION_LABEL_ZH } from "./follow-up-items"
+import { sanitizeActivityLabel, safeStableActivityId } from "@/lib/execution/run-activity"
+import {
+  buildFollowUpItems,
+  followUpHintLine,
+  RUN_ACTION_LABEL_EN,
+  RUN_ACTION_LABEL_ZH,
+} from "./follow-up-items"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
-type LarkMethod = "POST" | "PUT" | "PATCH"
+type LarkMethod = "POST" | "PUT" | "PATCH" | "DELETE"
 export type LarkRunRequest = (method: LarkMethod, path: string, body: unknown) => Promise<unknown>
 
 const CARD_LIMIT_BYTES = 30_000
@@ -98,6 +105,8 @@ interface FollowUpControlState {
 export interface LarkRunPresentationDriverOptions {
   sleep?: (ms: number) => Promise<void>
   now?: () => number
+  statusReactions?: boolean
+  webEntryBaseUrl?: string | null
 }
 
 // Shared with the generic fallback path, which registers the same verbs so
@@ -125,48 +134,146 @@ function deterministicUuid(input: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
-function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<string, unknown> {
+/** A bounded native dependency map; no inferred links or headless image process. */
+function workflowElements(snapshot: RunProjectionSnapshot): Record<string, unknown>[] {
+  const graph = snapshot.workflowGraph
+  if (!graph?.nodes.length) return []
+  const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
+  const i18n = resolveActivityI18n(snapshot.locale)
+  const marks = {
+    pending: "○",
+    in_progress: "▶",
+    completed: "✓",
+    failed: "✕",
+    skipped: "⊘",
+    blocked: "⏸",
+  }
+  const nodes = graph.nodes.slice(0, 16)
+  const index = new Map(graph.nodes.map((node, i) => [node.id, i + 1]))
+  const rows: Record<string, unknown>[] = []
+  for (let i = 0; i < nodes.length; i += 2) {
+    rows.push({
+      tag: "column_set",
+      columns: nodes.slice(i, i + 2).map((node) => ({
+        tag: "column",
+        width: "weighted",
+        weight: 1,
+        elements: [
+          {
+            tag: "markdown",
+            content: `**${index.get(node.id)} · ${marks[node.status] ?? "○"} ${sanitizeActivityLabel(
+              node.title,
+              "Step"
+            )
+              .replace(/([\\`*_\[\]])/g, "\\$1")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")}**\n${i18n.milestoneStatus(node.status)}`,
+          },
+        ],
+      })),
+    })
+  }
+  const edges = graph.edges.filter((edge) => index.has(edge.source) && index.has(edge.target))
+  rows.push({
+    tag: "markdown",
+    content: `${zh ? "依赖关系" : "Dependencies"}: ${
+      edges
+        .slice(0, 24)
+        .map((edge) => `${index.get(edge.source)} → ${index.get(edge.target)}`)
+        .join(" · ") || (zh ? "无节点间依赖" : "No dependencies between nodes")
+    }`,
+  })
+  if (graph.nodes.length > 16 || edges.length > 24)
+    rows.push({
+      tag: "markdown",
+      content: zh
+        ? "仅展示部分节点与连线，请打开完整工作流。"
+        : "Partial graph shown. Open the full workflow for all nodes and connections.",
+    })
+  return [{ tag: "markdown", content: `**${zh ? "工作流总览" : "Workflow overview"}**` }, ...rows]
+}
+
+function graphSignature(snapshot: RunProjectionSnapshot): string {
+  const graph = snapshot.workflowGraph
+  return graph
+    ? JSON.stringify([
+        graph.workflowId,
+        graph.sourceRunId,
+        graph.nodes.map(({ id, title, status }) => [id, title, status]),
+        graph.edges,
+      ])
+    : ""
+}
+
+function cardJson(
+  snapshot: RunProjectionSnapshot,
+  streaming: boolean,
+  webBase?: string | null
+): Record<string, unknown> {
   const safeRunId = safeStableActivityId(snapshot.runId)
   const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
   const i18n = resolveActivityI18n(snapshot.locale)
   const statusLabel = i18n.runStatus(snapshot.status)
   const title = runTitleForPresentation(snapshot, i18n)
   const actionLabel = zh ? ACTION_LABEL_ZH : ACTION_LABEL_EN
-  const details = formatRunActivityTimeline(snapshot, i18n)
-  const actions = snapshot.allowedActions.slice(0, 5).map((action) => ({
-    tag: "button",
-    text: { tag: "plain_text", content: actionLabel[action] },
-    type:
-      action === "approve"
-        ? "primary"
-        : action === "deny" || action === "stop"
-          ? "danger"
-          : "default",
-    behaviors:
-      action === "open_details"
-        ? [
-            {
-              type: "open_url",
-              default_url: `/agent-runs?run=${encodeURIComponent(safeRunId)}`,
-            },
-          ]
-        : [
-            {
-              type: "callback",
-              value: {
-                actionId: `run:${safeRunId}:${action}:${snapshot.revision}`,
-                surfaceId: `execution-run:${safeRunId}`,
-                componentId: `run-action-${action}`,
-                action,
-                runId: safeRunId,
-                revision: snapshot.revision,
-                ...(snapshot.pendingInterrupt
-                  ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
-                  : {}),
+  const details = summaryContent(snapshot)
+  const runUrl = buildRunDetailsUrl(safeRunId, webBase)
+  const detailsUrl =
+    runUrl && snapshot.workflowGraph
+      ? (() => {
+          const url = new URL(runUrl)
+          url.pathname = url.pathname.replace(/agent-runs$/, "workflows/run")
+          url.search = ""
+          url.searchParams.set("id", snapshot.workflowGraph.workflowId)
+          url.searchParams.set("runId", snapshot.workflowGraph.sourceRunId)
+          return url.href
+        })()
+      : runUrl
+  const actions = snapshot.allowedActions
+    .filter((action) => action !== "open_details" || detailsUrl)
+    .slice(0, 5)
+    .map((action) => ({
+      tag: "button",
+      text: {
+        tag: "plain_text",
+        content:
+          action === "open_details" && snapshot.workflowGraph
+            ? zh
+              ? "完整工作流"
+              : "Full workflow"
+            : actionLabel[action],
+      },
+      type:
+        action === "approve"
+          ? "primary"
+          : action === "deny" || action === "stop"
+            ? "danger"
+            : "default",
+      behaviors:
+        action === "open_details"
+          ? [
+              {
+                type: "open_url",
+                default_url: detailsUrl!,
               },
-            },
-          ],
-  }))
+            ]
+          : [
+              {
+                type: "callback",
+                value: {
+                  actionId: `run:${safeRunId}:${action}:${snapshot.revision}`,
+                  surfaceId: `execution-run:${safeRunId}`,
+                  componentId: `run-action-${action}`,
+                  action,
+                  runId: safeRunId,
+                  revision: snapshot.revision,
+                  ...(snapshot.pendingInterrupt
+                    ? { interruptId: safeStableActivityId(snapshot.pendingInterrupt.id) }
+                    : {}),
+                },
+              },
+            ],
+    }))
   return {
     schema: "2.0",
     config: {
@@ -180,23 +287,81 @@ function cardJson(snapshot: RunProjectionSnapshot, streaming: boolean): Record<s
       },
     },
     header: {
-      title: { tag: "plain_text", content: clamp(title, 240) },
+      title: { tag: "plain_text", content: `${clamp(title, 180)} · ${statusLabel}` },
       template:
-        snapshot.status === "failed" ? "red" : snapshot.status === "completed" ? "green" : "blue",
+        snapshot.status === "completed"
+          ? "green"
+          : snapshot.status === "failed"
+            ? "red"
+            : ["waiting", "paused", "recovery_required"].includes(snapshot.status)
+              ? "orange"
+              : "blue",
+      padding: "12px 16px 12px 16px",
     },
     body: {
+      padding: "16px",
+      vertical_spacing: "12px",
       elements: [
-        { tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID },
+        ...workflowElements(snapshot),
+        {
+          tag: "collapsible_panel",
+          element_id: "run_progress",
+          expanded: !snapshot.workflowGraph,
+          padding: "12px",
+          vertical_spacing: "12px",
+          header: {
+            title: {
+              tag: "plain_text",
+              content:
+                snapshot.kind === "workflow"
+                  ? zh
+                    ? "节点与执行活动"
+                    : "Nodes and activity"
+                  : zh
+                    ? "执行过程"
+                    : "Execution activity",
+            },
+            background_color: "grey-100",
+            padding: "12px",
+            icon: { tag: "standard_icon", token: "down-small-ccm_outlined", size: "16px 16px" },
+            icon_position: "right",
+          },
+          border: { color: "grey-200", corner_radius: "8px" },
+          elements: [{ tag: "markdown", content: details, element_id: SUMMARY_ELEMENT_ID }],
+        },
         ...(actions.length > 0
-          ? [{ tag: "action", layout: "bisected", actions, element_id: ACTIONS_ELEMENT_ID }]
+          ? [
+              {
+                tag: "column_set",
+                element_id: ACTIONS_ELEMENT_ID,
+                columns: actions.map((button) => ({
+                  tag: "column",
+                  width: "weighted",
+                  weight: 1,
+                  elements: [button],
+                })),
+              },
+            ]
           : []),
       ],
     },
   }
 }
 
-function serializeCard(snapshot: RunProjectionSnapshot, streaming: boolean): string {
-  let json = JSON.stringify(cardJson(snapshot, streaming))
+/** Keep fallback edits on the same Card 2.0 schema as native messages. */
+export function buildLarkRunFallbackSegment(
+  snapshot: RunProjectionSnapshot,
+  webBase?: string | null
+): MessageSegment {
+  return { type: "card", card: { kind: "lark", payload: cardJson(snapshot, false, webBase) } }
+}
+
+function serializeCard(
+  snapshot: RunProjectionSnapshot,
+  streaming: boolean,
+  webBase?: string | null
+): string {
+  let json = JSON.stringify(cardJson(snapshot, streaming, webBase))
   if (new TextEncoder().encode(json).byteLength <= CARD_LIMIT_BYTES) return json
   json = JSON.stringify(
     cardJson(
@@ -207,7 +372,8 @@ function serializeCard(snapshot: RunProjectionSnapshot, streaming: boolean): str
         recentSteps: [],
         artifacts: [],
       },
-      streaming
+      streaming,
+      webBase
     )
   )
   if (new TextEncoder().encode(json).byteLength > CARD_LIMIT_BYTES) {
@@ -217,21 +383,63 @@ function serializeCard(snapshot: RunProjectionSnapshot, streaming: boolean): str
 }
 
 function summaryContent(snapshot: RunProjectionSnapshot): string {
-  const card = cardJson(snapshot, true) as {
-    body: { elements: Array<{ content?: string }> }
-  }
-  return card.body.elements[0]?.content ?? ""
+  const zh = snapshot.locale?.toLowerCase().startsWith("zh") === true
+  const i18n = resolveActivityI18n(snapshot.locale)
+  const escape = (value: string) =>
+    value
+      .replace(/([\\`*_\[\]])/g, "\\$1")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+  const safeLabel = (value: unknown, fallback: string) =>
+    escape(sanitizeActivityLabel(value, fallback))
+  const ratio = snapshot.progress.completed / snapshot.progress.total
+  const bar =
+    snapshot.progress.trustworthy && snapshot.progress.total > 0 && Number.isFinite(ratio)
+      ? "■".repeat(Math.round(Math.max(0, Math.min(1, ratio)) * 10)) +
+        "□".repeat(10 - Math.round(Math.max(0, Math.min(1, ratio)) * 10))
+      : undefined
+  const overview = `**${i18n.runStatus(snapshot.status)}** · ${zh ? "用时" : "Elapsed"} ${i18n.elapsed(Math.max(0, Math.round(snapshot.elapsedMs / 1000)))}`
+  const waiting = snapshot.pendingInterrupt
+    ? `**${zh ? "需要你的操作" : "Your action is needed"}**\n${zh ? "请使用下方按钮批准或拒绝，再继续执行。" : "Use the controls below to approve or deny before execution continues."}`
+    : undefined
+  const artifacts =
+    snapshot.artifacts.length > 0
+      ? `**${zh ? "产物" : "Artifacts"} · ${snapshot.artifacts.length}**\n` +
+        snapshot.artifacts
+          .slice(0, 5)
+          .map((artifact) => `▣ ${safeLabel(artifact.title, "Artifact")}`)
+          .join("\n")
+      : undefined
+  // Reuse the sanitized public timeline; raw tool payloads and errors are not
+  // presentation data. The same element updates in place on every revision.
+  const timeline = formatRunActivityTimeline(snapshot, i18n)
+    .split("\n")
+    .slice(1)
+    .filter((line) => line !== "│")
+    .join("\n\n")
+  return [
+    overview,
+    bar,
+    waiting,
+    timeline,
+    artifacts,
+    followUpHintLine(buildFollowUpItems(snapshot), zh),
+  ]
+    .filter(Boolean)
+    .join("\n\n")
 }
 
-function actionsElement(snapshot: RunProjectionSnapshot): Record<string, unknown> {
-  const card = cardJson(snapshot, true) as {
+function actionsElement(
+  snapshot: RunProjectionSnapshot,
+  webBase?: string | null
+): Record<string, unknown> {
+  const card = cardJson(snapshot, true, webBase) as {
     body: { elements: Array<Record<string, unknown> & { element_id?: string }> }
   }
   return (
     card.body.elements.find((element) => element.element_id === ACTIONS_ELEMENT_ID) ?? {
-      tag: "action",
-      layout: "bisected",
-      actions: [],
+      tag: "column_set",
+      columns: [],
       element_id: ACTIONS_ELEMENT_ID,
     }
   )
@@ -294,6 +502,76 @@ export function createLarkRunPresentationDriver(
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const now = options.now ?? Date.now
 
+  async function react(
+    ref: RunPresentationRef,
+    target: RunPresentationTarget,
+    emoji: string,
+    checkpoint?: (ref: RunPresentationRef) => Promise<void>
+  ): Promise<RunPresentationRef> {
+    const messageId = target.sourceMessageId ?? target.deliveryTarget?.sourceMessageId
+    if (!options.statusReactions || !messageId) return ref
+    const previous = ref.opaqueState?.statusReaction as { id: string; emoji: string } | undefined
+    const cleanup = new Set((ref.opaqueState?.reactionCleanup as string[] | undefined) ?? [])
+    let next = ref
+    try {
+      if (previous?.emoji !== emoji) {
+        const response = (await request(
+          "POST",
+          `/im/v1/messages/${encodeURIComponent(messageId)}/reactions`,
+          {
+            reaction_type: { emoji_type: emoji },
+          }
+        )) as { data?: { reaction_id?: string } }
+        const id = response.data?.reaction_id
+        if (!id) return ref
+        if (previous?.id && previous.id !== id) cleanup.add(previous.id)
+        next = {
+          ...ref,
+          opaqueState: {
+            ...ref.opaqueState,
+            statusReaction: { id, emoji },
+            reactionCleanup: [...cleanup],
+          },
+        }
+        await checkpoint?.(next)
+      }
+      for (const id of cleanup) {
+        try {
+          await request(
+            "DELETE",
+            `/im/v1/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(id)}`,
+            {}
+          )
+          cleanup.delete(id)
+        } catch {
+          /* Retain the bot-owned id for the next mutation's cleanup. */
+        }
+      }
+      if (
+        cleanup.size !== ((next.opaqueState?.reactionCleanup as string[] | undefined)?.length ?? 0)
+      ) {
+        next = { ...next, opaqueState: { ...next.opaqueState, reactionCleanup: [...cleanup] } }
+        await checkpoint?.(next)
+      }
+      return next
+    } catch {
+      // A missing reaction scope must not prevent the answer or status card.
+      return next
+    }
+  }
+
+  const reactionFor = (snapshot: RunProjectionSnapshot): string =>
+    ({
+      queued: "Get",
+      running: "OnIt",
+      waiting: "THINKING",
+      paused: "OneSecond",
+      recovery_required: "ERROR",
+      completed: "DONE",
+      failed: "ERROR",
+      cancelled: "ENOUGH",
+    })[snapshot.status]
+
   async function requestMutation(mutation: PendingCardMutation): Promise<void> {
     let lastError: unknown
     for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
@@ -351,6 +629,24 @@ export function createLarkRunPresentationDriver(
     checkpoint?: (ref: RunPresentationRef) => Promise<void>
   ): Promise<RunPresentationRef> {
     const platformMessageId = ref.platformMessageId
+    if (platformMessageId && target.deliveryTarget?.address.scopeKind === "thread") {
+      const next = {
+        ...ref,
+        opaqueState: {
+          ...ref.opaqueState,
+          followUpControl: {
+            platformMessageId,
+            runId: snapshot.runId,
+            revision: snapshot.revision,
+            createdAt: now(),
+            expiresAt: now() + 600_000,
+            items: followUpItems(snapshot),
+          },
+        },
+      }
+      await checkpoint?.(next)
+      return next
+    }
     if (
       !platformMessageId ||
       target.deliveryTarget?.address.scopeKind !== "private" ||
@@ -446,19 +742,22 @@ export function createLarkRunPresentationDriver(
     })
     const created = (await request("POST", "/cardkit/v1/cards", {
       type: "card_json",
-      data: serializeCard(snapshot, true),
+      data: serializeCard(snapshot, true, options.webEntryBaseUrl),
       uuid: pendingCreate.uuid,
     })) as { data?: { card_id?: string } }
     const cardId = created.data?.card_id
     if (!cardId) throw new Error("Lark CardKit create response omitted card_id")
     const provisional: RunPresentationRef = {
       opaqueState: {
+        ...previousRef?.opaqueState,
         cardId,
         lastAcknowledgedSequence: 0,
         [CARD_CREATED_AT_KEY]: now(),
         elementIds: { summary: SUMMARY_ELEMENT_ID, actions: ACTIONS_ELEMENT_ID },
         target,
         hasActions: snapshot.allowedActions.length > 0,
+        presentedStatus: snapshot.status,
+        presentedGraph: graphSignature(snapshot),
         pendingCreate: undefined,
       },
     }
@@ -511,7 +810,7 @@ export function createLarkRunPresentationDriver(
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}/elements/${current.elementIds.actions}`,
               body: {
-                element: JSON.stringify(actionsElement(snapshot)),
+                element: JSON.stringify(actionsElement(snapshot, options.webEntryBaseUrl)),
                 sequence,
                 uuid: mutationUuid("actions"),
               },
@@ -524,7 +823,14 @@ export function createLarkRunPresentationDriver(
               method: "PUT",
               path: `/cardkit/v1/cards/${current.cardId}`,
               body: {
-                card: { type: "card_json", data: serializeCard(snapshot, false) },
+                card: {
+                  type: "card_json",
+                  data: serializeCard(
+                    snapshot,
+                    snapshot.status === "running" || snapshot.status === "queued",
+                    options.webEntryBaseUrl
+                  ),
+                },
                 sequence,
                 uuid: mutationUuid("replace"),
               },
@@ -538,6 +844,23 @@ export function createLarkRunPresentationDriver(
     try {
       await requestMutation(pending)
     } catch (error) {
+      if (errorCode(error) === 300309 && pending.operation === "stream_summary") {
+        // Streaming may already be closed on a persisted/recovered card.
+        // Retire the rejected operation and repair this SAME card with JSON 2.0.
+        return mutate(
+          {
+            ...ref,
+            opaqueState: {
+              ...ref.opaqueState,
+              pendingMutation: undefined,
+              lastAcknowledgedSequence: pending.sequence,
+            },
+          },
+          snapshot,
+          "replace_card",
+          checkpoint
+        )
+      }
       if ([200740, 200750, 300317].includes(errorCode(error) ?? -1)) {
         return openCard(current.target, snapshot, checkpoint)
       }
@@ -548,6 +871,9 @@ export function createLarkRunPresentationDriver(
       opaqueState: {
         ...ref.opaqueState,
         lastAcknowledgedSequence: pending.sequence,
+        ...(pending.operation === "replace_card"
+          ? { presentedStatus: snapshot.status, presentedGraph: graphSignature(snapshot) }
+          : {}),
         pendingMutation: undefined,
         hasActions: snapshot.allowedActions.length > 0,
       },
@@ -574,7 +900,12 @@ export function createLarkRunPresentationDriver(
       followUpBubbles: true,
     },
     async open(target, snapshot, options) {
-      const provisional = options?.previousRef
+      const provisional = await react(
+        options?.previousRef ?? {},
+        target,
+        "Get",
+        options?.checkpoint
+      )
       if (!provisional?.opaqueState?.cardId) {
         return openCard(target, snapshot, options?.checkpoint, provisional)
       }
@@ -592,15 +923,34 @@ export function createLarkRunPresentationDriver(
       return ensureFollowUpControl(result, current.target, snapshot, options?.checkpoint)
     },
     async update(ref, snapshot, mutationOptions) {
+      ref = await ensureFollowUpControl(
+        ref,
+        state(ref).target,
+        snapshot,
+        mutationOptions?.checkpoint
+      )
+      ref = await react(ref, state(ref).target, reactionFor(snapshot), mutationOptions?.checkpoint)
       const current = state(ref)
-      if (current.hasActions !== snapshot.allowedActions.length > 0) {
+      if (
+        !["running", "queued"].includes(snapshot.status) ||
+        current.hasActions !== snapshot.allowedActions.length > 0 ||
+        ref.opaqueState?.presentedStatus !== snapshot.status ||
+        (ref.opaqueState?.presentedGraph ?? "") !== graphSignature(snapshot)
+      ) {
         return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
       }
       const streamed = await mutate(ref, snapshot, "stream_summary", mutationOptions?.checkpoint)
       if (snapshot.allowedActions.length === 0) return streamed
       return mutate(streamed, snapshot, "update_actions", mutationOptions?.checkpoint)
     },
-    finish(ref, snapshot, mutationOptions) {
+    async finish(ref, snapshot, mutationOptions) {
+      ref = await ensureFollowUpControl(
+        ref,
+        state(ref).target,
+        snapshot,
+        mutationOptions?.checkpoint
+      )
+      ref = await react(ref, state(ref).target, reactionFor(snapshot), mutationOptions?.checkpoint)
       return mutate(ref, snapshot, "replace_card", mutationOptions?.checkpoint)
     },
   }

@@ -112,6 +112,7 @@ import {
   hasEffectiveCapability,
 } from "@/lib/connectors/effective-capabilities"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { speakerFromPlatformIdentity, speakerPromptHeader } from "@/lib/chat/speaker"
 
 /**
  * Turn-capture timeout for connector AI-run turns. Raised above the 5-min chat
@@ -364,7 +365,7 @@ export async function resolveRespondViaTarget(
         ),
       },
       conversationRef: { ...event.conversationRef, adapterId: targetRow.id },
-      sourceMessageId: event.messageId,
+      sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
       refreshedAt: event.timestamp,
     },
   }
@@ -564,11 +565,25 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
     blocks.push({ type: "text", text: `[${seg.type}]` })
   }
 
+  // Who is talking. One `ChatSession` is shared by every participant of a
+  // group, so without this the model reads five people as one: the sender only
+  // ever reached `metadata.platformMessage.sender`, which is storage, not
+  // prompt. Private chats are left exactly as they were, since there is nobody
+  // to confuse the sender with.
+  //
+  // This is the durable seam rather than a render-time one. `SendContent` is
+  // what the sidecar keeps as session history, so the attribution survives
+  // into every later turn, while the stored Dexie row keeps its clean body.
+  const speakerHeader = groupSpeakerHeader(event)
+
   // Always include `plainText` as a final text block when the segment list
-  // produced nothing — guarantees the model never sees an empty user turn.
+  // produced nothing, which guarantees the model never sees an empty user turn.
   if (blocks.length === 0) {
-    return event.plainText.length > 0 ? event.plainText : "[empty]"
+    const body = event.plainText.length > 0 ? event.plainText : "[empty]"
+    return speakerHeader ? `${speakerHeader}\n${body}` : body
   }
+
+  if (speakerHeader) blocks.unshift({ type: "text", text: speakerHeader })
 
   // When every block is text, hand back a plain string for the SDK's
   // back-compat code path (fewer surprises in logs).
@@ -576,6 +591,22 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
     return blocks.map((b) => (b as { text: string }).text).join("\n")
   }
   return blocks
+}
+
+/**
+ * The `[speaker: …]` line prepended to a group message, or `undefined` in a
+ * private chat.
+ *
+ * The label is cleared through `redactText` + `hasNoLeakingPii` inside
+ * `lib/chat/speaker.ts` before it gets here. That is not optional:
+ * `safe-send-prompt.ts` runs the same gate over every block of this very
+ * `SendContent` and aborts the whole turn when one fails, so an unredacted
+ * display name (somebody whose IM nickname is their phone number) would
+ * silently stop every auto-reply in that group.
+ */
+function groupSpeakerHeader(event: NormalizedInboundEvent): string | undefined {
+  if (event.channel.kind === "private") return undefined
+  return speakerPromptHeader(speakerFromPlatformIdentity(event.sender))
 }
 
 /**
@@ -1218,7 +1249,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             source: "im" as const,
             adapterId: event.adapterId,
             conversationKey: event.conversationKey,
-            sourceMessageId: event.messageId,
+            sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
             deliveryTarget: deliveryTargetFromEvent(event),
             ...(session.id ? { sessionId: session.id } : {}),
             ...(effectiveCharacterId ? { characterId: effectiveCharacterId } : {}),
@@ -1552,7 +1583,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             status: "active",
             deliveryMode: "native",
             locale: appSettings?.language,
-            sourceMessageId: event.messageId,
+            sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
             deliveryTarget: deliveryTargetFromEvent(event),
             recipientUserId: event.sender.remoteUserId,
             recipientTeamId: teamId,
@@ -1613,7 +1644,9 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             })
           return canonicalTail
         }
+        const approvalController = new AbortController()
         const basePermissionResponder = makeImPermissionResponder({
+          signal: AbortSignal.any([captureSignal, approvalController.signal]),
           runId: executionRunId,
           sessionId: session.id,
           adapterId: event.adapterId,
@@ -1775,6 +1808,8 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           unregisterRunController()
           unregisterLiveSteer?.()
           break
+        } finally {
+          approvalController.abort()
         }
         unregisterRunController()
         unregisterLiveSteer?.()
@@ -1868,6 +1903,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // conversation override nor the bot default opted out. Private chats
         // never quote — there is a single interlocutor.
         const quoteReply =
+          event.canReplyToMessage !== false &&
           streamsThroughReceiver &&
           event.channel.kind !== "private" &&
           hasEffectiveCapability(

@@ -199,21 +199,23 @@ it("uses the same command plane in a headless brain", async () => {
 it("lists, reads, and requeues only the plugin account's deadletters", async () => {
   mockedCall.mockImplementation(async (command) => {
     if (command === "integration_ingress_deadletters") {
-      return [
-        {
-          routeId: "route-1",
-          deliveryId: "delivery-1",
-          eventType: "issue.created",
-          receivedAt: "2026-07-28T00:00:00.000Z",
-          attempts: 5,
-        },
-        {
-          routeId: "another-plugin-route",
-          deliveryId: "delivery-2",
-          receivedAt: "2026-07-28T00:00:00.000Z",
-          attempts: 5,
-        },
-      ] as never
+      return {
+        items: [
+          {
+            routeId: "route-1",
+            deliveryId: "delivery-1",
+            eventType: "issue.created",
+            receivedAt: "2026-07-28T00:00:00.000Z",
+            attempts: 5,
+          },
+          {
+            routeId: "another-plugin-route",
+            deliveryId: "delivery-2",
+            receivedAt: "2026-07-28T00:00:00.000Z",
+            attempts: 5,
+          },
+        ],
+      } as never
     }
     if (command === "integration_ingress_deadletter") {
       return {

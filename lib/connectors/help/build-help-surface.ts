@@ -84,8 +84,8 @@ export interface HelpSurfaceLabels {
 
 export const DEFAULT_HELP_SURFACE_LABELS: HelpSurfaceLabels = {
   helpTitle: "使用帮助",
-  welcomeTitle: "你好，我是 {name}",
-  welcomeIntro: "我是 {name}，可以在这里直接帮你处理任务。下面是你可以让我做的事：",
+  welcomeTitle: "👋 开始一个新任务",
+  welcomeIntro: "直接描述你的任务，我会展示执行进度，并在需要授权时请你确认。",
   helpIntro: "下面是你可以让我做的事：",
   quickCommandsHeading: "快捷指令",
   noQuickCommands: "（管理员尚未配置快捷指令）",
@@ -192,9 +192,15 @@ export function buildHelpSurface(input: BuildHelpSurfaceInput): A2UISegmentConte
   mirrorLines.push("", labels.quickCommandsHeading)
 
   if (input.quickCommands.length === 0) {
-    components.qcNone = { component: "Text", text: labels.noQuickCommands }
+    components.qcNone = {
+      component: "Text",
+      text:
+        input.mode === "welcome"
+          ? "/commands 查看指令 · /status 查看状态 · /new 新建会话"
+          : labels.noQuickCommands,
+    }
     childIds.push("qcNone")
-    mirrorLines.push(labels.noQuickCommands)
+    mirrorLines.push((components.qcNone as { text: string }).text)
   } else {
     input.quickCommands.forEach((cmd, i) => {
       const id = `qc_${i}`
@@ -216,7 +222,7 @@ export function buildHelpSurface(input: BuildHelpSurfaceInput): A2UISegmentConte
 
   // ── Built-in skills ──────────────────────────────────────────────────
   const families = (input.skillFamilies ?? []).map((s) => s.family).filter(Boolean)
-  if (families.length > 0) {
+  if (families.length > 0 && input.mode !== "welcome") {
     components.skillsHeading = {
       component: "Text",
       text: labels.skillsHeading,
@@ -229,7 +235,11 @@ export function buildHelpSurface(input: BuildHelpSurfaceInput): A2UISegmentConte
 
   // ── @-strategy hint ──────────────────────────────────────────────────
   if (input.atStrategy) {
-    const hint = labels.atStrategy[input.atStrategy]
+    const hint =
+      input.mode === "welcome" &&
+      ["mention_each", "mention_activates", "mention_only"].includes(input.atStrategy)
+        ? "群聊中 @机器人 发起任务；进入回复话题后可直接继续聊天，无需重复 @。"
+        : labels.atStrategy[input.atStrategy]
     components.atHeading = {
       component: "Text",
       text: labels.atStrategyHeading,

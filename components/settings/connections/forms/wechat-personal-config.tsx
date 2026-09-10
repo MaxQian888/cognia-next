@@ -6,13 +6,15 @@
  * iLink has no static credentials: the operator scans a QR code with their
  * phone, and on confirm the gateway returns a `bot_token` + `baseurl` we
  * persist (token → keyring `botToken`, baseurl → `settings`). The dialog
- * surfaces the ban-risk + reply-only nature of this unofficial channel.
+ * uses the official Tencent iLink QR login and explains session renewal.
  */
 
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
+import { QRCodeSVG } from "qrcode.react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
+import { loggers } from "@cognia/logging"
 import { LoaderIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -23,7 +25,12 @@ import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
-import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
+import { ILINK_DEFAULT_BASE_URL } from "@/lib/connectors/adapters/wechat-personal/protocol"
+import {
+  requestLoginQr,
+  pollLoginStatus,
+  resolveIlinkQrRedirect,
+} from "@/lib/connectors/adapters/wechat-personal/auth"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
@@ -42,7 +49,17 @@ interface WeChatPersonalConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
-type LoginStatus = "idle" | "waiting" | "scaned" | "confirmed" | "expired" | "error"
+type LoginStatus =
+  | "idle"
+  | "loading"
+  | "waiting"
+  | "scaned"
+  | "confirmed"
+  | "expired"
+  | "error"
+  | "need_verifycode"
+  | "verify_code_blocked"
+  | "binded_redirect"
 
 const POLL_INTERVAL_MS = 2500
 
@@ -72,6 +89,22 @@ export function WeChatPersonalConfigDialog({
   const [qrcode, setQrcode] = useState<string | null>(null)
   const [qrImg, setQrImg] = useState<string | null>(null)
   const [loginStatus, setLoginStatus] = useState<LoginStatus>("idle")
+  const [pollBaseUrl, setPollBaseUrl] = useState(ILINK_DEFAULT_BASE_URL)
+  const [verifyCode, setVerifyCode] = useState("")
+  const [pendingVerifyCode, setPendingVerifyCode] = useState<string | undefined>()
+  const [verifyRetry, setVerifyRetry] = useState(false)
+  const loginGeneration = useRef(0)
+  useEffect(() => {
+    if (!open) return
+    return () => {
+      loginGeneration.current += 1
+      setQrcode(null)
+      setQrImg(null)
+      setLoginStatus("idle")
+      setVerifyCode("")
+      setPendingVerifyCode(undefined)
+    }
+  }, [open])
   const credentials = useAdapterCredentials({
     adapterId: row?.id ?? null,
     accounts: [],
@@ -94,6 +127,7 @@ export function WeChatPersonalConfigDialog({
   const persistOnConfirm = async (botToken: string, baseUrl?: string, accountId?: string) => {
     if (persistingRef.current) return
     persistingRef.current = true
+    setSaving(true)
     try {
       // On re-login, merge into the existing row's settings —
       // `updateAdapterInstance` replaces the whole `settings` object, so a
@@ -137,6 +171,7 @@ export function WeChatPersonalConfigDialog({
       setLoginStatus("error")
     } finally {
       persistingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -145,21 +180,30 @@ export function WeChatPersonalConfigDialog({
       toast.error(t("desktopOnly"))
       return
     }
-    setLoginStatus("idle")
+    const generation = ++loginGeneration.current
+    setLoginStatus("loading")
+    setQrcode(null)
     setQrImg(null)
+    setVerifyCode("")
+    setPendingVerifyCode(undefined)
+    setVerifyRetry(false)
+    setPollBaseUrl(ILINK_DEFAULT_BASE_URL)
     try {
       const qr = await requestLoginQr()
-      if (!qr.qrcode) {
+      if (generation !== loginGeneration.current) return
+      if (!qr.qrcode || !qr.qrcode_img_content) {
         setLoginStatus("error")
         toast.error(t("qrFailed"))
         return
       }
       setQrcode(qr.qrcode)
-      setQrImg(qr.qrcode_img_content ?? null)
+      setQrImg(qr.qrcode_img_content)
       setLoginStatus("waiting")
     } catch (err) {
+      if (generation !== loginGeneration.current) return
       setLoginStatus("error")
-      toast.error(err instanceof Error ? err.message : String(err))
+      loggers.app.warn("WeChat QR request failed", { error: err })
+      toast.error(t("qrFailed"))
     }
   }
 
@@ -171,35 +215,82 @@ export function WeChatPersonalConfigDialog({
     persistRef.current = persistOnConfirm
   })
 
-  // Poll the scan status while a QR code is outstanding. State updates land in
-  // the tick callback (not the effect body), complying with
-  // react-hooks/set-state-in-effect.
+  // Schedule the next poll only after the previous long-poll has settled.
   useEffect(() => {
-    if (!qrcode || (loginStatus !== "waiting" && loginStatus !== "scaned")) return
+    if (!open || !qrcode || (loginStatus !== "waiting" && loginStatus !== "scaned")) return
     let cancelled = false
-    const timer = setInterval(() => {
-      void pollLoginStatus(qrcode).then((res) => {
-        if (cancelled) return
-        if (res.status === "scaned") setLoginStatus("scaned")
-        else if (res.status === "confirmed") {
-          if (res.bot_token) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const generation = loginGeneration.current
+    const active = () => !cancelled && generation === loginGeneration.current
+    const poll = async () => {
+      let continuePolling = true
+      let failureMessage = t("pollFailed")
+      try {
+        const res = await pollLoginStatus(qrcode, undefined, pollBaseUrl, pendingVerifyCode)
+        if (!active()) return
+        switch (res.status) {
+          case "wait":
+            break
+          case "scaned":
+            setPendingVerifyCode(undefined)
+            setLoginStatus("scaned")
+            break
+          case "need_verifycode":
+            setVerifyRetry(Boolean(pendingVerifyCode))
+            setPendingVerifyCode(undefined)
+            setVerifyCode("")
+            setLoginStatus("need_verifycode")
+            continuePolling = false
+            break
+          case "verify_code_blocked":
+          case "binded_redirect":
+          case "expired":
+            setPendingVerifyCode(undefined)
+            setLoginStatus(res.status)
+            continuePolling = false
+            break
+          case "scaned_but_redirect":
+            failureMessage = t("redirectFailed")
+            if (!res.redirect_host) throw new Error(t("redirectFailed"))
+            setPollBaseUrl(resolveIlinkQrRedirect(res.redirect_host))
+            setLoginStatus("scaned")
+            break
+          case "confirmed":
+            continuePolling = false
+            failureMessage = t("confirmedNoToken")
+            if (!res.bot_token) throw new Error(failureMessage)
             setLoginStatus("confirmed")
-            void persistRef.current(res.bot_token, res.baseurl, res.account_id)
-          } else {
-            // The gateway confirmed the scan but returned no bot_token —
-            // nothing can be persisted, and a silent "confirmed" would let
-            // handleSave close the dialog without creating anything.
-            setLoginStatus("error")
-            toast.error(t("confirmedNoToken"))
-          }
-        } else if (res.status === "expired") setLoginStatus("expired")
-      })
-    }, POLL_INTERVAL_MS)
+            await persistRef.current(res.bot_token, res.baseurl, res.account_id)
+            break
+          default:
+            failureMessage = t("unknownLoginStatus")
+            throw new Error(failureMessage)
+        }
+      } catch (error) {
+        if (!active()) return
+        continuePolling = false
+        setLoginStatus("error")
+        loggers.app.warn("WeChat QR status failed", { error })
+        toast.error(failureMessage)
+      }
+      if (active() && continuePolling) timer = setTimeout(() => void poll(), POLL_INTERVAL_MS)
+    }
+    timer = setTimeout(() => void poll(), pendingVerifyCode ? 0 : POLL_INTERVAL_MS)
     return () => {
       cancelled = true
-      clearInterval(timer)
+      if (timer) clearTimeout(timer)
     }
-  }, [qrcode, loginStatus, t])
+  }, [open, qrcode, loginStatus, pollBaseUrl, pendingVerifyCode, t])
+
+  const handleVerify = () => {
+    const code = verifyCode.trim()
+    if (!/^\d+$/.test(code)) {
+      toast.error(t("verifyCodeRequired"))
+      return
+    }
+    setPendingVerifyCode(code)
+    setLoginStatus("waiting")
+  }
 
   const handleSave = async () => {
     if (!displayName.trim()) {
@@ -235,6 +326,10 @@ export function WeChatPersonalConfigDialog({
 
   const statusLabel: Record<LoginStatus, string> = {
     idle: "",
+    loading: t("statusLoading"),
+    need_verifycode: t("statusVerifyCode"),
+    verify_code_blocked: t("statusVerifyBlocked"),
+    binded_redirect: t("statusAlreadyBound"),
     waiting: t("statusWaiting"),
     scaned: t("statusScaned"),
     confirmed: t("statusConfirmed"),
@@ -260,7 +355,7 @@ export function WeChatPersonalConfigDialog({
           />
         </div>
 
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <div className="rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">
           {t("banRiskNote")}
         </div>
 
@@ -274,7 +369,7 @@ export function WeChatPersonalConfigDialog({
             variant="outline"
             size="sm"
             onClick={() => void handleGetQr()}
-            disabled={!desktop || saving}
+            disabled={!desktop || saving || loginStatus === "loading"}
           >
             {loggedIn ? t("reLogin") : t("getQrButton")}
           </Button>
@@ -284,26 +379,63 @@ export function WeChatPersonalConfigDialog({
           {qrImg ? (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">{t("qrInstructions")}</p>
-              <Image
-                src={`data:image/png;base64,${qrImg}`}
-                alt={t("qrAlt")}
-                width={176}
-                height={176}
-                unoptimized
-                className="rounded border bg-white p-2"
-                data-testid="wechat-personal-qr"
-              />
+              {/^https?:\/\//i.test(qrImg) ? (
+                <QRCodeSVG
+                  value={qrImg}
+                  size={176}
+                  level="M"
+                  marginSize={4}
+                  aria-label={t("qrAlt")}
+                  className="rounded border bg-white"
+                  data-testid="wechat-personal-qr"
+                />
+              ) : (
+                <Image
+                  src={qrImg.startsWith("data:image/") ? qrImg : `data:image/png;base64,${qrImg}`}
+                  alt={t("qrAlt")}
+                  width={176}
+                  height={176}
+                  unoptimized
+                  className="rounded border bg-white p-2"
+                  data-testid="wechat-personal-qr"
+                />
+              )}
             </div>
           ) : null}
+
+          {loginStatus === "need_verifycode" && (
+            <div className="w-full space-y-2">
+              <Label htmlFor="wx-verify-code">{t("verifyCodeLabel")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {verifyRetry ? t("verifyCodeRetry") : t("verifyCodeHint")}
+              </p>
+              <Input
+                id="wx-verify-code"
+                value={verifyCode}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                onChange={(event) => setVerifyCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    handleVerify()
+                  }
+                }}
+              />
+              <Button type="button" size="sm" onClick={handleVerify}>
+                {t("verifyCodeSubmit")}
+              </Button>
+            </div>
+          )}
 
           {loginStatus !== "idle" && (
             <span
               className="flex items-center gap-1.5 text-xs"
               data-testid="wechat-personal-login-status"
             >
-              {(loginStatus === "waiting" || loginStatus === "scaned") && (
-                <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-              )}
+              {(loginStatus === "loading" ||
+                loginStatus === "waiting" ||
+                loginStatus === "scaned") && <LoaderIcon className="h-3.5 w-3.5 animate-spin" />}
               {statusLabel[loginStatus]}
             </span>
           )}

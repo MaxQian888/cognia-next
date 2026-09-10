@@ -124,9 +124,9 @@ const OAUTH_SCOPE_REQUIREMENTS: Partial<
  * calls when the token is missing (`adapters/onebot/index.ts`); projecting the
  * same table here is what stops the tool being OFFERED in the first place.
  */
-const ONEBOT_FEATURE_REQUIREMENTS: Partial<Record<Capability, string>> = {
-  "send.reaction": "set_msg_emoji_like",
-  "send.file": "upload_group_file",
+const ONEBOT_FEATURE_REQUIREMENTS: Partial<Record<Capability, readonly string[]>> = {
+  "send.reaction": ["set_msg_emoji_like"],
+  "send.file": ["upload_group_file", "upload_file"],
 }
 
 /** Instance settings that must be truthy for a capability to work at all. */
@@ -258,11 +258,15 @@ export function effectiveCapabilities(
 
     const requiredFeature =
       input.platform === "onebot" ? ONEBOT_FEATURE_REQUIREMENTS[capability] : undefined
-    if (upstreamFeatures && requiredFeature && !upstreamFeatures.includes(requiredFeature)) {
+    if (
+      upstreamFeatures &&
+      requiredFeature &&
+      !requiredFeature.some((feature) => upstreamFeatures.includes(feature))
+    ) {
       suppressed.push({
         capability,
         reason: "upstream_impl_unsupported",
-        detail: requiredFeature,
+        detail: requiredFeature.join(" | "),
       })
       continue
     }

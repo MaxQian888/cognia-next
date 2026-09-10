@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import { createSlackRunPresentationDriver } from "./slack-driver"
 
 import {
   areExecutionRunPresentationsFrozen,
@@ -60,6 +61,39 @@ const snapshot: RunProjectionSnapshot = {
 }
 
 describe("execution run presentation projection", () => {
+  it("falls back to the command channel when no replyable Slack message exists", async () => {
+    const request = jest.fn()
+    const driver = createSlackRunPresentationDriver(request)
+    const open = jest.spyOn(driver, "open")
+    const deliveryTarget = {
+      refreshedAt: 1,
+      address: {
+        platform: "slack" as const,
+        adapterId: "slack-1",
+        conversationKey: "slack:slack-1:channel-1",
+        scopeKind: "group" as const,
+        containerId: "channel-1",
+      },
+      conversationRef: { platform: "slack" as const, adapterId: "slack-1", channelId: "channel-1" },
+    }
+    const commandBinding = { ...binding, adapterId: "slack-1", deliveryTarget }
+    const deliverFallback = jest.fn(async (_binding: ExecutionRunBinding) => ({
+      ref: { platformMessageId: "fallback-command" },
+      deliveryMode: "append" as const,
+      delivered: true,
+    }))
+    await projectExecutionRunBinding(commandBinding, snapshot, {
+      resolveDriver: () => driver,
+      deliverFallback,
+      saveBinding: async () => undefined,
+      recordDegraded: jest.fn(),
+      nativeEnabled: () => true,
+    })
+    expect(open.mock.calls[0][0].sourceMessageId).toBeUndefined()
+    expect(request).not.toHaveBeenCalled()
+    expect(deliverFallback.mock.calls[0][0]).toEqual(expect.objectContaining({ deliveryTarget }))
+  })
+
   it("commits the cursor only after a native projection succeeds", async () => {
     const saved: ExecutionRunBinding[] = []
     const driver: RunPresentationDriver = {
@@ -313,6 +347,19 @@ describe("execution run presentation projection", () => {
         ...snapshot,
         runId: "13800138000",
         detailsUrl: "https://example.com/private?token=secret",
+        workflowGraph: {
+          workflowId: "wf",
+          sourceRunId: "source",
+          nodes: [
+            {
+              id: "node",
+              title: "private.person@example.com",
+              status: "pending",
+              detail: "secret graph payload",
+            },
+          ],
+          edges: [],
+        },
         activities: [
           {
             id: "private.person@example.com",
@@ -343,6 +390,7 @@ describe("execution run presentation projection", () => {
     expect(received?.detailsUrl).toBe(`/agent-runs?run=${received?.runId}`)
     expect(serialized).not.toContain("13800138000")
     expect(serialized).not.toContain("private.person@example.com")
+    expect(serialized).not.toContain("secret graph payload")
     expect(serialized).not.toContain("token=secret")
   })
 

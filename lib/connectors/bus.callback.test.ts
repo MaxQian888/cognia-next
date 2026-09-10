@@ -7,6 +7,10 @@
  * callback.unbound / callback.handler_failed).
  */
 
+import { settleApprovalCard } from "./hitl/approval-card-state"
+jest.mock("./hitl/approval-card-state", () => ({
+  settleApprovalCard: jest.fn(async () => undefined),
+}))
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { __resetBusForTesting, getBus, type CallbackHandler } from "./bus"
@@ -447,6 +451,9 @@ describe("ConnectorBus.dispatchConnectorCallback — wf_approve / wf_cancel kind
       makeEvent({ triggerId: "wfapp:trigwf1", value: "approve", conversationKey })
     )
     expect(handler).not.toHaveBeenCalled()
+    expect(settleApprovalCard).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "msg_1", state: "processed" })
+    )
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs).toHaveLength(1)

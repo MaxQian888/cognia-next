@@ -143,7 +143,38 @@ describe("Lark follow-up controls", () => {
     )
   })
 
-  it("ignores expired registrations and every group/topic message", async () => {
+  it("accepts controls in a managed thread with the same actor authorization", async () => {
+    const execute = jest.fn(async () => ({ accepted: true }))
+    const threadKey = "lark:lark-1:chat-1:om-root"
+    const handled = await maybeHandleLarkFollowUpControl(
+      {
+        ...event("停止"),
+        channel: { id: "chat-1", kind: "thread" },
+        channelData: { larkManagedThread: true },
+        conversationKey: threadKey,
+      },
+      adapter,
+      {
+        now: () => 500,
+        listBindings: async () => [{ ...binding, conversationKey: threadKey }],
+        getRun: async () => run,
+        execute,
+        consume: jest.fn(async () => undefined),
+        enqueue: jest.fn(),
+      }
+    )
+    expect(handled).toBe(true)
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        action: "stop",
+        actor: expect.objectContaining({ remoteUserId: "ou-user" }),
+      }),
+      { operatorIds: ["ou-operator"] }
+    )
+  })
+
+  it("ignores expired registrations and unmanaged topic messages", async () => {
     const deps = {
       now: () => 800,
       listBindings: jest.fn(async () => [binding]),

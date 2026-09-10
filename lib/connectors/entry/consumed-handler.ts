@@ -391,7 +391,7 @@ export function installLarkIntentHandler(
   overrides: Partial<LarkIntentDependencies> = {}
 ): () => void {
   const deps: LarkIntentDependencies = {
-    call: transport.call,
+    call: (name, args) => transport.call(name, args),
     keyringGet: connectorsKeyringGet,
     tenantRequest: larkTenantRequest,
     markConsumed: markEntryContextConsumed,

@@ -55,7 +55,11 @@ function activityLine(activity: RunActivitySnapshot, i18n: ActivityI18n): string
       ? ` · \`${markdownText(activity.target.label)}\``
       : ` · ${markdownText(activity.target.label)}`
     : ""
-  return `${ACTIVITY_STATUS_ICON[activity.status]} ${ACTIVITY_ICON[activity.category]} ${markdownText(i18n.activityLabel(activity))}${target}`
+  const duration =
+    activity.endedAt !== undefined && activity.endedAt >= activity.startedAt
+      ? ` · ${i18n.elapsed(Math.round((activity.endedAt - activity.startedAt) / 1000))}`
+      : ""
+  return `${ACTIVITY_STATUS_ICON[activity.status]} ${ACTIVITY_ICON[activity.category]} ${markdownText(i18n.activityLabel(activity))}${duration}${target}`
 }
 
 function stepActivity(step: RunStepSnapshot): RunActivitySnapshot {
@@ -158,11 +162,28 @@ export function formatRunMilestones(
   snapshot: RunProjectionSnapshot,
   i18n: ActivityI18n
 ): string | undefined {
-  const ordered = [...snapshot.recentSteps, ...snapshot.activeSteps, ...snapshot.pendingSteps]
+  // Keep current and blocked work visible even after a long completed history.
+  const ordered = [
+    ...new Map(
+      [
+        ...snapshot.activeSteps,
+        ...snapshot.recentSteps.filter(
+          (step) => step.status === "failed" || step.status === "blocked"
+        ),
+        ...snapshot.pendingSteps,
+        ...snapshot.recentSteps,
+      ].map((step) => [step.id, step])
+    ).values(),
+  ]
   if (ordered.length === 0) return undefined
 
-  const total = Math.max(ordered.length, snapshot.progress.total || 0)
-  const completed = ordered.filter((step) => step.status === "completed").length
+  const total = Math.max(
+    ordered.length + Math.max(0, snapshot.pendingStepCount - snapshot.pendingSteps.length),
+    snapshot.progress.total || 0
+  )
+  const completed = snapshot.progress.trustworthy
+    ? snapshot.progress.completed
+    : ordered.filter((step) => step.status === "completed").length
   const shown = ordered.slice(0, MILESTONE_WINDOW)
   // `pendingStepCount` counts steps the projection knows about but did not
   // include; the window may hide more on top of that.
@@ -173,10 +194,20 @@ export function formatRunMilestones(
 
   const lines = shown.map((step) => {
     const label = sanitizeActivityLabel(step.title, i18n.milestoneStatus(step.status))
-    return `${MILESTONE_STATUS_ICON[step.status]} ${markdownText(label)}`
+    const duration =
+      Number.isFinite(step.startedAt) &&
+      Number.isFinite(step.completedAt) &&
+      step.completedAt! >= step.startedAt!
+        ? ` · ${i18n.elapsed(Math.round((step.completedAt! - step.startedAt!) / 1000))}`
+        : ""
+    return `${MILESTONE_STATUS_ICON[step.status]} ${markdownText(label)} · ${i18n.milestoneStatus(step.status)}${duration}`
   })
   if (hidden > 0) lines.push(i18n.moreMilestones(hidden))
-  return [i18n.milestones(completed, total), ...lines].join("\n")
+  const heading =
+    snapshot.kind === "workflow"
+      ? `**${i18n.runKind("workflow")}** — ${completed}/${total}`
+      : i18n.milestones(completed, total)
+  return [heading, ...lines].join("\n")
 }
 
 /**

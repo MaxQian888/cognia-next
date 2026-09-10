@@ -5,6 +5,7 @@ import {
   CHAT_TAB_URL_VERSION,
   buildAuthorizedConversationLink,
   buildSurfaceUrl,
+  buildRunDetailsUrl,
   resolveWebEntryBase,
 } from "./deep-links"
 
@@ -20,6 +21,25 @@ const ENTRY_INPUT = {
 }
 
 const ENV_KEYS = ["COGNIA_LARK_WEB_BASE", "NEXT_PUBLIC_COGNIA_WEB_BASE"]
+
+describe("external run details URLs", () => {
+  it("preserves a deployment prefix and encodes the exact run identifier", () => {
+    expect(buildRunDetailsUrl("execution:agent:session:turn", "https://cognia.example/app/")).toBe(
+      "https://cognia.example/app/agent-runs?run=execution%3Aagent%3Asession%3Aturn"
+    )
+  })
+  it.each([
+    null,
+    "",
+    "/agent-runs",
+    "javascript:alert(1)",
+    "https://user:pass@example.com",
+    "https://example.com?token=secret",
+    "https://example.com/#token",
+  ])("omits a missing or unsafe web base: %s", (base) => {
+    expect(buildRunDetailsUrl("run-1", base)).toBeNull()
+  })
+})
 
 describe("authorized deep links", () => {
   const savedEnv: Record<string, string | undefined> = {}

@@ -4,14 +4,11 @@
  * `parse.ts` derives its KNOWN / READONLY sets from these specs (the grammar
  * and dispatch state machine are untouched), and the Lark integration
  * (plan 2026-07-24 P4.4) uses `nativeExposed` to decide which commands the
- * ops runbook publishes to the platform. Feishu's open platform has NO
- * slash-command registration API for bots — a user-typed "/name" only ever
- * arrives as a plain `im.message.receive_v1` message (verified against the
- * official bot capability overview, 2026-07) — so "native" exposure means
- * bot-menu items configured with 发送文字消息 (V7.22+) that post the command
- * text into the chat, where the existing command dispatcher intercepts it.
- * A deliberately small first batch: platform menus are hard to retract, so
- * exposure is opt-in per command rather than automatic.
+ * ops runbook publishes to the platform. `nativeExposed` describes the
+ * conservative SEND_MESSAGE bot-menu batch, not the native slash panel.
+ * Feishu now also supports /application/v7/app_slash_commands (official
+ * agent guide verified 2026-09-07), with separate read/write permissions.
+ * Both entry points ultimately use this command dispatcher.
  */
 
 export type ControlCommandName =

@@ -13,6 +13,7 @@ import type {
 } from "@/types/connectors/interaction"
 import {
   authorizeConnectorCallback,
+  resolveLarkCallbackConversation,
   normalizeRequestedAction,
   notifyCallbackDenied,
 } from "./callback-authorization"
@@ -290,10 +291,11 @@ describe("authorizeConnectorCallback", () => {
       actorScope: { mode: "initiator", allowedUserIds: ["ou_alice"] },
       payload: { sessionId: "session_1", runId: "run_1", action: "approve" },
     })
-    await getDb().connectorCallbackBindings.put(row)
+    const sibling = { ...row, id: "sibling", actionId: "sibling-action" }
+    await getDb().connectorCallbackBindings.bulkPut([row, sibling])
     const [first, second] = await Promise.all([
       authorize({ binding: row }),
-      authorize({ binding: row }),
+      authorize({ binding: sibling }),
     ])
     if (!first.allowed || !second.allowed || !first.consume || !second.consume) {
       throw new Error("expected two pre-consumption authorization decisions")
@@ -429,4 +431,57 @@ describe("high-privilege binding writers", () => {
       expect(guard).toContain(`"${kind}"`)
     }
   })
+})
+
+it("recovers a topic only for the exact persisted run-card receipt", async () => {
+  const event = callbackEvent({
+    originatingMessageId: "om-card",
+    conversationKey: "lark:lk-1:oc-chat",
+  })
+  await getDb().executionRunBindings.put({
+    id: "topic-binding",
+    runId: "run-topic",
+    adapterId: "lk-1",
+    conversationKey: "lark:lk-1:oc-chat:om-root",
+    platformMessageId: "om-card",
+    status: "active",
+    deliveryMode: "native",
+    lastProjectedRevision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  expect(await resolveLarkCallbackConversation(event, "run-topic")).toBe(
+    "lark:lk-1:oc-chat:om-root"
+  )
+  expect(
+    await resolveLarkCallbackConversation(
+      { ...event, originatingMessageId: "another-card" },
+      "run-topic"
+    )
+  ).toBeUndefined()
+  expect(
+    await resolveLarkCallbackConversation(
+      { ...event, conversationKey: "lark:lk-1:other-chat" },
+      "run-topic"
+    )
+  ).toBeUndefined()
+})
+it("anchors a topic denial to the originating message", async () => {
+  const enqueue = jest.fn(async () => undefined)
+  await notifyCallbackDenied(
+    callbackEvent({ originatingMessageId: "om-card" }),
+    "lark:lk-1:oc-chat:om-root",
+    "binding_consumed",
+    { enqueue }
+  )
+  expect(enqueue).toHaveBeenCalledWith(
+    expect.objectContaining({
+      request: expect.objectContaining({
+        conversationRef: expect.objectContaining({
+          threadRootMessageId: "om-card",
+          threadId: "om-root",
+        }),
+      }),
+    })
+  )
 })

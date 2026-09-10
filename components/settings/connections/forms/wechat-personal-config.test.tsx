@@ -11,10 +11,12 @@ import type React from "react"
 
 const mockRequestLoginQr = jest.fn()
 const mockPollLoginStatus = jest.fn()
+const mockResolveRedirect = jest.fn((host: string) => `https://${host}`)
 const mockIsTauri = jest.fn(() => true)
 jest.mock("@/lib/connectors/adapters/wechat-personal/auth", () => ({
   requestLoginQr: (...a: unknown[]) => mockRequestLoginQr(...a),
   pollLoginStatus: (...a: unknown[]) => mockPollLoginStatus(...a),
+  resolveIlinkQrRedirect: (host: string) => mockResolveRedirect(host),
 }))
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri(),
@@ -76,10 +78,10 @@ beforeEach(() => {
 })
 
 describe("WeChatPersonalConfigDialog — create", () => {
-  it("renders the create title, ban-risk note, and a Get-QR button", () => {
+  it("renders the create title, iLink session note, and a Get-QR button", () => {
     render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
     expect(screen.getByText(/add personal wechat/i)).toBeInTheDocument()
-    expect(screen.getByText(/account-ban risk/i)).toBeInTheDocument()
+    expect(screen.getByText(/sign in through tencent ilink/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /get login qr/i })).toBeInTheDocument()
   })
 
@@ -119,7 +121,7 @@ describe("WeChatPersonalConfigDialog — create", () => {
     })
 
     expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
-    expect(mockToastError).toHaveBeenCalledWith("gateway offline")
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Failed"))
   })
 
   // QR login paints a login window from the desktop process, so a reachable
@@ -408,4 +410,253 @@ describe("WeChatPersonalConfigDialog — sign-in state", () => {
     expect(screen.getByText(/currently logged in/i)).toBeInTheDocument()
     expect(mockKeyringList).not.toHaveBeenCalled()
   })
+})
+
+describe("official WeChat QR login states", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    mockRequestLoginQr.mockReset().mockResolvedValue({
+      qrcode: "official",
+      qrcode_img_content: "https://weixin.qq.com/qr/payload",
+    })
+    mockPollLoginStatus.mockReset().mockResolvedValue({ status: "wait" })
+    mockResolveRedirect.mockReset().mockImplementation((host) => `https://${host}`)
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+  async function getQr() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /get login qr/i }))
+    })
+  }
+  async function advance(ms = 2500) {
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(ms)
+    })
+  }
+  it("encodes the official URL payload as an SVG QR instead of an image URL", async () => {
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    const qr = screen.getByTestId("wechat-personal-qr")
+    expect(qr.tagName.toLowerCase()).toBe("svg")
+    expect(qr).toHaveAttribute("aria-label", "WeChat login QR code")
+    expect(qr).not.toHaveAttribute("src")
+  })
+  it("retains legacy image data URI without prepending another base64 prefix", async () => {
+    mockRequestLoginQr.mockResolvedValue({
+      qrcode: "legacy",
+      qrcode_img_content: "data:image/png;base64,AQID",
+    })
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    expect(screen.getByTestId("wechat-personal-qr")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,AQID"
+    )
+  })
+  it("never overlaps long-polls", async () => {
+    let resolvePoll!: (value: unknown) => void
+    mockPollLoginStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePoll = resolve
+        })
+    )
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    await advance(30_000)
+    expect(mockPollLoginStatus).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolvePoll({ status: "wait" })
+    })
+    await advance()
+    expect(mockPollLoginStatus).toHaveBeenCalledTimes(2)
+  })
+  it("accepts a pairing code, prompts again after mismatch, and confirms after retry", async () => {
+    mockPollLoginStatus
+      .mockResolvedValueOnce({ status: "need_verifycode" })
+      .mockResolvedValueOnce({ status: "need_verifycode" })
+      .mockResolvedValueOnce({ status: "scaned" })
+      .mockResolvedValueOnce({
+        status: "confirmed",
+        bot_token: "paired-token",
+        account_id: "bot-official",
+      })
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    await advance()
+    const input = screen.getByLabelText(/pairing code/i)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /verify code/i }))
+    })
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("numeric"))
+    fireEvent.change(input, { target: { value: "1234" } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /verify code/i }))
+    })
+    await advance(1)
+    expect(mockPollLoginStatus).toHaveBeenLastCalledWith(
+      "official",
+      undefined,
+      "https://ilinkai.weixin.qq.com",
+      "1234"
+    )
+    expect(screen.getByText(/code did not match/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/pairing code/i), { target: { value: "5678" } })
+    await act(async () => {
+      fireEvent.keyDown(screen.getByLabelText(/pairing code/i), { key: "Enter" })
+    })
+    await advance(1)
+    await advance()
+    expect(mockKeyringSet).toHaveBeenCalledWith("wx-new", "botToken", "paired-token")
+    expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+      expect.objectContaining({ settings: expect.objectContaining({ accountId: "bot-official" }) })
+    )
+  })
+  it.each(["verify_code_blocked", "binded_redirect"])(
+    "stops on %s without fabricating credentials",
+    async (status) => {
+      mockPollLoginStatus.mockResolvedValue({ status })
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+      await getQr()
+      await advance()
+      await advance(20_000)
+      expect(mockPollLoginStatus).toHaveBeenCalledTimes(1)
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(
+        status === "verify_code_blocked" ? /incorrect codes/i : /already connected/i
+      )
+      await getQr()
+      expect(mockRequestLoginQr).toHaveBeenCalledTimes(2)
+    }
+  )
+  it("switches polling hosts after a validated IDC redirect", async () => {
+    mockPollLoginStatus
+      .mockResolvedValueOnce({
+        status: "scaned_but_redirect",
+        redirect_host: "ilink2.weixin.qq.com",
+      })
+      .mockResolvedValue({ status: "wait" })
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    await advance()
+    await advance()
+    expect(mockResolveRedirect).toHaveBeenCalledWith("ilink2.weixin.qq.com")
+    expect(mockPollLoginStatus).toHaveBeenLastCalledWith(
+      "official",
+      undefined,
+      "https://ilink2.weixin.qq.com",
+      undefined
+    )
+  })
+  it.each([undefined, "unsafe.local"])(
+    "stops when a redirect host is missing or rejected: %s",
+    async (host) => {
+      mockPollLoginStatus.mockResolvedValue({ status: "scaned_but_redirect", redirect_host: host })
+      mockResolveRedirect.mockImplementation(() => {
+        throw new Error("invalid redirect")
+      })
+      render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+      await getQr()
+      await advance()
+      await advance(10_000)
+      expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
+      expect(mockPollLoginStatus).toHaveBeenCalledTimes(1)
+      expect(mockKeyringSet).not.toHaveBeenCalled()
+    }
+  )
+  it("surfaces an unknown login state in localized guidance", async () => {
+    mockPollLoginStatus.mockResolvedValue({ status: "future_unknown" })
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    await advance()
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("unsupported status"))
+    expect(mockKeyringSet).not.toHaveBeenCalled()
+  })
+  it("surfaces polling errors and stops instead of rejecting an unhandled promise", async () => {
+    mockPollLoginStatus.mockRejectedValue(new Error("status unavailable"))
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await getQr()
+    await advance()
+    await advance(10_000)
+    expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Could not check"))
+    expect(mockPollLoginStatus).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("wechat-personal-login-status")).toHaveTextContent(/failed/i)
+  })
+  it("ignores an in-flight confirmation after close and clears the QR before reopening", async () => {
+    let resolvePoll!: (value: unknown) => void
+    mockPollLoginStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePoll = resolve
+        })
+    )
+    const { rerender } = render(
+      <WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />
+    )
+    await getQr()
+    await advance()
+    rerender(<WeChatPersonalConfigDialog open={false} onOpenChange={jest.fn()} row={null} />)
+    await act(async () => {
+      resolvePoll({ status: "confirmed", bot_token: "stale" })
+    })
+    rerender(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    await advance(10_000)
+    expect(mockKeyringSet).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("wechat-personal-qr")).not.toBeInTheDocument()
+    expect(mockPollLoginStatus).toHaveBeenCalledTimes(1)
+  })
+  it("ignores a QR request that completes after the dialog closes", async () => {
+    let resolveQr!: (value: unknown) => void
+    mockRequestLoginQr.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveQr = resolve
+        })
+    )
+    const { rerender } = render(
+      <WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />
+    )
+    await getQr()
+    rerender(<WeChatPersonalConfigDialog open={false} onOpenChange={jest.fn()} row={null} />)
+    await act(async () => {
+      resolveQr({ qrcode: "stale", qrcode_img_content: "https://weixin.qq.com/stale" })
+    })
+    rerender(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    expect(screen.queryByTestId("wechat-personal-qr")).not.toBeInTheDocument()
+    await advance(10_000)
+    expect(mockPollLoginStatus).not.toHaveBeenCalled()
+  })
+})
+
+it("validates the display name and lets the user cancel without writing", async () => {
+  const onOpenChange = jest.fn()
+  render(<WeChatPersonalConfigDialog open onOpenChange={onOpenChange} row={null} />)
+  fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "  " } })
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+  })
+  expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("name"))
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+  })
+  expect(onOpenChange).toHaveBeenCalledWith(false)
+  expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+})
+it("refuses to save incomplete quiet hours", async () => {
+  const row = {
+    id: "quiet",
+    type: "wechat-personal",
+    displayName: "Bot",
+    settings: {},
+    quietHours: { from: "", to: "18:00", tz: "UTC" },
+  } as AdapterInstanceRow
+  render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={row} />)
+  fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Updated" } })
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+  })
+  expect(mockToastError).toHaveBeenCalled()
+  expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
 })

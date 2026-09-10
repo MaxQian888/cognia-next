@@ -122,7 +122,8 @@ async function reply(
  * `followUpBubbles` stays the RENDERING switch: a platform without bubbles
  * still gets the verbs printed as text, and typing one back works.
  *
- * Group chats are still excluded. A bare word like "stop" is a plausible thing
+ * Parent group chats are still excluded; managed Feishu threads are explicit
+ * run conversations and share the direct-chat controls. A bare word like "stop" is a plausible thing
  * to say in a group for reasons that have nothing to do with a run, and the
  * registration match is by exact label — in a direct chat that is unambiguous,
  * in a group it is not. Groups keep the card buttons, which carry an explicit
@@ -133,7 +134,11 @@ export async function maybeHandleRunControlFollowUp(
   adapterRow: AdapterInstanceRow,
   overrides: Partial<FollowUpControlDependencies> = {}
 ): Promise<boolean> {
-  if (event.channel.kind !== "private") return false
+  if (
+    event.channel.kind !== "private" &&
+    !(event.channel.kind === "thread" && event.channelData?.larkManagedThread === true)
+  )
+    return false
   if (event.kind && event.kind !== "create") return false
 
   const deps: FollowUpControlDependencies = {

@@ -1,3 +1,4 @@
+import { settleApprovalCard } from "./approval-card-state"
 /**
  * IM plan-approval card — the delegate behind `GateBehavior: "delegate"`.
  *
@@ -176,6 +177,8 @@ export function makeImPlanApprovalDelegate(
       { actionId: PLAN_REJECT_PREFIX + bindingId, componentId: "reject", decision: "reject" },
     ]
 
+    let approvalJobId: string | undefined
+    let expired = false
     try {
       await Promise.all(
         buttons.map((button) =>
@@ -198,7 +201,7 @@ export function makeImPlanApprovalDelegate(
           })
         )
       )
-      await enqueue({
+      const approvalJob = await enqueue({
         adapterId: ctx.adapterId,
         conversationKey: ctx.conversationKey,
         request: {
@@ -209,6 +212,7 @@ export function makeImPlanApprovalDelegate(
         },
         source: "ai-run",
       })
+      approvalJobId = approvalJob?.id
       await audit({
         adapterId: ctx.adapterId,
         kind: "plan_approve.requested",
@@ -235,6 +239,7 @@ export function makeImPlanApprovalDelegate(
     const decision = await awaitApproval(ctx.runId, requestId, {
       ttlMs: ctx.ttlMs ?? DEFAULT_PLAN_APPROVAL_TTL_MS,
       onExpire: () => {
+        expired = true
         void audit({
           adapterId: ctx.adapterId,
           kind: "plan_approve.expired",
@@ -243,6 +248,14 @@ export function makeImPlanApprovalDelegate(
           fields: { runId: ctx.runId, revision: request.revision },
         }).catch(() => undefined)
       },
+    })
+    void settleApprovalCard({
+      adapterId: ctx.adapterId,
+      conversationKey: ctx.conversationKey,
+      conversationRef: ctx.conversationRef,
+      surfaceId,
+      jobId: approvalJobId,
+      state: expired ? "expired" : decision.decision === "allow" ? "approved" : "denied",
     })
     return decision.decision === "allow"
       ? { outcome: "approve" }

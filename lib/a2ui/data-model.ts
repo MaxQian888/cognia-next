@@ -51,7 +51,7 @@ function parseArrayIndex(segment: string): number | null {
 }
 
 function hasUnsafePointerSegment(segments: string[]): boolean {
-  return segments.some((segment) => UNSAFE_DATA_MODEL_KEYS.has(segment))
+  return segments.some((segment) => !isSafeDataModelKey(segment))
 }
 
 /**
@@ -204,7 +204,7 @@ function setInNode(node: unknown, segments: string[], index: number, value: unkn
       copy[arrIndex] = value
       return copy
     }
-    const nextIsArray = /^\d+$/.test(segments[index + 1])
+    const nextIsArray = parseArrayIndex(segments[index + 1]) !== null
     const child = node[arrIndex]
     const childContainer = isContainerNode(child) ? child : nextIsArray ? [] : {}
     const newChild = setInNode(childContainer, segments, index + 1, value)
@@ -227,7 +227,7 @@ function setInNode(node: unknown, segments: string[], index: number, value: unkn
     copy[segment] = value
     return copy
   }
-  const nextIsArray = /^\d+$/.test(segments[index + 1])
+  const nextIsArray = parseArrayIndex(segments[index + 1]) !== null
   const child = objNode[segment]
   const childContainer = isContainerNode(child) ? child : nextIsArray ? [] : {}
   const newChild = setInNode(childContainer, segments, index + 1, value)
@@ -305,7 +305,7 @@ export function deepClone<T>(obj: T): T {
 
   const result: Record<string, unknown> = {}
   for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && isSafeDataModelKey(key)) {
       result[key] = deepClone((obj as Record<string, unknown>)[key])
     }
   }
@@ -323,7 +323,7 @@ export function deepMerge(
   const result: Record<string, unknown> = { ...target }
 
   for (const key in source) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (!Object.prototype.hasOwnProperty.call(source, key) || !isSafeDataModelKey(key)) continue
 
     const sourceValue = source[key]
     const targetValue = result[key]
@@ -364,7 +364,12 @@ export function deepMerge(
  * Check if a value is a path reference
  */
 export function isPathValue<T>(value: T | A2UIPathValue<T>): value is A2UIPathValue<T> {
-  return typeof value === "object" && value !== null && "path" in value
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.prototype.hasOwnProperty.call(value, "path") &&
+    typeof (value as { path?: unknown }).path === "string"
+  )
 }
 
 /**
@@ -463,7 +468,7 @@ export function createRelativePathResolver(
     }
 
     // Otherwise, resolve relative to base path + item index
-    const absolutePath = `${basePath}/${itemIndex}/${relativePath}`
+    const absolutePath = `${basePath}/${itemIndex}${relativePath ? `/${relativePath}` : ""}`
     return getValueByPath(dataModel, absolutePath)
   }
 }
@@ -545,21 +550,13 @@ export function resolveComputedFields(
   dataModel: Record<string, unknown>,
   computedFields: ComputedFieldRegistry
 ): Record<string, unknown> {
-  const result = { ...dataModel }
+  let result = { ...dataModel }
 
   for (const [path, field] of Object.entries(computedFields)) {
     try {
       const depValues = field.deps.map((dep) => getValueByPath(result, dep))
       const computedValue = field.compute(...depValues)
-      // Apply computed value using path segments
-      const segments = path.split("/").filter(Boolean)
-      if (segments.length === 1) {
-        result[segments[0]] = computedValue
-      } else {
-        // Use setValueByPath for nested paths
-        const updated = setValueByPath(result, path, computedValue)
-        Object.assign(result, updated)
-      }
+      result = setValueByPath(result, path, computedValue)
     } catch {
       // Silently skip failed computations
     }

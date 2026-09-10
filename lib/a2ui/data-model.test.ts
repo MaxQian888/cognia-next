@@ -4,6 +4,13 @@
 
 import {
   parseJsonPointer,
+  resolveComputedFields,
+  isPathValue,
+  createRelativePathResolver,
+  watchPaths,
+  computedHelpers,
+  createJsonPointer,
+  extractReferencedPaths,
   getValueByPath,
   setValueByPath,
   deleteValueByPath,
@@ -426,5 +433,177 @@ describe("A2UI Data Model", () => {
       }
       expect(collectComponentDataPaths(component)).toEqual(["/x"])
     })
+  })
+})
+
+describe("data model boundary regressions", () => {
+  it("uses decoded JSON Pointer keys for computed fields and rejects unsafe destinations", () => {
+    const model = { count: 2 }
+    const result = resolveComputedFields(model, {
+      "/a~1b": { deps: ["/count"], compute: (value) => Number(value) + 1 },
+      "/~0count": { deps: ["/a~1b"], compute: (value) => value },
+      "/__proto__": { deps: [], compute: () => ({ injected: true }) },
+      "/constructor": { deps: [], compute: () => "unsafe" },
+      invalid: { deps: [], compute: () => "invalid" },
+    })
+    expect(result).toEqual({ count: 2, "a/b": 3, "~count": 3 })
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+    expect(model).toEqual({ count: 2 })
+  })
+
+  it("keeps clone and merged model prototypes unchanged for unsafe incoming keys", () => {
+    const source = JSON.parse(
+      '{"__proto__":{"injected":true},"constructor":{"prototype":{"x":1}},"nested":{"prototype":1,"safe":2}}'
+    )
+    for (const result of [deepClone(source), deepMerge({}, source)]) {
+      expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+      expect(result).toEqual({ nested: { safe: 2 } })
+      expect(isA2UIDataModel(result)).toBe(true)
+    }
+  })
+
+  it("creates object keys for noncanonical numeric tokens instead of unreadable array properties", () => {
+    expect(setValueByPath({}, "/codes/01/name", "one")).toEqual({
+      codes: { "01": { name: "one" } },
+    })
+    expect(setValueByPath({}, "/rows/0/01/name", "one")).toEqual({
+      rows: [{ "01": { name: "one" } }],
+    })
+  })
+
+  it("rejects empty nested keys consistently with reads and model validation", () => {
+    const model = { keep: 1 }
+    expect(setValueByPath(model, "/nested//name", "hidden")).toBe(model)
+    expect(deleteValueByPath(model, "/nested//name")).toBe(model)
+  })
+
+  it("does not recognize non-string or inherited paths as bindings", () => {
+    for (const value of [{ path: 0 }, { path: null }, Object.create({ path: "/count" })]) {
+      expect(isPathValue(value)).toBe(false)
+      expect(getBindingPath(value)).toBeNull()
+    }
+  })
+
+  it("resolves an empty relative path to the current list item", () => {
+    const model = { rows: [{ name: "Alice" }] }
+    expect(createRelativePathResolver("/rows", 0)("", model)).toBe(model.rows[0])
+  })
+})
+
+describe("data model helpers and subscriptions", () => {
+  it("round-trips escaped keys while retaining the established root alias", () => {
+    expect(createJsonPointer(["a/b", "~key"])).toBe("/a~1b/~0key")
+    expect(parseJsonPointer(createJsonPointer(["a/b", "~key"]))).toEqual(["a/b", "~key"])
+    expect(createJsonPointer([])).toBe("/")
+    expect(parseJsonPointer("/")).toEqual([])
+    expect(() => parseJsonPointer("invalid")).toThrow()
+    expect(getValueByPath({}, "invalid")).toBeUndefined()
+  })
+
+  it("replaces and deletes root models, preserving invalid replacement identity", () => {
+    const original = { a: 1 }
+    const replacement = { b: 2 }
+    expect(setValueByPath(original, "/", replacement)).toBe(replacement)
+    expect(setValueByPath(original, "", replacement)).toBe(replacement)
+    expect(setValueByPath(original, "/", [])).toBe(original)
+    expect(setValueByPath(original, "/", null)).toBe(original)
+    expect(deleteValueByPath(original, "/")).toEqual({})
+    expect(getValueByPath({ a: null }, "/a/name")).toBeUndefined()
+    expect(getValueByPath({ a: 1 }, "/a/name")).toBeUndefined()
+  })
+
+  it("deletes array elements and nested fields without changing untouched references", () => {
+    const model = { rows: [{ keep: 1, drop: 2 }, { keep: 3 }], spare: { value: true } }
+    const removed = deleteValueByPath(model, "/rows/0")
+    expect(removed.rows).toEqual([{ keep: 3 }])
+    expect(removed.spare).toBe(model.spare)
+    const updated = deleteValueByPath(model, "/rows/0/drop")
+    expect(updated.rows).toEqual([{ keep: 1 }, { keep: 3 }])
+    expect((updated.rows as unknown[])[1]).toBe(model.rows[1])
+    expect(deleteValueByPath(model, "/rows/0/absent")).toBe(model)
+    expect(deleteValueByPath(model, "/rows/9")).toBe(model)
+    expect(setValueByPath(model, "/rows/1", model.rows[1])).toBe(model)
+    expect(setValueByPath(model, "/rows/1/keep", 3)).toBe(model)
+  })
+
+  it("notifies only changed bound values, including nested arrays and type changes", () => {
+    const onChange = jest.fn()
+    const watch = (oldValue: unknown, newValue: unknown) =>
+      watchPaths([{ path: "/value", callback: onChange }], { value: oldValue }, { value: newValue })
+    watch({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] })
+    watch(null, null)
+    expect(onChange).not.toHaveBeenCalled()
+    for (const [before, after] of [
+      [null, {}],
+      [1, "1"],
+      [[1], [1, 2]],
+      [[1], [2]],
+      [{ a: 1 }, { a: 2 }],
+      [{ a: 1 }, { a: 1, b: 2 }],
+      [[], {}],
+    ]) {
+      watch(before, after)
+      expect(onChange).toHaveBeenLastCalledWith(after, before)
+    }
+    expect(onChange).toHaveBeenCalledTimes(7)
+  })
+
+  it("resolves derived totals, counts, formatting and nested fields without mutating inputs", () => {
+    const model = { amount: 12.5, other: 7.5, rows: [1, 2, 3], name: "Ada", title: "Dr" }
+    const derived = resolveComputedFields(model, {
+      "/total": computedHelpers.sum("/amount", "/other", "/missing"),
+      "/count": computedHelpers.count("/rows"),
+      "/selected": computedHelpers.countWhere("/rows", (value) => Number(value) > 1),
+      "/formatted": computedHelpers.currency("/total"),
+      "/custom": computedHelpers.currency("/amount", "€", 1),
+      "/label": computedHelpers.concat(" ", "/title", "/name", "/missing"),
+      "/stats/percent": computedHelpers.percentage("/selected", "/count"),
+      "/failed": {
+        deps: [],
+        compute: () => {
+          throw new Error("failed")
+        },
+      },
+      "/afterFailure": { deps: ["/total"], compute: (value) => value },
+    })
+    expect(derived).toMatchObject({
+      total: 20,
+      count: 3,
+      selected: 2,
+      formatted: "$20.00",
+      custom: "€12.5",
+      label: "Dr Ada",
+      stats: { percent: 67 },
+      afterFailure: 20,
+    })
+    expect(derived).not.toHaveProperty("failed")
+    expect(model).not.toHaveProperty("total")
+    expect(derived.rows).toBe(model.rows)
+    expect(computedHelpers.count("/missing").compute(undefined)).toBe(0)
+    expect(computedHelpers.countWhere("/missing", () => true).compute(null)).toBe(0)
+    expect(computedHelpers.currency("/missing").compute(undefined)).toBe("$0.00")
+    expect(computedHelpers.percentage("/a", "/b").compute(undefined, 0)).toBe(0)
+  })
+
+  it("uses resolver defaults for malformed bindings instead of treating them as root references", () => {
+    const invalid = { path: 0 } as unknown as { path: string }
+    expect(resolveStringOrPath(invalid, { name: "Ada" }, "missing")).toBe("missing")
+    expect(resolveNumberOrPath(invalid, {}, 5)).toBe(5)
+    expect(resolveBooleanOrPath(invalid, {}, true)).toBe(true)
+    expect(resolveArrayOrPath(invalid, {}, [1])).toEqual([1])
+    const resolver = createRelativePathResolver("/rows", 0)
+    const model = { name: "global", rows: [{ name: "local" }] }
+    expect(resolver("/name", model)).toBe("global")
+    expect(resolver("name", model)).toBe("local")
+  })
+
+  it("finds nested list bindings and pointer fields without treating numeric paths as references", () => {
+    const component = {
+      children: [{ value: { path: "/value" }, currentStepPath: "/step" }],
+      invalid: { path: 3 },
+      dataPath: "",
+    }
+    expect(extractReferencedPaths([component])).toEqual(["/value"])
+    expect(collectComponentDataPaths(component)).toEqual(["/value", "/step"])
   })
 })

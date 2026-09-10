@@ -45,6 +45,30 @@ export function resolveWebEntryBase(adapterRow?: LarkFlagAdapterSettings): strin
   return trimmed
 }
 
+/** External run links use the configured web client, never a relative URL or a run-supplied URL. */
+export function buildRunDetailsUrl(
+  runId: string,
+  webBase: string | null | undefined
+): string | null {
+  if (!webBase) return null
+  try {
+    const base = new URL(webBase)
+    if (
+      !["http:", "https:"].includes(base.protocol) ||
+      base.username ||
+      base.password ||
+      base.search ||
+      base.hash
+    )
+      return null
+    const url = new URL(`${base.pathname.replace(/\/+$/, "")}/agent-runs`, base.origin)
+    url.searchParams.set("run", runId)
+    return url.href
+  } catch {
+    return null
+  }
+}
+
 export interface AuthorizedConversationLinkInput extends IssueEntryTokenInput {
   adapterRow?: LarkFlagAdapterSettings
 }

@@ -1,6 +1,11 @@
 import type { PlatformAdapter } from "@/types/connectors"
 import type { AuditEntryInput } from "./audit"
 import { ConnectorRuntimeSupervisor, type ConnectorRuntimeDefinition } from "./runtime-supervisor"
+import { confirmSelfIdentityOnStart } from "./self-identity"
+
+jest.mock("./self-identity", () => ({
+  confirmSelfIdentityOnStart: jest.fn().mockResolvedValue(undefined),
+}))
 
 function adapter(
   id: string,
@@ -32,6 +37,20 @@ function definition(
 }
 
 describe("ConnectorRuntimeSupervisor", () => {
+  it("probes identity before a quiet Lark adapter receives its first event", async () => {
+    const built = {
+      ...adapter("quiet-lark", () => ({ state: "starting" })),
+      meta: { type: "lark" },
+    } as PlatformAdapter
+    const supervisor = new ConnectorRuntimeSupervisor({ audit: jest.fn() })
+    supervisor.setDefinition(definition("quiet-lark", { build: async () => built }))
+
+    await supervisor.restartAdapter("quiet-lark", "initial")
+
+    expect(confirmSelfIdentityOnStart).toHaveBeenCalledWith("quiet-lark", "lark")
+    expect(supervisor.getSnapshot("quiet-lark")?.observedState).toBe("starting")
+  })
+
   it("coalesces simultaneous restart causes into the latest generation", async () => {
     const supervisor = new ConnectorRuntimeSupervisor({ audit: jest.fn() })
     const runtime = definition("adapter-1")

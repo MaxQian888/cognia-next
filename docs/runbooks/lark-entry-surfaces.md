@@ -27,6 +27,21 @@ with no `COGNIA_LARK_PUBLIC_BASE` behind it print a warning and start.
 
 ## 2. Lark developer-console configuration
 
+### Run details in a paired Web client
+
+Run-card **View details** buttons use `webEntryBaseUrl` (or
+`COGNIA_LARK_WEB_BASE` / `NEXT_PUBLIC_COGNIA_WEB_BASE`) and open
+`<web base>/agent-runs?run=<encoded run id>`. Configure the address of the Web
+client, not the API listener. The Web client must be paired with the host that
+owns the run. Its detail pane links to the full conversation using the run's
+session ID. Links contain no device or service credentials.
+
+An unconfigured Web base omits the button; `/agent-runs` on its own is not a
+valid external link (Feishu may interpret it as `http://agent-runs/`). A
+loopback Web address works only on the host computer. For phones or other
+computers, deploy a reachable HTTPS Web client and pair it with the host.
+This paired-client path is separate from the Web SSO entry-token flow below.
+
 ### 2.1 OAuth (Web SSO)
 
 1. 安全设置 → 重定向 URL: add
@@ -89,10 +104,15 @@ immediately.
 
 ### 2.4 Command menu batch (`nativeExposed`)
 
-Feishu has **no** slash-command API for bots (verified 2026-07 against the
-bot capability overview — a typed "/x" arrives as a plain message). Expose
-the batch as additional bot-menu items with action 发送文字消息 (requires
-client ≥ V7.22) posting the literal command text:
+Feishu supports a native slash suggestion panel through
+`/open-apis/application/v7/app_slash_commands` (official documentation verified
+2026-09-07). It requires `application:app_slash_command:read` and
+`application:app_slash_command:write`, PC client 7.70+ or mobile 7.71+.
+Registration changes may take about five minutes to appear. See the
+[official Slash Command guide](https://open.feishu.cn/document/mcp_open_tools/agent-best-practices/agent-supports-slash-commands).
+
+The existing `nativeExposed` manifest below is the separate SEND_MESSAGE
+bot-menu batch (client 7.22+); it does not register the native slash panel:
 
 `/new` · `/status` · `/help` · `/sessions` · `/switch`
 
@@ -247,3 +267,54 @@ Every lever is independent and hot (settings reads are per-event):
   auto-replayed.
 - **SSO incident** → rotate the companion secret: invalidates every
   `lark_web` session and outstanding entry token at once (by design).
+
+### Command card appearance (2026-09-07)
+
+Feishu text command replies, help/welcome, and scheduled-task lists use the shared
+Card JSON 2.0 frame in `lib/connectors/adapters/lark/card.ts`: 16px body padding,
+12px vertical spacing, blue information headers, green confirmations, and orange
+non-applied results. Result text accompanies color. Plain-text replies on other
+platforms retain their existing behavior. Dynamic command output is escaped before
+Markdown formatting; long output is retained with a bounded component count.
+Help buttons retain persisted callback bindings through Card 2.0 `behaviors`.
+
+API references: [Card JSON 2.0 structure](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-json-v2-structure),
+[Button](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-json-v2-components/interactive-components/button).
+Card 2.0 requires Feishu 7.20 or newer. Three representative cards were accepted
+by the live message API during the 2026-09-07 test; client appearance and button
+callbacks still need verification in the actual client after deployment.
+
+### Agent and workflow progress (2026-09-07)
+
+Native run cards display elapsed time, state-colored headers, a measured node
+completion bar when totals are trustworthy, localized node states, finished
+activity durations, queued turns and sanitized artifact titles. Dynamic agents
+with no known total retain activity counts instead of a speculative percentage.
+Active/failed/blocked nodes remain visible before completed history in the
+bounded plan window. Aggregate counts include steps outside that window.
+
+A state transition replaces the card so the header and streaming mode track
+waiting, pause, resume and completion; same-state progress updates the existing
+summary element. Generic review instructions do not expose private interrupt
+titles. Updates remain event-driven; this change adds no polling or animation
+timer. A clearly labeled demo verified create → progress → pause → resume →
+complete against the live Feishu API (six successful calls). The workflow bridge
+and presentation runner are covered by the focused regression suites.
+
+### Workflow dependency view
+
+Workflow plan events now retain actual source/target edges and workflow run identity.
+The outbound projection includes sanitized node labels and states; parameters, raw
+step payloads and conditional expressions are excluded. Legacy plans without topology
+keep their timeline and never infer edges from execution order.
+
+The native Feishu card shows up to 16 numbered nodes and 24 explicit dependency
+arrows, with an omission notice for larger graphs. Execution details are collapsible.
+Graph state changes replace the card; heartbeat text updates preserve the graph.
+The full-workflow action uses the configured Web base and opens
+`/workflows/run?id=<workflowId>&runId=<sourceRunId>` behind the existing Web login.
+
+The Web run detail now mounts a read-only React Flow canvas using the frozen workflow
+positions and edges. Node selection shares the existing step inspector; zoom and pan
+are available. Node state and duration reuse the timeline's event/retry semantics.
+Deploy an updated Web build as well as the CLI bundle to expose the new canvas.

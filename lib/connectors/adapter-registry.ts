@@ -10,6 +10,7 @@
  * under `<adapterId>:onebotBearer`.
  */
 
+import { resolveWebEntryBase } from "./entry/deep-links"
 import type { PlatformAdapter } from "@/types/connectors"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
@@ -309,6 +310,8 @@ export async function buildLarkAdapter(row: AdapterInstanceRow): Promise<Platfor
     selfBotOpenId,
     quickCommands: normalizeQuickCommandList(settings.quickCommands),
     sendAsUser: settings.sendAsUser === true,
+    replyInThread: settings.replyInThread !== false,
+    webEntryBaseUrl: resolveWebEntryBase(row),
     transport,
   })
 }

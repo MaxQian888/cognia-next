@@ -1,3 +1,5 @@
+import { settleApprovalCard } from "./approval-card-state"
+jest.mock("./approval-card-state", () => ({ settleApprovalCard: jest.fn(async () => undefined) }))
 import type { ConversationReference } from "@/types/connectors/event"
 
 import { resolveApproval } from "./approval-registry"
@@ -101,6 +103,7 @@ describe("plan approval delegate", () => {
 
     resolveApproval("run_team_1", "plan-approval:run_team_1:0", { decision: "allow" })
     await expect(pending).resolves.toEqual({ outcome: "approve" })
+    expect(settleApprovalCard).toHaveBeenCalledWith(expect.objectContaining({ state: "approved" }))
   })
 
   it("carries the rejection feedback back as the revision instruction", async () => {
@@ -195,4 +198,10 @@ describe("plan approval callback", () => {
       message: "split it up",
     })
   })
+})
+
+it("closes the original plan card when the approval expires", async () => {
+  const pending = makeImPlanApprovalDelegate(ctx({ ttlMs: 1 }))({ planText: "plan", revision: 99 })
+  await expect(pending).resolves.toMatchObject({ outcome: "reject" })
+  expect(settleApprovalCard).toHaveBeenLastCalledWith(expect.objectContaining({ state: "expired" }))
 })

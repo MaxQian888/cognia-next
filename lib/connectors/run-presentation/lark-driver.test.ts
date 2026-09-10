@@ -1,4 +1,4 @@
-import { createLarkRunPresentationDriver } from "./lark-driver"
+import { createLarkRunPresentationDriver, buildLarkRunFallbackSegment } from "./lark-driver"
 import type { RunPresentationRef, RunProjectionSnapshot } from "@/types/execution/run"
 
 const topicTarget = {
@@ -93,6 +93,30 @@ const snapshot = (
 })
 
 describe("Lark run presentation driver", () => {
+  it("refreshes thread text controls when a run waits for authorization", async () => {
+    const paths: string[] = []
+    const driver = createLarkRunPresentationDriver(async (_method, path) => {
+      paths.push(path)
+      if (path === "/cardkit/v1/cards") return { data: { card_id: "card-controls" } }
+      return { data: { message_id: "message-controls" } }
+    })
+    const opened = await driver.open(topicTarget, snapshot(1))
+    const waiting = await driver.update(opened, {
+      ...snapshot(2, "waiting"),
+      allowedActions: ["approve", "deny"],
+      pendingInterrupt: { id: "permission-1", title: "Permission" },
+    })
+    expect(waiting.opaqueState?.followUpControl).toMatchObject({
+      platformMessageId: "message-controls",
+      revision: 2,
+      items: expect.arrayContaining([
+        expect.objectContaining({ action: "approve", localizedContent: "批准" }),
+        expect.objectContaining({ action: "deny", localizedContent: "拒绝" }),
+      ]),
+    })
+    expect(paths.some((path) => path.endsWith("/push_follow_up"))).toBe(false)
+  })
+
   it("creates, sends, and updates a CardKit 2.0 entity with monotonic sequences", async () => {
     const calls: Array<{ method: string; path: string; body: unknown }> = []
     const driver = createLarkRunPresentationDriver(async (method, path, body) => {
@@ -122,11 +146,30 @@ describe("Lark run presentation driver", () => {
     expect((calls[4].body as { sequence: number }).sequence).toBe(3)
     expect(JSON.stringify(calls[2].body)).toContain("2 queued turns")
     expect(JSON.stringify(calls[2].body)).toContain("src/release.ts")
-    expect(JSON.stringify(calls[2].body)).toContain("│")
+    expect(JSON.stringify(calls[2].body)).not.toContain("│")
     expect(typeof (calls[3].body as { element: unknown }).element).toBe("string")
     expect(JSON.parse((calls[3].body as { element: string }).element)).toEqual(
-      expect.objectContaining({ tag: "action", element_id: "run_actions" })
+      expect.objectContaining({
+        tag: "column_set",
+        element_id: "run_actions",
+        columns: expect.arrayContaining([
+          expect.objectContaining({
+            tag: "column",
+            elements: [expect.objectContaining({ tag: "button" })],
+          }),
+        ]),
+      })
     )
+    expect(JSON.stringify(calls[0].body)).not.toContain('\\"tag\\":\\"action\\"')
+    const initialCard = JSON.parse((calls[0].body as { data: string }).data)
+    expect(initialCard.body.elements[0]).toMatchObject({
+      tag: "collapsible_panel",
+      expanded: true,
+      header: {
+        title: { tag: "plain_text", content: "Nodes and activity" },
+      },
+      elements: [expect.objectContaining({ tag: "markdown", element_id: "run_summary" })],
+    })
     const finalCard = JSON.parse((calls[4].body as { card: { data: string } }).card.data) as {
       config: { streaming_mode: boolean }
     }
@@ -193,7 +236,28 @@ describe("Lark run presentation driver", () => {
     expect(createdData).not.toContain("Approve private operation")
     expect(createdData).not.toContain("token=secret")
     expect(createdData).toContain("opaque-")
-    expect(createdData).toContain("/agent-runs?run=")
+    expect(createdData).not.toContain("/agent-runs?run=")
+  })
+
+  it("opens details on the configured web client and ignores snapshot URLs", async () => {
+    let createdData = ""
+    const driver = createLarkRunPresentationDriver(
+      async (_method, path, body) => {
+        if (path === "/cardkit/v1/cards") {
+          createdData = (body as { data: string }).data
+          return { data: { card_id: "card-link" } }
+        }
+        return { data: { message_id: "message-link" } }
+      },
+      { webEntryBaseUrl: "http://127.0.0.1:3000" }
+    )
+    await driver.open(topicTarget, {
+      ...snapshot(1),
+      detailsUrl: "https://untrusted.example/?token=secret",
+      allowedActions: ["open_details"],
+    })
+    expect(createdData).toContain("http://127.0.0.1:3000/agent-runs?run=run-1")
+    expect(createdData).not.toContain("untrusted.example")
   })
 
   it("uses full replacement when the action component structure changes", async () => {
@@ -293,7 +357,7 @@ describe("Lark run presentation driver", () => {
 
     expect(updates).toHaveLength(3)
     expect(updates[1]).toEqual(updates[0])
-    expect(checkpoints[0]?.pendingMutation).toEqual(
+    expect(checkpoints.find((c) => c.pendingMutation)?.pendingMutation).toEqual(
       expect.objectContaining({ sequence: 1, uuid: updates[0].uuid, operation: "stream_summary" })
     )
     expect(updated.opaqueState?.pendingMutation).toBeUndefined()
@@ -373,7 +437,7 @@ describe("Lark run presentation driver", () => {
   it("pushes localized follow-up controls only for a direct-chat progress message", async () => {
     const calls: Array<{ path: string; body: unknown }> = []
     const driver = createLarkRunPresentationDriver(async (_method, path, body) => {
-      calls.push({ path, body })
+      calls.push({ path, body: body as { data?: string } })
       if (path === "/cardkit/v1/cards") return { data: { card_id: "card-direct" } }
       if (path === "/im/v1/messages?receive_id_type=chat_id") {
         return { data: { message_id: "om-bot-progress" } }
@@ -469,4 +533,164 @@ describe("Lark run presentation driver", () => {
     const driver = createLarkRunPresentationDriver(async () => ({ data: {} }))
     expect(driver.capabilities.followUpBubbles).toBe(true)
   })
+})
+
+describe("status reactions", () => {
+  it("acknowledges once, replaces status, and removes only the bot's previous reaction", async () => {
+    let reactionNumber = 0
+    const calls: Array<{ method: string; path: string; body: unknown }> = []
+    const driver = createLarkRunPresentationDriver(
+      async (method, path, body) => {
+        calls.push({ method, path, body })
+        if (path.endsWith("/reactions") && method === "POST")
+          return { data: { reaction_id: `r${++reactionNumber}` } }
+        if (path === "/cardkit/v1/cards") return { data: { card_id: "card-1" } }
+        return { data: { message_id: "om-card" } }
+      },
+      { statusReactions: true }
+    )
+    let ref = await driver.open(topicTarget, snapshot(1))
+    ref = await driver.update(ref, snapshot(2))
+    ref = await driver.update(ref, snapshot(3))
+    ref = await driver.finish(ref, snapshot(4, "failed"))
+    const reactions = calls.filter((c) => c.path.includes("/reactions"))
+    expect(reactions.map((c) => c.method)).toEqual(["POST", "POST", "DELETE", "POST", "DELETE"])
+    expect(reactions.filter((c) => c.method === "POST").map((c) => c.body)).toEqual([
+      { reaction_type: { emoji_type: "Get" } },
+      { reaction_type: { emoji_type: "OnIt" } },
+      { reaction_type: { emoji_type: "ERROR" } },
+    ])
+    expect(ref.opaqueState?.statusReaction).toEqual({ id: "r3", emoji: "ERROR" })
+  })
+  it("still sends the card when reaction permission is missing", async () => {
+    const driver = createLarkRunPresentationDriver(
+      async (_method, path) => {
+        if (path.endsWith("/reactions")) throw new Error("scope missing")
+        if (path === "/cardkit/v1/cards") return { data: { card_id: "card-1" } }
+        return { data: { message_id: "om-card" } }
+      },
+      { statusReactions: true }
+    )
+    expect((await driver.open(topicTarget, snapshot(1))).platformMessageId).toBe("om-card")
+  })
+})
+
+it("refreshes the entire card on a waiting transition even when actions stay the same", async () => {
+  const calls: Array<{ path: string; body: unknown }> = []
+  const driver = createLarkRunPresentationDriver(
+    async (_method, path, body) => {
+      calls.push({ path, body: body as { data?: string } })
+      return path === "/cardkit/v1/cards"
+        ? { data: { card_id: "waiting-card" } }
+        : { data: { message_id: "om-card" } }
+    },
+    { statusReactions: false }
+  )
+  const ref = await driver.open(topicTarget, snapshot(1))
+  await driver.update(ref, {
+    ...snapshot(2, "waiting"),
+    allowedActions: snapshot(1).allowedActions,
+    pendingInterrupt: { id: "review", title: "Confirm deployment" },
+  })
+  const update = calls.find((c) => c.path === "/cardkit/v1/cards/waiting-card")
+  expect(update).toBeDefined()
+  const card = JSON.parse((update!.body as { card: { data: string } }).card.data)
+  expect(card.header.template).toBe("orange")
+  expect(JSON.stringify(card)).toContain("Waiting for review")
+  expect(JSON.stringify(card)).toContain("Your action is needed")
+  expect(JSON.stringify(card)).not.toContain("Confirm deployment")
+})
+
+it("shows elapsed time and truthful progress in the streaming body", async () => {
+  let created = ""
+  const driver = createLarkRunPresentationDriver(
+    async (_method, path, body) => {
+      if (path === "/cardkit/v1/cards") {
+        created = (body as { data: string }).data
+        return { data: { card_id: "progress-card" } }
+      }
+      return { data: { message_id: "om-card" } }
+    },
+    { statusReactions: false }
+  )
+  await driver.open(topicTarget, { ...snapshot(1), elapsedMs: 65000 })
+  expect(created).toContain("65s")
+  expect(created).toContain("50%")
+  expect(created).toContain("■")
+})
+
+it("renders real branch dependencies and only replaces the graph when its state changes", async () => {
+  const calls: Array<{ path: string; body: { data?: string } }> = []
+  const driver = createLarkRunPresentationDriver(
+    async (_, path, body) => {
+      calls.push({ path, body: body as { data?: string } })
+      return { data: { card_id: "graph-card", message_id: "graph-message" } }
+    },
+    { webEntryBaseUrl: "http://localhost:3000" }
+  )
+  const value: RunProjectionSnapshot = {
+    ...snapshot(1),
+    allowedActions: ["open_details"],
+    workflowGraph: {
+      workflowId: "wf-1",
+      sourceRunId: "source-1",
+      nodes: ["read", "left", "right"].map((id) => ({ id, title: id, status: "pending" })),
+      edges: [
+        { source: "read", target: "left" },
+        { source: "read", target: "right" },
+      ],
+    },
+  }
+  let ref = await driver.open(topicTarget, value)
+  const card = JSON.parse(calls[0].body.data!)
+  expect(JSON.stringify(card)).toContain("1 → 2 · 1 → 3")
+  expect(JSON.stringify(card)).not.toContain("2 → 3")
+  expect(JSON.stringify(card)).toContain(
+    "http://localhost:3000/workflows/run?id=wf-1&runId=source-1"
+  )
+  expect(
+    card.body.elements.find(
+      (e: { tag: string; expanded?: boolean }) => e.tag === "collapsible_panel"
+    ).expanded
+  ).toBe(false)
+  calls.length = 0
+  ref = await driver.update(ref, { ...value, revision: 2, elapsedMs: 5000 })
+  expect(calls.some((call) => call.path === "/cardkit/v1/cards/graph-card")).toBe(false)
+  calls.length = 0
+  await driver.update(ref, {
+    ...value,
+    revision: 3,
+    workflowGraph: {
+      ...value.workflowGraph!,
+      nodes: value.workflowGraph!.nodes.map((node) => ({ ...node, status: "completed" })),
+    },
+  })
+  expect(calls[0].path).toBe("/cardkit/v1/cards/graph-card")
+})
+
+it("never streams heartbeats into a waiting card with streaming mode closed", async () => {
+  const paths: string[] = []
+  const driver = createLarkRunPresentationDriver(async (_, path) => {
+    paths.push(path)
+    return { data: { card_id: "wait-card", message_id: "message" } }
+  })
+  let ref = await driver.open(topicTarget, snapshot(1))
+  ref = await driver.update(ref, snapshot(2, "waiting"))
+  paths.length = 0
+  await driver.update(ref, snapshot(2, "waiting"))
+  expect(paths).toEqual(["/cardkit/v1/cards/wait-card"])
+})
+it("repairs a closed-stream operation on the existing card without schema downgrade", async () => {
+  const paths: string[] = []
+  const driver = createLarkRunPresentationDriver(async (_, path) => {
+    paths.push(path)
+    if (path.endsWith("/content")) throw { code: 300309 }
+    return { data: { card_id: "closed-card", message_id: "message" } }
+  })
+  const ref = await driver.open(topicTarget, snapshot(1))
+  await driver.update(ref, snapshot(2))
+  expect(paths).toContain("/cardkit/v1/cards/closed-card")
+  expect(paths.filter((path) => path === "/cardkit/v1/cards")).toHaveLength(1)
+  expect(JSON.stringify(buildLarkRunFallbackSegment(snapshot(3)))).toContain('"schema":"2.0"')
+  expect(JSON.stringify(buildLarkRunFallbackSegment(snapshot(3)))).not.toContain('"tag":"action"')
 })

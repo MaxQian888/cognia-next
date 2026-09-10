@@ -113,6 +113,8 @@ export interface NormalizedInboundEvent {
   adapterId: string
   selfId: string
   messageId: string
+  /** False for invocations whose dedup id is not a replyable platform message. */
+  canReplyToMessage?: boolean
   conversationRef: ConversationReference
   conversationKey: string
   /** Structured address supplied by adapters that support scoped delivery. */
@@ -193,7 +195,7 @@ export function deliveryTargetFromEvent(event: NormalizedInboundEvent): Conversa
   return {
     address,
     conversationRef: event.conversationRef,
-    sourceMessageId: event.messageId,
+    sourceMessageId: event.canReplyToMessage === false ? undefined : event.messageId,
     refreshedAt: event.timestamp,
   }
 }

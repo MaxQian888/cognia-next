@@ -128,6 +128,14 @@ describe("effectiveCapabilities", () => {
       })
     })
 
+    it("retains v12 file sending when upload_file is advertised", () => {
+      const snapshot = effectiveCapabilities({
+        platform: "onebot",
+        implMetadata: { impl: "unknown", version: "12", features: ["upload_file"] },
+      })
+      expect(hasEffectiveCapability(snapshot, "send.file")).toBe(true)
+    })
+
     it("drops file upload on an upstream without upload_group_file", () => {
       const snapshot = effectiveCapabilities({
         platform: "onebot",

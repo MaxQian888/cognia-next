@@ -132,6 +132,9 @@ describe("conversationKey", () => {
       sourceMessageId: "om_1",
       refreshedAt: 123,
     })
+    expect(
+      deliveryTargetFromEvent({ ...ev, canReplyToMessage: false }).sourceMessageId
+    ).toBeUndefined()
   })
 
   it("builds a platform-neutral fallback address for a legacy adapter event", () => {

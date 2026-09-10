@@ -150,6 +150,40 @@ describe("useA2UIStore", () => {
       expect(ids).toHaveLength(20)
       expect(ids).toContain("surface-24")
       expect(ids).not.toContain("surface-0")
+      await flushA2UISurfacePersistence()
+      expect(mockDeleteDurableSurface).not.toHaveBeenCalled()
+    })
+
+    it("hydrates only once while preserving local inline surfaces and active selection", async () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("inline", "inline")
+      mockListDurableSurfaces.mockResolvedValue([
+        durableSurface("panel", 1),
+        { ...durableSurface("remote-inline", 2), type: "inline" },
+      ])
+      await expect(hydrateA2UISurfaceCache()).resolves.toBe(true)
+      await expect(hydrateA2UISurfaceCache()).resolves.toBe(true)
+      expect(mockListDurableSurfaces).toHaveBeenCalledTimes(1)
+      expect(store.getSurface("inline")).toBeDefined()
+      expect(store.getSurface("remote-inline")).toBeUndefined()
+      expect(useA2UIStore.getState().activeSurfaceId).toBe("inline")
+      await flushA2UISurfacePersistence()
+      expect(mockDeleteDurableSurface).not.toHaveBeenCalled()
+    })
+
+    it("keeps local edits usable when a durable write fails", async () => {
+      await hydrateA2UISurfaceCache()
+      mockUpsertDurableSurface.mockRejectedValueOnce(new Error("quota exceeded"))
+      const store = useA2UIStore.getState()
+      store.createSurface("s", "panel")
+      store.updateComponents("s", [{ id: "root", component: "Text", text: "Saved locally" }])
+      store.setSurfaceReady("s")
+      await flushA2UISurfacePersistence()
+      await expect(hydrateA2UISurfaceCache()).resolves.toBe(false)
+      store.updateDataModel("s", { stillEditable: true })
+      await flushA2UISurfacePersistence()
+      expect(store.getDataValue("s", "/stillEditable")).toBe(true)
+      expect(mockUpsertDurableSurface).toHaveBeenCalledTimes(1)
     })
 
     it("synchronizes ready writes and deletes after hydration", async () => {
@@ -211,6 +245,80 @@ describe("useA2UIStore", () => {
     })
   })
 
+  describe("history and lifecycle public behavior", () => {
+    it("round-trips edits through undo and redo and ignores missing surfaces", () => {
+      const store = useA2UIStore.getState()
+      store.undo("missing")
+      store.redo("missing")
+      store.pushSnapshot("missing", "noop")
+      store.createSurface("s", "inline")
+      store.updateComponents("s", [{ id: "root", component: "Text", text: "First" }])
+      store.updateDataModel("s", { version: 1 })
+      store.undo("s")
+      expect(store.getSurface("s")?.dataModel).toEqual({})
+      store.redo("s")
+      expect(store.getDataValue("s", "/version")).toBe(1)
+      store.undo("s")
+      store.undo("s")
+      store.redo("s")
+      expect(store.getComponent("s", "root")).toMatchObject({ text: "First" })
+      expect(store.canUndo("missing")).toBe(false)
+      expect(store.canRedo("missing")).toBe(false)
+    })
+
+    it("records distinct snapshots outside the debounce window and caps history", () => {
+      jest.useFakeTimers()
+      try {
+        const store = useA2UIStore.getState()
+        store.createSurface("s", "inline")
+        for (let i = 0; i < 55; i++) {
+          store.updateDataModel("s", { count: i })
+          jest.advanceTimersByTime(301)
+        }
+        expect(useA2UIStore.getState().undoStacks.s).toHaveLength(50)
+        store.undo("s")
+        expect(store.getDataValue("s", "/count")).toBe(53)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("switches active surfaces on delete and clears loading and errors", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("first", "inline")
+      store.createSurface("second", "inline")
+      store.setActiveSurface("second")
+      store.setSurfaceLoading("second", true)
+      store.setError("second", "failed")
+      store.setError("second", null)
+      expect(useA2UIStore.getState().errors.second).toBeUndefined()
+      store.setSurfaceLoading("second", false)
+      expect(useA2UIStore.getState().loadingSurfaces.second).toBeUndefined()
+      store.deleteSurface("second")
+      expect(useA2UIStore.getState().activeSurfaceId).toBe("first")
+      store.deleteSurface("first")
+      expect(useA2UIStore.getState().activeSurfaceId).toBeNull()
+    })
+
+    it("rejects replacement and restore content without a renderable root", () => {
+      const store = useA2UIStore.getState()
+      expect(store.replaceSurfaceContent("missing", [], {})).toBe(false)
+      store.createSurface("s", "inline")
+      expect(store.replaceSurfaceContent("s", [], {})).toBe(false)
+      expect(store.restoreSurface({ ...store.getSurface("s")!, rootId: "absent" })).toBe(false)
+      expect(store.getSurface("s")?.components).toEqual({})
+    })
+
+    it("keeps a deterministic first component when no unreferenced root exists", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("s", "inline")
+      store.updateComponents("s", [])
+      expect(store.getSurface("s")?.rootId).toBe("root")
+      store.updateComponents("s", [{ id: "loop", component: "Column", children: ["loop"] }])
+      expect(store.getSurface("s")?.rootId).toBe("loop")
+    })
+  })
+
   describe("initial state", () => {
     it("has correct initial state", () => {
       const state = useA2UIStore.getState()
@@ -229,6 +337,78 @@ describe("useA2UIStore", () => {
       expect(state.surfaces["surface-1"]).toBeDefined()
       expect(state.surfaces["surface-1"].type).toBe("dialog")
       expect(state.activeSurfaceId).toBe("surface-1")
+    })
+  })
+
+  describe("streamed root selection", () => {
+    it("infers the unreferenced root from the first batch even when children arrive first", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("tree", "inline")
+      store.updateComponents("tree", [
+        { id: "leaf", component: "Text", text: "Child" },
+        { id: "layout", component: "Column", children: ["leaf", "future"] },
+      ])
+      expect(store.getSurface("tree")?.rootId).toBe("layout")
+      store.updateComponents("tree", [{ id: "future", component: "Text", text: "Later" }])
+      expect(store.getSurface("tree")?.rootId).toBe("layout")
+      expect(store.getComponent("tree", "future")).toBeDefined()
+    })
+
+    it("prefers an explicit root component and preserves restored roots on patches", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("tree", "inline")
+      store.updateComponents("tree", [
+        { id: "other", component: "Text", text: "Other" },
+        { id: "root", component: "Text", text: "Root" },
+      ])
+      expect(store.getSurface("tree")?.rootId).toBe("root")
+      store.replaceSurfaceContent(
+        "tree",
+        [{ id: "saved", component: "Text", text: "Saved" }],
+        {},
+        "saved"
+      )
+      store.updateComponents("tree", [{ id: "root", component: "Text", text: "Detached" }])
+      expect(store.getSurface("tree")?.rootId).toBe("saved")
+    })
+  })
+
+  describe("surface history lifecycle", () => {
+    it("clears undo and redo when a surface is deleted and its id is reused", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("same", "panel")
+      store.updateDataModel("same", { old: true })
+      store.updateComponents("same", [{ id: "root", component: "Text", text: "Old" }])
+      store.undo("same")
+      store.deleteSurface("same")
+      expect(useA2UIStore.getState().undoStacks.same).toBeUndefined()
+      expect(useA2UIStore.getState().redoStacks.same).toBeUndefined()
+      store.createSurface("same", "panel")
+      store.redo("same")
+      expect(store.getSurface("same")?.components).toEqual({})
+    })
+
+    it("clears stale history and errors when an existing surface is recreated", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("same", "panel")
+      store.updateComponents("same", [{ id: "root", component: "Text", text: "Old" }])
+      store.setError("same", "Old failure")
+      store.createSurface("same", "panel")
+      expect(useA2UIStore.getState().errors.same).toBeUndefined()
+      expect(store.canUndo("same")).toBe(false)
+    })
+
+    it("invalidates redo when a new edit merges with a debounced snapshot", () => {
+      const store = useA2UIStore.getState()
+      store.createSurface("same", "panel")
+      store.updateDataModel("same", { original: true })
+      store.updateComponents("same", [{ id: "root", component: "Text", text: "Old" }])
+      store.undo("same")
+      expect(store.canRedo("same")).toBe(true)
+      store.updateDataModel("same", { divergent: true })
+      expect(store.canRedo("same")).toBe(false)
+      store.redo("same")
+      expect(store.getDataValue("same", "/divergent")).toBe(true)
     })
   })
 
@@ -1005,7 +1185,126 @@ describe("useA2UIStore", () => {
   })
 
   describe("processMessageStream", () => {
+    it("keeps the streaming flag until every concurrent stream completes", async () => {
+      jest.useFakeTimers()
+      try {
+        const store = useA2UIStore.getState()
+        store.createSurface("shared", "inline")
+        const message = {
+          type: "dataModelUpdate" as const,
+          surfaceId: "shared",
+          data: { value: true },
+        }
+        const short = store.processMessageStream([message, message], 100)
+        const long = store.processMessageStream([message, message, message], 100)
+        await jest.advanceTimersByTimeAsync(100)
+        await short
+        expect(useA2UIStore.getState().streamingSurfaces.shared).toBe(true)
+        await jest.advanceTimersByTimeAsync(100)
+        await long
+        expect(useA2UIStore.getState().streamingSurfaces.shared).toBeUndefined()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it.each(["delete", "reset"] as const)(
+      "fences stale queued updates after %s and id reuse",
+      async (operation) => {
+        jest.useFakeTimers()
+        try {
+          const store = useA2UIStore.getState()
+          store.createSurface("shared", "inline")
+          const old = store.processMessageStream(
+            [
+              { type: "dataModelUpdate", surfaceId: "shared", data: { original: true } },
+              { type: "dataModelUpdate", surfaceId: "shared", data: { stale: true } },
+            ],
+            100
+          )
+          if (operation === "delete") store.deleteSurface("shared")
+          else store.reset()
+          store.createSurface("shared", "inline")
+          const replacement = store.processMessageStream(
+            [
+              { type: "dataModelUpdate", surfaceId: "shared", data: { fresh: true } },
+              { type: "dataModelUpdate", surfaceId: "shared", data: { finished: true } },
+            ],
+            200
+          )
+          await jest.advanceTimersByTimeAsync(100)
+          await old
+          expect(store.getDataValue("shared", "/stale")).toBeUndefined()
+          expect(useA2UIStore.getState().streamingSurfaces.shared).toBe(true)
+          await jest.advanceTimersByTimeAsync(100)
+          await replacement
+          expect(store.getSurface("shared")?.dataModel).toEqual({ fresh: true, finished: true })
+          expect(useA2UIStore.getState().streamingSurfaces.shared).toBeUndefined()
+        } finally {
+          jest.useRealTimers()
+        }
+      }
+    )
+
+    it("dispatches complete stream lifecycle without delays and ignores updates after deletion", async () => {
+      const store = useA2UIStore.getState()
+      await store.processMessageStream(
+        [
+          { type: "createSurface", surfaceId: "s", surfaceType: "inline" },
+          {
+            type: "updateComponents",
+            surfaceId: "s",
+            components: [{ id: "root", component: "Text", text: "Ready" }],
+          },
+          { type: "dataModelUpdate", surfaceId: "s", data: { count: 2 }, merge: false },
+          { type: "surfaceReady", surfaceId: "s" },
+        ],
+        0
+      )
+      expect(store.getSurface("s")).toMatchObject({ ready: true, dataModel: { count: 2 } })
+      await store.processMessageStream(
+        [
+          { type: "deleteSurface", surfaceId: "s" },
+          { type: "createSurface", surfaceId: "s", surfaceType: "inline" },
+        ],
+        0
+      )
+      expect(store.getSurface("s")).toBeUndefined()
+      expect(useA2UIStore.getState().streamingSurfaces.s).toBeUndefined()
+      store.processMessages([
+        { type: "createSurface", surfaceId: "next", surfaceType: "panel" },
+        { type: "deleteSurface", surfaceId: "next" },
+      ])
+      expect(store.getSurface("next")).toBeUndefined()
+    })
+
+    it("continues another surface after one surface is deleted mid-stream", async () => {
+      jest.useFakeTimers()
+      try {
+        const store = useA2UIStore.getState()
+        store.createSurface("old", "inline")
+        store.createSurface("valid", "inline")
+        const pending = store.processMessageStream(
+          [
+            { type: "dataModelUpdate", surfaceId: "old", data: { started: true } },
+            { type: "dataModelUpdate", surfaceId: "old", data: { stale: true } },
+            { type: "dataModelUpdate", surfaceId: "valid", data: { arrived: true } },
+          ],
+          100
+        )
+        store.deleteSurface("old")
+        await jest.runAllTimersAsync()
+        await pending
+        expect(store.getSurface("old")).toBeUndefined()
+        expect(store.getDataValue("valid", "/arrived")).toBe(true)
+        expect(useA2UIStore.getState().streamingSurfaces).toEqual({})
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
     it("should clear streaming flags even when message processing throws", async () => {
+      const originalProcessMessage = useA2UIStore.getState().processMessage
       act(() => {
         useA2UIStore.getState().createSurface("surface-1", "dialog")
         useA2UIStore.setState({
@@ -1025,10 +1324,64 @@ describe("useA2UIStore", () => {
       ).rejects.toThrow("stream failure")
 
       expect(useA2UIStore.getState().streamingSurfaces["surface-1"]).toBeUndefined()
+      useA2UIStore.setState({ processMessage: originalProcessMessage })
     })
   })
 
   describe("persist rehydrate normalization", () => {
+    it("migrates legacy components and drops malformed records and ephemeral inline surfaces", async () => {
+      localStorage.setItem(
+        "cognia-a2ui-surfaces",
+        JSON.stringify({
+          version: 2,
+          state: {
+            surfaces: {
+              invalid: null,
+              inline: { id: "inline", type: "inline", ready: true },
+              legacy: {
+                type: "panel",
+                components: {
+                  root: { id: "root", component: "DataExplorer", columns: [], data: [] },
+                },
+                ready: true,
+              },
+              metadata: { type: "panel", ready: true },
+            },
+            activeSurfaceId: "legacy",
+          },
+        })
+      )
+      await useA2UIStore.persist.rehydrate()
+      const store = useA2UIStore.getState()
+      expect(store.getSurface("invalid")).toBeUndefined()
+      expect(store.getSurface("inline")).toBeUndefined()
+      expect(store.getSurface("legacy")).toMatchObject({
+        id: "legacy",
+        rootId: "root",
+        ready: true,
+        components: { root: { component: "Table" } },
+        dataModel: {},
+      })
+      expect(store.getSurface("metadata")?.ready).toBe(false)
+      expect(store.activeSurfaceId).toBe("legacy")
+    })
+
+    it.each([null, "corrupt"])(
+      "recovers an invalid persisted surface collection: %s",
+      async (surfaces) => {
+        localStorage.setItem(
+          "cognia-a2ui-surfaces",
+          JSON.stringify({
+            version: 2,
+            state: { surfaces, activeSurfaceId: "gone" },
+          })
+        )
+        await useA2UIStore.persist.rehydrate()
+        expect(useA2UIStore.getState().surfaces).toEqual({})
+        expect(useA2UIStore.getState().activeSurfaceId).toBeNull()
+      }
+    )
+
     it("should normalize metadata-only surface to non-ready state", async () => {
       localStorage.setItem(
         "cognia-a2ui-surfaces",

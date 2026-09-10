@@ -1,6 +1,6 @@
 ---
 title: "ADR-0025: A2UI ⇄ IM Connector Bridge"
-description: "Bidirectional projection of A2UI surfaces across the five IM platforms"
+description: "A2UI projection, interaction, and fallback support across built-in IM connectors"
 ---
 
 # ADR-0025: A2UI ⇄ IM Connector Bridge
@@ -35,10 +35,11 @@ first-class transport across every connector. Two directions need wiring:
 ### Capability-aware downgrade
 
 Each adapter implements `PlatformAdapter.a2uiCapability(): A2UICapabilityMatrix`
-(`types/connectors/capability.ts`). The matrix declares each of the 35
-catalogue component kinds as one of:
+(`types/connectors/capability.ts`). The matrix declares each catalogue
+component kind as one of:
 
 - `native` — rendered with the platform's native rich element.
+- `simulated` — a supported multi-step interaction, such as a reply or modal submission.
 - `fallback` — degraded to `plainTextMirror` (always safe).
 - `unsupported` — adapter refuses; assistant SHOULD NOT emit on this channel.
 
@@ -67,7 +68,7 @@ slash-command, regex) still work uniformly across platforms.
 
 ### Per-platform A2UI mappers
 
-Five adapters own platform-specific projection through a shared toolkit
+Adapters own platform-specific projection through a shared toolkit
 (`lib/connectors/adapters/_shared/a2ui-mapper.ts`):
 
 - `walkA2UISurface(surface, visit)` — depth-first traversal with cycle
@@ -79,27 +80,48 @@ Five adapters own platform-specific projection through a shared toolkit
   forces opaque ids (Telegram's 64-byte cap, Discord's 100-char cap).
 - `generatePlainTextMirror(surface)` — fallback text projection.
 
-Mapper coverage by platform:
+#### Support audit (2026-09-08)
 
-| Component       | Telegram | Discord  | Slack    | Lark     | OneBot   |
-| --------------- | -------- | -------- | -------- | -------- | -------- |
-| Text            | native   | native   | native   | native   | native   |
-| Image           | native   | native   | native   | native   | native   |
-| Card            | native   | native   | native   | native   | native   |
-| Alert           | native   | native   | native   | native   | native   |
-| Button          | native   | native   | native   | native   | fallback |
-| Select          | fallback | native   | native   | native   | fallback |
-| RadioGroup      | fallback | native   | native   | native   | fallback |
-| Checkbox        | fallback | fallback | native   | fallback | fallback |
-| DatePicker      | fallback | fallback | native   | native   | fallback |
-| TimePicker      | fallback | fallback | native   | native   | fallback |
-| TextField       | fallback | fallback | native   | native   | fallback |
-| TextArea        | fallback | fallback | native   | native   | fallback |
-| Divider         | native   | native   | native   | native   | native   |
-| Link            | native   | native   | native   | native   | native   |
-| Row/Column/List | native   | native   | native   | native   | fallback |
-| Chart           | fallback | fallback | fallback | fallback | fallback |
-| Table           | fallback | fallback | fallback | fallback | fallback |
+The per-component source of truth is each adapter's `capability.ts`; a
+platform supporting A2UI does not imply it supports the complete browser
+component catalog. The implementation and regression-test audit covers
+all 11 built-in connectors:
+
+| Connector | Presentation and interaction |
+| --- | --- |
+| Lark | Interactive Cards, buttons and supported form controls; unsupported kinds fall back. |
+| Slack | Block Kit with supported buttons and form controls; edits retain native blocks. |
+| Discord | Embeds and message components; text inputs use modal simulation; edits retain embeds and components. |
+| Telegram | Text/media plus inline buttons; text inputs use ForceReply simulation. |
+| Matrix | Formatted HTML; interactive surfaces use replies correlated to their own event and conversation. |
+| WeCom | First interactive surface becomes a native template card; additional surfaces retain text mirrors. |
+| DingTalk | Markdown projection and links; action callbacks and inputs are fallback, not simulated interactions. |
+| WeChat Personal | Text plus simulated Button actions via digits 1–9; other input controls remain fallback. A replacement menu invalidates stale digits. |
+| OneBot | Text and images; interactive controls degrade to text. |
+| QQ Official | A2UI text mirror fallback. |
+| WeChat OA | A2UI text mirror fallback. |
+
+The shared reply extractor accepts tool-created surfaces, complete `a2ui`
+or JSON fences, and raw JSON. It preserves surrounding prose and leaves
+invalid payloads intact. The mapper resolves display bindings against the
+surface data model, traverses footer/tab/accordion/action references, and
+omits hidden subtrees. Callback metadata remains unchanged.
+
+Slack input blocks enable `dispatch_action`; text input dispatches on Enter,
+and callback parsing retains text and selected checkbox values. Slack documents
+the default as `false` in its [Input block reference](https://docs.slack.dev/reference/block-kit/blocks/input-block/).
+Slider, Tabs, Accordion, Dialog, and Drawer remain fallback in the current
+Slack implementation; there is no implemented modal or multi-step flow for them.
+
+Telegram text edits combine supported text calls and their inline keyboards;
+edits requiring media or ForceReply cannot use that text-edit path. Matrix
+rejects edits containing several interactive surfaces before network delivery,
+because a reply to the replacement message would otherwise be ambiguous.
+
+Verification covers serialization, outbound routing, and callback binding
+with local fixtures. Credentialed delivery and real-client interaction
+were not exercised by this audit. Native controls do not imply complete
+property parity, including disabled-state behavior, with the browser renderer.
 
 ### Inbound callback channel
 

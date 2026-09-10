@@ -290,6 +290,32 @@ describe("evaluateAdmissionPolicy", () => {
       }
     }
   })
+  it("continues only a bound managed Feishu thread and respects explicit policies", async () => {
+    const followup = { ...event({ mentioned: false }), channelData: { larkManagedThread: true } }
+    const adapter = {
+      type: "lark",
+      settings: {},
+      atResponseStrategy: "mention_only",
+    } as AdapterInstanceRow
+    expect((await admitConversationEvent(followup, adapter)).allowed).toBe(false)
+    await createPlatformSession(followup, undefined)
+    expect(await admitConversationEvent(followup, adapter)).toMatchObject({
+      allowed: true,
+      threadContinuation: true,
+    })
+    expect(
+      (
+        await admitConversationEvent(followup, {
+          ...adapter,
+          inboundActivationPolicy: "mention_each",
+        })
+      ).allowed
+    ).toBe(false)
+    expect(
+      (await admitConversationEvent({ ...followup, conversationKey: "another-thread" }, adapter))
+        .allowed
+    ).toBe(false)
+  })
 })
 
 describe("the bound room's reply mode (ADR-0177 batch 3)", () => {

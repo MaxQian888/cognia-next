@@ -36,6 +36,7 @@ import {
   shouldEmbedInboundText,
   type RunAndCaptureFn,
 } from "./runtime"
+import { hasNoLeakingPii } from "@cognia/redact"
 import { notifyConversationOverIM } from "@/lib/notifications/conversation-notify"
 import { registerRunningAdapter, __resetLifecycleForTesting } from "./lifecycle"
 import { getBus, __resetBusForTesting } from "./bus"
@@ -536,6 +537,29 @@ describe("installRuntime — ai-run (happy path)", () => {
 
     const jobs = await getDb().outboundQueue.toArray()
     expect(jobs[0].idempotencyKey).toBe("airun:uuid-asst-1")
+  })
+
+  it("enqueues textual A2UI as a surface when capture has no tool-created surfaces", async () => {
+    jest.mocked(DEFAULT_RUN_AND_CAPTURE).mockResolvedValueOnce({
+      text: `Summary\n\`\`\`a2ui\n${JSON.stringify({
+        surface: { id: "reply-card", type: "inline" },
+        components: [{ id: "root", component: "Text", text: "Project overview" }],
+      })}\n\`\`\``,
+      messageId: "a2ui-text-reply",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+    })
+    await callHandler(makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" }), "ai-run")
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].request.segments).toEqual([
+      { type: "markdown", md: "Summary\n" },
+      expect.objectContaining({
+        type: "a2ui",
+        surfaceId: "reply-card",
+        plainTextMirror: "Project overview",
+      }),
+    ])
   })
 
   it("writes an outbound.ai_run_enqueued audit entry with the message id", async () => {
@@ -1459,42 +1483,52 @@ describe("installRuntime — ai-run (team dispatch branch)", () => {
     expect(audit.some((row) => row.kind === "workflow.dispatched")).toBe(false)
   })
 
-  it("routes to the workflow orchestrator when the conversation has a workflowId", async () => {
-    const key = "telegram:adapter_1:chat_wf"
-    await seedAdapter("adapter_1")
-    await getDb().sessions.add({
-      id: "s_wf",
-      title: "t",
-      kind: "direct",
-      platformConversationKey: key,
-      platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
-      createdAt: 0,
-      updatedAt: 0,
-    } as never)
-    await upsertByConversationKey({ conversationKey: key, sessionId: "s_wf", workflowId: "wf_n" })
+  it.each([true, false])(
+    "routes workflow with replyable message flag %s",
+    async (canReplyToMessage) => {
+      const key = "telegram:adapter_1:chat_wf"
+      await seedAdapter("adapter_1")
+      await getDb().sessions.add({
+        id: "s_wf",
+        title: "t",
+        kind: "direct",
+        platformConversationKey: key,
+        platformBinding: { platform: "telegram", adapterId: "adapter_1", conversationKey: key },
+        createdAt: 0,
+        updatedAt: 0,
+      } as never)
+      await upsertByConversationKey({ conversationKey: key, sessionId: "s_wf", workflowId: "wf_n" })
 
-    await callHandler(makeEvent({ conversationKey: key }), "ai-run", {
-      ...RESOLVED,
-      characterId: undefined,
-    })
+      await callHandler(
+        makeEvent({ conversationKey: key, canReplyToMessage, messageId: "workflow-trigger" }),
+        "ai-run",
+        {
+          ...RESOLVED,
+          characterId: undefined,
+        }
+      )
 
-    expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
-    expect(mockStartWorkflowFromIM).toHaveBeenCalledTimes(1)
-    const arg = mockStartWorkflowFromIM.mock.calls[0][0] as unknown as {
-      workflowId: string
-      runParams: { message: string }
-      triggeredFrom: { source: string; conversationKey: string }
+      expect(DEFAULT_RUN_AND_CAPTURE).not.toHaveBeenCalled()
+      expect(mockStartWorkflowFromIM).toHaveBeenCalledTimes(1)
+      const arg = mockStartWorkflowFromIM.mock.calls[0][0] as unknown as {
+        workflowId: string
+        runParams: { message: string }
+        triggeredFrom: { source: string; conversationKey: string; sourceMessageId?: string }
+      }
+      expect(arg.workflowId).toBe("wf_n")
+      expect(arg.runParams.message).toBe("hello runtime")
+      expect(arg.triggeredFrom.source).toBe("im")
+      expect(arg.triggeredFrom.conversationKey).toBe(key)
+      expect(arg.triggeredFrom.sourceMessageId).toBe(
+        canReplyToMessage ? "workflow-trigger" : undefined
+      )
+      expect(mockBindExecutionRun).toHaveBeenCalledWith("run_x")
+
+      const audit = await getDb().connectorAudit.toArray()
+      expect(audit.some((r) => r.kind === "workflow.dispatched")).toBe(true)
+      expect(await getDb().outboundQueue.count()).toBe(0)
     }
-    expect(arg.workflowId).toBe("wf_n")
-    expect(arg.runParams.message).toBe("hello runtime")
-    expect(arg.triggeredFrom.source).toBe("im")
-    expect(arg.triggeredFrom.conversationKey).toBe(key)
-    expect(mockBindExecutionRun).toHaveBeenCalledWith("run_x")
-
-    const audit = await getDb().connectorAudit.toArray()
-    expect(audit.some((r) => r.kind === "workflow.dispatched")).toBe(true)
-    expect(await getDb().outboundQueue.count()).toBe(0)
-  })
+  )
 
   // PII red-line: the team/workflow branches forward `event.plainText` straight
   // into their runtimes, bypassing `safeSendPrompt`. The runtime now gates that
@@ -2238,6 +2272,122 @@ describe("inboundEventToSendContent", () => {
     expect(inboundEventToSendContent(event)).toBe("[empty]")
   })
 
+  describe("group speaker attribution", () => {
+    // One ChatSession is shared by every participant of a group, so before
+    // this the model read five people as one: the sender only ever reached
+    // `metadata.platformMessage.sender`, which the prompt never sees.
+    const group = { id: "ch_9", name: "Release war room", kind: "group" as const }
+
+    it("names the sender in a group", () => {
+      const event = makeEvent({
+        channel: group,
+        segments: [{ type: "text", text: "ship it" }],
+        plainText: "ship it",
+      })
+      const out = inboundEventToSendContent(event) as string
+      expect(out).toMatch(/^\[speaker: Alice · Person-[0-9A-Z]{6}\]\nship it$/)
+    })
+
+    it("leaves a private chat exactly as it was", () => {
+      const event = makeEvent({
+        segments: [{ type: "text", text: "ship it" }],
+        plainText: "ship it",
+      })
+      expect(inboundEventToSendContent(event)).toBe("ship it")
+    })
+
+    it("names the sender even when the segment list produced nothing", () => {
+      const event = makeEvent({ channel: group, segments: [], plainText: "fallback" })
+      expect(inboundEventToSendContent(event)).toContain("Alice")
+      expect(inboundEventToSendContent(event)).toContain("fallback")
+    })
+
+    it("keeps the header as the first block of a mixed-media turn", () => {
+      const event = makeEvent({
+        channel: group,
+        mediaModelPolicy: "allow_cloud_binary",
+        segments: [
+          { type: "text", text: "look:" },
+          { type: "image", url: "ignored", dataBase64: "AAA", mimeType: "image/jpeg" },
+        ],
+        plainText: "look:",
+      })
+      const out = inboundEventToSendContent(event)
+      expect(Array.isArray(out)).toBe(true)
+      expect((out as { type: string; text?: string }[])[0].text).toContain("[speaker:")
+    })
+
+    it("distinguishes two senders who share a display name", () => {
+      const one = inboundEventToSendContent(
+        makeEvent({
+          channel: group,
+          sender: {
+            id: "u_1",
+            platform: "telegram",
+            adapterId: "adapter_1",
+            remoteUserId: "u_1",
+            displayName: "张伟",
+          },
+          segments: [{ type: "text", text: "hi" }],
+          plainText: "hi",
+        })
+      )
+      const two = inboundEventToSendContent(
+        makeEvent({
+          channel: group,
+          sender: {
+            id: "u_2",
+            platform: "telegram",
+            adapterId: "adapter_1",
+            remoteUserId: "u_2",
+            displayName: "张伟",
+          },
+          segments: [{ type: "text", text: "hi" }],
+          plainText: "hi",
+        })
+      )
+      expect(one).not.toBe(two)
+    })
+
+    it("falls back to a pseudonym rather than letting a nickname trip the PII gate", () => {
+      // `safe-send-prompt.ts` runs `hasNoLeakingPii` over every block of this
+      // very SendContent and aborts the turn when one fails. A member whose
+      // nickname is their phone number must not be able to mute the bot.
+      const event = makeEvent({
+        channel: group,
+        sender: {
+          id: "u_phone",
+          platform: "telegram",
+          adapterId: "adapter_1",
+          remoteUserId: "u_phone",
+          displayName: "13800138000",
+        },
+        segments: [{ type: "text", text: "hi" }],
+        plainText: "hi",
+      })
+      const out = inboundEventToSendContent(event) as string
+      expect(out).not.toContain("13800138000")
+      expect(hasNoLeakingPii(out)).toBe(true)
+    })
+
+    it("marks a sibling bot as an app rather than a person", () => {
+      const event = makeEvent({
+        channel: group,
+        sender: {
+          id: "u_bot",
+          platform: "telegram",
+          adapterId: "adapter_1",
+          remoteUserId: "u_bot",
+          displayName: "Ops Bot",
+          kind: "bot",
+        },
+        segments: [{ type: "text", text: "deploy done" }],
+        plainText: "deploy done",
+      })
+      expect(inboundEventToSendContent(event)).toContain("App-")
+    })
+  })
+
   it("renders image segments without inline data as text markers", () => {
     const event = makeEvent({
       segments: [{ type: "image", url: "https://example.com/p.png" }],
@@ -2482,6 +2632,19 @@ describe("installRuntime — ai-run reply quoting (ADR-0009 §3A.3)", () => {
     await callHandler(groupEvent(), "ai-run")
     const [job] = await getDb().outboundQueue.toArray()
     expect(job.request.replyTo).toEqual({ messageId: "msg_group_trigger" })
+  })
+
+  it("does not quote an interaction id that is not a platform message", async () => {
+    await seedAdapter("adapter_1")
+    await callHandler(groupEvent({ canReplyToMessage: false }), "ai-run")
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.replyTo).toBeUndefined()
+    expect(job.request.deliveryTarget.sourceMessageId).toBeUndefined()
+    const [binding] = await getDb().executionRunBindings.toArray()
+    expect(binding).toBeDefined()
+    expect(binding.sourceMessageId).toBeUndefined()
+    expect(binding.deliveryTarget?.sourceMessageId).toBeUndefined()
+    expect(binding.deliveryTarget?.conversationRef).toEqual(groupEvent().conversationRef)
   })
 
   it("does not quote in a private chat", async () => {

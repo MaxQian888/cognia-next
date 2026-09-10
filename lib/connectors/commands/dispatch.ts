@@ -67,6 +67,7 @@ import { handleDelegateCommand } from "./delegate"
 import { handleHandoffCommand } from "./handoff"
 import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
+import { buildLarkCommandReply } from "../adapters/lark/card"
 
 /**
  * Legacy spellings, kept as aliases onto the named presets.
@@ -233,7 +234,12 @@ export async function maybeHandleControlCommand(
       conversationKey: event.conversationKey,
       request: {
         conversationRef: event.conversationRef,
-        segments: typeof content === "string" ? [{ type: "text", text: content }] : content,
+        segments:
+          typeof content === "string"
+            ? event.platform === "lark"
+              ? [buildLarkCommandReply(parsed.name, content, kind)]
+              : [{ type: "text", text: content }]
+            : content,
         metadata: { idempotencyKey: newIdempotencyKey() },
       },
       source: "ai-run",

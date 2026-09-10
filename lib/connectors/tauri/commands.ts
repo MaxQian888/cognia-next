@@ -163,6 +163,10 @@ export interface AttachmentCleanupReport {
 }
 
 export interface ConnectorMediaUploadRequest {
+  /** Optional multipart file part; contentType applies to that part. */
+  multipart?: { fieldName: string; filename: string; fields: Record<string, string> }
+  /** http returns a serialized {status, headers, body}; default extracts content_uri. */
+  responseMode?: "contentUri" | "http"
   uploadUrl: string
   headers?: Record<string, string>
   sourceUrl?: string
@@ -267,7 +271,10 @@ export interface MatrixCryptoMissingSessionsRequest {
   userIds: string[]
 }
 
-export type MatrixEncryptedMediaUploadRequest = ConnectorMediaUploadRequest
+export type MatrixEncryptedMediaUploadRequest = Omit<
+  ConnectorMediaUploadRequest,
+  "multipart" | "responseMode"
+>
 
 export interface MatrixEncryptedMediaUploadResponse {
   contentUri: string

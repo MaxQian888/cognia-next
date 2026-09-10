@@ -1,3 +1,4 @@
+import { settleApprovalCard } from "./approval-card-state"
 /**
  * IM tool-permission approval responder (control-plane HITL).
  *
@@ -96,6 +97,7 @@ export interface ImPermissionResponderContext {
   enqueue?: typeof enqueueOutbound
   recordBinding?: typeof recordCallbackBinding
   audit?: typeof appendAudit
+  signal?: AbortSignal
   ttlMs?: number
   /** Durable Execution Run that owns this permission request. */
   runId?: string
@@ -159,6 +161,8 @@ export function makeImPermissionResponder(
         decision: "allow_session",
       },
     ]
+    let approvalJobId: string | undefined
+    let expired = false
     try {
       const actorScope = ctx.initiatorUserId
         ? { mode: "initiator" as const, allowedUserIds: [ctx.initiatorUserId] }
@@ -185,7 +189,7 @@ export function makeImPermissionResponder(
           })
         )
       )
-      await enqueue({
+      const approvalJob = await enqueue({
         adapterId: ctx.adapterId,
         conversationKey: ctx.conversationKey,
         request: {
@@ -196,6 +200,7 @@ export function makeImPermissionResponder(
         },
         source: "ai-run",
       })
+      approvalJobId = approvalJob?.id
       await audit({
         adapterId: ctx.adapterId,
         kind: "tool_approve.requested",
@@ -216,7 +221,9 @@ export function makeImPermissionResponder(
     // 3. Suspend until the button-press callback resolves us (or TTL denies).
     const opts: AwaitApprovalOptions = {
       ttlMs: ctx.ttlMs,
+      signal: ctx.signal,
       onExpire: () => {
+        expired = true
         if (ctx.runId && interruptId) {
           void import("@/lib/execution/run-control").then(({ expireRunInterruptFromSource }) =>
             expireRunInterruptFromSource(ctx.runId!, interruptId)
@@ -232,6 +239,14 @@ export function makeImPermissionResponder(
       },
     }
     const decision = await awaitApproval(ctx.sessionId, req.requestId, opts)
+    void settleApprovalCard({
+      adapterId: ctx.adapterId,
+      conversationKey: ctx.conversationKey,
+      conversationRef: ctx.conversationRef,
+      surfaceId,
+      jobId: approvalJobId,
+      state: expired ? "expired" : decision.decision === "allow" ? "approved" : "denied",
+    })
     if (ctx.runId && interruptId) {
       const { resolveRunInterruptFromSource } = await import("@/lib/execution/run-control")
       await resolveRunInterruptFromSource(
@@ -257,10 +272,9 @@ export function applyToolApprovalCallback(input: {
   resolve: (sessionId: string, requestId: string, decision: CapturePermissionDecision) => boolean
 }): { granted: boolean; resolved: boolean } {
   const granted = input.decision !== "deny"
-  if (input.decision === "allow_session") {
-    grantSessionBypass(input.sessionId, input.toolName)
-  }
   const capture: CapturePermissionDecision = granted ? { decision: "allow" } : { decision: "deny" }
   const resolved = input.resolve(input.sessionId, input.requestId, capture)
-  return { granted, resolved }
+  if (resolved && input.decision === "allow_session")
+    grantSessionBypass(input.sessionId, input.toolName)
+  return { granted: granted && resolved, resolved }
 }

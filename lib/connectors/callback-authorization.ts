@@ -151,6 +151,12 @@ export async function consumeCallbackBindingAtomically(
     }
     const updated = await db.connectorCallbackBindings.update(binding.id, { consumedAt: now })
     if (updated !== 1) throw new Error("CALLBACK_BINDING_ALREADY_CONSUMED_OR_CHANGED")
+    // All choices on one approval card represent the same single decision.
+    await db.connectorCallbackBindings
+      .where("adapterId")
+      .equals(binding.adapterId)
+      .filter((row) => row.surfaceId === binding.surfaceId && CONSUME_ONCE_KINDS.has(row.kind))
+      .modify({ consumedAt: now })
   })
 }
 
@@ -183,6 +189,43 @@ function conversationMatches(bindingKey: string, eventKey: string): boolean {
   if (a.remoteChatId !== b.remoteChatId) return false
   if (a.threadId && b.threadId && a.threadId !== b.threadId) return false
   return true
+}
+
+/** Resolve a chat-only Feishu callback using the exact persisted card receipt.
+ * Never infer a topic from the caller's action payload or a matching group alone.
+ */
+export async function resolveLarkCallbackConversation(
+  event: ConnectorCallbackEvent,
+  runId?: string,
+  binding?: ConnectorCallbackBindingRow
+): Promise<string | undefined> {
+  if (event.platform !== "lark" || !event.originatingMessageId || !event.conversationKey)
+    return undefined
+  if (runId) {
+    const rows = await getDb().executionRunBindings.where("runId").equals(runId).toArray()
+    const match = rows.find(
+      (row) =>
+        row.adapterId === event.adapterId &&
+        row.platformMessageId === event.originatingMessageId &&
+        conversationMatches(row.conversationKey, event.conversationKey!)
+    )
+    return match?.conversationKey
+  }
+  if (
+    binding?.conversationKey &&
+    conversationMatches(binding.conversationKey, event.conversationKey)
+  ) {
+    const receipt = await getDb()
+      .outboundQueue.where("conversationKey")
+      .equals(binding.conversationKey)
+      .filter(
+        (row) =>
+          row.adapterId === event.adapterId && row.platformMessageId === event.originatingMessageId
+      )
+      .first()
+    if (receipt) return binding.conversationKey
+  }
+  return undefined
 }
 
 /**
@@ -408,7 +451,14 @@ export async function notifyCallbackDenied(
         platform: event.platform,
         adapterId: event.adapterId,
         channelId: parsed?.remoteChatId ?? conversationKey,
-        ...(parsed?.threadId ? { threadTs: parsed.threadId } : {}),
+        ...(parsed?.threadId
+          ? {
+              threadTs: parsed.threadId,
+              ...(event.platform === "lark" && event.originatingMessageId
+                ? { threadId: parsed.threadId, threadRootMessageId: event.originatingMessageId }
+                : {}),
+            }
+          : {}),
       },
       segments: [{ type: "text", text }],
       metadata: { idempotencyKey: `cb-denied:${event.triggerId}` },

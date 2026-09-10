@@ -410,6 +410,23 @@ describe("connectorsAttachmentRead", () => {
 })
 
 describe("connectorsMediaUpload", () => {
+  it("passes multipart uploads and raw HTTP response mode through the existing bridge", async () => {
+    const req = {
+      uploadUrl: "https://api.telegram.org/botTOKEN/sendPhoto",
+      localPath: "/tmp/image.png",
+      responseMode: "http" as const,
+      multipart: { fieldName: "photo", filename: "image.png", fields: { chat_id: "1" } },
+    }
+    const response = JSON.stringify({
+      status: 429,
+      headers: { "retry-after": "1" },
+      body: "limited",
+    })
+    mockInvoke.mockResolvedValue(response)
+    expect(await connectorsMediaUpload(req)).toBe(response)
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_media_upload", { req })
+  })
+
   it("invokes connectors_media_upload and returns the Matrix content_uri", async () => {
     mockInvoke.mockResolvedValueOnce("mxc://matrix.org/uploaded")
     const req: ConnectorMediaUploadRequest = {

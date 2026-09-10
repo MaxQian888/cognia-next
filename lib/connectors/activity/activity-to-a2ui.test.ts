@@ -234,3 +234,31 @@ describe("terminal stopped note", () => {
     expect(formatRunStoppedNote(runSnapshot({ status: "completed" }), i18n)).toBeUndefined()
   })
 })
+
+it("keeps active workflow nodes visible and uses aggregate completion counts", () => {
+  const block = formatRunMilestones(
+    runSnapshot({
+      kind: "workflow",
+      progress: { completed: 20, total: 23, trustworthy: true },
+      recentSteps: Array.from({ length: 10 }, (_, i) => ({
+        id: `done-${i}`,
+        title: `Done ${i}`,
+        status: "completed" as const,
+      })),
+      activeSteps: [{ id: "active", title: "Publishing", status: "in_progress" }],
+      pendingSteps: [{ id: "next", title: "Notify", status: "pending" }],
+      pendingStepCount: 2,
+    }),
+    i18n
+  )!
+  expect(block).toContain("Workflow")
+  expect(block).toContain("20/23")
+  expect(block).toContain("Publishing")
+  expect(block.indexOf("Publishing")).toBeLessThan(block.indexOf("Done 0"))
+})
+
+it("shows measured tool duration without guessing unfinished durations", () => {
+  const text = formatRunActivityTimeline(runSnapshot(), i18n)
+  expect(text).toContain("WebSearch · 1s")
+  expect(text).not.toContain("Read · 4s")
+})

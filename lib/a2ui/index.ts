@@ -12,6 +12,7 @@ export {
   parseA2UIJsonl,
   detectA2UIContent,
   extractA2UIFromResponse,
+  extractA2UIBlocks,
   createA2UISurface,
   isCreateSurfaceMessage,
   isUpdateComponentsMessage,
@@ -21,6 +22,7 @@ export {
   type A2UIParseResult,
   type A2UIUnifiedParseResult,
   type A2UIParseInputOptions,
+  type A2UIExtractedBlock,
 } from "./parser"
 
 // Data Model

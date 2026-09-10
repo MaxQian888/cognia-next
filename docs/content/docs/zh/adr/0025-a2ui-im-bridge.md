@@ -1,6 +1,6 @@
 ---
 title: "ADR-0025 — A2UI ⇄ IM 连接器桥"
-description: "五个IM站台上的双向投射A2UI 接口"
+description: "内置 IM 连接器的 A2UI 展示、交互和降级支持"
 ---
 
 # ADR-0025 — A2UI ⇄ IM 连接器桥
@@ -23,9 +23,10 @@ IM-completion轨道（第二阶段）通过使A2UI在每个连接处都成为一
 
 ### 能力感知降级
 
-每个适配器都实现了`PlatformAdapter.a2uiCapability(): A2UICapabilityMatrix`（`types/connectors/capability.ts`）。矩阵将35种目录组件类型声明为以下之一：
+每个适配器都实现了`PlatformAdapter.a2uiCapability(): A2UICapabilityMatrix`（`types/connectors/capability.ts`）。矩阵将目录中的组件类型声明为以下之一：
 
 - `native`——用平台原生丰富的元素渲染。
+- `simulated`——通过回复或弹窗提交等已实现的多步流程完成交互。
 - `fallback`——降级成`plainTextMirror`（始终安全）。
 - `unsupported` — 适配器拒绝;助理SHOULD NOT本频道发出。
 
@@ -48,34 +49,38 @@ IM-completion轨道（第二阶段）通过使A2UI在每个连接处都成为一
 
 ### 每个平台A2UI映射器
 
-五个适配器通过共享工具包拥有平台特定投影（`lib/connectors/adapters/_shared/a2ui-mapper.ts`）：
+适配器通过共享工具包实现平台特定投影（`lib/connectors/adapters/_shared/a2ui-mapper.ts`）：
 
 - `walkA2UISurface(surface, visit)` — 深度优先穿越，带有循环短路。
 - `buildActionId(surfaceId, componentId, action)` + `truncateActionId` — 在特定平台长度上限下的确定性ID生成。
 - `recordCallbackBinding` / `resolveCallbackBinding` — Dexie背绑定行，当平台强制不透明度ID（Telegram的64字节上限，Discord的100字符上限）时，会绕长action_id来回。
 - `generatePlainTextMirror(surface)` — 回退文本投影。
 
-按平台划分的地图覆盖范围：
+#### 支持情况校对（2026-09-08）
 
-| 组成部分 | 电报 | Discord | 松弛 | Lark | OneBot |
-| --------------- | -------- | -------- | -------- | -------- | -------- |
-| 正文 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| 图片 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| 卡牌 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| 警报 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| 按钮 | 本地人 | 本地人 | 本地人 | 本地人 | 回退 |
-| 精选 | 回退 | 本地人 | 本地人 | 本地人 | 回退 |
-| RadioGroup | 回退 | 本地人 | 本地人 | 本地人 | 回退 |
-| 复选框 | 回退 | 回退 | 本地人 | 回退 | 回退 |
-| DatePicker | 回退 | 回退 | 本地人 | 本地人 | 回退 |
-| TimePicker | 回退 | 回退 | 本地人 | 本地人 | 回退 |
-| TextField | 回退 | 回退 | 本地人 | 本地人 | 回退 |
-| TextArea | 回退 | 回退 | 本地人 | 本地人 | 回退 |
-| 分隔线 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| 链接 | 本地人 | 本地人 | 本地人 | 本地人 | 本地人 |
-| Row/Column/List | 本地人 | 本地人 | 本地人 | 本地人 | 回退 |
-| 排行榜 | 回退 | 回退 | 回退 | 回退 | 回退 |
-| 表格 | 回退 | 回退 | 回退 | 回退 | 回退 |
+各组件的能力声明以适配器的 `capability.ts` 为准。支持 A2UI 不代表完整支持浏览器端的所有组件。此次实现与回归测试校对覆盖全部 11 个内置连接器：
+
+| 连接器 | 展示与交互 |
+| --- | --- |
+| Lark | 原生交互卡片、按钮和已支持的表单控件；其余组件降级。 |
+| Slack | Block Kit 按钮和已支持的表单控件；编辑保留原生 blocks。 |
+| Discord | Embed 与消息组件；文本输入通过弹窗模拟；编辑保留 embeds 和 components。 |
+| Telegram | 文本、媒体和内联按钮；文本输入通过 ForceReply 模拟。 |
+| Matrix | HTML 富文本；每个交互界面的回复关联到其自己的消息和会话。 |
+| WeCom | 第一张交互界面生成原生 template card，其余界面保留文本镜像。 |
+| DingTalk | Markdown 和链接；动作回调及输入控件属于 fallback，不宣称模拟交互。 |
+| WeChat Personal | 文本和数字 1–9 模拟 Button 操作；其余输入控件保持文本降级。替换菜单时清除过期数字映射。 |
+| OneBot | 文本和图片；交互控件降级为文本。 |
+| QQ Official | A2UI 文本镜像降级。 |
+| WeChat OA | A2UI 文本镜像降级。 |
+
+共享回复转换支持工具创建的界面、完整的 `a2ui` / JSON 代码块和原始 JSON，保留前后正文及无法解析的内容。映射器从界面数据模型解析展示字段绑定，遍历 footer、tab、accordion 和 action 子节点，并跳过隐藏子树；回调元数据保持原样。
+
+Slack 输入块启用 `dispatch_action`，文本输入按 Enter 触发，回调解析保留文本和复选框选择值。Slack 的 [Input block 文档](https://docs.slack.dev/reference/block-kit/blocks/input-block/)说明该属性默认是 `false`。当前 Slack 实现中的 Slider、Tabs、Accordion、Dialog 和 Drawer 保持 fallback，没有宣称尚未实现的弹窗或多步交互。
+
+Telegram 文本编辑会合并支持的文本调用及内联键盘；包含媒体或 ForceReply 的编辑不能走此文本编辑路径。Matrix 在发送前拒绝包含多张交互界面的编辑，避免用户回复同一条编辑后的消息时产生菜单归属歧义。
+
+验证范围包括本地样例的序列化、出站路由和回调绑定，没有执行真实平台收发和客户端交互。原生控件支持不代表属性与浏览器渲染器完全一致，例如 disabled 状态仍有差异。
 
 ### 入站回呼信道
 
