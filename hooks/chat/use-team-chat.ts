@@ -49,6 +49,7 @@ import { withMetadata } from "@/lib/chat/room/runner"
 import { sendRoomTurn, stopRoomTurn } from "@/lib/companion/room-send-client"
 import { maybeDrainSteer, steerArmed } from "./steer-runtime"
 import { useChatStore } from "@/stores/chat"
+import { isCompanionShell } from "@/lib/chat/room/shell"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -64,14 +65,11 @@ export interface TeamSendOptions {
   webSearchContext?: SendOptions["webSearchContext"]
   /** The message this turn answers (ADR-0177 batch 2). */
   replyTo?: MessageReplyTo
+  /** The members the composer picked to answer (ADR-0177 batch 3), in pick order. */
+  targetMemberIds?: readonly string[]
 }
 
 type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
-
-/** A companion shell has a paired host that orchestrates for it. */
-function isCompanionShell(): boolean {
-  return !isTauri() && (isCapacitor() || hasWebCompanionTarget())
-}
 
 export function useTeamChat() {
   const tInlineErr = useTranslations("chat.inlineError")
@@ -135,6 +133,9 @@ export function useTeamChat() {
           webSearchContext: opts?.webSearchContext,
           attachmentManifest: opts?.attachmentManifest,
           ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}),
+          ...(opts?.targetMemberIds && opts.targetMemberIds.length > 0
+            ? { targetMemberIds: [...opts.targetMemberIds] }
+            : {}),
         })
         if (!result.accepted) throw new Error("room_send was not accepted")
       } catch (err) {
@@ -205,6 +206,25 @@ export function useTeamChat() {
         return
       }
       await engine.runner.stop(sessionId)
+    },
+    [engine]
+  )
+
+  /**
+   * Stop one member without stopping the room (ADR-0177 batch 3). The rest
+   * of the round goes on, on whichever host runs it.
+   */
+  const stopMember = useCallback(
+    async (characterId: string, targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      if (engine.projector) {
+        await stopRoomTurn(sessionId, characterId).catch((err) =>
+          console.error("room_stop (member) failed", err)
+        )
+        return
+      }
+      await engine.runner.stopMember(sessionId, characterId)
     },
     [engine]
   )
@@ -282,5 +302,14 @@ export function useTeamChat() {
     [engine]
   )
 
-  return { send, stop, regenerate, editAndResend, respondToApproval, interruptAndSteer, flushSteer }
+  return {
+    send,
+    stop,
+    stopMember,
+    regenerate,
+    editAndResend,
+    respondToApproval,
+    interruptAndSteer,
+    flushSteer,
+  }
 }

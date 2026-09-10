@@ -20,9 +20,18 @@
  * The decisions still live in the pure modules they always did:
  * `lib/claude/team-router.ts` (who speaks), `lib/chat/team-transcript.ts`
  * (what each member reads), `lib/claude/team-primary-router.ts` (the smart
- * primary). Members still run sequentially under one broker lease. The one
- * structural change is the streaming state, now keyed by sub-session
- * (`runner-streaming.ts`), which is what parallel replies will need.
+ * primary). Members run under one broker lease, one after another or, when
+ * the team says `parallel`, all at once over the streaming state keyed by
+ * sub-session (`runner-streaming.ts`).
+ *
+ * # What batch 3 added
+ *
+ * The room's settings steer the turn: `replyMode` and `mutedMemberIds` go
+ * into `planUserTurn`, a composer pick arrives as `targetMemberIds`, the
+ * last speaker is sticky for an unaddressed follow-up, a member's
+ * `handoffTargets` and `talkativeness` shape the auto rounds, one member can
+ * be stopped without stopping the room (`stopMember`), and an auto round
+ * waits while the human is typing and stands down once they send.
  */
 
 import type { UIMessage } from "ai"
@@ -51,10 +60,12 @@ import { attachInteractiveGrounding } from "@/lib/rag/chat-grounding"
 import {
   buildSupervisorRoster,
   parseDispatches,
+  holdReasonFor,
   parseMentions,
   planAutoRound,
   hasHandoffStopToken,
   routeTurn,
+  stickyResponderOf,
   stripDispatches,
   stripHandoffStopToken,
   type AutoRoundStop,
@@ -100,6 +111,7 @@ import { renderWorkingSetForCompaction } from "@/lib/chat/working-set"
 import { RoutingAttemptController } from "@cognia/provider-routing"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { resolveRoomSettings, buildRoomInstructionsSection } from "./settings"
+import type { ResolvedRoomSettings } from "./types"
 import { RoomStreamRegistry } from "./runner-streaming"
 import { deriveMemberActivity } from "./member-activity"
 import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
@@ -107,6 +119,12 @@ import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
 const MAX_SUPERVISOR_ROUNDS = 2
 /** A running tool with no result after this long stops being reported as the member's activity. */
 export const ACTIVITY_STALE_MS = 90_000
+/** A keystroke this recent means the human is mid-sentence, and an auto round waits. */
+export const TYPING_WINDOW_MS = 4_000
+/** The longest an auto round waits for the human, so a half-typed draft cannot park the room. */
+export const TYPING_YIELD_MAX_MS = 20_000
+/** How often a waiting auto round re-reads the typing signal and the steer queue. */
+export const TYPING_POLL_MS = 250
 
 /** Options for a room send. `sessionId` is required here: the hook resolves
  * the active pane, the RPC arm carries it explicitly. */
@@ -136,6 +154,12 @@ export interface RoomSendOptions {
    * can name the person, and never trusted from a raw client payload.
    */
   author?: { kind: "human"; id: string; displayName?: string; source?: string }
+  /**
+   * The members the user picked in the composer (ADR-0177 batch 3), in pick
+   * order. Routes above every policy, mute and reply mode included, the way
+   * an explicit `@` does. This is how a `manual` team gets its reply.
+   */
+  targetMemberIds?: readonly string[]
 }
 
 interface SubResolver {
@@ -167,6 +191,7 @@ interface RunCommonArgs {
   team: Team
   members: Character[]
   memberByCharId: Map<string, TeamMember>
+  roomSettings: ResolvedRoomSettings
   turnId: string
   turnTwinDeps?: TwinDepsForBuild
   turnEmbedding?: number[]
@@ -203,10 +228,17 @@ function skipsUserTurn(opts: RoomSendOptions): boolean {
   return Boolean(opts.skipPersistUserTurn || opts.steerDrain)
 }
 
+const isInterruption = (err: unknown): boolean =>
+  err instanceof Error && err.message === "Interrupted"
+
+const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 export class RoomRunner {
   private readonly resolvers: ResolverMap = new Map()
   private readonly eventQueues = new Map<string, Promise<void>>()
   private readonly interrupted = new Set<string>()
+  /** Member sub-sessions the user stopped on their own, without stopping the room. */
+  private readonly memberStops = new Set<string>()
   private readonly streams = new RoomStreamRegistry()
   private readonly coalescing: SessionCoalescingRegistry
   private readonly subCtx = new Map<string, SubResolverCtx>()
@@ -446,11 +478,20 @@ export class RoomRunner {
 
     // 2. Branch on orchestration. Supervisor has its own multi-round loop.
     try {
+      const muted = new Set(roomSettings.mutedMemberIds)
+      const picked = (opts.targetMemberIds ?? []).length > 0
       let primaryCharacterId: string | undefined
       if (
         team.orchestration === "mention_round_robin" &&
+        roomSettings.replyMode === "auto" &&
+        !picked &&
         parseMentions(userText, members).length === 0
       ) {
+        // The smart primary picks among the members the room may pick on its
+        // own, and is told who spoke last: a follow-up that names nobody most
+        // often continues the exchange the user was just having.
+        const candidates = members.filter((member) => !muted.has(member.id))
+        const history = sinks.messages.read(sessionId) ?? (await deps.db.listMessages(sessionId))
         const primary = await selectPrimaryResponder({
           client: deps.ai.buildUtilityLlmClient({
             session,
@@ -458,18 +499,26 @@ export class RoomRunner {
             featureId: "team-primary-router",
           }) as never,
           userText,
-          members,
+          members: candidates,
           memberByCharId,
+          sticky: stickyResponderOf(history, candidates),
         })
         primaryCharacterId = primary?.id
       }
-      const targets = routeTurn(team, members, userText, primaryCharacterId)
+      const routeOptions = {
+        mutedMemberIds: roomSettings.mutedMemberIds,
+        explicitTargetIds: opts.targetMemberIds,
+        replyMode: roomSettings.replyMode,
+      }
+      const targets = routeTurn(team, members, userText, primaryCharacterId, routeOptions)
+      const held = holdReasonFor(team, targets, routeOptions)
       const common: RunCommonArgs = {
         session,
         sessionId,
         team,
         members,
         memberByCharId,
+        roomSettings,
         turnId,
         turnTwinDeps,
         turnEmbedding,
@@ -477,11 +526,16 @@ export class RoomRunner {
         turnUserMessage: userText,
       }
 
+      if (held) {
+        // The room chose silence: asleep, unmentioned in mention_only, or a
+        // manual team with no pick. The turn is stored, the composer says why.
+        sinks.status.set(sessionId, "idle")
+        return
+      }
       if (team.orchestration === "supervisor" && targets.length === 0) {
         await this.runSupervisorTurn(common)
       } else {
         if (targets.length === 0) {
-          // `manual` mode: the user picks a member explicitly. Stop here.
           sinks.status.set(sessionId, "idle")
           return
         }
@@ -562,6 +616,9 @@ export class RoomRunner {
       const wasInterrupted = this.interrupted.has(sessionId)
       this.pendingBranchTags.delete(sessionId)
       this.pendingWebSearch.delete(sessionId)
+      for (const sub of [...this.memberStops]) {
+        if (decodeSubSession(sub)?.teamSessionId === sessionId) this.memberStops.delete(sub)
+      }
       sinks.status.set(sessionId, "idle")
       sinks.members.clearFor(sessionId)
       sinks.members.clearStopRequestsFor(sessionId)
@@ -582,6 +639,27 @@ export class RoomRunner {
     this.sinks.members.clearFor(sessionId)
     this.sinks.members.clearStopRequestsFor(sessionId)
     await this.interruptTurn(sessionId)
+  }
+
+  /**
+   * Stop one member without stopping the room (ADR-0177 batch 3). A member
+   * that is mid-reply is interrupted and its partial reply stays; one that
+   * has not started yet is skipped when its turn comes. The others go on,
+   * and the auto rounds still run.
+   */
+  async stopMember(sessionId: string, characterId: string): Promise<void> {
+    this.sinks.members.requestStop(sessionId, characterId)
+    for (const [sub, r] of this.resolvers.entries()) {
+      const decoded = decodeSubSession(sub)
+      if (decoded?.teamSessionId !== sessionId || decoded.characterId !== characterId) continue
+      this.memberStops.add(sub)
+      try {
+        await this.deps.ipc.interruptSession(sub)
+      } catch {
+        /* best effort */
+      }
+      r.reject(new Error("Interrupted"))
+    }
   }
 
   /** Cut the running turn short so its settle replays the queued steer. */
@@ -726,55 +804,97 @@ export class RoomRunner {
     }
   }
 
+  /**
+   * One round of replies. Sequential by default, so each member reads the
+   * replies before it. `parallel` starts every member at once over the same
+   * base; the streaming registry keeps their partial output apart and folds
+   * each reply as it lands.
+   */
   private async runLinearTurn(args: RunLinearArgs): Promise<void> {
-    const { sessionId, targets, turnId } = args
-    const { sinks } = this
-
+    const { sessionId, targets } = args
+    if (args.team.replyConcurrency === "parallel") {
+      await Promise.all(targets.map((character) => this.runOneMember(args, character)))
+      return
+    }
     for (const character of targets) {
       if (this.interrupted.has(sessionId)) break
+      await this.runOneMember(args, character)
+    }
+  }
 
-      // Per-member stop check: skip this one but keep going.
-      if (sinks.members.isStopRequested(sessionId, character.id)) {
+  private async runOneMember(args: RunLinearArgs, character: Character): Promise<void> {
+    const { sessionId, turnId } = args
+    const { sinks } = this
+    if (this.interrupted.has(sessionId)) return
+
+    // Per-member stop check: skip this one but keep going.
+    if (sinks.members.isStopRequested(sessionId, character.id)) {
+      sinks.members.clearStopRequest(sessionId, character.id)
+      sinks.members.setStatus(sessionId, character.id, "idle")
+      return
+    }
+
+    const sub = subSessionId(sessionId, character.id, turnId)
+    sinks.members.setStatus(sessionId, character.id, "thinking")
+
+    try {
+      await this.runMemberSubSession({
+        session: args.session,
+        sessionId,
+        team: args.team,
+        character,
+        members: args.members,
+        memberByCharId: args.memberByCharId,
+        sub,
+        sendContent: args.content,
+        // The handoff protocol is between the members. A reader seeing
+        // the stop token in a reply is reading our plumbing.
+        postProcessText: (text) => {
+          if (hasHandoffStopToken(text)) args.stopRequests?.add(character.id)
+          return stripHandoffStopToken(text)
+        },
+        turnTwinDeps: args.turnTwinDeps,
+        turnEmbedding: args.turnEmbedding,
+        turnMemoryDeps: args.turnMemoryDeps,
+        turnUserMessage: args.turnUserMessage,
+      })
+      sinks.members.setStatus(sessionId, character.id, "idle")
+    } catch (err) {
+      if (isInterruption(err) && this.memberStops.has(sub) && !this.interrupted.has(sessionId)) {
+        // The user stopped this one member. Not a fault, and not the room's
+        // stop either: the partial reply stays and the round goes on.
+        this.memberStops.delete(sub)
         sinks.members.clearStopRequest(sessionId, character.id)
         sinks.members.setStatus(sessionId, character.id, "idle")
-        continue
+        return
       }
-
-      const sub = subSessionId(sessionId, character.id, turnId)
-      sinks.members.setStatus(sessionId, character.id, "thinking")
-
-      try {
-        await this.runMemberSubSession({
-          session: args.session,
-          sessionId,
-          team: args.team,
-          character,
-          members: args.members,
-          memberByCharId: args.memberByCharId,
-          sub,
-          sendContent: args.content,
-          // The handoff protocol is between the members. A reader seeing
-          // the stop token in a reply is reading our plumbing.
-          postProcessText: (text) => {
-            if (hasHandoffStopToken(text)) args.stopRequests?.add(character.id)
-            return stripHandoffStopToken(text)
-          },
-          turnTwinDeps: args.turnTwinDeps,
-          turnEmbedding: args.turnEmbedding,
-          turnMemoryDeps: args.turnMemoryDeps,
-          turnUserMessage: args.turnUserMessage,
+      sinks.members.setStatus(sessionId, character.id, "errored")
+      sinks.diagnostic(
+        sessionId,
+        toDiagnostic(err, {
+          source: "agent-team",
+          meta: { sessionId, extra: { memberName: character.name, characterId: character.id } },
         })
-        sinks.members.setStatus(sessionId, character.id, "idle")
-      } catch (err) {
-        sinks.members.setStatus(sessionId, character.id, "errored")
-        sinks.diagnostic(
-          sessionId,
-          toDiagnostic(err, {
-            source: "agent-team",
-            meta: { sessionId, extra: { memberName: character.name, characterId: character.id } },
-          })
-        )
-      }
+      )
+    }
+  }
+
+  /**
+   * Before an auto round: wait while the human is typing, and stand down if
+   * they sent something (a queued steer) or stopped the room. A room that
+   * talks over the person composing a reply to it is the thing SillyTavern's
+   * group mode taught everyone to switch off, so the wait is the default
+   * and bounded by `TYPING_YIELD_MAX_MS`.
+   */
+  private async yieldToHuman(sessionId: string): Promise<"go" | "taken-over"> {
+    const deadline = this.deps.now() + TYPING_YIELD_MAX_MS
+    for (;;) {
+      if (this.interrupted.has(sessionId)) return "taken-over"
+      if (this.sinks.steer.queue(sessionId).length > 0) return "taken-over"
+      const typedAt = this.sinks.human.lastTypedAt(sessionId)
+      const now = this.deps.now()
+      if (typedAt === null || now - typedAt >= TYPING_WINDOW_MS || now >= deadline) return "go"
+      await (this.deps.sleep ?? defaultSleep)(TYPING_POLL_MS)
     }
   }
 
@@ -827,11 +947,17 @@ export class RoomRunner {
         round,
         maxAutoRounds,
         spokenIds,
+        mutedMemberIds: args.roomSettings.mutedMemberIds,
+        slots: args.memberByCharId,
+        random: this.deps.random,
       })
       if (plan.targets.length === 0) {
         this.reportChainCapped(sessionId, plan.stop)
         return
       }
+      // Only once there is something to run: a room that has finished has
+      // nothing to wait for.
+      if ((await this.yieldToHuman(sessionId)) === "taken-over") return
 
       await this.runLinearTurn({ ...args, targets: plan.targets })
       spokenIds.push(...plan.targets.map((member) => member.id))
@@ -932,6 +1058,9 @@ export class RoomRunner {
         if (this.interrupted.has(sessionId) || responseCount >= responseCap) return
         const target = members.find((m) => m.id === d.characterId)
         if (!target) continue
+        // The user muted this member in the room; the supervisor's ask does
+        // not outrank that.
+        if (args.roomSettings.mutedMemberIds.includes(target.id)) continue
         const dispatchKey = `${d.characterId}\u0000${d.task.trim().replace(/\s+/g, " ").toLowerCase()}`
         if (seenDispatches.has(dispatchKey)) continue
         seenDispatches.add(dispatchKey)
@@ -1015,6 +1144,7 @@ export class RoomRunner {
       routingContextHint: { promptText: turnUserMessage },
     } as never)
     const roomSettings = resolveRoomSettings(session)
+    const handoffTargets = memberByCharId.get(character.id)?.handoffTargets
     const transcript = buildTeamTranscript({
       messages: (await deps.db.listMessages(sessionId)) as unknown as TeamTranscriptMessage[],
       respondingCharacterId: character.id,
@@ -1025,6 +1155,12 @@ export class RoomRunner {
       })),
       scratchpad: session.scratchpad,
       handoffEnabled: (args.team.maxAutoRounds ?? 0) > 0,
+      handoffTargetNames: handoffTargets
+        ? handoffTargets.flatMap((id) => {
+            const target = members.find((member) => member.id === id)
+            return target ? [target.name] : []
+          })
+        : undefined,
     })
     const finalSystemPrompt = [
       baseOpts.systemPrompt,

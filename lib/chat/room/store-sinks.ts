@@ -16,6 +16,7 @@
  */
 
 import { useChatStore } from "@/stores/chat"
+import { lastTypedAt } from "@/stores/chat/composer-typing-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import {
@@ -64,6 +65,8 @@ export function createStoreRoomSinks(): RoomRunnerSinks {
       setActivity: (sessionId, characterId, activity) =>
         useUIStore.getState().setMemberActivity(sessionId, characterId, activity),
       clearFor: (sessionId) => useUIStore.getState().clearMemberStatusFor(sessionId),
+      requestStop: (sessionId, characterId) =>
+        useUIStore.getState().requestStopMember(sessionId, characterId),
       isStopRequested: (sessionId, characterId) =>
         useUIStore.getState().isStopRequested(sessionId, characterId),
       clearStopRequest: (sessionId, characterId) =>
@@ -103,5 +106,8 @@ export function createStoreRoomSinks(): RoomRunnerSinks {
       useChatStore
         .getState()
         .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir })),
+    human: {
+      lastTypedAt: (sessionId) => lastTypedAt(sessionId),
+    },
   }
 }

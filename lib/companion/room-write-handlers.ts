@@ -128,6 +128,8 @@ export async function roomSend(
     throw new Error("room_send.replyTo must be { messageId, preview } when present")
   }
 
+  const targetMemberIds = readTargetMemberIds(payload.targetMemberIds)
+
   void runner
     .send(content, {
       sessionId,
@@ -135,17 +137,37 @@ export async function roomSend(
       webSearchContext,
       author,
       ...(replyTo ? { replyTo } : {}),
+      ...(targetMemberIds ? { targetMemberIds } : {}),
     })
     .catch((err) => console.error("room send failed", err))
   return { accepted: true }
 }
 
+/** The composer's pick (ADR-0177 batch 3): member ids, or nothing. */
+function readTargetMemberIds(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id)) {
+    throw new Error("room_send.targetMemberIds must be a list of member ids when present")
+  }
+  return value.length > 0 ? (value as string[]) : undefined
+}
+
+/**
+ * Stop the room, or with `characterId` (ADR-0177 batch 3) one member of it
+ * while the rest of the round goes on.
+ */
 export async function roomStop(
   payload: Record<string, unknown>,
   deps: RoomWriteHandlerDeps = {}
 ): Promise<null> {
   const sessionId = requireString(payload, "sessionId", "room_stop")
   requireString(payload, "callerDeviceId", "room_stop")
-  await (deps.runner ?? defaultDeps.runner)().stop(sessionId)
+  const characterId = payload.characterId
+  if (characterId !== undefined && (typeof characterId !== "string" || !characterId)) {
+    throw new Error("room_stop.characterId must be a member id when present")
+  }
+  const runner = (deps.runner ?? defaultDeps.runner)()
+  if (typeof characterId === "string") await runner.stopMember(sessionId, characterId)
+  else await runner.stop(sessionId)
   return null
 }

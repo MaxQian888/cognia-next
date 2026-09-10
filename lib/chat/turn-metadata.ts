@@ -18,14 +18,23 @@ export interface ComposerTurnMetadata {
   webSearchContext?: SendOptions["webSearchContext"]
   /** The message this turn answers (ADR-0177 batch 2). */
   replyTo?: MessageReplyTo
+  /**
+   * The room members the user picked to answer this turn (ADR-0177 batch
+   * 3), in pick order. Only a team room's composer sets it; a direct chat's
+   * send path ignores it.
+   */
+  targetMemberIds?: readonly string[]
 }
 
 /** The send-option fields a turn's metadata carries, absent keys omitted. */
 export function turnMetadataSendOptions(
   turnMetadata: ComposerTurnMetadata | undefined
-): Pick<ComposerTurnMetadata, "webSearchContext" | "replyTo"> {
+): Pick<ComposerTurnMetadata, "webSearchContext" | "replyTo" | "targetMemberIds"> {
   return {
     ...(turnMetadata?.webSearchContext ? { webSearchContext: turnMetadata.webSearchContext } : {}),
     ...(turnMetadata?.replyTo ? { replyTo: turnMetadata.replyTo } : {}),
+    ...(turnMetadata?.targetMemberIds && turnMetadata.targetMemberIds.length > 0
+      ? { targetMemberIds: turnMetadata.targetMemberIds }
+      : {}),
   }
 }

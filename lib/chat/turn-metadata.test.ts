@@ -16,3 +16,10 @@ describe("turnMetadataSendOptions", () => {
     })
   })
 })
+
+it("carries the picked room members only when there are any (ADR-0177 batch 3)", () => {
+  expect(turnMetadataSendOptions({ targetMemberIds: ["a", "b"] })).toEqual({
+    targetMemberIds: ["a", "b"],
+  })
+  expect(turnMetadataSendOptions({ targetMemberIds: [] })).toEqual({})
+})

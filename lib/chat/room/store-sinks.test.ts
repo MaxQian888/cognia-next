@@ -29,6 +29,7 @@ const uiState = {
   setMemberActivity: jest.fn(),
   clearMemberStatusFor: jest.fn(),
   isStopRequested: jest.fn(() => true),
+  requestStopMember: jest.fn(),
   clearStopRequest: jest.fn(),
   clearStopRequestsFor: jest.fn(),
 }
@@ -69,6 +70,7 @@ jest.mock("@/lib/companion/needs-input-notifier", () => ({
 }))
 
 import { createStoreRoomSinks } from "./store-sinks"
+import { clearComposerTyping, noteComposerTyping } from "@/stores/chat/composer-typing-store"
 
 const permission = {
   type: "permission_request",
@@ -128,6 +130,8 @@ it("routes member status and stop requests to the UI store", () => {
   sinks.members.setActivity("room-1", "a", "Read · foo.ts")
   sinks.members.clearFor("room-1")
   expect(sinks.members.isStopRequested("room-1", "a")).toBe(true)
+  sinks.members.requestStop("room-1", "b")
+  expect(uiState.requestStopMember).toHaveBeenCalledWith("room-1", "b")
   sinks.members.clearStopRequest("room-1", "a")
   sinks.members.clearStopRequestsFor("room-1")
   expect(uiState.setMemberStatus).toHaveBeenCalledWith("room-1", "a", "thinking")
@@ -198,4 +202,13 @@ it("reads settings, the always-allow list and the referenced paths without extra
   settingsState.settings = null
   expect(sinks.settings.read()).toBeUndefined()
   expect(sinks.settings.alwaysAllowTools()).toEqual([])
+})
+
+it("reads the composer's typing signal for the room (ADR-0177 batch 3)", () => {
+  const sinks = createStoreRoomSinks()
+  expect(sinks.human.lastTypedAt("room-1")).toBeNull()
+  noteComposerTyping("room-1", 4_200)
+  expect(sinks.human.lastTypedAt("room-1")).toBe(4_200)
+  clearComposerTyping("room-1")
+  expect(sinks.human.lastTypedAt("room-1")).toBeNull()
 })

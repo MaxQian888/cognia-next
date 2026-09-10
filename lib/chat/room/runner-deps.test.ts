@@ -78,6 +78,7 @@ export function makeFakeSinks(): RoomRunnerSinks {
       isStopRequested: () => false,
       clearStopRequest: () => undefined,
       clearStopRequestsFor: () => undefined,
+      requestStop: () => undefined,
     },
     approvals: {
       push: () => undefined,
@@ -90,6 +91,7 @@ export function makeFakeSinks(): RoomRunnerSinks {
       toggleAlwaysAllow: async () => {},
     },
     referencedPaths: () => [],
+    human: { lastTypedAt: () => null },
   }
 }
 
@@ -109,6 +111,7 @@ it("keeps IO on the deps side and observation on the sinks side", () => {
       "status",
       "steer",
       "referencedPaths",
+      "human",
     ].sort()
   )
   // No sink reaches the sidecar or Dexie, no dep reaches a store.

@@ -30,6 +30,8 @@ export interface RoomSendRequest {
   editMessageId?: string
   /** The message this turn answers (ADR-0177 batch 2), stamped on the user row by the host. */
   replyTo?: MessageReplyTo
+  /** The members the composer picked to answer (ADR-0177 batch 3), in pick order. */
+  targetMemberIds?: string[]
 }
 
 export interface RoomSendResponse {
@@ -44,6 +46,13 @@ export async function sendRoomTurn(request: RoomSendRequest): Promise<RoomSendRe
   return result ?? { accepted: false }
 }
 
-export async function stopRoomTurn(sessionId: string): Promise<void> {
-  await transport.call<null>(ROOM_STOP_COMMAND, { sessionId })
+/**
+ * Stop the room, or with `characterId` (ADR-0177 batch 3) one member of it
+ * while the rest of the round goes on.
+ */
+export async function stopRoomTurn(sessionId: string, characterId?: string): Promise<void> {
+  await transport.call<null>(ROOM_STOP_COMMAND, {
+    sessionId,
+    ...(characterId ? { characterId } : {}),
+  })
 }

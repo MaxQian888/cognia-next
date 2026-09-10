@@ -99,10 +99,20 @@ jest.mock("@/lib/rag/chat-grounding", () => ({
 }))
 jest.mock("@/lib/claude/team-primary-router", () => ({
   ...jest.requireActual("@/lib/claude/team-primary-router"),
-  selectPrimaryResponder: async () => undefined,
+  // No utility model in the world: the sticky member, else nobody, which is
+  // what lets the routing tests below see the runner's own inputs.
+  selectPrimaryResponder: async ({ sticky }: { sticky?: { id: string } }) => sticky,
 }))
 
-import { ACTIVITY_STALE_MS, RoomRunner, asPlainText, withMetadata } from "./runner"
+import {
+  ACTIVITY_STALE_MS,
+  RoomRunner,
+  TYPING_POLL_MS,
+  TYPING_WINDOW_MS,
+  TYPING_YIELD_MAX_MS,
+  asPlainText,
+  withMetadata,
+} from "./runner"
 import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 
@@ -171,8 +181,18 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
   const steerAppended: Msg[] = []
   const drained: string[] = []
   const armed = new Set<string>()
+  const typedAt = new Map<string, number>()
+  let humanProbe: (() => number | null) | null = null
+  let clockOffset = 0
+  let sleeps = 0
   const calls = {
-    sendPrompt: [] as { sub: string; content: SendContent; options: SendOptions }[],
+    sendPrompt: [] as {
+      sub: string
+      content: SendContent
+      options: SendOptions
+      /** How many rows the room held when this member was started. */
+      rowsAtStart: number
+    }[],
     interrupt: [] as string[],
     close: [] as string[],
     approve: [] as unknown[][],
@@ -209,7 +229,12 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
   const deps: RoomRunnerDeps = {
     ipc: {
       sendPrompt: async (sub, content, options) => {
-        calls.sendPrompt.push({ sub, content, options: options ?? {} })
+        calls.sendPrompt.push({
+          sub,
+          content,
+          options: options ?? {},
+          rowsAtStart: (db.get(ROOM) ?? []).length,
+        })
         const characterId = decodeSubSession(sub)?.characterId ?? ""
         const script = scripts.get(characterId) ?? defaultScript
         setTimeout(() => script(sub, emit), 0)
@@ -263,9 +288,14 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
       applySdkSubagentBridge: () => undefined,
       recordChatToolApprovalDecision: async () => undefined,
     },
-    now: () => 1_000 + turn,
+    now: () => 1_000 + turn + clockOffset,
     newTurnId: () => `t${++turn}`,
     persistDelayMs: 0,
+    random: () => 0.5,
+    sleep: async (ms) => {
+      sleeps += 1
+      clockOffset += ms
+    },
   }
   const sinks: RoomRunnerSinks = {
     status: {
@@ -316,6 +346,9 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
         for (const key of [...memberActivity.keys()])
           if (key.startsWith(`${id}::`)) memberActivity.delete(key)
       },
+      requestStop: (id, characterId) => {
+        stopRequests.add(`${id}::${characterId}`)
+      },
       isStopRequested: (id, characterId) => stopRequests.has(`${id}::${characterId}`),
       clearStopRequest: (id, characterId) => stopRequests.delete(`${id}::${characterId}`),
       clearStopRequestsFor: (id) => {
@@ -337,6 +370,7 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
       },
     },
     referencedPaths: () => [],
+    human: { lastTypedAt: (id) => (humanProbe ? humanProbe() : (typedAt.get(id) ?? null)) },
   }
   const runner = new RoomRunner(deps, sinks)
   ref.runner = runner
@@ -372,6 +406,12 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
       db.set(ROOM, [...messages])
       store.set(ROOM, [...messages])
     },
+    typedAt,
+    setHumanProbe: (probe: () => number | null) => {
+      humanProbe = probe
+    },
+    now: () => deps.now(),
+    sleeps: () => sleeps,
   }
 }
 
@@ -835,5 +875,163 @@ describe("member activity (ADR-0177 batch 2)", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("room settings steer the turn (ADR-0177 batch 3)", () => {
+  const speakers = (w: ReturnType<typeof createWorld>) =>
+    w.calls.sendPrompt.map((c) => decodeSubSession(c.sub)?.characterId)
+
+  it("never picks a muted member on its own, but a mention still reaches it", async () => {
+    const w = createWorld({ session: { roomSettings: { mutedMemberIds: ["b"] } } })
+    await w.runner.send("hello", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a"])
+    await w.runner.send("@Bee you too", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a", "b"])
+  })
+
+  it("reaches exactly the members the composer picked, above mute and reply mode", async () => {
+    const w = createWorld({
+      session: { roomSettings: { mutedMemberIds: ["b"], replyMode: "mention_only" } },
+    })
+    await w.runner.send("go", { sessionId: ROOM, targetMemberIds: ["b"] })
+    expect(speakers(w)).toEqual(["b"])
+    expect(w.db.get(ROOM)?.map((m) => m.role)).toEqual(["user", "assistant"])
+  })
+
+  it("stores the turn and stays quiet when the room is asleep or nobody was mentioned", async () => {
+    const asleep = createWorld({ session: { roomSettings: { replyMode: "asleep" } } })
+    await asleep.runner.send("@Ava anyone?", { sessionId: ROOM })
+    expect(asleep.calls.sendPrompt).toEqual([])
+    expect(asleep.db.get(ROOM)?.map((m) => m.role)).toEqual(["user"])
+    expect(asleep.status.get(ROOM)).toBe("idle")
+
+    const quiet = createWorld({ session: { roomSettings: { replyMode: "mention_only" } } })
+    await quiet.runner.send("anyone?", { sessionId: ROOM })
+    expect(quiet.calls.sendPrompt).toEqual([])
+    await quiet.runner.send("@Bee?", { sessionId: ROOM })
+    expect(speakers(quiet)).toEqual(["b"])
+  })
+
+  it("keeps the last speaker for an unaddressed follow-up", async () => {
+    const w = createWorld({ team: { orchestration: "mention_round_robin" } })
+    await w.runner.send("@Bee start", { sessionId: ROOM })
+    await w.runner.send("and then?", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["b", "b"])
+    // A muted last speaker is not sticky: the room falls back to the roster.
+    const muted = createWorld({
+      team: { orchestration: "mention_round_robin" },
+      session: { roomSettings: { mutedMemberIds: ["b"] } },
+    })
+    await muted.runner.send("@Bee start", { sessionId: ROOM })
+    await muted.runner.send("and then?", { sessionId: ROOM })
+    expect(speakers(muted)).toEqual(["b", "a"])
+  })
+
+  it("drops a handoff outside the speaker's declared targets and tells the member so", async () => {
+    const w = createWorld({
+      team: {
+        orchestration: "mention_round_robin",
+        maxAutoRounds: 3,
+        members: [{ characterId: "a", handoffTargets: [] }, { characterId: "b" }],
+      },
+    })
+    w.replyWith("a", "@Bee can you check the numbers?")
+    await w.runner.send("@Ava start", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a"])
+    expect(w.calls.sendPrompt[0]?.options.systemPrompt).toContain(
+      "not able to hand the floor to anyone"
+    )
+    expect(w.diagnostics).toEqual([])
+  })
+
+  it("lets a talkative member chime in on an auto round", async () => {
+    const w = createWorld({
+      team: {
+        orchestration: "mention_round_robin",
+        maxAutoRounds: 1,
+        members: [{ characterId: "a" }, { characterId: "b", talkativeness: 0.9 }],
+      },
+    })
+    await w.runner.send("@Ava start", { sessionId: ROOM })
+    // The world rolls 0.5, under Bee's 0.9, so Bee speaks up once.
+    expect(speakers(w)).toEqual(["a", "b"])
+    expect(w.diagnostics).toEqual([])
+  })
+
+  it("runs the round's members at once when the team says parallel", async () => {
+    const sequential = createWorld()
+    await sequential.runner.send("go", { sessionId: ROOM })
+    expect(sequential.calls.sendPrompt.map((c) => c.rowsAtStart)).toEqual([1, 2])
+
+    const parallel = createWorld({ team: { replyConcurrency: "parallel" } })
+    await parallel.runner.send("go", { sessionId: ROOM })
+    expect(parallel.calls.sendPrompt.map((c) => c.rowsAtStart)).toEqual([1, 1])
+    const persisted = parallel.db.get(ROOM) ?? []
+    expect(persisted.map((m) => m.metadata?.senderId)).toEqual([undefined, "a", "b"])
+    expect(parallel.status.get(ROOM)).toBe("idle")
+  })
+
+  it("stops one member and lets the rest of the round go on", async () => {
+    const w = createWorld()
+    w.scripts.set("a", () => undefined)
+    const turn = w.runner.send("go", { sessionId: ROOM })
+    await flush()
+    expect(speakers(w)).toEqual(["a"])
+    await w.runner.stopMember(ROOM, "a")
+    await turn
+    expect(w.calls.interrupt).toEqual([w.calls.sendPrompt[0]!.sub])
+    expect(speakers(w)).toEqual(["a", "b"])
+    expect(w.diagnostics).toEqual([])
+    expect(w.memberStatus.get(`${ROOM}::a`)).toBeUndefined()
+    expect(w.db.get(ROOM)?.map((m) => m.metadata?.senderId)).toEqual([undefined, "b"])
+  })
+
+  it("skips a member stopped while an earlier one was still replying", async () => {
+    const w = createWorld()
+    w.scripts.set("a", (sub, emit) => {
+      setTimeout(() => {
+        emit(assistantFrame(sub, "r-slow", "Ava says hi"))
+        emit(resultFrame(sub))
+        emit(endedFrame(sub))
+      }, 20)
+    })
+    const turn = w.runner.send("go", { sessionId: ROOM })
+    await flush()
+    await w.runner.stopMember(ROOM, "b")
+    await turn
+    expect(speakers(w)).toEqual(["a"])
+    expect(w.calls.interrupt).toEqual([])
+    expect(w.stopRequests.size).toBe(0)
+  })
+
+  it("waits for the human to finish typing before the next auto round", async () => {
+    const w = createWorld({ team: { orchestration: "mention_round_robin", maxAutoRounds: 3 } })
+    w.replyWith("a", "@Bee your turn")
+    w.typedAt.set(ROOM, 1_000)
+    await w.runner.send("@Ava start", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a", "b"])
+    expect(w.sleeps()).toBe(Math.ceil(TYPING_WINDOW_MS / TYPING_POLL_MS))
+  })
+
+  it("gives up waiting after the ceiling so a parked draft cannot stall the room", async () => {
+    const w = createWorld({ team: { orchestration: "mention_round_robin", maxAutoRounds: 3 } })
+    w.replyWith("a", "@Bee your turn")
+    // Every poll sees a keystroke that just happened.
+    w.setHumanProbe(() => w.now())
+    await w.runner.send("@Ava start", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a", "b"])
+    expect(w.sleeps()).toBeLessThanOrEqual(Math.ceil(TYPING_YIELD_MAX_MS / TYPING_POLL_MS) + 1)
+    expect(w.sleeps()).toBeGreaterThan(Math.ceil(TYPING_WINDOW_MS / TYPING_POLL_MS))
+  })
+
+  it("stands down from the auto rounds once the human sent something", async () => {
+    const w = createWorld({ team: { orchestration: "mention_round_robin", maxAutoRounds: 3 } })
+    w.replyWith("a", "@Bee your turn")
+    w.steerQueues.set(ROOM, [{ id: "s1", text: "actually, stop" }] as SteerEntry[])
+    await w.runner.send("@Ava start", { sessionId: ROOM })
+    expect(speakers(w)).toEqual(["a"])
+    expect(w.sleeps()).toBe(0)
+    expect(w.drained).toEqual([ROOM])
   })
 })

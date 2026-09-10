@@ -9859,6 +9859,14 @@
             }
           },
           "additionalProperties": false
+        },
+        "targetMemberIds": {
+          "type": "array",
+          "description": "The members the composer picked to answer this turn (ADR-0177 batch 3), in pick order. Routes above mute and reply mode the way an @mention does; a `manual` team's only way to get a reply.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false
@@ -9871,6 +9879,11 @@
       "properties": {
         "sessionId": {
           "type": "string"
+        },
+        "characterId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stop only this member (ADR-0177 batch 3); the rest of the round goes on. Absent stops the whole room."
         }
       },
       "additionalProperties": false

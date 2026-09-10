@@ -158,6 +158,10 @@ export interface RoomRunnerDeps {
   newTurnId: () => string
   /** Debounce for the streaming Dexie write. `0` degrades to synchronous. */
   persistDelayMs: number
+  /** The roll behind `TeamMember.talkativeness`. Defaults to `Math.random`. */
+  random?: () => number
+  /** Waits while an auto round yields to a typing human. Defaults to a timer. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export interface RoomRunnerSinks {
@@ -195,6 +199,8 @@ export interface RoomRunnerSinks {
     /** The tool a member is on, `Read · foo.ts`, or `null` when none (ADR-0177 batch 2). */
     setActivity: (sessionId: string, characterId: string, activity: string | null) => void
     clearFor: (sessionId: string) => void
+    /** The user asked for one member to stop (ADR-0177 batch 3). */
+    requestStop: (sessionId: string, characterId: string) => void
     isStopRequested: (sessionId: string, characterId: string) => boolean
     clearStopRequest: (sessionId: string, characterId: string) => void
     clearStopRequestsFor: (sessionId: string) => void
@@ -221,4 +227,12 @@ export interface RoomRunnerSinks {
     toggleAlwaysAllow: (toolName: string, on: boolean) => Promise<void>
   }
   referencedPaths: () => { absolute: string; isDir: boolean }[]
+  /**
+   * The human's typing signal (ADR-0177 batch 3). `lastTypedAt` is the time
+   * of the last keystroke in this room's composer, or `null` when the host
+   * has no such signal (a headless brain, whose humans type on companions).
+   */
+  human: {
+    lastTypedAt: (sessionId: string) => number | null
+  }
 }

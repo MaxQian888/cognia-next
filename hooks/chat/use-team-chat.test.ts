@@ -321,6 +321,7 @@ const uiState = {
   setMemberStatus: jest.fn(),
   isStopRequested: jest.fn().mockReturnValue(false),
   clearStopRequest: jest.fn(),
+  requestStopMember: jest.fn(),
   clearMemberStatusFor: jest.fn(),
 }
 jest.mock("@/stores/ui", () => ({
@@ -500,7 +501,10 @@ describe("useTeamChat — actions", () => {
       expect.anything(),
       [alice],
       "who should answer?",
-      "alice"
+      "alice",
+      // The room's settings ride along (ADR-0177 batch 3); a fresh session
+      // routes with the defaults.
+      expect.objectContaining({ replyMode: "auto", mutedMemberIds: [] })
     )
   })
 
@@ -527,6 +531,18 @@ describe("useTeamChat — actions", () => {
       "team-1",
       expect.objectContaining({ code: "supervisorMissing", source: "agent-team" })
     )
+  })
+
+  it("stopMember() asks the host runner to stop one member of the named room", async () => {
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+    await act(async () => {
+      await result.current.stopMember("alice", "team-1")
+    })
+    // No sub-session of Alice is live, so the request is what the next
+    // round reads; a live one would also be interrupted (runner.test.ts).
+    expect(uiState.requestStopMember).toHaveBeenCalledWith("team-1", "alice")
+    expect(interruptSessionMock).not.toHaveBeenCalled()
   })
 
   it("stop() interrupts active sub-sessions and clears member statuses", async () => {

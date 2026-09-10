@@ -27,6 +27,7 @@ function fakeRunner() {
     regenerate: jest.fn(() => pending),
     editAndResend: jest.fn(() => pending),
     stop: jest.fn(async () => undefined),
+    stopMember: jest.fn(async () => undefined),
   }
   return { runner: runner as unknown as RoomRunner, calls: runner, release }
 }
@@ -220,5 +221,48 @@ describe("roomStop", () => {
     await expect(roomStop({ sessionId: "room-1" }, deps(runner))).rejects.toThrow(
       "room_stop.callerDeviceId is required"
     )
+  })
+})
+
+describe("picked members and a single-member stop (ADR-0177 batch 3)", () => {
+  it("forwards the composer's pick and refuses a malformed one", async () => {
+    const { runner, calls } = fakeRunner()
+    await roomSend(
+      { sessionId: "room-1", callerDeviceId: "dev-1", content: "go", targetMemberIds: ["b", "a"] },
+      deps(runner)
+    )
+    expect(calls.send).toHaveBeenCalledWith(
+      "go",
+      expect.objectContaining({ targetMemberIds: ["b", "a"] })
+    )
+    await roomSend(
+      { sessionId: "room-1", callerDeviceId: "dev-1", content: "go", targetMemberIds: [] },
+      deps(runner)
+    )
+    expect(calls.send).toHaveBeenLastCalledWith(
+      "go",
+      expect.not.objectContaining({ targetMemberIds: expect.anything() })
+    )
+    await expect(
+      roomSend(
+        { sessionId: "room-1", callerDeviceId: "dev-1", content: "go", targetMemberIds: [1] },
+        deps(runner)
+      )
+    ).rejects.toThrow(/targetMemberIds/)
+  })
+
+  it("stops one member when the payload names one, the room otherwise", async () => {
+    const { runner, calls } = fakeRunner()
+    await roomStop(
+      { sessionId: "room-1", callerDeviceId: "dev-1", characterId: "ava" },
+      deps(runner)
+    )
+    expect(calls.stopMember).toHaveBeenCalledWith("room-1", "ava")
+    expect(calls.stop).not.toHaveBeenCalled()
+    await roomStop({ sessionId: "room-1", callerDeviceId: "dev-1" }, deps(runner))
+    expect(calls.stop).toHaveBeenCalledWith("room-1")
+    await expect(
+      roomStop({ sessionId: "room-1", callerDeviceId: "dev-1", characterId: "" }, deps(runner))
+    ).rejects.toThrow(/characterId/)
   })
 })
