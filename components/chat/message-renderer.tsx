@@ -74,6 +74,9 @@ import {
 import { parseTodoInput } from "@/lib/chat/todos"
 import { userBubbleClass } from "@/lib/chat/message-bubble"
 import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
+import { buildReplyTo, readReplyTo } from "@/lib/chat/reply-to"
+import { ReplyToQuote } from "@/components/chat/message-parts/reply-to-quote"
+import { MessageReactionAdd, MessageReactionPills } from "@/components/chat/message-reactions"
 import type { AgentFlowMode } from "@/types/appearance"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
@@ -116,6 +119,7 @@ import {
   Share2Icon,
   MoreHorizontalIcon,
   QuoteIcon,
+  ReplyIcon,
 } from "lucide-react"
 import { BookmarkIcon as AnimatedBookmarkIcon } from "@/components/ui/bookmark"
 import { CheckIcon as AnimatedCheckIcon } from "@/components/ui/check"
@@ -620,6 +624,15 @@ function MessageRendererInner({
     })
   }, [branchSessionId, message])
 
+  // Aim the composer's next send at this row (ADR-0177 batch 2). The store
+  // keeps one target per conversation, so a second click on another row simply
+  // replaces the first, and the chip over the composer is the only UI state.
+  const handleReply = useCallback(() => {
+    if (!branchSessionId) return
+    useChatStore.getState().setReplyTo(buildReplyTo(message), branchSessionId)
+  }, [branchSessionId, message])
+  const replyTo = useMemo(() => readReplyTo(message), [message])
+
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
@@ -708,6 +721,7 @@ function MessageRendererInner({
                   "group-[.is-assistant]:w-full"
                 )}
               >
+                {replyTo ? <ReplyToQuote replyTo={replyTo} sessionId={branchSessionId} /> : null}
                 {(() => {
                   const inboundA2UI = (
                     message as {
@@ -898,318 +912,370 @@ function MessageRendererInner({
             />
           </div>
 
+          {/* One line under the body: the reactions on the row (always
+              visible) and the action bar, both on the message's side. */}
           {!editing && !isToolOnlyTurn && display.actions !== "all" && (
-            <MessageActions
+            <div
               className={cn(
-                "text-xs text-muted-foreground transition-opacity",
-                // `focus-within` and `pointer-coarse` are not decoration: hover
-                // is the ONLY reveal a bare `group-hover` offers, so without
-                // them this whole bar (copy / edit / retry / branch / plugin
-                // actions) is permanently invisible on touch — where the app
-                // ships through Capacitor — and a keyboard user lands focus on
-                // a control they cannot see. Same triple every other
-                // hover-revealed group in the repo carries (code-block,
-                // mermaid-block, math-block, image-block, video-block).
-                display.actions === "hover" && HOVER_REVEAL_CLASS,
-                message.role === "user" ? "ml-auto w-fit" : ""
+                "flex min-w-0 items-center gap-2",
+                message.role === "user" && "justify-end"
               )}
+              data-testid="message-action-line"
             >
-              <MessageAction
-                tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
-                label={t("copyLabel")}
-                onClick={handleCopy}
+              <MessageReactionPills message={message} sessionId={branchSessionId} />
+              <MessageActions
+                className={cn(
+                  "text-xs text-muted-foreground transition-opacity",
+                  // `focus-within` and `pointer-coarse` are not decoration: hover
+                  // is the ONLY reveal a bare `group-hover` offers, so without
+                  // them this whole bar (copy / edit / retry / branch / plugin
+                  // actions) is permanently invisible on touch — where the app
+                  // ships through Capacitor — and a keyboard user lands focus on
+                  // a control they cannot see. Same triple every other
+                  // hover-revealed group in the repo carries (code-block,
+                  // mermaid-block, math-block, image-block, video-block).
+                  display.actions === "hover" && HOVER_REVEAL_CLASS,
+                  message.role === "user" ? "w-fit" : ""
+                )}
               >
-                <CopyFeedbackIcon copied={copied || richCopied} size={14} />
-              </MessageAction>
-
-              {hasActionCommand("edit") && onEditResend && (
                 <MessageAction
-                  tooltip={t("editTooltip")}
-                  label={t("editLabel")}
-                  onClick={startEdit}
+                  tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
+                  label={t("copyLabel")}
+                  onClick={handleCopy}
                 >
-                  <PencilIcon className="size-3.5" />
+                  <CopyFeedbackIcon copied={copied || richCopied} size={14} />
                 </MessageAction>
-              )}
 
-              {hasActionCommand("rerunTemplate") && templateRun && branchSessionId && (
-                <MessageAction
-                  tooltip={t("rerunTemplateTooltip")}
-                  label={t("rerunTemplateLabel")}
-                  onClick={() =>
-                    requestTemplateRerun({ sessionId: branchSessionId, run: templateRun })
-                  }
-                  disabled={actionCommand("rerunTemplate")?.disabled}
-                >
-                  <Repeat2Icon className="size-3.5" />
-                </MessageAction>
-              )}
+                {hasActionCommand("edit") && onEditResend && (
+                  <MessageAction
+                    tooltip={t("editTooltip")}
+                    label={t("editLabel")}
+                    onClick={startEdit}
+                  >
+                    <PencilIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {hasActionCommand("saveAsMemory") && (
-                <MessageAction
-                  tooltip={t("saveAsMemoryTooltip")}
-                  label={t("saveAsMemoryLabel")}
-                  onClick={() => void handleSaveAsMemory()}
-                  disabled={actionCommand("saveAsMemory")?.disabled}
-                >
-                  <BrainIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {hasActionCommand("reply") && (
+                  <MessageAction
+                    tooltip={t("replyTooltip")}
+                    label={t("replyLabel")}
+                    onClick={handleReply}
+                    data-testid="message-reply"
+                  >
+                    <ReplyIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {hasActionCommand("saveAsIssue") && (
-                <MessageAction
-                  tooltip={t("saveAsIssueTooltip")}
-                  label={t("saveAsIssueLabel")}
-                  onClick={() => void handleSaveAsIssue()}
-                  disabled={actionCommand("saveAsIssue")?.disabled}
-                  data-testid="message-save-as-issue"
-                >
-                  <CircleDotIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {hasActionCommand("rerunTemplate") && templateRun && branchSessionId && (
+                  <MessageAction
+                    tooltip={t("rerunTemplateTooltip")}
+                    label={t("rerunTemplateLabel")}
+                    onClick={() =>
+                      requestTemplateRerun({ sessionId: branchSessionId, run: templateRun })
+                    }
+                    disabled={actionCommand("rerunTemplate")?.disabled}
+                  >
+                    <Repeat2Icon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {hasActionCommand("regenerate") && onRegenerate && (
-                <MessageAction
-                  tooltip={t("regenerateTooltip")}
-                  label={t("regenerateLabel")}
-                  onClick={() => void onRegenerate()}
-                  disabled={actionCommand("regenerate")?.disabled}
-                >
-                  <RefreshCcwIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {hasActionCommand("saveAsMemory") && (
+                  <MessageAction
+                    tooltip={t("saveAsMemoryTooltip")}
+                    label={t("saveAsMemoryLabel")}
+                    onClick={() => void handleSaveAsMemory()}
+                    disabled={actionCommand("saveAsMemory")?.disabled}
+                  >
+                    <BrainIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
+                {hasActionCommand("saveAsIssue") && (
+                  <MessageAction
+                    tooltip={t("saveAsIssueTooltip")}
+                    label={t("saveAsIssueLabel")}
+                    onClick={() => void handleSaveAsIssue()}
+                    disabled={actionCommand("saveAsIssue")?.disabled}
+                    data-testid="message-save-as-issue"
+                  >
+                    <CircleDotIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
+                {hasActionCommand("regenerate") && onRegenerate && (
+                  <MessageAction
+                    tooltip={t("regenerateTooltip")}
+                    label={t("regenerateLabel")}
+                    onClick={() => void onRegenerate()}
+                    disabled={actionCommand("regenerate")?.disabled}
+                  >
+                    <RefreshCcwIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
+                {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
                 stay reachable under every preset, not only `inspector` — the
                 `all` branch below is the only place it used to render. */}
-              {hasActionCommand("readAloud") && (
-                <ReadAloudButton
-                  messageId={message.id}
-                  text={extractText(message)}
-                  character={speaker ?? directCharacter ?? null}
-                />
-              )}
+                {hasActionCommand("readAloud") && (
+                  <ReadAloudButton
+                    messageId={message.id}
+                    text={extractText(message)}
+                    character={speaker ?? directCharacter ?? null}
+                  />
+                )}
 
-              {/* IM cross-links: forward this text to an IM conversation, or
+                {/* IM cross-links: forward this text to an IM conversation, or
                   lift an inbound IM message into a fresh main chat. Self-hide
                   when they do not apply. */}
-              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
+                <MessageReactionAdd message={message} sessionId={branchSessionId} />
+                <MessageImActions
+                  message={message}
+                  text={messageText}
+                  sessionId={branchSessionId}
+                />
 
-              {/* Overflow LAST. Everything above is a single-purpose button;
+                {/* Overflow LAST. Everything above is a single-purpose button;
                   this one is the drawer the rest of the actions live in, and a
                   drawer sitting mid-row reads as just another action while
                   pushing the real ones past it. */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-8"
-                    aria-label={t("moreLabel")}
-                  >
-                    <MoreHorizontalIcon className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align={message.role === "user" ? "end" : "start"}>
-                  <DropdownMenuItem onSelect={() => void handleShare()}>
-                    <Share2Icon className="size-4" />
-                    {t("shareLabel")}
-                  </DropdownMenuItem>
-                  {hasActionCommand("quote") && branchSessionId && (
-                    <DropdownMenuItem onSelect={handleQuote}>
-                      <QuoteIcon className="size-4" />
-                      {t("quoteLabel")}
-                    </DropdownMenuItem>
-                  )}
-                  {hasActionCommand("copyLink") && branchSessionId && (
-                    <DropdownMenuItem onSelect={() => void handleCopyLink()}>
-                      <LinkIcon className="size-4" />
-                      {t("copyLinkLabel")}
-                    </DropdownMenuItem>
-                  )}
-                  {hasActionCommand("shareCard") && (
-                    <DropdownMenuItem onSelect={() => setCardOpen(true)}>
-                      <ImageIcon className="size-4" />
-                      {t("shareCardLabel")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={() => toggleBookmark(message.id)}>
-                    <AnimatedBookmarkIcon className="size-4" />
-                    {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
-                  </DropdownMenuItem>
-                  {hasActionCommand("branch") && branchSessionId && (
-                    <DropdownMenuItem
-                      disabled={actionCommand("branch")?.disabled}
-                      onSelect={() => setBranchOpen(true)}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      aria-label={t("moreLabel")}
                     >
-                      <GitBranchIcon className="size-4" />
-                      {t("branchLabel")}
+                      <MoreHorizontalIcon className="size-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align={message.role === "user" ? "end" : "start"}>
+                    <DropdownMenuItem onSelect={() => void handleShare()}>
+                      <Share2Icon className="size-4" />
+                      {t("shareLabel")}
                     </DropdownMenuItem>
-                  )}
-                  {hasActionCommand("truncate") && branchSessionId && (
-                    <DropdownMenuItem
-                      disabled={actionCommand("truncate")?.disabled}
-                      onSelect={() => setTruncateOpen(true)}
-                    >
-                      <ScissorsIcon className="size-4" />
-                      {t("truncateFromLabel")}
+                    {hasActionCommand("quote") && branchSessionId && (
+                      <DropdownMenuItem onSelect={handleQuote}>
+                        <QuoteIcon className="size-4" />
+                        {t("quoteLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasActionCommand("reply") && (
+                      <DropdownMenuItem onSelect={handleReply} data-testid="message-reply-menu">
+                        <ReplyIcon className="size-4" />
+                        {t("replyLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasActionCommand("copyLink") && branchSessionId && (
+                      <DropdownMenuItem onSelect={() => void handleCopyLink()}>
+                        <LinkIcon className="size-4" />
+                        {t("copyLinkLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasActionCommand("shareCard") && (
+                      <DropdownMenuItem onSelect={() => setCardOpen(true)}>
+                        <ImageIcon className="size-4" />
+                        {t("shareCardLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => toggleBookmark(message.id)}>
+                      <AnimatedBookmarkIcon className="size-4" />
+                      {isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
                     </DropdownMenuItem>
-                  )}
-                  {hasActionCommand("bringBack") && handBackTargetId && (
-                    <DropdownMenuItem onSelect={handleBringBack}>
-                      <CornerUpLeftIcon className="size-4" />
-                      {t("bringBackLabel")}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {hasActionCommand("branch") && branchSessionId && (
+                      <DropdownMenuItem
+                        disabled={actionCommand("branch")?.disabled}
+                        onSelect={() => setBranchOpen(true)}
+                      >
+                        <GitBranchIcon className="size-4" />
+                        {t("branchLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasActionCommand("truncate") && branchSessionId && (
+                      <DropdownMenuItem
+                        disabled={actionCommand("truncate")?.disabled}
+                        onSelect={() => setTruncateOpen(true)}
+                      >
+                        <ScissorsIcon className="size-4" />
+                        {t("truncateFromLabel")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasActionCommand("bringBack") && handBackTargetId && (
+                      <DropdownMenuItem onSelect={handleBringBack}>
+                        <CornerUpLeftIcon className="size-4" />
+                        {t("bringBackLabel")}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-              <BranchNavigator message={message} className="mx-1" />
-              {branchSessionId && (
-                <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
-              )}
-            </MessageActions>
+                <BranchNavigator message={message} className="mx-1" />
+                {branchSessionId && (
+                  <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+                )}
+              </MessageActions>
+            </div>
           )}
 
           {!editing && !isToolOnlyTurn && display.actions === "all" && (
-            <MessageActions
+            <div
               className={cn(
-                "text-xs text-muted-foreground",
-                message.role === "user" ? "ml-auto w-fit" : ""
+                "flex min-w-0 items-center gap-2",
+                message.role === "user" && "justify-end"
               )}
+              data-testid="message-action-line"
             >
-              {usage && message.role === "assistant" && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="font-mono">
-                      ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
-                      {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <UsageBreakdown usage={usage} />
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              <MessageAction
-                tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
-                label={t("copyLabel")}
-                onClick={handleCopy}
+              <MessageReactionPills message={message} sessionId={branchSessionId} />
+              <MessageActions
+                className={cn(
+                  "text-xs text-muted-foreground",
+                  message.role === "user" ? "w-fit" : ""
+                )}
               >
-                <CopyFeedbackIcon copied={copied || richCopied} size={14} />
-              </MessageAction>
+                {usage && message.role === "assistant" && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="font-mono">
+                        ↑{usage.inputTokens ?? 0} ↓{usage.outputTokens ?? 0}
+                        {usage.totalCostUsd !== undefined && ` · $${usage.totalCostUsd.toFixed(4)}`}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <UsageBreakdown usage={usage} />
+                    </TooltipContent>
+                  </Tooltip>
+                )}
 
-              <MessageAction
-                tooltip={shared ? t("shareDone") : t("shareTooltip")}
-                label={t("shareLabel")}
-                onClick={handleShare}
-              >
-                <Share2Icon className="size-3.5" />
-              </MessageAction>
-
-              {hasActionCommand("quote") && branchSessionId && (
                 <MessageAction
-                  tooltip={t("quoteLabel")}
-                  label={t("quoteLabel")}
-                  onClick={handleQuote}
+                  tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
+                  label={t("copyLabel")}
+                  onClick={handleCopy}
                 >
-                  <QuoteIcon className="size-3.5" />
+                  <CopyFeedbackIcon copied={copied || richCopied} size={14} />
                 </MessageAction>
-              )}
 
-              {branchSessionId && (
                 <MessageAction
-                  // Deliberately worded as a *link to this message*, never as
-                  // "share": the neighbouring share action publishes content,
-                  // this one only navigates, and confusing the two is either a
-                  // privacy accident or a dead link.
-                  tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
-                  label={t("copyLinkLabel")}
-                  onClick={handleCopyLink}
+                  tooltip={shared ? t("shareDone") : t("shareTooltip")}
+                  label={t("shareLabel")}
+                  onClick={handleShare}
                 >
-                  {linkCopied ? (
-                    <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
-                  ) : (
-                    <LinkIcon className="size-3.5" />
-                  )}
+                  <Share2Icon className="size-3.5" />
                 </MessageAction>
-              )}
 
-              {messageShareContent.hasContent && (
+                {hasActionCommand("quote") && branchSessionId && (
+                  <MessageAction
+                    tooltip={t("quoteLabel")}
+                    label={t("quoteLabel")}
+                    onClick={handleQuote}
+                  >
+                    <QuoteIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
+                {hasActionCommand("reply") && (
+                  <MessageAction
+                    tooltip={t("replyTooltip")}
+                    label={t("replyLabel")}
+                    onClick={handleReply}
+                    data-testid="message-reply"
+                  >
+                    <ReplyIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
+                {branchSessionId && (
+                  <MessageAction
+                    // Deliberately worded as a *link to this message*, never as
+                    // "share": the neighbouring share action publishes content,
+                    // this one only navigates, and confusing the two is either a
+                    // privacy accident or a dead link.
+                    tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
+                    label={t("copyLinkLabel")}
+                    onClick={handleCopyLink}
+                  >
+                    {linkCopied ? (
+                      <AnimatedActionIcon icon={AnimatedCheckIcon} size={14} animateOnChange />
+                    ) : (
+                      <LinkIcon className="size-3.5" />
+                    )}
+                  </MessageAction>
+                )}
+
+                {messageShareContent.hasContent && (
+                  <MessageAction
+                    tooltip={t("shareCardTooltip")}
+                    label={t("shareCardLabel")}
+                    onClick={() => setCardOpen(true)}
+                  >
+                    <ImageIcon className="size-3.5" />
+                  </MessageAction>
+                )}
+
                 <MessageAction
-                  tooltip={t("shareCardTooltip")}
-                  label={t("shareCardLabel")}
-                  onClick={() => setCardOpen(true)}
+                  tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
+                  label={t("bookmarkLabel")}
+                  onClick={() => toggleBookmark(message.id)}
+                  className={cn(isBookmarked && "text-yellow-500")}
                 >
-                  <ImageIcon className="size-3.5" />
+                  <AnimatedActionIcon
+                    icon={AnimatedBookmarkIcon}
+                    size={14}
+                    animateOnChange={isBookmarked}
+                    className={isBookmarked ? "fill-current" : undefined}
+                  />
                 </MessageAction>
-              )}
 
-              <MessageAction
-                tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
-                label={t("bookmarkLabel")}
-                onClick={() => toggleBookmark(message.id)}
-                className={cn(isBookmarked && "text-yellow-500")}
-              >
-                <AnimatedActionIcon
-                  icon={AnimatedBookmarkIcon}
-                  size={14}
-                  animateOnChange={isBookmarked}
-                  className={isBookmarked ? "fill-current" : undefined}
-                />
-              </MessageAction>
+                {message.role === "user" && onEditResend && (
+                  <MessageAction
+                    tooltip={t("editTooltip")}
+                    label={t("editLabel")}
+                    onClick={startEdit}
+                  >
+                    <PencilIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {message.role === "user" && onEditResend && (
-                <MessageAction
-                  tooltip={t("editTooltip")}
-                  label={t("editLabel")}
-                  onClick={startEdit}
-                >
-                  <PencilIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {message.role === "user" && branchSessionId && onRewindFiles && (
+                  <CheckpointAction
+                    checkpointId={message.id}
+                    enabled={checkpointEnabled}
+                    rewindFiles={(checkpointId, dryRun) =>
+                      onRewindFiles(branchSessionId, checkpointId, dryRun)
+                    }
+                  />
+                )}
 
-              {message.role === "user" && branchSessionId && onRewindFiles && (
-                <CheckpointAction
-                  checkpointId={message.id}
-                  enabled={checkpointEnabled}
-                  rewindFiles={(checkpointId, dryRun) =>
-                    onRewindFiles(branchSessionId, checkpointId, dryRun)
-                  }
-                />
-              )}
+                {branchSessionId && (
+                  <MessageAction
+                    tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
+                    label={t("branchLabel")}
+                    onClick={() => setBranchOpen(true)}
+                    // A branch snapshots the visible thread, so taking one mid-turn
+                    // would copy a half-written reply and seed the child with an
+                    // unfinished exchange. Matches the regenerate action below.
+                    disabled={actionCommand("branch")?.disabled}
+                  >
+                    <GitBranchIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {branchSessionId && (
-                <MessageAction
-                  tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
-                  label={t("branchLabel")}
-                  onClick={() => setBranchOpen(true)}
-                  // A branch snapshots the visible thread, so taking one mid-turn
-                  // would copy a half-written reply and seed the child with an
-                  // unfinished exchange. Matches the regenerate action below.
-                  disabled={actionCommand("branch")?.disabled}
-                >
-                  <GitBranchIcon className="size-3.5" />
-                </MessageAction>
-              )}
-
-              {/* The only remaining destructive path. Editing a user message used
+                {/* The only remaining destructive path. Editing a user message used
                 to delete its whole tail as a side effect; now that it branches
                 instead, removing messages has to be asked for explicitly. */}
-              {actionCommand("truncate")?.destructive && branchSessionId && (
-                <MessageAction
-                  tooltip={t("truncateFromTooltip")}
-                  label={t("truncateFromLabel")}
-                  onClick={() => setTruncateOpen(true)}
-                  disabled={actionCommand("truncate")?.disabled}
-                >
-                  <ScissorsIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {actionCommand("truncate")?.destructive && branchSessionId && (
+                  <MessageAction
+                    tooltip={t("truncateFromTooltip")}
+                    label={t("truncateFromLabel")}
+                    onClick={() => setTruncateOpen(true)}
+                    disabled={actionCommand("truncate")?.disabled}
+                  >
+                    <ScissorsIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {/* Hand a conclusion back up.
+                {/* Hand a conclusion back up.
                 Two shapes of the same gesture, so they share one action and one
                 mechanism: a sidechat hands back to the MAIN conversation, a
                 branch hands back to the conversation it was cut from. Lineage
@@ -1217,55 +1283,61 @@ function MessageRendererInner({
                 the parent to look, but nothing brought a finding with you.
                 Deliberately not auto-sent — a conclusion reached elsewhere is
                 usually worth rewording before it costs a turn up there. */}
-              {handBackTargetId && (
-                <MessageAction
-                  tooltip={t("bringBackTooltip")}
-                  label={t("bringBackLabel")}
-                  onClick={handleBringBack}
-                >
-                  <CornerUpLeftIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {handBackTargetId && (
+                  <MessageAction
+                    tooltip={t("bringBackTooltip")}
+                    label={t("bringBackLabel")}
+                    onClick={handleBringBack}
+                  >
+                    <CornerUpLeftIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              {message.role === "assistant" && ttsEnabled && (
-                <ReadAloudButton
-                  messageId={message.id}
-                  text={extractText(message)}
-                  character={speaker ?? directCharacter ?? null}
-                />
-              )}
+                {message.role === "assistant" && ttsEnabled && (
+                  <ReadAloudButton
+                    messageId={message.id}
+                    text={extractText(message)}
+                    character={speaker ?? directCharacter ?? null}
+                  />
+                )}
 
-              {/* Both roles: assistant siblings come from regenerating, user
+                {/* Both roles: assistant siblings come from regenerating, user
                 siblings from editing (which keeps the original rather than
                 deleting its tail). The navigator no-ops when the message has
                 no branch group, so no role gate is needed. */}
-              <BranchNavigator message={message} className="mx-1" />
+                <BranchNavigator message={message} className="mx-1" />
 
-              {/* Self-hides unless a cross-session branch was cut here. Shows the
+                {/* Self-hides unless a cross-session branch was cut here. Shows the
                 fork where the decision was made, rather than only in the
                 header — scrolling a long thread reveals where it diverged. */}
-              {branchSessionId && (
-                <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
-              )}
+                {branchSessionId && (
+                  <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+                )}
 
-              {message.role === "assistant" && isLastAssistant && onRegenerate && (
-                <MessageAction
-                  tooltip={t("regenerateTooltip")}
-                  label={t("regenerateLabel")}
-                  onClick={() => void onRegenerate()}
-                  disabled={actionCommand("regenerate")?.disabled}
-                >
-                  <RefreshCcwIcon className="size-3.5" />
-                </MessageAction>
-              )}
+                {message.role === "assistant" && isLastAssistant && onRegenerate && (
+                  <MessageAction
+                    tooltip={t("regenerateTooltip")}
+                    label={t("regenerateLabel")}
+                    onClick={() => void onRegenerate()}
+                    disabled={actionCommand("regenerate")?.disabled}
+                  >
+                    <RefreshCcwIcon className="size-3.5" />
+                  </MessageAction>
+                )}
 
-              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
+                <MessageReactionAdd message={message} sessionId={branchSessionId} />
+                <MessageImActions
+                  message={message}
+                  text={messageText}
+                  sessionId={branchSessionId}
+                />
 
-              <PluginExtensionSlot
-                point="chat.message.footer"
-                className="flex items-center gap-1 empty:hidden"
-              />
-            </MessageActions>
+                <PluginExtensionSlot
+                  point="chat.message.footer"
+                  className="flex items-center gap-1 empty:hidden"
+                />
+              </MessageActions>
+            </div>
           )}
         </MessageShell>
 

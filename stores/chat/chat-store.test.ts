@@ -25,6 +25,7 @@ import {
   selectComposerEphemeralSkillIds,
   selectComposerPendingCommandOverrides,
   selectComposerPermissionMode,
+  selectComposerReplyTo,
   selectComposerWebSearchOn,
   selectComposerContextSelections,
   type FileReference,
@@ -1810,6 +1811,27 @@ describe("composer draft reads", () => {
       useChatStore.getState().setPermissionMode("bypassPermissions")
     })
     expect(selectComposerPermissionMode(useChatStore.getState(), null)).toBe("bypassPermissions")
+  })
+
+  it("keeps a reply target per conversation and drops it with the send", () => {
+    // ADR-0177 batch 2: a row's reply action aims the NAMED pane's next send,
+    // so the chip over the other pane never shows a quote it did not stage.
+    const store = useChatStore.getState()
+    const target = { messageId: "m1", preview: "the plan" }
+    act(() => {
+      store.setActiveSession("ses_focused")
+      store.setReplyTo(target, "ses_background")
+    })
+    expect(selectComposerReplyTo(useChatStore.getState(), "ses_background")).toBe(target)
+    expect(selectComposerReplyTo(useChatStore.getState(), "ses_focused")).toBeNull()
+    // The projection follows focus, like every other composer field.
+    act(() => store.setActiveSession("ses_background"))
+    expect(useChatStore.getState().replyTo).toBe(target)
+    const before = useChatStore.getState()
+    act(() => store.setReplyTo(target, "ses_background"))
+    expect(useChatStore.getState()).toBe(before)
+    act(() => store.setReplyTo(null, "ses_background"))
+    expect(selectComposerReplyTo(useChatStore.getState(), "ses_background")).toBeNull()
   })
 
   it("hands a session with no slice a STABLE empty draft", () => {

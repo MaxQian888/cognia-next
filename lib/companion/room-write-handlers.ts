@@ -21,6 +21,7 @@
  */
 
 import type { SendContent, SendOptions } from "@cognia/agent-config-types"
+import { parseReplyToPayload } from "@/lib/chat/reply-to"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { getHostRoomRunner } from "@/lib/chat/room/runner-host"
 import type { RoomRunner, RoomSendOptions } from "@/lib/chat/room/runner"
@@ -119,8 +120,22 @@ export async function roomSend(
       ? (payload.webSearchContext as SendOptions["webSearchContext"])
       : undefined
 
+  // The schema already refuses a malformed value at the RPC edge. This second
+  // read is what keeps a key the schema does not know from riding into the row.
+  const replyTo =
+    payload.replyTo === undefined ? undefined : (parseReplyToPayload(payload.replyTo) ?? undefined)
+  if (payload.replyTo !== undefined && !replyTo) {
+    throw new Error("room_send.replyTo must be { messageId, preview } when present")
+  }
+
   void runner
-    .send(content, { sessionId, attachmentManifest, webSearchContext, author })
+    .send(content, {
+      sessionId,
+      attachmentManifest,
+      webSearchContext,
+      author,
+      ...(replyTo ? { replyTo } : {}),
+    })
     .catch((err) => console.error("room send failed", err))
   return { accepted: true }
 }

@@ -38,6 +38,7 @@ import { useTranslations } from "next-intl"
 import {
   selectComposerContextSelections,
   selectComposerPermissionMode,
+  selectComposerReplyTo,
   selectComposerWebSearchOn,
   useChatStore,
   useComposerEphemeralSkillIds,
@@ -326,10 +327,14 @@ interface Props {
   placement?: "docked" | "hero"
 }
 
-/** Metadata assembled before dispatch that must travel with this exact turn. */
-export interface ComposerTurnMetadata {
-  webSearchContext?: SendOptions["webSearchContext"]
-}
+/**
+ * Metadata assembled before dispatch that must travel with this exact turn.
+ * Declared in `lib/chat/turn-metadata.ts` so every host maps it to send
+ * options through one helper. Re-exported here because the hosts import it
+ * from the composer.
+ */
+export type { ComposerTurnMetadata } from "@/lib/chat/turn-metadata"
+import type { ComposerTurnMetadata } from "@/lib/chat/turn-metadata"
 
 /** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
 export interface ComposerWorkflowMention {
@@ -3530,11 +3535,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         setOversizeConfirm(null)
         if (!ok) return false
       }
-      if (webSearchContext) {
-        await onSend(content, attachmentResult.manifest, templateRun, { webSearchContext })
+      // The reply target rides this exact turn (ADR-0177 batch 2). Read from
+      // THIS pane's conversation and cleared after the send, like the cited
+      // refs, so the chip is gone the moment the quoted turn is in the list.
+      const replyTo = selectComposerReplyTo(useChatStore.getState(), session?.id ?? null)
+      const turnMetadata: ComposerTurnMetadata = {
+        ...(webSearchContext ? { webSearchContext } : {}),
+        ...(replyTo ? { replyTo } : {}),
+      }
+      if (Object.keys(turnMetadata).length > 0) {
+        await onSend(content, attachmentResult.manifest, templateRun, turnMetadata)
       } else {
         await onSend(content, attachmentResult.manifest, templateRun)
       }
+      if (replyTo) useChatStore.getState().setReplyTo(null, session?.id ?? null)
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
       // Same lifetime as the chips they describe: the citations rode exactly

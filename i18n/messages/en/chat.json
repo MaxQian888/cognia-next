@@ -1687,7 +1687,9 @@
     "saveAsIssueDone": "Filed {identifier} in the tracker.",
     "saveAsIssueOpen": "Open issue",
     "saveAsIssueEmpty": "There is nothing readable in this reply to file.",
-    "saveAsIssueFailed": "Could not file it: {reason}"
+    "saveAsIssueFailed": "Could not file it: {reason}",
+    "replyLabel": "Reply",
+    "replyTooltip": "Reply to this message"
   },
   "messageDisplay": {
     "assistant": "Assistant",
@@ -1775,6 +1777,14 @@
   "planMode": {
     "banner": "Plan mode — read-only research; the agent will propose a plan before making changes.",
     "hint": "Shift+Tab"
+  },
+  "reactions": {
+    "add": "Add a reaction",
+    "mirrorFailed": "Saved here, but the platform did not take the reaction.",
+    "needsHost": "Reactions are written by the host this conversation lives on.",
+    "palette": "Reactions",
+    "pick": "React with {emoji}",
+    "toggle": "{emoji} {count}"
   },
   "renderers": {
     "alert": {
@@ -1917,6 +1927,16 @@
       "vimeoTitle": "Vimeo video",
       "youtubeTitle": "YouTube video"
     }
+  },
+  "replyTo": {
+    "assistant": "Assistant",
+    "chipLabel": "Replying to",
+    "clear": "Cancel reply",
+    "emptyPreview": "(no text)",
+    "jumpFailed": "That message is not in this conversation anymore.",
+    "jumpLabel": "Go to the quoted message",
+    "label": "Quoted message",
+    "you": "You"
   },
   "runPanel": {
     "ariaDiscardQueue": "Discard queued messages",

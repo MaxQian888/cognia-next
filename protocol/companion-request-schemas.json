@@ -9838,6 +9838,27 @@
         "editMessageId": {
           "type": "string",
           "description": "Replace this user message with `content` and re-run the turn below it."
+        },
+        "replyTo": {
+          "type": "object",
+          "description": "The message this turn answers (ADR-0177 batch 2): the stored id of the target and a one-line preview, stamped on the user row by the host.",
+          "required": [
+            "messageId",
+            "preview"
+          ],
+          "properties": {
+            "messageId": {
+              "type": "string"
+            },
+            "preview": {
+              "type": "string"
+            },
+            "platformMessageId": {
+              "type": "string",
+              "description": "The platform's id for the target when the reference came over an IM connector."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

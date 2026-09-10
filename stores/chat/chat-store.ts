@@ -3,6 +3,7 @@
 import type { UIMessage } from "ai"
 import { create } from "zustand"
 import type {
+  MessageReplyTo,
   PendingApproval,
   SendContent,
   SendContentBlock,
@@ -35,6 +36,8 @@ export type SteerEntry = {
   blocks?: SendContentBlock[]
   /** Pre-search sources attached to this follow-up; replayed with the drained turn. */
   webSearchContext?: SendOptions["webSearchContext"]
+  /** The message this follow-up answers, replayed with the drained turn. */
+  replyTo?: MessageReplyTo
 }
 
 export type PermissionMode = NonNullable<SendOptions["permissionMode"]>
@@ -211,6 +214,12 @@ export interface SessionChatSlice {
   bookmarkedIds: string[]
   webSearchOnForNextSend: boolean
   ephemeralSkillIds: string[]
+  /**
+   * The message the next send answers (ADR-0177 batch 2). Set by a row's
+   * reply action, shown as a chip over the composer, stamped as
+   * `metadata.replyTo` on the user turn, and cleared once that turn commits.
+   */
+  replyTo: MessageReplyTo | null
 }
 
 /** Default-initialised slice. `loading` seeds the hydration spinner for a
@@ -239,6 +248,7 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     bookmarkedIds: [],
     webSearchOnForNextSend: false,
     ephemeralSkillIds: [],
+    replyTo: null,
   }
 }
 
@@ -274,6 +284,7 @@ type ProjectedField =
   | "bookmarkedIds"
   | "webSearchOnForNextSend"
   | "ephemeralSkillIds"
+  | "replyTo"
 
 /** Project a slice onto the store's top-level (active-session) fields. */
 function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> {
@@ -296,6 +307,7 @@ function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> 
     bookmarkedIds: slice.bookmarkedIds,
     webSearchOnForNextSend: slice.webSearchOnForNextSend,
     ephemeralSkillIds: slice.ephemeralSkillIds,
+    replyTo: slice.replyTo,
   }
 }
 
@@ -418,6 +430,7 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       bookmarkedIds: state.bookmarkedIds,
       webSearchOnForNextSend: state.webSearchOnForNextSend,
       ephemeralSkillIds: state.ephemeralSkillIds,
+      replyTo: state.replyTo,
       // steerQueue / runTiming / runId / toolTimestamps are slice-only (not
       // projected onto the top-level active mirror), so seed them from defaults
       // when materialising a slice for the active session before its first write.
@@ -506,6 +519,7 @@ function projectionAsSlice(state: ChatState): Partial<SessionChatSlice> {
     bookmarkedIds: state.bookmarkedIds,
     webSearchOnForNextSend: state.webSearchOnForNextSend,
     ephemeralSkillIds: state.ephemeralSkillIds,
+    replyTo: state.replyTo,
   }
 }
 
@@ -593,6 +607,8 @@ interface ChatState {
    * then cleared. The composer's SkillPicker drives this.
    */
   ephemeralSkillIds: string[]
+  /** Projection of the active slice's `replyTo`. */
+  replyTo: MessageReplyTo | null
   /**
    * Per-session snapshot of the last send so a `session_ended` with a
    * transient error can re-issue the turn through the alias's fallback
@@ -731,6 +747,8 @@ interface ChatState {
   addCitedRef: (ref: ContextRef, sessionId?: string | null) => void
   removeCitedRef: (id: string, sessionId?: string | null) => void
   clearCitedRefs: (sessionId?: string | null) => void
+  /** Aim the next send at a message (a row's reply action). `null` clears. */
+  setReplyTo: (replyTo: MessageReplyTo | null, sessionId?: string | null) => void
   addReferencedWorkflowElement: (ref: WorkflowElementRef, sessionId?: string | null) => void
   removeReferencedWorkflowElement: (
     type: "node" | "edge",
@@ -814,6 +832,7 @@ export const useChatStore = create<ChatState>((set) => ({
   bookmarkedIds: [],
   webSearchOnForNextSend: false,
   ephemeralSkillIds: [],
+  replyTo: null,
   lastSendBySession: {},
   pendingArtifactEditTarget: {},
   activeBranchByGroup: {},
@@ -1190,6 +1209,12 @@ export const useChatStore = create<ChatState>((set) => ({
         ? s
         : patchComposerState(s, sessionId, { citedRefs: [] })
     ),
+  setReplyTo: (replyTo, sessionId) =>
+    set((s) =>
+      composerSlice(s, sessionId).replyTo === replyTo
+        ? s
+        : patchComposerState(s, sessionId, { replyTo })
+    ),
   addReferencedWorkflowElement: (ref, sessionId) =>
     set((s) => {
       const current = composerSlice(s, sessionId).referencedWorkflowElements
@@ -1362,6 +1387,7 @@ export const useChatStore = create<ChatState>((set) => ({
       bookmarkedIds: [],
       webSearchOnForNextSend: false,
       ephemeralSkillIds: [],
+      replyTo: null,
       lastSendBySession: {},
       pendingArtifactEditTarget: {},
       activeBranchByGroup: {},
@@ -1533,6 +1559,13 @@ export function selectComposerCitedRefs(
 ): ContextRef[] {
   return composerReadSlice(state, sessionId).citedRefs
 }
+/** The message `sessionId`'s next send answers, or `null`. */
+export function selectComposerReplyTo(
+  state: ChatState,
+  sessionId: string | null | undefined
+): MessageReplyTo | null {
+  return composerReadSlice(state, sessionId).replyTo
+}
 /** Staged context selections for `sessionId`'s conversation. */
 export function selectComposerContextSelections(
   state: ChatState,
@@ -1571,6 +1604,10 @@ export function useComposerPermissionMode(
 /** Staged `@` file/dir references for this composer's conversation. */
 export function useComposerReferencedPaths(sessionId: string | null | undefined): FileReference[] {
   return useChatStore((s) => composerReadSlice(s, sessionId).referencedPaths)
+}
+/** The reply target chip for this composer's conversation. */
+export function useComposerReplyTo(sessionId: string | null | undefined): MessageReplyTo | null {
+  return useChatStore((s) => selectComposerReplyTo(s, sessionId))
 }
 /** Staged workflow element chips for this composer's conversation. */
 export function useComposerReferencedWorkflowElements(

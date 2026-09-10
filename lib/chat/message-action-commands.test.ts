@@ -18,6 +18,15 @@ describe("resolveMessageActionCommands", () => {
     expect(commands.find((command) => command.id === "truncate")?.destructive).toBe(true)
   })
 
+  it("offers reply only with a conversation to answer into and words to quote", () => {
+    const ids = (context: Parameters<typeof resolveMessageActionCommands>[0]) =>
+      resolveMessageActionCommands(context).map((command) => command.id)
+    expect(ids({ role: "assistant", hasContent: true, hasSession: true })).toContain("reply")
+    expect(ids({ role: "user", hasContent: true, hasSession: true })).toContain("reply")
+    expect(ids({ role: "assistant", hasContent: false, hasSession: true })).not.toContain("reply")
+    expect(ids({ role: "assistant", hasContent: true, hasSession: false })).not.toContain("reply")
+  })
+
   it("does not invent content or session actions", () => {
     expect(
       resolveMessageActionCommands({ role: "user", hasContent: false, hasSession: false })

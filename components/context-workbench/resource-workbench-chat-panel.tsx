@@ -24,6 +24,7 @@ import { useSingleExport } from "@/hooks/data/use-single-export"
 import { Button } from "@/components/ui/button"
 import { DownloadIcon } from "lucide-react"
 import type { ComposerTurnMetadata } from "@/components/chat/composer"
+import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 
 const ChatPane = lazy(() =>
   import("@/components/chat/chat-view").then((module) => ({
@@ -148,9 +149,7 @@ export function ResourceWorkbenchChatPanel({
           sessionId,
           resourceContext,
           attachmentManifest: manifest,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
       }),
     [claude, resolveResourceContext, sessionId, withArtifactTarget]

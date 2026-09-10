@@ -118,6 +118,23 @@ describe("roomSend", () => {
     release()
   })
 
+  it("forwards a reply reference and refuses a malformed one", async () => {
+    const { runner, calls, release } = fakeRunner()
+    const replyTo = { messageId: "m-1", preview: "the plan" }
+    await roomSend(
+      { sessionId: "room-1", callerDeviceId: "dev-1", content: "answer", replyTo },
+      deps(runner)
+    )
+    expect(calls.send).toHaveBeenCalledWith("answer", expect.objectContaining({ replyTo }))
+    await expect(
+      roomSend(
+        { sessionId: "room-1", callerDeviceId: "dev-1", content: "x", replyTo: { preview: "p" } },
+        deps(runner)
+      )
+    ).rejects.toThrow(/replyTo/)
+    release()
+  })
+
   it("accepts content blocks and rejects anything else", async () => {
     const { runner, calls, release } = fakeRunner()
     const blocks = [{ type: "text", text: "see this" }]

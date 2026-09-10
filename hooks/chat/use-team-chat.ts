@@ -37,6 +37,7 @@ import type {
   PendingApproval,
   SendContent,
   SendOptions,
+  MessageReplyTo,
 } from "@cognia/agent-config-types"
 import {
   getCompanionRoomProjector,
@@ -61,6 +62,8 @@ export interface TeamSendOptions {
   steerDrain?: boolean
   branchTag?: { groupId: string; index: number }
   webSearchContext?: SendOptions["webSearchContext"]
+  /** The message this turn answers (ADR-0177 batch 2). */
+  replyTo?: MessageReplyTo
 }
 
 type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
@@ -119,7 +122,7 @@ export function useTeamChat() {
       if (!opts?.skipPersistUserTurn && !opts?.steerDrain) {
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts?.attachmentManifest),
-          { senderKind: "user" }
+          { senderKind: "user", ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}) }
         )
         const before = useChatStore.getState().sessions[sessionId]?.messages ?? []
         useChatStore.getState().replaceSessionMessages(sessionId, [...before, optimistic])
@@ -131,6 +134,7 @@ export function useTeamChat() {
           content,
           webSearchContext: opts?.webSearchContext,
           attachmentManifest: opts?.attachmentManifest,
+          ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}),
         })
         if (!result.accepted) throw new Error("room_send was not accepted")
       } catch (err) {
@@ -178,8 +182,13 @@ export function useTeamChat() {
   const drainSteerInto = useCallback((sessionId: string) => {
     maybeDrainSteer(
       sessionId,
-      (payload, webSearchContext) =>
-        void sendRef.current?.(payload, { sessionId, steerDrain: true, webSearchContext })
+      (payload, webSearchContext, replyTo) =>
+        void sendRef.current?.(payload, {
+          sessionId,
+          steerDrain: true,
+          webSearchContext,
+          ...(replyTo ? { replyTo } : {}),
+        })
     )
   }, [])
 

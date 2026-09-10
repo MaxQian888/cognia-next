@@ -37,6 +37,8 @@
 import { buildRoomRosterSection, type RoomParticipant } from "./room-roster"
 import { projectRoomParticipants } from "./room/participants"
 import { HANDOFF_STOP_TOKEN } from "@/lib/claude/team-router"
+import { formatReactionSummary, type MessageReaction } from "@cognia/agent-config-types"
+import { readReplyTo, replyContextLine } from "./reply-to"
 import { bareToolName } from "./tool-summary"
 import { resolveMessageSpeaker, speakerTranscriptName, type SpeakerSource } from "./speaker"
 
@@ -230,21 +232,37 @@ function transcriptLines(
     // it will redo the work. Only a genuinely empty turn is skipped.
     if (!body) continue
 
+    // A reply reference and the reactions on a turn are facts the room can
+    // see, so a member reads them too (ADR-0177 batch 2): the reply line says
+    // which message the user was answering, and the reaction tally says how
+    // the room received a turn without naming who reacted.
+    const replyTo = readReplyTo(message)
+    const prefix = replyTo ? `${replyContextLine(replyTo)} ` : ""
+    const reactions = formatReactionSummary(reactionsOf(message))
+    const suffix = reactions ? ` [reactions: ${reactions}]` : ""
+
     if (message.role === "user") {
       const speaker = resolveMessageSpeaker(message)
-      lines.push(`${speaker ? speakerTranscriptName(speaker) : "User"}: ${body}`)
+      lines.push(`${speaker ? speakerTranscriptName(speaker) : "User"}: ${prefix}${body}${suffix}`)
       continue
     }
 
     const senderId = senderIdOf(message)
     if (senderId && senderId === respondingCharacterId) {
-      lines.push(`You: ${body}`)
+      lines.push(`You: ${prefix}${body}${suffix}`)
       continue
     }
-    lines.push(`${(senderId && nameById.get(senderId)) || senderId || "Assistant"}: ${body}`)
+    lines.push(
+      `${(senderId && nameById.get(senderId)) || senderId || "Assistant"}: ${prefix}${body}${suffix}`
+    )
   }
 
   return lines
+}
+
+function reactionsOf(message: TeamTranscriptMessage): MessageReaction[] | undefined {
+  const value = message.metadata?.reactions
+  return Array.isArray(value) ? (value as MessageReaction[]) : undefined
 }
 
 /**

@@ -3,6 +3,7 @@ export type MessageActionCommandId =
   | "share"
   | "copyLink"
   | "quote"
+  | "reply"
   | "shareCard"
   | "bookmark"
   | "edit"
@@ -64,6 +65,9 @@ export function resolveMessageActionCommands(
     commands.push({ id: "copy" }, { id: "share" }, { id: "quote" }, { id: "shareCard" })
   }
   commands.push({ id: "bookmark" })
+  // A reply needs a conversation to answer into and words to quote: a
+  // tool-only turn has nothing a preview could show (ADR-0177 batch 2).
+  if (context.hasSession && context.hasContent) commands.push({ id: "reply" })
   if (context.hasSession) {
     commands.push(
       { id: "copyLink" },

@@ -47,6 +47,7 @@ import { useMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentio
 import type { WorkflowElementRef } from "@/stores/chat/chat-store"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { ComposerTurnMetadata } from "@/components/chat/composer"
+import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import {
   WorkflowEditorProvider,
   type WorkflowEditorContextValue,
@@ -202,9 +203,7 @@ export function WorkflowEditorChatTab({
         await claude.send(expanded, undefined, {
           sessionId: effectiveSessionId ?? undefined,
           attachmentManifest: manifest,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
         if (refs.length > 0) {
           useChatStore.getState().clearReferencedWorkflowElements()

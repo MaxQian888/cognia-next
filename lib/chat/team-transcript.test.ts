@@ -70,6 +70,24 @@ describe("buildTeamTranscript", () => {
     expect(transcript).toContain("User: hello")
   })
 
+  it("reads the reply reference ahead of a turn and the reaction tally after it", () => {
+    const transcript = buildTeamTranscript({
+      messages: [
+        userTurn("yes, do that", {
+          metadata: {
+            replyTo: { messageId: "m1", preview: "should we ship?" },
+            reactions: [{ emoji: "👍", actorIds: ["local", "tg:2"] }],
+          },
+        }),
+      ],
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+    })
+    expect(transcript).toContain(
+      'User: [Replying to: "should we ship?"] yes, do that [reactions: 👍 2]'
+    )
+  })
+
   it("names a human when the turn does carry authorship", () => {
     const transcript = buildTeamTranscript({
       messages: [imTurn("tg:1", "Alice", "ship it")],

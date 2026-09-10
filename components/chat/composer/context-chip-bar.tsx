@@ -32,6 +32,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 import { formatBytesCompact } from "@/lib/observability/format-utils"
 import { cn } from "@/lib/utils"
 import { ReferenceChips } from "../reference-chips"
+import { ReplyToChip } from "./reply-to-chip"
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
 import { WorkflowRefChips } from "./workflow-ref-chips"
 import { AttachmentPreview, type AttachmentPreviewProps } from "./attachment-preview"
@@ -96,6 +97,7 @@ export function ContextChipBar(props: ContextChipBarProps = {}) {
               onRemove={props.onRemoveCommand}
             />
           ) : null}
+          <ReplyToChip bare />
           <ReferenceChips bare />
           <WorkflowRefChips bare />
           <ArtifactSelectionChips bare />

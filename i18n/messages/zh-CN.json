@@ -7450,6 +7450,8 @@
       },
       "regenerateLabel": "重新生成",
       "regenerateTooltip": "重新生成",
+      "replyLabel": "回复",
+      "replyTooltip": "回复这条消息",
       "rerunTemplateLabel": "重跑这条消息",
       "rerunTemplateTooltip": "换个参数重跑",
       "saveAsIssueDone": "已在追踪器中创建 {identifier}。",
@@ -7579,6 +7581,14 @@
     "planMode": {
       "banner": "计划模式——只读调研；智能体将在修改前先提出计划。",
       "hint": "Shift+Tab"
+    },
+    "reactions": {
+      "add": "添加表情回应",
+      "mirrorFailed": "已在本地记录，但平台未接受这个回应。",
+      "needsHost": "表情回应由承载这段会话的主机写入。",
+      "palette": "表情回应",
+      "pick": "用 {emoji} 回应",
+      "toggle": "{emoji} {count}"
     },
     "renderers": {
       "alert": {
@@ -7721,6 +7731,16 @@
         "vimeoTitle": "Vimeo 视频",
         "youtubeTitle": "YouTube 视频"
       }
+    },
+    "replyTo": {
+      "assistant": "助手",
+      "chipLabel": "回复",
+      "clear": "取消回复",
+      "emptyPreview": "（无文字）",
+      "jumpFailed": "这条消息已不在当前会话中。",
+      "jumpLabel": "跳到被引用的消息",
+      "label": "被引用的消息",
+      "you": "你"
     },
     "runPanel": {
       "ariaDiscardQueue": "丢弃排队的消息",

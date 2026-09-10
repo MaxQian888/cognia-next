@@ -14,6 +14,7 @@ interface SliceLike {
     text: string
     blocks?: unknown[]
     webSearchContext?: WebSearchContext
+    replyTo?: { messageId: string; preview: string }
   }>
   messages?: UIMessage[]
 }
@@ -389,6 +390,20 @@ describe("maybeDrainSteer", () => {
     const text = typeof payload === "string" ? payload : JSON.stringify(payload)
     expect(text).toContain("first")
     expect(text).toContain("second")
+  })
+
+  it("replays the first queued reply target with the drained turn", () => {
+    const replyTo = { messageId: "m1", preview: "p" }
+    state.sessions["s1"] = {
+      steerQueue: [
+        { id: "a", text: "first" },
+        { id: "b", text: "second", replyTo },
+        { id: "c", text: "third", replyTo: { messageId: "m2", preview: "q" } },
+      ],
+    }
+    const replay = jest.fn()
+    maybeDrainSteer("s1", replay)
+    expect(replay.mock.calls[0][2]).toEqual(replyTo)
   })
 
   it("replays the merged search context for every drained follow-up", () => {

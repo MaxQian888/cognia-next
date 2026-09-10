@@ -37,6 +37,7 @@ import {
 import { capabilityAvailability } from "@/lib/connectors/capability-availability"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { ComposerTurnMetadata } from "@/components/chat/composer"
+import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 
 function ConversationInner() {
   const params = useSearchParams()
@@ -156,15 +157,11 @@ function ConversationDetail({
     isTeamSession
       ? teamChat.send(content, {
           attachmentManifest: manifest,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
       : directChat.send(content, undefined, {
           attachmentManifest: manifest,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
   const stop = isTeamSession ? teamChat.stop : directChat.stop
   const regenerate = isTeamSession ? teamChat.regenerate : directChat.regenerate

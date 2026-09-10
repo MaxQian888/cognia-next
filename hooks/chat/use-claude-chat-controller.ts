@@ -7,6 +7,7 @@ import { makeUserMessage } from "@/lib/claude/adapter"
 import { clearProjectHistoryEvidence } from "@/lib/claude/project-history-evidence-registry"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { prefixReplyContext } from "@/lib/chat/reply-to"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
@@ -159,6 +160,7 @@ import type {
   PendingApproval,
   SendContent,
   SendOptions,
+  MessageReplyTo,
 } from "@cognia/agent-config-types"
 import {
   selectComposerCitedRefs,
@@ -629,6 +631,13 @@ export function useClaudeChat() {
          *  until an SDK event arrives, which is only necessary when the target
          *  is an assistant message that does not exist yet. */
         branchTag?: { groupId: string; index: number }
+        /**
+         * The message this turn answers (ADR-0177 batch 2). Persisted as
+         * `metadata.replyTo` on the user row, and read to the model as one
+         * line ahead of the prompt, so the quoted text never becomes part of
+         * what the user is recorded as having typed.
+         */
+        replyTo?: MessageReplyTo
         /** The executor chosen for THIS turn only (ADR-0117 axes).
          *
          *  Deliberately not persisted: a sticky override would quietly become
@@ -1141,6 +1150,12 @@ export function useClaudeChat() {
           templateRun: callOptions.templateRun,
         }
       }
+      if (callOptions?.replyTo) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          replyTo: callOptions.replyTo,
+        }
+      }
       // Edit-as-branch: the replacement joins the original's sibling group, and
       // is selected right away so the user sees their edit rather than watching
       // it disappear behind a previously-pinned sibling.
@@ -1162,14 +1177,19 @@ export function useClaudeChat() {
       const skipAppend = callOptions?.skipUserAppend === true || callOptions?.steerDrain === true
       const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
       const displayContent = effectiveContent
+      // The reply line goes to the provider only. The transcript row above
+      // keeps the typed text and carries the reference in its metadata.
+      const providerContent = callOptions?.replyTo
+        ? prefixReplyContext(displayContent, callOptions.replyTo)
+        : displayContent
       const shouldGateWorkbenchPayload =
         callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
       const providerPayload = shouldGateWorkbenchPayload
         ? gateWorkbenchProviderPayload(
-            { content: displayContent, sendOptions, messages: next },
+            { content: providerContent, sendOptions, messages: next },
             callOptions?.resourceContext
           )
-        : { content: displayContent, sendOptions, messages: next }
+        : { content: providerContent, sendOptions, messages: next }
       if (callOptions?.sharedRequest) {
         providerPayload.messages = [makeUserMessage(content)]
         providerPayload.content = content

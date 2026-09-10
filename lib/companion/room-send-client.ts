@@ -12,7 +12,7 @@
  */
 
 import { transport } from "@/lib/tauri"
-import type { SendContent, SendOptions } from "@cognia/agent-config-types"
+import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 export const ROOM_SEND_COMMAND = "room_send"
@@ -28,6 +28,8 @@ export interface RoomSendRequest {
   regenerate?: boolean
   /** Replace this user message with `content` and re-run the turn below it. */
   editMessageId?: string
+  /** The message this turn answers (ADR-0177 batch 2), stamped on the user row by the host. */
+  replyTo?: MessageReplyTo
 }
 
 export interface RoomSendResponse {
