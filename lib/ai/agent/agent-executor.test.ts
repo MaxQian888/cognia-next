@@ -32,6 +32,16 @@ jest.mock("@/lib/ai/provider-consumption", () => ({
   createFeatureProviderModel: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
+// The executor now derives its environment from the host profile. Key the
+// profile to the same `isTauri` mock so every existing case keeps steering
+// the rail through one switch.
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () =>
+    (jest.requireMock("@/lib/tauri") as { isTauri: () => boolean }).isTauri()
+      ? "desktop"
+      : "web-standalone",
+}))
 const workspaceRoot = { value: "" }
 const acquireWorkspaceBundleMock = jest.fn(
   async (input: { roots: Array<{ sourceRoot: string }> }) => {

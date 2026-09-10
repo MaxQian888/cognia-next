@@ -26,6 +26,19 @@ pub async fn workflow_register_trigger(
     state: State<'_, WorkflowState>,
     input: RegisterTriggerInput,
 ) -> Result<(), String> {
+    workflow_register_trigger_for_state(state.inner(), input)
+}
+
+/// The body behind [`workflow_register_trigger`], shared with the service-plane
+/// arm (`companion_api/rpc/service_plane.rs`) so the headless brain registers
+/// its triggers with the same daemons the desktop renderer does. Every
+/// `workflow_*_for_state` below exists for the same reason: the Tauri command
+/// is one face of the body, the internal-plane RPC is the other, and neither
+/// may drift from the other.
+pub fn workflow_register_trigger_for_state(
+    state: &WorkflowState,
+    input: RegisterTriggerInput,
+) -> Result<(), String> {
     match input.kind.as_str() {
         "trigger.cron" => {
             let cron = input
@@ -131,6 +144,14 @@ pub async fn workflow_unregister_trigger(
     workflow_id: String,
     trigger_id: String,
 ) -> Result<(), String> {
+    workflow_unregister_trigger_for_state(state.inner(), workflow_id, trigger_id)
+}
+
+pub fn workflow_unregister_trigger_for_state(
+    state: &WorkflowState,
+    workflow_id: String,
+    trigger_id: String,
+) -> Result<(), String> {
     state.cron.remove(&workflow_id, &trigger_id);
     state.webhook.unregister(&workflow_id, &trigger_id);
     state.file_watch.remove(&trigger_id);
@@ -155,6 +176,14 @@ pub async fn workflow_file_watch_ack(
     workflow_id: String,
     trigger_id: String,
 ) -> Result<(), String> {
+    workflow_file_watch_ack_for_state(state.inner(), workflow_id, trigger_id)
+}
+
+pub fn workflow_file_watch_ack_for_state(
+    state: &WorkflowState,
+    workflow_id: String,
+    trigger_id: String,
+) -> Result<(), String> {
     state.file_watch.ack(&workflow_id, &trigger_id);
     let _ = state.mirror.touch_file_watch_cursor(&trigger_id);
     Ok(())
@@ -169,6 +198,14 @@ pub async fn workflow_get_webhook_url(
     workflow_id: String,
     trigger_id: String,
 ) -> Result<Option<String>, String> {
+    workflow_get_webhook_url_for_state(state.inner(), workflow_id, trigger_id)
+}
+
+pub fn workflow_get_webhook_url_for_state(
+    state: &WorkflowState,
+    workflow_id: String,
+    trigger_id: String,
+) -> Result<Option<String>, String> {
     Ok(state.webhook.url_for_trigger(&workflow_id, &trigger_id))
 }
 
@@ -180,6 +217,16 @@ pub async fn workflow_get_webhook_url(
 #[tauri::command]
 pub async fn workflow_webhook_respond(
     state: State<'_, WorkflowState>,
+    correlation_id: String,
+    status: u16,
+    body: String,
+    headers: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<bool, String> {
+    workflow_webhook_respond_for_state(state.inner(), correlation_id, status, body, headers)
+}
+
+pub fn workflow_webhook_respond_for_state(
+    state: &WorkflowState,
     correlation_id: String,
     status: u16,
     body: String,
@@ -389,6 +436,13 @@ pub async fn workflow_persist_run_state(
     state: State<'_, WorkflowState>,
     input: PersistRunStateInput,
 ) -> Result<(), String> {
+    workflow_persist_run_state_for_state(state.inner(), input)
+}
+
+pub fn workflow_persist_run_state_for_state(
+    state: &WorkflowState,
+    input: PersistRunStateInput,
+) -> Result<(), String> {
     state.mirror.persist(&input).map_err(map_mirror_err)
 }
 
@@ -399,6 +453,12 @@ pub async fn workflow_persist_run_state(
 pub async fn workflow_reload_in_flight_runs(
     state: State<'_, WorkflowState>,
 ) -> Result<Vec<InFlightRunRow>, String> {
+    workflow_reload_in_flight_runs_for_state(state.inner())
+}
+
+pub fn workflow_reload_in_flight_runs_for_state(
+    state: &WorkflowState,
+) -> Result<Vec<InFlightRunRow>, String> {
     state.mirror.list_in_flight().map_err(map_mirror_err)
 }
 
@@ -408,12 +468,26 @@ pub async fn workflow_ack_completed(
     state: State<'_, WorkflowState>,
     run_id: String,
 ) -> Result<(), String> {
+    workflow_ack_completed_for_state(state.inner(), run_id)
+}
+
+pub fn workflow_ack_completed_for_state(
+    state: &WorkflowState,
+    run_id: String,
+) -> Result<(), String> {
     state.mirror.ack_completed(&run_id).map_err(map_mirror_err)
 }
 
 #[tauri::command]
 pub async fn workflow_waitpoint_create(
     state: State<'_, WorkflowState>,
+    waitpoint: WorkflowWaitpointRow,
+) -> Result<WorkflowWaitpointRow, String> {
+    workflow_waitpoint_create_for_state(state.inner(), waitpoint)
+}
+
+pub fn workflow_waitpoint_create_for_state(
+    state: &WorkflowState,
     waitpoint: WorkflowWaitpointRow,
 ) -> Result<WorkflowWaitpointRow, String> {
     state
@@ -427,6 +501,13 @@ pub async fn workflow_waitpoint_get(
     state: State<'_, WorkflowState>,
     waitpoint_id: String,
 ) -> Result<Option<WorkflowWaitpointRow>, String> {
+    workflow_waitpoint_get_for_state(state.inner(), waitpoint_id)
+}
+
+pub fn workflow_waitpoint_get_for_state(
+    state: &WorkflowState,
+    waitpoint_id: String,
+) -> Result<Option<WorkflowWaitpointRow>, String> {
     state
         .mirror
         .get_waitpoint(&waitpoint_id)
@@ -437,6 +518,12 @@ pub async fn workflow_waitpoint_get(
 pub async fn workflow_waitpoint_list_pending(
     state: State<'_, WorkflowState>,
 ) -> Result<Vec<WorkflowWaitpointRow>, String> {
+    workflow_waitpoint_list_pending_for_state(state.inner())
+}
+
+pub fn workflow_waitpoint_list_pending_for_state(
+    state: &WorkflowState,
+) -> Result<Vec<WorkflowWaitpointRow>, String> {
     state
         .mirror
         .list_pending_waitpoints()
@@ -446,6 +533,13 @@ pub async fn workflow_waitpoint_list_pending(
 #[tauri::command]
 pub async fn workflow_waitpoint_decide(
     state: State<'_, WorkflowState>,
+    input: WorkflowWaitpointDecisionInput,
+) -> Result<bool, String> {
+    workflow_waitpoint_decide_for_state(state.inner(), input)
+}
+
+pub fn workflow_waitpoint_decide_for_state(
+    state: &WorkflowState,
     input: WorkflowWaitpointDecisionInput,
 ) -> Result<bool, String> {
     state
@@ -459,6 +553,13 @@ pub async fn workflow_wait_event_persist(
     state: State<'_, WorkflowState>,
     event: WorkflowWaitEventRow,
 ) -> Result<(), String> {
+    workflow_wait_event_persist_for_state(state.inner(), event)
+}
+
+pub fn workflow_wait_event_persist_for_state(
+    state: &WorkflowState,
+    event: WorkflowWaitEventRow,
+) -> Result<(), String> {
     state
         .mirror
         .persist_wait_event(&event)
@@ -468,6 +569,13 @@ pub async fn workflow_wait_event_persist(
 #[tauri::command]
 pub async fn workflow_wait_event_prune(
     state: State<'_, WorkflowState>,
+    now: i64,
+) -> Result<usize, String> {
+    workflow_wait_event_prune_for_state(state.inner(), now)
+}
+
+pub fn workflow_wait_event_prune_for_state(
+    state: &WorkflowState,
     now: i64,
 ) -> Result<usize, String> {
     state.mirror.prune_wait_events(now).map_err(map_mirror_err)
@@ -484,6 +592,63 @@ mod tests {
     /// themselves are 1-3 lines of pass-through, so the value of each test is
     /// the IPC contract: which inputs succeed / fail and which side effects
     /// they produce in the mirror or daemon.
+
+    /// The service-plane arm reaches the daemons and the mirror through the
+    /// `_for_state` bodies with no Tauri `State` in hand. A cron registration
+    /// through that face must land in the same daemon the desktop's does, and
+    /// the run-state round trip (persist, reload, ack) must be the crash-resume
+    /// contract the TS orchestrator relies on.
+    #[test]
+    fn the_shared_bodies_drive_the_same_daemons_and_mirror_as_the_commands() {
+        let (state, _) = WorkflowState::open_in_memory_for_testing();
+        workflow_register_trigger_for_state(
+            &state,
+            RegisterTriggerInput {
+                trigger_id: "trg_1".into(),
+                workflow_id: "wf_1".into(),
+                kind: "trigger.cron".into(),
+                enabled: true,
+                cron: Some("0 0 9 * * 1-5".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(state.cron.entry_count(), 1);
+        workflow_unregister_trigger_for_state(&state, "wf_1".into(), "trg_1".into()).unwrap();
+        assert_eq!(state.cron.entry_count(), 0);
+
+        workflow_persist_run_state_for_state(
+            &state,
+            PersistRunStateInput {
+                run_id: "run_1".into(),
+                workflow_id: "wf_1".into(),
+                status: "running".into(),
+                last_step_id: None,
+                snapshot: Some(json!({ "id": "wf_1" })),
+            },
+        )
+        .unwrap();
+        let rows = workflow_reload_in_flight_runs_for_state(&state).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].run_id, "run_1");
+        workflow_ack_completed_for_state(&state, "run_1".into()).unwrap();
+        assert!(workflow_reload_in_flight_runs_for_state(&state)
+            .unwrap()
+            .is_empty());
+
+        let err = workflow_register_trigger_for_state(
+            &state,
+            RegisterTriggerInput {
+                trigger_id: "trg_2".into(),
+                workflow_id: "wf_1".into(),
+                kind: "trigger.nope".into(),
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("unsupported kind"));
+    }
 
     #[test]
     fn register_a_cron_trigger_lands_in_the_daemon() {

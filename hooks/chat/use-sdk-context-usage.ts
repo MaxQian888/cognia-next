@@ -15,7 +15,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { isTauri } from "@/lib/tauri"
+import {
+  agentHostAvailable,
+  resolveAgentExecutionEnvironment,
+} from "@/lib/ai/agent/execution/host-environment"
 import { getSessionContextUsage } from "@/lib/claude/ipc"
 import type { SdkContextUsage } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
@@ -33,8 +36,13 @@ export function useSdkContextUsage(
   const [snapshot, setSnapshot] = useState<SdkContextUsage | null>(null)
 
   // Live introspection works only on the Anthropic path (the ai-sdk `q` lacks
-  // the control methods) and only inside the desktop shell.
-  const enabled = isTauri() && !!sessionId && (providerId ?? "anthropic") === "anthropic"
+  // the control methods) and only where a host sidecar can be reached: this
+  // shell's own, or the paired host's over the companion transport. Gating on
+  // `isTauri()` kept every companion blind to the SDK's real context window.
+  const enabled =
+    agentHostAvailable(resolveAgentExecutionEnvironment()) &&
+    !!sessionId &&
+    (providerId ?? "anthropic") === "anthropic"
 
   const refresh = useCallback(() => {
     if (!enabled || !sessionId) return

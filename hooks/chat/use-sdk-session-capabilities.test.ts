@@ -7,8 +7,13 @@ jest.mock("@/stores/chat", () => ({
   useChatStore: (sel: (s: { status: string }) => unknown) => sel({ status: mockStatus }),
 }))
 
-const mockIsTauri = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+// The host gate reads the host PROFILE (this shell's own sidecar, or a paired
+// host's over the companion transport), not the webview kind.
+const mockHostProfile = jest.fn((): string => "desktop")
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () => mockHostProfile(),
+}))
 
 const getSessionSupportedModels = jest.fn()
 const getSessionSupportedCommands = jest.fn()
@@ -28,7 +33,7 @@ const COMMANDS = [{ name: "compact", description: "c" }]
 beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = "idle"
-  mockIsTauri.mockReturnValue(true)
+  mockHostProfile.mockReturnValue("desktop")
   subscribeAgentEvents.mockResolvedValue(jest.fn())
 })
 
@@ -52,16 +57,31 @@ describe("useSdkSessionCapabilities", () => {
     expect(result.current.commands).toBeNull()
   })
 
-  it("stays disabled for non-Anthropic providers and in web mode", async () => {
+  it("stays disabled for non-Anthropic providers and in a standalone browser", async () => {
     getSessionSupportedModels.mockResolvedValue(MODELS)
     renderHook(() => useSdkSessionCapabilities("s1", "openai"))
-    mockIsTauri.mockReturnValue(false)
+    mockHostProfile.mockReturnValue("web-standalone")
     renderHook(() => useSdkSessionCapabilities("s1", "anthropic"))
     await act(async () => {
       await Promise.resolve()
     })
     expect(getSessionSupportedModels).not.toHaveBeenCalled()
   })
+
+  it.each(["mobile-companion", "cloud-companion", "headless"])(
+    "fetches from a %s shell, whose host owns or reaches the sidecar",
+    async (profile) => {
+      // `claude_session_control` is an execution-target command a paired
+      // device drives on the host's sidecar; gating on `isTauri()` kept every
+      // companion's capability lists at null.
+      mockHostProfile.mockReturnValue(profile)
+      getSessionSupportedModels.mockResolvedValue(MODELS)
+      getSessionSupportedCommands.mockResolvedValue(COMMANDS)
+      const { result } = renderHook(() => useSdkSessionCapabilities("s1", "anthropic"))
+      await waitFor(() => expect(result.current.models).toEqual(MODELS))
+      expect(getSessionSupportedModels).toHaveBeenCalledWith("s1")
+    }
+  )
 
   it("re-fetches after a completed turn (busy → idle)", async () => {
     getSessionSupportedModels.mockResolvedValue(MODELS)

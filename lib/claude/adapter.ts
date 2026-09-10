@@ -31,7 +31,7 @@ import { attachUsageToLastAssistant } from "@/lib/chat/message-run-metadata"
 import type { HookNoticePartData } from "./hooks"
 import { registerUndoSnapshot } from "./compaction-undo"
 import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
-import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
+import { extractA2UIBlocks } from "@/lib/a2ui/parser"
 import {
   extractAnthropicCitations,
   extractFootnoteSources,
@@ -138,14 +138,8 @@ function collectSourcesFromMessage(message: BetaMessage): SourcesPart | null {
 }
 
 /**
- * Detect A2UI content inside a free-text block. When found, splits the text
- * into pre / a2ui / post parts so the surface renders inline at the same
- * position the model emitted it.
- *
- * Order matters: the explicit ```a2ui fence is treated as a hard signal,
- * generic ```json fences fall back to `detectA2UIContent` heuristics inside
- * `extractA2UIFromResponse`. Markdown code-fences for other languages (html,
- * react, mermaid, …) are left untouched and rendered by the markdown layer.
+ * Render parsed A2UI spans inline without consuming neighboring prose or
+ * unrelated code fences. The parser owns format recognition and boundaries.
  */
 function blockToParts(block: BetaContentBlock): Part[] {
   if (block.type === "text") {
@@ -168,28 +162,23 @@ function splitTextForA2UI(
   providerMetadata?: Record<string, Record<string, unknown>>
 ): Part[] {
   if (!text) return []
-  // Fast-path: skip the regex if no a2ui marker in sight.
-  if (!/```a2ui|"createSurface"|"updateComponents"|"surface"\s*:/i.test(text)) {
-    return [textPart(text, providerMetadata)]
-  }
-  const extracted = extractA2UIFromResponse(text)
-  if (!extracted) return [textPart(text, providerMetadata)]
-  // We don't get back the exact span the parser consumed, so we strip the
-  // first ```a2ui|json fence (if any) to expose surrounding prose. When the
-  // payload is raw JSON without a fence we keep the plain text part empty.
-  const fenceRe = /```(?:a2ui|json)?\s*\n?[\s\S]*?\n?```/i
-  const fenceMatch = text.match(fenceRe)
-  const before = fenceMatch ? text.slice(0, fenceMatch.index ?? 0) : ""
-  const after = fenceMatch ? text.slice((fenceMatch.index ?? 0) + fenceMatch[0].length) : ""
-  const a2ui: A2UIPart = {
-    type: "a2ui",
-    surfaceId: extracted.surfaceId,
-    content: fenceMatch ? fenceMatch[0] : text,
-    source: "codeblock",
-  }
+  const blocks = extractA2UIBlocks(text)
+  if (blocks.length === 0) return [textPart(text, providerMetadata)]
   const out: Part[] = []
-  if (before.trim()) out.push(textPart(before, providerMetadata))
-  out.push(a2ui as unknown as Part)
+  let cursor = 0
+  for (const block of blocks) {
+    const before = text.slice(cursor, block.start)
+    if (before.trim()) out.push(textPart(before, providerMetadata))
+    const a2ui: A2UIPart = {
+      type: "a2ui",
+      surfaceId: block.content.surfaceId,
+      content: text.slice(block.start, block.end),
+      source: "codeblock",
+    }
+    out.push(a2ui as unknown as Part)
+    cursor = block.end
+  }
+  const after = text.slice(cursor)
   if (after.trim()) out.push(textPart(after, providerMetadata))
   return out
 }

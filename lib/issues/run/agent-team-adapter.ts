@@ -18,8 +18,13 @@
  * none beyond the team workspace link.
  */
 
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentTeam, AgentTeamTask, CreateTaskInput } from "@/types/agent/agent-team"
+import type { ConversationReference } from "@/types/connectors/event"
+import { parseConversationKey } from "@/types/connectors/event"
 import type { IssueRun, IssueRunArtifact } from "@/types/issues"
+import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { SquadPlanApprovalDelegate } from "@/lib/ai/agent/team/start-squad-run"
 import { createIssueRun } from "@/lib/db/issue-runs"
 import {
   getAgentTeamDeliveryGraph,
@@ -29,6 +34,7 @@ import {
 } from "@/lib/db/agent-team-runtime"
 import type {
   IssueRunAdapter,
+  IssueRunConversation,
   IssueRunOrigin,
   IssueRunPollResult,
   IssueRunStartContext,
@@ -72,13 +78,80 @@ export interface AgentTeamRunAdapterDeps {
    * objective the Squad had been configured with while the issue arrived as
    * one more task in the list — the run row then had nothing to call itself.
    */
-  startTeam: (teamId: string, origin: IssueRunOrigin, goal?: string) => Promise<void>
+  startTeam: (
+    teamId: string,
+    origin: IssueRunOrigin,
+    goal?: string,
+    conversation?: IssueRunConversation
+  ) => Promise<void>
   abortTeam: (teamId: string, reason: string) => void
   /** Durable-v2 artifact readers (best-effort; may return nothing for legacy runs). */
   collectArtifacts: (run: IssueRun) => Promise<IssueRunArtifact[]>
   createRun: typeof createIssueRun
   now: () => number
   onStartError?: (error: unknown) => void
+}
+
+/** What an IM-dispatched run gets that a desktop-dispatched one does not. */
+export interface ImSquadRunSurface {
+  triggeredFrom: WorkflowTriggeredFrom
+  planApprovalDelegate: SquadPlanApprovalDelegate
+  /** The thread's bound session, when it has one; the run is carded on it. */
+  session?: ChatSession
+}
+
+/**
+ * What an IM-dispatched run needs so its Squad can ASK instead of failing.
+ *
+ * `origin: "im"` alone puts the run under the headless gate policy, whose plan
+ * gate fails fast on the premise that nobody can answer. A card press in a
+ * chat thread has a person on the other end, and the approval machinery they
+ * answer through already exists, so this supplies the delegate the chat IM
+ * lane builds (`lib/connectors/team-dispatch.ts`) and stamps the thread on
+ * `triggeredFrom` so progress and the final result fan back to it. The card
+ * is addressed the way the issue card itself is (`lib/issues/im/push.ts`):
+ * by conversation key and a platform-level reference, with the bound
+ * session's delivery target on top when the thread has one.
+ */
+export async function resolveImSquadRunSurface(input: {
+  teamId: string
+  runId: string
+  objective: string
+  conversation: IssueRunConversation
+}): Promise<ImSquadRunSurface> {
+  const { adapterId, conversationKey, initiatorUserId } = input.conversation
+  const { findSessionByConversationKey } = await import("@/lib/connectors/session-bindings")
+  const session = await findSessionByConversationKey(conversationKey)
+  const deliveryTarget = session?.platformBinding?.deliveryTarget
+  const conversationRef: ConversationReference = session?.platformBinding?.conversationRef ?? {
+    platform: parseConversationKey(conversationKey).platform,
+    adapterId,
+  }
+  const planApprovalDelegate: SquadPlanApprovalDelegate = async (request) => {
+    const { makeImPlanApprovalDelegate } = await import("@/lib/connectors/hitl/plan-approval")
+    return makeImPlanApprovalDelegate({
+      runId: input.runId,
+      teamId: input.teamId,
+      objective: input.objective,
+      adapterId,
+      conversationKey,
+      conversationRef,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
+      ...(initiatorUserId ? { initiatorUserId } : {}),
+    })(request)
+  }
+  return {
+    triggeredFrom: {
+      source: "im",
+      adapterId,
+      conversationKey,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
+      ...(session ? { sessionId: session.id } : {}),
+      ...(initiatorUserId ? { initiator: { remoteUserId: initiatorUserId } } : {}),
+    },
+    planApprovalDelegate,
+    ...(session ? { session } : {}),
+  }
 }
 
 async function defaultGetTeamStore() {
@@ -104,21 +177,33 @@ export function createDefaultAgentTeamRunAdapterDeps(): AgentTeamRunAdapterDeps 
       if (!loadedStore) throw new Error("agent team store not loaded")
       return loadedStore.getState().createTask(input)
     },
-    startTeam: async (teamId, origin, goal) => {
+    startTeam: async (teamId, origin, goal, conversation) => {
       // `startSquadRun` is the one funnel (ADR-0140). Going straight to
       // `agentTeamManager.start` skipped the run-id convention, the
       // `projectId` stamp and the execution row itself, so an issue-dispatched
       // run was invisible in the cockpit unless the Squad was `durable-v2`.
       //
-      // No `session`: an issue is not a conversation. The run is therefore
-      // uncarded — no thread to project progress onto and no control callback
-      // to match — which the run row states rather than implies.
-      const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+      // An issue is not a conversation, so by default there is no `session`
+      // and the run is uncarded — no thread to project progress onto and no
+      // control callback to match — which the run row states rather than
+      // implies. An IM card press is the exception: it names the thread, so
+      // the run is minted up front (the approval delegate closes over its id)
+      // and the Squad gets somewhere to ask.
+      const { startSquadRun, mintSquadRunId } = await import("@/lib/ai/agent/team/start-squad-run")
+      const objective = goal ?? ""
+      const runId = origin === "im" && conversation ? mintSquadRunId() : undefined
+      const im =
+        runId && conversation
+          ? await resolveImSquadRunSurface({ teamId, runId, objective, conversation })
+          : undefined
       const result = await startSquadRun({
         squadId: teamId,
-        goal: goal ?? "",
+        goal: objective,
         origin,
-        triggeredFrom: { source: origin === "im" ? "im" : "ui" },
+        triggeredFrom: im?.triggeredFrom ?? { source: origin === "im" ? "im" : "ui" },
+        ...(runId ? { runId } : {}),
+        ...(im ? { planApprovalDelegate: im.planApprovalDelegate } : {}),
+        ...(im?.session ? { session: im.session, bindConnectorRun: true } : {}),
       })
       if (!result.started) {
         throw new Error(`squad run refused: ${result.reason ?? "unknown"}`)
@@ -256,7 +341,12 @@ export function createAgentTeamRunAdapter(
       // Resolves at terminal state — never awaited here. A start that throws
       // synchronously (team vanished between canRun and start) still surfaces.
       deps
-        .startTeam(teamId, context.origin, `${issue.identifier}: ${issue.title}`)
+        .startTeam(
+          teamId,
+          context.origin,
+          `${issue.identifier}: ${issue.title}`,
+          context.conversation
+        )
         .catch((error) => {
           deps.onStartError?.(error)
         })

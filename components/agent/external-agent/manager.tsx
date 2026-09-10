@@ -21,11 +21,12 @@
  * the analytics hook + health badge are local stubs that no-op gracefully.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   ChevronDown,
   ExternalLink,
+  Loader2,
   Plus,
   Power,
   PowerOff,
@@ -161,6 +162,7 @@ interface AgentCardProps {
     validity?: ExternalAgentValiditySnapshot
   }
   isActive: boolean
+  pending?: boolean
   /** The last failure for THIS agent, drawn in the row the user pressed. */
   failure?: ExternalAgentFailure
   onConnect: () => void
@@ -173,6 +175,7 @@ interface AgentCardProps {
 function AgentCard({
   agent,
   isActive,
+  pending,
   failure,
   onConnect,
   onDisconnect,
@@ -180,6 +183,7 @@ function AgentCard({
   onSelect,
   onDismissFailure,
 }: AgentCardProps) {
+  const t = useTranslations("externalAgent")
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
@@ -189,7 +193,8 @@ function AgentCard({
   // behind every other surface for as long as the rebuild took.
   const connectionStatus = useAgentConnectionStatus(config.id, agent.connectionStatus)
   const isConnected = connectionStatus === "connected"
-  const isConnecting = connectionStatus === "connecting"
+  const isConnecting =
+    pending || connectionStatus === "connecting" || connectionStatus === "reconnecting"
   // Subscribed, not read once. A Host still reporting its features blocks this
   // agent and then stops blocking it a moment later, and the block disables
   // the Connect button, which is the only other thing that could have brought
@@ -211,8 +216,8 @@ function AgentCard({
     <Card
       data-testid={`agent-card-${config.id}`}
       className={cn(
-        "cursor-pointer gap-0 py-2 transition-all hover:shadow-md",
-        isActive && "ring-2 ring-primary"
+        "cursor-pointer gap-0 rounded-xl border-0 py-3 shadow-none transition-colors hover:bg-muted/60",
+        isActive ? "bg-muted/60" : "bg-muted/25"
       )}
       onClick={onSelect}
     >
@@ -220,14 +225,24 @@ function AgentCard({
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium">{config.name}</span>
+              <button
+                type="button"
+                className="truncate rounded text-left text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-pressed={isActive}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onSelect()
+                }}
+              >
+                {config.name}
+              </button>
               {ecosystem?.supportTier && (
                 <Badge variant="outline" className="shrink-0 text-[10px]">
                   {ecosystem.supportTier}
                 </Badge>
               )}
               <ConnectionStatusBadge
-                status={connectionStatus}
+                status={pending ? "connecting" : connectionStatus}
                 withIcon
                 className="ml-auto shrink-0"
               />
@@ -254,19 +269,28 @@ function AgentCard({
                   className="h-7 w-7"
                   onClick={(e) => {
                     e.stopPropagation()
-                    if (connectDisabled) return
+                    if (connectDisabled || isConnecting) return
                     if (isConnected) {
                       onDisconnect()
                     } else {
                       onConnect()
                     }
                   }}
-                  disabled={connectDisabled}
+                  disabled={connectDisabled || isConnecting}
+                  aria-label={
+                    isConnecting
+                      ? t("statusConnecting")
+                      : isConnected
+                        ? tSettings("disconnect")
+                        : tSettings("connect")
+                  }
                 >
-                  {isConnected ? (
+                  {isConnecting ? (
+                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                  ) : isConnected ? (
                     <PowerOff className="h-4 w-4 text-destructive" />
                   ) : (
-                    <Power className="h-4 w-4 text-green-600" />
+                    <Power className="h-4 w-4 text-muted-foreground" />
                   )}
                 </Button>
               </TooltipTrigger>
@@ -280,6 +304,8 @@ function AgentCard({
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7"
+                  aria-label={tCommon("remove")}
+                  disabled={isConnecting}
                   onClick={(e) => {
                     e.stopPropagation()
                     onRemove()
@@ -292,6 +318,11 @@ function AgentCard({
             </Tooltip>
           </div>
         </div>
+        {isConnecting && (
+          <p role="status" className="mt-2 text-xs text-muted-foreground">
+            {tManager("connectingHint")}
+          </p>
+        )}
         {executionBlockReason && (
           <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
             {executionBlockReason}
@@ -343,7 +374,11 @@ function CollapsibleSection({
   children,
 }: CollapsibleSectionProps) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="rounded-md border" data-testid={dataTestId}>
+    <Collapsible
+      defaultOpen={defaultOpen}
+      className="rounded-xl bg-muted/20"
+      data-testid={dataTestId}
+    >
       <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate">{title}</span>
@@ -1045,6 +1080,8 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }>
   >([])
   const [isLoadingSessions, setIsLoadingSessions] = useState(false)
+  const connectingIds = useRef(new Set<string>())
+  const [pendingConnections, setPendingConnections] = useState<Set<string>>(new Set())
 
   const {
     agents,
@@ -1183,6 +1220,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
 
   const handleConnect = useCallback(
     async (agentId: string) => {
+      if (connectingIds.current.has(agentId)) return
+      connectingIds.current.add(agentId)
+      setPendingConnections(new Set(connectingIds.current))
       try {
         await connect(agentId)
         toast.success(tSettings("connected"))
@@ -1190,6 +1230,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         // Deliberately silent. The failure is recorded against this agent and
         // drawn in its row, and a toast saying the same thing in a corner was
         // the copy that vanished first while the row it belonged to stayed.
+      } finally {
+        connectingIds.current.delete(agentId)
+        setPendingConnections(new Set(connectingIds.current))
       }
     },
     [connect, tSettings]
@@ -1323,6 +1366,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         }
       : null
 
+  const configuredCwd = String(activeAgent?.config.process?.cwd ?? "")
   const refreshSessions = useCallback(async () => {
     const clearSessionListIfNeeded = () => {
       setSessionList((prev) => (prev.length === 0 ? prev : []))
@@ -1339,8 +1383,6 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }
     setIsLoadingSessions(true)
     try {
-      const configuredCwd = agents.find((agent) => agent.config.id === activeAgentId)?.config
-        .process?.cwd
       const sessions = await listSessions(
         activeAgentId,
         configuredCwd ? { cwd: configuredCwd } : undefined
@@ -1357,7 +1399,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     }
   }, [
     activeAgentId,
-    agents,
+    configuredCwd,
     isActiveAgentConnected,
     isActiveAgentExecutable,
     listSupport?.state,
@@ -1511,7 +1553,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   return (
     <div className={cn("flex min-h-0 flex-col gap-4", className)}>
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">{t("externalAgents")}</h3>
           <p className="text-sm text-muted-foreground">{tSettings("configuredAgentsDesc")}</p>
@@ -1519,7 +1561,13 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         <div className="flex gap-2">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="outline" size="icon" onClick={refresh} disabled={isLoading}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={tManager("refresh")}
+                onClick={refresh}
+                disabled={isLoading}
+              >
                 <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
               </Button>
             </TooltipTrigger>
@@ -1552,12 +1600,13 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
           // Cap the roster's height so a long agent list can never push the
           // sessions / diagnostics / commands panels below the fold.
           <div className="-mx-1 max-h-56 shrink-0 overflow-y-auto px-1">
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.config.id}
                   agent={agent}
                   isActive={activeAgentId === agent.config.id}
+                  pending={pendingConnections.has(agent.config.id)}
                   failure={agentFailures[agent.config.id]}
                   onConnect={() => handleConnect(agent.config.id)}
                   onDisconnect={() => handleDisconnect(agent.config.id)}
@@ -1572,7 +1621,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
 
         {/* Session Management */}
         {activeAgentId && (
-          <Collapsible defaultOpen className="rounded-md border">
+          <Collapsible defaultOpen className="rounded-xl bg-muted/20">
             <div className="flex items-center justify-between gap-2 px-3 py-2">
               <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium">
                 <span className="truncate">{tManager("sessions")}</span>
@@ -1584,7 +1633,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                 <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
               </CollapsibleTrigger>
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 className="shrink-0"
                 onClick={refreshSessions}
@@ -1611,7 +1660,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                   {sessionList.map((session) => (
                     <div
                       key={session.sessionId}
-                      className="flex items-center justify-between rounded border px-2 py-1.5"
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/50 px-2 py-2"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-xs font-medium">
@@ -1680,7 +1729,6 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         {activeAgent && (
           <CollapsibleSection
             title={tDiag("runtimeDiagnostics")}
-            defaultOpen
             dataTestId="external-agent-diagnostics"
           >
             <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-muted-foreground [&>p]:min-w-0 [&>p]:break-words sm:grid-cols-2">

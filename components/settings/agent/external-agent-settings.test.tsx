@@ -12,6 +12,7 @@
  *     "From preset: …" badge.
  */
 
+import { isTauri } from "@/lib/tauri"
 import React from "react"
 import { render, screen, within, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -220,11 +221,11 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
 
 // Platform gate for the mandatory-sandbox banner. jsdom is not Tauri, so the
 // default is "desktop shell absent" — which must NOT show the warning.
-const isTauriMock = jest.fn(() => false)
+const isTauriMock = jest.mocked(isTauri)
 const platformMock = jest.fn(() => "macos")
 jest.mock("@/lib/tauri", () => ({
   ...(jest.requireActual("@/lib/tauri") as Record<string, unknown>),
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn(() => false),
 }))
 jest.mock("@tauri-apps/plugin-os", () => ({
   platform: () => platformMock(),
@@ -436,7 +437,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(textarea.value).toBe("")
   })
 
-  it("shows the Pi runtime section for pi-rpc and saves an isolated policy by default", async () => {
+  it("shows the Pi runtime section for pi-rpc and saves global extensions by default", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
     await act(async () => {
@@ -454,7 +455,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(input.process).toMatchObject({ command: "pi" })
     // Isolation is the default, and it has to reach `metadata` — the adapter
     // reads it from there when building spawn args.
-    expect(input.metadata?.piExtensionPolicy).toBe("isolated")
+    expect(input.metadata?.piExtensionPolicy).toBe("global")
   })
 
   it("shows the exact isolation flags so the claim is inspectable", async () => {
@@ -464,6 +465,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
       await user.click(screen.getByTestId("preset-pick-pi-rpc"))
     })
     const section = await screen.findByTestId("pi-options-section")
+    await user.click(screen.getByTestId("pi-extension-policy"))
+    await user.click(screen.getByRole("option", { name: /^isolated$/i }))
     // `--no-extensions` alone does NOT isolate Pi; the UI must not imply it does.
     expect(section).toHaveTextContent("--no-extensions --no-skills --no-prompt-templates")
   })

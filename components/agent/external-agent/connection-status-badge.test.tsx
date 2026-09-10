@@ -47,9 +47,9 @@ describe("ConnectionStatusBadge", () => {
     expect(container.querySelector("svg")).not.toBeNull()
   })
 
-  it("does not render an icon for non-connected/error states even with withIcon", () => {
+  it("animates the connecting state", () => {
     const { container } = render(wrap(<ConnectionStatusBadge status="connecting" withIcon />))
-    expect(container.querySelector("svg")).toBeNull()
+    expect(container.querySelector("svg")).toHaveClass("animate-spin")
   })
 
   it("merges a custom className onto the badge", () => {

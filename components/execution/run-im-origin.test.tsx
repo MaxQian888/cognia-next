@@ -24,9 +24,33 @@ jest.mock("@/lib/db/execution-runs", () => ({
   listExecutionRunBindings: (runId: string) => mockListBindings(runId),
 }))
 
+const mockSession = jest.fn()
+const mockMessage = jest.fn()
+const mockMessageFilter = jest.fn()
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    sessions: { filter: () => ({ first: mockSession }) },
+    messages: {
+      where: () => ({
+        equals: () => ({
+          filter: (predicate: unknown) => {
+            mockMessageFilter(predicate)
+            return { first: mockMessage }
+          },
+        }),
+      }),
+    },
+  }),
+}))
+
 import { RunImOrigin } from "./run-im-origin"
 
-beforeEach(() => mockListBindings.mockReset().mockResolvedValue([]))
+beforeEach(() => {
+  mockListBindings.mockReset().mockResolvedValue([])
+  mockSession.mockReset().mockResolvedValue({ id: "session_1" })
+  mockMessage.mockReset().mockResolvedValue({ id: "stored_42" })
+  mockMessageFilter.mockReset()
+})
 
 // Every run started on the desktop has no binding. Absence has to read as
 // "not from a chat", never as a broken row.
@@ -59,7 +83,7 @@ it("lands on the message that started the run when the binding recorded one", as
   render(<RunImOrigin runId="run_1" />)
   expect(await screen.findByTestId("run-im-origin")).toHaveAttribute(
     "href",
-    "/inbox/c?key=telegram%3Atg-1%3A9&messageId=m_42"
+    "/inbox/c?key=telegram%3Atg-1%3A9&messageId=stored_42"
   )
 })
 
@@ -98,4 +122,19 @@ it("renders nothing when the lookup rejects", async () => {
   const { container } = render(<RunImOrigin runId="run_1" />)
   await waitFor(() => expect(mockListBindings).toHaveBeenCalled())
   expect(container).toBeEmptyDOMElement()
+})
+
+it("omits an unavailable transcript anchor", async () => {
+  mockMessage.mockResolvedValue(undefined)
+  mockListBindings.mockResolvedValue([
+    { conversationKey: "telegram:tg-1:9", sourceMessageId: "m_42" },
+  ])
+  render(<RunImOrigin runId="run_1" />)
+  expect(await screen.findByTestId("run-im-origin")).toHaveAttribute(
+    "href",
+    "/inbox/c?key=telegram%3Atg-1%3A9"
+  )
+  const predicate = mockMessageFilter.mock.calls[0][0]
+  expect(predicate({ sessionId: "session_1" })).toBe(true)
+  expect(predicate({ sessionId: "another_session" })).toBe(false)
 })

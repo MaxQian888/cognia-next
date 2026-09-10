@@ -64,6 +64,10 @@ describe("detectLocalCapabilities", () => {
       "mcp-runtime",
       "headless",
       "thread-handoff-v1",
+      "browser",
+      "ocr",
+      "pro-ide",
+      "media",
     ])
     expect(caps).toBe(serverBackedCapabilities("cloud-companion"))
   })
@@ -92,7 +96,7 @@ describe("detectLocalCapabilities", () => {
     expect(caps).not.toContain("headless")
   })
 
-  it("keeps the embedded Pro IDE off every non-desktop shell", () => {
+  it("keeps the embedded Pro IDE off the native mobile shell", () => {
     // `action.editor.*` gates on this: the node palette greys those nodes out
     // wherever code-server cannot be hosted, instead of letting a user drop a
     // node onto the canvas that is guaranteed to fail at run time.
@@ -104,13 +108,7 @@ describe("detectLocalCapabilities", () => {
     expect(detectLocalCapabilities()).not.toContain("pro-ide")
   })
 
-  // `action.media.*` gates on this. The FFmpeg commands in `crates/cognia-media`
-  // are raw `invoke` with no companion RPC arm and no command-manifest
-  // descriptor, so they are unreachable from the brain, a companion, and a
-  // remote host. Without a tauri-only id those nodes would preflight green on
-  // the brain (a bare `desktopOnly` resolves to `["shell"]`, which the
-  // server-backed baseline holds) and then throw mid-run.
-  it("keeps the native media pipeline on the desktop shell only", () => {
+  it("exposes media on execution hosts while keeping standalone clients local", () => {
     setTauri(true)
     expect(detectLocalCapabilities()).toContain("media")
 
@@ -120,7 +118,8 @@ describe("detectLocalCapabilities", () => {
 
     setCapacitorNative(false)
     expect(detectLocalCapabilities()).not.toContain("media")
-    expect(serverBackedCapabilities("cloud-companion")).not.toContain("media")
+    expect(serverBackedCapabilities("cloud-companion")).toContain("media")
+    expect(capabilitiesForPlatform("headless")).toContain("media")
   })
 
   it("returns the mobile baseline under Capacitor native", () => {
@@ -280,7 +279,9 @@ describe("serverBackedCapabilities", () => {
       expect(caps).toContain("headless")
       // Local-machine surfaces are NOT server-backed.
       expect(caps).not.toContain("uia-automation")
-      expect(caps).not.toContain("ocr")
+      expect(caps).toContain("ocr")
+      expect(caps).toContain("browser")
+      expect(caps).toContain("pro-ide")
     }
   })
 
@@ -304,4 +305,22 @@ describe("capabilitiesForPlatform", () => {
     expect(capabilitiesForPlatform("headless")).not.toContain("webview")
     expect(capabilitiesForPlatform("headless")).not.toContain("uia-automation")
   })
+})
+
+it("keeps headless execution capabilities separate from attached hardware and UI", () => {
+  const caps = capabilitiesForPlatform("headless")
+  expect(caps).toEqual(expect.arrayContaining(["browser", "ocr", "pro-ide", "media"]))
+  for (const cap of [
+    "camera",
+    "biometric",
+    "barcode-scan",
+    "geolocation",
+    "voice-record",
+    "share-sheet",
+    "push-display",
+    "uia-automation",
+    "webview",
+  ]) {
+    expect(caps).not.toContain(cap)
+  }
 })

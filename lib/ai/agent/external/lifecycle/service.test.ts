@@ -190,6 +190,10 @@ describe("assessReadiness and version certification", () => {
 })
 
 describe("isRuntimeAffectingUpdate", () => {
+  it("rebuilds the adapter when its Pi extension policy changes", () => {
+    expect(isRuntimeAffectingUpdate({ metadata: { piExtensionPolicy: "global" } })).toBe(true)
+    expect(isRuntimeAffectingUpdate({ metadata: { label: "New label" } })).toBe(false)
+  })
   it("treats launch-shaping fields as runtime-affecting", () => {
     expect(isRuntimeAffectingUpdate({ process: { command: "x" } })).toBe(true)
     expect(isRuntimeAffectingUpdate({ network: { endpoint: "https://a" } })).toBe(true)

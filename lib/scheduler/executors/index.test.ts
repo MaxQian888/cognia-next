@@ -39,6 +39,7 @@ jest.mock("@/lib/tauri", () => ({
     (jest.requireMock("@/lib/platform/detect") as { isTauri: () => boolean }).isTauri(),
 }))
 
+const approveToolMock = jest.fn(async (..._args: unknown[]) => undefined)
 const sendPromptMock = jest.fn(async (..._args: unknown[]) => undefined)
 const onClaudeMessageMock = jest.fn()
 const interruptSessionMock = jest.fn(async (..._args: unknown[]) => undefined)
@@ -47,6 +48,7 @@ jest.mock("@/lib/claude/ipc", () => ({
     sendPromptMock(sessionId, prompt, options),
   onClaudeMessage: (cb: (evt: unknown) => void) => onClaudeMessageMock(cb),
   interruptSession: (...args: unknown[]) => interruptSessionMock(...args),
+  approveTool: (...args: unknown[]) => approveToolMock(...args),
 }))
 
 const createSessionMock = jest.fn(async (input: unknown) => ({
@@ -180,6 +182,9 @@ jest.mock("@cognia/logging", () => {
   }
   stub.child = () => stub
   return {
+    // `lib/execution/broker` (reached through the issue-sync executor's import
+    // chain) builds its own logger; without this the whole suite fails to load.
+    createLogger: () => stub,
     loggers: {
       app: stub,
       ai: stub,
@@ -850,6 +855,42 @@ describe("executeChatTask", () => {
     )
     expect(r.success).toBe(false)
     expect(r.error).toBe("sidecar exploded")
+  })
+  it("denies an unattended permission ask and ends the task needs_approval", async () => {
+    onClaudeMessageMock.mockImplementationOnce(async (cb) => {
+      const cast = cb as (e: unknown) => void
+      setTimeout(
+        () =>
+          cast({
+            sessionId: "session-created",
+            type: "permission_request",
+            requestId: "req-1",
+            toolUseID: "tu-1",
+            toolName: "Edit",
+            input: { file_path: "/repo/a.ts" },
+          }),
+        0
+      )
+      setTimeout(() => cast({ sessionId: "session-created", type: "result" }), 5)
+      return () => undefined
+    })
+    const r = await executeChatTask(
+      makeTask({ payload: { prompt: "hi" } }),
+      makeExecution(),
+      makeSignal()
+    )
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "session-created",
+      "req-1",
+      "deny",
+      expect.stringContaining("needs_approval")
+    )
+    expect(r.success).toBe(false)
+    expect(r.error).toBe("needs approval: Edit")
+    expect(r.output).toMatchObject({
+      status: "needs_approval",
+      needsApproval: [expect.objectContaining({ requestId: "req-1", toolName: "Edit" })],
+    })
   })
   it("uses default error message when an error event omits .error", async () => {
     onClaudeMessageMock.mockImplementationOnce(async (cb) => {

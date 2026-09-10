@@ -92,7 +92,11 @@ jest.mock("@/components/ui/dialog", () => ({
   Dialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div data-testid="manage-dialog">{children}</div> : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DialogHeader: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className} data-testid="manage-dialog-header">
+      {children}
+    </div>
+  ),
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
@@ -503,6 +507,7 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     expect(screen.queryByTestId("manage-dialog")).toBeNull()
     fireEvent.click(screen.getByTestId("runtime-manage-agents"))
     expect(screen.getByTestId("external-agent-manager")).toBeInTheDocument()
+    expect(screen.getByTestId("manage-dialog-header")).toHaveClass("sr-only")
   })
 })
 

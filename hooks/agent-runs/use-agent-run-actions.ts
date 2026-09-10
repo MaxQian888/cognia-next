@@ -40,6 +40,7 @@ import { executeRunControlCommand, type RunControlResult } from "@/lib/execution
 import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/local-operator"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { transport } from "@/lib/tauri/transport-instance"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
 import type { RunControlAction, SquadReviewDecision } from "@/types/execution/run"
 
@@ -114,9 +115,15 @@ function outcomeFrom(result: RunControlResult): RunControlOutcome {
  * through the same gate, and the host answers with the same result. The
  * revision check happens against the host's journal, so a stale mirror on
  * this device is answered `revision_conflict`, never acted on.
+ *
+ * The desktop with a remote host ACTIVE is the same situation from the other
+ * side: `RoutingTransport` already sent `agent_send` to that host, so the run's
+ * AbortController lives in the other process and a local control answers
+ * `source_rejected`. Only `handle.interrupt()` used to follow the host, because
+ * it is a routed command; the cockpit controls must follow it too.
  */
 function remoteControlHost(profile: string): boolean {
-  return profile === "mobile-companion" || profile === "cloud-companion"
+  return profile === "mobile-companion" || profile === "cloud-companion" || isRemoteHostActive()
 }
 
 export function useRunControlActions(): RunControlActions {

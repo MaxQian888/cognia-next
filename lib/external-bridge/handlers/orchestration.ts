@@ -487,6 +487,14 @@ export async function pluginToolInvokeCore(
 type HostOperation = (...args: unknown[]) => unknown | Promise<unknown>
 
 const hostOperationLoaders: Record<string, () => Promise<HostOperation>> = {
+  usageQuery: async () => (await import("./usage")).usageQuery as HostOperation,
+  sessionHealth: async () => (await import("./usage")).sessionHealth as HostOperation,
+  optimizationFindings: async () => (await import("./usage")).optimizationFindings as HostOperation,
+  issuesList: async () => (await import("./issues")).issuesList as HostOperation,
+  issuesGet: async () => (await import("./issues")).issuesGet as HostOperation,
+  issuesCreate: async () => (await import("./issues")).issuesCreate as HostOperation,
+  issuesUpdate: async () => (await import("./issues")).issuesUpdate as HostOperation,
+  issuesComment: async () => (await import("./issues")).issuesComment as HostOperation,
   wikiSearch: async () => (await import("./wiki")).wikiSearch as HostOperation,
   wikiRead: async () => (await import("./wiki")).wikiRead as HostOperation,
   ragSearch: async () => (await import("./rag")).ragSearch as HostOperation,

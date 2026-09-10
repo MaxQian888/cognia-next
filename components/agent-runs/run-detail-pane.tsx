@@ -29,6 +29,8 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import Link from "next/link"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -127,6 +129,15 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
         <h2 className="min-w-0 break-words text-base font-semibold">{row.label}</h2>
         <ExecutionStatusPill status={row.status} />
       </div>
+
+      {(run?.sessionId ?? row.sessionId) && (
+        <Link
+          href={`/${buildSessionHref((run?.sessionId ?? row.sessionId)!)}`}
+          className="text-sm text-primary hover:underline"
+        >
+          {t("actions.openConversation")}
+        </Link>
+      )}
 
       <ControlBar
         row={row}

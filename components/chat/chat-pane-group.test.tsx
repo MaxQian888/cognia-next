@@ -99,6 +99,14 @@ beforeEach(() => {
   chatState.setSplitSessionId.mockClear()
 })
 
+it("passes the shared runtime recovery notice to both split panes", () => {
+  chatState.splitSessionId = "b"
+  const runtimeNotice = <div>Connection recovery</div>
+  render(<ChatPaneGroup {...makeProps({ runtimeNotice, composerDisabled: true })} />)
+  expect(paneRenders).toHaveLength(2)
+  for (const pane of paneRenders) expect(pane.runtimeNotice).toBe(runtimeNotice)
+})
+
 describe("ChatPaneGroup", () => {
   it("does not render a duplicate conversation tab strip", () => {
     chatState.openSessionIds = ["a", "b"]

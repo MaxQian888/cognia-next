@@ -61,6 +61,16 @@ jest.mock("@/lib/db/messages", () => ({
   listMessages: (...a: unknown[]) => listMessagesMock(...a),
 }))
 
+const getSessionMock = jest.fn(async (id: string) => ({ id, title: "remote" }))
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: (id: string) => getSessionMock(id),
+}))
+const buildSendOptionsMock = jest.fn(async () => ({ model: "sonnet", cwd: "/repo" }))
+jest.mock("@/hooks/chat/claude-chat-send-options", () => ({
+  buildSendOptions: (...a: unknown[]) =>
+    (buildSendOptionsMock as (...x: unknown[]) => unknown)(...a),
+}))
+
 let mockAdapterTurnComplete = true
 
 // applySdkEvent — append a synthetic assistant message with a controllable
@@ -321,17 +331,37 @@ describe("useRemoteSessionStream", () => {
     expect(result.current.pendingApproval).toBeNull()
   })
 
-  it("send forwards to sendPrompt; interrupt forwards to interruptSession", async () => {
+  it("send forwards to sendPrompt with the session's resolved options; interrupt forwards to interruptSession", async () => {
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
     await waitFor(() => expect(streamHandler).toBeTruthy())
     await act(async () => {
       await result.current.send("hello")
     })
-    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "hello")
+    expect(buildSendOptionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "sess-1" }),
+      "hello"
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith("sess-1", "hello", {
+      model: "sonnet",
+      cwd: "/repo",
+    })
     await act(async () => {
       await result.current.interrupt()
     })
     expect(interruptMock).toHaveBeenCalledWith("sess-1")
+  })
+
+  it("refuses the direct path when the session row has not synced to this device", async () => {
+    getSessionMock.mockResolvedValueOnce(null as never)
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(streamHandler).toBeTruthy())
+    await expect(
+      act(async () => {
+        await result.current.send("hello")
+      })
+    ).rejects.toThrow("not synced")
+    expect(sendPromptMock).not.toHaveBeenCalled()
+    expect(result.current.status).toBe("idle")
   })
 
   it("uses durable HostState actions for attached send, interrupt, and approval", async () => {

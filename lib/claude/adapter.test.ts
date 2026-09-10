@@ -2422,3 +2422,63 @@ describe("mergeProjectHistorySourcesIntoLastAssistant", () => {
     expect(part.sources.map((s) => s.origin)).toEqual(["project-claim", "project-history"])
   })
 })
+
+describe("applySdkEvent — inline A2UI spans", () => {
+  const payload = (surfaceId: string) =>
+    JSON.stringify({ type: "createSurface", surfaceId, surfaceType: "inline" })
+  const fence = (surfaceId: string) => "```a2ui\n" + payload(surfaceId) + "\n```"
+  const metadata = { provider: { traceId: "a2ui-trace" } }
+  const partsFor = (text: string) =>
+    applySdkEvent(
+      [],
+      asAssistant({
+        id: "inline-a2ui",
+        content: [{ type: "text", text, providerMetadata: metadata }],
+      } as unknown as BetaMessage)
+    ).messages[0].parts
+
+  it("keeps an unrelated JSON fence before the actual A2UI span", () => {
+    const before = 'Example:\n```json\n{"answer":42}\n```\nInterface:\n'
+    const block = fence("actual")
+    expect(partsFor(before + block + "\nAfter")).toMatchObject([
+      { type: "text", text: before, providerMetadata: metadata },
+      { type: "a2ui", surfaceId: "actual", content: block },
+      { type: "text", text: "\nAfter", providerMetadata: metadata },
+    ])
+  })
+
+  it("renders every surface in order and preserves intervening prose", () => {
+    const first = fence("first")
+    const second = fence("second")
+    expect(partsFor("Before\n" + first + "\nBetween\n" + second + "\nAfter")).toMatchObject([
+      { type: "text", text: "Before\n" },
+      { type: "a2ui", surfaceId: "first", content: first },
+      { type: "text", text: "\nBetween\n" },
+      { type: "a2ui", surfaceId: "second", content: second },
+      { type: "text", text: "\nAfter" },
+    ])
+  })
+
+  it("retains malformed A2UI fences when a later valid surface renders", () => {
+    const malformed = '```a2ui\n{"surface": broken}\n```\n'
+    const valid = fence("valid")
+    expect(partsFor(malformed + valid)).toMatchObject([
+      { type: "text", text: malformed },
+      { type: "a2ui", surfaceId: "valid", content: valid },
+    ])
+  })
+
+  it("uses only the raw JSON span and retains surrounding prose", () => {
+    const raw = payload("raw")
+    expect(partsFor("Before\n" + raw + "\nAfter")).toMatchObject([
+      { type: "text", text: "Before\n" },
+      { type: "a2ui", surfaceId: "raw", content: raw },
+      { type: "text", text: "\nAfter" },
+    ])
+  })
+
+  it("leaves unrelated and malformed code unchanged when no UI parses", () => {
+    const text = '```json\n{"answer":42}\n```\n```a2ui\n{broken}\n```'
+    expect(partsFor(text)).toMatchObject([{ type: "text", text, providerMetadata: metadata }])
+  })
+})

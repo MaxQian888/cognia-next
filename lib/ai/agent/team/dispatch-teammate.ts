@@ -742,9 +742,14 @@ export async function dispatchTeammate(
     release("failure", failure)
     throw failure
   }
+  // Host truth for this dispatch, derived from the host profile once and used
+  // for both the provisional channel pick and the resolver call below. The
+  // headless brain and a paired companion are hosts too, not web renderers.
+  const { resolveAgentExecutionEnvironment, agentHostAvailable } =
+    await import("@/lib/ai/agent/execution/host-environment")
+  const environment = resolveAgentExecutionEnvironment()
   if (channel !== "external" && args.preferToolEnabled !== false && runtime === "claude") {
-    const { isTauri } = await import("@/lib/tauri")
-    if (isTauri()) channel = "sidecar"
+    if (agentHostAvailable(environment)) channel = "sidecar"
   }
 
   // The negotiated capability projection for the resolved external agent.
@@ -795,8 +800,6 @@ export async function dispatchTeammate(
       import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
       import("./execution-binding-resolver"),
     ])
-    const { isTauri } = await import("@/lib/tauri")
-    const environment = { isTauri: isTauri(), isHeadlessHost: false }
     // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
     // default; run/app-default/managed slots reserved). A legacy raw-cred
     // member migrates to its provider-id deployment ref at dispatch time

@@ -504,8 +504,8 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
         signal: controller.signal,
         onEvent: (event) => {
           if (run.settled) return
-          if (event.type === "session_start") {
-            run.externalSessionId = (event as { sessionId?: string }).sessionId
+          if (event.sessionId) {
+            run.externalSessionId = event.sessionId
           }
           if (event.type === "permission_request" || event.type === "elicitation_request") {
             registerDecision(run, event)

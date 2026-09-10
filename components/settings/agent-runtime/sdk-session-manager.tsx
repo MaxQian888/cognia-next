@@ -63,7 +63,10 @@ import {
   resolveAgentExecutionSpec,
   sendSpecFromResolved,
 } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
-import { isTauri } from "@/lib/tauri"
+import {
+  agentHostAvailable,
+  resolveAgentExecutionEnvironment,
+} from "@/lib/ai/agent/execution/host-environment"
 
 interface SdkSessionInfo {
   sessionId: string
@@ -162,7 +165,11 @@ export function SdkSessionManager() {
   const router = useRouter()
   const enabled = useAgentExecutionFlag("claudeSdkParityV1")
   const sessionStoreEnabled = useAgentExecutionFlag("claudeSdkSessionStore")
-  const desktop = isTauri()
+  // The host profile, not the webview kind: `agent_session_api` is answered by
+  // the host's sidecar, which a paired phone or browser reaches over the
+  // companion transport and the headless brain owns outright.
+  const environment = resolveAgentExecutionEnvironment()
+  const hostReachable = agentHostAvailable(environment)
   const [sessions, setSessions] = useState<SdkSessionInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<SdkSessionErrorKey | null>(null)
@@ -183,7 +190,7 @@ export function SdkSessionManager() {
   const detailsRequestRef = useRef(0)
 
   const load = useCallback(async () => {
-    if (!desktop || !enabled) return
+    if (!hostReachable || !enabled) return
     setLoading(true)
     setError(null)
     try {
@@ -193,15 +200,15 @@ export function SdkSessionManager() {
     } finally {
       setLoading(false)
     }
-  }, [desktop, enabled])
+  }, [hostReachable, enabled])
 
   useEffect(() => {
-    if (!desktop || !enabled) return
+    if (!hostReachable || !enabled) return
     const timer = globalThis.setTimeout(() => void load(), 0)
     return () => globalThis.clearTimeout(timer)
-  }, [desktop, enabled, load])
+  }, [hostReachable, enabled, load])
 
-  if (!desktop) return null
+  if (!hostReachable) return null
 
   const onRename = async () => {
     if (!renameTarget || !renameDraft.trim()) return
@@ -356,7 +363,7 @@ export function SdkSessionManager() {
     try {
       const { spec } = resolveAgentExecutionSpec({
         surface: "chat",
-        environment: { isTauri: desktop, isHeadlessHost: false },
+        environment,
         flags: getAgentExecutionFlags(),
         policy: { executionKind: "agent", runtimePolicy: "claude-agent-sdk" },
         legacy: { providerId: "anthropic" },

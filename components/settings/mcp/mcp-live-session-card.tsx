@@ -9,8 +9,11 @@
  * in-process cognia / a2ui / plugin servers that have no `McpServer` row — and
  * lets the user reconnect a dropped server or toggle one without restarting.
  *
- * Desktop + Anthropic + open-session only; hides itself otherwise (the control
- * call rejects with a stable code on the ai-sdk path / when no session is open).
+ * Reachable host + Anthropic + open-session only; hides itself otherwise (the
+ * control call rejects with a stable code on the ai-sdk path / when no session
+ * is open). "Reachable host" is the host profile: this shell's own sidecar or
+ * the paired host's, which answers `claude_session_control` over the
+ * companion transport.
  */
 
 import { useEffect, useRef, useState } from "react"
@@ -23,7 +26,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
+import {
+  agentHostAvailable,
+  resolveAgentExecutionEnvironment,
+} from "@/lib/ai/agent/execution/host-environment"
 import { useChatStore } from "@/stores/chat"
 import {
   getSessionMcpStatus,
@@ -83,7 +89,7 @@ export function McpLiveSessionCard() {
   // spent. State is written only in async callbacks (never synchronously in
   // the effect body) — mirrors mcp-health-tab.
   useEffect(() => {
-    if (!(isTauri() && sessionId)) return
+    if (!(agentHostAvailable(resolveAgentExecutionEnvironment()) && sessionId)) return
     shownSessionRef.current = sessionId
     let cancelled = false
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -123,7 +129,8 @@ export function McpLiveSessionCard() {
     }
   }, [sessionId])
 
-  if (!isTauri() || !sessionId || !available) return null
+  if (!agentHostAvailable(resolveAgentExecutionEnvironment()) || !sessionId || !available)
+    return null
 
   const refresh = async () => {
     const forSession = sessionId

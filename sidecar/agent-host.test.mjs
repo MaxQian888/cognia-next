@@ -22,6 +22,10 @@ import {
   smokeCredentialGap,
   smokeObserveFrame,
   smokeOutcome,
+  routeCommand,
+  createUncaughtErrorGuard,
+  UNCAUGHT_ERROR_BUDGET,
+  RECENT_COMMAND_SESSIONS,
 } from "./agent-host.mjs"
 import * as shim from "./claude-host.mjs"
 
@@ -44,24 +48,61 @@ test("the claude-host shim re-exports the full agent-host surface", () => {
 
 test("duplicate commandIds are acked once and dropped; LRU caps at 128", () => {
   const sessions = new Map([["s1", {}]])
+  const ledger = new Map()
   const out = []
   const emit = (m) => out.push(m)
+  const drop = (msg) => dropDuplicateCommand(sessions, msg, emit, ledger)
 
-  assert.equal(dropDuplicateCommand(sessions, { sessionId: "s1", commandId: "c1" }, emit), false)
-  assert.equal(dropDuplicateCommand(sessions, { sessionId: "s1", commandId: "c1" }, emit), true)
+  assert.equal(drop({ sessionId: "s1", commandId: "c1" }), false)
+  assert.equal(drop({ sessionId: "s1", commandId: "c1" }), true)
   assert.deepEqual(out, [
     { type: "command_ack", sessionId: "s1", commandId: "c1", duplicate: true },
   ])
 
   // Fill past the LRU cap: the oldest id ages out and is processable again.
-  for (let i = 0; i < 130; i += 1) {
-    dropDuplicateCommand(sessions, { sessionId: "s1", commandId: `fill-${i}` }, emit)
-  }
-  assert.equal(dropDuplicateCommand(sessions, { sessionId: "s1", commandId: "c1" }, emit), false)
+  for (let i = 0; i < 130; i += 1) drop({ sessionId: "s1", commandId: `fill-${i}` })
+  assert.equal(drop({ sessionId: "s1", commandId: "c1" }), false)
 
-  // Messages without ids, or for unknown sessions, are never dropped.
-  assert.equal(dropDuplicateCommand(sessions, { sessionId: "s1" }, emit), false)
-  assert.equal(dropDuplicateCommand(sessions, { sessionId: "ghost", commandId: "x" }, emit), false)
+  // Messages without ids are never dropped. A first-seen id is never dropped
+  // either, whether or not the session is live.
+  assert.equal(drop({ sessionId: "s1" }), false)
+  assert.equal(drop({ sessionId: "ghost", commandId: "x" }), false)
+})
+
+test("a retried send is still dropped after the Anthropic session was retired", () => {
+  // The single-turn rail evicts its session on `session_ended`. A redrive that
+  // lands after that used to find no session, no ledger, and re-run the turn.
+  const sessions = new Map([["s1", { multiTurn: false }]])
+  const ledger = new Map()
+  const out = []
+  const emit = (m) => out.push(m)
+  assert.equal(
+    dropDuplicateCommand(sessions, { sessionId: "s1", commandId: "turn-1" }, emit, ledger),
+    false
+  )
+  sessions.delete("s1") // the turn ended
+  assert.equal(
+    dropDuplicateCommand(sessions, { sessionId: "s1", commandId: "turn-1" }, emit, ledger),
+    true
+  )
+  assert.deepEqual(out, [
+    { type: "command_ack", sessionId: "s1", commandId: "turn-1", duplicate: true },
+  ])
+})
+
+test("the command ledger forgets the least recently driven session past its cap", () => {
+  const ledger = new Map()
+  const emit = () => {}
+  for (let i = 0; i < RECENT_COMMAND_SESSIONS + 1; i += 1) {
+    dropDuplicateCommand(new Map(), { sessionId: `s${i}`, commandId: "c" }, emit, ledger)
+  }
+  assert.equal(ledger.size, RECENT_COMMAND_SESSIONS)
+  assert.equal(ledger.has("s0"), false, "the oldest session aged out")
+  // A session touched again is the newest, so it survives the next eviction.
+  dropDuplicateCommand(new Map(), { sessionId: "s1", commandId: "c2" }, emit, ledger)
+  dropDuplicateCommand(new Map(), { sessionId: "fresh", commandId: "c" }, emit, ledger)
+  assert.equal(ledger.has("s1"), true)
+  assert.equal(ledger.has("s2"), false)
 })
 
 test("commands unsupported by the frozen adapter emit a typed capability_error", () => {
@@ -666,3 +707,101 @@ test(
     }
   }
 )
+
+// ---- Command routing must never take the process down ----------------------
+
+function routerHarness(handlers) {
+  const emitted = []
+  const logged = []
+  const sessions = new Map()
+  const route = (msg) =>
+    routeCommand(msg, {
+      emit: (payload) => emitted.push(payload),
+      log: (level, line) => logged.push([level, line]),
+      sessions,
+      handlers,
+    })
+  return { emitted, logged, sessions, route }
+}
+
+test("a send whose handler throws ends that session instead of escaping the read loop", () => {
+  const closed = []
+  const { emitted, logged, sessions, route } = routerHarness({
+    send: () => {
+      throw new Error("Unsupported runtime adapter: external")
+    },
+  })
+  sessions.set("s1", {
+    closeInput: () => closed.push("closeInput"),
+    q: { close: () => closed.push("q.close") },
+  })
+  assert.doesNotThrow(() =>
+    route({ type: "send", sessionId: "s1", prompt: "hi", options: { turnId: "t1" } })
+  )
+  assert.deepEqual(emitted, [
+    {
+      type: "session_ended",
+      sessionId: "s1",
+      turnId: "t1",
+      error: "send failed: Unsupported runtime adapter: external",
+    },
+  ])
+  assert.deepEqual(closed, ["closeInput", "q.close"])
+  assert.equal(sessions.has("s1"), false)
+  assert.equal(logged[0][0], "error")
+})
+
+test("a rejected async command is logged and does not become an unhandled rejection", async () => {
+  const { emitted, logged, route } = routerHarness({
+    interrupt: async () => {
+      throw new Error("no session")
+    },
+  })
+  route({ type: "interrupt", sessionId: "s1" })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(emitted, [])
+  assert.deepEqual(logged, [["error", "interrupt failed: no session"]])
+})
+
+test("a send that fails without a session id is only logged", () => {
+  const { emitted, logged, route } = routerHarness({
+    send: () => {
+      throw new Error("boom")
+    },
+  })
+  route({ type: "send" })
+  assert.deepEqual(emitted, [])
+  assert.equal(logged.length, 1)
+})
+
+test("an unknown command type is a warning, not a crash", () => {
+  const { logged, route } = routerHarness({})
+  route({ type: "nope" })
+  assert.deepEqual(logged, [["warn", "unknown command type: nope"]])
+})
+
+test("the process guard logs every escape and exits only past the budget", () => {
+  const exits = []
+  const logged = []
+  let now = 0
+  const guard = createUncaughtErrorGuard({
+    log: (level, line) => logged.push([level, line]),
+    exit: (code) => exits.push(code),
+    now: () => now,
+  })
+  for (let i = 0; i < UNCAUGHT_ERROR_BUDGET; i += 1) guard("uncaughtException", new Error("e"))
+  assert.deepEqual(exits, [], "within budget the host keeps serving")
+  assert.equal(logged.length, UNCAUGHT_ERROR_BUDGET)
+  guard("unhandledRejection", new Error("one too many"))
+  assert.deepEqual(exits, [1])
+  // A new window resets the count.
+  const quiet = createUncaughtErrorGuard({
+    log: () => {},
+    exit: (code) => exits.push(code),
+    now: () => now,
+  })
+  for (let i = 0; i < UNCAUGHT_ERROR_BUDGET; i += 1) quiet("uncaughtException", new Error("e"))
+  now += 61_000
+  quiet("uncaughtException", new Error("later"))
+  assert.deepEqual(exits, [1], "an error in a fresh window starts a fresh count")
+})

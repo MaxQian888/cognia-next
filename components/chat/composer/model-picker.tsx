@@ -24,10 +24,16 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { toast } from "sonner"
+import { RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
-import { isTauri } from "@/lib/tauri"
+import {
+  agentHostAvailable,
+  resolveAgentExecutionEnvironment,
+} from "@/lib/ai/agent/execution/host-environment"
 import { useOptionalChatScope } from "@/components/chat/chat-scope-provider"
 import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -99,13 +105,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     if (!agentModels.agentId || agentGroups.length > 0) return null
     const agent = agentName ?? t("agentModelsGroup")
     if (agentModels.loading) return t("agentModelsLoading", { agent })
+    if (agentModels.status === "error") return t("agentModelsFailed", { agent })
     if (agentStatus !== "connected") return t("agentNotConnected", { agent })
-    if (!agentModels.externalSessionId) return t("agentNoSession", { agent })
     return t("agentNoModels", { agent })
   }, [
     agentModels.agentId,
     agentModels.loading,
-    agentModels.externalSessionId,
+    agentModels.status,
     agentGroups.length,
     agentName,
     agentStatus,
@@ -150,7 +156,7 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
     setOptimisticProvider(agentProviderMarker)
     agentModels
       .select(modelId)
-      .then(() => {
+      .then(async () => {
         // Persisted only once the agent accepted it, because this row is
         // replayed: `applyModelToSession` re-requests it on every session the
         // agent opens. Writing first meant a model the agent had refused was
@@ -164,10 +170,12 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
         // that this model belongs to the agent lane and skips both fields off
         // it.
         if (session?.id) {
-          void updateSession(session.id, {
+          await updateSession(session.id, {
             model: modelId,
             providerOverride: agentProviderMarker,
           })
+        } else {
+          await saveSettings({ defaultModel: modelId, defaultProvider: agentProviderMarker })
         }
       })
       .catch((err) => {
@@ -200,7 +208,13 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       model: modelId,
       providerOverride: providerId,
     })
-    if (isTauri()) {
+    // Host truth, not webview kind: a paired phone or browser reaches the
+    // host's sidecar over the companion transport (`claude_session_control` is
+    // an `execution`-target command), and the headless brain owns one outright.
+    // Gating on `isTauri()` here left every companion with a persisted override
+    // that only took effect on the NEXT session, while the running one kept the
+    // old model with no word about it.
+    if (agentHostAvailable(resolveAgentExecutionEnvironment())) {
       if (providerId === prevProvider) {
         // Same provider, model-only change → live in-place switch driving the
         // running session's `setModel` so the next turn uses the new model
@@ -246,7 +260,9 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       model: "auto",
       providerOverride: undefined,
     })
-    if (isTauri()) {
+    // Same host question as the live switch above: the runtime to reset lives
+    // wherever the sidecar does, which a companion reaches remotely.
+    if (agentHostAvailable(resolveAgentExecutionEnvironment())) {
       const reset =
         scope?.sessionId === session.id && scope.resetRuntime
           ? scope.resetRuntime()
@@ -254,6 +270,23 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       void reset.catch(() => undefined)
     }
   }
+
+  const refreshAgentModelsButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 gap-1.5 px-2 text-xs"
+      disabled={agentModels.loading}
+      onClick={agentModels.refresh}
+      aria-label={t("refreshAgentModels")}
+    >
+      <RefreshCw
+        className={cn("size-3", agentModels.loading && "animate-spin motion-reduce:animate-none")}
+      />
+      {t("refreshAgentModels")}
+    </Button>
+  )
 
   // Between sessions this used to render a plain `<span>`: a label that looked
   // like the chip and could not be opened. The model it named was the app
@@ -266,8 +299,25 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       provider={activeProvider}
       onSelect={handleSelect}
       onSelectAuto={handleSelectAuto}
-      leadingGroups={agentGroups}
-      leadingNotice={agentNotice}
+      leadingGroups={agentGroups.map((group) => ({
+        ...group,
+        headingAction: refreshAgentModelsButton,
+      }))}
+      leadingNotice={
+        agentModels.agentId && (agentGroups.length === 0 || agentNotice) ? (
+          <span className="flex flex-col gap-1" aria-live="polite">
+            {agentGroups.length === 0 ? (
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-medium text-foreground">
+                  {agentName ?? t("agentModelsGroup")}
+                </span>
+                {refreshAgentModelsButton}
+              </span>
+            ) : null}
+            {agentNotice ? <span>{agentNotice}</span> : null}
+          </span>
+        ) : null
+      }
       // The agent opens its session on the first turn, and nothing in any store
       // announces it. Without this the hook's one resolve, taken before that
       // turn, leaves the picker on "nothing open" for good.

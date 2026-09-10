@@ -95,6 +95,24 @@ export function subscribeRemoteExternalRun(
   })
 }
 
+/**
+ * Resolve once the host has acknowledged our subscription to the run topic.
+ *
+ * `external-agent://session-event` is `default_on: false` on the companion
+ * plane: the host delivers nothing on it until it has acknowledged a
+ * `subscribe` control frame, and that frame is dropped while the socket is
+ * still opening. `subscribeRemoteExternalRun` is synchronous, so a caller that
+ * subscribed and immediately started the turn could lose the opening frames
+ * (reported as a gap) or, on a cold socket, the terminal frame too, in which
+ * case the turn never settled. Transports without the control frame (Tauri,
+ * the CLI stdio bridge) resolve immediately.
+ */
+export async function whenRemoteRunChannelSubscribed(): Promise<void> {
+  const ready = (transport as { whenSubscribed?: (channels: readonly string[]) => Promise<void> })
+    .whenSubscribed
+  if (typeof ready === "function") await ready.call(transport, [EXTERNAL_RUN_EVENT_TOPIC])
+}
+
 export async function startRemoteExternalTurn(input: {
   runId: string
   chatSessionId: string

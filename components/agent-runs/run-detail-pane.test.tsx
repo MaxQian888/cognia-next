@@ -84,6 +84,14 @@ beforeEach(() => {
 })
 
 describe("RunDetailPane", () => {
+  it("links a mirrored run to its conversation without requiring an IM binding", () => {
+    render(<RunDetailPane row={row({ sessionId: "chat-a" })} actions={makeActions()} />)
+    expect(screen.getByRole("link", { name: "actions.openConversation" })).toHaveAttribute(
+      "href",
+      "/?session=chat-a"
+    )
+  })
+
   it("renders a control button for every allowed verb and none besides", () => {
     render(
       <RunDetailPane row={row({ allowedActions: ["pause", "stop"] })} actions={makeActions()} />

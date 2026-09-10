@@ -107,7 +107,11 @@ import {
   adaptPermissionMode,
   supportedPermissionModes,
 } from "@/lib/ai/agent/external/permission-modes"
-import { extensionPolicyArgs, type PiExtensionPolicy } from "@/lib/ai/agent/external/pi-rpc-client"
+import {
+  extensionPolicyArgs,
+  resolvePiExtensionPolicy,
+  type PiExtensionPolicy,
+} from "@/lib/ai/agent/external/pi-rpc-client"
 import type { AcpPreviewFeature } from "@/lib/ai/agent/external/acp-feature-profile"
 import type {
   ExternalAgentConnectionStatus,
@@ -176,9 +180,8 @@ interface AgentFormData {
   // Pi native RPC options (shown only for protocol === "pi-rpc")
   /**
    * How much of the user's own Pi installation loads inside a Cognia session.
-   * Defaults to `isolated` because community permission extensions also hook
-   * `tool_call`, and two engines intercepting one call produce double prompts
-   * and unpredictable blocking.
+   * Defaults to global extensions so installed provider plugins supply the
+   * same models as Pi itself. Project-local extensions still require trust.
    */
   piExtensionPolicy: PiExtensionPolicy
 }
@@ -242,11 +245,11 @@ const DEFAULT_FORM_DATA: AgentFormData = {
   opencodeServerPassword: "",
   opencodeServerUsername: "",
   opencodeModel: "",
-  piExtensionPolicy: "isolated",
+  piExtensionPolicy: "global",
 }
 
 /**
- * Read the Pi extension policy off `metadata`, defaulting to the safe end.
+ * Read the same policy used by the session and catalog probe.
  *
  * An unrecognised stored value falls back to `isolated` rather than being
  * trusted: a typo must not silently load the user's whole Pi extension stack
@@ -255,8 +258,7 @@ const DEFAULT_FORM_DATA: AgentFormData = {
 function piExtensionPolicyFromMetadata(
   metadata: Record<string, unknown> | undefined
 ): PiExtensionPolicy {
-  const value = metadata?.piExtensionPolicy
-  return value === "global" || value === "trusted-project" ? value : "isolated"
+  return resolvePiExtensionPolicy(metadata?.piExtensionPolicy)
 }
 
 /** Pull the OpenCode form fields out of an agent/preset `metadata` bag. */

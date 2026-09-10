@@ -10,8 +10,10 @@
  *   - `move`          → `moveIssue` through the SAME guard the desktop board
  *                       uses (`lib/issues/state-machine.ts`); a denial is
  *                       replied, never silently dropped.
- *   - `run`           → `startIssueRun` with `origin: "im"` (headless gate
- *                       policy) on the first engine that can run it.
+ *   - `run`           → `startIssueRun` with `origin: "im"` and the thread
+ *                       itself, on the first engine that can run it. The
+ *                       thread is what lets a Squad ask for plan approval
+ *                       here instead of failing its gate as unattended.
  *   - `create`        → file the draft into the chosen project, remember the
  *                       project on the conversation (`issueProjectId`), reply
  *                       with the new issue's card, and consume the
@@ -295,6 +297,11 @@ export async function handleIssueActionCallback(
           adapterId: first.adapter.id,
           by,
           origin: "im",
+          conversation: {
+            adapterId: input.adapterId,
+            conversationKey,
+            ...(input.user?.remoteUserId ? { initiatorUserId: input.user.remoteUserId } : {}),
+          },
         })
       } catch (error) {
         if (error instanceof IssueRunRefusedError) {

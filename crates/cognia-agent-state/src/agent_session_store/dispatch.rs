@@ -30,22 +30,21 @@ pub fn configure_path(path: PathBuf) {
 }
 
 fn store() -> Result<Arc<SessionStore>, String> {
-    if let Some(existing) = STORE.get() {
-        return Ok(Arc::clone(existing));
-    }
-    let path = STORE_PATH
-        .get()
+    STORE
+        .get_or_try_init(|| {
+            let path = STORE_PATH.get().ok_or_else(|| {
+                "sessionStore: no database path configured on this host".to_string()
+            })?;
+            let opened = SessionStore::open(path)?;
+            // Retention runs once per process on first use rather than on a timer: the
+            // store is only ever touched by an active agent session, so a scheduled
+            // sweep would either fire on an idle app or never fire at all.
+            if let Err(e) = opened.prune(DEFAULT_RETENTION_DAYS) {
+                log::warn!("sessionStore: retention sweep failed: {e}");
+            }
+            Ok(opened)
+        })
         .cloned()
-        .ok_or_else(|| "sessionStore: no database path configured on this host".to_string())?;
-    let opened = SessionStore::open(&path)?;
-    // Retention runs once per process on first use rather than on a timer: the
-    // store is only ever touched by an active agent session, so a scheduled
-    // sweep would either fire on an idle app or never fire at all.
-    if let Err(e) = opened.prune(DEFAULT_RETENTION_DAYS) {
-        log::warn!("sessionStore: retention sweep failed: {e}");
-    }
-    let _ = STORE.set(Arc::clone(&opened));
-    Ok(opened)
 }
 
 /// `pub` across the crate boundary (ADR-0067): its only caller is the
@@ -218,6 +217,51 @@ mod tests {
             "key": { "projectKey": "proj", "sessionId": session },
             "scope": { "tenant": "t", "workspace": "w" },
         })
+    }
+
+    #[test]
+    fn first_open_retries_failures_and_shares_one_store_across_threads() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        // This is the only test using the process-global store. Keep retry and
+        // concurrent initialization together so no global reset is necessary.
+        let dir = std::env::temp_dir().join(format!(
+            "cognia-store-init-{}-{}",
+            std::process::id(),
+            super::super::now_ms()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let parent = dir.join("parent");
+        std::fs::write(&parent, "blocked").unwrap();
+        configure_path(parent.join("store.sqlite"));
+        assert!(configured_store().is_err());
+        assert!(STORE.get().is_none(), "a failed open must remain retryable");
+        std::fs::remove_file(&parent).unwrap();
+
+        let barrier = Arc::new(Barrier::new(16));
+        let workers: Vec<_> = (0..16)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    configured_store()
+                })
+            })
+            .collect();
+        let stores: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap().expect("retry must open the store"))
+            .collect();
+        let cached = STORE.get().expect("initialized cache");
+        assert!(
+            stores.iter().all(|opened| Arc::ptr_eq(opened, cached)),
+            "every concurrent caller must use the cached connection and mutex"
+        );
+        assert!(Arc::ptr_eq(&configured_store().unwrap(), cached));
+        // STORE keeps its connection until process exit; Windows may therefore
+        // keep the fixture files open and prevent immediate cleanup.
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

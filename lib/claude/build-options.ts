@@ -1226,10 +1226,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // persona declares one (D1). Explicit `/model` and per-session choices
   // still win. Alias-valued defaults resolve through the alias engine below
   // like every other source.
+  const defaultModelBelongsToAgent = isExternalAgentProviderId(appSettings?.defaultProvider)
+  const defaultModelMatchesAgent =
+    externalAgentIdFromProviderId(appSettings?.defaultProvider) === ctx.externalRuntimeId &&
+    Boolean(ctx.externalRuntimeId)
   const agentModel = resolveAgentModel(
     ctx.modelRole ?? "execute",
     character,
-    appSettings?.defaultModel
+    defaultModelBelongsToAgent && !defaultModelMatchesAgent ? undefined : appSettings?.defaultModel
   )
   // A model picked from an external agent's OWN list is stamped with the
   // reserved provider id, because it is the agent's vocabulary rather than any
@@ -1265,7 +1269,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     sessionProviderOverride ??
     imDefaultProvider ??
     character?.providerId ??
-    appSettings?.defaultProvider ??
+    (defaultModelBelongsToAgent ? undefined : appSettings?.defaultProvider) ??
     "anthropic"
   const requestedEffort =
     imOverrideRow?.reasoningOverride ??
@@ -4527,10 +4531,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
     const { resolveAgentExecutionSpec, sendSpecFromResolved } =
       await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
-    const { isTauri } = await import("@/lib/tauri")
+    const { resolveAgentExecutionEnvironment } =
+      await import("@/lib/ai/agent/execution/host-environment")
     const { spec } = resolveAgentExecutionSpec({
       surface: "chat",
-      environment: { isTauri: isTauri(), isHeadlessHost: false },
+      // Host profile, not `isTauri()`: the spec's `hostRef` and fingerprint
+      // otherwise labelled every headless and companion turn "web-renderer".
+      environment: resolveAgentExecutionEnvironment(),
       flags: getAgentExecutionFlags(),
       // Chat sessions are agent sessions by definition; the legacy
       // provider id still drives the runtime mapping.
@@ -4601,8 +4608,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
     }
     ctx.onResolvedExecutionSpec?.(spec)
-  } catch {
-    // Never fail the send over spec stamping.
+  } catch (err) {
+    // Never fail the send over spec stamping. But never hide it either: with
+    // no `execution` on the wire the sidecar takes the legacy provider branch,
+    // no `agent://message` envelopes are emitted and the execution handle has
+    // nothing to bind to, so the `legacy_dispatch` counter needs a cause.
+    console.warn("execution spec stamping failed; sending on the legacy path", err)
   }
 
   // Trust proof is host-owned and stamped after plugin option transforms, so a

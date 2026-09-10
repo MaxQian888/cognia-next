@@ -9,7 +9,7 @@ import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
-import { isTauri } from "@/lib/tauri"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 import { useSettingsStore } from "@/stores/settings"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import enMessages from "@/i18n/messages/en.json"
@@ -23,13 +23,15 @@ jest.mock("@/lib/db/sessions", () => ({
 
 const mockedUpdateSession = updateSession as unknown as jest.Mock
 
-// Live-switch deps. Defaults: web mode (isTauri false) so the existing
-// rendering tests never trip the live path; the live-switch suite flips it on.
-jest.mock("@/lib/tauri", () => {
-  const actual = jest.requireActual("@/lib/tauri")
-  return { ...actual, isTauri: jest.fn(() => false) }
+// Live-switch deps. The live path is gated on the HOST PROFILE (a shell that
+// has a sidecar of its own or is paired to one), not on the webview kind.
+// Defaults: a standalone browser, so the existing rendering tests never trip
+// the live path; the live-switch suite picks the profile per test.
+jest.mock("@/lib/platform/capabilities", () => {
+  const actual = jest.requireActual("@/lib/platform/capabilities")
+  return { ...actual, detectHostProfile: jest.fn(() => "web-standalone") }
 })
-const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+const mockHostProfile = detectHostProfile as jest.MockedFunction<typeof detectHostProfile>
 const mockSetSessionModel = jest.fn(async (..._a: unknown[]) => undefined)
 const mockCloseSession = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/claude/ipc", () => {
@@ -598,7 +600,7 @@ describe("explicit Auto routing selection", () => {
   beforeEach(() => {
     mockedUpdateSession.mockClear()
     mockCloseSession.mockClear()
-    mockIsTauri.mockReturnValue(false)
+    mockHostProfile.mockReturnValue("web-standalone")
   })
 
   afterEach(() => {
@@ -655,7 +657,7 @@ describe("explicit Auto routing selection", () => {
 
   it("closes the live desktop session after selecting Auto and swallows close failures", () => {
     const save = jest.fn(async () => undefined)
-    mockIsTauri.mockReturnValue(true)
+    mockHostProfile.mockReturnValue("desktop")
     mockCloseSession.mockRejectedValueOnce(new Error("already closed"))
     useSettingsStore.setState({ settings: { autoRouting: { enabled: false } } as never, save })
     renderPicker()
@@ -713,7 +715,7 @@ describe("live model switch", () => {
     mockedUpdateSession.mockClear()
     mockSetSessionModel.mockClear()
     mockCloseSession.mockClear()
-    mockIsTauri.mockReturnValue(true)
+    mockHostProfile.mockReturnValue("desktop")
     // Two enabled built-ins so the list offers an off-provider (openai) row too.
     act(() => {
       useSettingsStore.setState({
@@ -730,7 +732,7 @@ describe("live model switch", () => {
   })
 
   afterEach(() => {
-    mockIsTauri.mockReturnValue(false)
+    mockHostProfile.mockReturnValue("web-standalone")
     act(() => {
       useSettingsStore.setState({ settings: undefined as never })
     })
@@ -804,8 +806,8 @@ describe("live model switch", () => {
     expect(mockCloseSession).not.toHaveBeenCalled()
   })
 
-  it("skips the live call in web mode", () => {
-    mockIsTauri.mockReturnValue(false)
+  it("skips the live call in a standalone browser, which has no sidecar to drive", () => {
+    mockHostProfile.mockReturnValue("web-standalone")
     const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
     if (!target) return
     renderPicker(anthropicSession)
@@ -813,6 +815,25 @@ describe("live model switch", () => {
     fireEvent.click(screen.getAllByText(target)[0])
     expect(mockSetSessionModel).not.toHaveBeenCalled()
   })
+
+  it.each(["mobile-companion", "cloud-companion", "headless"] as const)(
+    "drives the live setModel from a %s shell, whose host owns or reaches the sidecar",
+    async (profile) => {
+      // The regression: `isTauri()` gated this call, so a paired phone wrote
+      // the override to the session row and the RUNNING session kept the old
+      // model. `claude_session_control` is an execution-target command now,
+      // and the picker asks the host profile instead of the webview kind.
+      mockHostProfile.mockReturnValue(profile)
+      const target = PROVIDERS.anthropic.models.find((m) => m.id !== anthropicSession.model)?.id
+      if (!target) return
+      renderPicker(anthropicSession)
+      fireEvent.click(screen.getByRole("button"))
+      fireEvent.click(screen.getAllByText(target)[0])
+      expect(mockSetSessionModel).toHaveBeenCalledWith(anthropicSession.id, target)
+      expect(mockCloseSession).not.toHaveBeenCalled()
+      await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    }
+  )
 })
 
 describe("an external agent's own models", () => {
@@ -880,14 +901,15 @@ describe("an external agent's own models", () => {
       expect(screen.getByText(/is not connected/i)).toBeInTheDocument()
     })
 
-    it("separates connected-with-nothing-open from offline", () => {
+    it("offers refresh before a session exists", () => {
       mockAgentModels.externalSessionId = null
       act(() => {
         useExternalAgentStore.setState({ connectionStatus: { "pi-1": "connected" } })
       })
       renderPicker()
       fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
-      expect(screen.getByText(/nothing open/i)).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /refresh models/i })).toBeEnabled()
+      expect(screen.queryByText(/first turn/i)).not.toBeInTheDocument()
     })
 
     it("says the agent reported none only when it was actually asked", () => {
@@ -924,6 +946,31 @@ describe("an external agent's own models", () => {
     expect(mockAgentModels.refresh).toHaveBeenCalled()
   })
 
+  it("refreshes models inside the open list and prevents duplicate refresh while loading", () => {
+    const { rerender } = renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    mockAgentModels.refresh.mockClear()
+    fireEvent.click(screen.getByRole("button", { name: /refresh models/i }))
+    expect(mockAgentModels.refresh).toHaveBeenCalledTimes(1)
+    mockAgentModels.loading = true
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={session} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByRole("button", { name: /refresh models/i })).toBeDisabled()
+    mockAgentModels.loading = false
+  })
+
+  it("reports model discovery failures with a retry control", () => {
+    mockAgentModels.surface = null
+    mockAgentModels.status = "error"
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByText(/could not load models/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /refresh models/i })).toBeEnabled()
+  })
+
   it("shows the agent's current model on the trigger, because that is what runs", () => {
     renderPicker()
     expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
@@ -949,6 +996,25 @@ describe("an external agent's own models", () => {
     // for an agent that accepts one, so the agent's list leads rather than
     // replacing the providers.
     expect(anthropicIndex).toBeGreaterThan(agentIndex)
+  })
+
+  it("persists a welcome-screen plugin model for the first conversation", async () => {
+    const previousSave = useSettingsStore.getState().save
+    const save = jest.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({ save })
+    try {
+      renderPicker(null)
+      fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+      fireEvent.click(screen.getByText("Agent GPT"))
+      await waitFor(() =>
+        expect(save).toHaveBeenCalledWith({
+          defaultModel: "openai/agent-gpt",
+          defaultProvider: externalAgentProviderId("pi-1"),
+        })
+      )
+    } finally {
+      useSettingsStore.setState({ save: previousSave })
+    }
   })
 
   it("routes a pick of an agent model to the agent, not to a session override alone", async () => {

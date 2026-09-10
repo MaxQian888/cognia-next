@@ -226,7 +226,15 @@ export interface RunActivitySnapshot {
   endedAt?: number
 }
 
+export interface RunWorkflowGraph {
+  workflowId: string
+  sourceRunId: string
+  nodes: RunStepSnapshot[]
+  edges: Array<{ source: string; target: string }>
+}
+
 export interface RunProjectionSnapshot {
+  workflowGraph?: RunWorkflowGraph
   runId: string
   kind: ExecutionRunKind
   title: string

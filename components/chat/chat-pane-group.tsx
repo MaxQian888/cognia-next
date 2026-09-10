@@ -78,6 +78,7 @@ export interface ChatPaneGroupProps {
   composerRef?: Ref<ComposerHandle>
   /** Disable every pane composer without hiding cached conversation data. */
   composerDisabled?: boolean
+  runtimeNotice?: ReactNode
   mobileMentionMembers?: readonly Character[]
   /** Per-session plan-approval resume (switch mode + send the resume turn). */
   onResumeAfterPlanApproval?: (
@@ -175,6 +176,7 @@ export function ChatPaneGroup({
   onResumeSession,
   composerRef,
   composerDisabled,
+  runtimeNotice,
   mobileMentionMembers,
   onResumeAfterPlanApproval,
 }: ChatPaneGroupProps) {
@@ -246,6 +248,7 @@ export function ChatPaneGroup({
         onResumeSession={onResumeSession}
         composerRef={withComposerRef ? composerRef : undefined}
         composerDisabled={composerDisabled}
+        runtimeNotice={runtimeNotice}
         mobileMentionMembers={mobileMentionMembers}
         onResumeAfterPlanApproval={
           onResumeAfterPlanApproval && sessionId

@@ -11,12 +11,18 @@
  * command list is init-captured and can shift mid-session (e.g. after /compact
  * or dynamic skill discovery), so it re-fetches on each completed turn.
  *
- * Returns `null` lists when unavailable (web, non-Anthropic, no open session).
+ * Returns `null` lists when unavailable (a standalone browser with no host,
+ * non-Anthropic, no open session). The host question is the host profile, not
+ * the webview kind: a paired phone or browser drives `claude_session_control`
+ * on the host's sidecar over the companion transport.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { isTauri } from "@/lib/tauri"
+import {
+  agentHostAvailable,
+  resolveAgentExecutionEnvironment,
+} from "@/lib/ai/agent/execution/host-environment"
 import {
   getSessionSupportedCommands,
   getSessionSupportedModels,
@@ -41,7 +47,10 @@ export function useSdkSessionCapabilities(
   const [models, setModels] = useState<SdkModelInfo[] | null>(null)
   const [commands, setCommands] = useState<SdkSlashCommand[] | null>(null)
 
-  const enabled = isTauri() && !!sessionId && (providerId ?? "anthropic") === "anthropic"
+  const enabled =
+    agentHostAvailable(resolveAgentExecutionEnvironment()) &&
+    !!sessionId &&
+    (providerId ?? "anthropic") === "anthropic"
 
   const refresh = useCallback(() => {
     if (!enabled || !sessionId) return

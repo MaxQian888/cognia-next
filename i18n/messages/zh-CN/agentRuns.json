@@ -7,7 +7,8 @@
     "retry": "重试",
     "steer": "介入",
     "steerPlaceholder": "不中断运行，直接给出新的指示…",
-    "stop": "停止"
+    "stop": "停止",
+    "openConversation": "查看对话记录"
   },
   "activityCategory": {
     "approval": "审批",

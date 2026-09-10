@@ -281,6 +281,18 @@ pub fn execution_spec_is_acceptable(execution: &Value) -> bool {
         .is_some_and(|s| !s.is_empty())
 }
 
+/// The one adapter family the Node sidecar does not serve. External agents
+/// (ACP, Codex app-server, OpenCode, Pi, A2A, ...) run behind
+/// `ExternalAgentManager` with their own process and transport boundary; the
+/// sidecar's dispatcher throws on this id by design, so a send that carries it
+/// must be refused HERE, before it reaches a process that would die on it.
+pub fn execution_spec_names_external_runtime(execution: &Value) -> bool {
+    execution
+        .get("runtimeAdapter")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s == "external")
+}
+
 /// Canonical send. Requires a well-formed `options.execution` spec when one
 /// is present (deep validation stays renderer-side; this guards skew).
 #[tauri::command]
@@ -297,6 +309,13 @@ pub async fn agent_send(
             if !execution_spec_is_acceptable(execution) {
                 return Err(
                     "agent_send: malformed execution spec (specVersion/runtimeAdapter)".into(),
+                );
+            }
+            if execution_spec_names_external_runtime(execution) {
+                return Err(
+                    "agent_send: runtimeAdapter \"external\" is not served by the built-in \
+                     sidecar; route this session through the external agent manager"
+                        .into(),
                 );
             }
         }
@@ -845,6 +864,23 @@ pub async fn claude_session_control(
     command_id: Option<String>,
 ) -> Result<(), String> {
     bump_deprecated("claude_session_control");
+    claude_session_control_impl(&state, session_id, request_id, method, params, command_id).await
+}
+
+/// The body behind [`claude_session_control`], shared with the companion RPC
+/// arm so a paired phone drives the same allowlist and the same stdin frame
+/// as the desktop webview (`rpc/chat.rs`). The `control_response` the sidecar
+/// answers with rides `claude://message`, which every host publishes to the
+/// companion event bus, so the round-trip closes remotely without any extra
+/// plumbing here.
+pub async fn claude_session_control_impl(
+    state: &SidecarState,
+    session_id: String,
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+    command_id: Option<String>,
+) -> Result<(), String> {
     if !is_allowed_control_method(&method) {
         return Err(format!("unsupported control method: {method}"));
     }
@@ -911,13 +947,37 @@ pub async fn agent_session_api(
     params: Option<Value>,
     send_options: Option<Value>,
 ) -> Result<(), String> {
+    agent_session_api_impl(
+        Arc::new(TauriSidecarHost(app)),
+        state.inner().clone(),
+        request_id,
+        method,
+        params,
+        send_options,
+    )
+    .await
+}
+
+/// The body behind [`agent_session_api`], shared with the companion RPC arm.
+/// `host` names the sidecar supervisor for whichever process serves the call
+/// (the Tauri app or `cognia-server`'s registry), exactly as
+/// [`claude_send_with_host_and_id`] takes it, so the cold-start spawn works
+/// on both.
+pub async fn agent_session_api_impl(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+    request_id: String,
+    method: String,
+    params: Option<Value>,
+    send_options: Option<Value>,
+) -> Result<(), String> {
     if request_id.is_empty() {
         return Err("agent_session_api: requestId must not be empty".into());
     }
     if !is_allowed_session_api_method(&method) {
         return Err(format!("unsupported session api method: {method}"));
     }
-    spawn_sidecar(Arc::new(TauriSidecarHost(app)), state.inner().clone()).await?;
+    spawn_sidecar(host, state.clone()).await?;
     let payload = build_session_api_payload(request_id, method, params, send_options);
     state.write_command(&payload).await
 }
@@ -1585,6 +1645,25 @@ mod tests {
             "runtimeAdapter": "claude-agent-sdk",
         });
         assert!(!execution_spec_is_acceptable(&spec));
+    }
+
+    #[test]
+    fn an_external_runtime_adapter_is_well_formed_but_not_served_here() {
+        // Well-formed (the renderer can legitimately resolve it) ...
+        let spec = json!({ "specVersion": 2, "runtimeAdapter": "external" });
+        assert!(execution_spec_is_acceptable(&spec));
+        // ... but it names the one family the sidecar refuses by throwing, so
+        // `agent_send` must turn it away before the process sees it.
+        assert!(execution_spec_names_external_runtime(&spec));
+        assert!(!execution_spec_names_external_runtime(
+            &json!({ "specVersion": 2, "runtimeAdapter": "claude-agent-sdk" })
+        ));
+        assert!(!execution_spec_names_external_runtime(
+            &json!({ "specVersion": 2, "runtimeAdapter": "ai-sdk" })
+        ));
+        assert!(!execution_spec_names_external_runtime(
+            &json!({ "specVersion": 2 })
+        ));
     }
 
     #[test]

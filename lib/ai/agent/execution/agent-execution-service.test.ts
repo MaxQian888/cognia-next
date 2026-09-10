@@ -470,3 +470,16 @@ describe("execution-handle path is live (CLAUDE.md working rule 7)", () => {
     expect(callers).toContain("cli/src/tui/hooks/useAgentSession.tsx")
   })
 })
+
+it("treats a paired companion host as a real host: the rail runs on the host's sidecar", async () => {
+  // A phone or browser paired to a Host reaches `agent_send` over the companion
+  // transport. Before `pairedHost` existed this environment was a host-less
+  // web renderer and the turn silently ran as a tool-less completion.
+  await executeAgentTurn(
+    "p",
+    { toolsEnabled: true },
+    { isTauri: false, isHeadlessHost: false, pairedHost: true }
+  )
+  expect(agentRail).toHaveBeenCalledTimes(1)
+  expect(completionRail).not.toHaveBeenCalled()
+})

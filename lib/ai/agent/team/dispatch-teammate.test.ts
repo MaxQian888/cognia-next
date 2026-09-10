@@ -17,6 +17,12 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 // ── Module mocks ────────────────────────────────────────────────────────────
 const isTauriMock = jest.fn<boolean, []>(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
+// Dispatch derives its environment from the host profile; key it to the same
+// switch so "sidecar available" still means one mock flip.
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () => (isTauriMock() ? "desktop" : "web-standalone"),
+}))
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: {

@@ -490,7 +490,9 @@
       "routingGroup": "Routing",
       "searchPlaceholder": "Search models…",
       "switchModelAria": "Switch model",
-      "title": "Select a model"
+      "title": "Select a model",
+      "refreshAgentModels": "Refresh models",
+      "agentModelsFailed": "Could not load models from {agent}. Try refreshing again."
     },
     "paramForm": {
       "cancel": "Cancel",

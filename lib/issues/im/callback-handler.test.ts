@@ -240,7 +240,12 @@ describe("handleIssueActionCallback", () => {
       deps
     )
     expect(out).toMatchObject({ kind: "run_started", adapterId: "fake" })
-    expect(starts[0]).toMatchObject({ origin: "im", by: { kind: "human", id: "u1" } })
+    expect(starts[0]).toMatchObject({
+      origin: "im",
+      by: { kind: "human", id: "u1" },
+      // The thread rides along so a Squad engine can raise its plan gate here.
+      conversation: { adapterId: "lark-1", conversationKey: CONV, initiatorUserId: "u1" },
+    })
     expect((await getIssue(issue.id))!.status).toBe("in_progress")
     expect(sent).toEqual([{ text: "▶ MERC-1 dispatched to fake" }, { card: true }])
 

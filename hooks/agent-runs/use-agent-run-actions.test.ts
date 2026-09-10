@@ -19,6 +19,10 @@ let hostProfile = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useHostProfile: () => hostProfile,
 }))
+let remoteHostActive = false
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => remoteHostActive,
+}))
 const transportCall = jest.fn()
 jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: { call: (...args: unknown[]) => transportCall(...args) },
@@ -78,6 +82,38 @@ beforeEach(() => {
   getExecutionRun.mockReset()
   executeRunControlCommand.mockReset()
   executeRunControlCommand.mockResolvedValue({ accepted: true, currentRevision: 8 })
+})
+
+describe("useRunControlActions on a desktop driving a remote host", () => {
+  beforeEach(() => {
+    hostProfile = "desktop"
+    remoteHostActive = true
+    getExecutionRun.mockReset()
+    executeRunControlCommand.mockReset()
+    transportCall.mockReset()
+  })
+  afterEach(() => {
+    remoteHostActive = false
+  })
+
+  it("sends the control to the host that is running the turn instead of the local journal", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({}, ["pause", "stop", "open_details"]))
+    transportCall.mockResolvedValue({ accepted: true, currentRevision: 8 })
+    const { result } = renderHook(() => useRunControlActions())
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.dispatch(
+        row({ allowedActions: ["pause", "stop", "open_details"] }),
+        "pause"
+      )
+    })
+    expect(outcome).toEqual({ accepted: true })
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
+    expect(transportCall).toHaveBeenCalledWith(
+      "execution_run_control",
+      expect.objectContaining({ runId: "run-1", action: "pause" })
+    )
+  })
 })
 
 describe("useRunControlActions on a companion", () => {

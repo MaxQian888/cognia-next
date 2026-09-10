@@ -11,6 +11,7 @@
 
 import { interpolateEnvelopeTemplate } from "@/lib/bot/events/envelope"
 import type { SendOptions } from "@cognia/agent-config-types"
+import type { PluginAgentTurnResult } from "@cognia/plugin-sdk/api/agent-turn"
 
 import { BotExecutorUnavailableError, type BotExecutorContext, type BotExecutorFn } from "./types"
 
@@ -22,7 +23,10 @@ export interface AgentTurnExecutorDeps {
     signal?: AbortSignal
     timeoutMs?: number
     permissionMode?: SendOptions["permissionMode"]
-  }) => Promise<{ sessionId: string; text: string }>
+  }) => Promise<
+    Pick<PluginAgentTurnResult, "sessionId" | "text"> &
+      Partial<Pick<PluginAgentTurnResult, "status" | "needsApproval">>
+  >
 }
 
 /** The prompt a turn is given, with placeholders resolved from the envelope. */
@@ -81,7 +85,24 @@ export function createAgentTurnBotExecutor(deps: AgentTurnExecutorDeps = {}): Bo
       })
     )
 
-    return { summary: result.text.slice(0, 200), output: { sessionId: result.sessionId } }
+    // A denied tool is not a completed job. Say so in the run list and keep
+    // the denials on the output so a later step (or a human) can act on them.
+    if (result.status === "needs_approval") {
+      const tools = [...new Set((result.needsApproval ?? []).map((denial) => denial.toolName))]
+      return {
+        summary: `needs approval: ${tools.join(", ")}`,
+        output: {
+          sessionId: result.sessionId,
+          status: result.status,
+          needsApproval: result.needsApproval ?? [],
+          text: result.text,
+        },
+      }
+    }
+    return {
+      summary: result.text.slice(0, 200),
+      output: { sessionId: result.sessionId, status: result.status ?? "completed" },
+    }
   }
 }
 

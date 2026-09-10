@@ -6430,6 +6430,17 @@ describe("resolveSendOptions — Agent profile routing and execution policy", ()
 })
 
 describe("resolveSendOptions — a model that belongs to an external agent", () => {
+  it("uses a welcome-screen agent model only for its owner and strips the provider marker", async () => {
+    const settings = {
+      defaultModel: "plugin/custom-model",
+      defaultProvider: externalAgentProviderId("pi-1"),
+    }
+    for (const externalRuntimeId of [undefined, "pi-1", "other-agent"]) {
+      const opts = await resolveSendOptions({ appSettings: settings as never, externalRuntimeId })
+      expect(opts.model === "plugin/custom-model").toBe(externalRuntimeId === "pi-1")
+      expect(opts.provider).not.toBe(settings.defaultProvider)
+    }
+  })
   const agentSession = () =>
     makeSession({
       id: "ses_ext",

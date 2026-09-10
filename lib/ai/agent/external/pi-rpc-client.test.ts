@@ -17,6 +17,7 @@ import {
   type PiExtensionVerdict,
   clampThinkingLevel,
   extensionPolicyArgs,
+  resolvePiExtensionPolicy,
   piHandshakeTimeoutMs,
   PI_EXTENSION_HANDSHAKE_TIMEOUT_MS,
   PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS,
@@ -477,6 +478,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
 }
 
 const config: ExternalAgentConfig = {
+  metadata: { piExtensionPolicy: "isolated" },
   id: "agent-1",
   name: "Pi",
   protocol: "pi-rpc",
@@ -533,6 +535,32 @@ async function connected(host: FakeHost, version = PI_CERTIFIED_VERSION) {
 }
 
 describe("credential diagnostics", () => {
+  it("loads plugin models in both catalog discovery and sessions without a saved isolation policy", async () => {
+    const host = createFakeHost()
+    const adapter = new PiRpcClientAdapter({ host })
+    const connecting = adapter.connect({ ...config, metadata: undefined })
+    await Promise.resolve()
+    host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+    await connecting
+    const listing = adapter.listAgentModels()
+    await Promise.resolve()
+    const probe = host.spawns.find((spawn) => spawn.args.includes("--list-models"))!
+    expect(probe.args).toEqual(["--list-models", "--no-approve"])
+    host.emitStdoutLines(
+      probe.id,
+      "provider  model  context  max-out  thinking  images\nplugin  custom-model  128K  8K  yes  no\n"
+    )
+    host.emitExit(probe.id, 0)
+    expect(await listing).toMatchObject({
+      status: "ok",
+      models: [{ provider: "plugin", id: "custom-model" }],
+    })
+    await adapter.createSession()
+    const session = host.spawns.find((spawn) => spawn.args.includes("--session-id"))!
+    expect(session.args).not.toContain("--no-extensions")
+    expect(session.args).toContain("--no-approve")
+    await adapter.disconnect()
+  })
   /**
    * Drive one non-RPC probe: wait for its spawn, answer it, and hand back both
    * the adapter's result and the argv it was actually launched with.
@@ -819,7 +847,10 @@ describe("PiRpcClientAdapter — sessions", () => {
 describe("PiRpcClientAdapter — bundled extension", () => {
   const withExtension: ExternalAgentConfig = {
     ...config,
-    metadata: { piExtensionPath: "/opt/cognia/cognia-pi-extension.ts" },
+    metadata: {
+      piExtensionPolicy: "isolated",
+      piExtensionPath: "/opt/cognia/cognia-pi-extension.ts",
+    },
   }
 
   async function connectWithExtension(host: FakeHost) {
@@ -2343,5 +2374,15 @@ describe("Pi session recovery and host defaults", () => {
       "also-undated",
     ])
     expect(listed.at(-1)).toEqual({ sessionId: "also-undated" })
+  })
+})
+
+describe("resolvePiExtensionPolicy", () => {
+  it("loads installed plugins by default and preserves explicit isolation", () => {
+    expect(resolvePiExtensionPolicy(undefined)).toBe("global")
+    expect(extensionPolicyArgs(resolvePiExtensionPolicy(undefined))).toEqual(["--no-approve"])
+    expect(resolvePiExtensionPolicy("isolated")).toBe("isolated")
+    expect(resolvePiExtensionPolicy("trusted-project")).toBe("trusted-project")
+    expect(resolvePiExtensionPolicy("invalid")).toBe("isolated")
   })
 })

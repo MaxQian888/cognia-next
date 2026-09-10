@@ -41,6 +41,7 @@ import {
   type ExternalAgentThinkingSurface,
 } from "@/lib/ai/agent/external/session-models"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 export interface ExternalAgentModels {
   /** The agent this conversation runs on, or `null` on a built-in lane. */
@@ -108,6 +109,9 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
    */
   const hostConfigId = runtimeRef.kind === "host" ? runtimeRef.configId : null
   const agentId = runtimeRef.kind === "external" ? runtimeRef.agentId : hostConfigId
+  const connectionStatus = useExternalAgentStore((state) =>
+    agentId ? state.connectionStatus[agentId] : undefined
+  )
 
   const [externalSessionId, setExternalSessionId] = useState<string | null>(null)
   const [result, setResult] = useState<ModelSurfaceResult | null>(null)
@@ -144,7 +148,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     // No clearing here: the memo below already answers IDLE for a built-in
     // lane, so state left over from a previous agent is unreachable, and
     // clearing it would be a render cascade for a value nothing reads.
-    if (!agentId || !sessionId) return
+    if (!agentId) return
     let cancelled = false
     void (async () => {
       try {
@@ -183,7 +187,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
             return
           }
         }
-        const resolved = await resolveSessionId(agentId, sessionId)
+        const resolved = sessionId ? await resolveSessionId(agentId, sessionId) : null
         if (cancelled) return
         setExternalSessionId(resolved)
         if (!resolved) {
@@ -194,13 +198,13 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
           const cachedCatalog =
             nonce === 0 ? cachedAgentModelSurface(agentId, AGENT_MODEL_CATALOG) : null
           if (cachedCatalog) {
-            setResult(cachedCatalog.status === "ready" ? cachedCatalog : null)
+            setResult(cachedCatalog)
             return
           }
           setLoading(true)
           const catalog = await loadAgentModelCatalog(agentId, { refresh: nonce > 0 })
           if (cancelled) return
-          setResult(catalog.status === "ready" ? catalog : null)
+          setResult(catalog)
           return
         }
         const cached = nonce === 0 ? cachedAgentModelSurface(agentId, resolved) : null
@@ -212,6 +216,14 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
         const next = await loadAgentModelSurface(agentId, resolved, { refresh: nonce > 0 })
         if (cancelled) return
         setResult(next)
+      } catch (cause) {
+        if (!cancelled)
+          setResult({
+            status: "error",
+            surface: EMPTY_MODEL_SURFACE,
+            thinking: EMPTY_THINKING_SURFACE,
+            detail: cause instanceof Error ? cause.message : String(cause),
+          })
       } finally {
         // Every exit this run owns clears the flag, including the two that
         // never raised it. A run abandoned mid-flight leaves it raised, and
@@ -226,7 +238,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     return () => {
       cancelled = true
     }
-  }, [agentId, hostConfigId, sessionId, nonce, planeScope])
+  }, [agentId, hostConfigId, sessionId, nonce, planeScope, connectionStatus])
 
   /**
    * What the shared cache holds right now, derived rather than mirrored.

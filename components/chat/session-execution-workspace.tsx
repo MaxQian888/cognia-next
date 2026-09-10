@@ -128,6 +128,9 @@ function SessionExecutionWorkspaceContent({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const managedBinding = context?.workspaceBinding?.kind === "managed"
   const managedAvailability = context?.managedWorkspace?.availability ?? "missing-on-device"
+  // These legacy file assets use plugin-fs on this device. Registry actions
+  // below use the host transport and remain available to connected browsers.
+  const hasManagedFileAccess = isTauri()
 
   useEffect(() => {
     const taskId = context?.taskWorkspace.taskId
@@ -384,7 +387,12 @@ function SessionExecutionWorkspaceContent({
                 : ""}
             </code>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          {!hasManagedFileAccess && (
+            <p className="text-xs text-muted-foreground" role="status">
+              {t("desktopRequired")}
+            </p>
+          )}
+          <fieldset className="flex flex-wrap gap-1.5" disabled={busy || !hasManagedFileAccess}>
             {managedAvailability === "missing-on-device" && (
               <Button
                 size="sm"
@@ -465,7 +473,7 @@ function SessionExecutionWorkspaceContent({
                 {t("managedAssets.restore")}
               </Button>
             )}
-          </div>
+          </fieldset>
           <p className="text-[10px] text-muted-foreground">
             {t("managedAssets.sessionDeleteNote")}
           </p>

@@ -450,6 +450,39 @@ describe("the session a model surface should describe", () => {
 })
 
 describe("fetchSessionModelSurface (the async twin the sync capabilities could not be)", () => {
+  it("discovers session-scoped models before a prompt and closes the discovery session", async () => {
+    const manager = freshManager()
+    const config = buildBaseConfig()
+    await manager.addAgent(config)
+    currentMock.getSessionModelsImpl = jest.fn().mockReturnValue({
+      currentModelId: "m1",
+      availableModels: [{ modelId: "m1", name: "Model One" }],
+    })
+    const close = jest.spyOn(currentMock, "closeSession")
+    const result = await manager.fetchAgentModelCatalog(config.id)
+    expect(result).toMatchObject({
+      status: "ok",
+      data: {
+        models: {
+          choices: [{ modelId: "m1", name: "Model One" }],
+          write: { kind: "session-seed" },
+        },
+      },
+    })
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(currentMock.sessions.size).toBe(0)
+    expect(manager.getAgent(config.id)?.sessions.size).toBe(0)
+  })
+
+  it("cleans up discovery sessions when model discovery fails", async () => {
+    const manager = freshManager()
+    const config = buildBaseConfig()
+    await manager.addAgent(config)
+    currentMock.getSessionModelsImpl = jest.fn().mockRejectedValue(new Error("catalog offline"))
+    const result = await manager.fetchAgentModelCatalog(config.id)
+    expect(result.status).toBe("error")
+    expect(currentMock.sessions.size).toBe(0)
+  })
   it("reports an agent with neither model source as unsupported", async () => {
     const manager = freshManager()
     await expect(manager.fetchSessionModelSurface("missing", "s")).resolves.toEqual({

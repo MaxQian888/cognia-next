@@ -40,6 +40,21 @@ const mockStartSquadRun = jest.fn(
 )
 jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => mockStartSquadRun(...(args as [])),
+  mintSquadRunId: () => "run_team_minted",
+}))
+// The IM surface: the thread's bound session (none by default) and the plan
+// approval card builder the chat IM lane uses.
+const sessionByKey = jest.fn(async (_key: string): Promise<unknown> => undefined)
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  findSessionByConversationKey: (key: string) => sessionByKey(key),
+}))
+const delegateRequests: unknown[] = []
+const mockMakeDelegate = jest.fn((_ctx: unknown) => async (request: unknown) => {
+  delegateRequests.push(request)
+  return "approve"
+})
+jest.mock("@/lib/connectors/hitl/plan-approval", () => ({
+  makeImPlanApprovalDelegate: (ctx: unknown) => mockMakeDelegate(ctx),
 }))
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   agentTeamManager: { start: (...args: unknown[]) => mockStart(...(args as [])) },
@@ -149,7 +164,7 @@ function run(over: Partial<IssueRun> = {}): IssueRun {
 function makeDeps(over: Partial<AgentTeamRunAdapterDeps> = {}) {
   const created: Parameters<AgentTeamRunAdapterDeps["createTask"]>[0][] = []
   const runs: Parameters<AgentTeamRunAdapterDeps["createRun"]>[0][] = []
-  const starts: Array<[string, string]> = []
+  const starts: Array<[string, string, unknown]> = []
   const aborts: Array<[string, string]> = []
   let startResolve: () => void = () => {}
   const startPromise = new Promise<void>((resolve) => {
@@ -162,8 +177,8 @@ function makeDeps(over: Partial<AgentTeamRunAdapterDeps> = {}) {
       created.push(input)
       return teamTask({ id: "tt-new", title: input.title })
     },
-    startTeam: async (id, origin) => {
-      starts.push([id, origin])
+    startTeam: async (id, origin, _goal, conversation) => {
+      starts.push([id, origin, conversation])
       await startPromise
     },
     abortTeam: (id, reason) => {
@@ -241,7 +256,7 @@ describe("start", () => {
     })
     // start returned before the team run finished
     expect(result.id).toBe("run-new")
-    expect(harness.starts).toEqual([["team-1", "im"]])
+    expect(harness.starts).toEqual([["team-1", "im", undefined]])
     harness.resolveStart()
   })
 
@@ -495,5 +510,101 @@ describe("default deps", () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockAbort).toHaveBeenCalledWith("team-1", expect.any(Error))
     expect(deps.now()).toBeGreaterThan(0)
+  })
+
+  function lastSquadStart(): Record<string, unknown> {
+    const calls = mockStartSquadRun.mock.calls as unknown as Array<[Record<string, unknown>]>
+    return calls[calls.length - 1][0]
+  }
+
+  it("gives an IM-dispatched run the thread to ask on, uncarded when nothing is bound", async () => {
+    await ensureAgentTeamStoreLoaded()
+    const deps = createDefaultAgentTeamRunAdapterDeps()
+    sessionByKey.mockResolvedValueOnce(undefined)
+    delegateRequests.length = 0
+    await deps.startTeam("team-1", "im", "KEY-1: Fix the thing", {
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:oc_1",
+      initiatorUserId: "u1",
+    })
+    const call = lastSquadStart()
+    expect(call).toMatchObject({
+      squadId: "team-1",
+      goal: "KEY-1: Fix the thing",
+      origin: "im",
+      runId: "run_team_minted",
+      triggeredFrom: {
+        source: "im",
+        adapterId: "lark-1",
+        conversationKey: "lark:lark-1:oc_1",
+        initiator: { remoteUserId: "u1" },
+      },
+    })
+    expect(call.session).toBeUndefined()
+    expect(call.bindConnectorRun).toBeUndefined()
+    const delegate = call.planApprovalDelegate as (request: unknown) => Promise<unknown>
+    await expect(delegate({ planText: "plan", revision: 1 })).resolves.toBe("approve")
+    expect(mockMakeDelegate).toHaveBeenLastCalledWith({
+      runId: "run_team_minted",
+      teamId: "team-1",
+      objective: "KEY-1: Fix the thing",
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:oc_1",
+      conversationRef: { platform: "lark", adapterId: "lark-1" },
+      initiatorUserId: "u1",
+    })
+    expect(delegateRequests).toEqual([{ planText: "plan", revision: 1 }])
+  })
+
+  it("cards the run on the thread's bound session and addresses the card with its target", async () => {
+    await ensureAgentTeamStoreLoaded()
+    const deps = createDefaultAgentTeamRunAdapterDeps()
+    const platformBinding = {
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:oc_1",
+      platform: "lark",
+      conversationRef: { platform: "lark", adapterId: "lark-1", chatId: "oc_1" },
+      deliveryTarget: { platform: "lark", adapterId: "lark-1", chatId: "oc_1" },
+    }
+    const session = { id: "s-bound", platformBinding }
+    sessionByKey.mockResolvedValueOnce(session)
+    await deps.startTeam("team-1", "im", "KEY-1: Fix the thing", {
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:oc_1",
+    })
+    const call = lastSquadStart()
+    expect(call).toMatchObject({
+      session,
+      bindConnectorRun: true,
+      triggeredFrom: {
+        source: "im",
+        sessionId: "s-bound",
+        deliveryTarget: platformBinding.deliveryTarget,
+      },
+    })
+    expect(call.triggeredFrom).not.toHaveProperty("initiator")
+    const delegate = call.planApprovalDelegate as (request: unknown) => Promise<unknown>
+    await delegate({ planText: "plan", revision: 2 })
+    expect(mockMakeDelegate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        conversationRef: platformBinding.conversationRef,
+        deliveryTarget: platformBinding.deliveryTarget,
+      })
+    )
+    expect(mockMakeDelegate.mock.calls.at(-1)![0]).not.toHaveProperty("initiatorUserId")
+  })
+
+  it("mints nothing and asks nowhere for a desktop gesture", async () => {
+    await ensureAgentTeamStoreLoaded()
+    const deps = createDefaultAgentTeamRunAdapterDeps()
+    sessionByKey.mockClear()
+    await deps.startTeam("team-1", "interactive", "KEY-1: Fix the thing")
+    expect(lastSquadStart()).toEqual({
+      squadId: "team-1",
+      goal: "KEY-1: Fix the thing",
+      origin: "interactive",
+      triggeredFrom: { source: "ui" },
+    })
+    expect(sessionByKey).not.toHaveBeenCalled()
   })
 })

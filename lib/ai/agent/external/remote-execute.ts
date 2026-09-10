@@ -28,6 +28,7 @@ import {
   cancelRemoteExternalTurn,
   startRemoteExternalTurn,
   subscribeRemoteExternalRun,
+  whenRemoteRunChannelSubscribed,
 } from "./remote-run-client"
 import { remoteDecisionId } from "./remote-run-service"
 
@@ -126,6 +127,9 @@ export async function executeOnRemoteHostAgent(
   })
 
   try {
+    // Subscribed is not the same as delivered: wait for the host to
+    // acknowledge the topic before it has anything to stream on it.
+    await whenRemoteRunChannelSubscribed()
     const started = await startRemoteExternalTurn({
       runId,
       chatSessionId: options.chatSessionId,

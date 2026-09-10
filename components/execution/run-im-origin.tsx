@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl"
 import Link from "next/link"
 
 import { PlatformBadge } from "@/components/inbox/platform-badge"
+import { getDb } from "@/lib/db/schema"
 import { listExecutionRunBindings } from "@/lib/db/execution-runs"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -40,13 +41,31 @@ export function useRunImOrigin(runId: string | undefined) {
         if (!binding.conversationKey) continue
         try {
           const { platform } = parseConversationKey(binding.conversationKey)
+          // Platform IDs are not transcript row IDs. Scope the lookup to the
+          // same session the Inbox route opens, since platform IDs can collide
+          // across adapters and conversations.
+          let sourceMessageId: string | undefined
+          if (binding.sourceMessageId) {
+            const db = getDb()
+            const session = await db.sessions
+              .filter((row) => row.platformBinding?.conversationKey === binding.conversationKey)
+              .first()
+            if (session) {
+              const message = await db.messages
+                .where("platformMessageId")
+                .equals(binding.sourceMessageId)
+                .filter((row) => row.sessionId === session.id)
+                .first()
+              sourceMessageId = message?.id
+            }
+          }
           return {
             conversationKey: binding.conversationKey,
             platform: platform as PlatformKind,
             // The message that started the run, when the binding recorded one.
             // Without it the link lands at the bottom of a thread that may be
             // hundreds of messages past the request being asked about.
-            sourceMessageId: binding.sourceMessageId,
+            sourceMessageId,
           }
         } catch {
           // An unparseable key is a corrupt row, not a reason to claim the run

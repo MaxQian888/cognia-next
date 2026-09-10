@@ -33,6 +33,7 @@ import {
 } from "@/lib/db/issue-runs"
 import type {
   IssueRunAdapter,
+  IssueRunConversation,
   IssueRunOrigin,
   IssueRunRefusalReason,
   IssueRunTarget,
@@ -193,6 +194,8 @@ export interface StartIssueRunInput {
   adapterId: string
   by: IssueActor
   origin: IssueRunOrigin
+  /** The IM thread behind an `im` origin, so an engine can ask there. */
+  conversation?: IssueRunConversation
   options?: Readonly<Record<string, unknown>>
 }
 
@@ -219,6 +222,7 @@ export async function startIssueRun(
   const run = await adapter.start(target, {
     by: input.by,
     origin: input.origin,
+    ...(input.conversation ? { conversation: input.conversation } : {}),
     ...(input.options ? { options: input.options } : {}),
   })
   await applyRuntimeIssueStatus(target.issue.id, "in_progress", input.by)

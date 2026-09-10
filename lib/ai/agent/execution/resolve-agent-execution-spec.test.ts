@@ -546,3 +546,32 @@ describe("negotiated external capability profile", () => {
     expect(spec.capabilities.effective).toEqual([BEYOND_THE_FALLBACK])
   })
 })
+
+describe("paired companion hosts", () => {
+  const paired = { isTauri: false, isHeadlessHost: false, pairedHost: true as const }
+
+  it("pins the host to the paired host's sidecar, not the web renderer", () => {
+    const { spec } = resolveAgentExecutionSpec({
+      surface: "chat",
+      environment: paired,
+      flags: flagsOff,
+      policy: { executionKind: "agent" },
+      legacy: { providerId: "anthropic", toolsEnabled: true },
+    })
+    expect(spec.hostRef).toBe("paired-host-sidecar")
+    expect(channelFromSpec(spec, paired)).toBe("sidecar")
+  })
+
+  it("still leaves a standalone browser on the text channel", () => {
+    const standalone = { isTauri: false, isHeadlessHost: false }
+    const { spec } = resolveAgentExecutionSpec({
+      surface: "chat",
+      environment: standalone,
+      flags: flagsOff,
+      policy: { executionKind: "agent" },
+      legacy: { providerId: "anthropic", toolsEnabled: true },
+    })
+    expect(spec.hostRef).toBe("web-renderer")
+    expect(channelFromSpec(spec, standalone)).toBe("text")
+  })
+})

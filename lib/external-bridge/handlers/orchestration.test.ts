@@ -27,6 +27,20 @@ jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
 }))
 
 const workflowListDeploymentsCoreMock = jest.fn()
+const usageHandlerMock = jest.fn()
+const issueHandlerMock = jest.fn()
+jest.mock("./usage", () => ({
+  usageQuery: (...args: unknown[]) => usageHandlerMock(...args),
+  sessionHealth: (...args: unknown[]) => usageHandlerMock(...args),
+  optimizationFindings: (...args: unknown[]) => usageHandlerMock(...args),
+}))
+jest.mock("./issues", () => ({
+  issuesList: (...args: unknown[]) => issueHandlerMock(...args),
+  issuesGet: (...args: unknown[]) => issueHandlerMock(...args),
+  issuesCreate: (...args: unknown[]) => issueHandlerMock(...args),
+  issuesUpdate: (...args: unknown[]) => issueHandlerMock(...args),
+  issuesComment: (...args: unknown[]) => issueHandlerMock(...args),
+}))
 const createWorkflowRunCoreMock = jest.fn()
 const getWorkflowRunCoreMock = jest.fn()
 const listWorkflowEventsCoreMock = jest.fn()
@@ -57,6 +71,8 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 }))
 
 beforeEach(() => {
+  usageHandlerMock.mockReset()
+  issueHandlerMock.mockReset()
   isTauriMock.mockReturnValue(true)
   dispatchSubagentMock.mockReset()
   runTeamMock.mockReset()
@@ -72,6 +88,30 @@ beforeEach(() => {
   hasNoLeakingPiiDeepMock.mockReset().mockReturnValue(true)
   updateTeamMock.mockReset()
   storeTeams = {}
+})
+
+it.each([
+  "usageQuery",
+  "sessionHealth",
+  "optimizationFindings",
+  "issuesList",
+  "issuesGet",
+  "issuesCreate",
+  "issuesUpdate",
+  "issuesComment",
+])("dispatches %s from the packaged sidecar through the host response gate", async (command) => {
+  const handler = command.startsWith("issues") ? issueHandlerMock : usageHandlerMock
+  const input = { ref: "TASK-1", period: "7d" }
+  const output = { ok: true, items: [] }
+  handler.mockResolvedValue(output)
+  await expect(runOrchestrationExec(command, { arguments: [input] })).resolves.toEqual(output)
+  expect(handler).toHaveBeenCalledWith(input)
+  expect(hasNoLeakingPiiDeepMock).toHaveBeenCalledWith(output)
+  hasNoLeakingPiiDeepMock.mockReturnValue(false)
+  await expect(runOrchestrationExec(command, { arguments: [input] })).resolves.toEqual({
+    ok: false,
+    error: `host command '${command}' response failed the outbound PII gate`,
+  })
 })
 
 describe("agentDispatch", () => {

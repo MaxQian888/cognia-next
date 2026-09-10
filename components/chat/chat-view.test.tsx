@@ -254,6 +254,8 @@ describe("ChatPane", () => {
     hasPersistedPromptMessageMock.mockReset().mockReturnValue(false)
     listMessagesMock.mockReset().mockResolvedValue([])
     storeState.messagesLoading = false
+    storeState.messagesLoadError = null
+    storeState.messages = [{ id: "m1", role: "user", parts: [] }]
     storeState.ephemeralSkillIds = []
     storeState.setEphemeralSkillIds.mockClear()
     settingsState.completeOnboarding.mockClear()
@@ -267,6 +269,45 @@ describe("ChatPane", () => {
       mode: "timeline",
     })
     clearComputerUsePipState()
+  })
+
+  it("shows one connection recovery panel instead of a second history error", () => {
+    storeState.messages = []
+    storeState.messagesLoadError = "Failed to fetch"
+    render(
+      <ChatPane
+        {...makeProps()}
+        composerDisabled
+        runtimeNotice={<div role="status">Reconnect to host</div>}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnect to host")
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+  })
+
+  it("offers connection recovery on the welcome pane without an active session", () => {
+    render(
+      <ChatPane
+        {...makeProps()}
+        activeSession={null}
+        composerDisabled
+        runtimeNotice={<div role="status">Reconnect to host</div>}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnect to host")
+  })
+
+  it("keeps cached messages visible alongside a connection notice", () => {
+    render(
+      <ChatPane
+        {...makeProps()}
+        composerDisabled
+        runtimeNotice={<div role="status">Reconnect to host</div>}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnect to host")
+    expect(MessageList).toHaveBeenCalled()
   })
 
   it("mounts live Computer Use activity inside the real chat pane", async () => {

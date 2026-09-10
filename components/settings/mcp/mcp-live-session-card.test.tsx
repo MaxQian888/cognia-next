@@ -7,8 +7,13 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const mockIsTauri = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+// The host gate reads the host PROFILE (this shell's own sidecar, or a paired
+// host's over the companion transport), not the webview kind.
+const mockHostProfile = jest.fn((): string => "desktop")
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () => mockHostProfile(),
+}))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 let activeSessionId: string | null = "s1"
@@ -51,7 +56,7 @@ const okRow: SdkMcpServerStatus = {
 beforeEach(() => {
   jest.clearAllMocks()
   activeSessionId = "s1"
-  mockIsTauri.mockReturnValue(true)
+  mockHostProfile.mockReturnValue("desktop")
   useMcpServerLogs.mockReturnValue(EMPTY_LOGS)
 })
 
@@ -115,11 +120,22 @@ describe("McpLiveSessionCard", () => {
     await waitFor(() => expect(queryByTestId("mcp-live-session-card")).toBeNull())
   })
 
-  it("hides itself in web mode", () => {
-    mockIsTauri.mockReturnValue(false)
+  it("hides itself in a standalone browser, which has no host to ask", () => {
+    mockHostProfile.mockReturnValue("web-standalone")
     const { queryByTestId } = render(<McpLiveSessionCard />)
     expect(queryByTestId("mcp-live-session-card")).toBeNull()
   })
+
+  it.each(["mobile-companion", "cloud-companion", "headless"])(
+    "renders from a %s shell, whose host owns or reaches the sidecar",
+    async (profile) => {
+      mockHostProfile.mockReturnValue(profile)
+      getSessionMcpStatus.mockResolvedValue([okRow])
+      render(<McpLiveSessionCard />)
+      await waitFor(() => expect(screen.getByTestId("mcp-live-row-cognia")).toBeInTheDocument())
+      expect(getSessionMcpStatus).toHaveBeenCalledWith("s1")
+    }
+  )
 
   it("re-fetches when the Refresh button is clicked", async () => {
     getSessionMcpStatus.mockResolvedValue([okRow])

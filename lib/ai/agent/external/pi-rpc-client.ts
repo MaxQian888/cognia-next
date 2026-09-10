@@ -171,6 +171,12 @@ export function parsePiModel(model: string): { provider?: string; modelId: strin
 
 export type PiExtensionPolicy = "isolated" | "global" | "trusted-project"
 
+/** Match the user's Pi installation unless an isolation policy was explicitly saved. */
+export function resolvePiExtensionPolicy(value: unknown): PiExtensionPolicy {
+  if (value === undefined || value === "global") return "global"
+  return value === "trusted-project" ? "trusted-project" : "isolated"
+}
+
 /**
  * Flags that make `extensionPolicy` mean what it says.
  *
@@ -834,9 +840,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * whatever those flags let start first.
    */
   private extensionPolicy(): PiExtensionPolicy {
-    return (
-      (this._config?.metadata?.piExtensionPolicy as PiExtensionPolicy | undefined) ?? "isolated"
-    )
+    return resolvePiExtensionPolicy(this._config?.metadata?.piExtensionPolicy)
   }
 
   private extensionPath(): string | undefined {
@@ -1476,22 +1480,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     return parsePiModelListing(stdout)
   }
 
-  /**
-   * `--list-models` under the SAME isolation the session will run with.
-   *
-   * A bare `pi --list-models` reads the user's whole stack, extensions
-   * included. A Cognia session runs `isolated` by default, which is
-   * `--no-extensions`, and an extension-contributed provider is simply not in
-   * that process's catalog: on this machine the bare listing offers 70 models
-   * and the isolated session can select 3. The picker showed all 70, `set_model`
-   * answered "Model not found" for the other 67, the manager logged that and
-   * moved on, and the turn ran on Pi's default model instead. The user picked a
-   * model, the banner named it, and a different one answered.
-   *
-   * So the probe carries the policy flags. What the picker lists is then
-   * exactly what the session can select, and a model missing from it is a real
-   * fact about this configuration rather than an artefact of how it was read.
-   */
+  /** Use the same extension policy for catalog discovery and actual sessions. */
   private listModelsArgs(): string[] {
     return ["--list-models", ...extensionPolicyArgs(this.extensionPolicy())]
   }

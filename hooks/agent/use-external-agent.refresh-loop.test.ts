@@ -151,6 +151,7 @@ jest.mock("@/stores/agent/external-agent-store", () => {
 })
 
 const fakeManager = {
+  getAgentCapabilityProfile: jest.fn(),
   getAllAgents: jest.fn(() => [
     {
       config: CONFIG,
@@ -213,6 +214,7 @@ describe("useExternalAgent refresh/store projection converges", () => {
 
     await flush()
     const afterInitial = setStateCalls
+    expect(afterInitial).toBeGreaterThan(0)
 
     // Nothing about the manager changed. Any further writes are the projection
     // re-triggering itself — the freeze.

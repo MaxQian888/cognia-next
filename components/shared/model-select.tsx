@@ -75,6 +75,7 @@ export interface ModelProviderGroup {
   providerId: string
   providerName: string
   models: GroupedModel[]
+  headingAction?: React.ReactNode
 }
 
 export interface ModelSelectChoice {
@@ -354,7 +355,16 @@ export function ModelSelect({
           groups.map((group, idx) => (
             <div key={group.providerId}>
               {idx > 0 ? <ModelSelectorSeparator /> : null}
-              <ModelSelectorGroup heading={group.providerName}>
+              {group.headingAction ? (
+                <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <span>{group.providerName}</span>
+                  {group.headingAction}
+                </div>
+              ) : null}
+              <ModelSelectorGroup
+                heading={group.headingAction ? undefined : group.providerName}
+                aria-label={group.headingAction ? group.providerName : undefined}
+              >
                 {group.models.map((gm) => {
                   const { id: modelId, name: modelName } = gm
                   const isActive = modelId === model && group.providerId === provider

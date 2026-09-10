@@ -59,9 +59,27 @@ export type IssueRunRefusalReason =
 export type IssueRunVerdict =
   { ok: true } | { ok: false; reason: IssueRunRefusalReason; detail?: string }
 
+/**
+ * The IM thread a Run gesture came from, when it came from one.
+ *
+ * `origin: "im"` alone puts a Squad run under the headless gate policy, whose
+ * plan gate fails fast on the premise that nobody can answer. A card press in
+ * a chat thread has a person on the other end, and the adapter proves it by
+ * building the same plan-approval delegate the chat IM lane uses. Without
+ * this the run is genuinely unattended, and the fail-fast stands.
+ */
+export interface IssueRunConversation {
+  adapterId: string
+  conversationKey: string
+  /** remoteUserId of the person who pressed Run; only they (or an operator) may answer. */
+  initiatorUserId?: string
+}
+
 export interface IssueRunStartContext {
   by: IssueActor
   origin: IssueRunOrigin
+  /** Present when the gesture came from an IM card. See {@link IssueRunConversation}. */
+  conversation?: IssueRunConversation
   /**
    * Adapter-specific options from the Run dialog (e.g. `base` branch for the
    * GitHub loop). Adapters validate what they read and ignore the rest.

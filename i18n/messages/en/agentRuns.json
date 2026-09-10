@@ -7,7 +7,8 @@
     "retry": "Retry",
     "steer": "Steer",
     "steerPlaceholder": "Redirect this run without stopping it…",
-    "stop": "Stop"
+    "stop": "Stop",
+    "openConversation": "View conversation history"
   },
   "activityCategory": {
     "approval": "Approval",

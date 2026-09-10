@@ -521,7 +521,22 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
         return checkout_sidecar_dir();
     }
 
-    // Release: bundled resources directory.
+    // Debug builds: the checkout is the source of truth. Tauri stages a copy
+    // of `sidecar/` under `target/debug/_up_/sidecar` on every Rust build, and
+    // that copy is exactly as fresh and as complete as the last build that
+    // finished. A build interrupted mid-copy (ENOSPC, Ctrl-C) leaves
+    // `agent-host.mjs` in place with its imports missing, which is how the
+    // sidecar died with `ERR_MODULE_NOT_FOUND fetch-interceptor.mjs` on
+    // 2026-08-27. Preferring the checkout also means a sidecar edit is live
+    // without a Rust rebuild.
+    #[cfg(debug_assertions)]
+    if let Ok(candidate) = checkout_sidecar_dir() {
+        if missing_sidecar_entry(&candidate).is_none() {
+            return Ok(candidate);
+        }
+    }
+
+    // Release (or a debug binary with no checkout beside it): bundled resources.
     if let Ok(resource_dir) = app.path().resource_dir() {
         if let Some(candidate) = packaged_sidecar_dir(&resource_dir) {
             return Ok(candidate);
@@ -529,18 +544,46 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
     }
     // Dev: walk up from the Cargo manifest dir to the repo root.
     let candidate = checkout_sidecar_dir()?;
-    if candidate.exists() {
-        return Ok(candidate);
+    if let Some(missing) = missing_sidecar_entry(&candidate) {
+        return Err(format!(
+            "sidecar directory at {} is incomplete: missing {missing}",
+            candidate.display()
+        ));
     }
-    Err(format!(
-        "sidecar directory not found at {}",
-        candidate.display()
-    ))
+    Ok(candidate)
+}
+
+/// Everything `agent-host.mjs` needs on disk before it can boot. The static
+/// imports at the top of that file plus the dependency tree; a directory that
+/// has the entry but not these is a torn copy, not a sidecar.
+const REQUIRED_SIDECAR_ENTRIES: &[&str] = &[
+    "agent-host.mjs",
+    "fetch-interceptor.mjs",
+    "host-rpc.mjs",
+    "telemetry.mjs",
+    "package.json",
+    "dispatch",
+    "builtin-tools",
+    "node_modules",
+];
+
+/// The first required entry `dir` lacks, or `None` when the directory is a
+/// complete sidecar.
+fn missing_sidecar_entry(dir: &Path) -> Option<&'static str> {
+    REQUIRED_SIDECAR_ENTRIES
+        .iter()
+        .copied()
+        .find(|entry| !dir.join(entry).exists())
 }
 
 /// Resolve either an explicitly remapped `sidecar/` resource or Tauri's
 /// encoded destination for config entries that begin with `../sidecar`.
 /// Tauri replaces each parent component with `_up_` in array-form resources.
+///
+/// A candidate that has an entry file but is missing any of
+/// [`REQUIRED_SIDECAR_ENTRIES`] is a torn staging copy and is skipped with a
+/// warning, so the caller falls through to the next location instead of
+/// spawning a Node process that exits on its first `import`.
 fn packaged_sidecar_dir(resource_dir: &Path) -> Option<PathBuf> {
     [
         resource_dir.join("sidecar"),
@@ -548,7 +591,21 @@ fn packaged_sidecar_dir(resource_dir: &Path) -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|candidate| {
-        candidate.join("agent-host.mjs").is_file() || candidate.join("claude-host.mjs").is_file()
+        let has_entry = candidate.join("agent-host.mjs").is_file()
+            || candidate.join("claude-host.mjs").is_file();
+        if !has_entry {
+            return false;
+        }
+        match missing_sidecar_entry(candidate) {
+            None => true,
+            Some(missing) => {
+                log::warn!(
+                    "packaged sidecar at {} is incomplete (missing {missing}); skipping it",
+                    candidate.display()
+                );
+                false
+            }
+        }
     })
 }
 
@@ -1329,12 +1386,30 @@ mod tests {
         assert!(sidecar.join("node_modules").is_dir());
     }
 
+    /// Lay down every entry a complete sidecar directory must have.
+    fn stub_complete_sidecar(dir: &Path) {
+        std::fs::create_dir_all(dir).expect("create sidecar directory");
+        for entry in REQUIRED_SIDECAR_ENTRIES {
+            let path = dir.join(entry);
+            if entry.contains('.') {
+                std::fs::write(&path, "// stub").expect("write stub file");
+            } else {
+                std::fs::create_dir_all(&path).expect("create stub directory");
+            }
+        }
+    }
+
+    #[test]
+    fn the_checkout_sidecar_is_complete() {
+        let sidecar = checkout_sidecar_dir().expect("checkout sidecar path");
+        assert_eq!(missing_sidecar_entry(&sidecar), None);
+    }
+
     #[test]
     fn packaged_sidecar_resolves_tauri_encoded_parent_resource() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let encoded = tmp.path().join("_up_").join("sidecar");
-        std::fs::create_dir_all(&encoded).expect("create encoded sidecar directory");
-        std::fs::write(encoded.join("agent-host.mjs"), "// stub").expect("write packaged entry");
+        stub_complete_sidecar(&encoded);
 
         assert_eq!(packaged_sidecar_dir(tmp.path()), Some(encoded));
     }
@@ -1345,10 +1420,32 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("sidecar"))
             .expect("create incomplete direct resource");
         let encoded = tmp.path().join("_up_").join("sidecar");
-        std::fs::create_dir_all(&encoded).expect("create encoded sidecar directory");
-        std::fs::write(encoded.join("claude-host.mjs"), "// stub")
-            .expect("write packaged compatibility entry");
+        stub_complete_sidecar(&encoded);
 
         assert_eq!(packaged_sidecar_dir(tmp.path()), Some(encoded));
+    }
+
+    #[test]
+    fn a_torn_staging_copy_is_skipped_not_spawned() {
+        // The 2026-08-27 shape: the entry file landed, its first import did
+        // not. Accepting this directory spawns a Node process that exits on
+        // `import "./fetch-interceptor.mjs"` and burns the recovery budget.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let encoded = tmp.path().join("_up_").join("sidecar");
+        stub_complete_sidecar(&encoded);
+        std::fs::remove_file(encoded.join("fetch-interceptor.mjs")).expect("tear the copy");
+
+        assert_eq!(missing_sidecar_entry(&encoded), Some("fetch-interceptor.mjs"));
+        assert_eq!(packaged_sidecar_dir(tmp.path()), None);
+    }
+
+    #[test]
+    fn a_directory_with_no_entry_file_is_not_a_sidecar_at_all() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let encoded = tmp.path().join("_up_").join("sidecar");
+        stub_complete_sidecar(&encoded);
+        std::fs::remove_file(encoded.join("agent-host.mjs")).expect("drop the entry");
+
+        assert_eq!(packaged_sidecar_dir(tmp.path()), None);
     }
 }

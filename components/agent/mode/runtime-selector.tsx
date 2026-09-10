@@ -393,7 +393,7 @@ export function AgentRuntimeSelector({
           closes the picker, and on a phone that unmounts the picker's subtree. */}
       <Dialog open={manageOpen} onOpenChange={setManageOpen}>
         <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
-          <DialogHeader className="shrink-0">
+          <DialogHeader className="sr-only">
             <DialogTitle>{tExternal("manageAgents")}</DialogTitle>
           </DialogHeader>
           <ExternalAgentManager className="min-h-0 flex-1" />

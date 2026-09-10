@@ -1,14 +1,22 @@
 /**
- * Tauri IPC bridge — thin wrappers around the IPC contract documented in the
- * plan (workflow_persist_run_state, workflow_register_trigger, etc.).
+ * Native workflow bridge: thin wrappers around the Rust workflow state
+ * (`crates/cognia-scheduling/src/workflow/commands.rs`): the run-state mirror
+ * the crash-resume path reads, the cron and file-watch daemons, the webhook
+ * router and the durable waitpoint mirror.
  *
- * The Rust commands are live (see `src-tauri/src/workflow/commands.rs`); these
- * wrappers no-op gracefully when running outside Tauri so the orchestrator can
- * still run end-to-end in web mode (cron / webhook triggers and crash-resume
- * are simply absent there).
+ * Every native call goes through the shared `transport`, and only on a host
+ * that owns a workflow state: the desktop (`TauriTransport`, so `invoke`) or
+ * the headless brain (`CompanionTransport` on cognia-server's internal plane,
+ * answered by the service-scope arms in `rpc/service_plane.rs`). A paired
+ * phone or browser and a standalone web tab have no such state, so there the
+ * wrappers answer `null` and the orchestrator runs without triggers and
+ * without crash-resume.
  *
- * `lib/tauri.ts:isTauri()` is the canonical detection helper used elsewhere
- * in the app — we mirror it here.
+ * This file used to import `@tauri-apps/api/core` directly and treat
+ * everything that was not a Tauri webview as "web mode". On the headless brain
+ * that made every mirror write vanish, so cognia-server ran a cron daemon and
+ * a webhook router nobody ever registered a trigger with. Host reachability
+ * is decided on the host profile now, the same way the agent chain decides it.
  */
 
 import type {
@@ -17,6 +25,7 @@ import type {
   RegisterTriggerInput,
 } from "@/types/workflow/visual"
 import { notifyCompanionsOfRunState } from "./companion-run-events"
+import { detectHostProfile } from "@/lib/platform/capabilities"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import type {
   WorkflowWaitEvent,
@@ -40,20 +49,50 @@ function isTauri(): boolean {
   return _isTauri
 }
 
-async function safeInvoke<T>(name: string, payload?: unknown): Promise<T | null> {
-  if (!isTauri()) return null
+/**
+ * Whether this shell can reach a Rust workflow state at all: the desktop's own
+ * managed `WorkflowState`, or the one cognia-server opened for the brain. The
+ * command manifest declares these commands service-only, so a companion
+ * transport would refuse them before the wire; answering `null` here is the
+ * same refusal without the round trip.
+ */
+function hasNativeWorkflowPlane(): boolean {
+  const profile = detectHostProfile()
+  return profile === "desktop" || profile === "headless"
+}
+
+/** Commands whose failure has already been reported once in this process. */
+const reportedFailures = new Set<string>()
+
+async function safeInvoke<T>(name: string, payload?: Record<string, unknown>): Promise<T | null> {
+  if (!hasNativeWorkflowPlane()) return null
   try {
-    const mod = await import("@tauri-apps/api/core").catch(() => null)
-    if (!mod) return null
-    return (await mod.invoke(name, payload as Record<string, unknown>)) as T
-  } catch {
+    const { transport } = await import("@/lib/tauri")
+    return (await transport.call<T>(name, payload)) as T
+  } catch (error) {
+    // A host that HAS a native plane and still failed is the case worth
+    // hearing about. The previous blanket `catch {}` is how a bare object sent
+    // to a command that wants `{ input }` went unnoticed: every persist was
+    // refused with "missing required key input" and the mirror stayed empty.
+    // Once per command, so a persist failing on every step transition does
+    // not flood the log.
+    if (!reportedFailures.has(name)) {
+      reportedFailures.add(name)
+      console.warn(
+        `workflow bridge: ${name} failed on this host; the native mirror is behind`,
+        error
+      )
+    }
     return null
   }
 }
 
 /** Persist (or upsert) a run-state mirror row in Rust's SQLite. */
 export async function persistRunState(input: PersistRunStateInput): Promise<void> {
-  await safeInvoke("workflow_persist_run_state", input)
+  // `{ input }`, not the bare object: Tauri reads each command argument by
+  // name out of the payload, and `workflow_persist_run_state` takes a single
+  // argument called `input`. The bare object was refused on every call.
+  await safeInvoke("workflow_persist_run_state", { input })
   // ADR 0061 P2 — fan the transition out to paired devices (live WS frame,
   // sync invalidate on terminal, push policy). Fire-and-forget: companion
   // delivery must never block or fail the orchestrator's persistence path.
@@ -62,7 +101,9 @@ export async function persistRunState(input: PersistRunStateInput): Promise<void
 
 /** Register / update a trigger row. Causes the Rust daemon to reload its schedule. */
 export async function registerTrigger(input: RegisterTriggerInput): Promise<void> {
-  await safeInvoke("workflow_register_trigger", input)
+  // Same `{ input }` wrapping as `persistRunState`: the daemon never saw a
+  // cron, webhook or file-watch registration while this sent the bare object.
+  await safeInvoke("workflow_register_trigger", { input })
 }
 
 export async function unregisterTrigger(workflowId: string, triggerId: string): Promise<void> {

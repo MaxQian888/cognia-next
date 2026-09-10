@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { constants as fsConstants, rmSync } from "node:fs"
+import { constants as fsConstants, readFileSync, rmSync } from "node:fs"
 import { access, chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { createDecipheriv, randomBytes } from "node:crypto"
 import path from "node:path"
@@ -153,7 +153,7 @@ function createProgram() {
     .addArgument(
       new Argument(
         "[action]",
-        "serve, issue a cgnp3 pairing invitation for the app's pair screen, mint a cgnb1 enrollment for the browser extension, or print a loopback-only debug service token"
+        "serve, issue a cgnp3 or cgnp4 pairing invitation for the app's pair screen, mint a cgnb1 enrollment for the browser extension, or print a loopback-only debug service token"
       )
         .choices(["serve", "pair", "token", "browser-enroll"])
         .default("serve")
@@ -167,7 +167,7 @@ function createProgram() {
     .option("--advertise-url <url>", "Public URL written into pairing payloads.")
     .option(
       "--device-name <name>",
-      "Human-readable label for a cgnp3 pairing invitation (pair only)."
+      "Human-readable label for a cgnp3 or cgnp4 pairing invitation (pair only)."
     )
     .option("--tenant-id <id>", "Tenant encoded into a pairing invitation or a browser enrollment.")
     .option("--gateway", "Enable the local LLM gateway.")
@@ -322,7 +322,7 @@ function pairArgs(options) {
  * `devices enroll-browser` — a different code, for a different plane, carrying
  * a different capability set.
  *
- * `pair` mints an Owner invitation (`cgnp3|`) that the app's pair screen
+ * `pair` mints an Owner invitation (`cgnp3|` or `cgnp4|`) that the app's pair screen
  * spends. This mints a browser-companion enrollment (`cgnb1|`) that the
  * extension spends against the plaintext loopback listener for exactly
  * `browser.submit` + `browser.read-own`. Neither is usable where the other
@@ -476,10 +476,23 @@ async function writeLocalDebugEnvironment(options, paths, localDebug) {
   if (process.platform !== "win32") await chmod(localDebug.environmentPath, 0o600)
 }
 
-function installLocalDebugExitCleanup(environmentPath) {
+function removeOwnedLocalDebugEnvironment(environmentPath, token) {
+  try {
+    const environment = JSON.parse(readFileSync(environmentPath, "utf8"))
+    if (
+      environment.values?.some((entry) => entry.key === "serviceToken" && entry.value === token)
+    ) {
+      rmSync(environmentPath, { force: true })
+    }
+  } catch {
+    // Missing or replaced files belong to neither this cleanup nor this token.
+  }
+}
+
+function installLocalDebugExitCleanup(environmentPath, token) {
   const cleanup = () => {
     try {
-      rmSync(environmentPath, { force: true })
+      removeOwnedLocalDebugEnvironment(environmentPath, token)
     } catch {
       // Exit cleanup is best-effort; the credential is invalid once the
       // server process is gone even if the filesystem is already unavailable.
@@ -839,12 +852,12 @@ async function runPairProcess(command, args, env) {
     throw new PreflightError(`cognia-server pairing invitation issuer failed with ${status}`)
   }
   const output = result.stdout || ""
-  if (!/cgnp3\|/.test(output)) {
+  if (!/cgnp[34]\|/.test(output)) {
     const emittedVersion = /cgnp(\d+)\|/.exec(output)?.[1]
     throw new PreflightError(
       `pairing issuer ${
         emittedVersion ? `returned cgnp${emittedVersion}` : "did not return a Cognia invitation"
-      }; expected a cgnp3 invitation. Rebuild or redeploy cognia-server before pairing.`
+      }; expected a cgnp3 or cgnp4 invitation. Update the launcher and cognia-server to compatible versions before pairing.`
     )
   }
   process.stdout.write(output.endsWith("\n") ? output : `${output}\n`)
@@ -915,7 +928,7 @@ async function main() {
   const localDebug = options.localDebug ? createLocalDebugConfig(paths) : undefined
   if (localDebug) await writeLocalDebugEnvironment(options, paths, localDebug)
   const removeExitCleanup = localDebug
-    ? installLocalDebugExitCleanup(localDebug.environmentPath)
+    ? installLocalDebugExitCleanup(localDebug.environmentPath, localDebug.token)
     : undefined
   const childEnv = launchEnvironment(options, paths, secret, process.env, localDebug)
   process.stdout.write(
@@ -930,7 +943,7 @@ async function main() {
   try {
     await runProcess(paths.server, launchArgs(options), "cognia-server", childEnv)
   } finally {
-    if (localDebug) await rm(localDebug.environmentPath, { force: true })
+    if (localDebug) removeOwnedLocalDebugEnvironment(localDebug.environmentPath, localDebug.token)
     removeExitCleanup?.()
   }
 }

@@ -59,7 +59,13 @@ jest.mock("@/components/chat/transcript-message-list", () => ({
     </div>
   ),
 }))
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+// The manager gates on the host PROFILE: a desktop here, so the environment it
+// hands the resolver is the desktop sidecar's (see the `hostRef` pin below).
+const mockHostProfile = jest.fn((): string => "desktop")
+jest.mock("@/lib/platform/capabilities", () => ({
+  ...jest.requireActual("@/lib/platform/capabilities"),
+  detectHostProfile: () => mockHostProfile(),
+}))
 jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
   getAgentExecutionFlags: () => ({
     claudeSdkParityV1: true,
@@ -76,6 +82,9 @@ import { SdkSessionManager } from "./sdk-session-manager"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  // `clearAllMocks` keeps return values; a case that picked another shell must
+  // not leak it into the next one.
+  mockHostProfile.mockReturnValue("desktop")
   listSdkSessions.mockResolvedValue([
     { sessionId: "sdk-1", summary: "Fix auth", lastModified: 10, cwd: "/repo", tag: "work" },
   ])
@@ -119,6 +128,26 @@ describe("SdkSessionManager", () => {
     await user.click(screen.getByRole("button", { name: "Delete SDK session" }))
     await user.click(screen.getByRole("button", { name: "Delete permanently" }))
     await waitFor(() => expect(deleteSdkSession).toHaveBeenCalledWith("sdk-1"))
+  })
+
+  it.each(["mobile-companion", "cloud-companion", "headless"])(
+    "lists the host's SDK sessions from a %s shell",
+    async (profile) => {
+      // `agent_session_api` is an execution-target command the host's sidecar
+      // answers; gating on `isTauri()` hid this whole manager from every
+      // companion although the paired host could list, fork and rename.
+      mockHostProfile.mockReturnValue(profile)
+      render(<SdkSessionManager />)
+      expect(await screen.findByText("Fix auth")).toBeInTheDocument()
+      expect(listSdkSessions).toHaveBeenCalled()
+    }
+  )
+
+  it("renders nothing in a standalone browser, which has no host to list from", () => {
+    mockHostProfile.mockReturnValue("web-standalone")
+    const { container } = render(<SdkSessionManager />)
+    expect(container).toBeEmptyDOMElement()
+    expect(listSdkSessions).not.toHaveBeenCalled()
   })
 
   it("surfaces load failures and retries", async () => {

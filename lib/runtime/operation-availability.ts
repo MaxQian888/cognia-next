@@ -133,7 +133,11 @@ export function resolveOperationAvailability(
   }
 
   const host = input.snapshot.host
-  if (!host) return { state: "incompatible", reason: "host-manifest-missing" }
+  if (!host) {
+    return input.snapshot.connectionState === "online"
+      ? { state: "incompatible", reason: "host-manifest-missing" }
+      : { state: "offline", reason: "connection-offline" }
+  }
   if (!host.compatible) return { state: "incompatible", reason: "host-protocol" }
   if (!host.operations.includes(input.command)) {
     return input.readOnlyFallback

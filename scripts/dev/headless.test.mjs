@@ -71,8 +71,8 @@ test("documents the renderer-free development entry point", async () => {
   // The two codes are not interchangeable, so the help must not describe them
   // with one word: `pair` is the app's pair screen, `browser-enroll` is the
   // extension.
-  assert.match(result.stdout, /cgnp3 pairing invitation/)
-  assert.match(result.stdout, /mint a cgnb1/)
+  assert.match(result.stdout, /cgnp3 or cgnp4 pairing invitation/)
+  assert.match(result.stdout, /mint a\s+cgnb1/)
   assert.match(result.stdout, /enrollment for the browser extension/)
 })
 
@@ -133,11 +133,18 @@ process.stderr.write(JSON.stringify({
   assert.equal(capture.hasMasterKey, true)
 })
 
-test("pair action rejects a stale server that emits a cgnp2 invitation", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-v2-"))
+test("pair action forwards a cgnp4 relay invitation from the running host", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-pair-v4-"))
   const server = path.join(root, "cognia-server")
   t.after(() => rm(root, { recursive: true, force: true }))
-  await writeFile(server, "#!/bin/sh\nprintf 'cgnp2|legacy-invitation\\n'\n")
+  const output = '\nPair invitation for device "browser" (with relay):\n\ncgnp4|relay-invitation\n'
+  await writeFile(
+    server,
+    `#!/usr/bin/env node
+process.stdout.write(${JSON.stringify(output)})
+process.stderr.write("relay room ready\\n")
+`
+  )
   await chmod(server, 0o755)
 
   const result = await run(["pair", "--skip-build", "--data-dir", path.join(root, "data")], {
@@ -145,11 +152,31 @@ test("pair action rejects a stale server that emits a cgnp2 invitation", async (
     COGNIA_MASTER_KEY: "a".repeat(64),
   })
 
-  assert.equal(result.code, 3)
-  assert.equal(result.stdout, "")
-  assert.match(result.stderr, /expected a cgnp3 invitation/i)
-  assert.match(result.stderr, /rebuild or redeploy/i)
+  assert.equal(result.code, 0, result.stderr)
+  assert.equal(result.stdout, output)
+  assert.equal(result.stderr, "relay room ready\n")
 })
+
+for (const version of [2, 5]) {
+  test(`pair action rejects an unsupported cgnp${version} invitation`, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), `cognia-headless-pair-v${version}-`))
+    const server = path.join(root, "cognia-server")
+    t.after(() => rm(root, { recursive: true, force: true }))
+    await writeFile(server, `#!/bin/sh\nprintf 'cgnp${version}|unsupported-invitation\\n'\n`)
+    await chmod(server, 0o755)
+
+    const result = await run(["pair", "--skip-build", "--data-dir", path.join(root, "data")], {
+      COGNIA_HEADLESS_SERVER_BIN: server,
+      COGNIA_MASTER_KEY: "a".repeat(64),
+    })
+
+    assert.equal(result.code, 3)
+    assert.equal(result.stdout, "")
+    assert.match(result.stderr, new RegExp(`returned cgnp${version}`))
+    assert.match(result.stderr, /expected a cgnp3 or cgnp4 invitation/i)
+    assert.match(result.stderr, /update the launcher and cognia-server/i)
+  })
+}
 
 test(
   "pair action rebuilds the native server before issuing an invitation",
@@ -813,6 +840,23 @@ process.stdout.write(JSON.stringify({
   assert.match(result.stdout, /Apifox environment:/)
   assert.match(result.stdout, /expires when this server process stops/i)
   await assert.rejects(access(capture.environmentPath), { code: "ENOENT" })
+
+  // A replacement launcher has already published its own token before the old
+  // server exits. The old process must leave that environment intact.
+  await writeFile(
+    server,
+    (await readFile(server, "utf8")) +
+      `
+fs.writeFileSync(environmentPath, JSON.stringify({ values: [{ key: "serviceToken", value: "replacement-process-token" }] }))
+`
+  )
+  const replaced = await run(
+    ["--local-debug", "--skip-build", "--data-dir", dataDir, "--port", "28902"],
+    env
+  )
+  assert.equal(replaced.code, 0, replaced.stderr)
+  const replacement = JSON.parse(await readFile(capture.environmentPath, "utf8"))
+  assert.equal(replacement.values[0].value, "replacement-process-token")
 })
 
 test("local debug removes its temporary environment after an interrupt", async (t) => {

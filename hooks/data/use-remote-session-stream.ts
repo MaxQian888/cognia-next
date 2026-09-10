@@ -488,7 +488,19 @@ export function useRemoteSessionStream(
         // than saying so — the text is still worth delivering, and the user is
         // told the files were not.
         if (uploaded.length > 0) toast.warning(t("detail.attachmentsNeedHost"))
-        await sendPrompt(sessionId, text)
+        // The direct path sends the same resolved options the chat controller
+        // would. A bare `sendPrompt(sessionId, text)` reached the sidecar as
+        // `options: {}`: no model, cwd, system prompt, tools, permission ruleset
+        // or resume id, so each phone turn was a context-free, tool-less query
+        // against the default model while the composer already said streaming.
+        const [{ getSession }, { buildSendOptions }] = await Promise.all([
+          import("@/lib/db/sessions"),
+          import("@/hooks/chat/claude-chat-send-options"),
+        ])
+        const session = await getSession(sessionId)
+        if (!session) throw new Error("session is not synced to this device yet")
+        const sendOptions = await buildSendOptions(session, text)
+        await sendPrompt(sessionId, text, sendOptions)
       } catch (err) {
         setStatusBoth("idle")
         if (isControlForbidden(err)) {

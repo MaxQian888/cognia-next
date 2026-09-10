@@ -202,6 +202,14 @@ export interface LegacyExecutionSignals {
 export interface AgentExecutionEnvironment {
   isTauri: boolean
   isHeadlessHost: boolean
+  /**
+   * A paired host's sidecar is reachable through the companion transport
+   * (mobile / cloud companion). The agent rail runs there, remotely. Set by
+   * `host-environment.ts`, never hand-built.
+   */
+  pairedHost?: boolean
+  /** The detected host profile, for traces and fingerprints. */
+  hostProfile?: "desktop" | "mobile-companion" | "cloud-companion" | "web-standalone" | "headless"
   sidecarReady?: boolean
   /** Capabilities the selected host backend can actually serve. */
   hostCapabilities?: readonly AgentCapabilityId[]
@@ -297,6 +305,8 @@ function resolveHostRef(input: AgentExecutionResolveInput): string {
   if (target?.mode === "pinned") return target.hostRef
   if (input.environment.isTauri) return "desktop-sidecar"
   if (input.environment.isHeadlessHost) return "headless-agent-host"
+  // A paired companion drives the HOST's sidecar over the companion transport.
+  if (input.environment.pairedHost) return "paired-host-sidecar"
   return "web-renderer"
 }
 
@@ -590,8 +600,9 @@ export function channelFromSpec(
 ): "sidecar" | "text" | "external" {
   if (spec.runtimeAdapter === "external") return "external"
   if (spec.executionKind === "completion") return "text"
-  // Agent rail needs a host: today that means the Tauri sidecar (or the
-  // headless agent host); the web renderer degrades to text.
-  if (environment.isTauri || environment.isHeadlessHost) return "sidecar"
+  // Agent rail needs a host: the Tauri sidecar, the headless agent host, or a
+  // paired host reached over the companion transport. Only a standalone web
+  // renderer degrades to text.
+  if (environment.isTauri || environment.isHeadlessHost || environment.pairedHost) return "sidecar"
   return "text"
 }

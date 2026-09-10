@@ -436,6 +436,7 @@ export function reduceRunEvents(
   let revision = run.currentRevision
   let updatedAt = run.updatedAt
   let endedAt = run.endedAt
+  let workflowGraph: RunProjectionSnapshot["workflowGraph"]
   let planVersion: number | undefined
   let summary: string | undefined
   let error: string | undefined
@@ -482,6 +483,34 @@ export function reduceRunEvents(
       }
       steps.clear()
       for (const [id, step] of revisedSteps) steps.set(id, step)
+      // Topology comes only from an explicit plan, never from execution order.
+      workflowGraph = undefined
+      const graph = event.payload.workflowGraph as Record<string, unknown> | undefined
+      if (
+        graph &&
+        typeof graph.workflowId === "string" &&
+        typeof graph.sourceRunId === "string" &&
+        Array.isArray(graph.edges)
+      ) {
+        const edges = graph.edges.flatMap((edge: unknown) => {
+          if (!edge || typeof edge !== "object") return []
+          const { source, target } = edge as Record<string, unknown>
+          if (
+            typeof source !== "string" ||
+            typeof target !== "string" ||
+            !steps.has(source) ||
+            !steps.has(target)
+          )
+            return []
+          return [{ source: safeStableActivityId(source), target: safeStableActivityId(target) }]
+        })
+        workflowGraph = {
+          workflowId: safeStableActivityId(graph.workflowId),
+          sourceRunId: safeStableActivityId(graph.sourceRunId),
+          nodes: [],
+          edges,
+        }
+      }
     }
 
     const nextStepStatus = stepStatus(event.type)
@@ -558,6 +587,11 @@ export function reduceRunEvents(
     }
   }
 
+  if (TERMINAL.has(status)) {
+    pendingInterrupt = undefined
+    waitingReason = undefined
+  }
+
   const allSteps = [...steps.values()]
   const completed = allSteps.filter((step) => step.status === "completed").length
   const trustworthy = planVersion !== undefined && allSteps.length > 0
@@ -586,6 +620,7 @@ export function reduceRunEvents(
     ...(endedAt !== undefined ? { endedAt } : {}),
     ...(planVersion !== undefined ? { planVersion } : {}),
     progress,
+    ...(workflowGraph ? { workflowGraph: { ...workflowGraph, nodes: allSteps } } : {}),
     activeSteps,
     recentSteps,
     pendingSteps,

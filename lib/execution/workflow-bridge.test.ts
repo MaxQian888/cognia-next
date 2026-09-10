@@ -88,6 +88,12 @@ describe("workflow execution bridge", () => {
     const run = await getDb().executionRuns.get("execution:workflow:wf-run-1")
     expect(run?.latestSnapshot).toMatchObject({
       kind: "workflow",
+      workflowGraph: {
+        workflowId: "wf-1",
+        sourceRunId: "wf-run-1",
+        nodes: [expect.objectContaining({ id: "step-1" })],
+        edges: [],
+      },
       progress: { total: 1, trustworthy: true },
       activeSteps: [expect.objectContaining({ id: "step-1", title: "Step 1" })],
     })

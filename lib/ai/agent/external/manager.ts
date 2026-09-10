@@ -677,31 +677,61 @@ export class ExternalAgentManager {
     throw new Error("Agent does not expose a way to change its model")
   }
 
-  /**
-   * The agent's model catalog with NO session open.
-   *
-   * Only Pi answers today (`pi --list-models`, the same probe the credential
-   * card reads). Every other adapter has nothing to say before a session
-   * exists, which is `unsupported`, not an error: the picker then keeps its
-   * "models arrive with the first turn" notice.
-   */
+  /** Read models before the first turn; discovery never submits a prompt. */
   async fetchAgentModelCatalog(
     agentId: string
   ): Promise<AgentCapabilityResult<ExternalAgentSessionSurface>> {
-    const pi = this.getPiRpcAdapter(agentId)
-    if (!pi || !pi.isConnected()) return { status: "unsupported" }
+    const adapter = this.adapters.get(agentId)
+    const instance = this.instances.get(agentId)
+    if (!adapter || !instance || !adapter.isConnected()) return { status: "unsupported" }
     try {
-      const listing = await pi.listAgentModels()
-      if (listing.status !== "ok") {
-        return { status: "error", error: new Error("Pi's model listing was unreadable") }
+      const pi = this.getPiRpcAdapter(agentId)
+      if (pi) {
+        const listing = await pi.listAgentModels()
+        if (listing.status !== "ok") throw new Error("Pi's model listing was unreadable")
+        return {
+          status: "ok",
+          data: { models: catalogModelSurface(listing.models), thinking: EMPTY_THINKING_SURFACE },
+        }
       }
-      // No session, so no thinking ladder: the levels an agent honours are per
-      // model AND per session, and inventing one from the global vocabulary
-      // would offer tiers that silently collapse to `off`. The effort control
-      // keeps its generic fallback until the first turn opens a session.
-      return {
-        status: "ok",
-        data: { models: catalogModelSurface(listing.models), thinking: EMPTY_THINKING_SURFACE },
+      const codex = this.getCodexAppServerAdapter(agentId)
+      if (codex) {
+        const models = await codex.listModels()
+        return {
+          status: "ok",
+          data: {
+            models: {
+              choices: models.map((model) => ({ modelId: model.id, name: model.name ?? model.id })),
+              currentModelId: null,
+              write: { kind: "session-seed" },
+            },
+            thinking: EMPTY_THINKING_SURFACE,
+          },
+        }
+      }
+      if (!adapter.getConfigOptions && !adapter.getSessionModels) return { status: "unsupported" }
+      // ACP exposes models in session/new. Use a short-lived discovery session,
+      // preserving configured permissions, and release it even when reading fails.
+      // It is never bound to a conversation or reused for an actual turn.
+      const session = await adapter.createSession(this.buildSessionOptions(instance))
+      try {
+        const result = await this.fetchSessionModelSurface(agentId, session.id)
+        if (result.status !== "ok") return result
+        return {
+          status: "ok",
+          data: {
+            models: {
+              ...result.data.models,
+              currentModelId: null,
+              write: result.data.models.choices.length
+                ? { kind: "session-seed" }
+                : { kind: "none" },
+            },
+            thinking: EMPTY_THINKING_SURFACE,
+          },
+        }
+      } finally {
+        await adapter.closeSession(session.id)
       }
     } catch (error) {
       return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }

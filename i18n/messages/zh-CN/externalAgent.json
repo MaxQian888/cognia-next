@@ -272,7 +272,8 @@
     "transportStdioLocal": "stdio（本地）",
     "transportWebsocket": "WebSocket",
     "unsupportedProtocol": "目前可执行代理仅支持 ACP。",
-    "websocketProtocolComingSoon": "WebSocket（即将支持）"
+    "websocketProtocolComingSoon": "WebSocket（即将支持）",
+    "connectingHint": "正在连接 Agent… 启动期间你可以继续使用 Cognia。"
   },
   "runCommand": "运行 /{name}",
   "runtimes": {
@@ -533,9 +534,9 @@
     "permissionDefault": "默认（每次操作询问）",
     "permissionDontAsk": "不询问（未预先批准则拒绝）",
     "permissionPlan": "计划模式（不执行）",
-    "piExtensionPolicyGlobal": "加载我的全局 Pi 扩展",
-    "piExtensionPolicyHint": "隔离模式下运行 Pi 时不加载你自己的扩展、技能与提示模板，AGENTS.md 与 CLAUDE.md 仍会加载。社区权限扩展同样会拦截工具调用，与 Cognia 的权限链同时启用可能产生重复确认。",
-    "piExtensionPolicyIsolated": "隔离（推荐）",
+    "piExtensionPolicyGlobal": "加载我的全局 Pi 扩展（默认）",
+    "piExtensionPolicyHint": "全局扩展包含已安装 Pi 插件提供的模型。隔离模式会禁用这些插件、技能和提示词模板。项目内扩展需要明确授权信任。权限类扩展可能会与 Cognia 同时显示提示。",
+    "piExtensionPolicyIsolated": "隔离模式",
     "piExtensionPolicyLabel": "扩展策略",
     "piExtensionPolicyTrustedProject": "同时信任项目本地文件",
     "piExtensionPolicyTrustedProjectWarning": "项目本地的 Pi 文件可以执行所打开仓库中的任意代码。请仅对你信任的仓库启用。",

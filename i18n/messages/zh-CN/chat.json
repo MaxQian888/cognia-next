@@ -490,7 +490,9 @@
       "routingGroup": "路由",
       "searchPlaceholder": "搜索模型…",
       "switchModelAria": "切换模型",
-      "title": "选择模型"
+      "title": "选择模型",
+      "refreshAgentModels": "刷新模型",
+      "agentModelsFailed": "无法获取 {agent} 的模型列表，请重试刷新。"
     },
     "paramForm": {
       "cancel": "取消",

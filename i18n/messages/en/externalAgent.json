@@ -272,7 +272,8 @@
     "transportStdioLocal": "stdio (local)",
     "transportWebsocket": "WebSocket",
     "unsupportedProtocol": "Only ACP is currently supported for executable agents.",
-    "websocketProtocolComingSoon": "WebSocket (coming soon)"
+    "websocketProtocolComingSoon": "WebSocket (coming soon)",
+    "connectingHint": "Connecting to the agent… You can keep using Cognia while it starts."
   },
   "runCommand": "Run /{name}",
   "runtimes": {
@@ -533,9 +534,9 @@
     "permissionDefault": "Default (Ask for each action)",
     "permissionDontAsk": "Don't Ask (Deny unless pre-approved)",
     "permissionPlan": "Plan Mode (No execution)",
-    "piExtensionPolicyGlobal": "Load my global Pi extensions",
-    "piExtensionPolicyHint": "Isolated runs Pi without your own extensions, skills or prompt templates. AGENTS.md and CLAUDE.md still load. Community permission extensions also intercept tool calls, so loading them alongside Cognia's can produce duplicate prompts.",
-    "piExtensionPolicyIsolated": "Isolated (recommended)",
+    "piExtensionPolicyGlobal": "Load my global Pi extensions (default)",
+    "piExtensionPolicyHint": "Global extensions include models provided by your installed Pi plugins. Isolated disables those plugins, skills and prompt templates. Project-local extensions require explicit trust. Permission extensions may show their own prompts alongside Cognia.",
+    "piExtensionPolicyIsolated": "Isolated",
     "piExtensionPolicyLabel": "Extension policy",
     "piExtensionPolicyTrustedProject": "Also trust project-local files",
     "piExtensionPolicyTrustedProjectWarning": "Project-local Pi files can execute arbitrary code from the repository you open. Only use this for repositories you trust.",

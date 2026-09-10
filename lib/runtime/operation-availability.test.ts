@@ -30,6 +30,18 @@ function snapshot(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {
 }
 
 describe("resolveOperationAvailability", () => {
+  it.each(["connecting", "offline"] as const)(
+    "does not diagnose protocol incompatibility before a %s host has answered",
+    (connectionState) => {
+      expect(
+        resolveOperationAvailability({
+          snapshot: snapshot({ connectionState, host: undefined }),
+          command: "claude_send",
+        })
+      ).toEqual({ state: "offline", reason: "connection-offline" })
+    }
+  )
+
   it("runs a browser-local executor in standalone mode", () => {
     expect(
       resolveOperationAvailability({

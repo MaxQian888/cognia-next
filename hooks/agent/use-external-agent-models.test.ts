@@ -63,6 +63,29 @@ const SURFACE: ExternalAgentModelSurface = {
 }
 
 describe("useExternalAgentModels", () => {
+  it("loads the catalog on the welcome screen before a conversation exists", async () => {
+    const { result } = renderHook(() => useExternalAgentModels(undefined))
+    await waitFor(() =>
+      expect(loadAgentModelCatalog).toHaveBeenCalledWith("pi-1", { refresh: false })
+    )
+    expect(resolveConversationSessionId).not.toHaveBeenCalled()
+    await waitFor(() => expect(result.current.loading).toBe(false))
+  })
+
+  it("keeps catalog errors visible and lets refresh recover before the first turn", async () => {
+    resolveConversationSessionId.mockReturnValue(null)
+    loadAgentModelCatalog.mockResolvedValueOnce({
+      status: "error",
+      surface: null,
+      detail: "offline",
+    })
+    const { result } = renderHook(() => useExternalAgentModels("chat-1"))
+    await waitFor(() => expect(result.current.status).toBe("error"))
+    loadAgentModelCatalog.mockResolvedValueOnce({ status: "ready", surface: SURFACE })
+    act(() => result.current.refresh())
+    await waitFor(() => expect(result.current.surface).toEqual(SURFACE))
+    expect(loadAgentModelCatalog).toHaveBeenLastCalledWith("pi-1", { refresh: true })
+  })
   beforeEach(() => {
     runtimeRef = { kind: "external", agentId: "pi-1" } as AgentRuntimeRef
     loadAgentModelSurface.mockReset().mockResolvedValue({ status: "ready", surface: SURFACE })

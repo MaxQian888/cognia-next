@@ -48,6 +48,24 @@ function renderSelect(props: Partial<React.ComponentProps<typeof ModelSelect>> =
 }
 
 describe("groupByProvider", () => {
+  it("renders the provider name once with its refresh action in the same heading", () => {
+    const refresh = jest.fn()
+    renderSelect({
+      leadingGroups: [
+        {
+          providerId: "pi",
+          providerName: "Pi",
+          models: [{ id: "m1", name: "Plugin model" }],
+          headingAction: <button onClick={refresh}>Refresh models</button>,
+        },
+      ],
+    })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getAllByText("Pi")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh models" }))
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(screen.getByText("Plugin model")).toBeInTheDocument()
+  })
   const opt = (over: Partial<ModelOption>): ModelOption => ({
     providerId: "anthropic",
     providerName: "Anthropic",

@@ -1053,16 +1053,39 @@ export async function smoke() {
 /**
  * ADR-0090 Phase 3 — command idempotency. A `commandId` the session already
  * processed is acknowledged (`command_ack { duplicate: true }`) and dropped,
- * so at-least-once senders (AgentExecutionHandle) can retry safely.
- * Session-scoped LRU of 128 ids. Returns true when the message was dropped.
- * Exported for the co-located test.
+ * so at-least-once senders (AgentExecutionHandle, the work-submission sweep,
+ * a HostState redrive) can retry safely.
+ *
+ * The ledger lives OUTSIDE the session object on purpose. Anthropic sessions
+ * are retired from `sessions` on every `session_ended`, so a ledger hung off
+ * the live session forgot every id the moment the turn finished, and a retry
+ * that landed after that re-ran the whole turn. The ledger is an LRU of
+ * `RECENT_COMMAND_SESSIONS` sessions, each remembering
+ * `RECENT_COMMAND_IDS_PER_SESSION` ids, so a closed session's ids outlive it
+ * for as long as any at-least-once sender would retry.
+ *
+ * Returns true when the message was dropped. Exported for the co-located test,
+ * which injects its own ledger.
  */
-export function dropDuplicateCommand(sessionsMap, msg, emitFn) {
+export const RECENT_COMMAND_SESSIONS = 256
+export const RECENT_COMMAND_IDS_PER_SESSION = 128
+const recentCommandIds = new Map()
+
+export function dropDuplicateCommand(_sessionsMap, msg, emitFn, ledger = recentCommandIds) {
   if (!msg?.commandId || !msg?.sessionId) return false
-  const session = sessionsMap.get(msg.sessionId)
-  if (!session) return false
-  if (!session.processedCommandIds) session.processedCommandIds = new Map()
-  if (session.processedCommandIds.has(msg.commandId)) {
+  let ids = ledger.get(msg.sessionId)
+  if (ids) {
+    // LRU touch: a session that is still being driven stays warm.
+    ledger.delete(msg.sessionId)
+    ledger.set(msg.sessionId, ids)
+  } else {
+    ids = new Map()
+    ledger.set(msg.sessionId, ids)
+    if (ledger.size > RECENT_COMMAND_SESSIONS) {
+      ledger.delete(ledger.keys().next().value)
+    }
+  }
+  if (ids.has(msg.commandId)) {
     emitFn({
       type: "command_ack",
       sessionId: msg.sessionId,
@@ -1071,10 +1094,9 @@ export function dropDuplicateCommand(sessionsMap, msg, emitFn) {
     })
     return true
   }
-  session.processedCommandIds.set(msg.commandId, true)
-  if (session.processedCommandIds.size > 128) {
-    const oldest = session.processedCommandIds.keys().next().value
-    session.processedCommandIds.delete(oldest)
+  ids.set(msg.commandId, true)
+  if (ids.size > RECENT_COMMAND_IDS_PER_SESSION) {
+    ids.delete(ids.keys().next().value)
   }
   return false
 }
@@ -1096,6 +1118,88 @@ export function blockUnsupportedCommand(sessionsMap, msg, emitFn) {
   return false
 }
 
+/**
+ * Dispatch one inbound command to its handler WITHOUT letting a throw escape
+ * the stdin loop.
+ *
+ * Before this existed, `handleSend` ran bare inside `rl.on("line")` and the
+ * async handlers were fire-and-forget promises. Either kind of failure was an
+ * uncaught exception / unhandled rejection, which exits Node: every live
+ * session died, Rust charged the recovery budget, and three such deaths held
+ * the whole sidecar back. The trigger did not have to be exotic: `dispatch()`
+ * throws by design for `runtimeAdapter: "external"`, and a HostState
+ * `message.enqueue` from a phone could stamp that adapter from the host's
+ * composer pick.
+ *
+ * Policy: a failed `send` ends THAT session with a `session_ended { error }`
+ * (the renderer's terminal frame, so the turn settles instead of hanging), any
+ * other failed command is logged, and the process keeps serving everyone else.
+ * Exported for the co-located test.
+ */
+export function routeCommand(msg, { emit: emitFn, log: logFn, sessions: sessionsMap, handlers }) {
+  const handler = handlers[msg?.type]
+  if (!handler) {
+    logFn("warn", `unknown command type: ${msg?.type}`)
+    return
+  }
+  const fail = (err) => {
+    const reason = err?.message ?? String(err)
+    logFn("error", `${msg.type} failed: ${reason}`)
+    if (msg.type !== "send" || !msg.sessionId) return
+    // The session may be half-started (dispatch threw) or wedged (push threw):
+    // retire it so the next send starts clean rather than pushing into a
+    // loop that never came up.
+    routeClose(sessionsMap, { sessionId: msg.sessionId }, logFn)
+    emitFn({
+      type: "session_ended",
+      sessionId: msg.sessionId,
+      ...(msg.options?.turnId ? { turnId: msg.options.turnId } : {}),
+      error: `send failed: ${reason}`,
+    })
+  }
+  try {
+    const result = handler(msg)
+    if (result && typeof result.then === "function") result.then(undefined, fail)
+  } catch (err) {
+    fail(err)
+  }
+}
+
+/**
+ * Last-resort process guards. A bug that escapes every handler above must not
+ * take every session down with it, so log it and keep serving. The budget is
+ * the escape hatch for a genuinely broken host: more than
+ * `UNCAUGHT_ERROR_BUDGET` escapes inside one window exits with code 1, and
+ * Rust's recovery ladder takes over as before.
+ */
+export const UNCAUGHT_ERROR_BUDGET = 5
+export const UNCAUGHT_ERROR_WINDOW_MS = 60_000
+
+export function createUncaughtErrorGuard({ log: logFn, exit, now = () => Date.now() }) {
+  let windowStart = now()
+  let count = 0
+  return (kind, err) => {
+    const at = now()
+    if (at - windowStart > UNCAUGHT_ERROR_WINDOW_MS) {
+      windowStart = at
+      count = 0
+    }
+    count += 1
+    const reason = err?.stack ?? err?.message ?? String(err)
+    logFn("error", `${kind}: ${reason}`)
+    if (count > UNCAUGHT_ERROR_BUDGET) {
+      logFn("error", `${count} uncaught errors within ${UNCAUGHT_ERROR_WINDOW_MS}ms; exiting`)
+      exit(1)
+    }
+  }
+}
+
+function installUncaughtErrorGuards() {
+  const guard = createUncaughtErrorGuard({ log, exit: (code) => process.exit(code) })
+  process.on("uncaughtException", (err) => guard("uncaughtException", err))
+  process.on("unhandledRejection", (err) => guard("unhandledRejection", err))
+}
+
 function startReadLoop() {
   const rl = readline.createInterface({ input: process.stdin })
   rl.on("line", (line) => {
@@ -1110,71 +1214,45 @@ function startReadLoop() {
     }
     if (dropDuplicateCommand(sessions, msg, emit)) return
     if (blockUnsupportedCommand(sessions, msg, emit)) return
-    switch (msg.type) {
-      case "send":
-        handleSend(msg)
-        break
-      case "interrupt":
-        void handleInterrupt(msg)
-        break
-      case "compact":
-        void handleCompact(msg)
-        break
-      case "restore":
-        handleRestore(msg)
-        break
-      case "set_mode":
-        void handleSetMode(msg)
-        break
-      case "control":
-        void handleControl(msg)
-        break
-      case "session_api":
-        // Session-level reads and mutations that need no live session (list,
-        // rename, fork, import, …). Separate from `control` because those
-        // resolve a running query by id and these deliberately do not.
-        void handleSessionApi(msg, {
-          emit,
-          store: sessionStoreFromSendOptions(msg?.sendOptions ?? {}, { hostRpc, log }),
-        })
-        break
-      case "feature_call":
-        void featureCalls.call(msg)
-        break
-      case "feature_call_abort":
-        featureCalls.abort(msg.requestId)
-        break
-      case "permission_response":
-        handlePermissionResponse(msg)
-        break
-      case "plugin_tool_response":
-        handlePluginToolResponse(msg)
-        break
-      case "plugin_hook_response":
-        handlePluginHookResponse(msg)
-        break
-      case "host_rpc_result":
+    routeCommand(msg, {
+      emit,
+      log,
+      sessions,
+      handlers: {
+        send: handleSend,
+        interrupt: handleInterrupt,
+        compact: handleCompact,
+        restore: handleRestore,
+        set_mode: handleSetMode,
+        control: handleControl,
+        session_api: (m) =>
+          // Session-level reads and mutations that need no live session (list,
+          // rename, fork, import, …). Separate from `control` because those
+          // resolve a running query by id and these deliberately do not.
+          handleSessionApi(m, {
+            emit,
+            store: sessionStoreFromSendOptions(m?.sendOptions ?? {}, { hostRpc, log }),
+          }),
+        feature_call: (m) => featureCalls.call(m),
+        feature_call_abort: (m) => featureCalls.abort(m.requestId),
+        permission_response: handlePermissionResponse,
+        plugin_tool_response: handlePluginToolResponse,
+        plugin_hook_response: handlePluginHookResponse,
         // Answered by Rust directly (never by the renderer) — see host-rpc.mjs.
-        hostRpc.resolveResult(msg)
-        break
-      case "tool_result_decision":
-        handleToolResultDecision(msg)
-        break
-      case "protocol_adapter_chunk":
-        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterChunk(msg)
-        break
-      case "protocol_adapter_done":
-        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterDone(msg)
-        break
-      case "protocol_adapter_error":
-        if (!featureCalls.handleProtocolAdapterMessage(msg)) handleProtocolAdapterError(msg)
-        break
-      case "close":
-        handleClose(msg)
-        break
-      default:
-        log("warn", `unknown command type: ${msg.type}`)
-    }
+        host_rpc_result: (m) => hostRpc.resolveResult(m),
+        tool_result_decision: handleToolResultDecision,
+        protocol_adapter_chunk: (m) => {
+          if (!featureCalls.handleProtocolAdapterMessage(m)) handleProtocolAdapterChunk(m)
+        },
+        protocol_adapter_done: (m) => {
+          if (!featureCalls.handleProtocolAdapterMessage(m)) handleProtocolAdapterDone(m)
+        },
+        protocol_adapter_error: (m) => {
+          if (!featureCalls.handleProtocolAdapterMessage(m)) handleProtocolAdapterError(m)
+        },
+        close: handleClose,
+      },
+    })
   })
   rl.on("close", async () => {
     // Parent closed our stdin — shut down all sessions gracefully.
@@ -1214,6 +1292,7 @@ let hostStarted = false
 export function startAgentHost() {
   if (hostStarted) return
   hostStarted = true
+  installUncaughtErrorGuards()
   startReadLoop()
 }
 

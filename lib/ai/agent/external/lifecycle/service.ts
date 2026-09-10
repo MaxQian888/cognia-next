@@ -167,7 +167,10 @@ const RUNTIME_AFFECTING_KEYS = [
 ] as const satisfies readonly (keyof UpdateExternalAgentInput)[]
 
 export function isRuntimeAffectingUpdate(updates: UpdateExternalAgentInput): boolean {
-  return RUNTIME_AFFECTING_KEYS.some((key) => Object.prototype.hasOwnProperty.call(updates, key))
+  return (
+    RUNTIME_AFFECTING_KEYS.some((key) => Object.prototype.hasOwnProperty.call(updates, key)) ||
+    Boolean(updates.metadata && Object.hasOwn(updates.metadata, "piExtensionPolicy"))
+  )
 }
 
 // ============================================================================

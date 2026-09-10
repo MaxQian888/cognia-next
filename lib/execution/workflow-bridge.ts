@@ -73,7 +73,18 @@ export async function syncWorkflowExecutionRun(
       await runEventJournal.appendBatch(runId, [
         semanticRunEvent(
           "plan.created",
-          { version: 1, steps: stepPlan(sourceRun) },
+          {
+            version: 1,
+            steps: stepPlan(sourceRun),
+            workflowGraph: {
+              workflowId: sourceRun.workflowId,
+              sourceRunId: sourceRun.id,
+              edges: sourceRun.workflowSnapshot.edges.map(({ source, target }) => ({
+                source,
+                target,
+              })),
+            },
+          },
           { ts: sourceRun.startedAt, sourceEventId: `workflow:${sourceRun.id}:plan` }
         ),
         semanticRunEvent(

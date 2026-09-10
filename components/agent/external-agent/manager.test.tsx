@@ -129,6 +129,40 @@ const baseHookValue = () => ({
 })
 
 describe("ExternalAgentManager", () => {
+  it("does not relist sessions when an unchanged runtime is projected into a new array", async () => {
+    const agent = makeAgent({
+      protocol: "opencode",
+      transport: "http",
+      network: { endpoint: "http://localhost:4096" },
+    })
+    agent.connectionStatus = "connected"
+    const value = { ...baseHookValue(), agents: [agent], activeAgentId: agent.config.id }
+    mockUseExternalAgent.mockReturnValue(value)
+    const { rerender } = render(wrap(<ExternalAgentManager />))
+    await act(async () => {})
+    expect(value.listSessions).toHaveBeenCalledTimes(1)
+    mockUseExternalAgent.mockReturnValue({ ...value, agents: [{ ...agent }] })
+    rerender(wrap(<ExternalAgentManager />))
+    await act(async () => {})
+    expect(value.listSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows immediate progress and prevents duplicate connect clicks", async () => {
+    const connect = jest.fn(() => new Promise<void>(() => {}))
+    const agent = makeAgent({
+      protocol: "opencode",
+      transport: "http",
+      network: { endpoint: "http://localhost:4096" },
+    })
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], connect })
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.connect }))
+    const pending = screen.getByRole("button", { name: en.externalAgent.statusConnecting })
+    expect(pending).toBeDisabled()
+    fireEvent.click(pending)
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("status")).toHaveTextContent(en.externalAgent.manager.connectingHint)
+  })
   beforeEach(() => {
     mockUseExternalAgent.mockReset()
     // The store is real here, so a failure left by one test would be drawn by
@@ -167,6 +201,9 @@ describe("ExternalAgentManager", () => {
       activeAgentId: "agent-1",
     })
     render(wrap(<ExternalAgentManager />))
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
+    )
     expect(screen.getByTestId("external-agent-diagnostics")).toBeInTheDocument()
     expect(screen.getByText(/Protocol\/Transport: ACP via stdio/)).toBeInTheDocument()
   })
@@ -212,6 +249,9 @@ describe("ExternalAgentManager", () => {
       },
     })
     render(wrap(<ExternalAgentManager />))
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
+    )
     expect(screen.getByText(/Adapter: ClaudeAdapter/)).toBeInTheDocument()
     expect(screen.getByText(/Surface: Cognia Desktop/)).toBeInTheDocument()
     expect(screen.getByText(/Support tier: guided/)).toBeInTheDocument()
@@ -473,16 +513,7 @@ describe("ExternalAgentManager", () => {
     } as never)
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], connect })
     render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const connectBtn = buttons.find((b) => {
-      const svg = b.querySelector("svg")
-      return (
-        svg !== null &&
-        svg.classList.contains("text-green-600") &&
-        b.classList.contains("h-7") &&
-        !(b as HTMLButtonElement).disabled
-      )
-    })
+    const connectBtn = screen.getByRole("button", { name: en.externalAgent.settings.connect })
     expect(connectBtn).toBeDefined()
     await act(async () => {
       fireEvent.click(connectBtn!)
@@ -512,14 +543,7 @@ describe("ExternalAgentManager", () => {
 
   /** Click the trash icon on the first agent card. */
   const clickRemoveIcon = async () => {
-    const trashBtn = screen.getAllByRole("button").find((b) => {
-      const svg = b.querySelector("svg")
-      return (
-        svg !== null &&
-        svg.classList.contains("text-muted-foreground") &&
-        b.classList.contains("h-7")
-      )
-    })
+    const trashBtn = screen.getByRole("button", { name: en.common.remove })
     expect(trashBtn).toBeDefined()
     await act(async () => {
       fireEvent.click(trashBtn!)
@@ -654,6 +678,9 @@ describe("ExternalAgentManager", () => {
       },
     })
     render(wrap(<ExternalAgentManager />))
+    fireEvent.click(
+      screen.getByRole("button", { name: en.externalAgent.manager.diagnostics.runtimeDiagnostics })
+    )
     expect(screen.getByText(/Latest run: success/)).toBeInTheDocument()
     expect(screen.getByText(/Trace: trace-1/)).toBeInTheDocument()
     expect(screen.getByText(/Session: session-1/)).toBeInTheDocument()
@@ -868,11 +895,7 @@ describe("ExternalAgentManager", () => {
     } as never)
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], connect })
     render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const connectBtn = buttons.find((b) => {
-      const svg = b.querySelector("svg")
-      return svg !== null && svg.classList.contains("text-green-600") && b.classList.contains("h-7")
-    })
+    const connectBtn = screen.getByRole("button", { name: en.externalAgent.settings.connect })
     await act(async () => {
       fireEvent.click(connectBtn!)
     })

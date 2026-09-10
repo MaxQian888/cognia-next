@@ -315,9 +315,7 @@ describe("reduceRunEvents", () => {
     expect(snapshot.title).not.toContain("alice@example.com")
     expect(snapshot.activeSteps[0]?.title).toBe("Step")
     expect(snapshot.activeSteps[0]?.summary).toBeUndefined()
-    expect(snapshot.pendingInterrupt).toEqual(
-      expect.objectContaining({ title: "Approval required" })
-    )
+    expect(snapshot.pendingInterrupt).toBeUndefined()
     expect(snapshot.artifacts).toEqual([
       expect.objectContaining({ id: expect.stringMatching(/^opaque-/), title: "Artifact created" }),
     ])
@@ -690,4 +688,45 @@ describe("verification artifacts", () => {
     expect(artifact.title).toBe("Artifact created")
     expect(JSON.stringify(artifact)).not.toContain("sk-secret")
   })
+})
+
+it("preserves actual branch edges and all settled nodes, rejecting dangling edges", () => {
+  const nodes = ["read", "left", "right", "join", "end"]
+  const snapshot = reduceRunEvents(baseRun, [
+    event({
+      type: "plan.created",
+      seq: 1,
+      payload: {
+        steps: nodes.map((id) => ({ id, title: "private title" })),
+        workflowGraph: {
+          workflowId: "wf",
+          sourceRunId: "source",
+          edges: [
+            { source: "read", target: "left" },
+            { source: "read", target: "right" },
+            { source: "left", target: "join" },
+            { source: "right", target: "join" },
+            { source: "missing", target: "end" },
+            null,
+          ],
+        },
+      },
+    }),
+    ...nodes.map((id, i) => event({ type: "step.completed", seq: i + 2, payload: { stepId: id } })),
+  ])
+  expect(snapshot.workflowGraph?.nodes).toHaveLength(5)
+  expect(snapshot.workflowGraph?.nodes.every((node) => node.status === "completed")).toBe(true)
+  expect(snapshot.workflowGraph?.edges).toHaveLength(4)
+  expect(snapshot.workflowGraph?.edges).not.toContainEqual({ source: "left", target: "right" })
+  expect(JSON.stringify(snapshot.workflowGraph)).not.toContain("private title")
+})
+
+it("removes stale review prompts when the run terminates", () => {
+  const snapshot = reduceRunEvents(baseRun, [
+    event({ seq: 1, type: "interrupt.requested", payload: { interruptId: "pending" } }),
+    event({ seq: 2, type: "run.failed" }),
+  ])
+  expect(snapshot.pendingInterrupt).toBeUndefined()
+  expect(snapshot.waitingReason).toBeUndefined()
+  expect(snapshot.allowedActions).not.toContain("approve")
 })

@@ -344,3 +344,27 @@ describe("control", () => {
     })
   })
 })
+
+describe("whenRemoteRunChannelSubscribed", () => {
+  it("resolves immediately on a transport without subscription acknowledgements", async () => {
+    const { transport } = jest.requireMock("@/lib/tauri") as { transport: Record<string, unknown> }
+    delete transport.whenSubscribed
+    const { whenRemoteRunChannelSubscribed, EXTERNAL_RUN_EVENT_TOPIC } =
+      await import("./remote-run-client")
+    await expect(whenRemoteRunChannelSubscribed()).resolves.toBeUndefined()
+    expect(EXTERNAL_RUN_EVENT_TOPIC).toBe("external-agent://session-event")
+  })
+
+  it("waits on the companion transport's acknowledgement for the run topic", async () => {
+    const { transport } = jest.requireMock("@/lib/tauri") as { transport: Record<string, unknown> }
+    const whenSubscribed = jest.fn(async (_channels: readonly string[]) => undefined)
+    transport.whenSubscribed = whenSubscribed
+    try {
+      const { whenRemoteRunChannelSubscribed } = await import("./remote-run-client")
+      await whenRemoteRunChannelSubscribed()
+      expect(whenSubscribed).toHaveBeenCalledWith(["external-agent://session-event"])
+    } finally {
+      delete transport.whenSubscribed
+    }
+  })
+})

@@ -28,6 +28,8 @@ jest.mock("@/lib/task-workspace/client", () => ({
 }))
 const materializeManagedMock = jest.fn()
 const deleteManagedMock = jest.fn()
+jest.mock("@/lib/platform/detect", () => ({ isTauri: jest.fn(() => true) }))
+const isTauriMock = jest.requireMock("@/lib/platform/detect").isTauri as jest.Mock
 jest.mock("@/lib/task-workspace/managed-workspace", () => ({
   materializeManagedWorkspace: (...args: unknown[]) => materializeManagedMock(...args),
   rebindManagedWorkspace: jest.fn(),
@@ -50,6 +52,7 @@ const session: ChatSession = {
 }
 
 beforeEach(() => {
+  isTauriMock.mockReturnValue(true)
   gitStatusMock.mockReset().mockResolvedValue({
     staged: [{ path: "staged.ts" }],
     changes: [{ path: "local.ts" }],
@@ -91,6 +94,35 @@ beforeEach(() => {
     },
   })
 })
+
+it.each(["missing-on-device", "available", "deleted"] as const)(
+  "explains and disables local managed file actions on web when availability is %s",
+  async (availability) => {
+    isTauriMock.mockReturnValue(false)
+    render(
+      <SessionExecutionWorkspace
+        session={
+          {
+            ...session,
+            executionContext: {
+              location: "managedWorktree",
+              workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:session-1" },
+              managedWorkspace: { availability },
+              projectId: "",
+              projectRoot: "",
+              taskWorkspace: { taskId: "task-1", workspaceKey: "session-1" },
+            },
+          } as never
+        }
+      />
+    )
+    expect(await screen.findByText("This action requires the desktop app.")).toBeInTheDocument()
+    for (const button of screen.getAllByRole("button")) expect(button).toBeDisabled()
+    expect(screen.getByLabelText("Import workspace")).toBeDisabled()
+    expect(materializeManagedMock).not.toHaveBeenCalled()
+    expect(deleteManagedMock).not.toHaveBeenCalled()
+  }
+)
 
 it("reviews and hands off every Bundle root with root-scoped selections", async () => {
   getBundleTurnMock.mockResolvedValue({

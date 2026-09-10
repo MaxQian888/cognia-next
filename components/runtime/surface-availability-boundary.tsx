@@ -47,7 +47,9 @@ export function SurfaceAvailabilityBoundary({ children }: { children: React.Reac
             {t("readOnly", { reason: t(`reasons.${availability.reason}`) })}
           </AlertDescription>
         </Alert>
-        {children}
+        {/* Routes inherit a flex row from the shell. Keep that content slot
+            separate from the notice's column so chat panes stay side by side. */}
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
       </div>
     )
   }

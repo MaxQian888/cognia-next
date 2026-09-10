@@ -25,21 +25,17 @@ import { detectPlatform, type Platform } from "./detect"
  * - `sidecar`           — runs the Node sidecar (Claude host, builtin tools).
  * - `keyring`           — OS keyring access for `keyring:*` secret refs.
  * - `uia-automation`    — desktop UI automation (screenshot, click, UIA events).
- * - `ocr`               — native OCR pipeline.
- * - `media`             — native FFmpeg/FFprobe media pipeline
- *                         (`crates/cognia-media`). Desktop-only because those
- *                         commands are raw `invoke`, absent from the companion
- *                         RPC allowlist and the command manifest, so they are
- *                         unreachable from the brain, a companion, or a remote
- *                         host. Whether ffmpeg is actually on PATH stays a
- *                         run-time answer (`VideoError::MissingDependency`);
- *                         this id only says the command surface exists here.
+ * - `ocr`               — native/server OCR pipeline.
+ * - `media`             — local/server FFmpeg media processing. Shipped by desktop
+ *                         and headless hosts; missing FFmpeg/FFprobe dependencies
+ *                         are reported when the operation runs.
  * - `camera` / `geolocation` / `barcode-scan` / `voice-record` / `share-sheet`
  *                       — Capacitor-native mobile facilities.
  * - `push-display`      — can surface push/local notifications to a human.
  * - `biometric`         — biometric prompt available.
  * - `webview`           — an interactive webview UI is attached.
- * - `browser`           — an Agent-operable browser engine is ready.
+ * - `browser`           — provides an Agent-operable browser engine; workspace
+ *                         readiness is checked when an operation runs.
  * - `headless`          — runs without an interactive UI (ADR 0059 cloud
  *                         brain; assigned to no webview platform here).
  * - `always-on`         — process hosts long-lived listeners that outlive the
@@ -48,7 +44,7 @@ import { detectPlatform, type Platform } from "./detect"
  * - `mcp-runtime`       — MCP client/server stack runs here.
  * - `pro-ide`           — can host the embedded code-server "Pro IDE"
  *                         (ADR-0088). Coarse like its neighbours: listed for
- *                         the desktop shell, while `codeserver_supported()`
+ *                         desktop and headless hosts, while `codeserver_supported()`
  *                         still answers the per-OS/arch question at call time.
  */
 export const CORE_CAPABILITY_IDS = [
@@ -97,6 +93,10 @@ const SERVER_BACKED: readonly CapabilityId[] = Object.freeze([
   "mcp-runtime",
   "headless",
   "thread-handoff-v1",
+  "browser",
+  "ocr",
+  "pro-ide",
+  "media",
 ] as const)
 
 /** True when `value` is a well-formed capability id (core or `plugin:<id>`). */

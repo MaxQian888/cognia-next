@@ -22,6 +22,7 @@ import {
   resolveAgentExecutionSpec,
   type AgentExecutionEnvironment,
 } from "./resolve-agent-execution-spec"
+import { agentHostAvailable } from "./host-environment"
 import { resolveActiveCertification } from "./certification-store"
 
 export class AgentCapabilityUnsatisfiedError extends Error {
@@ -194,7 +195,7 @@ export async function executeAgentTurn(
     ...(spec.legacyMigrated ? { legacyMigrated: true } : {}),
   })
 
-  const hostAvailable = environment.isTauri || environment.isHeadlessHost
+  const hostAvailable = agentHostAvailable(environment)
 
   const executeResolved = async (
     effectiveConfig: ExecuteAgentConfig
@@ -205,7 +206,8 @@ export async function executeAgentTurn(
     }
 
     // Agent rail: requires a host. Host availability is resolver-environment
-    // truth (`isTauri` / headless host), NEVER re-probed ad hoc here.
+    // truth (desktop sidecar / headless host / paired host), NEVER re-probed
+    // ad hoc here.
     if (hostAvailable) {
       return stamp(await executor.runAgentRail(prompt, effectiveConfig))
     }
@@ -342,9 +344,11 @@ export async function openAgentSession(input: {
 }
 
 /**
- * Renderer-side convenience wrapper over {@link executeAgentTurn}. Environment
- * is renderer host truth (desktop sidecar vs web); the headless brain calls
- * {@link executeAgentTurn} with its own environment instead.
+ * Convenience wrapper over {@link executeAgentTurn} for callers that run in
+ * whatever shell this process is. The environment is derived from the host
+ * profile (`resolveAgentExecutionEnvironment`), so the headless brain, the
+ * desktop, and a paired companion each resolve to their real host instead of
+ * every non-Tauri process being treated as a host-less web renderer.
  *
  * Deliberately does NOT delegate to `executeAgent`: that function now delegates
  * *here*, so a fallback in this direction would be an infinite loop.
@@ -354,6 +358,6 @@ export async function executeAgentTurnFromRenderer(
   config: ExecuteAgentConfig,
   options?: AgentExecutionTurnOptions
 ): Promise<AgentExecutionServiceResult> {
-  const { isTauri } = await import("@/lib/tauri")
-  return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false }, options)
+  const { resolveAgentExecutionEnvironment } = await import("./host-environment")
+  return executeAgentTurn(prompt, config, resolveAgentExecutionEnvironment(), options)
 }

@@ -4,6 +4,11 @@
  * Web-mode behavior of the workflow Tauri bridge. Without the Tauri globals
  * `isTauri()` is false, so every wrapper degrades gracefully instead of
  * throwing — the orchestrator must run end-to-end in the browser shell.
+ *
+ * The native-call suites below pin the two things the bridge got wrong for a
+ * long time: which hosts have a workflow state to talk to (the desktop AND
+ * the headless brain, never a companion), and the argument shape the Rust
+ * commands read (`{ input }`, not the bare object).
  */
 import {
   respondToWebhook,
@@ -206,5 +211,117 @@ describe("tauri-bridge listeners (Tauri mode)", () => {
     const cb = listen.mock.calls[0][1] as (e: { payload: unknown }) => void
     cb({ payload: { workflowId: "wf", kind: "trigger.cron", originAt: 1 } })
     expect(handler).toHaveBeenCalledWith({ workflowId: "wf", kind: "trigger.cron", originAt: 1 })
+  })
+})
+
+describe("tauri-bridge native calls (headless brain)", () => {
+  afterEach(() => {
+    jest.resetModules()
+    jest.dontMock("@/lib/tauri")
+    jest.dontMock("./companion-run-events")
+    delete (globalThis as { __COGNIA_HEADLESS__?: unknown }).__COGNIA_HEADLESS__
+  })
+
+  /**
+   * The brain marks itself with `__COGNIA_HEADLESS__` before anything else
+   * boots (`cli/src/serve/serve-command.ts`), and `detectHostProfile` reads
+   * that marker ahead of every browser check. The transport is the brain's
+   * `CompanionTransport`; here it is a recording stub.
+   */
+  async function loadHeadlessBridge(call: jest.Mock) {
+    jest.resetModules()
+    ;(globalThis as { __COGNIA_HEADLESS__?: unknown }).__COGNIA_HEADLESS__ = true
+    jest.doMock("@/lib/tauri", () => ({ transport: { call } }))
+    jest.doMock("./companion-run-events", () => ({
+      notifyCompanionsOfRunState: jest.fn(async () => undefined),
+    }))
+    return import("./tauri-bridge")
+  }
+
+  it("routes mirror writes through the shared transport, wrapped the way the Rust commands read them", async () => {
+    const call = jest.fn(async () => null)
+    const bridge = await loadHeadlessBridge(call)
+    await bridge.persistRunState({ runId: "run_1", workflowId: "wf_1", status: "running" })
+    expect(call).toHaveBeenCalledWith("workflow_persist_run_state", {
+      input: { runId: "run_1", workflowId: "wf_1", status: "running" },
+    })
+    await bridge.registerTrigger({
+      workflowId: "wf_1",
+      triggerId: "trg_1",
+      kind: "trigger.cron",
+      enabled: true,
+      cron: "0 9 * * *",
+    })
+    expect(call).toHaveBeenLastCalledWith("workflow_register_trigger", {
+      input: expect.objectContaining({ triggerId: "trg_1", cron: "0 9 * * *" }),
+    })
+    await bridge.unregisterTrigger("wf_1", "trg_1")
+    expect(call).toHaveBeenLastCalledWith("workflow_unregister_trigger", {
+      workflowId: "wf_1",
+      triggerId: "trg_1",
+    })
+    await bridge.ackRunCompleted("run_1")
+    expect(call).toHaveBeenLastCalledWith("workflow_ack_completed", { runId: "run_1" })
+  })
+
+  it("reads the in-flight rows back from the host's mirror", async () => {
+    const rows = [{ runId: "run_1", workflowId: "wf_1", snapshot: {}, startedAt: 1 }]
+    const call = jest.fn(async () => rows)
+    const bridge = await loadHeadlessBridge(call)
+    await expect(bridge.reloadInFlightRuns()).resolves.toEqual(rows)
+    expect(call).toHaveBeenCalledWith("workflow_reload_in_flight_runs", undefined)
+    await expect(bridge.getWebhookUrl("wf_1", "trg_1")).resolves.toEqual(rows)
+  })
+
+  it("degrades to null and reports a failing host once per command", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const call = jest.fn(async () => {
+      throw new Error("unknown command")
+    })
+    const bridge = await loadHeadlessBridge(call)
+    await expect(bridge.getWebhookUrl("wf", "trg")).resolves.toBeNull()
+    await expect(bridge.getWebhookUrl("wf", "trg")).resolves.toBeNull()
+    await expect(bridge.reloadInFlightRuns()).resolves.toEqual([])
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn.mock.calls[0][0]).toContain("workflow_get_webhook_url")
+    expect(warn.mock.calls[1][0]).toContain("workflow_reload_in_flight_runs")
+    warn.mockRestore()
+  })
+})
+
+describe("tauri-bridge native calls (Tauri desktop and companions)", () => {
+  afterEach(() => {
+    jest.resetModules()
+    jest.dontMock("@/lib/tauri")
+    jest.dontMock("./companion-run-events")
+    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+  })
+
+  it("wraps persist and register under `input` on the desktop too", async () => {
+    jest.resetModules()
+    ;(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {}
+    const call = jest.fn(async () => null)
+    jest.doMock("@/lib/tauri", () => ({ transport: { call } }))
+    jest.doMock("./companion-run-events", () => ({
+      notifyCompanionsOfRunState: jest.fn(async () => undefined),
+    }))
+    const bridge = await import("./tauri-bridge")
+    await bridge.persistRunState({ runId: "run_1", workflowId: "wf_1", status: "succeeded" })
+    expect(call).toHaveBeenCalledWith("workflow_persist_run_state", {
+      input: { runId: "run_1", workflowId: "wf_1", status: "succeeded" },
+    })
+  })
+
+  it("never puts a mirror write on the wire from a shell with no workflow state", async () => {
+    jest.resetModules()
+    const call = jest.fn(async () => null)
+    jest.doMock("@/lib/tauri", () => ({ transport: { call } }))
+    jest.doMock("./companion-run-events", () => ({
+      notifyCompanionsOfRunState: jest.fn(async () => undefined),
+    }))
+    const bridge = await import("./tauri-bridge")
+    await bridge.persistRunState({ runId: "run_1", workflowId: "wf_1", status: "running" })
+    await expect(bridge.reloadInFlightRuns()).resolves.toEqual([])
+    expect(call).not.toHaveBeenCalled()
   })
 })

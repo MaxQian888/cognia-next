@@ -13,11 +13,15 @@ let handlers:
 let startReply: unknown = { started: true, runId: "run-1" }
 let subscribedRunId: string | undefined
 
+const channelReady: string[] = []
 jest.mock("./remote-run-client", () => ({
   subscribeRemoteExternalRun: (runId: string, h: never) => {
     subscribedRunId = runId
     handlers = h
     return stop
+  },
+  whenRemoteRunChannelSubscribed: async () => {
+    channelReady.push(`ready:${started.length}`)
   },
   startRemoteExternalTurn: async (input: Record<string, unknown>) => {
     started.push(input)
@@ -228,4 +232,18 @@ describe("interruptRemoteHostAgent", () => {
     await interruptRemoteHostAgent("run-1")
     expect(cancelled).toEqual(["run-1"])
   })
+})
+
+it("waits for the run topic to be acknowledged before starting the turn", async () => {
+  channelReady.length = 0
+  const run = executeOnRemoteHostAgent("go", { stamp: STAMP, chatSessionId: "chat-1" })
+  await Promise.resolve()
+  await Promise.resolve()
+  // Subscribed first, acknowledged second, started third: `ready:0` records
+  // that no turn had been started when the acknowledgement was awaited.
+  expect(subscribedRunId).toBeDefined()
+  expect(channelReady).toEqual(["ready:0"])
+  expect(started).toHaveLength(1)
+  handlers?.onTerminal("completed")
+  await run
 })

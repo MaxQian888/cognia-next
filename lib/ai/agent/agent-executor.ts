@@ -673,15 +673,22 @@ export async function executeAgent(
   prompt: string,
   config: ExecuteAgentConfig = {}
 ): Promise<ExecuteAgentResult> {
-  const { isTauri } = await import("@/lib/tauri")
-
   // ADR-0090: the unified service is THE authority — one resolver decision,
   // fail-closed hard capabilities (fail-before-spend), and an explicit-only
   // completion fallback that carries `degradedReason`. The rails it runs are
   // the bodies this function used to inline (`runAgentRail` /
   // `runCompletionRail`), so this is a delegation, not a second path.
-  const { executeAgentTurn } = await import("@/lib/ai/agent/execution/agent-execution-service")
-  return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false })
+  //
+  // The environment comes from the host profile, not from `isTauri()`: this
+  // function is what Squad leads and teammates run through, and on the
+  // headless brain the old `{ isTauri: false, isHeadlessHost: false }` made
+  // every one of them a host-less web renderer that degraded to a tool-less
+  // completion.
+  const [{ executeAgentTurn }, { resolveAgentExecutionEnvironment }] = await Promise.all([
+    import("@/lib/ai/agent/execution/agent-execution-service"),
+    import("@/lib/ai/agent/execution/host-environment"),
+  ])
+  return executeAgentTurn(prompt, config, resolveAgentExecutionEnvironment())
 }
 
 /**

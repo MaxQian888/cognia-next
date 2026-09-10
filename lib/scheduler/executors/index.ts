@@ -68,7 +68,11 @@ import { executePlanTask } from "./plan-executor"
 import { executeBotTask } from "./bot-executor"
 import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 import { executeScript } from "../script-executor"
-import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
+import { sendPrompt, onClaudeMessage, interruptSession, approveTool } from "@/lib/claude/ipc"
+import {
+  createUnattendedPermissionResponder,
+  needsApprovalSummary,
+} from "@/lib/claude/unattended-permission-responder"
 import type {
   AppSettings,
   BuiltinToolsConfig,
@@ -635,6 +639,11 @@ async function runChatPrompt(
     resolveOnce = resolve
   })
 
+  // Nobody is watching a scheduled turn. A permission request is answered
+  // here with a recorded denial, so the task ends `needs_approval` with the
+  // tools named, instead of the desktop's silent auto-deny or the headless
+  // brain's five-minute hang that surfaced as "timeout or cancellation".
+  const permissions = createUnattendedPermissionResponder("scheduled task")
   const unlisten = await onClaudeMessage((evt: ClaudeEvent) => {
     if (
       (evt as { sessionId?: string }).sessionId &&
@@ -644,7 +653,38 @@ async function runChatPrompt(
     }
     collected.push(evt)
     const evtType = (evt as { type?: string }).type
+    if (evtType === "permission_request") {
+      const request = evt as { requestId?: string; toolName?: string }
+      if (request.requestId && request.toolName) {
+        const decision = permissions.onPermissionRequest({
+          type: "permission_request",
+          sessionId,
+          requestId: request.requestId,
+          toolUseID: (evt as { toolUseID?: string }).toolUseID ?? request.requestId,
+          toolName: request.toolName,
+          input: (evt as { input?: Record<string, unknown> }).input ?? {},
+        })
+        void approveTool(sessionId, request.requestId, decision.decision, decision.message).catch(
+          (error) => log.warn("Scheduler unattended deny failed", { sessionId, error })
+        )
+      }
+      return
+    }
     if (evtType === "result") {
+      if (permissions.needsApproval()) {
+        resolveOnce({
+          success: false,
+          error: needsApprovalSummary(permissions),
+          output: {
+            sessionId,
+            events: collected.length,
+            last: evt,
+            status: "needs_approval",
+            needsApproval: [...permissions.denials],
+          },
+        })
+        return
+      }
       resolveOnce({
         success: true,
         output: { sessionId, events: collected.length, last: evt },

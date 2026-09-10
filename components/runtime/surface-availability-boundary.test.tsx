@@ -122,3 +122,76 @@ it("does not intercept internal popup routes", () => {
   )
   expect(screen.getByText("popup harness")).toBeInTheDocument()
 })
+
+it.each(["left", "right"])(
+  "keeps the %s offline sidebar beside the conversation below the notice",
+  (side) => {
+    pathname = "/"
+    snapshot = {
+      target: { id: "companion-studio", kind: "companion", hostKind: "desktop", platform: "web" },
+      vaultState: "unlocked",
+      connectionState: "offline",
+    }
+    render(
+      <SurfaceAvailabilityBoundary>
+        {side === "left" && <aside>Conversation sidebar</aside>}
+        <main>Cached conversation</main>
+        {side === "right" && <aside>Conversation sidebar</aside>}
+      </SurfaceAvailabilityBoundary>
+    )
+
+    const sidebar = screen.getByRole("complementary")
+    const contentRow = sidebar.parentElement!
+    expect(screen.getByRole("main").parentElement).toBe(contentRow)
+    expect(contentRow).toHaveClass("flex", "min-h-0", "min-w-0", "flex-1")
+    expect(contentRow).not.toHaveClass("flex-col")
+    expect(contentRow).not.toContainElement(screen.getByRole("status"))
+  }
+)
+
+it.each([
+  { vaultState: "locked", state: "requires-unlock", recovery: "unlockVault", href: "/me/profile" },
+  { vaultState: "unavailable", state: "requires-pairing", recovery: "pairHost", href: "/pair" },
+  {
+    vaultState: "unlocked",
+    host: { compatible: false },
+    state: "incompatible",
+    recovery: "diagnose",
+    href: "/me/diagnostics",
+  },
+])(
+  "preserves $state recovery instead of rendering cached content",
+  ({ state, recovery, href, ...runtime }) => {
+    pathname = "/"
+    snapshot = {
+      target: { id: "companion-studio", kind: "companion", hostKind: "desktop", platform: "web" },
+      connectionState: "offline",
+      ...runtime,
+    }
+    render(
+      <SurfaceAvailabilityBoundary>
+        <div>Cached conversation</div>
+      </SurfaceAvailabilityBoundary>
+    )
+    expect(screen.queryByText("Cached conversation")).not.toBeInTheDocument()
+    expect(screen.getByText(`states.${state}`)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: recovery })).toHaveAttribute("href", href)
+  }
+)
+
+it("keeps non-cacheable offline routes behind their recovery page", () => {
+  pathname = "/remote-sessions"
+  snapshot = {
+    target: { id: "companion-studio", kind: "companion", hostKind: "desktop", platform: "web" },
+    vaultState: "unlocked",
+    connectionState: "offline",
+  }
+  render(
+    <SurfaceAvailabilityBoundary>
+      <div>Remote sessions</div>
+    </SurfaceAvailabilityBoundary>
+  )
+  expect(screen.queryByText("Remote sessions")).not.toBeInTheDocument()
+  expect(screen.getByText("states.offline")).toBeInTheDocument()
+  expect(screen.getAllByRole("link")).toHaveLength(1)
+})

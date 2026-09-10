@@ -67,6 +67,27 @@ describe("agentTurnPrompt", () => {
 })
 
 describe("createAgentTurnBotExecutor", () => {
+  it("marks the run needs approval, naming the tools, when the turn was denied a permission", async () => {
+    const run = jest.fn().mockResolvedValue({
+      sessionId: "s1",
+      text: "I could not run the tests.",
+      status: "needs_approval",
+      needsApproval: [
+        { requestId: "r1", toolName: "Bash", at: 1, reason: "x" },
+        { requestId: "r2", toolName: "Bash", at: 2, reason: "x" },
+        { requestId: "r3", toolName: "Edit", at: 3, reason: "x" },
+      ],
+    })
+    const result = await createAgentTurnBotExecutor({ run })(ctx())
+    expect(result).toMatchObject({
+      summary: "needs approval: Bash, Edit",
+      output: { sessionId: "s1", status: "needs_approval" },
+    })
+    expect((result as { output: { needsApproval: unknown[] } }).output.needsApproval).toHaveLength(
+      3
+    )
+  })
+
   it("runs one turn as the definition's character in the resolved directory", async () => {
     const run = jest.fn().mockResolvedValue({ sessionId: "s1", text: "Looks fine" })
     const result = await createAgentTurnBotExecutor({ run })(ctx())
@@ -121,7 +142,8 @@ describe("createAgentTurnBotExecutor", () => {
     expect(run).not.toHaveBeenCalled()
     expect(result).toEqual({
       summary: "from the first attempt",
-      output: { sessionId: "s0" },
+      // A memoized result from before `status` existed reads as completed.
+      output: { sessionId: "s0", status: "completed" },
     })
   })
 

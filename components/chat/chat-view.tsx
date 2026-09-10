@@ -263,6 +263,8 @@ interface ChatPaneProps {
   composerRef?: Ref<ComposerHandle>
   /** Keep cached history readable while runtime writes are unavailable. */
   composerDisabled?: boolean
+  /** One recovery surface, centered without history and compact beside cached messages. */
+  runtimeNotice?: ReactNode
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
   /**
@@ -346,6 +348,7 @@ export function ChatPane({
   onResumeSession,
   composerRef,
   composerDisabled,
+  runtimeNotice,
   mobileMentionMembers,
   onResumeAfterPlanApproval,
   onSendPlanFeedback,
@@ -601,6 +604,19 @@ export function ChatPane({
   // `emptyState`) get their own framing and would read as off-topic with it.
   const statsSlot = emptyState ? undefined : <WelcomeStats />
 
+  if (runtimeNotice && (!activeSession || !hasHistory)) {
+    return (
+      <>
+        {showHeader && activeSession && (
+          <ChatHeader session={activeSession} onSplitView={onSplitView} onExitSplit={onExitSplit} />
+        )}
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="w-full max-w-md">{runtimeNotice}</div>
+        </div>
+      </>
+    )
+  }
+
   if (!activeSession) {
     return (
       <EmptyChatState
@@ -768,6 +784,7 @@ export function ChatPane({
       {showHeader && (
         <ChatHeader session={activeSession} onSplitView={onSplitView} onExitSplit={onExitSplit} />
       )}
+      {runtimeNotice && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
           nothing when the character resolves or the id is a plain Dexie
