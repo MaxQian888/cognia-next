@@ -437,6 +437,24 @@ describe("call() — success", () => {
     expect(result).toEqual({ ok: true })
   })
 
+  it("hands a 202 Operation document back whole instead of unwrapping it", async () => {
+    await setConfig()
+    const operation = {
+      id: "0d1f3a6e-8f0c-4c4c-9a1e-2f2f4b6c8d10",
+      done: false,
+      status: "running",
+      metadata: {
+        createdAt: 1,
+        updatedAt: 1,
+        requestId: "7080c795-aa2b-4dbe-96b7-966e50393b0b",
+      },
+    }
+    fetchSpy.mockResolvedValueOnce(mockResponse(operation, 202))
+
+    transport = new CompanionTransport()
+    await expect(transport.call("claude_sidecar_status")).resolves.toEqual(operation)
+  })
+
   it("unwraps the canonical Companion RPC response envelope", async () => {
     await setConfig()
     fetchSpy.mockResolvedValueOnce(
@@ -981,6 +999,71 @@ describe("call() — 4xx errors", () => {
       retryable: false,
     })
     expect(stateHandler).toHaveBeenCalledWith("unauthenticated")
+  })
+
+  it("reads the code and the message out of the Host's problem document", async () => {
+    // ADR-0175: the Host answers one RFC 9457 document, whose `detail` carries
+    // the message the flat envelope used to put in `message`.
+    fetchSpy.mockResolvedValue(
+      mockResponse(
+        {
+          type: "https://cognia.dev/problems/command_renamed",
+          title: "Gone",
+          status: 410,
+          detail: "session_list is now session.list",
+          instance: "/api/_rpc/session_list",
+          code: "command_renamed",
+          requestId: "req-1",
+          retryable: false,
+          details: { replacement: "session.list" },
+        },
+        410
+      )
+    )
+
+    transport = new CompanionTransport()
+    const err = await transport.call("session_list").catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(CompanionError)
+    expect(err).toMatchObject({
+      code: "command_renamed",
+      message: "session_list is now session.list",
+      retryable: false,
+    })
+    expect(fetchSpy.mock.calls.length).toBe(1)
+  })
+
+  it("keeps the Host's retryable over the status guess on a problem document", async () => {
+    jest.useFakeTimers()
+    // A 503 the Host declares unretryable must not be retried by the status
+    // rule, and a 4xx it declares retryable must not be refused by it.
+    fetchSpy.mockResolvedValue(
+      mockResponse(
+        {
+          type: "https://cognia.dev/problems/host_draining",
+          title: "Service Unavailable",
+          status: 503,
+          detail: "the host is shutting down",
+          code: "host_draining",
+          requestId: "req-2",
+          retryable: false,
+          details: {},
+        },
+        503
+      )
+    )
+
+    transport = new CompanionTransport()
+    let caught: unknown
+    const callPromise = transport.call("claude_send").catch((e: unknown) => {
+      caught = e
+    })
+    await jest.runAllTimersAsync()
+    await callPromise
+    jest.useRealTimers()
+
+    expect(caught).toMatchObject({ code: "host_draining", retryable: false })
+    expect(fetchSpy.mock.calls.length).toBe(1)
   })
 
   it.each([

@@ -1497,6 +1497,11 @@ export class CompanionTransport implements Transport {
       if (response.ok) {
         this.setPlaneHealth({ rpc: "ready" })
         const envelope = (await response.json()) as unknown
+        // 202 is the Operation document of a long-running command (ADR-0175
+        // B3). It is the answer, not an envelope around one: the caller reads
+        // `done`, polls the operation route, and finds `result` or `error`
+        // there. `isOperation` in companion-paging.ts recognises it.
+        if (response.status === 202) return envelope as T
         return (
           envelope !== null && typeof envelope === "object" && Object.hasOwn(envelope, "result")
             ? (envelope as Record<string, unknown>).result
