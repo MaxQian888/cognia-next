@@ -47,6 +47,7 @@ import { getDb } from "@/lib/db/schema"
 import { reportGovernanceProjectionFailure } from "@/lib/db/governance-ledger"
 import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { recordDeliveredMessage, wasDeliveredByUs } from "./delivered-messages"
+import { isReactionSystemEvent, recordInboundReaction } from "@/lib/connectors/reactions-inbound"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
@@ -1696,6 +1697,23 @@ export class ConnectorBus {
             ?.event_type,
         },
       })
+      // A reaction on a message we hold lands on that row too (ADR-0177
+      // batch 2), so the renderer and the room transcript see it. Best-effort:
+      // the audit row above is already the record of the event itself.
+      if (isReactionSystemEvent(sk) && targetMessageId && emoji) {
+        try {
+          const target = await this.findStoredPlatformMessage(event, targetMessageId)
+          if (target) await recordInboundReaction({ event, row: target, emoji })
+        } catch (error) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "adapter.error",
+            at: now,
+            conversationKey: event.conversationKey,
+            reason: `reaction_record_failed:${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      }
       void this.fanOutSystemTriggers(event, sk, targetDeliveredByUs)
       return
     } else {
