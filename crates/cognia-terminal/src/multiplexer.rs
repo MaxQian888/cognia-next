@@ -77,8 +77,9 @@ impl MultiplexerInfo {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TmuxSession {
     pub name: String,
     pub window_count: u32,
@@ -88,8 +89,9 @@ pub struct TmuxSession {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TmuxWindow {
     pub index: u32,
     pub name: String,

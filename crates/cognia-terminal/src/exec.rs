@@ -31,8 +31,9 @@ const MAX_TIMEOUT_MS: u64 = 600_000;
 const CAPTURE_OUTPUT_BYTES: usize = 64 * 1024 + 1;
 
 /// Result of a one-shot command execution.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct TerminalExecResult {
     pub stdout: String,
     pub stderr: String,

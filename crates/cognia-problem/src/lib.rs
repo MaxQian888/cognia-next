@@ -314,6 +314,9 @@ pub fn status_for_code(code: &str) -> Option<u16> {
 /// Page tokens and the page envelope (ADR-0175 B3).
 pub mod paging;
 
+/// Schema conventions for the types the RPC face answers with (ADR-0175 B4).
+pub mod wire_schema;
+
 #[cfg(feature = "axum")]
 mod axum_support {
     use super::{Problem, CONTENT_TYPE, REQUEST_ID_HEADER};

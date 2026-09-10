@@ -62,6 +62,8 @@ pub mod middleware;
 pub mod oidc;
 /// The one long-running operation document (ADR-0175 B3).
 pub mod operations;
+/// What every dispatchable arm answers with (ADR-0175 B4).
+mod output_registry;
 /// Page tokens and the page envelope (ADR-0175 B3).
 pub mod paging;
 mod problem_surface;

@@ -26,8 +26,9 @@ use std::path::{Path, PathBuf};
 /// Hard ceiling regardless of the caller-requested limit.
 const MAX_LIMIT: usize = 200;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(transform = cognia_problem::wire_schema::closed_object)]
 pub struct PathCandidate {
     /// Entry name with on-disk casing (no directory part, no separator).
     pub name: String,
