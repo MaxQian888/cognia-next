@@ -1419,7 +1419,8 @@
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
     "title": "发送失败",
-    "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}"
+    "unflushedEditorBuffers": "本回合开始前有 {count} 个打开的文件未能保存，agent 可能读到过期内容：{files}",
+    "workspaceBusy": "另一个回合仍在占用该会话的工作副本。请等它结束，或在正在运行它的设备上发送。"
   },
   "jump": {
     "back": "返回原处",

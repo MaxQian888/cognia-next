@@ -29,6 +29,39 @@ export function markTaskWorkspaceTurnCancelled(sessionId: string, runId: number)
   cancelledTaskWorkspaceTurns.add(`${sessionId}:${runId}`)
 }
 
+/**
+ * Turns that ended without ever acquiring the session's managed working copy.
+ *
+ * The settle edge releases whatever `activeBySession[sessionId]` holds, and
+ * that is deliberately not compared against the ending turn's identity — see
+ * `settleTaskWorkspaceTurn`. For a turn that ran, that is right: the session's
+ * open run IS the one it opened.
+ *
+ * A turn that was REFUSED the working copy breaks that equivalence. Its own
+ * `openWorkspaceBundleTurnLease` never returned, so `activeBySession` still
+ * holds the PREVIOUS turn's run — and the refusal's status edge would settle
+ * it. That turn is very often the reason the refusal happened at all, which
+ * means a send that arrived while an earlier turn was legitimately mid-flight
+ * would tear that turn's working copy out from under it: the agent kept
+ * streaming into a conversation whose execution root had already been settled
+ * and whose diff was captured early.
+ *
+ * A turn that never owned a run has nothing to settle, so it says so.
+ */
+const unownedTaskWorkspaceTurns = new Set<string>()
+
+/**
+ * Declare that this turn ended without holding the session's workspace run, so
+ * its settle edge releases nothing.
+ *
+ * Marked at the refusal, not inferred at the edge: by the time the edge fires,
+ * "no run of my own" and "a run I have already forgotten" look identical from
+ * the store.
+ */
+export function markTaskWorkspaceTurnUnowned(sessionId: string, runId: number): void {
+  unownedTaskWorkspaceTurns.add(`${sessionId}:${runId}`)
+}
+
 function projectTaskResources(
   sessionId: string,
   runId: number,
@@ -127,12 +160,15 @@ export function isSettleEdge(before: ChatStatus | undefined, now: ChatStatus): b
 async function settleTurn(sessionId: string, runId: number, status: ChatStatus): Promise<void> {
   const turnKey = `${sessionId}:${runId}`
   const cancelled = cancelledTaskWorkspaceTurns.delete(turnKey)
+  const unowned = unownedTaskWorkspaceTurns.delete(turnKey)
   const active = useTaskWorkspaceStore.getState().activeBySession[sessionId]
-  const resources = await settleTaskWorkspaceTurn(
-    sessionId,
-    runId,
-    cancelled ? "cancelled" : status === "error" ? "failed" : "ready"
-  )
+  const resources = unowned
+    ? null
+    : await settleTaskWorkspaceTurn(
+        sessionId,
+        runId,
+        cancelled ? "cancelled" : status === "error" ? "failed" : "ready"
+      )
   const legacy = await endCodeAdoptionTurn(turnKey)
   const attempt = consumeCodeAdoptionTrackingAttempt(turnKey)
   const row = projectTaskResources(
@@ -150,16 +186,64 @@ async function settleTurn(sessionId: string, runId: number, status: ChatStatus):
 }
 
 /**
- * Subscribe to chat-store status edges and persist each settled turn's
- * attribution. Returns an unsubscribe. No-op (returns a noop) off-Tauri.
+ * The one live subscription, and how many initializers are holding it open.
+ *
+ * Two chunks mount `CodeAdoptionTrackerInitializer`: the core-chat one and the
+ * workflow-automation one. Outside development `resolveBootProfile` answers
+ * `eager`, which requests every capability, so BOTH render and this was called
+ * twice. Two closures in the store's listener set means `settleTurn` ran twice
+ * per settle edge, and the marks it consumes are `Set.delete` — the first
+ * subscriber took the mark and the second, seeing none, did exactly the thing
+ * the mark exists to prevent: `markTaskWorkspaceTurnUnowned` lost its skip and
+ * the previous, still-live turn's working copy was settled; and before that
+ * `markTaskWorkspaceTurnCancelled` lost its `cancelled`, so an interrupted turn
+ * was settled once as cancelled and once as ready.
+ *
+ * The core-chat mount's own comment already asserted this is idempotent and
+ * "subscribes once". It was not. Refcounting is what makes that true, and it
+ * keeps holding for a third mount rather than for one particular pair.
+ */
+let subscription: { stop: () => void; holders: number } | null = null
+
+/**
+ * Subscribe to chat-store status edges, settle each ended turn's managed
+ * working copy, and persist its attribution. Returns a release function.
+ *
+ * Idempotent: repeated calls share one store subscription and the last release
+ * detaches it. NOT host-gated, despite what this comment used to say — it is
+ * the only caller of `settleTaskWorkspaceTurn`, so a host where it did not run
+ * would leave every chat turn's run `running` and refuse that conversation's
+ * next send for good.
  */
 export function startCodeAdoptionTracker(): () => void {
+  const held = (subscription ??= { stop: subscribeToSettleEdges(), holders: 0 })
+  held.holders += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    held.holders -= 1
+    if (held.holders > 0) return
+    held.stop()
+    // Only if this is still the live one: a release arriving after a later
+    // start must not detach that one's subscription.
+    if (subscription === held) subscription = null
+  }
+}
+
+function subscribeToSettleEdges(): () => void {
   return useChatStore.subscribe((state, prev) => {
     for (const sessionId of Object.keys(state.sessions)) {
       const slice = state.sessions[sessionId]
       const before = prev.sessions[sessionId]?.status
       if (!isSettleEdge(before, slice.status)) continue
-      void settleTurn(sessionId, slice.runId, slice.status).catch(() => {})
+      void settleTurn(sessionId, slice.runId, slice.status).catch((error: unknown) => {
+        // The only subscriber to this edge, so a throw here is the last chance
+        // anything hears that a turn did not close out. Swallowed silently, its
+        // one downstream symptom was the session's next send being refused for
+        // a reason that named neither this turn nor this failure.
+        console.error("code adoption turn settle failed", { sessionId, runId: slice.runId }, error)
+      })
     }
   })
 }

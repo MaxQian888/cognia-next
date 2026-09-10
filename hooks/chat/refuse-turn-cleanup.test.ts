@@ -62,6 +62,7 @@ it("routes every pre-stream refusal through it", () => {
       "environment_unavailable",
       "environment_setup_failed",
       "external_agent_not_selected",
+      "external_agent_unavailable",
     ])
   )
 
@@ -77,4 +78,66 @@ it("does not release the execution lease, which has exactly one owner", () => {
   // `lib/execution/chat-lease.ts` releases on any transition out of an active
   // status. A second release here would give one lease two owners.
   expect(refuseTurnBody()).not.toContain("releaseChatLease")
+})
+
+/**
+ * A turn refused the managed working copy never opened a run of its own, so
+ * `activeBySession[sessionId]` still holds the PREVIOUS turn's. The settle edge
+ * that follows the refusal would release that one — and when the refusal is the
+ * host's `pipeline workspace is already active`, that previous turn is the live
+ * one which caused the refusal. A send that arrived mid-turn therefore tore the
+ * working copy out from under an agent that was still streaming into it.
+ */
+describe("a refusal that never owned a working copy", () => {
+  /** From the lease attempt to the first refusal that DOES own its run. */
+  function leaseRefusalRegion(): string {
+    const start = SOURCE.indexOf("let bundleTurnLease:")
+    expect(start).toBeGreaterThan(-1)
+    const nextOwningRefusal = SOURCE.indexOf('errorCode: "environment_unavailable"', start)
+    expect(nextOwningRefusal).toBeGreaterThan(start)
+    // Stop at that refusal's own `await refuseTurn({`, a line above its code.
+    return SOURCE.slice(start, SOURCE.lastIndexOf("await refuseTurn({", nextOwningRefusal))
+  }
+
+  it("declares itself unowned at every workspace-lease refusal", () => {
+    const region = leaseRefusalRegion()
+    // Both of them: the lease that threw, and the lease that answered null.
+    expect(region.match(/await refuseTurn\(\{/g)).toHaveLength(2)
+    expect(region.match(/markTurnUnowned\(\)/g)).toHaveLength(2)
+  })
+
+  // The refusals AFTER the lease is held do own a run, and settling it on their
+  // way out is the whole point of the settle edge.
+  it("leaves the refusals that do own a run alone", () => {
+    const afterLease = SOURCE.slice(SOURCE.indexOf('errorCode: "environment_unavailable"'))
+    expect(afterLease).not.toContain("markTurnUnowned()")
+  })
+
+  /**
+   * The mark is a silent no-op if the run id it reads is undefined, and a
+   * silent no-op here means the working copy is torn out from under a live turn
+   * with every test still green. Pinned against the cancel path rather than by
+   * running the closure: that path has shipped this exact read for the abort
+   * gesture, so agreeing with it is the check that matters.
+   */
+  it("reads the ending turn's id the way the proven cancel path does", () => {
+    const reads = SOURCE.match(/const endingRunId = [\w.()]*\.sessions\[sessionId\]\?\.runId/g)
+    expect(reads).toHaveLength(2)
+    expect(SOURCE.match(/typeof endingRunId === "number"/g)).toHaveLength(2)
+  })
+
+  /**
+   * The busy refusal is an English sentence naming an internal workspace key,
+   * so it is translated. Every OTHER failure keeps the host's own words,
+   * because `detail` has no renderer today and a generic sentence would leave
+   * the reader with no account of the cause at all.
+   */
+  it("translates the refusal it can name and keeps the host's words for the rest", () => {
+    const start = SOURCE.indexOf('console.error("workspace turn lease failed"')
+    expect(start).toBeGreaterThan(-1)
+    const body = SOURCE.slice(start, SOURCE.indexOf("const taskLease = bundleTurnLease", start))
+    expect(body).toContain("message: isWorkspaceBusyRefusal(error)")
+    expect(body).toContain('tInlineErr("workspaceBusy")')
+    expect(body).toContain("detail: error instanceof Error ? error.message : String(error)")
+  })
 })

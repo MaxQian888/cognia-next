@@ -22,6 +22,7 @@ import { persistCodeAdoptionTurn, pruneCodeAdoptionTurns } from "./persist"
 import {
   isSettleEdge,
   markTaskWorkspaceTurnCancelled,
+  markTaskWorkspaceTurnUnowned,
   startCodeAdoptionTracker,
 } from "./turn-tracker"
 
@@ -55,10 +56,18 @@ describe("isSettleEdge", () => {
 })
 
 describe("startCodeAdoptionTracker", () => {
+  /** Releases handed out by `wire`, so one test's subscription cannot leak. */
+  const held: Array<() => void> = []
+
+  afterEach(() => {
+    while (held.length) held.pop()?.()
+  })
+
   function wire() {
     const storeUnsub = jest.fn()
     mockSubscribe.mockReturnValue(storeUnsub)
     const ret = startCodeAdoptionTracker()
+    held.push(ret)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const fn = mockSubscribe.mock.calls[0][0] as (s: any, p: any) => void
     return { fn, storeUnsub, ret }
@@ -117,9 +126,140 @@ describe("startCodeAdoptionTracker", () => {
     expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 5, "cancelled")
   })
 
-  it("returns the store unsubscribe", () => {
+  it("detaches the store subscription when its last holder releases", () => {
     const { ret, storeUnsub } = wire()
-    expect(ret).toBe(storeUnsub)
+    ret()
+    expect(storeUnsub).toHaveBeenCalledTimes(1)
+    // Releasing twice must not detach a subscription a later start reopened.
+    ret()
+    expect(storeUnsub).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Two chunks mount the initializer — the core-chat one and the
+   * workflow-automation one — and outside development the eager boot profile
+   * requests both, so this runs twice. Two listeners meant `settleTurn` ran
+   * twice per edge, and every mark it consumes is a `Set.delete`: the first
+   * subscriber took the mark and the second, seeing none, did the exact thing
+   * the mark exists to prevent.
+   */
+  describe("mounted by more than one boot chunk", () => {
+    it("subscribes once and settles once per edge", async () => {
+      mockEnd.mockResolvedValue(null)
+      const { fn } = wire()
+      wire()
+
+      expect(mockSubscribe).toHaveBeenCalledTimes(1)
+      fn(
+        { sessions: { s1: { status: "idle", runId: 3 } } },
+        { sessions: { s1: { status: "streaming", runId: 3 } } }
+      )
+      await flush()
+      expect(mockSettleTaskWorkspace).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps the store attached until the last holder releases", () => {
+      const { storeUnsub, ret } = wire()
+      const second = wire()
+
+      ret()
+      expect(storeUnsub).not.toHaveBeenCalled()
+      second.ret()
+      expect(storeUnsub).toHaveBeenCalledTimes(1)
+    })
+
+    // The mark is consumed by a `Set.delete`, so a second subscriber saw no
+    // mark and settled the previous, still-live turn's working copy.
+    it("does not let a second mount defeat the unowned mark", async () => {
+      mockEnd.mockResolvedValue(null)
+      const { fn } = wire()
+      wire()
+      markTaskWorkspaceTurnUnowned("s1", 9)
+
+      fn(
+        { sessions: { s1: { status: "idle", runId: 9 } } },
+        { sessions: { s1: { status: "streaming", runId: 9 } } }
+      )
+      await flush()
+
+      expect(mockSettleTaskWorkspace).not.toHaveBeenCalled()
+    })
+
+    // Same hole, older mark: an interrupted turn was settled once as
+    // `cancelled` and once as `ready`.
+    it("does not let a second mount defeat the cancelled mark", async () => {
+      mockEnd.mockResolvedValue(null)
+      const { fn } = wire()
+      wire()
+      markTaskWorkspaceTurnCancelled("s1", 10)
+
+      fn(
+        { sessions: { s1: { status: "idle", runId: 10 } } },
+        { sessions: { s1: { status: "streaming", runId: 10 } } }
+      )
+      await flush()
+
+      expect(mockSettleTaskWorkspace).toHaveBeenCalledTimes(1)
+      expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 10, "cancelled")
+    })
+  })
+
+  /**
+   * A turn refused the working copy never opened a run of its own, so
+   * `activeBySession` still holds the PREVIOUS turn's — very often the live one
+   * that caused the refusal. Settling it here tore the working copy out from
+   * under a turn whose agent was still streaming.
+   */
+  it("settles nothing for a turn that never owned the workspace run", async () => {
+    mockEnd.mockResolvedValue(null)
+    const { fn } = wire()
+    markTaskWorkspaceTurnUnowned("s1", 6)
+    fn(
+      { sessions: { s1: { status: "idle", runId: 6 } } },
+      { sessions: { s1: { status: "streaming", runId: 6 } } }
+    )
+    await flush()
+    expect(mockSettleTaskWorkspace).not.toHaveBeenCalled()
+  })
+
+  // The mark names one turn, not the conversation: the next turn does own its
+  // run and must settle it.
+  it("only skips the turn that was marked", async () => {
+    mockEnd.mockResolvedValue(null)
+    const { fn } = wire()
+    markTaskWorkspaceTurnUnowned("s1", 6)
+    fn(
+      { sessions: { s1: { status: "idle", runId: 6 } } },
+      { sessions: { s1: { status: "streaming", runId: 6 } } }
+    )
+    await flush()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 7 } } },
+      { sessions: { s1: { status: "streaming", runId: 7 } } }
+    )
+    await flush()
+    expect(mockSettleTaskWorkspace).toHaveBeenCalledTimes(1)
+    expect(mockSettleTaskWorkspace).toHaveBeenCalledWith("s1", 7, "ready")
+  })
+
+  // The only subscriber to this edge, so a throw here is the last chance
+  // anything hears that a turn did not close out.
+  it("reports a settle that throws instead of swallowing it", async () => {
+    const reported: unknown[][] = []
+    const spy = jest
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => void reported.push(args))
+    mockSettleTaskWorkspace.mockRejectedValue(new Error("host unreachable"))
+    const { fn } = wire()
+    fn(
+      { sessions: { s1: { status: "idle", runId: 8 } } },
+      { sessions: { s1: { status: "streaming", runId: 8 } } }
+    )
+    await flush()
+    expect(reported).toHaveLength(1)
+    expect(reported[0][0]).toBe("code adoption turn settle failed")
+    expect(reported[0][1]).toMatchObject({ sessionId: "s1", runId: 8 })
+    spy.mockRestore()
   })
 
   it("projects agent-only adoption metrics from the authoritative task ledger", async () => {

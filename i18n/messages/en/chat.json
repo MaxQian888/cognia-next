@@ -1419,7 +1419,8 @@
     "retry": "Retry",
     "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
     "title": "Failed to send",
-    "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}"
+    "unflushedEditorBuffers": "{count, plural, one {# open file could not be saved} other {# open files could not be saved}} before this turn, so the agent may read an out-of-date copy: {files}",
+    "workspaceBusy": "Another turn is still using this conversation's working copy. Wait for it to finish, or send from the device that is running it."
   },
   "jump": {
     "back": "Back to where you were",

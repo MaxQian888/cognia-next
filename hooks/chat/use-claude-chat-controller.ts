@@ -91,8 +91,16 @@ import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { compositionForSession } from "@/stores/agent/agent-runtime-store"
-import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
-import { acquireWorkspaceBundle, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import {
+  markTaskWorkspaceTurnCancelled,
+  markTaskWorkspaceTurnUnowned,
+} from "@/lib/code-adoption/turn-tracker"
+import {
+  acquireWorkspaceBundle,
+  isWorkspaceBusyRefusal,
+  runIdForTurn,
+  taskIdForMessage,
+} from "@/lib/task-workspace/client"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   finishDirectChatExecutionRun,
@@ -1867,6 +1875,13 @@ export function useClaudeChat() {
         // `running` on the Host and the session's NEXT turn was refused for
         // good with "pipeline workspace is already active". A refusal both
         // settles the turn and puts the reason on screen.
+        // The ending turn's id, read at the refusal rather than captured
+        // earlier: the store's counter is the only thing that knows which turn
+        // the settle edge is about to fire for.
+        const markTurnUnowned = () => {
+          const endingRunId = store.getState().sessions[sessionId]?.runId
+          if (typeof endingRunId === "number") markTaskWorkspaceTurnUnowned(sessionId, endingRunId)
+        }
         let bundleTurnLease: Awaited<ReturnType<typeof openWorkspaceBundleTurnLease>> = null
         try {
           bundleTurnLease =
@@ -1880,12 +1895,26 @@ export function useClaudeChat() {
                 : null
         } catch (error) {
           console.error("workspace turn lease failed", error)
+          // This turn never got a working copy, so its refusal must not settle
+          // the one the session already holds — which, when the refusal is
+          // `isWorkspaceBusyRefusal`, is precisely the live turn that caused it.
+          markTurnUnowned()
           await refuseTurn({
             errorCode: "task_workspace_unavailable",
             finishRun: true,
             diagnostic: createDiagnostic("workspaceUnavailable", {
               source: "chat",
-              message: error instanceof Error ? error.message : String(error),
+              // Only the refusal we can name is translated. For that one the
+              // host's sentence is an English internal key with nothing in it
+              // for the reader; for every other failure it is the ONLY account
+              // of what went wrong, and `detail` has no renderer yet, so
+              // replacing it with a generic sentence would lose the cause.
+              message: isWorkspaceBusyRefusal(error)
+                ? tInlineErr("workspaceBusy")
+                : error instanceof Error
+                  ? error.message
+                  : String(error),
+              detail: error instanceof Error ? error.message : String(error),
               meta: { sessionId },
             }),
           })
@@ -1896,6 +1925,7 @@ export function useClaudeChat() {
           !taskLease &&
           (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
         ) {
+          markTurnUnowned()
           await refuseTurn({
             errorCode: "task_workspace_unavailable",
             finishRun: true,
