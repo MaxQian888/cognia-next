@@ -288,3 +288,70 @@ column has to be threaded through both row builders and the hoist list, and
 the `collaboration` column proved that path is easy to miss. And the transcript
 now reads reactions as a tally without actor ids, so an agent sees that a reply
 was liked without being handed who liked it.
+
+## Implementation update (2026-09-10, batch 3)
+
+Landed, each with its UI and its test:
+
+- **The router reads the room.** `routeTurn` takes the room's
+  `mutedMemberIds`, `replyMode` and the composer's `explicitTargetIds`
+  (`lib/claude/team-router.ts`). Precedence, top down: `asleep` answers
+  nobody, a composer pick and then an `@` reach exactly those members (muted
+  or not, since both are the user's initiative), `mention_only` answers
+  nobody else, and the team's own policy runs over the members that are not
+  muted. `holdReasonFor` names why an empty result is silence, and the
+  runner stores the turn and returns to idle. The `data-inert` labels and
+  the settings note from batch 1 are gone; a hint under the reply-mode
+  buttons says what each mode does, and one under the mute list says what a
+  mute does not do.
+- **Manual member picker.** A button in the composer's capability row opens
+  the roster to tick (`components/chat/composer/room-target-picker.tsx`),
+  the pick is a standing per-session state in
+  `stores/chat/room-target-store.ts`, rides every send as
+  `ComposerTurnMetadata.targetMemberIds`, and reaches the host as
+  `room_send.targetMemberIds`. A chip in the context row names the pick or,
+  when there is none, says why the room may stay quiet (asleep, mention
+  only, a manual team with nobody picked).
+- **`Team.replyConcurrency`.** `parallel` starts every member of a round at
+  once over the same transcript, on the sub-session-keyed streaming state
+  batch 1 built for it. `sequential` (absent, every legacy row) is unchanged.
+- **Per-member interrupt.** `RoomRunner.stopMember` interrupts one member's
+  live sub-session, keeps its partial reply, and lets the round go on. The
+  message header shows the stop on the reply a member is writing, read off
+  the member's live status rather than the row's streaming flag so two
+  members replying at once each get their own. On a companion it is
+  `room_stop { sessionId, characterId }`.
+- **`handoffTargets` and `talkativeness`** on `TeamMember`. `planAutoRound`
+  drops a handoff outside the speaker's declared targets (absent means
+  anyone, `[]` means nobody, and the member's prompt says which), never hands
+  the floor to a muted member, and lets a member nobody addressed chime in
+  once per round on a roll against its talkativeness, through an injected
+  `random` so the test is deterministic. Running out of rounds is reported
+  only when a real handoff was cut off, not when a chatty member simply ran
+  out. The team editor has both fields on the member override card, and the
+  write validates them (targets must be teammates, never the member itself).
+- **Sticky responder.** `stickyResponderOf` names the member that spoke
+  last, when it is still a candidate. The smart primary router is told to
+  keep it unless another member clearly fits better, and it is the
+  deterministic fallback when no utility model is available (before that,
+  the most talkative member, then the first declared).
+- **Yield to the typing human.** The composer notes each keystroke in a team
+  room (`stores/chat/composer-typing-store.ts`). Before running an auto
+  round the runner waits while a keystroke is younger than 4 s, up to 20 s,
+  and stands down entirely once a steer is queued or the room was stopped.
+  The headless brain has no keystroke signal, so it never waits.
+- **`replyMode` on the IM plane.** `admitConversationEvent` reads the bound
+  session's reply mode: `asleep` denies with `room_asleep` (audited like
+  every other policy block), `mention_only` forces `mention_each`, and
+  `auto` defers to the operator's policy.
+
+Three judgements implementation overturned. The mapping table above said
+`auto` maps to `always` on the IM plane; it maps to "as configured", because
+a default that overrode every operator's activation policy would have changed
+the behaviour of every group the moment the setting existed. The stop token
+and the per-member limit stay as they were, but the spent-budget report is
+now conditional: a talkative member running out of rounds is not an
+interrupted conversation. And the per-member stop had to become a runner
+method rather than a store flag, because the existing flag was only read
+before a member started and could never reach one that was already replying.
+
