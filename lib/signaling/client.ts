@@ -46,6 +46,13 @@ const OUTBOUND_QUEUE_CAPACITY = 64
  * `RELAY_OUTBOUND_QUEUE`.
  */
 const DATA_OUTBOUND_QUEUE_CAPACITY = 1024
+// Mirrors services/signaling-server/core/src/limits.rs. Data cannot consume
+// the separately budgeted signaling lane, even when a large transfer queues.
+const DATA_RATE_CAPACITY = 256
+const DATA_RATE_PER_MS = 64 / 1_000
+const SOCKET_BUFFER_HIGH_WATER = 1024 * 1024
+const SOCKET_CAPACITY_POLL_MS = 25
+const SOCKET_CAPACITY_TIMEOUT_MS = 15_000
 
 export type SignalingState =
   "idle" | "connecting" | "subscribed" | "awaiting-peer" | "reconnecting" | "rejected" | "closed"
@@ -85,10 +92,25 @@ interface PeerCrypto {
   inboundKey: CryptoKey
 }
 
+interface QueuedEnvelope {
+  kind: EnvelopeKind
+  body: unknown
+  proof: SubscribeProof
+  peer: PeerCrypto
+  resolve: () => void
+  reject: (error: Error) => void
+}
+
 interface OutboundSession {
   socket: WebSocket
-  tail: Promise<void>
-  pending: number
+  signal: QueuedEnvelope[]
+  data: QueuedEnvelope[]
+  active: QueuedEnvelope | null
+  running: boolean
+  wakeTimer: ReturnType<typeof setTimeout> | null
+  dataTokens: number
+  lastRefill: number
+  blockedSince: number | null
 }
 
 export class SignalingClient {
@@ -185,48 +207,122 @@ export class SignalingClient {
     ) {
       throw new Error("signaling: authenticated peer is not connected")
     }
-    const capacity =
-      relayLaneFor(kind) === "data" ? DATA_OUTBOUND_QUEUE_CAPACITY : OUTBOUND_QUEUE_CAPACITY
-    if (session.pending >= capacity) {
-      this.failSocket("outbound_queue_overflow")
-      throw new Error("signaling: outbound signaling queue is full")
-    }
-    session.pending++
-    const seq = this.outboundSeq++
-    const operation = session.tail.then(async () => {
-      if (this.destroyed || this.ws !== socket || socket.readyState !== WebSocket.OPEN) {
-        throw new Error("signaling: connection changed before send")
-      }
-      const envelope = await this.opts.buildEnvelope({
-        roomId: this.opts.descriptor.roomId,
-        senderRole: this.opts.role,
-        sessionId: proof.sessionId,
-        epoch: proof.epoch,
-        seq,
-        kind,
-        body,
-        signingPrivateKey: this.opts.signingPrivateKey,
-        encryptionKey: peer.outboundKey,
+    const data = relayLaneFor(kind) === "data"
+    const queue = data ? session.data : session.signal
+    const capacity = data ? DATA_OUTBOUND_QUEUE_CAPACITY : OUTBOUND_QUEUE_CAPACITY
+    const activeInLane =
+      session.active && (relayLaneFor(session.active.kind) === "data") === data ? 1 : 0
+    if (queue.length + activeInLane >= capacity) {
+      // A full data queue is local backpressure, not evidence that the
+      // authenticated signaling connection has failed.
+      if (!data) this.failSocket("outbound_queue_overflow")
+      throw Object.assign(new Error("signaling: outbound signaling queue is full"), {
+        code: "signaling_queue_full",
       })
-      if (this.destroyed || this.ws !== socket || socket.readyState !== WebSocket.OPEN) {
-        throw new Error("signaling: connection changed before send")
-      }
-      const lane = relayLaneFor(kind)
-      const frame: ClientFrame = {
-        kind: "relay",
-        rendezvousId: this.opts.descriptor.roomId,
-        payload: JSON.stringify(envelope),
-        // The signal lane is the wire default; omit it so a pre-lane
-        // rendezvous sees exactly the frame it always did.
-        ...(lane === "data" ? { lane } : {}),
-      }
-      socket.send(JSON.stringify(frame))
+    }
+    return new Promise<void>((resolve, reject) => {
+      queue.push({ kind, body, proof, peer, resolve, reject })
+      this.wakeOutbound(session)
     })
-    const tracked = operation.finally(() => {
-      session.pending--
-    })
-    session.tail = tracked.catch(() => undefined)
-    return tracked
+  }
+
+  private wakeOutbound(session: OutboundSession): void {
+    if (session.wakeTimer !== null) {
+      this.opts.scheduler.clearTimeout(session.wakeTimer)
+      session.wakeTimer = null
+    }
+    void this.pumpOutbound(session)
+  }
+
+  private async pumpOutbound(session: OutboundSession): Promise<void> {
+    if (session.running || this.outboundSession !== session) return
+    session.running = true
+    try {
+      while (this.outboundSession === session && (session.signal.length || session.data.length)) {
+        const now = performance.now()
+        session.dataTokens = Math.min(
+          DATA_RATE_CAPACITY,
+          session.dataTokens + Math.max(0, now - session.lastRefill) * DATA_RATE_PER_MS
+        )
+        session.lastRefill = now
+        let delay = 0
+        if (session.socket.bufferedAmount > SOCKET_BUFFER_HIGH_WATER) {
+          session.blockedSince ??= now
+          if (now - session.blockedSince >= SOCKET_CAPACITY_TIMEOUT_MS) {
+            this.failSocket("outbound_backpressure_timeout")
+            return
+          }
+          delay = SOCKET_CAPACITY_POLL_MS
+        } else {
+          session.blockedSince = null
+          if (!session.signal.length && session.dataTokens < 1) {
+            delay = Math.ceil((1 - session.dataTokens) / DATA_RATE_PER_MS)
+          }
+        }
+        if (delay > 0) {
+          session.wakeTimer = this.opts.scheduler.setTimeout(() => {
+            session.wakeTimer = null
+            void this.pumpOutbound(session)
+          }, delay)
+          return
+        }
+        // Pick before allocating the signed sequence: priority must never
+        // reorder envelopes after signing or the peer rejects them as replay.
+        const item = session.signal.shift() ?? session.data.shift()!
+        session.active = item
+        if (relayLaneFor(item.kind) === "data") session.dataTokens--
+        try {
+          if (this.peerCrypto !== item.peer || this.ownProof !== item.proof) {
+            throw new Error("signaling: authenticated peer changed before send")
+          }
+          const envelope = await this.opts.buildEnvelope({
+            roomId: this.opts.descriptor.roomId,
+            senderRole: this.opts.role,
+            sessionId: item.proof.sessionId,
+            epoch: item.proof.epoch,
+            seq: this.outboundSeq++,
+            kind: item.kind,
+            body: item.body,
+            signingPrivateKey: this.opts.signingPrivateKey,
+            encryptionKey: item.peer.outboundKey,
+          })
+          if (
+            this.outboundSession !== session ||
+            this.peerCrypto !== item.peer ||
+            session.socket.readyState !== WebSocket.OPEN
+          ) {
+            throw new Error("signaling: connection changed before send")
+          }
+          const lane = relayLaneFor(item.kind)
+          const frame: ClientFrame = {
+            kind: "relay",
+            rendezvousId: this.opts.descriptor.roomId,
+            payload: JSON.stringify(envelope),
+            ...(lane === "data" ? { lane } : {}),
+          }
+          session.socket.send(JSON.stringify(frame))
+          item.resolve()
+        } catch (error) {
+          item.reject(error instanceof Error ? error : new Error(String(error)))
+        } finally {
+          session.active = null
+        }
+      }
+    } finally {
+      session.running = false
+    }
+  }
+
+  private cancelOutbound(socket: WebSocket | null): void {
+    const session = this.outboundSession
+    if (!session || session.socket !== socket) return
+    this.outboundSession = null
+    if (session.wakeTimer !== null) this.opts.scheduler.clearTimeout(session.wakeTimer)
+    const error = new Error("signaling: connection changed before send")
+    session.active?.reject(error)
+    for (const item of [...session.signal, ...session.data]) item.reject(error)
+    session.signal.length = 0
+    session.data.length = 0
   }
 
   close(): void {
@@ -252,7 +348,17 @@ export class SignalingClient {
     this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting")
     const socket = this.opts.webSocketFactory(this.connectUrl())
     this.ws = socket
-    this.outboundSession = { socket, tail: Promise.resolve(), pending: 0 }
+    this.outboundSession = {
+      socket,
+      signal: [],
+      data: [],
+      active: null,
+      running: false,
+      wakeTimer: null,
+      dataTokens: DATA_RATE_CAPACITY,
+      lastRefill: performance.now(),
+      blockedSince: null,
+    }
     this.armDeadline(CONNECT_DEADLINE_MS, "connect_timeout")
 
     socket.onopen = () => {
@@ -279,7 +385,7 @@ export class SignalingClient {
     socket.onclose = () => {
       if (this.ws !== socket) return
       this.ws = null
-      if (this.outboundSession?.socket === socket) this.outboundSession = null
+      this.cancelOutbound(socket)
       this.clearConnectionTimers()
       this.resetSessionCrypto()
       if (!this.destroyed && !this.rejected) this.scheduleReconnect()
@@ -497,6 +603,7 @@ export class SignalingClient {
       socket.close()
     } catch {
       if (this.ws === socket) this.ws = null
+      this.cancelOutbound(socket)
       this.scheduleReconnect()
     }
   }
@@ -504,7 +611,7 @@ export class SignalingClient {
   private closeSocket(): void {
     const socket = this.ws
     this.ws = null
-    if (this.outboundSession?.socket === socket) this.outboundSession = null
+    this.cancelOutbound(socket)
     if (socket) {
       try {
         socket.close()

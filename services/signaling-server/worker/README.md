@@ -37,8 +37,11 @@ deployments can't drift:
   end to end, so the relay cannot inspect them even for an admitted room.
 - **Origin allowlist** — `SIGNALING_ALLOWED_ORIGINS` (empty = same-origin only;
   a missing `Origin`, as native clients send, is always allowed). Cross-origin
-  entries must be exact HTTPS origins; a present, unlisted browser `Origin`
-  gets `403`.
+  entries must be exact HTTPS origins, loopback HTTP origins for development,
+  or `capacitor://localhost` for bundled iOS. Bundled Android uses
+  `https://localhost`. Both mobile origins must be explicitly listed: a
+  WebView uses browser WebSockets and does send an Origin. A present, unlisted
+  origin gets `403`; adding an origin never bypasses signed room admission.
 - **Per-connection rate limit** — the shared 20-token / 10-per-sec bucket;
   `rate_limited` closes the socket, `frame_too_large` (8 KiB soft cap) does not.
 - **Malformed frames** are rejected with `malformed_frame`, matching the axum

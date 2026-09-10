@@ -114,7 +114,11 @@ verification does not depend on JSON property order.
 - Origin allowlist: `SIGNALING_ALLOWED_ORIGINS` is a comma-separated list.
   Blank/unset permits same-origin browsers only; missing `Origin` remains
   allowed for native desktop clients. Cross-origin entries must be exact
-  HTTPS origins; wildcard, plaintext, credential, and path values fail startup.
+  HTTPS origins, loopback HTTP origins for development, or the exact bundled
+  iOS origin `capacitor://localhost`. Wildcards, remote plaintext origins,
+  credentials, and paths fail startup. Capacitor Android sends `https://localhost`;
+  WebView sockets carry an Origin even though the app is native. Explicitly
+  allow both mobile origins when serving the bundled app.
 - Frame size cap, per lane: 8 KiB for the `signal` lane and 64 KiB for the
   `data` lane, enforced in `ws::handle_socket` after the frame is parsed
   (oversized frames get a graceful `error{code:"frame_too_large"}`), backed by

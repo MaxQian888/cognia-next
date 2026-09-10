@@ -13,3 +13,17 @@ test("edge routing preserves both signaling endpoint generations", () => {
     assert.match(ingress, new RegExp(`- path: ${route.replaceAll("/", "\\/")}\\n`))
   }
 })
+
+test("production signaling explicitly admits both bundled mobile origins", () => {
+  const config = readFileSync(
+    new URL("services/signaling-server/worker/wrangler.toml", repositoryRoot),
+    "utf8"
+  )
+  const origins = config.match(/^SIGNALING_ALLOWED_ORIGINS = "([^"]*)"/m)?.[1].split(",")
+  assert.ok(origins, "production origin allowlist exists")
+  for (const origin of ["https://cognia.cn", "capacitor://localhost", "https://localhost"]) {
+    assert.ok(origins.includes(origin), `missing shipped app origin: ${origin}`)
+  }
+  assert.ok(!origins.includes("*"))
+  assert.ok(!origins.includes("null"))
+})

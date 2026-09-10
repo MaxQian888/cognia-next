@@ -208,6 +208,10 @@ async function main() {
 
   // A newer valid session atomically replaces the old mobile role.
   const replacement = await authenticated(room, "mobile", "mobile-replacement")
+  assert(
+    replacement.accepted.peers.every((peer) => peer.proof?.role !== "mobile"),
+    "replacement snapshot excludes the retired same-role session"
+  )
   const replaced = await mobile.client.next()
   assert(replaced.kind === "error" && replaced.code === "session_replaced", "role takeover")
   let replacementJoined = false
@@ -224,6 +228,8 @@ async function main() {
   }
   assert(replacementJoined, "desktop observes replacement session join")
   assert(oldSessionLeft, "desktop observes replaced session leave")
+  await mobile.client.closed
+  assert(await expectNoFrame(desktop.client), "retired session is announced only once")
 
   replacement.client.send({ kind: "ping" })
   await nextMatching(
@@ -264,15 +270,31 @@ async function main() {
     "authenticated peerLeft"
   )
 
-  for (const client of [
-    desktop.client,
-    mobile.client,
-    replacement.client,
-    observer,
-    mismatch,
-    attacker,
-  ]) {
+  const clients = [desktop.client, mobile.client, replacement.client, observer, mismatch, attacker]
+  for (const client of clients) {
     client.close()
+  }
+  let closeTimer
+  try {
+    await Promise.race([
+      Promise.all(clients.map((client) => client.closed)),
+      new Promise((_, reject) => {
+        closeTimer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `close handshake timed out: ${clients
+                  .filter((client) => client.ws.readyState !== WebSocket.CLOSED)
+                  .map((client) => client.label)
+                  .join(", ")}`
+              )
+            ),
+          TIMEOUT_MS
+        )
+      }),
+    ])
+  } finally {
+    clearTimeout(closeTimer)
   }
   console.log("worker signaling integration: PASS")
 }

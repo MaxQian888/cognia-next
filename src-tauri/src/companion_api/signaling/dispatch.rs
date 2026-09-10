@@ -26,7 +26,10 @@
 //! An RTC timeout followed by an HTTPS retry therefore cannot execute a write
 //! twice or reuse a key for different parameters.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
+
+use futures_util::{future::BoxFuture, FutureExt};
 
 use cognia_signaling_core::protocol::PROTOCOL_VERSION;
 use serde::{Deserialize, Serialize};
@@ -173,6 +176,98 @@ enum EventControl {
     Subscribe(crate::companion_api::event_channels::SubscribeRequest),
 }
 
+const MAX_QUEUED_RPCS: usize = 64;
+const MAX_PARALLEL_READS: usize = 8;
+
+type RpcWork = BoxFuture<'static, Result<(), String>>;
+
+/// Reads may progress alongside a slow mutation. Mutations start in arrival
+/// order, one at a time. The JoinSet owns cancellation: dropping a dispatcher
+/// aborts its active jobs rather than leaving detached peer work behind.
+#[derive(Default)]
+struct RpcWorkQueue {
+    queued: VecDeque<(bool, RpcWork)>,
+    running: tokio::task::JoinSet<(bool, Result<(), String>)>,
+    reads: usize,
+    mutation: bool,
+    failed: bool,
+}
+
+impl RpcWorkQueue {
+    fn is_full(&self) -> bool {
+        self.queued.len() + self.running.len() >= MAX_QUEUED_RPCS
+    }
+
+    fn push(&mut self, read_only: bool, work: RpcWork) {
+        self.queued.push_back((read_only, work));
+        self.start_ready();
+    }
+
+    fn start_ready(&mut self) {
+        while let Some(index) = self.queued.iter().position(|(read_only, _)| {
+            if *read_only {
+                self.reads < MAX_PARALLEL_READS
+            } else {
+                !self.mutation
+            }
+        }) {
+            let (read_only, work) = self.queued.remove(index).expect("queued work exists");
+            if read_only {
+                self.reads += 1;
+            } else {
+                self.mutation = true;
+            }
+            self.running.spawn(async move {
+                let result = std::panic::AssertUnwindSafe(work)
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| Err("RPC worker panicked".into()));
+                (read_only, result)
+            });
+        }
+    }
+
+    async fn complete_next(&mut self) -> Option<Result<(), String>> {
+        let outcome = self.running.join_next().await?;
+        let result = match outcome {
+            Ok((read_only, result)) => {
+                if read_only {
+                    self.reads -= 1;
+                } else {
+                    self.mutation = false;
+                }
+                result
+            }
+            Err(error) => {
+                // A panicked task cannot report its class. Abort the queue so
+                // a lost mutation slot never silently wedges later writes.
+                self.running.abort_all();
+                self.queued.clear();
+                self.failed = true;
+                return Some(Err(format!("RPC worker failed: {error}")));
+            }
+        };
+        self.start_ready();
+        Some(result)
+    }
+}
+
+fn inbound_is_read_only(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return false;
+    };
+    if value.get("kind").and_then(Value::as_str) == Some("binary-resource") {
+        return true;
+    }
+    value
+        .get("method")
+        .and_then(Value::as_str)
+        .and_then(crate::companion_api::command_manifest::descriptor)
+        .is_some_and(|descriptor| {
+            descriptor.operation == crate::companion_api::command_manifest::CommandOperation::Read
+        })
+}
+
 /// Spawn the dispatcher task. The returned `JoinHandle` is cancelled by
 /// dropping or aborting; consumers should keep it around for the lifetime
 /// of the data channel.
@@ -254,10 +349,18 @@ async fn run(
         crate::companion_api::signaling::datachannel_framing::ChunkReassembler::default();
     // ADR-0127 §2: per-subscriber batching lives here, in the send loop.
     let mut batcher = EventBatcher::new();
+    let mut rpc_work = RpcWorkQueue::default();
 
     loop {
         tokio::select! {
             biased;
+
+            completed = rpc_work.complete_next(), if !rpc_work.running.is_empty() => {
+                if let Some(Err(error)) = completed {
+                    log::warn!("signaling::dispatch: inbound worker error: {error}");
+                }
+                if rpc_work.failed { break; }
+            }
 
             // Batch window expired — flush what accumulated.
             _ = batch_window(batcher.deadline()) => {
@@ -365,17 +468,30 @@ async fn run(
                             }
                             continue;
                         }
-                        if let Err(e) = handle_inbound(
-                            &peer,
-                            bytes,
-                            &state,
-                            host.as_ref(),
-                            &device_id,
-                        )
-                        .await
-                        {
-                            log::warn!("signaling::dispatch: inbound handling error: {e}");
+                        if rpc_work.is_full() {
+                            // Refuse admission before any side effect and preserve
+                            // the request id so the caller can apply quota backoff.
+                            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                                if let Some(id) = value.get("id").and_then(Value::as_str) {
+                                    let response = OutboundFrame::Response(ResponseFrame {
+                                        id: id.to_string(), ok: false, result: None,
+                                        error: Some(ErrorBody {
+                                            code: "rate_limited".into(),
+                                            message: "peer execution queue full; retry_after_seconds=1".into(),
+                                        }),
+                                    });
+                                    let _ = send_outbound(&peer, &response).await;
+                                }
+                            }
+                            continue;
                         }
+                        let read_only = inbound_is_read_only(&bytes);
+                        let peer = peer.clone();
+                        let state = state.clone();
+                        let device_id = device_id.clone();
+                        rpc_work.push(read_only, Box::pin(async move {
+                            handle_inbound(&peer, bytes, &state, &device_id).await
+                        }));
                     }
                     ReassemblyResult::Cancel { message_id, reason } => {
                         if !message_id.is_empty() {
@@ -457,7 +573,6 @@ async fn handle_inbound(
     peer: &DataCarrier,
     bytes: Vec<u8>,
     state: &SharedState,
-    _host: Option<&crate::companion_api::dispatch_host::DispatchHost>,
     device_id: &str,
 ) -> Result<(), String> {
     log::debug!(
@@ -604,7 +719,10 @@ async fn handle_binary_resource(
         return send_binary_resource_error(peer, request.id, "device_revoked").await;
     }
     if !matches!(
-        state.rate_limiter.check(device_id),
+        state.rate_limiter.check_class(
+            device_id,
+            crate::companion_api::rate_limit::RequestClass::MediaTransfer
+        ),
         crate::companion_api::rate_limit::RateLimitDecision::Accept
     ) {
         return send_binary_resource_error(peer, request.id, "rate_limited").await;
@@ -737,6 +855,115 @@ pub(super) fn empty_rpc_for_test(id: &str, method: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn slow_mutation_does_not_block_reads_and_mutations_keep_order() {
+        let mut queue = RpcWorkQueue::default();
+        let (release, gate) = tokio::sync::oneshot::channel();
+        let completed = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let first = completed.clone();
+        queue.push(
+            false,
+            Box::pin(async move {
+                let _ = gate.await;
+                first.lock().push("first write");
+                Ok(())
+            }),
+        );
+        let second = completed.clone();
+        queue.push(
+            false,
+            Box::pin(async move {
+                second.lock().push("second write");
+                Ok(())
+            }),
+        );
+        let read = completed.clone();
+        queue.push(
+            true,
+            Box::pin(async move {
+                read.lock().push("read");
+                Ok(())
+            }),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), queue.complete_next())
+            .await
+            .expect("read cannot wait for slow mutation")
+            .unwrap()
+            .unwrap();
+        assert_eq!(*completed.lock(), vec!["read"]);
+        release.send(()).unwrap();
+        queue.complete_next().await.unwrap().unwrap();
+        queue.complete_next().await.unwrap().unwrap();
+        assert_eq!(
+            *completed.lock(),
+            vec!["read", "first write", "second write"]
+        );
+    }
+
+    #[tokio::test]
+    async fn rpc_queue_bounds_parallel_reads_and_aborts_on_drop() {
+        let mut queue = RpcWorkQueue::default();
+        let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        struct Running(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Running {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        for _ in 0..MAX_QUEUED_RPCS {
+            let live = live.clone();
+            queue.push(
+                true,
+                Box::pin(async move {
+                    live.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _running = Running(live);
+                    std::future::pending().await
+                }),
+            );
+        }
+        tokio::task::yield_now().await;
+        assert!(queue.is_full());
+        assert_eq!(
+            live.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_PARALLEL_READS
+        );
+        drop(queue);
+        tokio::task::yield_now().await;
+        assert_eq!(live.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn panicked_mutation_releases_its_ordering_slot() {
+        let mut queue = RpcWorkQueue::default();
+        queue.push(false, Box::pin(async { panic!("test worker panic") }));
+        queue.push(false, Box::pin(async { Ok(()) }));
+        assert!(queue.complete_next().await.unwrap().is_err());
+        assert!(queue.complete_next().await.unwrap().is_ok());
+    }
+
+    #[test]
+    fn binary_reads_have_independent_transfer_quota() {
+        let limiter = crate::companion_api::rate_limit::RateLimiter::with_defaults();
+        for _ in 0..10 {
+            let _ = limiter.check("media-reader");
+        }
+        assert!(matches!(
+            limiter.check("media-reader"),
+            crate::companion_api::rate_limit::RateLimitDecision::Reject { .. }
+        ));
+        for _ in 0..32 {
+            assert!(matches!(
+                limiter.check_class(
+                    "media-reader",
+                    crate::companion_api::rate_limit::RequestClass::MediaTransfer
+                ),
+                crate::companion_api::rate_limit::RateLimitDecision::Accept
+            ));
+        }
+        assert!(inbound_is_read_only(br#"{"kind":"binary-resource"}"#));
+        assert!(!inbound_is_read_only(br#"{"method":"unknown-write"}"#));
+    }
 
     #[test]
     fn response_frame_serializes_ok() {

@@ -46,6 +46,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use app_lib::companion_api::security_store::{install_security_store, SecurityStore};
 use app_lib::companion_api::signaling::{DeviceRegistration, SignalingHub};
 use app_lib::companion_api::{
     deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
@@ -134,6 +135,34 @@ fn harness_state() -> SharedState {
     })
 }
 
+/// Keep the transport harness on the production device-authorization path.
+/// This store is process-local and never touches the user's paired devices.
+fn harness_security(args: &Args) -> Result<Arc<SecurityStore>, Box<dyn std::error::Error>> {
+    use base64::Engine;
+    use p256::pkcs8::EncodePublicKey;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&args.room_descriptor.mobile_signing_key)?;
+    let key = p256::PublicKey::from_sec1_bytes(&raw)?;
+    let pem = key.to_public_key_pem(Default::default())?;
+    let store = SecurityStore::in_memory()?;
+    let tenant = "webrtc-harness";
+    let now = app_lib::companion_api::signaling::envelope::now_ms() / 1000;
+    let challenge = store.issue_challenge(tenant, now, 60)?;
+    let invitation = store.create_owner_invitation(tenant, "local-trust-root", now, 60)?;
+    store.register_owner_device(
+        tenant,
+        &invitation,
+        &challenge.id,
+        &challenge.nonce,
+        &args.device_id,
+        "WebRTC harness",
+        &pem,
+        &args.room_descriptor.mobile_signing_key,
+        now,
+    )?;
+    Ok(store)
+}
+
 fn emit(line: serde_json::Value) {
     println!("{line}");
     use std::io::Write as _;
@@ -173,6 +202,12 @@ async fn main() -> Result<(), String> {
     log::set_max_level(level);
 
     let args = parse_args()?;
+    // WSS is established before PeerSession installs the DTLS provider.
+    // Match the production server's startup even when no local API is booted.
+    app_lib::companion_api::ensure_crypto_provider();
+    install_security_store(Some(
+        harness_security(&args).map_err(|error| error.to_string())?,
+    ));
     let state = harness_state();
     let hub = SignalingHub::new();
 
@@ -252,6 +287,40 @@ async fn main() -> Result<(), String> {
 mod tests {
     use super::{parse_args_from, Args};
     use cognia_signaling_core::proto::RoomDescriptor;
+
+    #[test]
+    fn harness_registers_an_isolated_active_device() {
+        use base64::Engine;
+        let key = p256::ecdsa::SigningKey::from_slice(&[7; 32]).unwrap();
+        let public = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(key.verifying_key().to_sec1_point(false).as_bytes());
+        let args = Args {
+            signaling_url: "ws://localhost/signaling".into(),
+            rendezvous_id: "room".into(),
+            room_descriptor: RoomDescriptor {
+                v: 2,
+                room_id: "room".into(),
+                room_nonce: "nonce".into(),
+                desktop_signing_key: public.clone(),
+                mobile_signing_key: public,
+                not_after: 1_900_000_000_000,
+            },
+            signing_private_key: "unused".into(),
+            device_id: "harness-device".into(),
+        };
+        let store = super::harness_security(&args).unwrap();
+        assert_eq!(
+            store
+                .active_device_tenant(&args.device_id)
+                .unwrap()
+                .as_deref(),
+            Some("webrtc-harness")
+        );
+        assert!(store
+            .active_device_tenant("unregistered")
+            .unwrap()
+            .is_none());
+    }
 
     #[test]
     fn parses_every_required_harness_argument() {

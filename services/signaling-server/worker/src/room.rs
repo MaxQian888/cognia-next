@@ -75,6 +75,16 @@ struct Attachment {
 }
 
 impl Attachment {
+    /// Retire the membership before notifying peers. A closing WebSocket can
+    /// remain in get_websockets() across alarms and hibernation.
+    fn take_subscription(&mut self) -> Option<(String, PeerRole, String)> {
+        let room = self.rendezvous_id.take();
+        let role = self.role.take();
+        let session = self.session_id.take();
+        self.proof = None;
+        Some((room?, role?, session?))
+    }
+
     fn fresh(
         now_ms: f64,
         ip: Option<String>,
@@ -298,6 +308,7 @@ impl DurableObject for RoomDurableObject {
                             "session_replaced",
                             "a newer authenticated session took over this role",
                         );
+                        self.announce_left(&old)?;
                         let _ = old.close(Some(4001), Some("session_replaced"));
                     }
                 }
@@ -351,12 +362,9 @@ impl DurableObject for RoomDurableObject {
                     ws.serialize_attachment(&attach)?;
                     return Ok(());
                 }
-                let was_role = attach.role.take();
-                let was_session_id = attach.session_id.take();
-                attach.proof = None;
-                attach.rendezvous_id = None;
+                let departed = attach.take_subscription();
                 ws.serialize_attachment(&attach)?;
-                if let (Some(role), Some(session_id)) = (was_role, was_session_id) {
+                if let Some((_, role, session_id)) = departed {
                     self.record("peer_left", Some(role.as_str()), 1.0, 0.0);
                     for other in self.subscribed_others(&ws, &rendezvous_id)? {
                         send_frame(
@@ -467,13 +475,15 @@ impl DurableObject for RoomDurableObject {
         _reason: String,
         _was_clean: bool,
     ) -> Result<()> {
-        self.announce_left(&ws);
-        Ok(())
+        self.announce_left(&ws)?;
+        // Complete the close handshake even on runtimes without automatic
+        // close replies; otherwise the socket can stay in CLOSING indefinitely.
+        ws.close::<&str>(None, None)
     }
 
     async fn websocket_error(&self, ws: WebSocket, _error: Error) -> Result<()> {
-        self.announce_left(&ws);
-        Ok(())
+        self.announce_left(&ws)?;
+        ws.close::<&str>(None, None)
     }
 
     async fn alarm(&self) -> Result<Response> {
@@ -487,7 +497,7 @@ impl DurableObject for RoomDurableObject {
                 })
                 .unwrap_or(true);
             if stale {
-                self.announce_left(&ws);
+                self.announce_left(&ws)?;
                 let _ = ws.close(Some(4000), Some("lease_expired"));
                 self.record("lease_expired", None, 1.0, 0.0);
             } else {
@@ -605,16 +615,16 @@ impl RoomDurableObject {
         Ok(peers)
     }
 
-    /// Announce a departing peer to the rest of the room (close/error paths).
-    fn announce_left(&self, ws: &WebSocket) {
-        let attach = ws.deserialize_attachment::<Attachment>().ok().flatten();
-        let Some(attach) = attach else { return };
-        let Some(role) = attach.role else { return };
-        let Some(session_id) = attach.session_id else {
-            return;
+    /// Persist retirement before fan-out, so takeover, lease scans and a
+    /// later close/error callback can announce each session at most once.
+    fn announce_left(&self, ws: &WebSocket) -> Result<()> {
+        let Some(mut attach) = ws.deserialize_attachment::<Attachment>()? else {
+            return Ok(());
         };
-        let Some(rendezvous_id) = attach.rendezvous_id else {
-            return;
+        let departed = attach.take_subscription();
+        ws.serialize_attachment(&attach)?;
+        let Some((rendezvous_id, role, session_id)) = departed else {
+            return Ok(());
         };
         self.record("peer_left", Some(role.as_str()), 1.0, 0.0);
         if let Ok(others) = self.subscribed_others(ws, &rendezvous_id) {
@@ -629,6 +639,7 @@ impl RoomDurableObject {
                 );
             }
         }
+        Ok(())
     }
 }
 
@@ -646,4 +657,56 @@ fn send_error(ws: &WebSocket, code: &str, message: &str) {
             message: message.to_string(),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn subscribed_attachment() -> Attachment {
+        let mut attachment = Attachment::fresh(0.0, None, "room".into(), "challenge".into());
+        attachment.rendezvous_id = Some("room".into());
+        attachment.role = Some(PeerRole::Desktop);
+        attachment.session_id = Some("old-session".into());
+        attachment.proof = Some(cognia_signaling_core::proto::SubscribeProof {
+            v: 2,
+            room_id: "room".into(),
+            role: PeerRole::Desktop,
+            session_id: "old-session".into(),
+            epoch: "epoch".into(),
+            issued_at: 0,
+            challenge: "challenge".into(),
+            ecdh_public_key: "key".into(),
+            signature: "signature".into(),
+        });
+        attachment
+    }
+
+    #[test]
+    fn retired_subscription_stays_retired_across_repeated_scans_and_hibernation() {
+        let mut attachment = subscribed_attachment();
+        assert_eq!(
+            attachment.take_subscription(),
+            Some(("room".into(), PeerRole::Desktop, "old-session".into()))
+        );
+        for _ in 0..3 {
+            let serialized = serde_json::to_string(&attachment).unwrap();
+            attachment = serde_json::from_str(&serialized).unwrap();
+            assert!(attachment.take_subscription().is_none());
+            assert!(attachment.rendezvous_id.is_none());
+            assert!(attachment.role.is_none());
+            assert!(attachment.session_id.is_none());
+            assert!(attachment.proof.is_none());
+        }
+    }
+
+    #[test]
+    fn incomplete_subscription_is_cleared_without_announcing_a_departure() {
+        let mut attachment = subscribed_attachment();
+        attachment.session_id = None;
+        assert!(attachment.take_subscription().is_none());
+        assert!(attachment.rendezvous_id.is_none());
+        assert!(attachment.role.is_none());
+        assert!(attachment.proof.is_none());
+    }
 }

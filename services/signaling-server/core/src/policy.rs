@@ -147,7 +147,13 @@ pub fn is_origin_allowed(
 /// Host's own plaintext browser listener on loopback — and it widens nothing
 /// on its own: an empty allowlist still denies every cross-origin browser, and
 /// a public deployment has no reason to list a loopback origin.
+/// Capacitor iOS serves its bundled app from exactly `capacitor://localhost`.
+/// Allow configuring that origin explicitly, without accepting arbitrary
+/// custom schemes or implicitly admitting WebViews to every deployment.
 pub fn is_valid_allowed_origin(origin: &str) -> bool {
+    if origin == "capacitor://localhost" {
+        return true;
+    }
     if let Some(authority) = origin.strip_prefix("http://") {
         return is_loopback_authority(authority);
     }
@@ -297,7 +303,7 @@ mod tests {
         assert!(is_valid_allowed_origin("https://app.cognia.cn"));
         assert!(is_valid_allowed_origin("https://localhost:8443"));
         assert!(!is_valid_allowed_origin("http://app.cognia.cn"));
-        assert!(!is_valid_allowed_origin("capacitor://localhost"));
+        assert!(is_valid_allowed_origin("capacitor://localhost"));
         assert!(!is_valid_allowed_origin("https://*.cognia.cn"));
         assert!(!is_valid_allowed_origin("https://app.cognia.cn/path"));
         assert!(!is_valid_allowed_origin("https://user@app.cognia.cn"));
@@ -310,6 +316,33 @@ mod tests {
         assert!(is_valid_allowed_origin("http://127.0.0.1:3000"));
         assert!(is_valid_allowed_origin("http://[::1]:3000"));
         assert!(is_valid_allowed_origin("http://[::1]"));
+    }
+
+    #[test]
+    fn mobile_webview_origin_requires_explicit_exact_admission() {
+        let origin = "capacitor://localhost";
+        assert!(is_valid_allowed_origin(origin));
+        assert!(!is_origin_allowed(
+            Some(origin),
+            Some("https://signaling.cognia.cn"),
+            &[]
+        ));
+        assert!(is_origin_allowed(
+            Some(origin),
+            Some("https://signaling.cognia.cn"),
+            &[origin.to_string()],
+        ));
+        for invalid in [
+            "capacitor://localhost.evil.example",
+            "capacitor://localhost:3000",
+            "capacitor://localhost/path",
+            "capacitor://user@localhost",
+            "capacitor://*",
+            "capacitor://remote.example",
+            "null",
+        ] {
+            assert!(!is_valid_allowed_origin(invalid), "accepted {invalid}");
+        }
     }
 
     #[test]

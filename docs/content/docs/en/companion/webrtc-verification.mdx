@@ -5,6 +5,78 @@ description: Real-device smoke test for the WebRTC mobile↔desktop tier (ADR-00
 
 # WebRTC verification checklist
 
+## Transport audit — 2026-09-07
+
+ADR-0170 adds an encrypted application relay to the signaling service. `open`
+alone is **not** proof of WebRTC: require an open `cognia.signaling` DataChannel.
+Distinguish `rtc-direct`, TURN-backed `rtc-relay`, and signaling-backed `relay`.
+On a healthy LAN, the product intentionally prefers `ws-lan` and disables the
+WAN tier; a LAN connection does not need to show WebRTC to pass.
+
+The real Chromium ↔ Rust harness was exercised in four modes, with all seven
+scenarios passing in each:
+
+| Signaling | ICE | Verified carrier |
+| --- | --- | --- |
+| Local Axum | Enabled | Real DataChannel, `prflx` candidate |
+| Local Axum | No usable candidates | Encrypted signaling relay |
+| Public `signaling.cognia.cn` | Enabled | Real DataChannel, `prflx` candidate |
+| Public `signaling.cognia.cn` | No usable candidates | Encrypted public signaling relay |
+
+Each run checks RPC responses, ordered events, peer restart recovery,
+mobile-first startup, duplicate reconnect handling, and observed teardown.
+The harness registers an isolated in-memory device. Its RPC intentionally
+expects `service_unavailable`, because it has no application backend: these
+runs do not prove conversation loading or chat execution. Both peers ran on
+one Mac; neither the direct candidate nor public signaling proves cross-NAT
+connectivity. Public-mode application assets came from the local E2E export
+under an allowed HTTPS origin; WSS was real and was not intercepted.
+
+Reproduce after building a fresh E2E export with `rtk pnpm test:e2e:build`:
+
+```bash
+rtk pnpm webrtc:pair
+rtk env WEBRTC_PAIR_SKIP_BUILD=1 WEBRTC_PAIR_FORCE_RELAY=1 pnpm webrtc:pair
+rtk env WEBRTC_PAIR_SKIP_BUILD=1 WEBRTC_PAIR_FORCE_RELAY=1 WEBRTC_PAIR_SIGNALING_URL=wss://signaling.cognia.cn/signaling WEBRTC_PAIR_BROWSER_ORIGIN=https://cognia.cn pnpm webrtc:pair
+```
+
+Omit `WEBRTC_PAIR_FORCE_RELAY` in the last command to test DataChannel
+negotiation through public signaling. Forced relay uses the real browser ICE
+implementation with `iceTransportPolicy: "relay"` and no TURN servers; it tests
+signaling-relay fallback, **not TURN**. Skip-build is only for binaries already
+built from the current sources.
+
+**Deployment blocker observed:** public `/healthz` returned 200 and the web
+origin `https://cognia.cn` received a WebSocket challenge, but iOS
+`capacitor://localhost` and Android `https://localhost` both received 403.
+The fix makes the iOS origin explicitly configurable and adds both mobile
+origins to the production Worker allowlist. It was deployed with user approval
+at **2026-09-07T08:38:29Z**, with 100% of traffic on version
+`aa6f8062-1eb0-49f1-8268-0c961808795a`. The previous version was
+`0c92a528-b1a3-4d5d-bede-de87f71732d7`.
+
+Post-deployment probes confirmed HTTP 200 health with `relayDataLane: true`,
+WebSocket 101 plus a challenge for native, web, iOS, and Android origins, and
+403 for unlisted and lookalike origins. The authenticated Worker protocol
+suite passed with the iOS Origin. Both real browser ↔ Rust runs under the
+Android Origin (`https://localhost`) passed all seven scenarios against the
+public Worker: direct DataChannel and forced signaling-relay fallback.
+These origin simulations do not replace physical-device acceptance below.
+
+Still required for acceptance: two physical devices on the same LAN, a phone
+on cellular with the desktop on its usual network, Wi-Fi/cellular switching,
+real application RPCs, and a configured TURN server with an actually selected
+relay candidate. TURN credentials and a second-network device were not
+available for this audit. An ICE failure alone does not diagnose symmetric NAT.
+
+Validation also passed 282 focused TS tests, 36 signaling-core tests, 65 Axum
+tests, and four Rust harness tests. Signaling Clippy and the Worker release
+build passed. The full `pnpm test:coverage` run encountered unrelated
+agent/workflow/UI test failures, then its first shard exited with Node
+`SIGABRT` under the 4 GiB test heap limit; repository-wide coverage is not certified.
+Rust formatting also reports an existing `healthz` signature layout in
+`services/signaling-server/src/server.rs`, outside the edited lines.
+
 Use this checklist after any change that could affect the WebRTC tier
 end-to-end: signaling envelope schema, SDP/ICE handshake, pair-flow
 mints, rendezvous-server upgrades, or the `TransportRtc` state machine.
@@ -24,8 +96,8 @@ You need:
 - The phone on **cellular** (not the same Wi-Fi as the desktop) — that
   forces the WebRTC tier to do real NAT traversal rather than landing on
   `ws-lan`.
-- A scratch room for diagnostics: open `chrome://webrtc-internals` on
-  the desktop, and the Cognia app's Settings → Mobile companion →
+- A scratch room for diagnostics: open `chrome://webrtc-internals` in
+  the Chromium client (use remote WebView inspection on mobile), and the Cognia app's Settings → Mobile companion →
   WebRTC card on both sides.
 
 ## Step 1 — Pair and observe tier rollup
@@ -33,26 +105,26 @@ You need:
 1. From the desktop, generate a pair QR (Settings → Mobile companion →
    Pair device → Generate QR).
 2. On the phone, run the in-app pair flow: Discover → Pair → scan the
-   `cgnp3` QR. The phone completes challenge + P-256 registration at
+   `cgnp4` QR (`cgnp3` remains supported). The phone completes challenge + P-256 registration at
    `POST /api/auth/device/register`; this returns a `RoomDescriptor` and
    stores the independent mobile-role signaling key in secure storage.
 3. Within ~5 seconds the desktop's WebRTC card should show the new
    device transitioning **offline → awaiting → negotiating → connected**.
 4. On the mobile Settings panel, the Transport row should land on
-   `WebRTC (direct)`. The "Reconnect WebRTC" button is visible.
+   `relay`, `rtc-direct`, or `rtc-relay`, depending on the selected carrier.
 
 If the tier stays on `ws-tunnel` (i.e. cloudflared) or `offline` after a
 minute, jump to [Step 4](#step-4--symmetric-nat--turn).
 
 ## Step 2 — Selected ICE candidate type
 
-1. With the DataChannel open, open `chrome://webrtc-internals` on the
-   desktop.
+1. With the DataChannel open, inspect the client PeerConnection. A desktop
+   Chromium diagnostics tab cannot observe the Rust host's WebRTC stack.
 2. Find the `RTCDataChannel:cognia.signaling` row → expand the parent peer
    connection → `RTCIceCandidatePair` → look at the **local candidate's**
    `type`.
-3. Expected: `host` (same LAN; you shouldn't be on cellular if so) or
-   `srflx` (typical cellular). `prflx` is also fine. If the type is
+3. Direct candidates can be `host`, `srflx`, or `prflx`. A `host` candidate
+   can also use globally routable IPv6, so its type does not prove LAN use. If the type is
    `relay`, see [Step 4](#step-4--symmetric-nat--turn).
 4. Screenshot this row for the PR description.
 
@@ -74,17 +146,16 @@ Confirm the connection uses `/signaling` and the status reports
 
 ## Step 4 — Symmetric NAT / TURN
 
-If [Step 1](#step-1--pair-and-observe-tier-rollup) parks on `ws-tunnel`
-or [Step 2](#step-2--selected-ice-candidate-type) shows `relay` without
-TURN configured, the carrier is doing symmetric NAT and STUN alone can't
-punch a hole. Two outcomes are acceptable:
+Inspect the ICE error and selected candidate pair when direct connectivity
+fails. NAT, blocked UDP, unreachable STUN, and expired TURN credentials need
+different fixes; a fallback tier does not identify the cause by itself.
 
 - **TURN is configured.** Tier should land on `WebRTC (TURN relay)`.
   Slightly higher latency than direct but still avoids the cloudflared
   tunnel.
-- **TURN is not configured.** The tier falls back to `ws-tunnel`
-  (cloudflared) or `ws-lan` if a tunnel isn't running. This is the
-  documented degradation path — no regression, just no win.
+- **TURN is not configured.** With an admitted, online peer the encrypted
+  signaling `relay` can carry application traffic (ADR-0170). A healthy LAN
+  or tunnel may take priority. An unreachable LAN is never a working fallback.
 
 Follow [companion/turn-byo](./turn-byo) to plug in Twilio /
 Cloudflare TURN credentials and rerun [Step 1](#step-1--pair-and-observe-tier-rollup).
@@ -94,13 +165,14 @@ Cloudflare TURN credentials and rerun [Step 1](#step-1--pair-and-observe-tier-ro
 While the DataChannel is open, curl the rendezvous you're hitting:
 
 ```bash
-curl -s https://signaling.cognia.cn/healthz
-# → { "ok": true, "rooms": >=1, "peers": >=2, "uptimeSeconds": ..., "version": ... }
-
-curl -s https://signaling.cognia.cn/metrics | grep -E "signaling_(rooms|peers|frames_in)_"
-# → non-zero counters; specifically `signaling_rooms_active >= 1` and
-#   `signaling_peers_active >= 2` while the room is live.
+rtk curl -s https://signaling.cognia.cn/healthz
+# Worker → { "backend": "worker", "ok": true, "version": "0.1.0" }
 ```
+
+The Worker health response has no global room/peer counters and no Axum
+Prometheus `/metrics` endpoint. Use Worker observability for that deployment;
+on a self-hosted Axum rendezvous, `/metrics` exposes room, peer, and frame
+counters. A successful health probe does not verify WebSocket Origin admission.
 
 ## Step 6 — Browser security and fallback
 

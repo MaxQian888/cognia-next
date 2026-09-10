@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cognia_signaling_core::{
+    limits::{TokenBucket, DATA_RATE_CAPACITY, DATA_RATE_REFILL_PER_SEC},
     proto::{
         ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RelayLane, RoomDescriptor, ServerFrame,
         SignalingEnvelope, SubscribeProof,
@@ -808,7 +809,7 @@ async fn run_one_session(
     )
     .await?
     .map_err(|e| SessionError::Websocket(e.to_string()))?;
-    let (mut write, mut read) = ws_stream.split();
+    let (write, mut read) = ws_stream.split();
     let mut crypto = SessionCrypto {
         identity,
         ephemeral,
@@ -817,9 +818,12 @@ async fn run_one_session(
         replay: StrictReplayWindow::default(),
     };
 
-    // Outbound queue → any task that wants to push a frame to the WSS sink
-    // sends through here. Bounded so a runaway producer can't OOM us.
-    let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
+    // A separate bounded writer owns the sink. The session must never await
+    // capacity on a queue that only its own select loop can drain. JoinSet
+    // aborts the writer on every return/cancellation path, including errors.
+    let (out_tx, out_rx) = mpsc::channel::<SocketWrite>(64);
+    let mut writer = tokio::task::JoinSet::new();
+    writer.spawn(run_socket_writer(write, out_rx));
 
     // Per-peer state: recreated each time a fresh PeerSession is built
     // (i.e., each new offer) and, in relay mode, from the peer's `hello`.
@@ -832,6 +836,10 @@ async fn run_one_session(
     let mut subscribe_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(5));
     let mut pong_deadline: Option<tokio::time::Instant> = None;
 
+    // Cancellation must also interrupt an await inside a selected branch
+    // (for example a saturated socket writer), not only the next loop poll.
+    let mut urgent_cancel = cancel_rx.clone();
+    let outcome = cancellable(&mut urgent_cancel, async {
     loop {
         // Helpers for `select!` — extract receivers that may be `None` and
         // gate the branch on `Option::is_some()` via `if let`.
@@ -839,12 +847,20 @@ async fn run_one_session(
         let state_branch = ps.peer_state_rx.as_mut();
         let relay_branch = ps.relay_out_rx.as_mut();
 
+        // Fair selection keeps a continuously ready media producer from
+        // starving socket reads, keepalives, peer changes or cancellation.
         tokio::select! {
-            biased;
-
             () = wait_for_cancel(&mut cancel_rx) => {
                 ps.teardown_all(&config.device_id).await;
                 return Err(SessionError::Cancelled);
+            }
+
+            outcome = writer.join_next() => {
+                return match outcome {
+                    Some(Ok(Err(error))) => Err(error),
+                    Some(Err(error)) => Err(SessionError::Websocket(error.to_string())),
+                    _ => Err(SessionError::Websocket("outbound writer closed".into())),
+                };
             }
 
             // ADR-0170: a frame the dispatcher could not put on a DataChannel.
@@ -866,18 +882,11 @@ async fn run_one_session(
                 push_relay(&out_tx, &config.rendezvous_id, &env, RelayLane::Data).await?;
             }
 
-            Some(out) = out_rx.recv() => {
-                if let Err(e) = write.send(Message::Text(out.into())).await {
-                    return Err(SessionError::Websocket(e.to_string()));
-                }
-            }
 
             _ = keepalive.tick() => {
                 let frame = serde_json::to_string(&ClientFrame::Ping)
                     .expect("serialize ping");
-                if let Err(e) = write.send(Message::Text(frame.into())).await {
-                    return Err(SessionError::Websocket(e.to_string()));
-                }
+                enqueue_socket_write(&out_tx, Message::Text(frame.into()), None).await?;
                 pong_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(10));
             }
 
@@ -1011,16 +1020,16 @@ async fn run_one_session(
                                 session_id,
                                 ..
                             } => {
-                                log::info!(
-                                    "signaling::client[{}]: peer-left role={}",
-                                    config.device_id,
-                                    role.as_str()
-                                );
                                 if crypto.peer.as_ref().map(|peer| peer.proof.session_id.as_str())
                                     != Some(session_id.as_str())
                                 {
                                     continue;
                                 }
+                                log::info!(
+                                    "signaling::client[{}]: peer-left role={}",
+                                    config.device_id,
+                                    role.as_str()
+                                );
                                 crypto.peer = None;
                                 crypto.replay = StrictReplayWindow::default();
                                 // Mobile dropped — tear down our peer too.
@@ -1071,20 +1080,74 @@ async fn run_one_session(
                         return Err(SessionError::Websocket("server closed".into()));
                     }
                     Message::Ping(buf) => {
-                        write
-                            .send(Message::Pong(buf))
-                            .await
-                            .map_err(|e| SessionError::Websocket(e.to_string()))?;
+                        enqueue_socket_write(&out_tx, Message::Pong(buf), None).await?;
                     }
                     Message::Pong(_) | Message::Frame(_) | Message::Binary(_) => {}
                 }
             }
         }
     }
+    }).await;
+    match outcome {
+        Ok(result) => result,
+        Err(error) => {
+            writer.abort_all();
+            ps.teardown_all(&config.device_id).await;
+            Err(error)
+        }
+    }
+}
+
+/// FIFO is essential: signed signal/data envelopes share one replay sequence.
+/// Pacing happens after enqueue, so decrypting inbound traffic and responding
+/// to cancellation never waits for the full media transfer to drain.
+struct SocketWrite {
+    message: Message,
+    lane: Option<RelayLane>,
+}
+
+async fn enqueue_socket_write(
+    sender: &mpsc::Sender<SocketWrite>,
+    message: Message,
+    lane: Option<RelayLane>,
+) -> Result<(), SessionError> {
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        sender.send(SocketWrite { message, lane }),
+    )
+    .await
+    .map_err(|_| SessionError::Websocket("outbound queue stalled".into()))?
+    .map_err(|_| SessionError::Websocket("outbound writer closed".into()))
+}
+
+async fn run_socket_writer<W>(
+    mut sink: W,
+    mut receiver: mpsc::Receiver<SocketWrite>,
+) -> Result<(), SessionError>
+where
+    W: futures_util::Sink<Message> + Unpin,
+    W::Error: std::fmt::Display,
+{
+    let started = tokio::time::Instant::now();
+    let mut data_budget = TokenBucket::new(DATA_RATE_CAPACITY, DATA_RATE_REFILL_PER_SEC);
+    while let Some(frame) = receiver.recv().await {
+        if frame.lane == Some(RelayLane::Data) {
+            // Ceil(1000/64): at most one refill interval of oversleep, never
+            // exceeds the server's sustained rate or its 256-frame burst.
+            while !data_budget.try_take(started.elapsed().as_secs_f64() * 1000.0) {
+                tokio::time::sleep(Duration::from_millis(16)).await;
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(10), sink.send(frame.message))
+            .await
+            .map_err(|_| SessionError::Websocket("outbound socket stalled".into()))?
+            .map_err(|error| SessionError::Websocket(error.to_string()))?;
+    }
+    Ok(())
 }
 
 async fn push_relay(
-    out_tx: &mpsc::Sender<String>,
+    out_tx: &mpsc::Sender<SocketWrite>,
     rendezvous_id: &str,
     envelope: &SignalingEnvelope,
     lane: RelayLane,
@@ -1097,10 +1160,7 @@ async fn push_relay(
         lane,
     };
     let text = serde_json::to_string(&frame).map_err(|e| SessionError::Protocol(e.to_string()))?;
-    out_tx
-        .send(text)
-        .await
-        .map_err(|_| SessionError::Protocol("outbound queue closed".into()))
+    enqueue_socket_write(out_tx, Message::Text(text.into()), Some(lane)).await
 }
 
 /// Whether an inbound `rtc:offer` should renegotiate on the live peer (a true
@@ -1141,7 +1201,7 @@ async fn handle_relay(
     payload: &str,
     config: &ClientConfig,
     state: &SharedState,
-    out_tx: &mpsc::Sender<String>,
+    out_tx: &mpsc::Sender<SocketWrite>,
     next_seq: &mut u64,
     crypto: &mut SessionCrypto,
     ps: &mut PeerState,
@@ -1441,7 +1501,7 @@ async fn handle_pairing_envelope(
     body: Value,
     config: &ClientConfig,
     state: &SharedState,
-    out_tx: &mpsc::Sender<String>,
+    out_tx: &mpsc::Sender<SocketWrite>,
     next_seq: &mut u64,
     crypto: &mut SessionCrypto,
 ) -> Result<(), SessionError> {
@@ -1985,6 +2045,68 @@ mod tests {
             .expect("a dropped cancel sender must unwind the session, not spin")
             .expect("the session thread should report an outcome");
         assert!(cancelled, "the session should unwind as `Cancelled`");
+    }
+
+    #[tokio::test]
+    async fn relay_writer_drains_more_than_64_frames_and_paces_data_budget() {
+        let (sender, receiver) = mpsc::channel(64);
+        let observed = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let record = observed.clone();
+        let sink = Box::pin(futures_util::sink::unfold(
+            record,
+            |record, message| async move {
+                record.lock().push((tokio::time::Instant::now(), message));
+                Ok::<_, std::io::Error>(record)
+            },
+        ));
+        let writer = tokio::spawn(run_socket_writer(sink, receiver));
+        let producer = async {
+            for index in 0..512 {
+                enqueue_socket_write(
+                    &sender,
+                    Message::Text(index.to_string().into()),
+                    Some(RelayLane::Data),
+                )
+                .await
+                .unwrap();
+            }
+            enqueue_socket_write(&sender, Message::Text("control".into()), None)
+                .await
+                .unwrap();
+            drop(sender);
+        };
+        tokio::time::timeout(Duration::from_secs(8), producer)
+            .await
+            .expect("bounded queue must drain independently of its producer");
+        writer.await.unwrap().unwrap();
+        let sent = observed.lock();
+        assert_eq!(sent.len(), 513);
+        for (index, (_, frame)) in sent.iter().take(512).enumerate() {
+            assert_eq!(frame.to_text().unwrap(), index.to_string());
+        }
+        assert!(sent[511].0.duration_since(sent[0].0) >= Duration::from_millis(3_900));
+        assert_eq!(sent[512].1.to_text().unwrap(), "control");
+    }
+
+    #[tokio::test]
+    async fn writer_failure_closes_the_bounded_sender() {
+        let (sender, receiver) = mpsc::channel(64);
+        let sink = Box::pin(futures_util::sink::unfold((), |(), _message| async {
+            Err::<(), _>(std::io::Error::other("broken socket"))
+        }));
+        let writer = tokio::spawn(run_socket_writer(sink, receiver));
+        enqueue_socket_write(&sender, Message::Text("first".into()), None)
+            .await
+            .unwrap();
+        assert!(matches!(
+            writer.await.unwrap(),
+            Err(SessionError::Websocket(_))
+        ));
+        assert!(
+            enqueue_socket_write(&sender, Message::Text("after failure".into()), None)
+                .await
+                .is_err()
+        );
     }
 
     #[test]

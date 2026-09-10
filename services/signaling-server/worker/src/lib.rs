@@ -73,7 +73,7 @@ fn allowed_origins(env: &Env) -> Result<Vec<String>> {
         .find(|origin| !is_valid_allowed_origin(origin))
     {
         return Err(Error::RustError(format!(
-            "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS origin: {invalid}"
+            "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS, loopback HTTP, or capacitor://localhost origin: {invalid}"
         )));
     }
     Ok(origins)

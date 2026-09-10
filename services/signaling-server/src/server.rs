@@ -79,7 +79,7 @@ fn parse_allowed_origins(raw: &str) -> anyhow::Result<Vec<String>> {
                 Ok(origin.to_string())
             } else {
                 anyhow::bail!(
-                    "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS origin: {origin}"
+                    "SIGNALING_ALLOWED_ORIGINS entry must be an exact HTTPS, loopback HTTP, or capacitor://localhost origin: {origin}"
                 )
             }
         })
@@ -356,6 +356,8 @@ mod tests {
         // thread-safe under the test runner).
         let parsed = parse_allowed_origins("https://a.example, https://b.example ,,").unwrap();
         assert_eq!(parsed, vec!["https://a.example", "https://b.example"]);
+        let mobile = parse_allowed_origins("capacitor://localhost,https://localhost").unwrap();
+        assert_eq!(mobile, vec!["capacitor://localhost", "https://localhost"]);
     }
 
     #[test]
@@ -363,7 +365,7 @@ mod tests {
         for invalid in [
             "*",
             "http://app.example",
-            "capacitor://localhost",
+            "capacitor://localhost.evil.example",
             "https://*.example",
             "https://app.example/path",
         ] {

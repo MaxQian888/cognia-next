@@ -34,6 +34,12 @@
  *
  * Requires the E2E static export (`pnpm test:e2e:build`) so the browser bundle
  * carries the `__cogniaE2EWebRtc` seam. Exit 0 on success, 1 otherwise.
+ * WEBRTC_PAIR_FORCE_RELAY=1 makes real ICE gather no usable candidates and
+ * requires RPC/events to succeed over the encrypted signaling data lane.
+ * WEBRTC_PAIR_SIGNALING_URL uses a deployed rendezvous. An optional
+ * WEBRTC_PAIR_BROWSER_ORIGIN serves the local export under an allowed origin
+ * through Playwright asset routing; the WSS connection is never intercepted.
+ * Neither mode substitutes for a two-device LAN/cellular acceptance run.
  */
 
 import { spawn, spawnSync } from "node:child_process"
@@ -66,6 +72,8 @@ const SIGNALING_BIN = path.join(
   `cognia-signaling-server${process.platform === "win32" ? ".exe" : ""}`
 )
 const OUT_ROOT = path.join(REPO, "out")
+const REMOTE_SIGNALING_URL = process.env.WEBRTC_PAIR_SIGNALING_URL
+const FORCE_RELAY = process.env.WEBRTC_PAIR_FORCE_RELAY === "1"
 
 function log(...args) {
   console.log("[pair]", ...args)
@@ -119,10 +127,15 @@ function ensureExport() {
 // Signaling server
 // ---------------------------------------------------------------------------
 
-async function bootSignaling() {
+async function bootSignaling(browserOrigin) {
   const child = spawn(SIGNALING_BIN, ["--bind", "127.0.0.1:0"], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RUST_LOG: "info", NO_COLOR: "1" },
+    env: {
+      ...process.env,
+      RUST_LOG: "info",
+      NO_COLOR: "1",
+      SIGNALING_ALLOWED_ORIGINS: browserOrigin,
+    },
   })
   const port = await new Promise((resolve, reject) => {
     let buffered = ""
@@ -221,7 +234,7 @@ function startHarnessPeer({ signalingUrl, rid, roomDescriptor, desktopPrivateKey
       ])
     },
     waitForTier(tier, timeoutMs = 15_000) {
-      if (tiers.includes(tier)) return Promise.resolve({ kind: "tier", tier })
+      if (tiers.at(-1) === tier) return Promise.resolve({ kind: "tier", tier })
       return this.waitFor((o) => o.kind === "tier" && o.tier === tier, timeoutMs, `tier=${tier}`)
     },
     emitEvent(event, payload) {
@@ -343,16 +356,16 @@ async function run() {
   ensureBinaries()
   ensureExport()
 
-  const { child: sigChild, port } = await bootSignaling()
-  const signalingUrl = `ws://127.0.0.1:${port}/signaling`
-  log(`signaling server on ${signalingUrl}`)
-
   const outServer = createOutServer(OUT_ROOT)
   const httpPort = await new Promise((resolve) =>
     outServer.listen(0, "127.0.0.1", () => resolve(outServer.address().port))
   )
   const pageUrl = `http://127.0.0.1:${httpPort}/`
   log(`static export on ${pageUrl}`)
+
+  const localSignaling = REMOTE_SIGNALING_URL ? null : await bootSignaling(new URL(pageUrl).origin)
+  const signalingUrl = REMOTE_SIGNALING_URL ?? `ws://127.0.0.1:${localSignaling.port}/signaling`
+  log(`signaling server on ${signalingUrl}`)
 
   const browser = await chromium.launch({ args: ["--no-sandbox"] })
   const cleanupFns = [
@@ -361,12 +374,62 @@ async function run() {
       new Promise((r) => {
         outServer.close(() => r())
       }),
-    () => sigChild.kill(),
+    () => localSignaling?.child.kill(),
   ]
   let peer = null
 
   try {
     const page = await browser.newPage()
+    // Observe real channels: `open` also means signaling-relay availability
+    // since ADR-0170. Force-relay exercises that fallback with real ICE but
+    // no usable candidates (relay policy and no configured TURN server).
+    await page.addInitScript(
+      ({ forceRelay }) => {
+        window.__cogniaPairChannels = []
+        const NativePeer = window.RTCPeerConnection
+        window.RTCPeerConnection = class extends NativePeer {
+          constructor(config) {
+            super(forceRelay ? { ...config, iceServers: [], iceTransportPolicy: "relay" } : config)
+          }
+          createDataChannel(...args) {
+            const channel = super.createDataChannel(...args)
+            window.__cogniaPairChannels.push(channel)
+            return channel
+          }
+        }
+      },
+      { forceRelay: FORCE_RELAY }
+    )
+    const assertCarrier = async () => {
+      if (FORCE_RELAY) {
+        const open = await page.evaluate(() =>
+          window.__cogniaPairChannels.some((channel) => channel.readyState === "open")
+        )
+        if (open) fatal("relay-only scenario unexpectedly opened a DataChannel")
+      } else {
+        await page.waitForFunction(
+          () =>
+            window.__cogniaPairChannels.some(
+              (channel) => channel.label === "cognia.signaling" && channel.readyState === "open"
+            ),
+          null,
+          { timeout: 15_000 }
+        )
+      }
+    }
+    // The local export can run under an explicitly allowed browser origin
+    // to test the deployed rendezvous without changing its production policy.
+    // Only application assets are intercepted; signaling uses the real WSS.
+    const browserOrigin = process.env.WEBRTC_PAIR_BROWSER_ORIGIN
+    if (browserOrigin) {
+      await page.route(`${browserOrigin}/**`, async (route) => {
+        const source = new URL(route.request().url())
+        const response = await page.request.get(
+          new URL(source.pathname + source.search, pageUrl).href
+        )
+        await route.fulfill({ response })
+      })
+    }
     const browserDiagnostics = []
     page.on("console", (message) => {
       if (message.type() === "error" || message.type() === "warning") {
@@ -381,7 +444,7 @@ async function run() {
         `requestfailed: ${request.url()} (${request.failure()?.errorText ?? "unknown"})`
       )
     })
-    await page.goto(pageUrl)
+    await page.goto(browserOrigin ? `${browserOrigin}/` : pageUrl)
     try {
       await page.waitForFunction(() => window.__cogniaE2EWebRtcReady === true, {
         timeout: 20_000,
@@ -425,24 +488,24 @@ async function run() {
         rendezvousId: room.rid,
         signalingRoomDescriptor: room.roomDescriptor,
         signalingPrivateKeyJwk: room.mobilePrivateKeyJwk,
-        deviceId: "mobile-p1",
+        deviceId: room.deviceId,
         peerWaitTimeoutMs: 15_000,
         negotiationTimeoutMs: 15_000,
       })
       await waitForBrowserState(api, "open")
-      await peer.waitForTier("connected")
+      await assertCarrier()
       const kind = await api.candidateKind()
-      if (!["host", "srflx", "prflx"].includes(kind)) {
+      if (!FORCE_RELAY && !["host", "srflx", "prflx"].includes(kind)) {
         fatal(`P1: expected a direct candidate, got ${kind}`)
       }
-      log(`P1 OK — open, candidate=${kind}`)
+      log(`P1 OK — carrier=${FORCE_RELAY ? "signaling-relay" : "datachannel"}, candidate=${kind}`)
 
       // ── P3 — RPC round-trip (reuse the open P1 channel) ───────────────────
       log("P3: RPC round-trip")
       // No dispatch host in the harness → structured service_unavailable frame.
       let rpcResult
       try {
-        rpcResult = await api.call("session_list", {})
+        rpcResult = await api.call("session_list", { limit: 1, offset: 0 })
         fatal(
           `P3: expected the harness to reject with service_unavailable, got ${JSON.stringify(rpcResult)}`
         )
@@ -456,13 +519,13 @@ async function run() {
 
       // ── P4 — event delivery (desktop → browser) ───────────────────────────
       log("P4: event delivery + seq monotonicity")
-      await api.subscribe("harness://tick")
-      peer.emitEvent("harness://tick", { n: 1 })
-      peer.emitEvent("harness://tick", { n: 2 })
+      await api.subscribe("claude://message")
+      peer.emitEvent("claude://message", { n: 1 })
+      peer.emitEvent("claude://message", { n: 2 })
       const deadline = Date.now() + 10_000
       let received = []
       while (Date.now() < deadline) {
-        received = await api.events("harness://tick")
+        received = await api.events("claude://message")
         if (received.length >= 2) break
         await delay(100)
       }
@@ -480,6 +543,7 @@ async function run() {
       // Bring the desktop back; the TS backoff schedule re-handshakes.
       peer = startHarnessPeer({ signalingUrl, ...room })
       await waitForBrowserState(api, "open", 30_000)
+      await assertCarrier()
       log("P5 OK — recovered to open after the peer restarted")
 
       // ── P7 — graceful close ───────────────────────────────────────────────
@@ -504,7 +568,7 @@ async function run() {
         rendezvousId: room.rid,
         signalingRoomDescriptor: room.roomDescriptor,
         signalingPrivateKeyJwk: room.mobilePrivateKeyJwk,
-        deviceId: "mobile-p2",
+        deviceId: room.deviceId,
         peerWaitTimeoutMs: 25_000,
         negotiationTimeoutMs: 8_000,
       })
@@ -519,7 +583,7 @@ async function run() {
       // Now the desktop joins → handshake completes.
       peer = startHarnessPeer({ signalingUrl, ...room })
       await waitForBrowserState(api, "open", 30_000)
-      await peer.waitForTier("connected")
+      await assertCarrier()
       log("P2 OK — mobile-first cold start completed once the desktop joined")
     }
 
@@ -528,15 +592,12 @@ async function run() {
       log("P6: reconnectNow() during in-flight negotiation — F3 regression guard")
       // From the open P2 channel, force a fresh handshake and immediately
       // (while it's re-negotiating) call reconnectNow again.
-      const first = await api.reconnectNow()
+      const [first, second, inflight] = await page.evaluate(() => {
+        const first = window.__cogniaE2EWebRtc.reconnectNow()
+        const inflight = window.__cogniaE2EWebRtc.getState()
+        return [first, window.__cogniaE2EWebRtc.reconnectNow(), inflight]
+      })
       if (first !== "started") fatal(`P6: first reconnectNow expected 'started', got ${first}`)
-      // Poll for an in-flight state, then assert a second call is 'busy'.
-      const inflight = await waitForAnyBrowserState(
-        api,
-        ["signaling-connecting", "awaiting-peer", "negotiating"],
-        10_000
-      )
-      const second = await api.reconnectNow()
       if (second !== "busy") {
         fatal(
           `P6: reconnectNow during ${inflight} expected 'busy' (not a false success), got ${second}`

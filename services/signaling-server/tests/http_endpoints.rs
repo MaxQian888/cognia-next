@@ -12,6 +12,47 @@ use std::time::Duration;
 use cognia_signaling_server::serve_for_test;
 
 #[tokio::test]
+async fn bundled_mobile_origins_upgrade_only_when_explicitly_configured() {
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Error};
+
+    let origins = ["capacitor://localhost", "https://localhost"];
+    for configured in [false, true] {
+        let allowlist = if configured {
+            origins.iter().map(|origin| origin.to_string()).collect()
+        } else {
+            vec![]
+        };
+        let (addr, handle) =
+            cognia_signaling_server::serve_for_test_full(50, Default::default(), allowlist, false)
+                .await
+                .expect("server boots");
+        for origin in origins
+            .into_iter()
+            .chain(["capacitor://localhost.evil.example"])
+        {
+            let mut request = format!("ws://{addr}/signaling")
+                .into_client_request()
+                .unwrap();
+            request
+                .headers_mut()
+                .insert("Origin", origin.parse().unwrap());
+            let result = tokio_tungstenite::connect_async(request).await;
+            if configured && origins.contains(&origin) {
+                let (mut socket, response) = result.expect("configured WebView upgrades");
+                assert_eq!(response.status(), 101);
+                socket.close(None).await.unwrap();
+            } else {
+                match result {
+                    Err(Error::Http(response)) => assert_eq!(response.status(), 403),
+                    other => panic!("unlisted origin must fail closed: {other:?}"),
+                }
+            }
+        }
+        handle.abort();
+    }
+}
+
+#[tokio::test]
 async fn healthz_returns_json_with_uptime() {
     let (addr, _handle) = serve_for_test().await.expect("server boots");
     let url = format!("http://{addr}/healthz");
