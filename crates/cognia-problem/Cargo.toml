@@ -28,6 +28,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 schemars = "1"
 uuid = { version = "1", features = ["v4"] }
+# The page token is opaque base64url (paging.rs).
+base64 = "0.23"
+thiserror = "2"
 axum = { version = "0.8", default-features = false, optional = true }
 
 [dev-dependencies]

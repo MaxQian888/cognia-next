@@ -2610,9 +2610,11 @@ name = "cognia-problem"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tokio",
  "uuid",
 ]
@@ -2636,6 +2638,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "cognia-core",
+ "cognia-problem",
  "cognia-secrets",
  "cron",
  "dirs 6.0.0",
@@ -2782,6 +2785,7 @@ dependencies = [
  "chrono",
  "cognia-automation",
  "cognia-instrument",
+ "cognia-problem",
  "cognia-secrets",
  "dirs 6.0.0",
  "ed25519-dalek 3.0.0",
