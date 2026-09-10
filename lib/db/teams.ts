@@ -1,4 +1,9 @@
-import type { Team, TeamMember, TeamOrchestration } from "@cognia/agent-config-types"
+import type {
+  Team,
+  TeamMember,
+  TeamOrchestration,
+  TeamReplyConcurrency,
+} from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 import { MAX_AUTO_ROUNDS } from "@/lib/claude/team-primary-router"
 
@@ -12,6 +17,8 @@ export const TEAM_ORCHESTRATIONS: TeamOrchestration[] = [
   "manual",
   "supervisor",
 ]
+
+export const TEAM_REPLY_CONCURRENCIES: TeamReplyConcurrency[] = ["sequential", "parallel"]
 
 export async function listTeams(): Promise<Team[]> {
   return getDb().teams.orderBy("name").toArray()
@@ -31,6 +38,7 @@ export type TeamDraft = Pick<Team, "name" | "members"> &
       | "orchestration"
       | "maxResponses"
       | "maxAutoRounds"
+      | "replyConcurrency"
       | "supervisorCharacterId"
       | "mcpServerIds"
     >
@@ -73,6 +81,46 @@ function validateMaxAutoRounds(maxAutoRounds: number | undefined): void {
   }
 }
 
+function validateReplyConcurrency(value: TeamReplyConcurrency | undefined): void {
+  if (value !== undefined && !TEAM_REPLY_CONCURRENCIES.includes(value)) {
+    throw new Error("Team reply concurrency must be sequential or parallel.")
+  }
+}
+
+/**
+ * A slot's handoff graph names teammates, and its talkativeness is a
+ * probability (ADR-0177 batch 3). Both are checked at the write, like the
+ * supervisor, because the router trusts what the row says and a dangling
+ * target would be a handoff that silently never happens.
+ */
+function validateMemberSlots(members: TeamMember[]): void {
+  const ids = new Set(members.map((member) => member.characterId))
+  for (const member of members) {
+    if (member.handoffTargets !== undefined) {
+      if (!Array.isArray(member.handoffTargets)) {
+        throw new Error("A member's handoff targets must be a list of member ids.")
+      }
+      for (const target of member.handoffTargets) {
+        if (target === member.characterId) {
+          throw new Error("A member cannot hand the floor to itself.")
+        }
+        if (!ids.has(target)) {
+          throw new Error("A handoff target must be one of the team's members.")
+        }
+      }
+    }
+    if (
+      member.talkativeness !== undefined &&
+      (typeof member.talkativeness !== "number" ||
+        !Number.isFinite(member.talkativeness) ||
+        member.talkativeness < 0 ||
+        member.talkativeness > 1)
+    ) {
+      throw new Error("A member's talkativeness must be a number from 0 through 1.")
+    }
+  }
+}
+
 export async function createTeam(draft: TeamDraft): Promise<Team> {
   if (!draft.members || draft.members.length === 0) {
     throw new Error("A team needs at least one member.")
@@ -82,6 +130,8 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
   validateOrchestration(orchestration, members, draft.supervisorCharacterId)
   validateMaxResponses(draft.maxResponses)
   validateMaxAutoRounds(draft.maxAutoRounds)
+  validateReplyConcurrency(draft.replyConcurrency)
+  validateMemberSlots(members)
   const now = Date.now()
   const team: Team = {
     id: newId(),
@@ -93,6 +143,7 @@ export async function createTeam(draft: TeamDraft): Promise<Team> {
     orchestration,
     maxResponses: draft.maxResponses,
     maxAutoRounds: draft.maxAutoRounds,
+    replyConcurrency: draft.replyConcurrency,
     supervisorCharacterId: draft.supervisorCharacterId,
     mcpServerIds: draft.mcpServerIds,
     createdAt: now,
@@ -121,6 +172,10 @@ export async function updateTeam(
   validateOrchestration(nextOrchestration, nextMembers, nextSupervisor)
   validateMaxResponses("maxResponses" in patch ? patch.maxResponses : existing.maxResponses)
   validateMaxAutoRounds("maxAutoRounds" in patch ? patch.maxAutoRounds : existing.maxAutoRounds)
+  validateReplyConcurrency(
+    "replyConcurrency" in patch ? patch.replyConcurrency : existing.replyConcurrency
+  )
+  validateMemberSlots(nextMembers)
   await getDb().teams.update(id, { ...patch, updatedAt: Date.now() })
 }
 

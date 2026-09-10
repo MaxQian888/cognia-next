@@ -6448,7 +6448,29 @@ export interface TeamMember {
   allowedToolsOverride?: string[]
   /** Fully replaces (does not union) character.mcpServerIds when set. */
   mcpServerIdsOverride?: string[]
+  /**
+   * Who this member may hand the floor to by name (ADR-0177 batch 3).
+   *
+   * Absent means anyone on the team. An empty list means nobody: the member
+   * can still be addressed, it just cannot pass the conversation on. The
+   * runner drops a handoff outside the list, so a team's transition graph is
+   * a property of its configuration rather than of what a model happens to
+   * write.
+   */
+  handoffTargets?: string[]
+  /**
+   * How readily this member speaks when nobody addressed it, 0 to 1
+   * (ADR-0177 batch 3). During an auto round every member that was not
+   * handed the floor rolls against this once, so `0.3` is "chimes in on
+   * roughly a third of the rounds". Absent means 0: only an explicit handoff
+   * or a mention gets this member to speak, which is what every team did
+   * before the field existed.
+   */
+  talkativeness?: number
 }
+
+/** Whether the members of one round reply one after another or all at once. */
+export type TeamReplyConcurrency = "sequential" | "parallel"
 
 export interface Team {
   id: string
@@ -6471,6 +6493,12 @@ export interface Team {
    * by `maxResponses`, and by a per-member limit of two turns per round.
    */
   maxAutoRounds?: number
+  /**
+   * Whether the members picked for one round run one after another (each
+   * reads the replies before it) or all at once (each reads only what came
+   * before the round). Absent means sequential, every legacy row's shape.
+   */
+  replyConcurrency?: TeamReplyConcurrency
   /** When orchestration === "supervisor", which member acts as the leader. */
   supervisorCharacterId?: string
   /** Team-level MCP override applied to members without their own subset. */

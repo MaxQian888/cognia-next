@@ -398,4 +398,54 @@ describe("seedBuiltInTeams", () => {
       expect((await getTeam(team.id))?.maxAutoRounds).toBe(3)
     })
   })
+
+  describe("orchestration fields (ADR-0177 batch 3)", () => {
+    it("persists reply concurrency and refuses an unknown value", async () => {
+      const team = await createTeam({
+        name: "Parallel",
+        members: [{ characterId: "c1" }, { characterId: "c2" }],
+        replyConcurrency: "parallel",
+      })
+      expect((await getTeam(team.id))?.replyConcurrency).toBe("parallel")
+      await expect(
+        updateTeam(team.id, { replyConcurrency: "interleaved" as never })
+      ).rejects.toThrow(/concurrency/i)
+      const legacy = await createTeam({ name: "Legacy", members: [{ characterId: "c1" }] })
+      expect((await getTeam(legacy.id))?.replyConcurrency).toBeUndefined()
+    })
+
+    it("keeps a member's handoff targets on the roster and never pointing at itself", async () => {
+      const team = await createTeam({
+        name: "Graph",
+        members: [{ characterId: "c1", handoffTargets: ["c2"] }, { characterId: "c2" }],
+      })
+      expect((await getTeam(team.id))?.members[0]?.handoffTargets).toEqual(["c2"])
+      await expect(
+        updateTeam(team.id, {
+          members: [{ characterId: "c1", handoffTargets: ["ghost"] }, { characterId: "c2" }],
+        })
+      ).rejects.toThrow(/one of the team's members/i)
+      await expect(
+        updateTeam(team.id, {
+          members: [{ characterId: "c1", handoffTargets: ["c1"] }, { characterId: "c2" }],
+        })
+      ).rejects.toThrow(/itself/i)
+      // Removing the target member leaves a dangling graph, which the write refuses.
+      await expect(removeMember(team.id, "c2")).rejects.toThrow(/one of the team's members/i)
+    })
+
+    it("keeps talkativeness a probability", async () => {
+      const team = await createTeam({
+        name: "Chatty",
+        members: [{ characterId: "c1", talkativeness: 0.5 }],
+      })
+      expect((await getTeam(team.id))?.members[0]?.talkativeness).toBe(0.5)
+      await expect(updateMemberOverride(team.id, "c1", { talkativeness: 1.5 })).rejects.toThrow(
+        /talkativeness/i
+      )
+      await expect(
+        updateMemberOverride(team.id, "c1", { talkativeness: Number.NaN })
+      ).rejects.toThrow(/talkativeness/i)
+    })
+  })
 })

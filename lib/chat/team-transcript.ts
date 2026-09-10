@@ -99,6 +99,13 @@ export interface BuildTeamTranscriptInput {
    * on a question no one is going to answer.
    */
   handoffEnabled?: boolean | undefined
+  /**
+   * The names this member may hand the floor to (`TeamMember.handoffTargets`
+   * resolved to names, ADR-0177 batch 3). Absent means anyone. An empty list
+   * means nobody, and the member is told so rather than left to address a
+   * teammate the runner will not send the turn to.
+   */
+  handoffTargetNames?: readonly string[] | undefined
 }
 
 /** Concatenate the text parts of a message. Non-text parts carry no transcript line. */
@@ -160,6 +167,18 @@ const HANDOFF_PROTOCOL =
   "run. The tag is removed before anyone reads the message, so write your answer normally " +
   "around it. Do not use it to end your own turn early, only to end the group's work."
 
+/** The protocol, plus the member's own transition graph when the team declares one. */
+export function handoffParagraph(targetNames: readonly string[] | undefined): string {
+  if (targetNames === undefined) return HANDOFF_PROTOCOL
+  if (targetNames.length === 0) {
+    return (
+      HANDOFF_PROTOCOL +
+      " You are not able to hand the floor to anyone in this room: finish your own contribution instead of addressing a teammate."
+    )
+  }
+  return HANDOFF_PROTOCOL + ` You may hand the floor only to: ${targetNames.join(", ")}.`
+}
+
 export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
   const { messages, respondingCharacterId, members, scratchpad } = input
   const sections: string[] = []
@@ -182,7 +201,7 @@ export function buildTeamTranscript(input: BuildTeamTranscriptInput): string {
           "`User:` is the person you are talking to when nobody else is named, and every other " +
           "label names a participant from the roster above. " +
           "Reply only with your next turn (no transcript, no prefix).",
-        ...(input.handoffEnabled ? ["", HANDOFF_PROTOCOL] : []),
+        ...(input.handoffEnabled ? ["", handoffParagraph(input.handoffTargetNames)] : []),
         "",
         lines.join("\n"),
       ].join("\n")

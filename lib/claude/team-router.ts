@@ -2,7 +2,7 @@
 // user turn. Kept dependency-free so they can be unit-tested without React,
 // IndexedDB, or Tauri.
 
-import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
+import type { Character, RoomReplyMode, Team, TeamMember } from "@cognia/agent-config-types"
 import { resolveTeamResponseCap } from "./team-primary-router"
 
 /**
@@ -66,19 +66,48 @@ function isDelimiter(ch: string): boolean {
 }
 
 /**
+ * The room-level inputs to routing (ADR-0177 batch 3). All optional: a
+ * caller that passes nothing gets the routing every team had before rooms
+ * had settings.
+ */
+export interface RouteTurnOptions {
+  /**
+   * `roomSettings.mutedMemberIds`. The room never picks a muted member on
+   * its own initiative. An explicit `@` or a composer pick still reaches
+   * one, because those are the user's initiative, not the room's.
+   */
+  mutedMemberIds?: readonly string[]
+  /**
+   * The members the user picked in the composer, in pick order. Beats every
+   * policy below, mute and reply mode included, for the same reason a
+   * mention does: the user said who should answer.
+   */
+  explicitTargetIds?: readonly string[]
+  /** `roomSettings.replyMode`. `auto` is the shape every room had before. */
+  replyMode?: RoomReplyMode
+}
+
+/**
  * Decide which team members should respond to this turn.
  *
- * - `mention_round_robin`: if any members are mentioned, return them in the
- *   order they appear; otherwise every member replies once in declared order.
- * - `round_robin`: every member replies once, regardless of mentions.
- * - `manual`: nobody replies automatically — the user picks via the member
- *   list. Returns an empty list.
+ * In order of precedence:
+ *
+ * - `replyMode === "asleep"`: nobody, whatever else was said. The turn is
+ *   stored and the room stays quiet until the mode changes.
+ * - A composer pick (`explicitTargetIds`), then an `@` mention: exactly
+ *   those members, muted or not.
+ * - `replyMode === "mention_only"`: nobody, since nobody was addressed.
+ * - Then the team's own policy over the members that are not muted:
+ *   `mention_round_robin` picks the primary responder (or the first member),
+ *   `round_robin` picks everyone, `manual` and `supervisor` pick nobody
+ *   here (the user, or the supervisor loop, decides).
  */
 export function routeTurn(
   team: Pick<Team, "members" | "orchestration" | "maxResponses">,
   members: readonly Character[],
   userText: string,
-  primaryCharacterId?: string
+  primaryCharacterId?: string,
+  opts: RouteTurnOptions = {}
 ): Character[] {
   // Order members per the team's declared order; drop any whose row no longer
   // exists (a deleted character shouldn't be sent).
@@ -89,30 +118,128 @@ export function routeTurn(
     if (c && !ordered.some((candidate) => candidate.id === c.id)) ordered.push(c)
   }
 
+  if (opts.replyMode === "asleep") return []
+
   const cap = resolveTeamResponseCap(team.maxResponses)
-  // An explicit @ always wins, independent of the no-mention policy. This is
-  // what makes a group conversation addressable without changing the team's
-  // default moderator/all/smart-primary behavior.
+  // A pick, then an explicit @, always win, independent of the no-mention
+  // policy. This is what makes a group conversation addressable without
+  // changing the team's default moderator/all/smart-primary behavior.
+  const picked = explicitTargetsOf(opts.explicitTargetIds, ordered)
+  if (picked.length > 0) return picked.slice(0, cap)
   const mentioned = parseMentions(userText, ordered)
   if (mentioned.length > 0) return mentioned.slice(0, cap)
+
+  if (opts.replyMode === "mention_only") return []
+
+  const muted = new Set(opts.mutedMemberIds ?? [])
+  const eligible = ordered.filter((member) => !muted.has(member.id))
 
   switch (team.orchestration) {
     case "manual":
       // Manual + supervisor are both "no automatic linear fanout"; supervisor
-      // is handled by the orchestrator hook (runSupervisorTurn).
+      // is handled by the orchestrator (runSupervisorTurn).
       return []
     case "supervisor":
       return []
     case "round_robin":
-      return ordered.slice(0, cap)
+      return eligible.slice(0, cap)
     case "mention_round_robin":
     default: {
       const selected = primaryCharacterId
-        ? ordered.find((member) => member.id === primaryCharacterId)
+        ? eligible.find((member) => member.id === primaryCharacterId)
         : undefined
-      return (selected ? [selected] : ordered.slice(0, 1)).slice(0, cap)
+      return (selected ? [selected] : eligible.slice(0, 1)).slice(0, cap)
     }
   }
+}
+
+/** The picked members that are on the team, in pick order, each once. */
+function explicitTargetsOf(
+  ids: readonly string[] | undefined,
+  ordered: readonly Character[]
+): Character[] {
+  if (!ids || ids.length === 0) return []
+  const byId = new Map(ordered.map((member) => [member.id, member]))
+  const out: Character[] = []
+  for (const id of ids) {
+    const member = byId.get(id)
+    if (member && !out.includes(member)) out.push(member)
+  }
+  return out
+}
+
+/** Why a user turn produced no reply on purpose. */
+export type TurnHoldReason = "asleep" | "mention_only" | "manual"
+
+export interface UserTurnPlan {
+  targets: Character[]
+  /**
+   * Set when the room chose silence. `null` with no targets means the
+   * supervisor loop owns the turn, or the roster is empty.
+   */
+  held: TurnHoldReason | null
+}
+
+/**
+ * `routeTurn` plus the reason nobody was picked, so the runner can tell a
+ * held turn (the room's settings said so) from a supervisor turn (someone
+ * else decides) without re-deriving the policy.
+ */
+export function planUserTurn(
+  team: Pick<Team, "members" | "orchestration" | "maxResponses">,
+  members: readonly Character[],
+  userText: string,
+  primaryCharacterId?: string,
+  opts: RouteTurnOptions = {}
+): UserTurnPlan {
+  const targets = routeTurn(team, members, userText, primaryCharacterId, opts)
+  return { targets, held: holdReasonFor(team, targets, opts) }
+}
+
+/**
+ * The hold reason for a routing result. Split from `planUserTurn` so the
+ * runner can call `routeTurn` itself (its test doubles that one call) and
+ * still name why an empty result is silence rather than a supervisor turn.
+ */
+export function holdReasonFor(
+  team: Pick<Team, "orchestration">,
+  targets: readonly Character[],
+  opts: RouteTurnOptions = {}
+): TurnHoldReason | null {
+  if (targets.length > 0) return null
+  if (opts.replyMode === "asleep") return "asleep"
+  if (opts.replyMode === "mention_only") return "mention_only"
+  if (team.orchestration === "manual") return "manual"
+  return null
+}
+
+/**
+ * The member that spoke last, if it is still a candidate (ADR-0177 batch 3).
+ *
+ * A follow-up that names nobody most often continues the exchange the user
+ * was just having, so the smart primary router is told who that was and
+ * keeps them unless another member clearly fits better, and the
+ * deterministic fallback (no utility model) is that member instead of
+ * whoever is first on the roster. A last speaker that is muted or gone is
+ * not sticky: the room is not going to pick them anyway.
+ */
+export function stickyResponderOf<T extends { id: string }>(
+  messages: readonly { role: string; metadata?: unknown }[],
+  candidates: readonly T[]
+): T | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!
+    if (message.role !== "assistant") continue
+    const senderId = (message.metadata as { senderId?: unknown } | undefined)?.senderId
+    if (typeof senderId !== "string") continue
+    return candidates.find((candidate) => candidate.id === senderId)
+  }
+  return undefined
+}
+
+/** `TeamMember.talkativeness` clamped to 0..1, absent and malformed read as 0. */
+export function clampTalkativeness(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
 }
 
 // ---- Supervisor mode helpers ---------------------------------------------
@@ -316,6 +443,19 @@ export interface PlanAutoRoundArgs {
   maxAutoRounds: number
   /** Every member id that has spoken in this user turn, including repeats. */
   spokenIds: readonly string[]
+  /**
+   * `roomSettings.mutedMemberIds` (ADR-0177 batch 3). A handoff to a muted
+   * member is dropped, and a muted member never chimes in.
+   */
+  mutedMemberIds?: readonly string[]
+  /**
+   * The team's slots, for each speaker's `handoffTargets` and each member's
+   * `talkativeness`. Absent means every member may hand off to anyone and
+   * nobody chimes in, the shape every team had before.
+   */
+  slots?: ReadonlyMap<string, Pick<TeamMember, "handoffTargets" | "talkativeness">>
+  /** The roll behind talkativeness. Injected so a test is deterministic. */
+  random?: () => number
 }
 
 /**
@@ -328,6 +468,8 @@ export interface PlanAutoRoundArgs {
  */
 export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
   const { replies, members, spokenCount, responseCap, round, maxAutoRounds, spokenIds } = args
+  const muted = new Set(args.mutedMemberIds ?? [])
+  const roll = args.random ?? Math.random
 
   // Read the round first, then decide whether the room may pay for it. The
   // ceilings used to be checked up front, which made every stop reason mean
@@ -339,14 +481,20 @@ export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
 
   const spokenTally = new Map<string, number>()
   for (const id of spokenIds) spokenTally.set(id, (spokenTally.get(id) ?? 0) + 1)
+  const atLimit = (id: string) => (spokenTally.get(id) ?? 0) >= MAX_TURNS_PER_MEMBER_PER_ROUND
 
   const picked: Character[] = []
   const seen = new Set<string>()
   let blockedByRepeat = false
   for (const reply of replies) {
+    // The speaker's transition graph. `undefined` is the open room every
+    // team had before; `[]` is a member that may be addressed but never
+    // passes the floor on.
+    const allowed = args.slots?.get(reply.characterId)?.handoffTargets
     for (const target of parseHandoffTargets(reply.text, members, reply.characterId)) {
-      if (seen.has(target.id)) continue
-      if ((spokenTally.get(target.id) ?? 0) >= MAX_TURNS_PER_MEMBER_PER_ROUND) {
+      if (seen.has(target.id) || muted.has(target.id)) continue
+      if (allowed && !allowed.includes(target.id)) continue
+      if (atLimit(target.id)) {
         blockedByRepeat = true
         continue
       }
@@ -354,13 +502,34 @@ export function planAutoRound(args: PlanAutoRoundArgs): AutoRoundPlan {
       picked.push(target)
     }
   }
+  const handoffCount = picked.length
+
+  // Talkativeness: a member nobody addressed may still speak up, once per
+  // round, with the probability its slot declares. Never the members that
+  // just spoke (they had their say), never a muted one, never past the
+  // per-member limit. Absent talkativeness is 0, so a team that never set
+  // it sees no change.
+  const justSpoke = new Set(replies.map((reply) => reply.characterId))
+  for (const member of members) {
+    if (seen.has(member.id) || muted.has(member.id) || justSpoke.has(member.id)) continue
+    const eagerness = clampTalkativeness(args.slots?.get(member.id)?.talkativeness)
+    if (eagerness <= 0 || atLimit(member.id)) continue
+    if (roll() < eagerness) {
+      seen.add(member.id)
+      picked.push(member)
+    }
+  }
 
   if (picked.length === 0) {
     return { targets: [], stop: blockedByRepeat ? "repeat" : "no-handoff" }
   }
-  if (maxAutoRounds <= 0 || round >= maxAutoRounds) return { targets: [], stop: "budget" }
+  // Running out of rounds cuts a handoff chain off, which the room reports.
+  // It only ends a talkative member's chiming in, which is not worth a word.
+  if (maxAutoRounds <= 0 || round >= maxAutoRounds) {
+    return { targets: [], stop: handoffCount > 0 ? "budget" : "no-handoff" }
+  }
   const remaining = responseCap - spokenCount
-  if (remaining <= 0) return { targets: [], stop: "cap" }
+  if (remaining <= 0) return { targets: [], stop: handoffCount > 0 ? "cap" : "no-handoff" }
 
   // Truncating is not a stop: the members that did fit still speak, and the
   // next round's checks are what end the chain.

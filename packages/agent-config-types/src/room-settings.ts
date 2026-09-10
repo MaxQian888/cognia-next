@@ -9,14 +9,19 @@ export type RoomReplyMode = "auto" | "mention_only" | "asleep"
 
 export interface RoomSettings {
   /**
-   * Stored from batch 1, read by the runner from batch 3. Until then the
-   * setting is inert: the UI labels it so, and a test pins the label.
+   * When the room's agents may speak on their own. Read by the team runner
+   * (`lib/chat/room/runner.ts`) and by IM admission
+   * (`lib/connectors/conversation-admission.ts`) since batch 3.
    */
   replyMode?: RoomReplyMode
   /** Injected into every member's system prompt as `## Room instructions`. */
   instructions?: string
   /** Mirrored onto `memoryUse` and `memoryLearn`, which the memory plane reads. */
   memory?: boolean
-  /** Stored from batch 1, honoured by the router from batch 3. Inert until then. */
+  /**
+   * Members the router never picks on its own. An explicit `@` or a pick in
+   * the composer still reaches a muted member: the user asked, so mute, which
+   * is about the room's own initiative, does not apply.
+   */
   mutedMemberIds?: string[]
 }

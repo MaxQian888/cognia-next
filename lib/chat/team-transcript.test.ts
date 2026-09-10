@@ -3,6 +3,7 @@ import { HANDOFF_STOP_TOKEN } from "@/lib/claude/team-router"
 import {
   DEFAULT_TEAM_TRANSCRIPT_BUDGET,
   buildTeamTranscript,
+  handoffParagraph,
   nonTextPartMarkers,
   textFromParts,
   type TeamTranscriptMessage,
@@ -418,5 +419,32 @@ describe("the handoff protocol paragraph", () => {
       handoffEnabled: true,
     })
     expect(transcript).toContain("Ben: I can take it")
+  })
+})
+
+describe("handoff scope (ADR-0177 batch 3)", () => {
+  it("tells a member whom it may hand the floor to, or that it cannot", () => {
+    expect(handoffParagraph(undefined)).not.toContain("hand the floor only to")
+    expect(handoffParagraph(["Ben", "Cara"])).toContain("hand the floor only to: Ben, Cara.")
+    expect(handoffParagraph([])).toContain("not able to hand the floor to anyone")
+  })
+
+  it("puts the scope inside the transcript only when handoff is on", () => {
+    const messages = [userTurn("go")]
+    const on = buildTeamTranscript({
+      messages,
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+      handoffEnabled: true,
+      handoffTargetNames: ["Ben"],
+    })
+    expect(on).toContain("only to: Ben.")
+    const off = buildTeamTranscript({
+      messages,
+      respondingCharacterId: "char_a",
+      members: MEMBERS,
+      handoffTargetNames: ["Ben"],
+    })
+    expect(off).not.toContain("only to: Ben.")
   })
 })

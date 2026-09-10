@@ -60,9 +60,9 @@ describe("resolveRoomSettings", () => {
     expect(resolved.mutedMemberIds).toEqual(["a", "b"])
   })
 
-  it("pins the batch 1 dormancy: replyMode and mutedMemberIds are stored, not acted on", () => {
-    // The runner reads neither field until batch 3 (ADR-0177). This test exists
-    // so that wiring them is a deliberate change that has to update it.
+  it("resolves replyMode and mutedMemberIds for the router (live since batch 3)", () => {
+    // The runner reads both through `planUserTurn` and `planAutoRound`; the
+    // pin from batch 1 that said they were inert is gone with the label.
     const resolved = resolveRoomSettings({
       ...team,
       roomSettings: { replyMode: "asleep", mutedMemberIds: ["a"] },

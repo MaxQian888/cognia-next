@@ -26,9 +26,9 @@ import type { RoomReplyMode } from "@cognia/agent-config-types"
  * - `mention_only`: an explicit `@` is the only thing that gets a reply.
  * - `asleep`: nothing replies until the mode is changed.
  *
- * Batch 1 (ADR-0177) stores and renders the value. The team runner and the
- * IM admission mapping honour it in batch 3, so until then it is labelled
- * inert in the settings sheet and pinned by `settings.test.ts`.
+ * The team runner reads it through `planUserTurn` and IM admission maps it
+ * onto the activation policy (`mention_only` forces a mention, `asleep`
+ * denies with `room_asleep`, `auto` defers to what the operator configured).
  */
 export type { RoomReplyMode, RoomSettings } from "@cognia/agent-config-types"
 

@@ -10,6 +10,7 @@ import type { Character, TeamMember } from "@cognia/agent-config-types"
 import {
   DEFAULT_TEAM_RESPONSE_CAP,
   duplicateTeamResponseIds,
+  fallbackPrimaryResponder,
   MAX_TEAM_RESPONSE_CAP,
   resolveTeamResponseCap,
   selectPrimaryResponder,
@@ -110,5 +111,57 @@ describe("selectPrimaryResponder", () => {
         memberByCharId: slots,
       })
     ).resolves.toBe(members[0])
+  })
+})
+
+describe("sticky responder and talkativeness (ADR-0177 batch 3)", () => {
+  it("tells the model who answered last and keeps them without a model", async () => {
+    const complete = jest.fn(async () => "A1")
+    await expect(
+      selectPrimaryResponder({
+        client: { complete },
+        userText: "and the summary?",
+        members,
+        memberByCharId: slots,
+        sticky: members[1],
+      })
+    ).resolves.toBe(members[0])
+    expect(complete).toHaveBeenCalledWith(
+      expect.stringContaining("A2 answered the previous turn. Keep A2"),
+      expect.anything()
+    )
+    await expect(
+      selectPrimaryResponder({
+        client: null,
+        userText: "and the summary?",
+        members,
+        memberByCharId: slots,
+        sticky: members[1],
+      })
+    ).resolves.toBe(members[1])
+  })
+
+  it("names how often each member speaks up and falls back to the most talkative", async () => {
+    const eager = new Map<string, TeamMember>([
+      ["research", { characterId: "research", role: "Researcher", talkativeness: 0.2 }],
+      ["writer", { characterId: "writer", role: "Writer", talkativeness: 0.8 }],
+    ])
+    const complete = jest.fn(async () => "nope")
+    await expect(
+      selectPrimaryResponder({
+        client: { complete },
+        userText: "hi",
+        members,
+        memberByCharId: eager,
+      })
+    ).resolves.toBe(members[1])
+    expect(complete).toHaveBeenCalledWith(
+      expect.stringContaining("A2 | Writer | Draft clear prose | speaks up 80% of the time"),
+      expect.anything()
+    )
+    expect(fallbackPrimaryResponder(members, eager)).toBe(members[1])
+    expect(fallbackPrimaryResponder(members, slots)).toBe(members[0])
+    // A sticky member that is no longer a candidate (muted, removed) is not kept.
+    expect(fallbackPrimaryResponder([members[0]], slots, members[1])).toBe(members[0])
   })
 })

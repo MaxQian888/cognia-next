@@ -5,9 +5,13 @@ import {
   hasHandoffStopToken,
   parseDispatches,
   parseHandoffTargets,
+  clampTalkativeness,
+  holdReasonFor,
   parseMentions,
   planAutoRound,
+  planUserTurn,
   routeTurn,
+  stickyResponderOf,
   stripDispatches,
   stripHandoffStopToken,
 } from "./team-router"
@@ -511,6 +515,225 @@ describe("planAutoRound", () => {
         { characterId: "char_a", text: "@Cara please" },
         { characterId: "char_b", text: "@Cara too" },
       ],
+    })
+    expect(result.targets).toEqual([CARA])
+  })
+})
+
+// ---- Room settings in routing (ADR-0177 batch 3) ---------------------------
+
+describe("routeTurn with room options", () => {
+  const coder = makeCharacter({ id: "c1", name: "Coder" })
+  const writer = makeCharacter({ id: "c2", name: "Writer" })
+  const reviewer = makeCharacter({ id: "c3", name: "Reviewer" })
+  const members = [coder, writer, reviewer]
+  const team = makeTeam({
+    members: [{ characterId: "c1" }, { characterId: "c2" }, { characterId: "c3" }],
+    orchestration: "round_robin",
+  })
+
+  it("never picks a muted member on its own", () => {
+    expect(routeTurn(team, members, "hi", undefined, { mutedMemberIds: ["c2"] })).toEqual([
+      coder,
+      reviewer,
+    ])
+    const smart = makeTeam({ ...team, orchestration: "mention_round_robin" })
+    // The primary router is handed the unmuted candidates, but a stale id
+    // still falls through to the first eligible member rather than nobody.
+    expect(routeTurn(smart, members, "hi", "c1", { mutedMemberIds: ["c1"] })).toEqual([writer])
+  })
+
+  it("still reaches a muted member by @, because that is the user's initiative", () => {
+    expect(routeTurn(team, members, "@Writer go", undefined, { mutedMemberIds: ["c2"] })).toEqual([
+      writer,
+    ])
+  })
+
+  it("routes to the composer's picks in pick order, above every policy", () => {
+    expect(
+      routeTurn(team, members, "@Coder hi", undefined, {
+        explicitTargetIds: ["c3", "c2", "c3", "ghost"],
+        mutedMemberIds: ["c2"],
+        replyMode: "mention_only",
+      })
+    ).toEqual([reviewer, writer])
+  })
+
+  it("answers only a mention in mention_only mode and nobody when asleep", () => {
+    expect(routeTurn(team, members, "hello", undefined, { replyMode: "mention_only" })).toEqual([])
+    expect(
+      routeTurn(team, members, "@Coder hello", undefined, { replyMode: "mention_only" })
+    ).toEqual([coder])
+    expect(routeTurn(team, members, "@Coder hello", undefined, { replyMode: "asleep" })).toEqual([])
+    expect(
+      routeTurn(team, members, "hello", undefined, {
+        replyMode: "asleep",
+        explicitTargetIds: ["c1"],
+      })
+    ).toEqual([])
+  })
+
+  it("changes nothing for a caller that passes no options", () => {
+    expect(routeTurn(team, members, "hi")).toEqual(members)
+  })
+})
+
+describe("planUserTurn", () => {
+  const coder = makeCharacter({ id: "c1", name: "Coder" })
+  const members = [coder]
+  const team = makeTeam({ members: [{ characterId: "c1" }], orchestration: "round_robin" })
+
+  it("names why the room held its tongue", () => {
+    expect(planUserTurn(team, members, "hi", undefined, { replyMode: "asleep" })).toEqual({
+      targets: [],
+      held: "asleep",
+    })
+    expect(planUserTurn(team, members, "hi", undefined, { replyMode: "mention_only" })).toEqual({
+      targets: [],
+      held: "mention_only",
+    })
+    expect(planUserTurn({ ...team, orchestration: "manual" }, members, "hi")).toEqual({
+      targets: [],
+      held: "manual",
+    })
+  })
+
+  it("names the hold for a routing result the runner computed itself", () => {
+    expect(holdReasonFor(team, [], { replyMode: "asleep" })).toBe("asleep")
+    expect(holdReasonFor(team, [coder], { replyMode: "asleep" })).toBeNull()
+    expect(holdReasonFor({ orchestration: "manual" }, [])).toBe("manual")
+    expect(holdReasonFor({ orchestration: "supervisor" }, [])).toBeNull()
+  })
+
+  it("leaves the supervisor loop unnamed, since somebody still answers", () => {
+    expect(planUserTurn({ ...team, orchestration: "supervisor" }, members, "hi")).toEqual({
+      targets: [],
+      held: null,
+    })
+    expect(planUserTurn(team, members, "hi")).toEqual({ targets: [coder], held: null })
+  })
+})
+
+describe("stickyResponderOf", () => {
+  it("is the last member that spoke, when it is still a candidate", () => {
+    const messages = [
+      { role: "user" },
+      { role: "assistant", metadata: { senderId: "char_a" } },
+      { role: "user" },
+      { role: "assistant", metadata: { senderId: "char_b" } },
+      { role: "user" },
+    ]
+    expect(stickyResponderOf(messages, ROOM)).toBe(BEN)
+    expect(stickyResponderOf(messages, [ANA, CARA])).toBeUndefined()
+    expect(stickyResponderOf([{ role: "user" }], ROOM)).toBeUndefined()
+  })
+
+  it("skips an assistant turn that names no member", () => {
+    const messages = [
+      { role: "assistant", metadata: { senderId: "char_a" } },
+      { role: "assistant", metadata: {} },
+    ]
+    expect(stickyResponderOf(messages, ROOM)).toBe(ANA)
+  })
+})
+
+describe("clampTalkativeness", () => {
+  it("reads absent and malformed values as silent and clamps the rest", () => {
+    expect(clampTalkativeness(undefined)).toBe(0)
+    expect(clampTalkativeness("1")).toBe(0)
+    expect(clampTalkativeness(Number.NaN)).toBe(0)
+    expect(clampTalkativeness(-1)).toBe(0)
+    expect(clampTalkativeness(7)).toBe(1)
+    expect(clampTalkativeness(0.4)).toBe(0.4)
+  })
+})
+
+describe("planAutoRound with a transition graph, mute and talkativeness", () => {
+  it("drops a handoff outside the speaker's declared targets", () => {
+    const slots = new Map([["char_a", { handoffTargets: ["char_c"] }]])
+    const result = plan({ replies: [{ characterId: "char_a", text: "@Ben and @Cara" }], slots })
+    expect(result.targets).toEqual([CARA])
+  })
+
+  it("lets a member with an empty target list address nobody", () => {
+    const slots = new Map([["char_a", { handoffTargets: [] }]])
+    const result = plan({ replies: [{ characterId: "char_a", text: "@Ben" }], slots })
+    expect(result).toEqual({ targets: [], stop: "no-handoff" })
+  })
+
+  it("never hands the floor to a muted member", () => {
+    const result = plan({
+      replies: [{ characterId: "char_a", text: "@Ben and @Cara" }],
+      mutedMemberIds: ["char_b"],
+    })
+    expect(result.targets).toEqual([CARA])
+  })
+
+  it("lets a talkative member chime in on a roll, never the one who just spoke", () => {
+    const slots = new Map([
+      ["char_a", { talkativeness: 1 }],
+      ["char_c", { talkativeness: 0.5 }],
+    ])
+    const rolls = [0.2]
+    const result = plan({
+      replies: [{ characterId: "char_a", text: "done here" }],
+      slots,
+      random: () => rolls.shift() ?? 0.99,
+    })
+    expect(result.targets).toEqual([CARA])
+    expect(result.stop).toBeNull()
+
+    const quiet = plan({
+      replies: [{ characterId: "char_a", text: "done here" }],
+      slots,
+      random: () => 0.9,
+    })
+    expect(quiet).toEqual({ targets: [], stop: "no-handoff" })
+  })
+
+  it("keeps a muted or exhausted member silent whatever its talkativeness", () => {
+    const slots = new Map([
+      ["char_b", { talkativeness: 1 }],
+      ["char_c", { talkativeness: 1 }],
+    ])
+    const result = plan({
+      replies: [{ characterId: "char_a", text: "done" }],
+      slots,
+      mutedMemberIds: ["char_b"],
+      spokenIds: Array.from({ length: MAX_TURNS_PER_MEMBER_PER_ROUND }, () => "char_c"),
+      random: () => 0,
+    })
+    expect(result).toEqual({ targets: [], stop: "no-handoff" })
+  })
+
+  it("does not report a spent budget as a cut-off when only chime-ins were left", () => {
+    const slots = new Map([["char_b", { talkativeness: 1 }]])
+    const result = plan({
+      round: 2,
+      maxAutoRounds: 2,
+      replies: [{ characterId: "char_a", text: "done" }],
+      slots,
+      random: () => 0,
+    })
+    expect(result).toEqual({ targets: [], stop: "no-handoff" })
+    const handoff = plan({
+      round: 2,
+      maxAutoRounds: 2,
+      replies: [{ characterId: "char_a", text: "@Cara go" }],
+      slots,
+      random: () => 0,
+    })
+    expect(handoff).toEqual({ targets: [], stop: "budget" })
+  })
+
+  it("puts handoffs before chime-ins when the cap truncates", () => {
+    const slots = new Map([["char_b", { talkativeness: 1 }]])
+    const result = plan({
+      spokenCount: 3,
+      responseCap: 4,
+      replies: [{ characterId: "char_a", text: "@Cara go" }],
+      slots,
+      random: () => 0,
     })
     expect(result.targets).toEqual([CARA])
   })
