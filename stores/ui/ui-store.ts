@@ -116,6 +116,13 @@ interface UIState {
   memberStatus: Record<string, MemberStatus>
   setMemberStatus: (teamSessionId: string, characterId: string, status: MemberStatus) => void
   clearMemberStatusFor: (teamSessionId: string) => void
+  /**
+   * What each busy member is doing, keyed like `memberStatus` (ADR-0177
+   * batch 2): the display title of the tool it is running, `Read · foo.ts`.
+   * Transient, cleared with the status. `null` removes the entry.
+   */
+  memberActivity: Record<string, string>
+  setMemberActivity: (teamSessionId: string, characterId: string, activity: string | null) => void
 
   /**
    * VSCode-style sidebar collapse. Drives the ChannelList visibility and the
@@ -380,7 +387,21 @@ export const useUIStore = create<UIState>()(
           for (const [k, v] of Object.entries(s.memberStatus)) {
             if (!k.startsWith(prefix)) next[k] = v
           }
-          return { memberStatus: next }
+          const activity: Record<string, string> = {}
+          for (const [k, v] of Object.entries(s.memberActivity)) {
+            if (!k.startsWith(prefix)) activity[k] = v
+          }
+          return { memberStatus: next, memberActivity: activity }
+        }),
+      memberActivity: {},
+      setMemberActivity: (teamSessionId, characterId, activity) =>
+        set((s) => {
+          const key = memberKey(teamSessionId, characterId)
+          if ((s.memberActivity[key] ?? null) === activity) return s
+          const next = { ...s.memberActivity }
+          if (activity === null) delete next[key]
+          else next[key] = activity
+          return { memberActivity: next }
         }),
 
       sidebarCollapsed: false,
@@ -603,6 +624,16 @@ export const useUIStore = create<UIState>()(
     }
   )
 )
+
+/** Selector helper: what a team member is doing right now, or `null`. */
+export function useMemberActivity(
+  teamSessionId: string | null,
+  characterId: string
+): string | null {
+  return useUIStore((s) =>
+    teamSessionId ? (s.memberActivity[memberKey(teamSessionId, characterId)] ?? null) : null
+  )
+}
 
 /** Selector helper: read the live status of a team member. */
 export function useMemberStatus(teamSessionId: string | null, characterId: string): MemberStatus {

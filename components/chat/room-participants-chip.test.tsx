@@ -33,6 +33,7 @@ jest.mock("@/stores/chat", () => ({
 
 import type { Character, ChatSession } from "@cognia/agent-config-types"
 
+import { useUIStore } from "@/stores/ui"
 import { RoomParticipantsChip } from "./room-participants-chip"
 
 function character(id: string, name: string): Character {
@@ -80,6 +81,19 @@ describe("RoomParticipantsChip", () => {
     mockMembers = [character("char_a", "Ana"), character("char_b", "Ben")]
     render(<RoomParticipantsChip session={session({ kind: "team", teamId: "team_1" })} />)
     expect(screen.getByTestId("room-participants-chip").textContent).toContain("2")
+  })
+
+  it("says what a busy member is doing, under its name (ADR-0177 batch 2)", async () => {
+    mockMembers = [character("char_a", "Ana"), character("char_b", "Ben")]
+    useUIStore.getState().setMemberActivity("sess_1", "char_a", "Bash · pnpm test")
+    const user = userEvent.setup({ delay: null })
+    render(<RoomParticipantsChip session={session({ kind: "team", teamId: "team_1" })} />)
+    await user.click(screen.getByTestId("room-participants-chip"))
+    expect(await screen.findByTestId("room-participant-activity-char_a")).toHaveTextContent(
+      "Bash · pnpm test"
+    )
+    expect(screen.queryByTestId("room-participant-activity-char_b")).toBeNull()
+    useUIStore.getState().clearMemberStatusFor("sess_1")
   })
 
   it("names everyone in the room, with their roles", async () => {

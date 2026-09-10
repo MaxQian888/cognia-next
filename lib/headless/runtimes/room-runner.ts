@@ -17,6 +17,8 @@
  *   what a companion's members panel renders while the round runs on the
  *   host. The whole set is diffed, and a member dropped from the map (turn
  *   over) is published as `idle`, so a client never sticks on `thinking`.
+ *   The activity string (`Read · foo.ts`, ADR-0177 batch 2) rides the same
+ *   frame, so a change of tool with no change of status is published too.
  */
 
 import { getHostRoomRunner } from "@/lib/chat/room/runner-host"
@@ -31,16 +33,25 @@ export interface RoomMemberStatusFrame {
   sessionId: string
   characterId: string
   status: MemberStatus
+  /** The tool the member is on, or `null` when it is between tools or done. */
+  activity: string | null
+}
+
+/** The two per-member maps the UI store keeps, read together. */
+export interface MemberStatusSnapshot {
+  status: Readonly<Record<string, MemberStatus>>
+  activity: Readonly<Record<string, string>>
 }
 
 /**
  * The frames that turn `prev` into `next`. Keys are `<roomId>::<characterId>`
  * (`memberKey` in the UI store). The split is on the last separator so a
- * room id is never cut in half.
+ * room id is never cut in half. A member present in neither map of `next`
+ * is published as idle with no activity, once.
  */
 export function diffMemberStatus(
-  prev: Readonly<Record<string, MemberStatus>>,
-  next: Readonly<Record<string, MemberStatus>>
+  prev: MemberStatusSnapshot,
+  next: MemberStatusSnapshot
 ): RoomMemberStatusFrame[] {
   const frames: RoomMemberStatusFrame[] = []
   const split = (key: string): [string, string] | null => {
@@ -48,15 +59,18 @@ export function diffMemberStatus(
     if (at <= 0 || at + 2 >= key.length) return null
     return [key.slice(0, at), key.slice(at + 2)]
   }
-  for (const [key, status] of Object.entries(next)) {
-    if (prev[key] === status) continue
+  const keys = new Set([
+    ...Object.keys(prev.status),
+    ...Object.keys(prev.activity),
+    ...Object.keys(next.status),
+    ...Object.keys(next.activity),
+  ])
+  for (const key of keys) {
+    const before = { status: prev.status[key] ?? "idle", activity: prev.activity[key] ?? null }
+    const after = { status: next.status[key] ?? "idle", activity: next.activity[key] ?? null }
+    if (before.status === after.status && before.activity === after.activity) continue
     const parts = split(key)
-    if (parts) frames.push({ sessionId: parts[0], characterId: parts[1], status })
-  }
-  for (const key of Object.keys(prev)) {
-    if (key in next) continue
-    const parts = split(key)
-    if (parts) frames.push({ sessionId: parts[0], characterId: parts[1], status: "idle" })
+    if (parts) frames.push({ sessionId: parts[0], characterId: parts[1], ...after })
   }
   return frames
 }
@@ -68,11 +82,18 @@ registerHeadlessRuntime({
     const runner = getHostRoomRunner()
     const unlisten = await onClaudeMessage((evt) => runner.handleEvent(evt))
 
-    let previous = useUIStore.getState().memberStatus
+    const snapshot = (state: {
+      memberStatus: Record<string, MemberStatus>
+      memberActivity: Record<string, string>
+    }): MemberStatusSnapshot => ({ status: state.memberStatus, activity: state.memberActivity })
+    let previous = snapshot(useUIStore.getState())
     const unsubscribe = useUIStore.subscribe((state) => {
-      if (state.memberStatus === previous) return
-      const frames = diffMemberStatus(previous, state.memberStatus)
-      previous = state.memberStatus
+      if (state.memberStatus === previous.status && state.memberActivity === previous.activity) {
+        return
+      }
+      const current = snapshot(state)
+      const frames = diffMemberStatus(previous, current)
+      previous = current
       for (const frame of frames) {
         void publishHostEvent(ROOM_MEMBER_STATUS_TOPIC, frame).catch((error) =>
           ctx.log(

@@ -28,6 +28,8 @@ import {
 import { makeSpeaker, type SpeakerContext, type SpeakerSource } from "@/lib/chat/speaker"
 import type { RoomKind, RoomRosterCompleteness } from "./types"
 
+export type { RoomRosterCompleteness } from "./types"
+
 export type { RoomParticipant } from "@/lib/chat/room-roster"
 
 export interface RoomRosterProjection {

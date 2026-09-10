@@ -22,8 +22,9 @@ jest.mock("@/lib/companion/host-event-publisher", () => ({
   publishHostEvent: (...args: unknown[]) => publishHostEvent(...(args as [])),
 }))
 
-type Listener = (state: { memberStatus: Record<string, string> }) => void
-let uiState = { memberStatus: {} as Record<string, string> }
+type UiState = { memberStatus: Record<string, string>; memberActivity: Record<string, string> }
+type Listener = (state: UiState) => void
+let uiState: UiState = { memberStatus: {}, memberActivity: {} }
 const listeners = new Set<Listener>()
 jest.mock("@/stores/ui", () => ({
   useUIStore: {
@@ -35,7 +36,11 @@ jest.mock("@/stores/ui", () => ({
   },
 }))
 const setMemberStatus = (memberStatus: Record<string, string>) => {
-  uiState = { memberStatus }
+  uiState = { ...uiState, memberStatus }
+  for (const listener of listeners) listener(uiState)
+}
+const setMemberActivity = (memberActivity: Record<string, string>) => {
+  uiState = { ...uiState, memberActivity }
   for (const listener of listeners) listener(uiState)
 }
 
@@ -62,7 +67,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   sidecarHandler = null
   listeners.clear()
-  uiState = { memberStatus: {} }
+  uiState = { memberStatus: {}, memberActivity: {} }
 })
 
 it("registers on the brain and feeds every sidecar frame to the host runner", async () => {
@@ -78,13 +83,21 @@ it("registers on the brain and feeds every sidecar frame to the host runner", as
 it("publishes member status changes as host events, including the clear at the turn's end", async () => {
   const result = await bootstrapHeadlessRuntimes(context())
   setMemberStatus({ "room-1::a": "thinking" })
+  setMemberActivity({ "room-1::a": "Read · foo.ts" })
   setMemberStatus({ "room-1::a": "thinking", "room-1::b": "errored" })
+  setMemberActivity({})
   setMemberStatus({})
+  const frame = (characterId: string, status: string, activity: string | null) => [
+    ROOM_MEMBER_STATUS_TOPIC,
+    { sessionId: "room-1", characterId, status, activity },
+  ]
   expect(publishHostEvent.mock.calls).toEqual([
-    [ROOM_MEMBER_STATUS_TOPIC, { sessionId: "room-1", characterId: "a", status: "thinking" }],
-    [ROOM_MEMBER_STATUS_TOPIC, { sessionId: "room-1", characterId: "b", status: "errored" }],
-    [ROOM_MEMBER_STATUS_TOPIC, { sessionId: "room-1", characterId: "a", status: "idle" }],
-    [ROOM_MEMBER_STATUS_TOPIC, { sessionId: "room-1", characterId: "b", status: "idle" }],
+    frame("a", "thinking", null),
+    frame("a", "thinking", "Read · foo.ts"),
+    frame("b", "errored", null),
+    frame("a", "thinking", null),
+    frame("a", "idle", null),
+    frame("b", "idle", null),
   ])
   await result.stop()
 })
@@ -115,18 +128,35 @@ it("stops listening to both the sidecar and the store on teardown", async () => 
 })
 
 describe("diffMemberStatus", () => {
+  const snap = (status: Record<string, string>, activity: Record<string, string> = {}) =>
+    ({ status, activity }) as Parameters<typeof diffMemberStatus>[0]
+
   it("splits on the last separator so a room id with one inside survives", () => {
-    expect(diffMemberStatus({}, { "a::b::c": "thinking" })).toEqual([
-      { sessionId: "a::b", characterId: "c", status: "thinking" },
+    expect(diffMemberStatus(snap({}), snap({ "a::b::c": "thinking" }))).toEqual([
+      { sessionId: "a::b", characterId: "c", status: "thinking", activity: null },
     ])
   })
 
   it("drops keys it cannot split and reports unchanged members not at all", () => {
     expect(
       diffMemberStatus(
-        { "room::a": "idle", junk: "thinking" },
-        { "room::a": "idle", "::x": "idle" }
+        snap({ "room::a": "idle", junk: "thinking" }),
+        snap({ "room::a": "idle", "::x": "idle" })
       )
     ).toEqual([])
+  })
+
+  it("publishes a change of tool on its own, and clears it with the status", () => {
+    expect(
+      diffMemberStatus(
+        snap({ "room::a": "thinking" }, { "room::a": "Read · a.ts" }),
+        snap({ "room::a": "thinking" }, { "room::a": "Bash · pnpm test" })
+      )
+    ).toEqual([
+      { sessionId: "room", characterId: "a", status: "thinking", activity: "Bash · pnpm test" },
+    ])
+    expect(
+      diffMemberStatus(snap({ "room::a": "thinking" }, { "room::a": "Read · a.ts" }), snap({}))
+    ).toEqual([{ sessionId: "room", characterId: "a", status: "idle", activity: null }])
   })
 })

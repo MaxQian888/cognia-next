@@ -51,6 +51,7 @@ import type { SpeakerSource } from "@/lib/chat/speaker"
 import { deterministicColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat"
+import { useUIStore } from "@/stores/ui"
 import type { Character, ChatSession } from "@cognia/agent-config-types"
 import type { SessionMembership } from "@cognia/agent-config-types/collaboration"
 
@@ -62,6 +63,8 @@ interface Row {
   subject: AvatarSubject
   label: string
   role?: string
+  /** What the member is doing right now, for a team room (ADR-0177 batch 2). */
+  activity?: string
 }
 
 export function RoomParticipantsChip({
@@ -78,6 +81,7 @@ export function RoomParticipantsChip({
   const roles = useTeamMemberRoles(teamId)
   const memberships = useSharedRoomMemberships(kind === "shared" ? session.id : null)
   const messages = useChatStore((state) => state.sessions[session.id]?.messages)
+  const memberActivity = useUIStore((state) => state.memberActivity)
 
   const { rows, completeness } = useMemo(
     // `UIMessage.metadata` is `unknown` by construction, while `SpeakerSource`
@@ -91,8 +95,9 @@ export function RoomParticipantsChip({
         roles,
         memberships,
         messages: (messages ?? []) as unknown as readonly SpeakerSource[],
+        activityFor: (id) => memberActivity[`${session.id}::${id}`],
       }),
-    [kind, members, roles, memberships, messages]
+    [kind, members, roles, memberships, messages, memberActivity, session.id]
   )
 
   if (rows.length < 2) return null
@@ -131,7 +136,18 @@ export function RoomParticipantsChip({
         {rows.slice(0, MAX_ROSTER_PARTICIPANTS).map((row) => (
           <DropdownMenuItem key={row.id} className="gap-2" data-testid="room-participant-row">
             <AvatarBadge subject={row.subject} size={18} />
-            <span className="min-w-0 flex-1 truncate">{row.label}</span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate">{row.label}</span>
+              {row.activity ? (
+                <span
+                  className="truncate text-[11px] text-amber-600 dark:text-amber-400"
+                  aria-label={t("working", { activity: row.activity })}
+                  data-testid={`room-participant-activity-${row.id}`}
+                >
+                  {row.activity}
+                </span>
+              ) : null}
+            </span>
             {row.role ? (
               <span className="shrink-0 text-[11px] text-muted-foreground">{row.role}</span>
             ) : null}
@@ -161,15 +177,17 @@ export function RoomParticipantsChip({
  * the mirror at all.
  */
 function useSharedRoomMemberships(sessionId: string | null): readonly SessionMembership[] {
-  return useClientLiveQuery<readonly SessionMembership[]>(
-    () =>
-      sessionId
-        ? import("@/lib/db/schema").then(({ getDb }) =>
-            getDb().collabChatMemberships.where("sessionId").equals(sessionId).toArray()
-          )
-        : Promise.resolve([]),
-    [sessionId],
-    []
+  return (
+    useClientLiveQuery<readonly SessionMembership[]>(
+      () =>
+        sessionId
+          ? import("@/lib/db/schema").then(({ getDb }) =>
+              getDb().collabChatMemberships.where("sessionId").equals(sessionId).toArray()
+            )
+          : Promise.resolve([]),
+      [sessionId],
+      []
+    ) ?? []
   )
 }
 
@@ -187,8 +205,9 @@ function buildRows(input: {
   roles: ReadonlyMap<string, string>
   memberships: readonly SessionMembership[]
   messages: readonly SpeakerSource[]
+  activityFor?: (characterId: string) => string | undefined
 }): { rows: Row[]; completeness: RoomRosterCompleteness } {
-  const { kind, members, roles, memberships, messages } = input
+  const { kind, members, roles, memberships, messages, activityFor } = input
   const { participants, completeness } = projectRoomParticipants({
     kind,
     characters: members,
@@ -212,6 +231,9 @@ function buildRows(input: {
         avatarColor: deterministicColor(participant.speaker.id),
       },
       ...(participant.role ? { role: participant.role } : {}),
+      ...(activityFor?.(participant.speaker.id)
+        ? { activity: activityFor(participant.speaker.id) }
+        : {}),
     }
   })
   return { rows, completeness }

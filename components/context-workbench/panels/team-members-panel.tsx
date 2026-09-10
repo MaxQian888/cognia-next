@@ -108,6 +108,7 @@ export function TeamMembersPanel({ teamSessionId, teamId, onNavigated }: Props) 
   const t = useTranslations("desktop.memberList")
   const tOrchestration = useTranslations("settings.teams.orchestration")
   const memberStatus = useUIStore((s) => s.memberStatus)
+  const memberActivity = useUIStore((s) => s.memberActivity)
 
   const team = useClientLiveQuery<Team | undefined>(
     () => (teamId ? getTeam(teamId) : Promise.resolve(undefined)),
@@ -194,6 +195,7 @@ export function TeamMembersPanel({ teamSessionId, teamId, onNavigated }: Props) 
                 character={character}
                 supervisor={team?.supervisorCharacterId === character.id}
                 status={memberStatus[`${teamSessionId}::${character.id}`] ?? "idle"}
+                activity={memberActivity[`${teamSessionId}::${character.id}`] ?? null}
                 muted={roomSettings.mutedMemberIds.includes(character.id)}
                 onToggleMute={() =>
                   persistRoomSettings(teamSessionId, session, {
@@ -492,6 +494,7 @@ function MemberRow({
   character,
   supervisor,
   status,
+  activity,
   muted,
   onToggleMute,
   onNavigated,
@@ -501,6 +504,8 @@ function MemberRow({
   character: Character
   supervisor: boolean
   status: MemberStatus
+  /** The tool the member is on right now, or null (ADR-0177 batch 2). */
+  activity: string | null
   muted: boolean
   onToggleMute: () => void
   onNavigated?: () => void
@@ -588,10 +593,22 @@ function MemberRow({
                 ) : null}
               </span>
               {/* Role in *this* team, then the model it will actually answer
-                  with — the two facts that tell members of one team apart. */}
-              <span className="truncate text-[11px] text-muted-foreground">
-                {[slot.role, model ?? t("defaultModel")].filter(Boolean).join(" · ")}
-              </span>
+                  with — the two facts that tell members of one team apart.
+                  While the member runs a tool, the tool takes this line: what
+                  it is doing right now matters more than what it always is. */}
+              {activity ? (
+                <span
+                  className="truncate text-[11px] text-amber-600 dark:text-amber-400"
+                  aria-label={t("activityLabel", { activity })}
+                  data-testid={`team-member-activity-${character.id}`}
+                >
+                  {activity}
+                </span>
+              ) : (
+                <span className="truncate text-[11px] text-muted-foreground">
+                  {[slot.role, model ?? t("defaultModel")].filter(Boolean).join(" · ")}
+                </span>
+              )}
             </span>
           </Button>
           <Button

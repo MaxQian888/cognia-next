@@ -6345,6 +6345,7 @@
         "entityUnavailable": "“{title}” can no longer be referenced here.",
         "fileTitle": "Reference a file or folder",
         "filesSection": "Files",
+        "membersSection": "Members",
         "memoryTitle": "Append to memory",
         "multiCommandHint": "Commands can be combined by line. After choosing one, start a new line and type / again.",
         "multiSkillHint": "You can attach multiple skills. Type @skill: again or use the Skills button to add more.",
@@ -8184,7 +8185,11 @@
     "shared": "Shared",
     "sharedDescription": "The server is authoritative for membership, messages, runs, approvals, and attachments.",
     "sharedTitle": "Shared conversation",
+    "switchBuildDisabled": "This build was not compiled with shared conversations, so the switch cannot be turned on here.",
+    "switchHelp": "Let this machine open conversations that several people share, with the server deciding roles, event order and approvals. Turning it off hides the sharing controls and stops this app pulling shared sessions. Nothing is deleted.",
+    "switchLabel": "Shared conversations",
     "takeoverExecution": "Take over execution",
+    "teamRoomConversion": "A team conversation cannot be shared yet: its replies are produced locally, and a shared session's come from the server.",
     "toggleApprover": "Toggle high-risk approver for {user}",
     "transferBeforeLeaving": "Promote another member to Owner before leaving. The last owner cannot leave.",
     "updateFailed": "The membership changed elsewhere or could not be updated.",
@@ -8195,7 +8200,8 @@
     "andMore": "{count, plural, other {# more}}",
     "listLabel": "In this room",
     "observedOnly": "Only members who have spoken are listed.",
-    "participants": "{count, plural, other {# in this room}}"
+    "participants": "{count, plural, other {# in this room}}",
+    "working": "Working on {activity}"
   },
   "chatTemplatesSettings": {
     "adopt": "Adopt into my library",
@@ -9530,6 +9536,7 @@
       "trigger": "Jobs"
     },
     "memberList": {
+      "activityLabel": "Working: {activity}",
       "charsCount": "{count} chars",
       "chatTitle": "Chat with {name}",
       "defaultModel": "Session default model",
@@ -10530,6 +10537,10 @@
       "frozenModelBinding": {
         "hint": "This session is pinned to a fixed set of models and the requested one isn't among them.",
         "label": "Model not allowed here"
+      },
+      "handoffChainCapped": {
+        "hint": "The members were still handing the conversation to each other when this team ran out of follow-up rounds. Raise the limit in the team's settings to let them finish.",
+        "label": "The room stopped short"
       },
       "healthCheckFailed": {
         "hint": "The agent started but failed its health check — check its logs, then reconnect.",
@@ -24657,14 +24668,6 @@
     "backToList": "Back",
     "baseURL": "Base URL",
     "baseURLHint": "Use a proxy URL or self-hosted endpoint. Leave empty for default.",
-    "browserStreaming": {
-      "gatewayDescription": "This provider points at a custom endpoint. Streaming works only if that endpoint allows requests from a browser origin.",
-      "gatewayTitle": "Custom endpoint, streaming unverified",
-      "supportedDescription": "Responses arrive token by token, straight from the provider, with no desktop app in between.",
-      "supportedTitle": "Streams directly from this browser",
-      "unsupportedDescription": "This provider's endpoint may refuse browser requests. Replies can arrive all at once instead of streaming, or fail outright.",
-      "unsupportedTitle": "May not stream from a browser"
-    },
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseURLPlaceholderAnthropic": "https://api.anthropic.com/v1",
     "baseURLPlaceholderGemini": "https://generativelanguage.googleapis.com/v1beta",
@@ -24678,6 +24681,14 @@
     "batchShort": "Batch",
     "bootstrapRetries": "Bootstrap Retries",
     "browseModels": "Browse Models",
+    "browserStreaming": {
+      "gatewayDescription": "This provider points at a custom endpoint. Streaming works only if that endpoint allows requests from a browser origin.",
+      "gatewayTitle": "Custom endpoint, streaming unverified",
+      "supportedDescription": "Responses arrive token by token, straight from the provider, with no desktop app in between.",
+      "supportedTitle": "Streams directly from this browser",
+      "unsupportedDescription": "This provider's endpoint may refuse browser requests. Replies can arrive all at once instead of streaming, or fail outright.",
+      "unsupportedTitle": "May not stream from a browser"
+    },
     "builtin": "Built-in",
     "cachedInputPrice": "Cached input price",
     "cachedInputShort": "Cache",
@@ -37848,6 +37859,8 @@
         "dispatchMaxRetriesHint": "Retries for transient dispatch failures (rate-limit, timeout, network, sidecar restart). 0 disables. Default 1.",
         "enabled": "Enable nested dispatch",
         "enabledHint": "Off by default — the agent keeps the standard single-level Task tool.",
+        "maxConcurrent": "Max concurrent sub-agents",
+        "maxConcurrentHint": "How many sub-agents one dispatch may run at the same time. 0 = unlimited. A finite token budget always runs them one at a time.",
         "maxDepth": "Max nesting depth",
         "maxDepthHint": "How many levels below the chat a sub-agent may nest (1–5).",
         "timeout": "Subtree timeout (seconds)",
@@ -37902,8 +37915,6 @@
           "writing": "Writing"
         },
         "configTitle": "Advanced configuration",
-        "maxConcurrent": "Max concurrent sub-agents",
-        "maxConcurrentHint": "How many sub-agents one dispatch may run at the same time. 0 = unlimited. A finite token budget always runs them one at a time.",
         "copyName": "{name} (copy)",
         "description": "Built-in and user-created sub-agent templates. Built-ins are read-only — duplicate to fork an editable copy.",
         "disabledBadge": "Disabled",
@@ -38100,6 +38111,8 @@
       "editor": {
         "addMembersFirst": "Add members first",
         "allowedToolsOverride": "Allowed tools override (comma-separated; replaces character list)",
+        "autoRounds": "Auto rounds",
+        "autoRoundsHelp": "Extra rounds the room may run on its own when a member hands the floor to a teammate by name. 0 keeps one reply round per message.",
         "avatarEmoji": "Avatar emoji",
         "avatarEmojiPlaceholder": "🧩",
         "description": "Description",
@@ -38152,6 +38165,7 @@
       "updatedToast": "Updated {name}.",
       "validation": {
         "atLeastOneMember": "A team needs at least one member.",
+        "autoRoundsInvalid": "Auto rounds must be a whole number between 0 and 5.",
         "nameRequired": "Name is required.",
         "responseCapInvalid": "The response cap must be an integer from 1 through 12.",
         "supervisorMustBeMember": "The supervisor must be one of the team's members.",

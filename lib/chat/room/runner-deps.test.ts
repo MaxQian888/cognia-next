@@ -73,6 +73,7 @@ export function makeFakeSinks(): RoomRunnerSinks {
     },
     members: {
       setStatus: () => undefined,
+      setActivity: () => undefined,
       clearFor: () => undefined,
       isStopRequested: () => false,
       clearStopRequest: () => undefined,

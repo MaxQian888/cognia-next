@@ -46,6 +46,30 @@ jest.mock("@/lib/claude/adapter", () => {
       if (evt.type === "result") {
         return { messages: messages.map((m) => m), turnComplete: true, result: evt }
       }
+      // A tool call starting on the member's newest reply, the part shape
+      // the real adapter paints on `content_block_start` (state, no output).
+      const tool = evt as { type: string; name?: string; input?: Record<string, unknown> }
+      if (tool.type === "tool_start" && tool.name) {
+        let idx = -1
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i]!.role === "assistant") {
+            idx = i
+            break
+          }
+        }
+        if (idx < 0) return { messages, turnComplete: false }
+        const target = messages[idx]!
+        const part = {
+          type: `tool-${tool.name}`,
+          toolCallId: `tu-${tool.name}`,
+          state: "input-available",
+          input: tool.input ?? {},
+        }
+        const out = messages.map((m, i) =>
+          i === idx ? { ...target, parts: [...target.parts, part] } : m
+        )
+        return { messages: out, turnComplete: false }
+      }
       return { messages, turnComplete: false }
     },
     makeUserMessage: (content: SendContent, _id?: string, manifest?: unknown) => ({
@@ -78,7 +102,7 @@ jest.mock("@/lib/claude/team-primary-router", () => ({
   selectPrimaryResponder: async () => undefined,
 }))
 
-import { RoomRunner, asPlainText, withMetadata } from "./runner"
+import { ACTIVITY_STALE_MS, RoomRunner, asPlainText, withMetadata } from "./runner"
 import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 
@@ -96,6 +120,8 @@ const resultFrame = (sub: string): ClaudeEvent =>
     sessionId: sub,
     event: { type: "result", subtype: "success", duration_ms: 5 },
   }) as never
+const toolStartFrame = (sub: string, name: string, input: Record<string, unknown>): ClaudeEvent =>
+  ({ type: "event", sessionId: sub, event: { type: "tool_start", name, input } }) as never
 const endedFrame = (sub: string, error: string | null = null): ClaudeEvent =>
   ({ type: "session_ended", sessionId: sub, error }) as never
 const permissionFrame = (sub: string, toolName = "Bash"): ClaudeEvent =>
@@ -136,6 +162,8 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
   const status = new Map<string, ChatStatus>()
   const statusLog: string[] = []
   const memberStatus = new Map<string, MemberStatus>()
+  const memberActivity = new Map<string, string>()
+  const activityLog: string[] = []
   const stopRequests = new Set<string>()
   const diagnostics: CogniaDiagnostic[] = []
   const approvals: unknown[] = []
@@ -277,9 +305,16 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
     },
     members: {
       setStatus: (id, characterId, next) => memberStatus.set(`${id}::${characterId}`, next),
+      setActivity: (id, characterId, activity) => {
+        activityLog.push(`${characterId}:${activity ?? "-"}`)
+        if (activity === null) memberActivity.delete(`${id}::${characterId}`)
+        else memberActivity.set(`${id}::${characterId}`, activity)
+      },
       clearFor: (id) => {
         for (const key of [...memberStatus.keys()])
           if (key.startsWith(`${id}::`)) memberStatus.delete(key)
+        for (const key of [...memberActivity.keys()])
+          if (key.startsWith(`${id}::`)) memberActivity.delete(key)
       },
       isStopRequested: (id, characterId) => stopRequests.has(`${id}::${characterId}`),
       clearStopRequest: (id, characterId) => stopRequests.delete(`${id}::${characterId}`),
@@ -316,6 +351,8 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
     status,
     statusLog,
     memberStatus,
+    memberActivity,
+    activityLog,
     stopRequests,
     diagnostics,
     approvals,
@@ -382,6 +419,19 @@ describe("a linear turn", () => {
       expect(call.options.systemPrompt).toContain("sys")
       expect(call.options.systemPrompt).toContain("## Room instructions\n\nAnswer in one line.")
     }
+  })
+
+  it("stamps the reply reference on the user turn and on a queued steer", async () => {
+    const w = createWorld()
+    const replyTo = { messageId: "m-earlier", preview: "the plan" }
+    await w.runner.send("answering", { sessionId: ROOM, replyTo })
+    expect(w.db.get(ROOM)?.[0].metadata).toEqual({ senderKind: "user", replyTo })
+    // While the room streams, the same option lands on the steer entry and the
+    // optimistic row, so the drained turn still answers the right message.
+    w.status.set(ROOM, "streaming")
+    await w.runner.send("and this", { sessionId: ROOM, replyTo })
+    expect(w.steerQueues.get(ROOM)?.[0]).toMatchObject({ text: "and this", replyTo })
+    expect(w.steerAppended.at(-1)?.metadata).toMatchObject({ replyTo })
   })
 
   it("stamps the author a companion turn arrived with", async () => {
@@ -745,5 +795,45 @@ describe("helpers", () => {
         { type: "text", text: "b" },
       ])
     ).toBe("a b")
+  })
+})
+
+describe("member activity (ADR-0177 batch 2)", () => {
+  const SUB_A = `${ROOM}::char::a::t9`
+  const SUB_B = `${ROOM}::char::b::t9`
+
+  it("names the tool a member is on from its own slice and clears it when the member ends", async () => {
+    const w = createWorld()
+    w.seed([{ id: "u-0", role: "user", parts: [{ type: "text", text: "go" }] } as Msg])
+    w.emit(assistantFrame(SUB_A, "a1", ""))
+    w.emit(toolStartFrame(SUB_A, "Read", { file_path: "/repo/runner.ts" }))
+    await flush()
+    expect(w.memberActivity.get(`${ROOM}::a`)).toBe("Read · runner.ts")
+    // Another member's frames never touch a's label.
+    w.emit(assistantFrame(SUB_B, "b1", "hello"))
+    await flush()
+    expect(w.memberActivity.get(`${ROOM}::a`)).toBe("Read · runner.ts")
+    expect(w.memberActivity.has(`${ROOM}::b`)).toBe(false)
+    w.emit(endedFrame(SUB_A))
+    await flush()
+    expect(w.memberActivity.has(`${ROOM}::a`)).toBe(false)
+    expect(w.activityLog).toEqual(["a:Read · runner.ts", "a:-"])
+  })
+
+  it("drops a label whose tool never reported back after the stale window", async () => {
+    jest.useFakeTimers()
+    try {
+      const w = createWorld()
+      w.seed([{ id: "u-0", role: "user", parts: [{ type: "text", text: "go" }] } as Msg])
+      w.emit(assistantFrame(SUB_A, "a1", ""))
+      w.emit(toolStartFrame(SUB_A, "Bash", { command: "sleep 999" }))
+      await jest.advanceTimersByTimeAsync(10)
+      expect(w.memberActivity.get(`${ROOM}::a`)).toBe("Bash · sleep 999")
+      await jest.advanceTimersByTimeAsync(ACTIVITY_STALE_MS + 1)
+      expect(w.memberActivity.has(`${ROOM}::a`)).toBe(false)
+      w.runner.dispose()
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

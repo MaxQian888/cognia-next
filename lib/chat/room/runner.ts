@@ -85,6 +85,7 @@ import type {
   SendOptions,
   Team,
   TeamMember,
+  MessageReplyTo,
 } from "@cognia/agent-config-types"
 import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
 import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
@@ -100,9 +101,12 @@ import { RoutingAttemptController } from "@cognia/provider-routing"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { resolveRoomSettings, buildRoomInstructionsSection } from "./settings"
 import { RoomStreamRegistry } from "./runner-streaming"
+import { deriveMemberActivity } from "./member-activity"
 import type { RoomRunnerDeps, RoomRunnerSinks } from "./runner-deps"
 
 const MAX_SUPERVISOR_ROUNDS = 2
+/** A running tool with no result after this long stops being reported as the member's activity. */
+export const ACTIVITY_STALE_MS = 90_000
 
 /** Options for a room send. `sessionId` is required here: the hook resolves
  * the active pane, the RPC arm carries it explicitly. */
@@ -120,6 +124,12 @@ export interface RoomSendOptions {
   branchTag?: { groupId: string; index: number }
   /** Search sources resolved by the composer before this team turn. */
   webSearchContext?: SendOptions["webSearchContext"]
+  /**
+   * The message this turn answers (ADR-0177 batch 2). Stamped as
+   * `metadata.replyTo` on the user row and read by the transcript, so every
+   * member sees which message the user was answering.
+   */
+  replyTo?: MessageReplyTo
   /**
    * Who wrote the user turn, when it did not come from this host's own
    * composer. Stamped as `collaboration.author` so `resolveMessageSpeaker`
@@ -203,6 +213,11 @@ export class RoomRunner {
   private readonly pendingBranchTags = new Map<string, PendingBranchTag>()
   private readonly pendingWebSearch = new Map<string, SendOptions["webSearchContext"]>()
   private readonly lastUserContent = new Map<string, SendContent>()
+  /** Per member sub-session: the activity last published and its stale timer. */
+  private readonly activity = new Map<
+    string,
+    { label: string | null; timer: ReturnType<typeof setTimeout> | null }
+  >()
   private disposed = false
 
   constructor(
@@ -230,6 +245,8 @@ export class RoomRunner {
   /** Flush pending streaming writes and forget every room. */
   dispose(): void {
     this.disposed = true
+    for (const entry of this.activity.values()) if (entry.timer) clearTimeout(entry.timer)
+    this.activity.clear()
     this.coalescing.flushAllPersist()
     this.coalescing.clear()
     this.streams.clear()
@@ -284,7 +301,7 @@ export class RoomRunner {
         const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts.attachmentManifest),
-          { senderKind: "user", steer: steerMeta, ...authorMetadata(opts) }
+          { senderKind: "user", steer: steerMeta, ...replyMetadata(opts), ...authorMetadata(opts) }
         )
         sinks.steer.appendMessage(sessionId, optimistic)
         sinks.steer.enqueue(sessionId, {
@@ -292,6 +309,7 @@ export class RoomRunner {
           text,
           blocks: blocks.length > 0 ? blocks : undefined,
           webSearchContext: opts.webSearchContext,
+          ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
         })
         return
       }
@@ -364,6 +382,7 @@ export class RoomRunner {
     if (!skipsUserTurn(opts)) {
       const userMsg = withMetadata(makeUserMessage(content, undefined, opts.attachmentManifest), {
         senderKind: "user",
+        ...replyMetadata(opts),
         ...authorMetadata(opts),
       })
       if (opts.branchTag) {
@@ -655,9 +674,41 @@ export class RoomRunner {
 
   // ---- Internals ---------------------------------------------------------
 
+  /**
+   * Publish a member's activity string when it changed, and arm a stale
+   * timer so a tool whose result never arrives does not pin the label on
+   * the member forever. `null` clears both.
+   */
+  private publishActivity(
+    roomId: string,
+    characterId: string,
+    sub: string,
+    label: string | null
+  ): void {
+    const entry = this.activity.get(sub)
+    if ((entry?.label ?? null) === label) return
+    if (entry?.timer) clearTimeout(entry.timer)
+    if (label === null) {
+      this.activity.delete(sub)
+      if (entry) this.sinks.members.setActivity(roomId, characterId, null)
+      return
+    }
+    const timer = setTimeout(() => {
+      this.activity.delete(sub)
+      this.sinks.members.setActivity(roomId, characterId, null)
+    }, ACTIVITY_STALE_MS)
+    this.activity.set(sub, { label, timer })
+    this.sinks.members.setActivity(roomId, characterId, label)
+  }
+
   private drainSteerInto(sessionId: string): void {
-    this.sinks.steer.drain(sessionId, (payload, webSearchContext) => {
-      void this.send(payload, { sessionId, steerDrain: true, webSearchContext })
+    this.sinks.steer.drain(sessionId, (payload, webSearchContext, replyTo) => {
+      void this.send(payload, {
+        sessionId,
+        steerDrain: true,
+        webSearchContext,
+        ...(replyTo ? { replyTo } : {}),
+      })
     })
   }
 
@@ -1094,6 +1145,7 @@ export class RoomRunner {
 
     switch (evt.type) {
       case "session_ended": {
+        this.publishActivity(teamSessionId, characterId, evt.sessionId, null)
         const r = this.resolvers.get(evt.sessionId)
         if (r) {
           if (evt.error) r.reject(new Error(evt.error))
@@ -1245,6 +1297,15 @@ export class RoomRunner {
           })
         }
 
+        // The status string (ADR-0177 batch 2): the tool this member is on,
+        // read off its own slice so another member's tools never show here.
+        this.publishActivity(
+          teamSessionId,
+          characterId,
+          sub,
+          deriveMemberActivity(tagged.slice(baseLength))
+        )
+
         const coalesce = this.coalescing.get(sub)
         if (sdkResult) {
           // Member turn boundary: drop pending coalesced work and write the
@@ -1381,6 +1442,11 @@ export function withMetadata(msg: UIMessage, extra: Record<string, unknown>): UI
     ...msg,
     ...({ metadata: { ...prior, ...extra } } as { metadata: Record<string, unknown> }),
   }
+}
+
+/** The `replyTo` stamp for a user turn that answers an earlier message. */
+function replyMetadata(opts: RoomSendOptions): Record<string, unknown> {
+  return opts.replyTo ? { replyTo: opts.replyTo } : {}
 }
 
 /** The `collaboration.author` stamp for a user turn written by another principal. */

@@ -364,6 +364,7 @@
     "trigger": "任务"
   },
   "memberList": {
+    "activityLabel": "正在：{activity}",
     "charsCount": "{count} 字符",
     "chatTitle": "与 {name} 的对话",
     "defaultModel": "会话默认模型",

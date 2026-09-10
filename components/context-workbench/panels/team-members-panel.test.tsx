@@ -82,6 +82,7 @@ jest.mock("@/lib/db/sessions", () => ({
 }))
 
 let memberStatus: Record<string, string> = {}
+let memberActivity: Record<string, string> = {}
 let scratchpadCollapsed: Record<string, boolean> = {}
 const setScratchpadCollapsed = jest.fn((id: string, value: boolean) => {
   scratchpadCollapsed = { ...scratchpadCollapsed, [id]: value }
@@ -89,7 +90,13 @@ const setScratchpadCollapsed = jest.fn((id: string, value: boolean) => {
 const requestStopMember = jest.fn()
 jest.mock("@/stores/ui", () => ({
   useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
-    selector({ memberStatus, scratchpadCollapsed, setScratchpadCollapsed, requestStopMember }),
+    selector({
+      memberStatus,
+      memberActivity,
+      scratchpadCollapsed,
+      setScratchpadCollapsed,
+      requestStopMember,
+    }),
 }))
 
 import { TeamMembersPanel } from "./team-members-panel"
@@ -106,6 +113,7 @@ beforeEach(() => {
   setScratchpadCollapsed.mockClear()
   updateSession.mockClear()
   memberStatus = {}
+  memberActivity = {}
   scratchpadCollapsed = {}
   session = { scratchpad: "" }
   characters = [
@@ -226,6 +234,17 @@ it("collapses the shared notes per session and hides the editor with them", () =
   rerender(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
   expect(screen.queryByLabelText("desktop.memberList.sharedNotes")).toBeNull()
   expect(screen.getByTestId("team-members-notes-toggle")).toHaveAttribute("aria-expanded", "false")
+})
+
+it("shows the tool a busy member is on in place of its role line (ADR-0177 batch 2)", () => {
+  memberStatus = { "s-1::c-1": "thinking" }
+  memberActivity = { "s-1::c-1": "Read · runner.ts" }
+  render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+  const activity = screen.getByTestId("team-member-activity-c-1")
+  expect(activity).toHaveTextContent("Read · runner.ts")
+  expect(activity).toHaveAttribute("aria-label", expect.stringContaining("activityLabel"))
+  // The other member keeps its role and model line.
+  expect(screen.queryByTestId("team-member-activity-c-2")).toBeNull()
 })
 
 it("names a member's live status rather than leaking the raw enum", () => {

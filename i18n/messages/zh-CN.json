@@ -6345,6 +6345,7 @@
         "entityUnavailable": "「{title}」已无法在这里引用。",
         "fileTitle": "引用文件或文件夹",
         "filesSection": "文件",
+        "membersSection": "成员",
         "memoryTitle": "追加到 memory",
         "multiCommandHint": "命令可分行组合。选中一个后换行，再输入 / 即可继续添加。",
         "multiSkillHint": "可同时添加多个技能。再次输入 @skill:，或使用技能按钮继续添加。",
@@ -8184,7 +8185,11 @@
     "shared": "共享",
     "sharedDescription": "成员、消息、运行、审批和附件均以服务器权限为准。",
     "sharedTitle": "共享会话",
+    "switchBuildDisabled": "当前构建未启用共享会话，因此无法在这里打开。",
+    "switchHelp": "允许本机打开多人共享的会话，角色、事件顺序和审批由服务端决定。关闭后会隐藏共享入口，并停止本应用拉取共享会话，不会删除任何数据。",
+    "switchLabel": "共享会话",
     "takeoverExecution": "接管执行",
+    "teamRoomConversion": "团队会话暂时无法共享：它的回复在本机生成，而共享会话的回复来自服务端。",
     "toggleApprover": "切换 {user} 的高风险审批权限",
     "transferBeforeLeaving": "退出前请将另一位成员设为 Owner，最后一位所有者不能退出。",
     "updateFailed": "成员状态已在其他位置变化或无法更新。",
@@ -8195,7 +8200,8 @@
     "andMore": "{count, plural, other {另有 # 人}}",
     "listLabel": "房间成员",
     "observedOnly": "仅列出发过言的成员。",
-    "participants": "{count, plural, other {房间内 # 人}}"
+    "participants": "{count, plural, other {房间内 # 人}}",
+    "working": "正在处理 {activity}"
   },
   "chatTemplatesSettings": {
     "adopt": "收进我的模板库",
@@ -9530,6 +9536,7 @@
       "trigger": "任务"
     },
     "memberList": {
+      "activityLabel": "正在：{activity}",
       "charsCount": "{count} 字符",
       "chatTitle": "与 {name} 的对话",
       "defaultModel": "会话默认模型",
@@ -10530,6 +10537,10 @@
       "frozenModelBinding": {
         "hint": "本会话已锁定可用模型集合，所请求的模型不在其中。",
         "label": "此处不允许该模型"
+      },
+      "handoffChainCapped": {
+        "hint": "成员之间还在互相交接，团队的接力轮次已经用完。可以在团队设置里调高上限，让他们把话说完。",
+        "label": "群聊被上限打断"
       },
       "healthCheckFailed": {
         "hint": "智能体已启动但健康检查未通过——请查看其日志后重新连接。",
@@ -24657,14 +24668,6 @@
     "backToList": "返回",
     "baseURL": "基础 URL",
     "baseURLHint": "使用代理 URL 或自托管端点。留空使用默认值。",
-    "browserStreaming": {
-      "gatewayDescription": "这个提供商指向了自定义端点。只有该端点允许来自浏览器的跨域请求，流式才能生效。",
-      "gatewayTitle": "自定义端点，流式未经验证",
-      "supportedDescription": "回复逐字返回，直接来自提供商，中间不经过桌面端。",
-      "supportedTitle": "可以从当前浏览器直连流式",
-      "unsupportedDescription": "这个提供商的端点可能拒绝浏览器发起的请求。回复可能一次性返回而非逐字流式，也可能直接失败。",
-      "unsupportedTitle": "可能无法在浏览器里流式"
-    },
     "baseURLPlaceholder": "https://api.example.com/v1",
     "baseURLPlaceholderAnthropic": "https://api.anthropic.com/v1",
     "baseURLPlaceholderGemini": "https://generativelanguage.googleapis.com/v1beta",
@@ -24678,6 +24681,14 @@
     "batchShort": "批量",
     "bootstrapRetries": "启动重试次数",
     "browseModels": "浏览模型",
+    "browserStreaming": {
+      "gatewayDescription": "这个提供商指向了自定义端点。只有该端点允许来自浏览器的跨域请求，流式才能生效。",
+      "gatewayTitle": "自定义端点，流式未经验证",
+      "supportedDescription": "回复逐字返回，直接来自提供商，中间不经过桌面端。",
+      "supportedTitle": "可以从当前浏览器直连流式",
+      "unsupportedDescription": "这个提供商的端点可能拒绝浏览器发起的请求。回复可能一次性返回而非逐字流式，也可能直接失败。",
+      "unsupportedTitle": "可能无法在浏览器里流式"
+    },
     "builtin": "内置",
     "cachedInputPrice": "缓存输入单价",
     "cachedInputShort": "缓存",
@@ -37848,6 +37859,8 @@
         "dispatchMaxRetriesHint": "针对瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 表示禁用，默认 1。",
         "enabled": "启用嵌套派发",
         "enabledHint": "默认关闭——代理仍使用标准的单层 Task 工具。",
+        "maxConcurrent": "最大并发子代理数",
+        "maxConcurrentHint": "一次派发最多同时运行多少个子代理。0 表示不限制。设置了 token 预算时始终逐个运行。",
         "maxDepth": "最大嵌套深度",
         "maxDepthHint": "子代理最多可以在聊天之下嵌套几层（1–5）。",
         "timeout": "子树超时（秒）",
@@ -37902,8 +37915,6 @@
           "writing": "写作"
         },
         "configTitle": "高级配置",
-        "maxConcurrent": "最大并发子代理数",
-        "maxConcurrentHint": "一次派发最多同时运行多少个子代理。0 表示不限制。设置了 token 预算时始终逐个运行。",
         "copyName": "{name}（副本）",
         "description": "内置与用户创建的子代理模板。内置模板只读——复制一份即可得到可编辑的副本。",
         "disabledBadge": "已停用",
@@ -38100,6 +38111,8 @@
       "editor": {
         "addMembersFirst": "请先添加成员",
         "allowedToolsOverride": "允许工具覆盖（用逗号分隔；替换角色列表）",
+        "autoRounds": "自动轮次",
+        "autoRoundsHelp": "当成员在回复中点名把话头交给队友时，房间可以自行多跑几轮。0 表示每条消息只回一轮。",
         "avatarEmoji": "头像 Emoji",
         "avatarEmojiPlaceholder": "🧩",
         "description": "描述",
@@ -38152,6 +38165,7 @@
       "updatedToast": "已更新 {name}。",
       "validation": {
         "atLeastOneMember": "团队至少需要一位成员。",
+        "autoRoundsInvalid": "自动轮次必须是 0 到 5 之间的整数。",
         "nameRequired": "请填写名称。",
         "responseCapInvalid": "回复上限必须是 1 到 12 之间的整数。",
         "supervisorMustBeMember": "监督者必须是团队成员之一。",

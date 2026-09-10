@@ -364,6 +364,7 @@
     "trigger": "Jobs"
   },
   "memberList": {
+    "activityLabel": "Working: {activity}",
     "charsCount": "{count} chars",
     "chatTitle": "Chat with {name}",
     "defaultModel": "Session default model",

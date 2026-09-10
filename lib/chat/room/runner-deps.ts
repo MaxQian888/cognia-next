@@ -22,6 +22,7 @@ import type {
   SendContent,
   SendOptions,
   Team,
+  MessageReplyTo,
 } from "@cognia/agent-config-types"
 import type { SDKMessage } from "@cognia/agent-config-types"
 import type { SteerEntry, ChatStatus } from "@/stores/chat"
@@ -181,12 +182,18 @@ export interface RoomRunnerSinks {
     appendMessage: (sessionId: string, message: UIMessage) => void
     drain: (
       sessionId: string,
-      replay: (content: SendContent, webSearchContext?: SendOptions["webSearchContext"]) => void
+      replay: (
+        content: SendContent,
+        webSearchContext?: SendOptions["webSearchContext"],
+        replyTo?: MessageReplyTo
+      ) => void
     ) => void
     armed: Set<string>
   }
   members: {
     setStatus: (sessionId: string, characterId: string, status: MemberStatus) => void
+    /** The tool a member is on, `Read · foo.ts`, or `null` when none (ADR-0177 batch 2). */
+    setActivity: (sessionId: string, characterId: string, activity: string | null) => void
     clearFor: (sessionId: string) => void
     isStopRequested: (sessionId: string, characterId: string) => boolean
     clearStopRequest: (sessionId: string, characterId: string) => void

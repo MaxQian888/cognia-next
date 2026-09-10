@@ -26,6 +26,7 @@ jest.mock("@/stores/settings", () => ({ useSettingsStore: { getState: () => sett
 
 const uiState = {
   setMemberStatus: jest.fn(),
+  setMemberActivity: jest.fn(),
   clearMemberStatusFor: jest.fn(),
   isStopRequested: jest.fn(() => true),
   clearStopRequest: jest.fn(),
@@ -124,11 +125,13 @@ it("shares the steer queue, its armed set and the drain with direct chat", () =>
 it("routes member status and stop requests to the UI store", () => {
   const sinks = createStoreRoomSinks()
   sinks.members.setStatus("room-1", "a", "thinking")
+  sinks.members.setActivity("room-1", "a", "Read · foo.ts")
   sinks.members.clearFor("room-1")
   expect(sinks.members.isStopRequested("room-1", "a")).toBe(true)
   sinks.members.clearStopRequest("room-1", "a")
   sinks.members.clearStopRequestsFor("room-1")
   expect(uiState.setMemberStatus).toHaveBeenCalledWith("room-1", "a", "thinking")
+  expect(uiState.setMemberActivity).toHaveBeenCalledWith("room-1", "a", "Read · foo.ts")
   expect(uiState.clearMemberStatusFor).toHaveBeenCalledWith("room-1")
   expect(uiState.clearStopRequest).toHaveBeenCalledWith("room-1", "a")
   expect(uiState.clearStopRequestsFor).toHaveBeenCalledWith("room-1")

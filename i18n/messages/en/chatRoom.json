@@ -2,5 +2,6 @@
   "andMore": "{count, plural, other {# more}}",
   "listLabel": "In this room",
   "observedOnly": "Only members who have spoken are listed.",
-  "participants": "{count, plural, other {# in this room}}"
+  "participants": "{count, plural, other {# in this room}}",
+  "working": "Working on {activity}"
 }

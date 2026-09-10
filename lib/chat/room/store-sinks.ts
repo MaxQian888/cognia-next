@@ -61,6 +61,8 @@ export function createStoreRoomSinks(): RoomRunnerSinks {
     members: {
       setStatus: (sessionId, characterId, status) =>
         useUIStore.getState().setMemberStatus(sessionId, characterId, status),
+      setActivity: (sessionId, characterId, activity) =>
+        useUIStore.getState().setMemberActivity(sessionId, characterId, activity),
       clearFor: (sessionId) => useUIStore.getState().clearMemberStatusFor(sessionId),
       isStopRequested: (sessionId, characterId) =>
         useUIStore.getState().isStopRequested(sessionId, characterId),

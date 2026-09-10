@@ -1,7 +1,13 @@
 /** @jest-environment jsdom */
 import { EMPTY_CONVERSATION_FILTERS } from "@/lib/chat/conversation-filters"
 import { act, renderHook } from "@testing-library/react"
-import { DEFAULT_BAR_ITEMS, useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
+import {
+  DEFAULT_BAR_ITEMS,
+  useMemberActivity,
+  useMemberStatus,
+  useUIStore,
+  type SelectedGuild,
+} from "./ui-store"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import {
   DEFAULT_STATUS_BAR_LAYOUT,
@@ -13,6 +19,7 @@ import {
 const RESET = {
   selectedGuild: { kind: "dm" } as SelectedGuild,
   memberStatus: {},
+  memberActivity: {},
   scratchpadCollapsed: {},
   stopRequestedFor: {},
   pendingSettingsRequest: null,
@@ -732,5 +739,39 @@ describe("useMemberStatus selector", () => {
     act(() => useUIStore.getState().setMemberStatus("ts1", "char-a", "errored"))
     const { result } = renderHook(() => useMemberStatus("ts1", "char-a"))
     expect(result.current).toBe("errored")
+  })
+})
+
+describe("member activity", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    useUIStore.setState(RESET)
+  })
+
+  it("stores one string per member, drops it on null, and keeps identity on a repeat", () => {
+    act(() => useUIStore.getState().setMemberActivity("ts1", "a", "Read · foo.ts"))
+    const { result } = renderHook(() => useMemberActivity("ts1", "a"))
+    expect(result.current).toBe("Read · foo.ts")
+    const before = useUIStore.getState()
+    act(() => useUIStore.getState().setMemberActivity("ts1", "a", "Read · foo.ts"))
+    expect(useUIStore.getState()).toBe(before)
+    act(() => useUIStore.getState().setMemberActivity("ts1", "a", null))
+    expect(useUIStore.getState().memberActivity).toEqual({})
+    expect(renderHook(() => useMemberActivity(null, "a")).result.current).toBeNull()
+  })
+
+  it("is cleared with the member status of the same room only", () => {
+    act(() => {
+      useUIStore.getState().setMemberActivity("ts1", "a", "Bash · pnpm test")
+      useUIStore.getState().setMemberActivity("ts2", "a", "Grep · x")
+      useUIStore.getState().clearMemberStatusFor("ts1")
+    })
+    expect(useUIStore.getState().memberActivity).toEqual({ "ts2::a": "Grep · x" })
+  })
+
+  it("is transient: never persisted", () => {
+    act(() => useUIStore.getState().setMemberActivity("ts1", "a", "Read · a"))
+    const raw = window.localStorage.getItem("cognia-ui") ?? ""
+    expect(raw).not.toContain("memberActivity")
   })
 })
