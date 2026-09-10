@@ -13,6 +13,7 @@ import {
   persistMessages,
   persistStreamingMessages,
   replaceSessionTranscript,
+  setMessageReaction,
   truncateAfter,
   updateMessageMetadata,
   ImageEditAppendError,
@@ -214,6 +215,32 @@ describe("persistMessages + listMessages", () => {
     })
   })
 
+  it("keeps the collaboration author on the column across a persist", async () => {
+    // A room runner stamps `metadata.collaboration.author` on a user turn a
+    // paired device wrote (ADR-0177). The hoist list strips that key before a
+    // write, so unless the row builder puts it back on the column the author
+    // is gone after the first persist and the speaker falls back to "You".
+    const author = { kind: "human", id: "usr_2", displayName: "Grace", source: "device" }
+    await persistMessages("s1", [
+      msg("remote-turn", "user", "hello", { senderKind: "user", collaboration: { author } }),
+    ])
+    const stored = await getDb().messages.get("remote-turn")
+    expect(stored?.collaboration).toEqual({ author })
+    expect(stored?.metadata).toBeUndefined()
+    const [listed] = await listMessages("s1")
+    expect(listed.metadata).toMatchObject({ collaboration: { author } })
+    // And again through the id-scoped writer.
+    await commitMessageDelta("s1", {
+      upserts: [msg("delta-turn", "user", "hi", { collaboration: { author } })],
+    })
+    expect((await getDb().messages.get("delta-turn"))?.collaboration).toEqual({ author })
+  })
+
+  it("does not invent a collaboration column from a malformed value", async () => {
+    await persistMessages("s1", [msg("bad", "user", "x", { collaboration: "nope" })])
+    expect((await getDb().messages.get("bad"))?.collaboration).toBeUndefined()
+  })
+
   it("drops metadata when only routing keys were present", async () => {
     await persistMessages("s1", [
       msg("only-route", "assistant", "hi", { senderId: "c1", senderKind: "assistant" }),
@@ -411,6 +438,64 @@ describe("updateMessageMetadata", () => {
   it("is a no-op for an unknown message id", async () => {
     await updateMessageMetadata("s1", "ghost", { minimapLabel: "x" })
     expect(await getDb().messages.get("ghost")).toBeUndefined()
+  })
+})
+
+describe("setMessageReaction", () => {
+  it("adds, counts, removes, and publishes a revision on each real change", async () => {
+    await putSession("s1")
+    await getDb().sessions.update("s1", { transcriptRevision: 0 } as never)
+    await persistMessages("s1", [msg("a", "user", "hi", { foo: 1 })])
+    const first = await setMessageReaction("s1", "a", { emoji: "👍", actorId: "local", add: true })
+    expect(first).toEqual([{ emoji: "👍", actorIds: ["local"] }])
+    const stored = await getDb().messages.get("a")
+    expect(stored?.metadata).toEqual({ foo: 1, reactions: [{ emoji: "👍", actorIds: ["local"] }] })
+    await setMessageReaction("s1", "a", { emoji: "👍", actorId: "telegram:9", add: true })
+    const removed = await setMessageReaction("s1", "a", {
+      emoji: "👍",
+      actorId: "local",
+      add: false,
+    })
+    expect(removed).toEqual([{ emoji: "👍", actorIds: ["telegram:9"] }])
+    // The UI reads the hoisted metadata, so the reactions must survive a list.
+    const [listed] = await listMessages("s1")
+    expect(listed.metadata).toMatchObject({
+      reactions: [{ emoji: "👍", actorIds: ["telegram:9"] }],
+    })
+  })
+
+  it("is a no-op for a repeated add, a removal of nothing, and a foreign row", async () => {
+    await persistMessages("s1", [msg("a", "user", "1")])
+    await persistMessages("s2", [msg("b", "user", "2")])
+    expect(await setMessageReaction("s1", "a", { emoji: "🎉", actorId: "x", add: false })).toEqual(
+      []
+    )
+    expect((await getDb().messages.get("a"))?.metadata).toBeUndefined()
+    await setMessageReaction("s1", "a", { emoji: "🎉", actorId: "x", add: true })
+    const before = await getDb().messages.get("a")
+    await setMessageReaction("s1", "a", { emoji: "🎉", actorId: "x", add: true })
+    expect(await getDb().messages.get("a")).toEqual(before)
+    expect(await setMessageReaction("s1", "b", { emoji: "🎉", actorId: "x", add: true })).toBeNull()
+    expect((await getDb().messages.get("b"))?.metadata).toBeUndefined()
+  })
+
+  it("survives the next whole-list persist of the same messages", async () => {
+    // The persist snapshot claims rows are unchanged unless invalidated; an
+    // out-of-band reaction write that forgot to invalidate would be silently
+    // undone by the next streamed persist of the identical list.
+    const list = [msg("a", "user", "1")]
+    await persistMessages("s1", list)
+    await setMessageReaction("s1", "a", { emoji: "👀", actorId: "local", add: true })
+    await persistMessages("s1", list)
+    expect((await getDb().messages.get("a"))?.metadata?.reactions).toBeUndefined()
+    // Rewriting from the hoisted list, the way the store does, keeps them.
+    const hydrated = await listMessages("s1")
+    await setMessageReaction("s1", "a", { emoji: "👀", actorId: "local", add: true })
+    await persistMessages("s1", await listMessages("s1"))
+    expect((await getDb().messages.get("a"))?.metadata?.reactions).toEqual([
+      { emoji: "👀", actorIds: ["local"] },
+    ])
+    expect(hydrated).toHaveLength(1)
   })
 })
 

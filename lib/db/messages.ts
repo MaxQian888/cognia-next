@@ -1,5 +1,10 @@
 import type { UIMessage } from "ai"
-import type { StoredMessage } from "@cognia/agent-config-types"
+import {
+  applyReactionChange,
+  type MessageReaction,
+  type ReactionChange,
+  type StoredMessage,
+} from "@cognia/agent-config-types"
 import { markMessagesRemoved, markSessionDirty } from "@/lib/chat/search/indexer"
 import {
   revokeClaimsForDeletedMessages,
@@ -139,9 +144,28 @@ export function toStoredMessageRow(
       senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
         ? senderKindRaw
         : undefined,
+    collaboration: collaborationColumnOf(meta),
     metadata: stripHoistedMeta(meta),
     createdAt: fields.createdAt,
   }
+}
+
+/**
+ * The `collaboration` column from the in-memory message.
+ *
+ * `rowToUIMessage` hoists the column onto `metadata`, and `stripHoistedMeta`
+ * takes it back off before a write. Nothing used to put it back on the row,
+ * so the author a room runner stamps on a user turn written by another
+ * principal (ADR-0177) was dropped on the very first persist, and a shared
+ * session's rows lost their server author the moment the list was rewritten.
+ */
+function collaborationColumnOf(
+  meta: Record<string, unknown> | undefined
+): StoredMessage["collaboration"] {
+  const value = meta?.collaboration
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as StoredMessage["collaboration"])
+    : undefined
 }
 
 /**
@@ -507,6 +531,7 @@ export async function commitMessageDelta(
       turnKey: typeof meta?.turnKey === "string" ? meta.turnKey : undefined,
       senderId: typeof meta?.senderId === "string" ? meta.senderId : undefined,
       senderKind,
+      collaboration: collaborationColumnOf(meta),
       metadata: stripHoistedMeta(meta),
       createdAt: existingById.get(id)?.createdAt ?? now + index,
     }
@@ -793,6 +818,49 @@ export async function updateMessageMetadata(
   // `persistMessages` re-derives existence/createdAt from disk.
   invalidatePersistSnapshot(sessionId)
   if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+}
+
+/**
+ * Add or remove one actor's emoji on a message (ADR-0177 batch 2).
+ *
+ * Re-reads the row inside the transaction rather than taking the caller's
+ * copy of `reactions`: an inbound IM reaction and the local picker can land
+ * on the same row within the same tick, and a merge from a snapshot would
+ * drop one of them. Returns the reactions the row now holds, or `null` when
+ * the row is not in `sessionId`. A no-op change (adding what is there,
+ * removing what is not) writes nothing and publishes nothing.
+ */
+export async function setMessageReaction(
+  sessionId: string,
+  messageId: string,
+  change: ReactionChange
+): Promise<MessageReaction[] | null> {
+  const db = getDb()
+  const session = await db.sessions.get(sessionId)
+  assertSessionWritable(session, "metadata")
+  let result: MessageReaction[] | null = null
+  let revision: number | null = null
+  let changed = false
+  await db.transaction("rw", db.messages, db.sessions, async () => {
+    const row = await db.messages.get(messageId)
+    if (!row || row.sessionId !== sessionId) return
+    const current = row.metadata?.reactions
+    const next = applyReactionChange(current, change)
+    result = next
+    // `applyReactionChange` hands back the input array itself for a no-op,
+    // and an empty list when there was nothing to start from.
+    const unchanged = current !== undefined ? next === current : next.length === 0
+    if (unchanged) return
+    const metadata = stripHoistedMeta({ ...(row.metadata ?? {}), reactions: next })
+    await db.messages.update(messageId, { metadata: metadata ?? {} })
+    revision = await bumpTranscriptRevision(db, sessionId)
+    changed = true
+  })
+  if (changed) {
+    invalidatePersistSnapshot(sessionId)
+    if (revision !== null) await publishTranscriptRevision(sessionId, revision)
+  }
+  return result
 }
 
 /**

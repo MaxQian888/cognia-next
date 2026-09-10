@@ -9,6 +9,7 @@ import type { UIMessage } from "ai"
 
 export * from "./collaboration"
 export * from "./room-settings"
+export * from "./message-room-primitives"
 import type {
   SearchProviderType,
   SearchProviderSettings,
@@ -2630,6 +2631,20 @@ export interface StoredMessage {
      * once. Only populated when the timeline label-summary setting is on.
      */
     minimapLabel?: string
+    /**
+     * The message this one replies to, as a quote reference (ADR-0177 batch
+     * 2). Stamped by the composer's reply action, by the room runner on a
+     * `room_send` that carries one, and by the connector runtime from an
+     * inbound IM reply. Rendered above the body, read by the team transcript.
+     */
+    replyTo?: import("./message-room-primitives").MessageReplyTo
+    /**
+     * Emoji reactions on this row (ADR-0177 batch 2). Written by the local
+     * picker and by inbound IM reaction events, mirrored outbound when the
+     * adapter has `send.reaction`. Read by the renderer and the team
+     * transcript. Non-indexed, so no schema bump.
+     */
+    reactions?: import("./message-room-primitives").MessageReaction[]
   }
   createdAt: number
 }
