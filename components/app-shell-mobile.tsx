@@ -85,6 +85,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
+import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
@@ -96,7 +97,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { whenSeeded } from "@/lib/db/schema"
 import { loadMobileUnread } from "@/lib/inbox/unread-count"
-import { markSessionRead } from "@/lib/db/session-state"
+import { openSessionForReading } from "@/lib/chat/unread-marker"
 import { updateSession } from "@/lib/db/sessions"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
@@ -217,7 +218,7 @@ export function AppShellMobile() {
 
   useEffect(() => {
     if (!activeSessionId) return
-    void markSessionRead(activeSessionId).catch((err) => {
+    void openSessionForReading(activeSessionId).catch((err) => {
       log.warn("markSessionRead failed", {
         sessionId: activeSessionId,
         error: err instanceof Error ? err.message : String(err),
@@ -336,17 +337,13 @@ export function AppShellMobile() {
         if (isTeamSession) {
           await teamChat.send(content, {
             attachmentManifest: manifest,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
         } else {
           await directChat.send(content, undefined, {
             attachmentManifest: manifest,
             templateRun,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
         }
         void impact("light")
@@ -396,9 +393,7 @@ export function AppShellMobile() {
         sessionId: s.id,
         attachmentManifest: manifest,
         templateRun,
-        ...(turnMetadata?.webSearchContext
-          ? { webSearchContext: turnMetadata.webSearchContext }
-          : {}),
+        ...turnMetadataSendOptions(turnMetadata),
       })
       void impact("light")
     },

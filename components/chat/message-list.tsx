@@ -32,6 +32,9 @@ import {
 import { useJumpFlash } from "@/hooks/chat/use-jump-flash"
 import { useJumpHistory } from "@/hooks/chat/use-jump-history"
 import { JumpFlash } from "./jump-flash"
+import { UnreadDivider } from "./unread-divider"
+import { firstUnreadMessageId } from "@/lib/chat/unread-marker"
+import { useUnreadMarker } from "@/stores/chat/unread-marker-store"
 import { ConversationJumpPill, resolveJumpPillMode } from "./conversation-jump-pill"
 import { MessageSelectionToolbar } from "./message-selection-toolbar"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
@@ -198,6 +201,16 @@ export function MessageList({
     active: status === "streaming" || status === "awaiting_approval",
     pinKey: messages,
   })
+
+  // Where "new messages" starts for this visit (ADR-0177 batch 2). The shell
+  // captured the read pointer before it marked the session read, so the line
+  // sits above the first message newer than that, and stays until a send or
+  // a switch away drops the marker.
+  const unreadMarker = useUnreadMarker(paneSessionId)
+  const firstUnreadId = useMemo(
+    () => firstUnreadMessageId(messages, unreadMarker),
+    [messages, unreadMarker]
+  )
 
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -628,6 +641,7 @@ export function MessageList({
                             transform: `translateY(${virtualItem.start}px)`,
                           }}
                         >
+                          {m.id === firstUnreadId && <UnreadDivider />}
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
@@ -659,6 +673,7 @@ export function MessageList({
                               "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                           )}
                         >
+                          {m.id === firstUnreadId && <UnreadDivider />}
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
@@ -686,6 +701,7 @@ export function MessageList({
                           "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
                       )}
                     >
+                      {liveTailMessage.id === firstUnreadId && <UnreadDivider />}
                       {liveTailMessage.id === flashId && (
                         <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                       )}

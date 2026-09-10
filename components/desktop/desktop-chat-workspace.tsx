@@ -36,6 +36,7 @@ import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
 import { CanvasShell } from "@/components/canvas/canvas-shell"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle, ComposerTurnMetadata } from "@/components/chat/composer"
+import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type {
   ApprovalDecision,
@@ -52,7 +53,7 @@ import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { useUIStore } from "@/stores/ui"
-import { markSessionRead } from "@/lib/db/session-state"
+import { openSessionForReading } from "@/lib/chat/unread-marker"
 import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
@@ -183,7 +184,7 @@ export function DesktopChatWorkspace() {
 
   useEffect(() => {
     if (!activeSessionId) return
-    void markSessionRead(activeSessionId).catch((err) => {
+    void openSessionForReading(activeSessionId).catch((err) => {
       log.warn("markSessionRead failed", {
         sessionId: activeSessionId,
         error: err instanceof Error ? err.message : String(err),
@@ -387,17 +388,13 @@ export function DesktopChatWorkspace() {
         ? teamChat.send(content, {
             sessionId: sid,
             attachmentManifest: manifest,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
         : directChat.send(content, undefined, {
             sessionId: sid,
             attachmentManifest: manifest,
             templateRun,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
     },
     [directChat, teamChat, isTeamSessionId]
@@ -557,18 +554,14 @@ export function DesktopChatWorkspace() {
           await teamChat.send(content, {
             sessionId: active,
             attachmentManifest: manifest,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
         } else {
           await directChat.send(content, undefined, {
             sessionId: active,
             attachmentManifest: manifest,
             templateRun,
-            ...(turnMetadata?.webSearchContext
-              ? { webSearchContext: turnMetadata.webSearchContext }
-              : {}),
+            ...turnMetadataSendOptions(turnMetadata),
           })
         }
         return
@@ -581,9 +574,7 @@ export function DesktopChatWorkspace() {
         await teamChat.send(content, {
           sessionId: s.id,
           attachmentManifest: manifest,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
       } else {
         const s = await create({
@@ -594,9 +585,7 @@ export function DesktopChatWorkspace() {
           sessionId: s.id,
           attachmentManifest: manifest,
           templateRun,
-          ...(turnMetadata?.webSearchContext
-            ? { webSearchContext: turnMetadata.webSearchContext }
-            : {}),
+          ...turnMetadataSendOptions(turnMetadata),
         })
       }
     },

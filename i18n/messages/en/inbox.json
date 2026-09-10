@@ -714,6 +714,11 @@
       "label": "Loading from cache…"
     }
   },
+  "threadMembership": {
+    "label": "Thread",
+    "noParent": "A thread of a channel this Inbox does not hold.",
+    "openParent": "Open the channel this thread belongs to"
+  },
   "topicRuntime": {
     "activation": "Activation: {value}",
     "active": "Active",

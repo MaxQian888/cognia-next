@@ -8066,6 +8066,9 @@
       "ragOn": "RAG 已开启（top-{topK}）",
       "statSummary": "{sources} 个数据源 · {chunks} 个切片"
     },
+    "unreadDivider": {
+      "label": "新消息"
+    },
     "welcomeDemo": {
       "analyze": "分析",
       "codeReview": "代码评审",
@@ -14506,6 +14509,11 @@
       "syncing": {
         "label": "正在加载缓存…"
       }
+    },
+    "threadMembership": {
+      "label": "话题",
+      "noParent": "所属频道不在此收件箱中。",
+      "openParent": "打开这个话题所属的频道"
     },
     "topicRuntime": {
       "activation": "激活状态：{value}",

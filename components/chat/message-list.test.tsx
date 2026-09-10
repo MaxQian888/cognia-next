@@ -205,6 +205,7 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
+import { useUnreadMarkerStore } from "@/stores/chat/unread-marker-store"
 import { MessageList, TIMELINE_THRESHOLD, VIRTUALIZE_THRESHOLD } from "./message-list"
 import { TIMELINE_MIN_PANE_PX } from "./minimap/timeline-visibility"
 import { FALLBACK_ROW_PX } from "@/lib/chat/row-height-estimate"
@@ -863,6 +864,44 @@ describe("MessageList", () => {
     )
     const scrollEl = container.querySelector('[role="log"]')!
     expect(scrollEl).toHaveClass("overscroll-contain")
+  })
+})
+
+describe("unread divider (ADR-0177 batch 2)", () => {
+  const stamped = (id: string, text: string, createdAt: number): UIMessage =>
+    ({ ...userMsg(id, text), metadata: { createdAt } }) as UIMessage
+
+  beforeEach(() => useUnreadMarkerStore.setState({ markers: {} }))
+
+  it("draws the line above the first message newer than this visit's pointer", () => {
+    useUnreadMarkerStore.getState().setMarker("s1", 20)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[stamped("a", "old", 10), stamped("b", "new", 30), stamped("c", "newer", 40)]}
+          status="idle"
+          paneSessionId="s1"
+        />
+      </Wrapper>
+    )
+    const divider = screen.getByTestId("unread-divider")
+    expect(divider.closest("[data-msg-id]")).toHaveAttribute("data-msg-id", "b")
+  })
+
+  it("draws nothing without a pointer, or for another pane's pointer", () => {
+    useUnreadMarkerStore.getState().setMarker("other", 20)
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <MessageList
+          messages={[stamped("a", "old", 10), stamped("b", "new", 30)]}
+          status="idle"
+          paneSessionId="s1"
+        />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("unread-divider")).toBeNull()
   })
 })
 

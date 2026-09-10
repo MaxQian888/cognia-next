@@ -8066,6 +8066,9 @@
       "ragOn": "RAG on (top-{topK})",
       "statSummary": "{sources} sources · {chunks} chunks"
     },
+    "unreadDivider": {
+      "label": "New messages"
+    },
     "welcomeDemo": {
       "analyze": "Analyze",
       "codeReview": "Code review",
@@ -14506,6 +14509,11 @@
       "syncing": {
         "label": "Loading from cache…"
       }
+    },
+    "threadMembership": {
+      "label": "Thread",
+      "noParent": "A thread of a channel this Inbox does not hold.",
+      "openParent": "Open the channel this thread belongs to"
     },
     "topicRuntime": {
       "activation": "Activation: {value}",

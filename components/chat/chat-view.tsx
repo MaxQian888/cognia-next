@@ -20,6 +20,7 @@ import {
 import { usePlatform } from "@/hooks/use-platform"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { dropUnreadMarker } from "@/lib/chat/unread-marker"
 import { ChatHeader } from "./chat-header"
 import { ChatColumn } from "./chat-column"
 import { CharacterMissingBanner } from "./character-missing-banner"
@@ -476,6 +477,8 @@ export function ChatPane({
           beginOnboardingRequestAttempt(boundId)
         }
       }
+      // Sending here means what came before has been read (ADR-0177 batch 2).
+      if (boundId) dropUnreadMarker(boundId)
       try {
         await onSend(content, manifest, templateRun, turnMetadata)
       } catch (error) {

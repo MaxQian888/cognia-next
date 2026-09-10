@@ -428,6 +428,45 @@ describe("installRuntime — ai-run (happy path)", () => {
     )
   })
 
+  it("keeps an inbound reply as a replyTo reference, resolved to the stored parent", async () => {
+    const session = await getDb().sessions.add({
+      id: "session-reply",
+      title: "Reply",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+    const parent = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_reply",
+      messageId: "msg_parent",
+      segments: [{ type: "text", text: "should we ship?" }],
+      plainText: "should we ship?",
+    })
+    await insertInboundMessage(parent, String(session))
+    const stored = await getDb().messages.where("platformMessageId").equals("msg_parent").first()
+    const reply = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_reply",
+      messageId: "msg_reply",
+      replyTo: { messageId: "msg_parent", snippet: "should we…" },
+    })
+    const row = await insertInboundMessage(reply, String(session))
+    expect(row.metadata?.replyTo).toEqual({
+      messageId: stored?.id,
+      preview: "should we ship?",
+      platformMessageId: "msg_parent",
+    })
+    // A parent that was never stored keeps the platform id and snippet.
+    const orphan = makeEvent({
+      conversationKey: "telegram:adapter_1:chat_reply",
+      messageId: "msg_orphan",
+      replyTo: { messageId: "msg_gone", snippet: "older text" },
+    })
+    expect((await insertInboundMessage(orphan, String(session))).metadata?.replyTo).toEqual({
+      messageId: "msg_gone",
+      preview: "older text",
+      platformMessageId: "msg_gone",
+    })
+  })
+
   it("invokes runAndCapture with the session id and event content", async () => {
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_ai" })
     await callHandler(event, "ai-run")

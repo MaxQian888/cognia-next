@@ -24,6 +24,7 @@ import { ChevronLeftIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
 import { ContactProfileDrawer } from "./contact-profile-drawer"
 import { PlatformBadge } from "./platform-badge"
+import { ThreadMembershipChip } from "./thread-membership-chip"
 import { ConversationOverrideDialog } from "./overrides/conversation-override-dialog"
 import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
 import { ConversationHeaderOverflow } from "./conversation-header-overflow"
@@ -153,6 +154,7 @@ export function ConversationHeader({
       {/* Left: platform + character chip + title */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <PlatformBadge platform={platform} iconOnly />
+        <ThreadMembershipChip conversationKey={conversationKey} className="shrink-0" />
         {character && (
           <span
             className="flex min-w-0 items-center gap-1.5"

@@ -2262,6 +2262,9 @@
     "ragOn": "RAG 已开启（top-{topK}）",
     "statSummary": "{sources} 个数据源 · {chunks} 个切片"
   },
+  "unreadDivider": {
+    "label": "新消息"
+  },
   "welcomeDemo": {
     "analyze": "分析",
     "codeReview": "代码评审",

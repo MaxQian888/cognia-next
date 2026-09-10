@@ -27,6 +27,7 @@ import { buildConversationKey } from "@/types/connectors/event"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
+import { resolveInboundReplyTo } from "@/lib/connectors/inbound-reply-to"
 import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
 import { resolveInboxSuppression, type ResolvedBinding } from "./policy-resolve"
@@ -644,6 +645,20 @@ export async function insertInboundMessage(
   // mapper returns null when the payload has nothing structured.
   const inboundA2UI = projectInboundToA2UI(event.platform, event.raw, event.segments)
 
+  // The platform's reply descriptor becomes `replyTo` on the row (ADR-0177
+  // batch 2), resolved to the stored parent when it lives in this session.
+  const replyTo = await resolveInboundReplyTo({
+    event,
+    findParent: async (platformMessageId) => {
+      const parent = await getDb()
+        .messages.where("platformMessageId")
+        .equals(platformMessageId)
+        .filter((message) => message.sessionId === sessionId)
+        .first()
+      return parent ? { id: parent.id, parts: parent.parts } : undefined
+    },
+  })
+
   const row: StoredMessage = {
     id: crypto.randomUUID(),
     sessionId,
@@ -664,6 +679,7 @@ export async function insertInboundMessage(
         conversationKey: event.conversationKey,
       },
       ...(inboundA2UI ? { inboundA2UI } : {}),
+      ...(replyTo ? { replyTo } : {}),
     },
     createdAt: now,
   }
