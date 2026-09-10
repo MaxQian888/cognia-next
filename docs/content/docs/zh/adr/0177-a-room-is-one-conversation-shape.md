@@ -135,3 +135,16 @@ description: "角色团队房间、共享会话与 IM 群组统一为一个房�
 已落地：`lib/chat/room/{types,kind,settings,participants,runner,runner-streaming,runner-deps,production-deps,store-sinks,runner-host}.ts`、`lib/companion/{room-send-client,room-write-handlers}.ts`、`lib/headless/runtimes/room-runner.ts`、`room_send` 与 `room_stop` 分支及其注册、`room.host-run` 特性、`components/context-workbench/panels/team-members-panel.tsx` 里的房间设置区、改用 `projectRoomParticipants` 的徽章与 `lib/chat/team-transcript.ts`，以及变薄的 `hooks/chat/use-team-chat.ts` 适配器。
 
 有两处实现推翻了计划。上下文名单仍然只观察用户消息，因为成员自己的回复已经在声明侧，再观察一遍没有增益。伴随端投影从成员事件加一小段空闲宽限来推导房间的忙碌状态，而不是让宿主再发布一条状态帧，因为这些事件本来就在线上。
+
+## 实现更新（2026-09-10，批次 2）
+
+已落地，每一项都带着自己的界面和测试，这一批没有休眠项：
+
+- 消息行上的 `metadata.replyTo` 与 `metadata.reactions`，类型在 `packages/agent-config-types/src/message-room-primitives.ts`。两者都放在 `metadata` 下而不是作为列：这张行有两个手写的构造函数和一份提升字段清单，接线时发现 `collaboration` 列在每次持久化时都被两者丢掉，伴随端回合上房间运行器盖的作者章因此丢失。已在 `lib/db/messages.ts` 修正。
+- 回复：消息行上的动作把目标暂存到指定面板（`stores/chat` 的 `replyTo`），组合器把它作为回合元数据带出，一个辅助函数（`lib/chat/turn-metadata.ts`）把它映射进每个宿主的发送选项。直聊控制器和房间运行器在行上盖章，并把引用作为提示前的一行读给模型，从不混进用户输入的文字。`room_send` 的请求 schema 携带它。连接器运行时把入站 IM 回复的父消息保存为同一种引用。
+- 表情回应：`lib/chat/reactions.ts` 通过 `setMessageReaction`（在事务内重读）切换行上的记录，并在 `local` 写入路由上镜像到平台。总线把入站表情事件落到行上（`lib/connectors/reactions-inbound.ts`）。在伴随端选择器禁用并说明原因，因为行属于宿主。
+- 状态字符串：`lib/chat/room/member-activity.ts` 从成员自己的转录切片推导它正在用的工具，运行器通过 `members.setActivity` 接收器发布并带 90 秒过期，UI store 与 `memberStatus` 并列保存，成员面板和参与者徽章显示它，无头 `room://member-status` 帧携带它。
+- 未读分隔线：外壳在标记已读前先捕获 `lastReadAt`（`lib/chat/unread-marker.ts`），列表在第一条更新的消息上方画线，发送即清除标记。
+- IM 话题：平台话题本来就是独立的会话键。收件箱头部现在用一枚徽章说明这一点，并在所属频道也在本地时链接过去。没有新增话题实体。
+
+有两处实现推翻了判断。计划把 `replyTo` 和 `reactions` 作为列放"在行上"，实际放到了 `metadata` 下，因为列必须同时穿过两个行构造函数和提升清单，`collaboration` 列证明了这条路容易漏。另外转录现在把表情回应读成不带主体 id 的计数，agent 能看到某条回复被点赞，却不会拿到是谁点的。

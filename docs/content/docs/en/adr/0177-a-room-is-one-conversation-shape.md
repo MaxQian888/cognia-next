@@ -247,3 +247,44 @@ the declared side and observing them added nothing. And the companion
 projection derives the room's busy state from member events with a short idle
 grace, rather than from a status frame the host would have had to publish,
 because the events were already on the wire.
+
+## Implementation update (2026-09-10, batch 2)
+
+Landed, each with its UI and its test, so nothing in this batch is dormant:
+
+- `metadata.replyTo` and `metadata.reactions` on the message row, typed in
+  `packages/agent-config-types/src/message-room-primitives.ts`. Both live under
+  `metadata` rather than as columns: the row has two hand-written builders and
+  a hoist list, and while wiring this the `collaboration` column turned out to
+  be dropped by both on every persist, which lost the author a room runner
+  stamps on a companion's turn. Fixed in `lib/db/messages.ts`.
+- Reply: a row action stages the target on the named pane
+  (`stores/chat` `replyTo`), the composer carries it as turn metadata, and one
+  helper (`lib/chat/turn-metadata.ts`) maps it into every host's send
+  options. The direct-chat controller and the room runner stamp the row and
+  read the reference to the model as one line ahead of the prompt, never as
+  part of the typed text. `room_send` carries it in its request schema. The
+  connector runtime keeps an inbound IM reply's parent as the same reference.
+- Reactions: `lib/chat/reactions.ts` toggles the row through
+  `setMessageReaction` (re-read inside the transaction) and mirrors to the
+  platform on the `local` write route. The bus lands inbound reaction events
+  on the row (`lib/connectors/reactions-inbound.ts`). On a companion the
+  picker is disabled with the reason, because the rows are the host's.
+- Status strings: `lib/chat/room/member-activity.ts` derives the tool a member
+  is on from its own transcript slice, the runner publishes it through the
+  `members.setActivity` sink with a 90 s stale timeout, the UI store keeps it
+  beside `memberStatus`, the members panel and the participants chip show it,
+  and the headless `room://member-status` frame carries it.
+- Unread divider: the shell captures `lastReadAt` before it marks the session
+  read (`lib/chat/unread-marker.ts`), the list draws the line above the first
+  newer message, and a send drops the marker.
+- IM threads: a platform thread was already its own conversation key. The
+  Inbox header now says so with a chip that links to the channel when that
+  conversation is held here. No thread entity was added.
+
+Two judgements implementation overturned. The plan put `replyTo` and
+`reactions` "on the row" as columns. They went under `metadata`, because a
+column has to be threaded through both row builders and the hoist list, and
+the `collaboration` column proved that path is easy to miss. And the transcript
+now reads reactions as a tally without actor ids, so an agent sees that a reply
+was liked without being handed who liked it.
