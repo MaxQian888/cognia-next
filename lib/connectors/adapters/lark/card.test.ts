@@ -1,4 +1,10 @@
-import { escapeLarkMarkdown, segmentToLarkBody, segmentsToLarkBody } from "./card"
+import {
+  buildLarkCommandFrame,
+  buildLarkCommandReply,
+  escapeLarkMarkdown,
+  segmentToLarkBody,
+  segmentsToLarkBody,
+} from "./card"
 
 describe("escapeLarkMarkdown", () => {
   it("escapes backslash", () => {
@@ -217,5 +223,43 @@ describe("segmentsToLarkBody", () => {
     const content = JSON.parse(body.content) as { text: string }
     expect(content.text).toContain("look:")
     expect(content.text).toContain("[image]")
+  })
+})
+
+describe("command Card 2.0 presentation", () => {
+  it.each(["commands", "status", "sessions", "dir", "tasks", "agent"])(
+    "uses the shared information frame for /%s",
+    (command) => {
+      const segment = buildLarkCommandReply(
+        command,
+        "会话 / session: 青松\n模型 / model: muse1.3",
+        "applied"
+      )
+      const body = segmentToLarkBody(segment)!
+      expect(body.msg_type).toBe("interactive")
+      const card = JSON.parse(body.content)
+      expect(card.schema).toBe("2.0")
+      expect(card.header.template).toBe("blue")
+      expect(card.body.padding).toBe("16px")
+      expect(JSON.stringify(card.body)).toContain("muse1.3")
+      expect(card.elements).toBeUndefined()
+    }
+  )
+  it("distinguishes confirmations and denials without depending only on color", () => {
+    expect(buildLarkCommandFrame("Done", [], "success")).toHaveProperty("header.template", "green")
+    const denied = segmentToLarkBody(buildLarkCommandReply("model", "No permission", "denied"))!
+    const card = JSON.parse(denied.content)
+    expect(card.header.title.content).toContain("未执行")
+    expect(card.header.template).toBe("orange")
+  })
+  it("escapes dynamic mention and formatting syntax and preserves long output", () => {
+    const text = "<at id=all></at> **title** " + "line\n".repeat(220)
+    const card = JSON.parse(
+      segmentToLarkBody(buildLarkCommandReply("sessions", text, "applied"))!.content
+    )
+    expect(card.body.elements).toHaveLength(1)
+    expect(card.body.elements[0].content).toContain("&lt;at id=all&gt;")
+    expect(card.body.elements[0].content).not.toContain("<at")
+    expect(card.body.elements[0].content.split("line")).toHaveLength(221)
   })
 })

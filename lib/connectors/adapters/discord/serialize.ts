@@ -8,14 +8,32 @@
  * unintentionally open formatting: * _ ~ | > (and \\ itself).
  */
 
-import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { OutboundRequest, SegmentDowngrade } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { fnv1a32 } from "../_shared/fnv1a"
-import { buildDiscordA2UIPayload } from "./a2ui-mapper"
+import { buildDiscordA2UIPayload, DiscordA2UIValidationError } from "./a2ui-mapper"
+
+import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { DISCORD_A2UI_CAPABILITY } from "./capability"
 
 const DISCORD_API_BASE = "https://discord.com/api/v10"
 
+/** Resolve public composite IDs, accepting legacy bare IDs when a channel is known. */
+export function splitChannelMessage(
+  id: string,
+  fallbackChannel?: string
+): [channelId: string, messageId: string] {
+  const separator = id.indexOf(":")
+  if (separator > 0 && separator < id.length - 1) {
+    return [id.slice(0, separator), id.slice(separator + 1)]
+  }
+  if (separator === -1 && id && fallbackChannel) return [fallbackChannel, id]
+  throw new Error(`Discord message ops require a "channelId:messageId" composite id, got "${id}"`)
+}
+
 export interface SerializedDiscordCall {
+  /** Local rendering diagnostics; never sent to the platform. */
+  downgrades?: SegmentDowngrade[]
   method: "POST" | "PATCH" | "DELETE" | "PUT"
   url: string
   payload: Record<string, unknown>
@@ -76,23 +94,138 @@ function stampNonces(
   })
 }
 
-/**
- * Split `text` into ≤`max`-char chunks, preferring to cut at the last
- * newline inside the window so markdown blocks/paragraphs stay intact.
- * The boundary newline itself is consumed (not re-emitted).
- */
-export function chunkDiscordContent(text: string, max = DISCORD_MAX_CONTENT_LENGTH): string[] {
-  if (text.length <= max) return [text]
-  const chunks: string[] = []
-  let rest = text
-  while (rest.length > max) {
-    const nl = rest.lastIndexOf("\n", max)
-    // No usable newline in the window (or only a leading one) → hard cut.
-    const cut = nl > 0 ? nl : max
-    chunks.push(rest.slice(0, cut))
-    rest = rest.slice(cut === nl ? cut + 1 : cut)
+interface DiscordMarkdownSpan {
+  start: number
+  bodyStart: number
+  bodyEnd: number
+  end: number
+  open: string
+  close: string
+}
+
+/** Locate paired inline/fenced markup without treating escaped delimiters as formatting. */
+function discordMarkdownSpans(text: string): {
+  spans: DiscordMarkdownSpan[]
+  protectedRanges: Array<[number, number]>
+} {
+  const spans: DiscordMarkdownSpan[] = []
+  const protectedRanges: Array<[number, number]> = []
+  const scan = (start: number, end: number) => {
+    for (let at = start; at < end;) {
+      if (text[at] === "\\") {
+        protectedRanges.push([at, Math.min(end, at + 2)])
+        at += 2
+        continue
+      }
+      const source = text.slice(at, end)
+      const tag = /^<(?:@!?\d+|@&\d+|#\d+|a?:\w+:\d+|https?:\/\/[^>]+)>/.exec(source)
+      if (tag) {
+        protectedRanges.push([at, at + tag[0].length])
+        at += tag[0].length
+        continue
+      }
+      const fence = /^(`{3,})([^`\n]*\n)/.exec(source)
+      const link = /^\[((?:\\.|[^\]\\])+)\]\(((?:\\.|[^)\\])+)\)/.exec(source)
+      let open = ""
+      let close = ""
+      let bodyEnd = -1
+      if (fence) {
+        open = fence[0]
+        close = fence[1]
+        bodyEnd = text.indexOf(close, at + open.length)
+      } else if (link) {
+        open = "["
+        close = `](${link[2]})`
+        bodyEnd = at + 1 + link[1].length
+      } else {
+        const delimiter = /^(\*\*\*|___|\*\*|__|~~|\|\||\*|_|`+)/.exec(source)?.[0]
+        if (delimiter && !/\s/.test(text[at + delimiter.length] ?? " ")) {
+          open = close = delimiter
+          let candidate = text.indexOf(close, at + open.length)
+          while (candidate >= 0 && candidate < end) {
+            let slashes = 0
+            for (let i = candidate - 1; i >= 0 && text[i] === "\\"; i--) slashes++
+            if (slashes % 2 === 0 && !/\s/.test(text[candidate - 1])) break
+            candidate = text.indexOf(close, candidate + close.length)
+          }
+          bodyEnd = candidate
+        }
+      }
+      if (bodyEnd <= at + open.length || bodyEnd + close.length > end) {
+        at += String.fromCodePoint(text.codePointAt(at)!).length
+        continue
+      }
+      const span = {
+        start: at,
+        bodyStart: at + open.length,
+        bodyEnd,
+        end: bodyEnd + close.length,
+        open,
+        close,
+      }
+      spans.push(span)
+      protectedRanges.push([span.start, span.bodyStart], [span.bodyEnd, span.end])
+      if (!fence && !open.startsWith("`")) scan(span.bodyStart, span.bodyEnd)
+      at = span.end
+    }
   }
-  if (rest.length > 0) chunks.push(rest)
+  scan(0, text.length)
+  return { spans, protectedRanges }
+}
+
+/** Preserve all text, Unicode characters and paired Markdown across message boundaries. */
+export function chunkDiscordContent(text: string, max = DISCORD_MAX_CONTENT_LENGTH): string[] {
+  if (!Number.isInteger(max) || max < 1)
+    throw new DiscordA2UIValidationError("Discord chunk limit must be positive")
+  if (text.length <= max) return [text]
+  const { spans, protectedRanges } = discordMarkdownSpans(text)
+  const activeAt = (offset: number) =>
+    spans.filter((span) => span.start < offset && offset < span.end)
+  const chunks: string[] = []
+  let start = 0
+  while (start < text.length) {
+    const prefix = activeAt(start)
+      .map((span) => span.open)
+      .join("")
+    let cut = Math.min(text.length, start + max - prefix.length)
+    const newline = text.lastIndexOf("\n", cut - 1)
+    // Preserve the boundary newline. Avoid choosing only a reopened fence header.
+    if (
+      cut < text.length &&
+      newline > start &&
+      !protectedRanges.some(([a, b]) => a <= newline && newline < b)
+    )
+      cut = newline + 1
+    let suffix = ""
+    while (cut > start) {
+      const protectedRange = protectedRanges.find(([a, b]) => a < cut && cut < b)
+      if (protectedRange) {
+        cut = protectedRange[0]
+        continue
+      }
+      if (
+        cut < text.length &&
+        /[\uD800-\uDBFF]/.test(text[cut - 1]) &&
+        /[\uDC00-\uDFFF]/.test(text[cut])
+      ) {
+        cut--
+        continue
+      }
+      suffix = activeAt(cut)
+        .map((span) => span.close)
+        .reverse()
+        .join("")
+      const overflow = prefix.length + cut - start + suffix.length - max
+      if (overflow <= 0) break
+      cut -= overflow
+    }
+    if (cut <= start)
+      throw new DiscordA2UIValidationError(
+        "Discord markup or Unicode character cannot fit within the message limit"
+      )
+    chunks.push(prefix + text.slice(start, cut) + suffix)
+    start = cut
+  }
   return chunks
 }
 
@@ -125,9 +258,10 @@ function buildMessageReference(
 ): Record<string, unknown> | undefined {
   if (!req.replyTo?.messageId) return undefined
   const ref = req.conversationRef as Record<string, unknown>
+  const [replyChannel, messageId] = splitChannelMessage(req.replyTo.messageId, channelId)
   return {
-    message_id: req.replyTo.messageId,
-    channel_id: channelId,
+    message_id: messageId,
+    channel_id: replyChannel,
     guild_id: ref["guildId"],
   }
 }
@@ -185,6 +319,7 @@ const BLOCK_SEGMENT_TYPES = new Set(["text", "markdown", "code"])
 export function renderDiscordContentRun(segments: readonly MessageSegment[]): string {
   let out = ""
   let previousWasBlock = false
+  let lastWasCode = false
   for (const seg of segments) {
     const piece = renderContentSegment(seg)
     if (!piece) continue
@@ -192,8 +327,9 @@ export function renderDiscordContentRun(segments: readonly MessageSegment[]): st
     if (out.length > 0 && isBlock && previousWasBlock && !out.endsWith("\n")) out += "\n"
     out += seg.type === "code" ? `${piece}\n` : piece
     previousWasBlock = isBlock
+    lastWasCode = seg.type === "code"
   }
-  return out.replace(/\s+$/, "")
+  return lastWasCode ? out.slice(0, -1) : out
 }
 
 /**
@@ -282,6 +418,29 @@ function serializeSegment(
       return [{ method: "POST", url, payload }]
     }
 
+    case "location":
+    case "poll": {
+      const text =
+        seg.type === "location"
+          ? [seg.name, String(seg.lat) + ", " + String(seg.lon)].filter(Boolean).join("\n")
+          : [
+              seg.question,
+              ...(seg.multi ? ["Multiple selections allowed"] : []),
+              ...seg.options.map((option, index) => String(index + 1) + ". " + option),
+            ].join("\n")
+      const downgrades: SegmentDowngrade[] = [
+        {
+          from: seg.type,
+          to: "text",
+          reason:
+            "Native " + seg.type + " sending is unavailable; complete content retained as text",
+        },
+      ]
+      const calls = contentCalls(text, url, messageReference)
+      calls[0].downgrades = downgrades
+      return calls
+    }
+
     case "reply":
       // reply segments are handled via replyTo on the OutboundRequest
       return []
@@ -307,6 +466,11 @@ function serializeSegment(
  * `serializeOutboundAsync` for the full embed + components rendering.
  */
 export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[] {
+  if (req.segments.some((segment) => segment.type === "card")) {
+    throw new DiscordA2UIValidationError(
+      "Opaque native cards are not supported by discord; use an A2UI surface or text"
+    )
+  }
   const channelId = channelIdFromRef(req)
   const messageReference = buildMessageReference(req, channelId)
   const calls: SerializedDiscordCall[] = []
@@ -328,6 +492,11 @@ export async function serializeOutboundAsync(
   req: OutboundRequest,
   adapterId: string
 ): Promise<SerializedDiscordCall[]> {
+  if (req.segments.some((segment) => segment.type === "card")) {
+    throw new DiscordA2UIValidationError(
+      "Opaque native cards are not supported by discord; use an A2UI surface or text"
+    )
+  }
   const channelId = channelIdFromRef(req)
   const messageReference = buildMessageReference(req, channelId)
   const calls: SerializedDiscordCall[] = []
@@ -335,6 +504,27 @@ export async function serializeOutboundAsync(
 
   for (const seg of mergeDiscordContentSegments(req.segments)) {
     if (seg.type === "a2ui") {
+      const fallbackKinds = new Set<string>()
+      walkA2UISurface(seg.content, (node) => {
+        const support = (DISCORD_A2UI_CAPABILITY as Readonly<Record<string, string>>)[
+          node.component
+        ]
+        if (support !== "native" && support !== "simulated") fallbackKinds.add(node.component)
+      })
+      const downgrades: SegmentDowngrade[] = fallbackKinds.size
+        ? [
+            {
+              from: "a2ui",
+              to: "text",
+              reason:
+                "A2UI surface " +
+                seg.surfaceId +
+                " uses its text mirror for: " +
+                [...fallbackKinds].join(", "),
+            },
+          ]
+        : []
+
       const payload = await buildDiscordA2UIPayload({
         adapterId,
         surfaceId: seg.surfaceId,
@@ -347,14 +537,21 @@ export async function serializeOutboundAsync(
         (payload.content && payload.content.length > 0)
       if (!hasNative) {
         // Mapper produced nothing — fall back to plain text mirror.
-        const body: Record<string, unknown> = { content: seg.plainTextMirror }
-        if (messageReference) body["message_reference"] = messageReference
-        calls.push({ method: "POST", url, payload: body })
+        const fallbackCalls = contentCalls(seg.plainTextMirror, url, messageReference)
+        if (downgrades.length) fallbackCalls[0].downgrades = downgrades
+        calls.push(...fallbackCalls)
         continue
       }
-      const body: Record<string, unknown> = { ...payload }
-      if (messageReference) body["message_reference"] = messageReference
-      calls.push({ method: "POST", url, payload: body })
+      const content = [payload.content, ...(fallbackKinds.size ? [seg.plainTextMirror] : [])]
+        .filter(Boolean)
+        .join("\n")
+      const nativeCalls = contentCalls(content, url, messageReference)
+      Object.assign(nativeCalls[nativeCalls.length - 1].payload, {
+        ...(payload.embeds ? { embeds: payload.embeds } : {}),
+        ...(payload.components ? { components: payload.components } : {}),
+      })
+      if (downgrades.length) nativeCalls[0].downgrades = downgrades
+      calls.push(...nativeCalls)
       continue
     }
     calls.push(...serializeSegment(seg, channelId, messageReference))

@@ -47,7 +47,7 @@ describe("collectNumberedInteractives", () => {
     ])
   })
 
-  it("collects Select / RadioGroup / Checkbox alongside Button", () => {
+  it("leaves value-taking controls as text fallback rather than firing value-less callbacks", () => {
     const surface = makeSegment("s2", {
       root: { component: "Card", children: ["s", "r", "c"] },
       s: { component: "Select", options: [] },
@@ -55,7 +55,7 @@ describe("collectNumberedInteractives", () => {
       c: { component: "Checkbox", label: "agree" },
     })
     const numbered = collectNumberedInteractives(surface)
-    expect(numbered.map((n) => n.componentId)).toEqual(["s", "r", "c"])
+    expect(numbered).toEqual([])
   })
 
   it("caps at 9 — single-digit replies only", () => {
@@ -192,4 +192,68 @@ describe("buildIlinkA2UISurface", () => {
     })
     expect(result.textMirror.startsWith("# Pre-baked mirror")).toBe(true)
   })
+})
+
+describe("numeric menu correctness", () => {
+  const ctx = { adapterId: "ad", conversationKey: "wechat-personal:ad:u1" }
+
+  it("does not bind disabled buttons", () => {
+    const segment = makeSegment("disabled", {
+      root: { component: "Button", text: "Unavailable", disabled: true },
+    })
+    expect(collectNumberedInteractives(segment)).toEqual([])
+  })
+
+  it("replaces stale digits when a shorter menu replaces the previous menu", async () => {
+    await buildIlinkA2UISurface({ ...ctx, segment: TWO_BUTTON_SURFACE })
+    await buildIlinkA2UISurface({
+      ...ctx,
+      segment: makeSegment("new", {
+        root: { component: "Button", text: "New" },
+      }),
+    })
+    expect(__peekNumericActionForTesting(ctx.conversationKey, 1)).toBe("a2ui:new:root:root")
+    expect(__peekNumericActionForTesting(ctx.conversationKey, 2)).toBeUndefined()
+  })
+
+  it("clears a previous menu when the replacement has no enabled actions", async () => {
+    await buildIlinkA2UISurface({ ...ctx, segment: TWO_BUTTON_SURFACE })
+    await buildIlinkA2UISurface({
+      ...ctx,
+      segment: makeSegment("notice", {
+        root: { component: "Text", text: "Complete" },
+      }),
+    })
+    expect(__countNumericActionsForTesting(ctx.conversationKey)).toBe(0)
+  })
+
+  it("preserves binding kind and payload for built-in command buttons", async () => {
+    await buildIlinkA2UISurface({
+      ...ctx,
+      segment: makeSegment("help", {
+        root: {
+          component: "Button",
+          text: "Help",
+          bindingKind: "help_quick_command",
+          bindingPayload: { command: "/help" },
+        },
+      }),
+    })
+    const bindings = await getDb().connectorCallbackBindings.toArray()
+    expect(bindings[0]).toMatchObject({ kind: "help_quick_command", payload: { command: "/help" } })
+  })
+})
+
+it("uses button labels and primitive actions when no text is provided", () => {
+  const segment = makeSegment("labels", {
+    root: { component: "Row", children: ["label", "number", "boolean"] },
+    label: { component: "Button", label: "Proceed" },
+    number: { component: "Button", action: 42 },
+    boolean: { component: "Button", text: false },
+  })
+  expect(collectNumberedInteractives(segment).map((entry) => entry.label)).toEqual([
+    "Proceed",
+    "42",
+    "false",
+  ])
 })

@@ -5,11 +5,20 @@
  * Lark im/v1 API calls (send, edit, delete, reactions).
  */
 
+import { sha256 } from "@noble/hashes/sha256"
+import { bytesToHex } from "@noble/hashes/utils"
+
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import { segmentsToLarkBody, segmentsToLarkBodyAsync, type LarkMessageBody } from "./card"
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
+
+// Feishu caps message uuid at 50 characters. Preserve existing short keys;
+// hash the entire long key so retries remain stable and suffixes stay distinct.
+function messageUuid(key: string): string {
+  return key.length <= 50 ? key : bytesToHex(sha256(key)).slice(0, 48)
+}
 
 export interface SerializedLarkCall {
   method: "POST" | "PUT" | "PATCH" | "DELETE"
@@ -139,7 +148,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     const payload: Record<string, unknown> = {
       msg_type: body.msg_type,
       content: body.content,
-      uuid: req.metadata.idempotencyKey,
+      uuid: messageUuid(req.metadata.idempotencyKey),
     }
     if (threadId) payload["reply_in_thread"] = true
     return {
@@ -164,7 +173,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
           msg_type: body.msg_type,
           content: body.content,
           reply_in_thread: true,
-          uuid: req.metadata.idempotencyKey,
+          uuid: messageUuid(req.metadata.idempotencyKey),
         },
       }
     }
@@ -175,7 +184,7 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-    uuid: req.metadata.idempotencyKey,
+    uuid: messageUuid(req.metadata.idempotencyKey),
   }
 
   return {
@@ -390,7 +399,7 @@ export async function serializeOutboundAsync(
     const payload: Record<string, unknown> = {
       msg_type: body.msg_type,
       content: body.content,
-      uuid: req.metadata.idempotencyKey,
+      uuid: messageUuid(req.metadata.idempotencyKey),
     }
     if (threadId) payload["reply_in_thread"] = true
     return {
@@ -413,7 +422,7 @@ export async function serializeOutboundAsync(
           msg_type: body.msg_type,
           content: body.content,
           reply_in_thread: true,
-          uuid: req.metadata.idempotencyKey,
+          uuid: messageUuid(req.metadata.idempotencyKey),
         },
       }
     }
@@ -424,7 +433,7 @@ export async function serializeOutboundAsync(
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-    uuid: req.metadata.idempotencyKey,
+    uuid: messageUuid(req.metadata.idempotencyKey),
   }
 
   return {

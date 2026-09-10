@@ -48,6 +48,40 @@ beforeEach(() => {
 })
 
 describe("createWechatOaAdapter", () => {
+  it("preserves unsupported rich content with explicit text downgrades", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { errcode: 0 }))
+    const req = sendReq()
+    req.segments = [
+      { type: "mention", userId: "u", displayName: "Alice" },
+      { type: "location", name: "Office", lat: 1, lon: 2 },
+      { type: "poll", question: "Pick", options: ["A", "B"] },
+      { type: "reply", messageId: "m", snippet: "original" },
+    ]
+    const result = await adapter().send(req)
+    expect(result.ok).toBe(true)
+    expect(result.downgrades).toEqual(
+      req.segments.map((segment) => ({
+        from: segment.type,
+        to: "text",
+        reason: "wechat_oa_text_alternative",
+      }))
+    )
+    expect(JSON.parse(mockInvoke.mock.calls[0][1].req.body).text.content).toBe(
+      "@Alice\nOffice: 1,2\nPick\n1. A\n2. B\n> original"
+    )
+  })
+  it("rejects opaque cards before uploading preceding media", async () => {
+    const req = sendReq()
+    req.segments = [
+      { type: "image", url: "file:///tmp/photo.jpg" },
+      { type: "card", card: { kind: "unknown", payload: { title: "lost" } } },
+    ]
+    expect(await adapter().send(req)).toMatchObject({
+      ok: false,
+      error: { code: "validation", retryable: false },
+    })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
   it("exposes correct meta and initial health", () => {
     const a = adapter()
     expect(a.meta.type).toBe("wechat-oa")
@@ -82,6 +116,28 @@ describe("createWechatOaAdapter", () => {
     expect(a.health().state).toBe("running")
   })
 
+  it("uploads images and sends native customer-service media payloads", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "connectors_media_upload"
+        ? JSON.stringify(httpResp(200, { media_id: "media-1" }))
+        : httpResp(200, { errcode: 0 })
+    )
+    const req = sendReq()
+    req.segments = [{ type: "image", url: "file:///tmp/photo.jpg", mimeType: "image/jpeg" }]
+    expect((await adapter().send(req)).ok).toBe(true)
+    expect(mockInvoke.mock.calls[0][0]).toBe("connectors_media_upload")
+    expect(mockInvoke.mock.calls[0][1].req).toMatchObject({
+      localPath: "/tmp/photo.jpg",
+      responseMode: "http",
+      multipart: { fieldName: "media", filename: "photo.jpg" },
+    })
+    expect(JSON.parse(mockInvoke.mock.calls[1][1].req.body)).toEqual({
+      touser: "oUser",
+      msgtype: "image",
+      image: { media_id: "media-1" },
+    })
+  })
+
   it("send() maps the 48h-window errcode to a non-retryable validation error", async () => {
     mockInvoke.mockResolvedValue(
       httpResp(200, { errcode: 45015, errmsg: "response out of time limit" })
@@ -104,11 +160,11 @@ describe("createWechatOaAdapter", () => {
     expect(res.error?.message).toContain(String(errcode))
   })
 
-  it("send() keeps other platform errcodes retryable", async () => {
+  it("send() does not retry an oversized message", async () => {
     mockInvoke.mockResolvedValue(httpResp(200, { errcode: 45002, errmsg: "message too long" }))
     const res = await adapter().send(sendReq())
     expect(res.ok).toBe(false)
-    expect(res.error?.retryable).toBe(true)
+    expect(res.error?.retryable).toBe(false)
   })
 
   it("send() reports a retryable failure on an HTML gateway body (502)", async () => {
@@ -135,6 +191,11 @@ describe("createWechatOaAdapter", () => {
     expect(res.ok).toBe(false)
     expect(res.error?.retryable).toBe(true)
     expect(res.error?.message).toContain("non-JSON")
+  })
+
+  it.each([{}, null, []])("send() rejects success bodies without errcode zero", async (body) => {
+    mockInvoke.mockResolvedValue(httpResp(200, body))
+    expect((await adapter().send(sendReq())).ok).toBe(false)
   })
 
   it("send() rejects a request without an openId", async () => {

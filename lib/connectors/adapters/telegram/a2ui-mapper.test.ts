@@ -217,3 +217,18 @@ describe("buildTelegramA2UICalls — buttons + callback bindings", () => {
     expect(binding?.componentId).toBe(longComponentId)
   })
 })
+
+it("preserves canonical Card.description and Alert.message", async () => {
+  const surface: A2UISegmentContent = {
+    rootId: "root",
+    dataModel: {},
+    components: {
+      root: { component: "Column", children: ["card", "alert"] },
+      card: { component: "Card", title: "Summary", description: "Card details" },
+      alert: { component: "Alert", title: "Notice", message: "Canonical alert message" },
+    },
+  }
+  const result = await buildTelegramA2UICalls(baseInput(surface))
+  expect(JSON.stringify(result)).toContain("Card details")
+  expect(JSON.stringify(result)).toContain("Canonical alert message")
+})

@@ -188,7 +188,7 @@ export async function buildTelegramA2UICalls(
         flushRow()
         lastEmittedWasButton = false
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         if (title || text) {
           lines.push(
             `⚠️ *${escapeMdV2(title || "")}*${title && text ? ": " : ""}${escapeMdV2(text || "")}`
@@ -201,6 +201,8 @@ export async function buildTelegramA2UICalls(
         lastEmittedWasButton = false
         const title = stringValue(node.raw.title)
         if (title) lines.push(`*${escapeMdV2(title)}*`)
+        const description = stringValue(node.raw.description)
+        if (description) lines.push(escapeMdV2(description))
         break
       }
       case "Row":

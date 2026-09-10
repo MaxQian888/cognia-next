@@ -452,6 +452,39 @@ describe("startMatrixSync", () => {
     expect(got[0].event.event_id).toBe("$ok")
   })
 
+  it.each([
+    ["12", 12000],
+    ["Tue, 08 Sep 2026 00:00:09 GMT", 9000],
+  ])("waits for Retry-After %s before polling again", async (header, waitMs) => {
+    jest.useFakeTimers({ now: Date.parse("2026-09-08T00:00:00Z") })
+    const controller = new AbortController()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 429,
+        headers: { "Retry-After": header },
+        body: JSON.stringify({ errcode: "M_LIMIT_EXCEEDED", retry_after_ms: 1 }),
+      })
+      .mockResolvedValueOnce(syncResp("s1", {}))
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      onNextBatch: () => controller.abort(),
+    })
+    const pending = gen.next()
+    try {
+      await jest.advanceTimersByTimeAsync(waitMs - 1)
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      await jest.advanceTimersByTimeAsync(1)
+      await pending
+      expect(mockInvoke).toHaveBeenCalledTimes(2)
+    } finally {
+      controller.abort()
+      await pending
+      jest.useRealTimers()
+    }
+  })
+
   it("backfills a limited timeline gap oldest-first via /messages", async () => {
     const controller = new AbortController()
     mockInvoke.mockImplementation(async (_cmd: string, args: { req: { url: string } }) => {

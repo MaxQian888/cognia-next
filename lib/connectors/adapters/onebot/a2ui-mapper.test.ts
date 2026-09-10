@@ -65,3 +65,92 @@ describe("buildOneBotA2UISegments", () => {
     expect(segments).toEqual([{ type: "text", text: "Chart mirror" }])
   })
 })
+
+it("preserves canonical card descriptions and alert messages alongside other content", () => {
+  const surface: A2UISegmentContent = {
+    rootId: "root",
+    dataModel: {},
+    components: {
+      root: {
+        component: "Card",
+        title: "Report",
+        description: "Summary",
+        children: ["alert", "legacy"],
+      },
+      alert: { component: "Alert", title: "Warning", message: "Review required" },
+      legacy: { component: "Alert", text: "Legacy alert" },
+    },
+  }
+  expect(buildOneBotA2UISegments(surface, "")).toEqual([
+    { type: "text", text: "【Report】\nSummary\n⚠️ Warning: Review required\n⚠️ Legacy alert" },
+  ])
+})
+
+it("keeps links, dividers, primitive text and URL-backed images in render order", () => {
+  const components = {
+    root: {
+      component: "Column",
+      children: [
+        "card",
+        "named",
+        "bare",
+        "badLink",
+        "divider",
+        "number",
+        "boolean",
+        "empty",
+        "image",
+        "badImage",
+        "alert",
+        "emptyAlert",
+      ],
+    },
+    card: { component: "Card" },
+    named: { component: "Link", text: "Docs", href: "https://example.com/docs" },
+    bare: { component: "Link", href: "https://example.com" },
+    badLink: { component: "Link", text: "No target" },
+    divider: { component: "Divider" },
+    number: { component: "Text", text: 42 },
+    boolean: { component: "Text", text: false },
+    empty: { component: "Text" },
+    image: { component: "Image", url: "https://example.com/image.png" },
+    badImage: { component: "Image" },
+    alert: { component: "Alert", title: "Notice" },
+    emptyAlert: { component: "Alert" },
+  }
+  expect(buildOneBotA2UISegments({ components, rootId: "root", dataModel: {} }, "")).toEqual([
+    { type: "text", text: "Docs (https://example.com/docs)\nhttps://example.com\n———\n42\nfalse" },
+    { type: "image", url: "https://example.com/image.png", alt: undefined },
+    { type: "text", text: "⚠️ Notice" },
+  ])
+})
+
+it("does not insert empty text around an image-only surface", () => {
+  expect(
+    buildOneBotA2UISegments(
+      {
+        rootId: "image",
+        dataModel: {},
+        components: {
+          image: { component: "Image", src: "https://example.com/image.png" },
+        },
+      },
+      ""
+    )
+  ).toEqual([{ type: "image", url: "https://example.com/image.png", alt: undefined }])
+})
+
+it("uses a visible fallback for an unsupported surface with no mirror", () => {
+  expect(
+    buildOneBotA2UISegments(
+      {
+        rootId: "chart",
+        dataModel: {},
+        components: {
+          chart: { component: "Chart" },
+        },
+      },
+      ""
+    )
+  ).toEqual([{ type: "text", text: "[empty]" }])
+})

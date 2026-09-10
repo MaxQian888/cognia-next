@@ -46,23 +46,58 @@ describe("startWebhookTransport", () => {
   it("subscribes to the adapter's webhook channel", async () => {
     makeListen()
     const ctrl = new AbortController()
-    await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal })
+    await startWebhookTransport({
+      adapterId: "dc-1",
+      selfId: "self",
+      signal: ctrl.signal,
+      emit: jest.fn(async () => {}),
+    })
     expect(mockListen).toHaveBeenCalledWith("connectors://webhook/dc-1", expect.any(Function))
   })
 
   it("dispatches a component interaction as a connector callback", async () => {
     const bridge = makeListen()
     const ctrl = new AbortController()
-    await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal })
+    await startWebhookTransport({
+      adapterId: "dc-1",
+      selfId: "self",
+      signal: ctrl.signal,
+      emit: jest.fn(async () => {}),
+    })
     bridge.emit(componentInteraction)
     await Promise.resolve()
     expect(busDispatch).toHaveBeenCalledTimes(1)
   })
 
+  it("forwards verified application commands to adapter ingress", async () => {
+    const bridge = makeListen()
+    const emit = jest.fn(async () => {})
+    const ctrl = new AbortController()
+    await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal, emit })
+    bridge.emit({
+      ...componentInteraction,
+      type: 2,
+      data: { type: 1, name: "ask", options: [{ name: "prompt", type: 3, value: "hello" }] },
+    })
+    await Promise.resolve()
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plainText: "/ask\nprompt: hello",
+        mentions: { selfMentioned: true, users: [] },
+      })
+    )
+    expect(busDispatch).not.toHaveBeenCalled()
+  })
+
   it("ignores non-interaction and non-object payloads", async () => {
     const bridge = makeListen()
     const ctrl = new AbortController()
-    await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal })
+    await startWebhookTransport({
+      adapterId: "dc-1",
+      selfId: "self",
+      signal: ctrl.signal,
+      emit: jest.fn(async () => {}),
+    })
     bridge.emit("not-an-object")
     bridge.emit({ type: 2, id: "i2", token: "t", channel_id: "c1", data: {} }) // command → parse returns null
     await Promise.resolve()
@@ -76,6 +111,7 @@ describe("startWebhookTransport", () => {
       adapterId: "dc-1",
       selfId: "self",
       signal: ctrl.signal,
+      emit: jest.fn(async () => {}),
     })
     handle.stop()
     expect(bridge.unlisten).toHaveBeenCalledTimes(1)
@@ -84,7 +120,12 @@ describe("startWebhookTransport", () => {
   it("aborting the signal unlistens the subscription", async () => {
     const bridge = makeListen()
     const ctrl = new AbortController()
-    await startWebhookTransport({ adapterId: "dc-1", selfId: "self", signal: ctrl.signal })
+    await startWebhookTransport({
+      adapterId: "dc-1",
+      selfId: "self",
+      signal: ctrl.signal,
+      emit: jest.fn(async () => {}),
+    })
     ctrl.abort()
     expect(bridge.unlisten).toHaveBeenCalledTimes(1)
   })

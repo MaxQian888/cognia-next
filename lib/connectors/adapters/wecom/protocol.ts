@@ -39,20 +39,24 @@ export interface WeComMediaRef {
 export interface WeComInboundMsgBody {
   msgid: string
   aibotid: string
-  chatid: string
+  /** Only group callbacks require chatid; private callbacks use from.userid. */
+  chatid?: string
   chattype: WeComChatType
   from?: { userid?: string; name?: string }
   msgtype: "text" | "markdown" | "image" | "voice" | "file" | "video" | "mixed"
   text?: { content?: string }
   markdown?: { content?: string }
   image?: WeComMediaRef
-  voice?: WeComMediaRef & { transcript?: string }
+  /** Official voice callbacks contain transcription; URL is a legacy extension. */
+  voice?: { content?: string; url?: string; aeskey?: string; transcript?: string }
   file?: WeComMediaRef & { filename?: string; fileext?: string }
   video?: WeComMediaRef
   /** "mixed" user content — an ordered list of text/image items. */
   mixed?: {
     msg_item?: Array<{ msgtype?: string; text?: { content?: string }; image?: WeComMediaRef }>
   }
+  /** Quoted content has no source message id in the official protocol. */
+  quote?: Pick<WeComInboundMsgBody, "msgtype" | "text" | "image" | "mixed" | "voice" | "file">
 }
 
 export type WeComEventType =

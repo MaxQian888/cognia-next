@@ -4,14 +4,29 @@
  * The platform encrypts CDN media with AES-128-ECB, which the browser's Web
  * Crypto does NOT support (only CBC/CTR/GCM). So this module ships a compact,
  * self-contained AES-128 inverse cipher (FIPS-197), verified against the
- * standard test vector in the co-located test. Inbound only — outbound media
- * (which would need ECB *encryption* + the CDN upload handshake) is not
- * supported in v1.
+ * standard test vector in the co-located test. Outbound media uses the same
+ * key schedule for encryption and the official getuploadurl/CDN handshake.
  *
  * Download goes through the Rust attachment cache (`fetch_attachment` →
  * `connectors_attachment_read`), NOT a renderer `fetch()` — the CDN host
  * sends no CORS headers, so a webview fetch is blocked before it starts.
  */
+
+import { readBinaryFile, statFile } from "@/lib/file/file-operations"
+import { fileUriToPath } from "@/lib/files/path-uri"
+import { isTauri } from "@/lib/tauri"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { md5Hex } from "../wecom/md5"
+import type { AdapterContext } from "@/types/connectors/adapter"
+import type { IlinkOutboundMedia } from "./serialize"
+import {
+  buildIlinkHeaders,
+  ilinkResultCode,
+  ILINK_PATHS,
+  ILINK_CHANNEL_VERSION,
+  ILINK_ITEM,
+  type IlinkMediaItem,
+} from "./protocol"
 
 import { connectorsAttachmentRead } from "@/lib/connectors/tauri/commands"
 
@@ -154,9 +169,15 @@ function normalizeKey(aesKeyBase64: string): Uint8Array {
 }
 
 function pkcs7Unpad(data: Uint8Array): Uint8Array {
-  if (data.length === 0) return data
+  if (data.length === 0) throw new Error("Invalid iLink PKCS7 padding")
   const pad = data[data.length - 1]
-  if (pad < 1 || pad > 16 || pad > data.length) return data // tolerate non-padded
+  if (
+    pad < 1 ||
+    pad > 16 ||
+    pad > data.length ||
+    !data.subarray(data.length - pad).every((byte) => byte === pad)
+  )
+    throw new Error("Invalid iLink PKCS7 padding")
   return data.subarray(0, data.length - pad)
 }
 
@@ -211,4 +232,190 @@ export async function fetchAndDecryptIlinkMediaViaTauri(
   const bytes = base64ToBytes(b64)
   if (!aesKeyBase64) return bytes
   return decryptIlinkMedia(bytes, aesKeyBase64)
+}
+
+/** AES-128-ECB encryption with mandatory PKCS#7 padding, as required by iLink CDN. */
+export function encryptIlinkMedia(plain: Uint8Array, key: Uint8Array): Uint8Array {
+  if (key.length !== 16) throw new Error("AES-128 requires a 16-byte key")
+  const pad = 16 - (plain.length % 16)
+  const out = new Uint8Array(plain.length + pad)
+  out.set(plain)
+  out.fill(pad, plain.length)
+  const expanded = keyExpansion(key)
+  for (let offset = 0; offset < out.length; offset += 16) {
+    const state = out.subarray(offset, offset + 16)
+    for (let i = 0; i < 16; i++) state[i] ^= expanded[i]
+    for (let round = 1; round <= 10; round++) {
+      for (let i = 0; i < 16; i++) state[i] = SBOX[state[i]]
+      for (let row = 1; row < 4; row++) {
+        const values = [state[row], state[row + 4], state[row + 8], state[row + 12]]
+        for (let col = 0; col < 4; col++) state[row + 4 * col] = values[(col + row) % 4]
+      }
+      if (round < 10) {
+        for (let col = 0; col < 4; col++) {
+          const i = col * 4
+          const [a, b, c, d] = state.slice(i, i + 4)
+          state[i] = gmul(a, 2) ^ gmul(b, 3) ^ c ^ d
+          state[i + 1] = a ^ gmul(b, 2) ^ gmul(c, 3) ^ d
+          state[i + 2] = a ^ b ^ gmul(c, 2) ^ gmul(d, 3)
+          state[i + 3] = gmul(a, 3) ^ b ^ c ^ gmul(d, 2)
+        }
+      }
+      for (let i = 0; i < 16; i++) state[i] ^= expanded[round * 16 + i]
+    }
+  }
+  return out
+}
+
+export class IlinkMediaError extends Error {
+  constructor(
+    message: string,
+    public readonly retryable = false,
+    public readonly sessionExpired = false
+  ) {
+    super(message)
+    this.name = "IlinkMediaError"
+  }
+}
+
+/** Upload bytes without publishing a message. The returned item is ready for sendmessage. */
+export async function uploadIlinkMedia(input: {
+  adapterId: string
+  baseUrl: string
+  token: string
+  userId: string
+  segment: IlinkOutboundMedia
+  tauri: AdapterContext["tauri"]
+}): Promise<{ itemType: number; mediaItem: IlinkMediaItem }> {
+  const { segment, tauri } = input
+  let plain: Uint8Array
+  const inline = "dataBase64" in segment ? segment.dataBase64 : undefined
+  const dataUrl = /^data:([^;,]*);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(segment.url)
+  if (inline || dataUrl) {
+    const encoded = inline ?? dataUrl![2]
+    if (encoded.length > Math.ceil(ILINK_MEDIA_MAX_BYTES / 3) * 4)
+      throw new IlinkMediaError("iLink media exceeds the 20 MiB attachment limit")
+    try {
+      plain = base64ToBytes(encoded)
+    } catch {
+      throw new IlinkMediaError("Invalid media base64")
+    }
+  } else if (/^file:/i.test(segment.url)) {
+    if (!isTauri()) throw new IlinkMediaError("Local media requires the desktop runtime")
+    let url: URL
+    try {
+      url = new URL(segment.url)
+    } catch {
+      throw new IlinkMediaError("Invalid local media file URI")
+    }
+    if (url.hostname && url.hostname !== "localhost")
+      throw new IlinkMediaError("Remote file hosts are not supported")
+    const path = fileUriToPath(url.href)
+    if (!path) throw new IlinkMediaError("Invalid local media file URI")
+    const metadata = await statFile(path)
+    if (!metadata.isFile) throw new IlinkMediaError("Local media must be a regular file")
+    if (
+      !Number.isSafeInteger(metadata.size) ||
+      metadata.size < 1 ||
+      metadata.size > ILINK_MEDIA_MAX_BYTES
+    )
+      throw new IlinkMediaError("iLink media must contain 1 byte to 20 MiB")
+    plain = await readBinaryFile(path)
+  } else {
+    if (!/^https?:\/\//i.test(segment.url))
+      throw new IlinkMediaError(
+        "iLink media requires an HTTP URL, local file URI, or inline base64 bytes"
+      )
+    plain = await fetchAndDecryptIlinkMediaViaTauri({
+      adapterId: input.adapterId,
+      url: segment.url,
+      fetchAttachment: tauri.fetchAttachment,
+    })
+  }
+  if (plain.length === 0 || plain.length > ILINK_MEDIA_MAX_BYTES)
+    throw new IlinkMediaError("iLink media must contain 1 byte to 20 MiB")
+  const key = crypto.getRandomValues(new Uint8Array(16))
+  const hex = (bytes: Uint8Array) =>
+    Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+  const aeskey = hex(key)
+  const filekey = hex(crypto.getRandomValues(new Uint8Array(16)))
+  const cipher = encryptIlinkMedia(plain, key)
+  const mediaType = segment.type === "image" ? 1 : segment.type === "video" ? 2 : 3
+  const handshake = await tauri.httpRequest({
+    url: `${input.baseUrl}${ILINK_PATHS.getUploadUrl}`,
+    method: "POST",
+    headers: buildIlinkHeaders(input.token),
+    timeoutMs: 15_000,
+    body: JSON.stringify({
+      filekey,
+      media_type: mediaType,
+      to_user_id: input.userId,
+      rawsize: plain.length,
+      rawfilemd5: md5Hex(plain),
+      filesize: cipher.length,
+      no_need_thumb: true,
+      aeskey,
+      base_info: { channel_version: ILINK_CHANNEL_VERSION },
+    }),
+  })
+  let result: { upload_full_url?: string; upload_param?: string; errmsg?: string }
+  try {
+    result = JSON.parse(handshake.body)
+  } catch {
+    throw new IlinkMediaError("Invalid getuploadurl response", true)
+  }
+  const code = ilinkResultCode(result)
+  if (handshake.status >= 400 || code !== 0)
+    throw new IlinkMediaError(
+      result?.errmsg ?? `getuploadurl HTTP ${handshake.status}, ret ${code}`,
+      handshake.status === 429 || handshake.status >= 500,
+      code === -14
+    )
+  const uploadUrl =
+    result.upload_full_url?.trim() ||
+    (result.upload_param
+      ? `https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=${encodeURIComponent(result.upload_param)}&filekey=${encodeURIComponent(filekey)}`
+      : undefined)
+  if (!uploadUrl || !/^https:\/\//i.test(uploadUrl))
+    throw new IlinkMediaError("getuploadurl returned no HTTPS upload URL")
+  let downloadParam: string | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await proxyFetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: cipher as Uint8Array<ArrayBuffer>,
+        timeout: 60_000,
+        blockPrivateHosts: true,
+      })
+      if (response.status >= 400 && response.status < 500)
+        throw new IlinkMediaError(`CDN upload HTTP ${response.status}`)
+      if (response.status !== 200)
+        throw new IlinkMediaError(`CDN upload HTTP ${response.status}`, true)
+      downloadParam = response.headers.get("x-encrypted-param")
+      if (!downloadParam) throw new IlinkMediaError("CDN upload omitted x-encrypted-param", true)
+      break
+    } catch (error) {
+      if ((error instanceof IlinkMediaError && !error.retryable) || attempt === 2) throw error
+    }
+  }
+  const media = { encrypt_query_param: downloadParam!, aes_key: btoa(aeskey), encrypt_type: 1 }
+  if (segment.type === "image")
+    return { itemType: ILINK_ITEM.image, mediaItem: { media, mid_size: cipher.length } }
+  if (segment.type === "video")
+    return { itemType: ILINK_ITEM.video, mediaItem: { media, video_size: cipher.length } }
+  const mime = segment.mimeType ?? dataUrl?.[1]
+  const extension = mime?.split("/")[1]?.replace(/[^a-zA-Z0-9]/g, "") || "bin"
+  let name = segment.type === "file" ? segment.name : ""
+  if (!name && !dataUrl) {
+    try {
+      name = decodeURIComponent(new URL(segment.url).pathname.split("/").pop() || "")
+    } catch {
+      /* Use the MIME-derived fallback. */
+    }
+  }
+  return {
+    itemType: ILINK_ITEM.file,
+    mediaItem: { media, file_name: name || `audio.${extension}`, len: String(plain.length) },
+  }
 }

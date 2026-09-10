@@ -109,3 +109,32 @@ describe("parseSlackInteractivePayload", () => {
     expect(parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, payload)).toBeNull()
   })
 })
+
+it("routes plain text changes as input callbacks", () => {
+  const result = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+    type: "block_actions",
+    user: { id: "U" },
+    channel: { id: "C" },
+    actions: [
+      { action_id: "a2ui:s:field:input", type: "plain_text_input", value: "Updated value" },
+    ],
+  })
+  expect(result).toMatchObject({ actionType: "input", value: "Updated value" })
+})
+
+it.each([{ selected_options: [] }, { selected_options: [{ value: "true" }] }])(
+  "preserves checkbox selections $selected_options",
+  ({ selected_options }) => {
+    const result = parseSlackInteractivePayload(ADAPTER_ID, SELF_ID, {
+      type: "block_actions",
+      user: { id: "U" },
+      channel: { id: "C" },
+      actions: [{ action_id: "a2ui:s:check:change", type: "checkboxes", selected_options }],
+    })
+    expect(result).toMatchObject({
+      actionType: "checkbox",
+      value: selected_options[0]?.value ?? "",
+      payload: { values: selected_options.map((option) => option.value) },
+    })
+  }
+)

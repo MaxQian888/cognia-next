@@ -199,3 +199,39 @@ describe("buildSlackA2UIBlocks", () => {
     })
   })
 })
+
+it("preserves canonical Card.description and Alert.message", async () => {
+  const surface: A2UISegmentContent = {
+    rootId: "root",
+    dataModel: {},
+    components: {
+      root: { component: "Column", children: ["card", "alert"] },
+      card: { component: "Card", title: "Summary", description: "Card details" },
+      alert: { component: "Alert", title: "Notice", message: "Canonical alert message" },
+    },
+  }
+  const result = await buildSlackA2UIBlocks(baseInput(surface))
+  expect(JSON.stringify(result)).toContain("Card details")
+  expect(JSON.stringify(result)).toContain("Canonical alert message")
+})
+
+it.each(["Select", "RadioGroup", "Checkbox", "DatePicker", "TimePicker", "TextField", "TextArea"])(
+  "enables callback dispatch for message %s inputs",
+  async (component) => {
+    const blocks = await buildSlackA2UIBlocks(
+      baseInput({
+        rootId: "input",
+        dataModel: {},
+        components: {
+          input: { component, label: "Value", options: [{ value: "one", label: "One" }] },
+        },
+      })
+    )
+    expect(blocks[0]).toMatchObject({ type: "input", dispatch_action: true })
+    if (component === "TextField" || component === "TextArea") {
+      expect(blocks[0]).toMatchObject({
+        element: { dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] } },
+      })
+    }
+  }
+)

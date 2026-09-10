@@ -100,6 +100,10 @@ export interface LarkAdapterOptions {
    * delivery stops so the host can preserve the reply as a draft.
    */
   sendAsUser?: boolean
+  /** New group requests open isolated reply threads by default. */
+  replyInThread?: boolean
+  /** Reachable web client connected to this host; used by run details buttons. */
+  webEntryBaseUrl?: string | null
   transport: "webhook" | "long-connection"
   /**
    * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
@@ -147,7 +151,7 @@ function larkOutboundError(err: unknown): OutboundError {
     // 99991400 is Lark's app frequency-limit business code (shipped inside
     // an HTTP 400) — same meaning as a bare 429 from the gateway.
     if (err.status === 429 || err.code === 99991400) {
-      return { code: "rate_limited", message, retryable: true }
+      return { code: "rate_limited", message, retryable: true, retryAfterMs: err.retryAfterMs }
     }
     if (
       err.status === 401 ||
@@ -306,6 +310,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       // with `code: null` the main send path never triggered a TAT refresh.
       throw new LarkApiError({
         status: resp.status,
+        headers: resp.headers,
         code: extractLarkCode(resp.body),
         message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
       })
@@ -314,6 +319,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
       throw new LarkApiError({
         status: resp.status,
+        headers: resp.headers,
         code: parsed.code,
         message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
       })
@@ -563,7 +569,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           )
         }
       }
-      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
+      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope, {
+        replyInThread: opts.replyInThread !== false,
+      })
       if (!event) {
         loggers.network.warn("[lark] inbound envelope not parsed into an event", {
           id: opts.id,
@@ -764,28 +772,51 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     }
     const chatId = target.address.containerId
     const conversationKey = target.address.conversationKey
+    const topicId = target.address.topicId
+    const managedThread = topicId?.startsWith("om_") === true
+    let threadId = topicId
+    let rootItems: Array<Record<string, unknown>> | undefined
+    if (managedThread) {
+      // Managed topics use the stable root message id locally. The history
+      // API requires the platform's allocated omt_ id, obtainable from the root.
+      const rootResponse = (await doRequest(
+        "GET",
+        `/im/v1/messages/${encodeURIComponent(topicId!)}`
+      )) as { data?: { items?: Array<Record<string, unknown>> } } | null
+      const root = rootResponse?.data?.items?.find((item) => item.message_id === topicId)
+      if (!root || root.chat_id !== chatId) {
+        throw new Error("Lark thread root could not be verified in the requested chat")
+      }
+      threadId = typeof root.thread_id === "string" && root.thread_id ? root.thread_id : undefined
+      // A newly created root can have no replies and no allocated thread yet.
+      if (!threadId) rootItems = [root]
+    }
     const pageSize = Math.max(1, Math.min(50, pageOpts.max))
     const params: Record<string, string> = {
-      container_id_type: "chat",
-      container_id: chatId,
+      container_id_type: topicId ? "thread" : "chat",
+      container_id: threadId ?? chatId,
       page_size: String(pageSize),
     }
     if (cursor?.pageToken) params["page_token"] = cursor.pageToken
-    if (cursor?.afterTimestamp !== undefined) {
+    // Lark does not support time ranges on thread containers. Filter the
+    // returned items locally while retaining the platform pagination cursor.
+    if (!topicId && cursor?.afterTimestamp !== undefined) {
       params["start_time"] = toEpochSeconds(String(cursor.afterTimestamp))
     }
-    if (cursor?.beforeTimestamp !== undefined) {
+    if (!topicId && cursor?.beforeTimestamp !== undefined) {
       params["end_time"] = toEpochSeconds(String(cursor.beforeTimestamp))
     }
 
     const search = new URLSearchParams(params).toString()
-    const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
-      data?: {
-        items?: Array<Record<string, unknown>>
-        page_token?: string
-        has_more?: boolean
-      }
-    } | null
+    const response = rootItems
+      ? { data: { items: rootItems } }
+      : ((await doRequest("GET", `/im/v1/messages?${search}`)) as {
+          data?: {
+            items?: Array<Record<string, unknown>>
+            page_token?: string
+            has_more?: boolean
+          }
+        } | null)
 
     const events: NormalizedInboundEvent[] = []
     const items = response?.data?.items ?? []
@@ -808,6 +839,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         mentions?: unknown
         create_time?: string
         thread_id?: string | null
+        root_id?: string | null
+        parent_id?: string | null
         deleted?: boolean
       }
       if (raw.deleted === true || raw.msg_type === "system") continue
@@ -820,6 +853,8 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         mentions: raw.mentions,
         create_time: raw.create_time,
         thread_id: raw.thread_id ?? null,
+        root_id: raw.root_id ?? null,
+        parent_id: raw.parent_id ?? null,
       }
       const envelope: LarkEventEnvelope = {
         schema: "2.0",
@@ -832,13 +867,22 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           message: normalizedMessage as unknown as LarkEventEnvelope["event"]["message"],
         },
       }
-      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
-      // Feishu only exposes chat-level history. A response may therefore
-      // contain the parent chat and every topic in it; retain exactly the
-      // requested opaque conversation scope after normalisation.
-      if (event?.conversationKey === conversationKey) {
-        events.push(event)
+      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope, {
+        replyInThread: managedThread,
+      })
+      if (event?.conversationKey !== conversationKey) continue
+      if (topicId) {
+        const created = Number(raw.create_time) / 1000
+        const after = cursor?.afterTimestamp
+        const before = cursor?.beforeTimestamp
+        if (
+          !Number.isFinite(created) ||
+          (after !== undefined && created < Number(toEpochSeconds(String(after)))) ||
+          (before !== undefined && created > Number(toEpochSeconds(String(before))))
+        )
+          continue
       }
+      events.push(event)
     }
 
     const nextToken = response?.data?.page_token
@@ -1057,7 +1101,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
     },
     id: opts.id,
-    runPresentation: createLarkRunPresentationDriver(doRequest),
+    runPresentation: createLarkRunPresentationDriver(doRequest, {
+      statusReactions: true,
+      webEntryBaseUrl: opts.webEntryBaseUrl,
+    }),
     runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark"),
     historyCursorKind: "timestamp",
     start,

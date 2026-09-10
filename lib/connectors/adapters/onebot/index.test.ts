@@ -444,7 +444,10 @@ describe("createOneBotAdapter — identity probe", () => {
     respondByAction(
       bus,
       "ob-v12fresh",
-      { get_self_info: { user_id: 100000, user_displayname: "V12 Bot" } },
+      {
+        get_self_info: { user_id: 100000, user_displayname: "V12 Bot" },
+        get_supported_actions: ["upload_file", "send_message", "delete_message"],
+      },
       ["get_version_info", "get_login_info"]
     )
 
@@ -473,6 +476,20 @@ describe("createOneBotAdapter — identity probe", () => {
         lastWhoamiResult: { botName: "V12 Bot", appId: "100000", openId: "100000" },
       })
     )
+    expect(mockUpdateAdapter).toHaveBeenCalledWith(
+      "ob-v12fresh",
+      expect.objectContaining({
+        implMetadata: expect.objectContaining({
+          features: expect.arrayContaining(["upload_file"]),
+        }),
+      })
+    )
+    await adapter.delete!("message-1")
+    expect(
+      mockOnebotSend.mock.calls.some((call) =>
+        String(call[1]).includes('"action":"delete_message"')
+      )
+    ).toBe(true)
     await adapter.stop()
   })
 
@@ -836,39 +853,60 @@ describe("createOneBotAdapter — health & activity", () => {
     await adapter.stop()
   })
 
-  it("send() returns a non-retryable validation error for v12 media (upload_file gap)", async () => {
-    const bus = createEventBus()
-    mockListen.mockImplementation(bus.listenImpl)
-    respondByAction(bus, "ob-v12media", {})
+  it.each([true, false])(
+    "v12 media respects upload_file discovery (supported=%s)",
+    async (supported) => {
+      const bus = createEventBus()
+      mockListen.mockImplementation(bus.listenImpl)
+      respondByAction(bus, "ob-v12media", {
+        get_supported_actions: supported ? ["upload_file", "send_message"] : ["send_message"],
+        upload_file: { file_id: "uploaded-1" },
+        send_message: { message_id: "sent-1" },
+      })
 
-    const adapter = makeAdapter("ob-v12media")
-    const { ctx } = makeCtx()
-    await adapter.start(ctx)
+      const adapter = makeAdapter("ob-v12media")
+      const { ctx } = makeCtx()
+      await adapter.start(ctx)
 
-    const v12Msg = {
-      id: "evt-1",
-      time: 1700000000,
-      type: "message",
-      detail_type: "private",
-      message_id: "m-1",
-      user_id: "200001",
-      self: { platform: "qq", user_id: "100000" },
-      message: [{ type: "text", data: { text: "seed" } }],
+      const v12Msg = {
+        id: "evt-1",
+        time: 1700000000,
+        type: "message",
+        detail_type: "private",
+        message_id: "m-1",
+        user_id: "200001",
+        self: { platform: "qq", user_id: "100000" },
+        message: [{ type: "text", data: { text: "seed" } }],
+      }
+      bus.trigger("connectors://onebot/ob-v12media/event", JSON.stringify(v12Msg))
+      await new Promise((r) => setTimeout(r, 20))
+
+      const result = await adapter.send({
+        conversationRef: { platform: "onebot", adapterId: "ob-v12media", chatKey: "p:200001" },
+        segments: [{ type: "image", url: "https://x.com/a.png" }],
+        metadata: { idempotencyKey: "k-v12m" },
+      })
+      if (supported) {
+        expect(result).toMatchObject({ ok: true, platformMessageId: "sent-1" })
+        const calls = mockOnebotSend.mock.calls.map((call) => JSON.parse(call[1]))
+        expect(calls.map((call) => call.action)).toEqual([
+          "get_supported_actions",
+          "upload_file",
+          "send_message",
+        ])
+        expect(calls[1].params).toEqual({ type: "url", name: "a.png", url: "https://x.com/a.png" })
+        expect(calls[2].params.message).toEqual([
+          { type: "image", data: { file_id: "uploaded-1" } },
+        ])
+      } else {
+        expect(result.ok).toBe(false)
+        expect(result.error?.code).toBe("validation")
+        expect(result.error?.retryable).toBe(false)
+        expect(result.error?.message).toContain("upload_file")
+      }
+      await adapter.stop()
     }
-    bus.trigger("connectors://onebot/ob-v12media/event", JSON.stringify(v12Msg))
-    await new Promise((r) => setTimeout(r, 20))
-
-    const result = await adapter.send({
-      conversationRef: { platform: "onebot", adapterId: "ob-v12media", chatKey: "p:200001" },
-      segments: [{ type: "image", url: "https://x.com/a.png" }],
-      metadata: { idempotencyKey: "k-v12m" },
-    })
-    expect(result.ok).toBe(false)
-    expect(result.error?.code).toBe("validation")
-    expect(result.error?.retryable).toBe(false)
-    expect(result.error?.message).toContain("requires upload_file")
-    await adapter.stop()
-  })
+  )
 
   it("enriches an inbound reply snippet via get_msg before emitting", async () => {
     const bus = createEventBus()

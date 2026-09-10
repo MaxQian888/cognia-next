@@ -198,6 +198,7 @@ interface ActionsBlock {
 
 interface InputBlock {
   type: "input"
+  dispatch_action: true
   block_id?: string
   label: { type: "plain_text"; text: string }
   element: Record<string, unknown>
@@ -233,8 +234,7 @@ export type SlackAnyBlock =
  *   - Image → image block (or section accessory when small)
  *   - Button / ButtonGroup → actions block with one element per Button
  *   - Select / RadioGroup / Checkbox / DatePicker / TimePicker /
- *     TextField / TextArea → input block (the inbound view_submission
- *     gathers their state on submit)
+ *     TextField / TextArea → input block with block_actions dispatch
  *   - Alert → section with `:warning:` prefix
  */
 export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise<SlackAnyBlock[]> {
@@ -264,12 +264,14 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
             text: { type: "plain_text", text: truncateWithEllipsis(title, HEADER_TEXT_MAX) },
           })
         }
+        const description = stringValue(node.raw.description)
+        if (description) out.push(sectionBlock(escapeSlackMrkdwn(description)))
         break
       }
       case "Alert": {
         flushActions()
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         const body = [title ? `*${title}*` : "", text].filter(Boolean).join(" — ")
         out.push(sectionBlock(`:warning: ${escapeSlackMrkdwn(body)}`))
         break
@@ -373,6 +375,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const label = stringValue(node.raw.label) || "Select"
         out.push({
           type: "input",
+          dispatch_action: true,
           block_id: `b_${node.id}`,
           label: { type: "plain_text", text: label },
           element: {
@@ -405,6 +408,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const label = stringValue(node.raw.label) || "Checkbox"
         out.push({
           type: "input",
+          dispatch_action: true,
           block_id: `b_${node.id}`,
           label: { type: "plain_text", text: label },
           element: {
@@ -430,6 +434,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const label = stringValue(node.raw.label) || "Date"
         out.push({
           type: "input",
+          dispatch_action: true,
           block_id: `b_${node.id}`,
           label: { type: "plain_text", text: label },
           element: { type: "datepicker", action_id: fullId },
@@ -451,6 +456,7 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const label = stringValue(node.raw.label) || "Time"
         out.push({
           type: "input",
+          dispatch_action: true,
           block_id: `b_${node.id}`,
           label: { type: "plain_text", text: label },
           element: { type: "timepicker", action_id: fullId },
@@ -473,12 +479,14 @@ export async function buildSlackA2UIBlocks(input: SlackA2UIMapperInput): Promise
         const label = stringValue(node.raw.label) || "Input"
         out.push({
           type: "input",
+          dispatch_action: true,
           block_id: `b_${node.id}`,
           label: { type: "plain_text", text: label },
           element: {
             type: "plain_text_input",
             action_id: fullId,
             multiline: node.component === "TextArea",
+            dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
             ...(stringValue(node.raw.placeholder)
               ? {
                   placeholder: {

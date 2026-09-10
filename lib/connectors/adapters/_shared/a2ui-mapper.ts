@@ -26,6 +26,9 @@ import type {
 } from "@/types/connectors/interaction"
 import type { A2UIComponentKind } from "@/types/connectors/capability"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import type { A2UIComponent } from "@/types/a2ui/schema"
+import { getComponentChildReferences } from "@/lib/a2ui/component-tree"
+import { getValueByPath } from "@/lib/a2ui/data-model"
 
 /**
  * A component node as the mapper sees it. We accept the unknown-typed
@@ -36,9 +39,9 @@ import type { A2UISegmentContent } from "@/types/connectors/segment"
 export interface A2UIWalkNode {
   id: string
   component: A2UIComponentKind | string
-  /** The full original node payload (text, options, action, etc.). */
+  /** Node payload with display bindings resolved; callback metadata is preserved. */
   raw: Record<string, unknown>
-  /** Direct child ids resolved from the original `children` array. */
+  /** Child ids from all component collection slots and required references. */
   childIds: string[]
 }
 
@@ -62,7 +65,8 @@ export function walkA2UISurface(
     visited.add(id)
     const raw = components[id]
     if (!raw || typeof raw !== "object") return
-    const node = raw as Record<string, unknown>
+    const node = resolveDisplayBindings(raw as Record<string, unknown>, surface.dataModel)
+    if (node.visible === false) return
     const childIds = extractChildIds(node)
     visit(
       {
@@ -84,26 +88,81 @@ export function walkA2UISurface(
  * Recover the child id list from an A2UI node. The shape differs per
  * component kind:
  *
- *   - Row / Column / Card / List / Tabs / Accordion / Drawer / Sheet /
- *     Sidebar / Collapsible: `children: string[]` (component ids).
- *   - Dialog: `body: string[]`.
- *   - ButtonGroup / RadioGroup: `options[].id` for the visual children
- *     (but options are typically inline payload, not separate components).
- *
- * Conservative default: when no recognisable child anchor exists, return
- * an empty list. Mapper-side projection still receives the `raw` node and
- * can decide to render leaves directly.
+ * Reuse the renderer's structural references, including footer/actions,
+ * nested tab/accordion bodies and step content. Keep legacy Dialog.body
+ * before its actions for existing connector-generated surfaces.
  */
 function extractChildIds(node: Record<string, unknown>): string[] {
-  // Common case — most layout components use `children`.
-  if (Array.isArray(node.children)) {
-    return node.children.filter((c): c is string => typeof c === "string")
+  const legacyBody =
+    node.component === "Dialog" && Array.isArray(node.body)
+      ? node.body.filter((id): id is string => typeof id === "string")
+      : []
+  return [
+    ...new Set([
+      ...legacyBody,
+      ...getComponentChildReferences(node as unknown as A2UIComponent).map((ref) => ref.id),
+    ]),
+  ]
+}
+
+// Only declarative display properties support bindings. In particular, an
+// action's bindingPayload may contain a literal file `path` and must survive.
+const BOUND_DISPLAY_FIELDS = new Set([
+  "visible",
+  "disabled",
+  "text",
+  "loading",
+  "value",
+  "error",
+  "options",
+  "checked",
+  "title",
+  "description",
+  "image",
+  "items",
+  "src",
+  "data",
+  "selectedRows",
+  "open",
+  "label",
+  "message",
+  "activeTab",
+  "pressed",
+  "profileId",
+  "content",
+  "fallbackContent",
+  "steps",
+  "currentStep",
+  "tableRows",
+  "chartData",
+  "networkNodes",
+  "networkEdges",
+  "plotPoints",
+  "simulationConfig",
+  "scenePrompt",
+  "audioPrompt",
+  "caption",
+  "detail",
+  "actionLabel",
+])
+
+function resolveDisplayBindings(
+  node: Record<string, unknown>,
+  dataModel: Record<string, unknown>
+): Record<string, unknown> {
+  const resolved = { ...node }
+  for (const [key, value] of Object.entries(node)) {
+    if (
+      BOUND_DISPLAY_FIELDS.has(key) &&
+      value &&
+      typeof value === "object" &&
+      "path" in value &&
+      typeof value.path === "string"
+    ) {
+      resolved[key] = getValueByPath(dataModel, value.path)
+    }
   }
-  // Dialog uses `body`.
-  if (node.component === "Dialog" && Array.isArray(node.body)) {
-    return (node.body as unknown[]).filter((c): c is string => typeof c === "string")
-  }
-  return []
+  return resolved
 }
 
 /**
@@ -313,13 +372,15 @@ export function generatePlainTextMirror(surface: A2UISegmentContent): string {
         break
       case "Alert": {
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         if (title || text) lines.push(`[!] ${title || ""}${title && text ? ": " : ""}${text || ""}`)
         break
       }
       case "Card": {
         const title = stringValue(node.raw.title)
         if (title) lines.push(`# ${title}`)
+        const description = stringValue(node.raw.description)
+        if (description) lines.push(description)
         break
       }
       case "Row":

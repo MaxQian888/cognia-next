@@ -158,3 +158,43 @@ describe("withTatRefresh", () => {
     expect(mockClearTokenCache).not.toHaveBeenCalled()
   })
 })
+
+describe("LarkApiError retry delay", () => {
+  it.each([undefined, "", " ", "no", "-1", "Infinity", "1e309"])(
+    "rejects invalid reset %s",
+    (reset) => {
+      const error = new LarkApiError({
+        status: 429,
+        code: 99991400,
+        message: "limited",
+        ...(reset !== undefined ? { headers: { "x-ogw-ratelimit-reset": reset } } : {}),
+      })
+      expect(error.retryAfterMs).toBeUndefined()
+    }
+  )
+  it("keeps zero and rounds fractional milliseconds up", () => {
+    for (const [reset, expected] of [
+      ["0", 0],
+      ["0.0001", 1],
+    ] as const) {
+      expect(
+        new LarkApiError({
+          status: 400,
+          code: 99991400,
+          message: "limited",
+          headers: { "X-Ogw-Ratelimit-Reset": reset },
+        }).retryAfterMs
+      ).toBe(expected)
+    }
+  })
+  it("ignores rate-limit headers on unrelated failures", () => {
+    expect(
+      new LarkApiError({
+        status: 403,
+        code: 99991672,
+        message: "denied",
+        headers: { "x-ogw-ratelimit-reset": "52" },
+      }).retryAfterMs
+    ).toBeUndefined()
+  })
+})

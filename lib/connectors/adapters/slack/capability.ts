@@ -76,20 +76,11 @@ export const SLACK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMa
   Row: "native",
   Column: "native",
   List: "native",
-  // Simulated tier (ADR-0009 v41 / B6) — these have no native Block Kit
-  // equivalent but can be stood in with quantised select / header+section
-  // / toggle button patterns. The mapper can opt in to emit these
-  // stand-ins; the assistant is warned via the capability prompt that
-  // they're multi-step UX (e.g., switching tab content requires a click +
-  // a follow-up message).
-  Slider: "simulated",
-  Tabs: "simulated",
-  Accordion: "simulated",
-  // ADR-0026 Track B — overlays via `views.open` Modal two-hop.
-  // The mapper emits a Block Kit Button whose `action_id` triggers a
-  // `connectorCallbackBindings` entry with `kind: "modal_open"`; on
-  // click, the adapter calls `views.open` with the surface's Input
-  // blocks. Modal submissions round-trip as `actionType: "submit"`.
-  Dialog: "simulated",
-  Drawer: "simulated",
+  // These containers can expose static child content, but the adapter has
+  // no slider/tab/toggle interaction or modal-opening callback flow.
+  Slider: "fallback",
+  Tabs: "fallback",
+  Accordion: "fallback",
+  Dialog: "fallback",
+  Drawer: "fallback",
 })

@@ -173,10 +173,10 @@ describe("serializeOutbound", () => {
         b2: { component: "Button", text: "No", action: "no" },
       },
     }
-    const { contents, a2uiBinding } = serializeOutbound(
+    const { contents, a2uiBindings } = serializeOutbound(
       req([{ type: "a2ui", surfaceId: "surf-1", content, plainTextMirror: "Choose: Yes / No" }])
     )
-    expect(a2uiBinding).toEqual({ surfaceId: "surf-1" })
+    expect(a2uiBindings).toEqual([{ surfaceId: "surf-1", contentIndex: 0 }])
     expect(asSend(contents[0]).format).toBe("org.matrix.custom.html")
     expect(asSend(contents[0]).formatted_body).toContain("<strong>Choose</strong>")
     expect(asSend(contents[0]).formatted_body).toContain("1. <strong>Yes</strong>")
@@ -192,10 +192,10 @@ describe("serializeOutbound", () => {
       dataModel: {},
       components: { root: { component: "Text", text: "just text" } },
     }
-    const { a2uiBinding, contents } = serializeOutbound(
+    const { a2uiBindings, contents } = serializeOutbound(
       req([{ type: "a2ui", surfaceId: "s", content, plainTextMirror: "just text" }])
     )
-    expect(a2uiBinding).toBeUndefined()
+    expect(a2uiBindings).toEqual([])
     expect(asSend(contents[0]).formatted_body).toContain("just text")
   })
 
@@ -218,6 +218,22 @@ describe("serializeOutbound", () => {
 })
 
 describe("a2uiToMatrixHtml", () => {
+  it("preserves card descriptions, canonical alert messages, and link buttons", () => {
+    const { html, hasInteractive } = a2uiToMatrixHtml({
+      rootId: "root",
+      dataModel: {},
+      components: {
+        root: { component: "Card", title: "Title", description: "Details", children: ["a", "b"] },
+        a: { component: "Alert", message: "Alert <message>" },
+        b: { component: "Button", text: "Open", href: "https://example.com" },
+      },
+    })
+    expect(html).toContain("Details")
+    expect(html).toContain("Alert &lt;message&gt;")
+    expect(html).toContain('<a href="https://example.com">Open</a>')
+    expect(hasInteractive).toBe(false)
+  })
+
   it("numbers select options", () => {
     const content: A2UISegmentContent = {
       rootId: "root",
@@ -235,6 +251,28 @@ describe("a2uiToMatrixHtml", () => {
 })
 
 describe("serializeEdit", () => {
+  it("preserves A2UI content and surrounding text in replacement messages", () => {
+    const content = serializeEdit(
+      "$target",
+      req([
+        { type: "text", text: "intro" },
+        {
+          type: "a2ui",
+          surfaceId: "s",
+          plainTextMirror: "Updated card",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: { root: { component: "Text", text: "Updated <card>" } },
+          },
+        },
+        { type: "text", text: "tail" },
+      ])
+    )
+    expect(content["m.new_content"]?.body).toBe("intro\nUpdated card\ntail")
+    expect(content["m.new_content"]?.formatted_body).toBe("intro<br/>Updated &lt;card&gt;<br/>tail")
+  })
+
   it("builds an m.replace content with new_content", () => {
     const content = serializeEdit("$target", req([{ type: "markdown", md: "**v2**" }]))
     expect(content["m.relates_to"]).toEqual({ rel_type: "m.replace", event_id: "$target" })
@@ -293,4 +331,53 @@ describe("serializeReaction", () => {
       content: { "m.relates_to": { rel_type: "m.annotation", event_id: "$t", key: "👍" } },
     })
   })
+})
+
+it("preserves A2UI fallback images and mirrors in both Matrix renderings", () => {
+  const request = req([
+    {
+      type: "a2ui",
+      surfaceId: "mixed",
+      plainTextMirror: "Complete table rows",
+      content: {
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { component: "Column", children: ["image", "button", "table"] },
+          image: {
+            component: "Image",
+            src: "https://example.com/image.png?a=1&b=2",
+            alt: "Diagram",
+          },
+          button: { component: "Button", text: "Continue" },
+          table: { component: "Table" },
+        },
+      },
+    },
+  ])
+  const result = serializeOutbound(request)
+  const content = result.contents[0] as { body: string; formatted_body: string }
+  expect(content.body).toContain("https://example.com/image.png?a=1&b=2")
+  expect(content.formatted_body).toContain('href="https://example.com/image.png?a=1&amp;b=2"')
+  expect(content.formatted_body).toContain("Complete table rows")
+  expect(content.formatted_body).toContain("Continue")
+  expect(result.downgrades).toEqual([
+    { from: "a2ui", to: "text", reason: expect.stringContaining("Image, Table") },
+  ])
+  expect(result.a2uiBindings).toEqual([{ surfaceId: "mixed", contentIndex: 0 }])
+  const edit = serializeEdit("$event", request)
+  expect(edit["m.new_content"]?.body).toContain("https://example.com/image.png")
+  expect(edit["m.new_content"]?.formatted_body).toContain("Complete table rows")
+})
+
+it("keeps non-web A2UI image references as escaped text instead of active links", () => {
+  const { html, imageReferences } = a2uiToMatrixHtml({
+    rootId: "image",
+    dataModel: {},
+    components: {
+      image: { component: "Image", src: "javascript:alert(1)", alt: "<diagram>" },
+    },
+  })
+  expect(html).toBe("[&lt;diagram&gt;] javascript:alert(1)")
+  expect(imageReferences).toEqual(["[<diagram>] javascript:alert(1)"])
 })

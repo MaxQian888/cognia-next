@@ -193,6 +193,40 @@ describe("parseDiscordInteraction", () => {
     expect(cb!.payload).toEqual({ name: "Alice", role: "admin" })
   })
 
+  it("preserves current Label modal values alongside legacy ActionRow values", () => {
+    const dispatch: DiscordDispatch = {
+      t: "INTERACTION_CREATE",
+      op: 0,
+      d: {
+        type: 5,
+        id: "INT_LABEL",
+        application_id: "APP",
+        token: "TOK",
+        channel_id: "C_xyz",
+        user: { id: "U", username: "A" },
+        data: {
+          custom_id: "a2ui:sfc:modal:submit",
+          components: [
+            { type: 18, component: { type: 4, custom_id: "name", value: "Alice" } },
+            { type: 18, component: { type: 4, custom_id: "notes", value: "" } },
+            { type: 18, component: { type: 3, custom_id: "choices", values: ["a", "b"] } },
+            { type: 18, component: { type: 23, custom_id: "checked", value: false } },
+            { type: 18, component: { type: 21, custom_id: "radio", value: null } },
+            { type: 1, components: [{ type: 4, custom_id: "legacy", value: "kept" }] },
+          ],
+        },
+      },
+    }
+    expect(parseDiscordInteraction(ADAPTER_ID, SELF_ID, dispatch)?.payload).toEqual({
+      name: "Alice",
+      notes: "",
+      choices: ["a", "b"],
+      checked: false,
+      radio: null,
+      legacy: "kept",
+    })
+  })
+
   it("returns null for application commands (type 2)", () => {
     const dispatch: DiscordDispatch = {
       t: "INTERACTION_CREATE",

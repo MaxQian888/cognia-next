@@ -34,11 +34,13 @@ export function buildOneBotA2UISegments(
       case "Card": {
         const title = stringValue(node.raw.title)
         if (title) lines.push(`【${title}】`)
+        const description = stringValue(node.raw.description)
+        if (description) lines.push(description)
         break
       }
       case "Alert": {
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         if (title || text) {
           lines.push(`⚠️ ${title || ""}${title && text ? ": " : ""}${text || ""}`)
         }

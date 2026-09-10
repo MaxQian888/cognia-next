@@ -33,6 +33,80 @@ describe("parseIlinkMessage", () => {
     expect(ref).toMatchObject({ userId: "alice@im.wechat", contextToken: "ctx-1", sessionId: "s1" })
   })
 
+  it("preserves official message identity, timestamp, nested CDN images and voice transcription", () => {
+    const ev = parseIlinkMessage(
+      ADP,
+      msg({
+        message_id: 12345,
+        create_time_ms: 1700000000000,
+        item_list: [
+          { type: ILINK_ITEM.image, image_item: { media: { encrypt_query_param: "a+b/=" } } },
+          { type: ILINK_ITEM.voice, voice_item: { text: "spoken words" } },
+          {
+            type: ILINK_ITEM.file,
+            file_item: {
+              media: { full_url: "https://cdn/file" },
+              file_name: "report.pdf",
+              len: "42",
+            },
+          },
+        ],
+      }),
+      5000
+    )
+    expect(ev).toMatchObject({ messageId: "12345", timestamp: 1700000000000 })
+    expect(ev!.segments).toEqual([
+      {
+        type: "image",
+        url: "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=a%2Bb%2F%3D",
+      },
+      { type: "text", text: "spoken words" },
+      {
+        type: "file",
+        url: "https://cdn/file",
+        name: "report.pdf",
+        mimeType: "application/octet-stream",
+        sizeBytes: 42,
+      },
+    ])
+  })
+
+  it("preserves quoted text and quoted media without inventing a replyable ID", () => {
+    const ev = parseIlinkMessage(
+      ADP,
+      msg({
+        item_list: [
+          {
+            type: ILINK_ITEM.text,
+            text_item: { text: "describe this" },
+            ref_msg: {
+              title: "Alice",
+              message_item: {
+                type: ILINK_ITEM.image,
+                image_item: { media: { full_url: "https://cdn/quote" } },
+              },
+            },
+          },
+          {
+            type: ILINK_ITEM.text,
+            text_item: { text: "and this" },
+            ref_msg: {
+              title: "Bob",
+              message_item: { type: ILINK_ITEM.text, text_item: { text: "prior text" } },
+            },
+          },
+        ],
+      })
+    )
+    expect(ev!.segments).toEqual([
+      { type: "reply", messageId: "", snippet: "Alice" },
+      { type: "image", url: "https://cdn/quote" },
+      { type: "text", text: "describe this" },
+      { type: "reply", messageId: "", snippet: "Bob | prior text" },
+      { type: "text", text: "and this" },
+    ])
+  })
+
   it("ignores bot-direction messages", () => {
     expect(parseIlinkMessage(ADP, msg({ message_type: ILINK_MSG.fromBot }))).toBeNull()
   })
@@ -157,5 +231,63 @@ describe("tryParseNumericCallback", () => {
         })
       )
     ).toBeNull()
+  })
+})
+
+describe("official and legacy media variants", () => {
+  it("preserves voice/video and safely normalizes absent or invalid file sizes", () => {
+    const ev = parseIlinkMessage(
+      ADP,
+      msg({
+        item_list: [
+          {
+            type: ILINK_ITEM.voice,
+            voice_item: { url: "https://cdn/voice", transcript: "legacy" },
+          },
+          {
+            type: ILINK_ITEM.voice,
+            voice_item: { media: { full_url: "https://cdn/new" }, text: "new" },
+          },
+          { type: ILINK_ITEM.video, video_item: { url: "https://cdn/video" } },
+          { type: ILINK_ITEM.file, file_item: { url: "https://cdn/file", len: "Infinity" } },
+        ],
+      })
+    )
+    expect(ev!.segments).toEqual([
+      { type: "voice", url: "https://cdn/voice", transcript: "legacy" },
+      { type: "voice", url: "https://cdn/new", transcript: "new" },
+      { type: "video", url: "https://cdn/video" },
+      {
+        type: "file",
+        url: "https://cdn/file",
+        name: "file",
+        mimeType: "application/octet-stream",
+        sizeBytes: 0,
+      },
+    ])
+  })
+  it("ignores missing content, unsupported items and empty quote metadata", () => {
+    for (const type of [1, 2, 3, 4, 5, 99])
+      expect(parseIlinkMessage(ADP, msg({ item_list: [{ type, ref_msg: {} }] }))).toBeNull()
+    expect(parseIlinkMessage(ADP, msg({ item_list: undefined }))).toBeNull()
+    expect(parseIlinkMessage(ADP, msg({ from_user_id: "" }))).toBeNull()
+  })
+  it("does not consume numeric actions when a digit is part of a larger message", () => {
+    const key = "wechat-personal:wx1:alice@im.wechat"
+    for (const extra of [
+      { type: ILINK_ITEM.text, text_item: { text: "please explain" } },
+      { type: ILINK_ITEM.image, image_item: { url: "https://cdn/image" } },
+    ]) {
+      setNumericAction(key, 1, "action-1")
+      expect(
+        tryParseNumericCallback(
+          ADP,
+          msg({ item_list: [{ type: ILINK_ITEM.text, text_item: { text: "1" } }, extra] })
+        )
+      ).toBeNull()
+    }
+    expect(tryParseNumericCallback(ADP, msg({ item_list: undefined }))).toBeNull()
+    expect(tryParseNumericCallback(ADP, msg({ from_user_id: "" }))).toBeNull()
+    expect(tryParseNumericCallback(ADP, msg({ context_token: "" }))).toBeNull()
   })
 })

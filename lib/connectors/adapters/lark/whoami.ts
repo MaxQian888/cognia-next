@@ -36,9 +36,8 @@ const LARK_BOT_INFO_URL = "https://open.feishu.cn/open-apis/bot/v3/info"
  *
  * Optional fields are omitted from the persisted row when the bot info
  * endpoint did not return them (e.g. `botAvatar` for legacy bots).
- * `tenantKey` and `scopes` are always undefined here because the bot
- * info endpoint does not expose them — see the connector-types.ts
- * comments for why.
+ * The endpoint does not expose tenant scope. Preserve a tenant previously
+ * learned from inbound events only when the verified bot identity is unchanged.
  */
 export interface LarkWhoamiResult {
   botName: string
@@ -46,6 +45,7 @@ export interface LarkWhoamiResult {
   appId: string
   openId: string
   activateStatus?: number
+  tenantKey?: string
 }
 
 interface LarkBotInfoResponse {
@@ -166,6 +166,11 @@ export async function probeBotIdentity(
   if (parsed.bot.avatar_url) result.botAvatar = parsed.bot.avatar_url
   if (typeof parsed.bot.activate_status === "number") {
     result.activateStatus = parsed.bot.activate_status
+  }
+
+  const previous = (await getAdapterInstance(adapterId))?.lastWhoamiResult
+  if (previous?.appId === appId && previous.openId === result.openId && previous.tenantKey) {
+    result.tenantKey = previous.tenantKey
   }
 
   await updateAdapterInstance(adapterId, {

@@ -11,13 +11,14 @@
  * A2UI surfaces project to DingTalk markdown (see {@link a2uiToDingTalkMarkdown}).
  */
 
-import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { OutboundRequest, SegmentDowngrade } from "@/types/connectors/outbound"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
 export type DingTalkMsgKey = "sampleText" | "sampleMarkdown"
 
 export interface DingTalkSerialized {
+  downgrades?: SegmentDowngrade[]
   msgKey: DingTalkMsgKey
   /** Object form; the caller JSON-stringifies it into the `msgParam` field. */
   msgParam: Record<string, string>
@@ -122,6 +123,7 @@ export function a2uiToDingTalkMarkdown(content: A2UISegmentContent): string {
  * there is nothing renderable to send.
  */
 export function serializeOutbound(req: OutboundRequest): DingTalkSerialized | null {
+  const downgrades: SegmentDowngrade[] = []
   const textParts: string[] = []
   const mdParts: string[] = []
   let usedMarkdown = false
@@ -148,10 +150,29 @@ export function serializeOutbound(req: OutboundRequest): DingTalkSerialized | nu
           textParts.push(seg.code)
           mdParts.push(seg.code)
           break
+        case "reply":
+        case "location":
+        case "poll": {
+          const text =
+            seg.type === "reply"
+              ? `> ${seg.snippet}`
+              : seg.type === "location"
+                ? `${seg.name ?? "Location"}: ${seg.lat},${seg.lon}`
+                : `${seg.question}\n${seg.options.map((option) => `- ${option}`).join("\n")}`
+          textParts.push(text)
+          mdParts.push(text)
+          downgrades.push({ from: seg.type, to: "text", reason: "dingtalk_text_alternative" })
+          break
+        }
         case "image":
         case "video":
         case "voice":
         case "file":
+          downgrades.push({
+            from: seg.type,
+            to: "markdown",
+            reason: "dingtalk_media_rendered_as_link",
+          })
           textParts.push(`[${seg.type}] ${seg.url}`)
           mdParts.push(`[${seg.type}](${seg.url})`)
           usedMarkdown = true
@@ -182,9 +203,17 @@ export function serializeOutbound(req: OutboundRequest): DingTalkSerialized | nu
 
   if (usedMarkdown) {
     const title = deriveTitle(markdown) || "Message"
-    return { msgKey: "sampleMarkdown", msgParam: { title, text: markdown } }
+    return {
+      msgKey: "sampleMarkdown",
+      msgParam: { title, text: markdown },
+      ...(downgrades.length ? { downgrades } : {}),
+    }
   }
-  return { msgKey: "sampleText", msgParam: { content: plain } }
+  return {
+    msgKey: "sampleText",
+    msgParam: { content: plain },
+    ...(downgrades.length ? { downgrades } : {}),
+  }
 }
 
 /** First non-empty markdown line (stripped of markdown syntax) as the card title. */

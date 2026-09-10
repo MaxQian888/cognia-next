@@ -46,6 +46,67 @@ export function escapeLarkMarkdown(text: string): string {
   return text.replace(/\\/g, "\\\\").replace(/@/g, "\\@")
 }
 
+function usesCommandFrame(surfaceId: string): boolean {
+  return /^(help:|welcome:|schedule-list-)/.test(surfaceId)
+}
+
+/** Shared Card 2.0 frame for command replies and help/welcome surfaces. */
+export function buildLarkCommandFrame(
+  title: string,
+  elements: Record<string, unknown>[],
+  tone: "info" | "success" | "warning" = "info"
+): Record<string, unknown> {
+  return {
+    schema: "2.0",
+    config: { update_multi: true, summary: { content: title } },
+    header: {
+      title: { tag: "plain_text", content: title },
+      template: tone === "warning" ? "orange" : tone === "success" ? "green" : "blue",
+      padding: "12px 16px 12px 16px",
+    },
+    body: { padding: "16px", vertical_spacing: "12px", elements },
+  }
+}
+
+/** Preserve every reply line while making command syntax easy to scan. */
+export function buildLarkCommandReply(
+  command: string,
+  text: string,
+  outcome: "applied" | "denied" | "unknown"
+): MessageSegment {
+  const read = ["commands", "status", "sessions", "dir", "tasks", "agent"].includes(command)
+  const tone = outcome !== "applied" ? "warning" : read ? "info" : "success"
+  const label =
+    outcome === "denied"
+      ? "未执行 · Not applied"
+      : outcome === "unknown"
+        ? "未知命令 · Unknown command"
+        : "命令回复 · Command reply"
+  // Escape dynamic values, including card mention tags, before adding styling.
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/([\\`*_\[\]])/g, "\\$1")
+  const lines = escaped.split("\n").map((line) => {
+    const field = line.match(/^(•\s+)([^:]+):\s*(.*)$/)
+    if (field) return `${field[1]}**${field[2]}**: ${field[3]}`
+    const commandLine = line.match(/^(•\s+)(\/[^—]+) — (.*)$/)
+    if (commandLine) return `**${commandLine[2].trim()}**\n${commandLine[3]}`
+    return line.endsWith(":") ? `**${line.slice(0, -1)}**` : line
+  })
+  const elements: Record<string, unknown>[] = []
+  // Bound the component count; long output stays intact in the final block.
+  for (let i = 0; i < lines.length; i += 8) {
+    elements.push({ tag: "markdown", content: lines.slice(i, i + 8).join("\n") })
+  }
+  const bounded = elements.length > 24 ? [{ tag: "markdown", content: escaped }] : elements
+  return {
+    type: "card",
+    card: { kind: "lark", payload: buildLarkCommandFrame(`/${command} · ${label}`, bounded, tone) },
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Segment → Lark body
 // ---------------------------------------------------------------------------
@@ -280,12 +341,19 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
         if (title) {
           header = { title: { content: title, tag: "plain_text" } }
         }
+        const description = stringValue(node.raw.description)
+        if (description) {
+          elements.push({
+            tag: "div",
+            text: { tag: "lark_md", content: escapeLarkMarkdown(description) },
+          })
+        }
         break
       }
       case "Alert": {
         flushAction()
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         elements.push({
           tag: "div",
           text: {
@@ -560,6 +628,31 @@ export async function buildLarkA2UICard(input: LarkA2UIMapperInput): Promise<Lar
     }
   }
 
+  if (usesCommandFrame(input.surfaceId)) {
+    const modern = elements.flatMap((element): Record<string, unknown>[] => {
+      if (element.tag === "div") {
+        const text = element.text as { content: string }
+        return [{ tag: "markdown", content: text.content.replace(/\\@/g, "@") }]
+      }
+      if (element.tag === "action") {
+        return (element.actions as Record<string, unknown>[]).map((button) => {
+          const { value, url, ...rest } = button
+          return {
+            ...rest,
+            behaviors: [url ? { type: "open_url", default_url: url } : { type: "callback", value }],
+          }
+        })
+      }
+      return [element]
+    })
+    return {
+      msg_type: "interactive",
+      content: JSON.stringify(
+        buildLarkCommandFrame(header?.title.content ?? input.surface.title ?? "Cognia", modern)
+      ),
+    }
+  }
+
   const card: Record<string, unknown> = { elements }
   if (header) card.header = header
   return {
@@ -599,6 +692,10 @@ export async function segmentsToLarkBodyAsync(
     conversationKey?: string
   }
 ): Promise<LarkMessageBody> {
+  const single = segments.length === 1 ? segments[0] : undefined
+  if (single?.type === "a2ui" && usesCommandFrame(single.surfaceId)) {
+    return buildLarkA2UICard({ ...ctx, surfaceId: single.surfaceId, surface: single.content })
+  }
   const hasA2UI = segments.some((s) => s.type === "a2ui")
   // A single markdown segment already renders as its own interactive card
   // via `segmentToLarkBody`; only multi-segment markdown needs the combiner.

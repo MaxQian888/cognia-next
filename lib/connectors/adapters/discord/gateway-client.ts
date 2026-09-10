@@ -407,6 +407,14 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
         return
       }
 
+      // Invalid sequence / expired session cannot be resumed. Discord requires
+      // a fresh Identify after these closes, using the original gateway URL.
+      if (closeCode === 4007 || closeCode === 4009) {
+        session.sessionId = null
+        session.resumeGatewayUrl = null
+        session.sequence = null
+      }
+
       // Reconnect delay
       if (!shouldResume) {
         attempts += 1

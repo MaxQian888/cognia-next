@@ -26,6 +26,7 @@ export interface WeComMediaSegment {
 export interface WeComSerialized {
   /** Combined markdown body (may be empty when the reply is media/card-only). */
   markdown: string
+  markdownChunks: string[]
   /** Interactive A2UI surfaces, in emission order, for template_card mapping. */
   a2uiSurfaces: A2UIMessageSegment[]
   /** Media segments needing a chunked upload before send. */
@@ -71,7 +72,22 @@ export function clampUtf8(input: string, maxBytes: number): string {
     if (enc.encode(input.slice(0, mid)).length <= maxBytes) lo = mid
     else hi = mid - 1
   }
+  if (lo < input.length && lo > 0 && /[\uD800-\uDBFF]/.test(input[lo - 1])) lo -= 1
   return input.slice(0, lo)
+}
+
+/** Preserve all text while respecting each wire message's UTF-8 byte limit. */
+export function chunkUtf8(input: string, maxBytes: number): string[] {
+  if (!Number.isInteger(maxBytes) || maxBytes < 4)
+    throw new Error("UTF-8 chunk limit must be at least 4 bytes")
+  const chunks: string[] = []
+  let remaining = input
+  while (remaining) {
+    const chunk = clampUtf8(remaining, maxBytes)
+    chunks.push(chunk)
+    remaining = remaining.slice(chunk.length)
+  }
+  return chunks
 }
 
 /**
@@ -155,8 +171,10 @@ export function serializeSegments(segments: MessageSegment[]): WeComSerialized {
     }
   }
 
+  const markdown = lines.join("\n\n").trim()
   return {
-    markdown: clampUtf8(lines.join("\n\n").trim(), WECOM_MARKDOWN_MAX_BYTES),
+    markdown,
+    markdownChunks: chunkUtf8(markdown, WECOM_MARKDOWN_MAX_BYTES),
     a2uiSurfaces,
     media,
     cards,

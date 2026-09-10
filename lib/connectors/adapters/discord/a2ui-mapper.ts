@@ -27,6 +27,8 @@ import {
   bindingHintFields,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 
+export class DiscordA2UIValidationError extends Error {}
+
 const MAX_BUTTONS_PER_ROW = 5
 const MAX_ACTION_ROWS_PER_MESSAGE = 5
 const CUSTOM_ID_MAX = 100
@@ -92,6 +94,7 @@ export async function buildDiscordA2UIPayload(
     nodes.push({ node, depth })
   })
 
+  const modalInputs = collectModalInputs(nodes)
   const embeds: Record<string, unknown>[] = []
   const actionRows: ActionRow[] = []
   let currentRow: ActionRow | null = null
@@ -108,9 +111,7 @@ export async function buildDiscordA2UIPayload(
         (currentRow.components[0] as { type: number }).type === 3)
     ) {
       if (actionRows.length >= MAX_ACTION_ROWS_PER_MESSAGE) {
-        // Drop overflow silently — the assistant should have stayed within
-        // Discord's row budget. Fallback text remains.
-        return currentRow ?? { type: 1, components: [] }
+        throw new DiscordA2UIValidationError("Discord messages support at most 5 action rows")
       }
       currentRow = { type: 1, components: [] }
       actionRows.push(currentRow)
@@ -132,7 +133,7 @@ export async function buildDiscordA2UIPayload(
         currentCardEmbed = {
           color: CARD_COLOUR,
           title: stringValue(node.raw.title),
-          description: "",
+          description: stringValue(node.raw.description),
         }
         break
       }
@@ -141,7 +142,7 @@ export async function buildDiscordA2UIPayload(
         embeds.push({
           color: ALERT_COLOUR,
           title: `⚠️ ${stringValue(node.raw.title) || "Alert"}`,
-          description: stringValue(node.raw.text),
+          description: stringValue(node.raw.message) || stringValue(node.raw.text),
         })
         break
       }
@@ -207,7 +208,6 @@ export async function buildDiscordA2UIPayload(
         })
         const href = stringValue(node.raw.href) || stringValue(node.raw.url)
         const row = ensureRow(false)
-        if (row.components.length >= MAX_BUTTONS_PER_ROW) break
         if (href) {
           row.components.push({
             type: 2, // Button
@@ -238,15 +238,32 @@ export async function buildDiscordA2UIPayload(
           componentId: node.id,
           conversationKey: input.conversationKey,
         })
+        if (
+          !Array.isArray(node.raw.options) ||
+          node.raw.options.length < 1 ||
+          node.raw.options.length > 25
+        ) {
+          throw new DiscordA2UIValidationError("Discord selects require 1 to 25 options")
+        }
+        if (
+          node.raw.options.some(
+            (o: unknown) =>
+              !o ||
+              typeof o !== "object" ||
+              !("value" in o) ||
+              (typeof o.value !== "string" && typeof o.value !== "number")
+          )
+        ) {
+          throw new DiscordA2UIValidationError(
+            "Discord select options require a string or number value"
+          )
+        }
         const options = Array.isArray(node.raw.options)
-          ? (node.raw.options as Array<Record<string, unknown>>)
-              .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
-              .slice(0, 25) // Discord max
-              .map((o) => ({
-                label: stringValue(o.label) || stringValue(o.value) || "option",
-                value: String(o.value),
-                description: stringValue(o.description) || undefined,
-              }))
+          ? (node.raw.options as Array<Record<string, unknown>>).map((o) => ({
+              label: stringValue(o.label) || stringValue(o.value) || "option",
+              value: String(o.value),
+              description: stringValue(o.description) || undefined,
+            }))
           : []
         if (options.length === 0) break
         const row = ensureRow(true) // exclusive row
@@ -284,7 +301,6 @@ export async function buildDiscordA2UIPayload(
   // modal definition; on click the adapter answers InteractionResponse type 9
   // (see `buildDiscordModalData`). The modal submit then arrives as a
   // MODAL_SUBMIT interaction and round-trips through the normal binding lookup.
-  const modalInputs = collectModalInputs(nodes)
   if (modalInputs.length > 0) {
     const dialogNode = nodes.find((n) => n.node.component === "Dialog")?.node
     const modalComponentId = dialogNode?.id ?? "modal"
@@ -295,6 +311,7 @@ export async function buildDiscordA2UIPayload(
       "Form"
     const fullId = buildActionId(input.surfaceId, modalComponentId, "submit")
     const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
+    buildDiscordModalData(wireId, { title, inputs: modalInputs })
     // One binding serves both hops: the trigger click (kind → modal_open) and
     // the modal submit (same custom_id echoed back on MODAL_SUBMIT).
     await recordCallbackBinding({
@@ -334,7 +351,7 @@ function stringValue(v: unknown): string {
 
 /**
  * Collect the surface's text inputs (TextField / TextArea) into modal-input
- * descriptors, capped at Discord's 5-per-modal limit. Order follows the
+ * descriptors, validating Discord's 5-per-modal limit. Order follows the
  * render-order walk so the modal fields match the surface's layout.
  */
 function collectModalInputs(
@@ -343,12 +360,11 @@ function collectModalInputs(
   const inputs: DiscordModalInput[] = []
   for (const { node } of nodes) {
     if (node.component !== "TextField" && node.component !== "TextArea") continue
-    if (inputs.length >= MAX_MODAL_INPUTS) break
     const label = stringValue(node.raw.label) || stringValue(node.raw.placeholder) || node.id
     const required = node.raw.required === true || stringValue(node.raw.required) === "true"
     inputs.push({
       customId: node.id,
-      label: label.slice(0, DISCORD_LABEL_MAX),
+      label,
       style: node.component === "TextArea" ? 2 : 1,
       required,
       placeholder: stringValue(node.raw.placeholder) || undefined,
@@ -357,39 +373,57 @@ function collectModalInputs(
       maxLength: typeof node.raw.maxLength === "number" ? node.raw.maxLength : undefined,
     })
   }
+  if (inputs.length > MAX_MODAL_INPUTS) {
+    throw new DiscordA2UIValidationError(
+      `Discord modals support at most 5 inputs; received ${inputs.length}`
+    )
+  }
   return inputs
 }
 
 /**
  * Build the `data` object for an InteractionResponse type 9 (MODAL) from a
- * persisted {@link DiscordModalPayload}. Each TextInput must sit alone in its
- * own ActionRow per Discord's modal rules.
+ * persisted {@link DiscordModalPayload}. Each TextInput sits in a Label;
+ * the legacy ActionRow wrapper and TextInput.label are deprecated.
  */
-// GAP: modal Label (component type 18) migration — Discord is moving modal
-// TextInputs from ActionRow wrappers to Label components; the ActionRow form
-// still works and the migration is a separate follow-up.
 export function buildDiscordModalData(
   customId: string,
   payload: DiscordModalPayload
 ): Record<string, unknown> {
+  if (payload.inputs.length > MAX_MODAL_INPUTS) {
+    throw new DiscordA2UIValidationError(
+      `Discord modals support at most 5 inputs; received ${payload.inputs.length}`
+    )
+  }
+  if ((payload.title || "Form").length > DISCORD_MODAL_TITLE_MAX) {
+    throw new DiscordA2UIValidationError("Discord modal titles support at most 45 characters")
+  }
+  for (const input of payload.inputs) {
+    if ((input.label || input.customId).length > DISCORD_LABEL_MAX) {
+      throw new DiscordA2UIValidationError("Discord modal labels support at most 45 characters")
+    }
+    if (input.placeholder && input.placeholder.length > 100) {
+      throw new DiscordA2UIValidationError(
+        "Discord modal placeholders support at most 100 characters"
+      )
+    }
+  }
   return {
     custom_id: customId,
-    title: (payload.title || "Form").slice(0, DISCORD_MODAL_TITLE_MAX),
-    components: payload.inputs.slice(0, MAX_MODAL_INPUTS).map((inp) => ({
-      type: 1, // ActionRow
-      components: [
-        {
-          type: 4, // TextInput
-          custom_id: inp.customId,
-          label: (inp.label || inp.customId).slice(0, DISCORD_LABEL_MAX),
-          style: inp.style,
-          required: inp.required ?? false,
-          ...(inp.placeholder ? { placeholder: inp.placeholder.slice(0, 100) } : {}),
-          ...(inp.value ? { value: inp.value } : {}),
-          ...(inp.minLength !== undefined ? { min_length: inp.minLength } : {}),
-          ...(inp.maxLength !== undefined ? { max_length: inp.maxLength } : {}),
-        },
-      ],
+    title: payload.title || "Form",
+    components: payload.inputs.map((inp) => ({
+      type: 18, // Label
+      label: inp.label || inp.customId,
+      component: {
+        type: 4, // TextInput
+        custom_id: inp.customId,
+        style: inp.style,
+        required: inp.required ?? false,
+        ...(inp.placeholder ? { placeholder: inp.placeholder } : {}),
+        ...(inp.value ? { value: inp.value } : {}),
+        ...(inp.minLength !== undefined ? { min_length: inp.minLength } : {}),
+        ...(inp.maxLength !== undefined ? { max_length: inp.maxLength } : {}),
+      },
     })),
   }
 }

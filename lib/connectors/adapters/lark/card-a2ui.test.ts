@@ -10,6 +10,7 @@ import type { LarkEventEnvelope } from "./parse"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
+import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -25,6 +26,59 @@ const baseInput = (surface: A2UISegmentContent) => ({
 })
 
 describe("buildLarkA2UICard", () => {
+  it("renders bound descriptions, canonical alert messages, and footer actions", async () => {
+    const body = await buildLarkA2UICard(
+      baseInput({
+        rootId: "root",
+        dataModel: { summary: "Project summary", status: "Ready to review" },
+        components: {
+          root: {
+            component: "Card",
+            title: "Report",
+            description: { path: "/summary" },
+            children: ["alert"],
+            footer: ["go"],
+          },
+          alert: { component: "Alert", message: { path: "/status" } },
+          go: { component: "Button", text: "Review", action: "review" },
+        },
+      })
+    )
+    expect(body.content).toContain("Project summary")
+    expect(body.content).toContain("Ready to review")
+    expect(body.content).toContain('"tag":"button"')
+  })
+
+  it("renders an assistant's fenced A2UI as native card elements with a working callback", async () => {
+    const segments = assistantReplyToSegments({
+      text: `项目速览：\n\`\`\`a2ui\n${JSON.stringify({
+        surface: { id: "cognia-analysis", type: "inline", title: "Cognia Next 分析" },
+        components: [
+          { id: "root", component: "Column", children: ["title", "go"] },
+          { id: "title", component: "Text", text: "Cognia Next 项目速览" },
+          { id: "go", component: "Button", text: "继续", action: "continue" },
+        ],
+      })}\n\`\`\`\n分析完成。`,
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+    })
+    const body = await segmentsToLarkBodyAsync(segments, {
+      adapterId: "adp_lk",
+      conversationKey: "lark:adp_lk:oc_chat",
+    })
+    expect(body.msg_type).toBe("interactive")
+    expect(body.content).toContain("Cognia Next 项目速览")
+    expect(body.content).toContain('"tag":"button"')
+    expect(body.content).not.toContain("```a2ui")
+    expect(body.content).not.toContain('"component":"Column"')
+    expect(
+      await resolveCallbackBinding("adp_lk", "a2ui:cognia-analysis:go:continue")
+    ).toMatchObject({
+      surfaceId: "cognia-analysis",
+      componentId: "go",
+    })
+  })
+
   it("renders Card title into a header + Buttons into action elements", async () => {
     const surface: A2UISegmentContent = {
       components: {
@@ -597,4 +651,65 @@ describe("parseLarkInteractiveCallback identityScope (plan 2026-07-24 Phase 2)",
     const cb = parseLarkInteractiveCallback("adp_lk", "BOT", envelope)
     expect(cb!.identityScope).toBeUndefined()
   })
+})
+
+it("serializes help as Card 2.0 while preserving callback bindings", async () => {
+  const content = {
+    rootId: "root",
+    dataModel: {},
+    components: {
+      root: { component: "Card", title: "命令帮助", children: ["text", "button"] },
+      text: { component: "Text", text: "请选择命令" },
+      button: {
+        component: "Button",
+        text: "查看状态",
+        action: "status",
+        bindingKind: "help_quick_command",
+        bindingPayload: { action: { type: "text", text: "/status" } },
+      },
+    },
+  }
+  const body = await segmentsToLarkBodyAsync(
+    [{ type: "a2ui", surfaceId: "help:chat:unique", content, plainTextMirror: "help" }],
+    { adapterId: "adapter", conversationKey: "lark:adapter:chat" }
+  )
+  const card = JSON.parse(body.content)
+  expect(card.schema).toBe("2.0")
+  expect(card.header.title.content).toBe("命令帮助")
+  expect(card.body.elements[0]).toMatchObject({ tag: "markdown", content: "请选择命令" })
+  const button = card.body.elements[1]
+  expect(button.tag).toBe("button")
+  expect(button.value).toBeUndefined()
+  expect(button.behaviors[0]).toMatchObject({
+    type: "callback",
+    value: { surfaceId: "help:chat:unique", componentId: "button" },
+  })
+})
+
+it("uses the shared frame and keeps the empty task-list description", async () => {
+  const body = await segmentsToLarkBodyAsync(
+    [
+      {
+        type: "a2ui",
+        surfaceId: "schedule-list-test",
+        plainTextMirror: "No tasks",
+        content: {
+          rootId: "root",
+          dataModel: {},
+          components: {
+            root: {
+              component: "Card",
+              title: "Scheduled tasks",
+              description: "No tasks",
+              children: [],
+            },
+          },
+        },
+      },
+    ],
+    { adapterId: "adapter" }
+  )
+  const card = JSON.parse(body.content)
+  expect(card.schema).toBe("2.0")
+  expect(card.body.elements).toEqual([{ tag: "markdown", content: "No tasks" }])
 })

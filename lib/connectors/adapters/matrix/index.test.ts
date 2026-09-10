@@ -1,9 +1,15 @@
 import { invoke } from "@tauri-apps/api/core"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
+import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { createMatrixAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MatrixTimelineEvent } from "./parse"
+
+jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
+  ...jest.requireActual("@/lib/connectors/adapters/_shared/a2ui-mapper"),
+  recordCallbackBinding: jest.fn(async () => undefined),
+}))
 
 const mockE2EEInitialize = jest.fn(async () => undefined)
 const mockE2EEClose = jest.fn(async () => undefined)
@@ -112,6 +118,7 @@ const until = async (pred: () => boolean, timeoutMs = 2000) => {
 
 describe("createMatrixAdapter", () => {
   beforeEach(() => {
+    jest.mocked(recordCallbackBinding).mockClear()
     mockInvoke.mockReset()
     mockGate.mockReset()
     mockGate.mockResolvedValue(true)
@@ -131,6 +138,126 @@ describe("createMatrixAdapter", () => {
     mockE2EEDecryptOrQueue.mockImplementation(async (_roomId, event) => event)
     mockE2EEIsRoomEncrypted.mockReset()
     mockE2EEIsRoomEncrypted.mockResolvedValue(false)
+  })
+
+  it.each(["send", "edit"] as const)(
+    "%s returns A2UI image fallback diagnostics without hiding its URL",
+    async (method) => {
+      mockInvoke.mockResolvedValue(httpResp(200, { event_id: "$sent" }))
+      const request = sendReq([
+        {
+          type: "a2ui",
+          surfaceId: "image",
+          plainTextMirror: "Image caption",
+          content: {
+            rootId: "image",
+            dataModel: {},
+            components: {
+              image: {
+                component: "Image",
+                url: "https://example.com/image.png",
+                alt: "Image caption",
+              },
+            },
+          },
+        },
+      ])
+      const bot = adapter()
+      const result =
+        method === "send" ? await bot.send(request) : await bot.edit!("$original", request)
+      expect(result.ok).toBe(true)
+      expect(result.downgrades).toEqual([
+        { from: "a2ui", to: "text", reason: expect.stringContaining("Image") },
+      ])
+      const calls = mockInvoke.mock.calls.filter(
+        ([command]) => command === "connectors_http_request"
+      )
+      const wire = calls.map(([, args]) => args.req.body).join("\n")
+      expect(wire).toContain("https://example.com/image.png")
+      expect(wire).not.toContain('"downgrades"')
+    }
+  )
+
+  it("binds each interactive surface to its own event and conversation", async () => {
+    let event = 0
+    mockInvoke.mockImplementation(async () => httpResp(200, { event_id: `$event${++event}` }))
+    const surface = (id: string): OutboundRequest["segments"][number] => ({
+      type: "a2ui",
+      surfaceId: id,
+      plainTextMirror: "Choose",
+      content: {
+        rootId: "b",
+        dataModel: {},
+        components: { b: { component: "Button", text: "Yes", action: "yes" } },
+      },
+    })
+    await adapter().send(
+      sendReq([surface("s1"), surface("s2"), { type: "text", text: "tail" }], {
+        threadId: "!r:matrix.org|$root",
+        metadata: { idempotencyKey: "idem", sourceMessageId: "source-message" },
+      })
+    )
+    expect(recordCallbackBinding).toHaveBeenCalledTimes(2)
+    expect(recordCallbackBinding).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        actionId: "$event1",
+        surfaceId: "s1",
+        conversationKey: "matrix:mx-1:!r:matrix.org:$root",
+      })
+    )
+    expect(recordCallbackBinding).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        actionId: "$event2",
+        surfaceId: "s2",
+        conversationKey: "matrix:mx-1:!r:matrix.org:$root",
+      })
+    )
+  })
+
+  it("binds an edited interactive surface to the original event users reply to", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { event_id: "$edit" }))
+    await adapter().edit!(
+      "!r:matrix.org|$original",
+      sendReq([
+        {
+          type: "a2ui",
+          surfaceId: "new-surface",
+          plainTextMirror: "Choose",
+          content: {
+            rootId: "b",
+            dataModel: {},
+            components: { b: { component: "Button", text: "Yes" } },
+          },
+        },
+      ])
+    )
+    expect(recordCallbackBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionId: "$original",
+        surfaceId: "new-surface",
+        conversationKey: "matrix:mx-1:!r:matrix.org",
+      })
+    )
+  })
+
+  it("rejects an edit containing multiple interactive surfaces before sending", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { event_id: "$edit" }))
+    const segments: OutboundRequest["segments"] = ["one", "two"].map((surfaceId) => ({
+      type: "a2ui",
+      surfaceId,
+      plainTextMirror: "Choose",
+      content: {
+        rootId: "b",
+        dataModel: {},
+        components: { b: { component: "Button", text: "Yes" } },
+      },
+    }))
+    const result = await adapter().edit!("!r:matrix.org|$original", sendReq(segments))
+    expect(result).toMatchObject({ ok: false, error: { code: "validation", retryable: false } })
+    expect(mockInvoke).not.toHaveBeenCalled()
+    expect(recordCallbackBinding).not.toHaveBeenCalled()
   })
 
   it("exposes correct meta and initial health", () => {
@@ -483,6 +610,25 @@ describe("createMatrixAdapter", () => {
     expect(res.ok).toBe(false)
     expect(res.error?.code).toBe("rate_limited")
     expect(res.error?.retryAfterMs).toBe(4200)
+  })
+
+  it.each([
+    ["Retry-After", "12", 12000],
+    ["retry-after", "Tue, 08 Sep 2026 00:00:09 GMT", 9000],
+    ["RETRY-AFTER", "0", 0],
+    ["retry-after", "invalid", 4200],
+  ])("send() honors %s=%s before the legacy delay", async (name, value, expected) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-08T00:00:00Z"))
+    try {
+      mockInvoke.mockResolvedValueOnce({
+        ...httpResp(429, { errcode: "M_LIMIT_EXCEEDED", retry_after_ms: 4200 }),
+        headers: { [name]: value },
+      })
+      const result = await adapter().send(sendReq([{ type: "text", text: "hello" }]))
+      expect(result.error).toMatchObject({ code: "rate_limited", retryAfterMs: expected })
+    } finally {
+      now.mockRestore()
+    }
   })
 
   it("send() maps a 401 to a non-retryable auth_failed", async () => {

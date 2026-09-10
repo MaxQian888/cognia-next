@@ -26,7 +26,9 @@ import { parseConversationKey } from "@/types/connectors/event"
 import { WECHAT_OA_A2UI_CAPABILITY, WECHAT_OA_CAPS } from "./capability"
 import { WECHAT_API_BASE, clearWechatOaTokenCache } from "./auth"
 import { extractXmlField, parseWechatOaXml } from "./parse"
-import { serializeOutbound, type WechatCustomMessage } from "./serialize"
+import type { WechatCustomMessage } from "./serialize"
+import { prepareWechatMessages, WechatMediaError } from "./media"
+import { enrichWechatInboundMedia } from "./inbound-media"
 import { startWechatOaWebhook } from "./transport-webhook"
 
 export interface WechatOaAdapterOptions {
@@ -67,7 +69,7 @@ const AUTH_ERRCODES = new Set([40001, 40014, 42001])
  * 48001 api unauthorized (unverified / subscription accounts lack 客服 permission),
  * 50002 user blacklisted / blocked by the user.
  */
-const NON_RETRYABLE_ERRCODES = new Set([45015, 45047, 48001, 50002])
+const NON_RETRYABLE_ERRCODES = new Set([40004, 40007, 45002, 45015, 45047, 48001, 50002])
 
 /**
  * Typing-indicator errcodes that are NOT failures worth surfacing: the
@@ -114,6 +116,7 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
           if (event) {
             if (!(await gateInboundEvent(opts.id, event))) continue
             lastActivityAt = Date.now()
+            await enrichWechatInboundMedia(event, { accessToken: opts.accessToken, apiBase })
             await ctx.emit(event)
           }
         }
@@ -171,7 +174,7 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
     }
     // Non-2xx status or an unparseable body (gateway HTML, truncated proxy
     // response) means the message was NOT delivered — never report success.
-    if (resp.status >= 400 || body === undefined) {
+    if (resp.status >= 400 || body?.errcode !== 0) {
       return {
         kind: "transport",
         status: resp.status,
@@ -219,16 +222,39 @@ export function createWechatOaAdapter(opts: WechatOaAdapterOptions): PlatformAda
   const attemptSend = (msg: WechatCustomMessage): Promise<SendAttempt> =>
     postCustomApi("/cgi-bin/message/custom/send", msg as unknown as Record<string, unknown>)
 
-  // GAP: passive-reply fast path (replying inside the webhook HTTP response
-  // within 5s) is not implemented — every reply goes through the 客服 send API.
   async function send(req: OutboundRequest): Promise<OutboundResult> {
-    const msg = serializeOutbound(req)
-    if (!msg) {
+    try {
+      const messages = await prepareWechatMessages(req, opts.accessToken, apiBase)
+      for (let index = 0; index < messages.length; index++) {
+        const result = await sendMessage(messages[index])
+        if (!result.ok) {
+          // Retrying an already partially delivered batch would duplicate its
+          // prefix: the customer-service API has no idempotency key.
+          if (index > 0 && result.error) result.error.retryable = false
+          return result
+        }
+      }
+      const downgrades = req.segments
+        .filter((segment) => ["mention", "location", "poll", "reply"].includes(segment.type))
+        .map((segment) => ({
+          from: segment.type,
+          to: "text" as const,
+          reason: "wechat_oa_text_alternative",
+        }))
+      return { ok: true, ...(downgrades.length ? { downgrades } : {}) }
+    } catch (error) {
       return {
         ok: false,
-        error: { code: "validation", message: "WeChat OA send: missing openId", retryable: false },
+        error: {
+          code: error instanceof WechatMediaError ? error.code : "platform_5xx",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: error instanceof WechatMediaError ? error.retryable : true,
+        },
       }
     }
+  }
+
+  async function sendMessage(msg: WechatCustomMessage): Promise<OutboundResult> {
     try {
       let attempt = await attemptSend(msg)
       if (attempt.kind === "auth") {

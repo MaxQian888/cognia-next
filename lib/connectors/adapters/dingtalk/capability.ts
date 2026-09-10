@@ -51,15 +51,17 @@ export const DINGTALK_CAPS: readonly Capability[] = [
  *   - Row / Column / List: layout-only; the mapper walks children and emits
  *     grouped markdown lines.
  *
- * Simulated (functional, but degraded vs. a true inline widget):
+ * Fallback (no structured callback round-trip):
  *   - Button: a button carrying an `href`/`url` renders as a clickable
  *     markdown link (works); a callback-only button (action id, no url) cannot
  *     round-trip in v1 because actionCard/markdown buttons do not raise a
  *     Stream card callback — it renders in an "操作" list for the user to type
- *     back. Full inline interactive callbacks require the advanced
+ *     back as an ordinary chat message, without surface correlation. A kind
+ *     cannot claim simulated support solely because URL variants work.
+ *     Full inline interactive callbacks require the advanced
  *     interactive-card template (deferred — see the adapter README).
  *
- * Fallback (rendered via `plainTextMirror`):
+ * Other fallback components (rendered via `plainTextMirror`):
  *   - Select / RadioGroup / TextField / TextArea / Checkbox / Slider /
  *     DatePicker / Table / Chart and every overlay widget. These need the
  *     advanced interactive card to be functional, so v1 degrades them to the
@@ -75,5 +77,5 @@ export const DINGTALK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilit
   Row: "native",
   Column: "native",
   List: "native",
-  Button: "simulated",
+  Button: "fallback",
 })

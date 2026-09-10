@@ -1,5 +1,7 @@
 import { escapeMdV2 } from "./markdown-v2"
-import { serializeOutbound, serializeReaction } from "./serialize"
+import { serializeOutbound, serializeOutboundAsync, serializeReaction } from "./serialize"
+import { buildTelegramA2UICalls } from "./a2ui-mapper"
+jest.mock("./a2ui-mapper", () => ({ buildTelegramA2UICalls: jest.fn() }))
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 
@@ -44,6 +46,26 @@ describe("escapeMdV2", () => {
 // serializeOutbound tests
 // ---------------------------------------------------------------------------
 describe("serializeOutbound", () => {
+  it("keeps mentions inline with adjacent prose and emoji in one reply", () => {
+    const calls = serializeOutbound(
+      makeReq(
+        [
+          { type: "text", text: "Hello " },
+          { type: "mention", userId: "42", displayName: "Alice" },
+          { type: "text", text: ", please review " },
+          { type: "emoji", code: "👍" },
+        ],
+        { replyTo: { messageId: "7" } }
+      )
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].payload).toMatchObject({
+      text: "Hello [Alice](tg://user?id=42), please review 👍",
+      parse_mode: "MarkdownV2",
+      reply_parameters: { message_id: 7 },
+    })
+  })
+
   it("text segment → sendMessage", () => {
     const calls = serializeOutbound(makeReq([{ type: "text", text: "Hello!" }]))
     expect(calls).toHaveLength(1)
@@ -175,6 +197,92 @@ describe("serializeOutbound", () => {
 // 4096-char chunking (audited fix #7)
 // ---------------------------------------------------------------------------
 describe("serializeOutbound — long-message chunking", () => {
+  it("retains the keyboard and ForceReply binding on the last formatted chunk", async () => {
+    const replyMarkup = { inline_keyboard: [[{ text: "Continue", callback_data: "next" }]] }
+    const binding = { surfaceId: "surface", componentId: "input" }
+    const mapper = jest.mocked(buildTelegramA2UICalls).mockResolvedValueOnce([
+      {
+        method: "sendMessage",
+        payload: {
+          chat_id: "123456789",
+          text: `*${"x".repeat(5000)}*`,
+          parse_mode: "MarkdownV2",
+          message_thread_id: 42,
+          reply_parameters: { message_id: 7 },
+          reply_markup: replyMarkup,
+        },
+        forceReplyBinding: binding,
+      },
+    ])
+    try {
+      const calls = await serializeOutboundAsync(
+        makeReq([
+          {
+            type: "a2ui",
+            surfaceId: "surface",
+            content: { components: {}, dataModel: {}, rootId: "root" },
+            plainTextMirror: "mirror",
+          },
+        ]),
+        "tg-1"
+      )
+      expect(calls).toHaveLength(2)
+      expect(calls[0].payload).not.toHaveProperty("reply_markup")
+      expect(calls[0]).not.toHaveProperty("forceReplyBinding")
+      expect(calls[1].payload.reply_markup).toEqual(replyMarkup)
+      expect(calls[1].forceReplyBinding).toEqual(binding)
+      expect(calls[1].payload).not.toHaveProperty("reply_parameters")
+    } finally {
+      mapper.mockReset()
+    }
+  })
+
+  it("splits long code and link labels without stripping their entities", () => {
+    const code = "const x = 1;\n".repeat(400)
+    const codeCalls = serializeOutbound(makeReq([{ type: "code", code, language: "ts" }]))
+    expect(codeCalls.map((call) => call.payload.text).join("")).toBe(code)
+    for (const call of codeCalls)
+      expect(call.payload.entities).toEqual([
+        { type: "pre", offset: 0, length: (call.payload.text as string).length, language: "ts" },
+      ])
+    const label = "label".repeat(1000)
+    const linkCalls = serializeOutbound(
+      makeReq([{ type: "markdown", md: `[${label}](https://example.com)` }])
+    )
+    expect(linkCalls.map((call) => call.payload.text).join("")).toBe(label)
+    for (const call of linkCalls)
+      expect(call.payload.entities).toEqual([
+        {
+          type: "text_link",
+          offset: 0,
+          length: (call.payload.text as string).length,
+          url: "https://example.com",
+        },
+      ])
+  })
+
+  it("sends oversized formatted text using complete, rebased entities", () => {
+    const content = "a😀".repeat(1800)
+    const calls = serializeOutbound(
+      makeReq([{ type: "markdown", md: `**${content}**` }], {
+        threadId: "42",
+        replyTo: { messageId: "123456789:7" },
+      })
+    )
+    expect(calls.length).toBeGreaterThan(1)
+    expect(calls.map((call) => call.payload.text).join("")).toBe(content)
+    for (const call of calls) {
+      expect(call.payload).not.toHaveProperty("parse_mode")
+      expect(call.payload.entities).toEqual([
+        { type: "bold", offset: 0, length: (call.payload.text as string).length },
+      ])
+      expect(call.payload.message_thread_id).toBe(42)
+      expect(call.payload.text).not.toMatch(/[\uD800-\uDBFF]$/u)
+    }
+    expect(calls[0].payload.reply_parameters).toEqual({ message_id: 7 })
+    expect(calls[1].payload).not.toHaveProperty("reply_parameters")
+  })
+
   it("splits sendMessage text over 4096 chars into sequential sends", () => {
     const long = Array.from({ length: 500 }, (_, i) => `line number ${i}`).join("\n") // > 4096
     const calls = serializeOutbound(makeReq([{ type: "text", text: long }]))
@@ -185,7 +293,7 @@ describe("serializeOutbound — long-message chunking", () => {
       expect(call.payload["chat_id"]).toBe("123456789")
     }
     // Newline-preferred boundaries → joining restores the original text.
-    expect(calls.map((c) => c.payload["text"]).join("\n")).toBe(long)
+    expect(calls.map((c) => c.payload["text"]).join("")).toBe(long)
   })
 
   it("keeps reply_parameters on the FIRST chunk only", () => {
@@ -252,5 +360,50 @@ describe("serializeReaction", () => {
     const call = serializeReaction("c1", "12345", "👍")
     expect(call.payload["message_id"]).toBe(12345)
     expect(typeof call.payload["message_id"]).toBe("number")
+  })
+})
+
+describe("mixed A2UI fallback", () => {
+  it("keeps native controls and the complete unsupported-content mirror with a diagnostic", async () => {
+    jest.mocked(buildTelegramA2UICalls).mockResolvedValueOnce([
+      {
+        method: "sendMessage",
+        payload: {
+          chat_id: "123",
+          text: "Act",
+          reply_markup: { inline_keyboard: [[{ text: "Go", callback_data: "go" }]] },
+        },
+      },
+    ])
+    const calls = await serializeOutboundAsync(
+      makeReq([
+        {
+          type: "a2ui",
+          surfaceId: "mixed",
+          plainTextMirror: "Table: all rows preserved",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: {
+              root: { id: "root", component: "Column", children: ["button", "table"] },
+              button: { id: "button", component: "Button", text: "Go", action: "go" },
+              table: { id: "table", component: "Table", rows: [["all rows preserved"]] },
+            },
+          },
+        },
+      ]),
+      "adapter"
+    )
+    expect(calls.map((call) => call.payload.text ?? "").join("\n")).toContain(
+      "Table: all rows preserved"
+    )
+    expect(calls.some((call) => call.payload.reply_markup)).toBe(true)
+    expect(calls.flatMap((call) => call.downgrades ?? [])).toEqual([
+      {
+        from: "a2ui",
+        to: "text",
+        reason: expect.stringContaining("Table"),
+      },
+    ])
   })
 })

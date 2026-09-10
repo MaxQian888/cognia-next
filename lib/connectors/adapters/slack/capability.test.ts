@@ -74,12 +74,10 @@ describe("SLACK_A2UI_CAPABILITY", () => {
     expect(SLACK_A2UI_CAPABILITY.Table).toBe("fallback")
   })
 
-  it("declares Slider/Tabs/Accordion as simulated (B6 — multi-step stand-ins)", () => {
-    // ADR-0009 v41 / B6 — quantised static_select stand-in for Slider,
-    // header+section+divider per tab for Tabs, toggle button per panel
-    // for Accordion. Capability advertised; mapper integration follows.
-    expect(SLACK_A2UI_CAPABILITY.Slider).toBe("simulated")
-    expect(SLACK_A2UI_CAPABILITY.Tabs).toBe("simulated")
-    expect(SLACK_A2UI_CAPABILITY.Accordion).toBe("simulated")
-  })
+  it.each(["Slider", "Tabs", "Accordion", "Dialog", "Drawer"] as const)(
+    "declares %s as fallback until its interaction flow is implemented",
+    (kind) => {
+      expect(SLACK_A2UI_CAPABILITY[kind]).toBe("fallback")
+    }
+  )
 })

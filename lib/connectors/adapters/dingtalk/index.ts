@@ -17,6 +17,7 @@ import type {
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { enrichInboundMedia, isPublicHttpUrl } from "../_shared/inbound-media"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { DINGTALK_A2UI_CAPABILITY, DINGTALK_CAPS } from "./capability"
 import { clearDingTalkTokenCache, DINGTALK_API_BASE, dingtalkAuthHeaders } from "./auth"
@@ -196,18 +197,79 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
       try {
         for await (const frame of client.frames) {
           if (signal.aborted) break
-          if (frame.topic !== TOPIC_BOT_MESSAGE) continue
-          const raw = frame.data as unknown as DingTalkBotMessage
-          // Learn the bot's own user id from the first frame that carries it
-          // (parse falls back per-event; this keeps adapter-level selfId set).
-          if (!selfId && typeof raw?.chatbotUserId === "string" && raw.chatbotUserId) {
-            selfId = raw.chatbotUserId
+          try {
+            if (frame.topic !== TOPIC_BOT_MESSAGE) {
+              await frame.ack?.(true)
+              continue
+            }
+            const raw = frame.data as unknown as DingTalkBotMessage
+            // Learn the bot's own user id from the first frame that carries it
+            // (parse falls back per-event; this keeps adapter-level selfId set).
+            if (!selfId && typeof raw?.chatbotUserId === "string" && raw.chatbotUserId) {
+              selfId = raw.chatbotUserId
+            }
+            const normalized = parseDingTalkBotMessage(opts.id, selfId, raw)
+            if (!normalized) {
+              await frame.ack?.(false)
+              continue
+            }
+            if (!(await gateInboundEvent(opts.id, normalized))) {
+              await frame.ack?.(true)
+              continue
+            }
+            const resolved = new Map<string, string>()
+            for (const segment of normalized.segments) {
+              if (
+                !(
+                  segment.type === "image" ||
+                  segment.type === "file" ||
+                  segment.type === "voice" ||
+                  segment.type === "video"
+                ) ||
+                !segment.url.startsWith("dingtalk://download/")
+              )
+                continue
+              const rawUrl = segment.url
+              try {
+                let url = resolved.get(rawUrl)
+                if (!url) {
+                  const result = await dingtalkPost("/v1.0/robot/messageFiles/download", {
+                    downloadCode: decodeURIComponent(rawUrl.slice("dingtalk://download/".length)),
+                    robotCode: raw.robotCode || (await opts.appKey()),
+                  })
+                  if (
+                    typeof result.downloadUrl !== "string" ||
+                    !isPublicHttpUrl(result.downloadUrl)
+                  )
+                    throw new Error("DingTalk returned no public media download URL")
+                  url = result.downloadUrl
+                  resolved.set(rawUrl, url)
+                }
+                segment.rawUrl = rawUrl
+                segment.url = url
+              } catch (error) {
+                ctx.logger.warn(
+                  `DingTalk media resolution failed: ${error instanceof Error ? error.message : String(error)}`
+                )
+              }
+            }
+            await enrichInboundMedia(normalized, {
+              ref: (segment) => segment.rawUrl ?? segment.url,
+              source: (segment) =>
+                isPublicHttpUrl(segment.url) ? { url: segment.url } : undefined,
+              extractLabel: "dingtalk-inbound",
+            })
+            lastActivityAt = Date.now()
+            await ctx.emit(normalized)
+            await frame.ack?.(true)
+          } catch (error) {
+            await frame.ack?.(false).catch(() => {})
+            ctx.logger.warn(
+              `DingTalk inbound processing failed: ${error instanceof Error ? error.message : String(error)}`
+            )
+            healthState = "degraded"
+            healthReason = "transport_error"
           }
-          const normalized = parseDingTalkBotMessage(opts.id, selfId, raw)
-          if (!normalized) continue
-          if (!(await gateInboundEvent(opts.id, normalized))) continue
-          lastActivityAt = Date.now()
-          await ctx.emit(normalized)
         }
         if (!stopCalled) {
           healthState = "down"
@@ -272,6 +334,24 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
       sessionWebhook?: string
       sessionWebhookExpiredTime?: number
     }
+    const unsupported = req.segments.find(
+      (segment) =>
+        segment.type === "card" ||
+        ((segment.type === "image" ||
+          segment.type === "video" ||
+          segment.type === "voice" ||
+          segment.type === "file") &&
+          !/^https?:\/\//i.test(segment.url))
+    )
+    if (unsupported)
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_segment",
+          message: `DingTalk cannot send ${unsupported.type} without a supported text or public-link representation`,
+          retryable: false,
+        },
+      }
     const serialized = serializeOutbound(req)
     if (!serialized) return { ok: true }
 
@@ -355,7 +435,11 @@ export function createDingTalkAdapter(opts: DingTalkAdapterOptions): PlatformAda
         }
       }
       lastActivityAt = Date.now()
-      return { ok: true, platformMessageId }
+      return {
+        ok: true,
+        platformMessageId,
+        ...(serialized.downgrades?.length ? { downgrades: serialized.downgrades } : {}),
+      }
     } catch (err) {
       return errorToResult(err)
     }

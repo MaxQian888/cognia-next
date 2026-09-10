@@ -33,6 +33,25 @@ function makeReq(opts: {
 }
 
 describe("serializeSend", () => {
+  it.each(["send", "reply", "thread"])(
+    "bounds long retry keys for %s without losing their suffix",
+    async (route) => {
+      const req = makeReq({
+        channelId: "oc_chat_001",
+        ...(route === "thread" ? { threadTs: "omt_1", threadRootMessageId: "om_1" } : {}),
+      })
+      if (route === "reply") req.replyTo = { messageId: "om_1" }
+      req.metadata.idempotencyKey =
+        "principal-unbound:cai_headless_feishu_20260907:" + "a".repeat(60)
+      const first = serializeSend(req).payload.uuid as string
+      expect(first.length).toBeLessThanOrEqual(50)
+      expect(serializeSend(req).payload.uuid).toBe(first)
+      expect((await serializeOutboundAsync(req, {})).payload.uuid).toBe(first)
+      const changed = { ...req, metadata: { idempotencyKey: req.metadata.idempotencyKey + "b" } }
+      expect(serializeSend(changed).payload.uuid).not.toBe(first)
+    }
+  )
+
   it("sends to chat_id for oc_ prefixed chat", () => {
     const call = serializeSend(makeReq({ channelId: "oc_chat_001" }))
     expect(call.method).toBe("POST")

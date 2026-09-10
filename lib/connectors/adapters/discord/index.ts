@@ -17,7 +17,11 @@ import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-
 import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsDiscordUpload } from "@/lib/connectors/tauri/commands"
 import { DISCORD_A2UI_CAPABILITY, DISCORD_CAPS } from "./capability"
-import { buildDiscordModalData, type DiscordModalPayload } from "./a2ui-mapper"
+import {
+  buildDiscordModalData,
+  DiscordA2UIValidationError,
+  type DiscordModalPayload,
+} from "./a2ui-mapper"
 import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import {
   parseDiscordDispatch,
@@ -30,11 +34,10 @@ import {
   discordNonce,
   serializeOutboundAsync,
   serializeDelete,
-  serializeEdit,
   serializeReaction,
   serializeReactionRemoval,
   serializeFetchHistory,
-  renderDiscordContentRun,
+  splitChannelMessage,
 } from "./serialize"
 import { enrichDiscordInboundMedia } from "./inbound-media"
 import { sendDiscordVoiceMessage } from "./voice-upload"
@@ -147,6 +150,9 @@ function parseRetryAfterMs(headers: Record<string, string>, body: string): numbe
  */
 function toOutboundError(err: unknown): OutboundError {
   const message = err instanceof Error ? err.message : String(err)
+  if (err instanceof DiscordA2UIValidationError) {
+    return { code: "validation", message, retryable: false }
+  }
   if (err instanceof DiscordApiError) {
     if (err.status === 429) {
       return { code: "rate_limited", message, retryable: true, retryAfterMs: err.retryAfterMs }
@@ -220,22 +226,6 @@ async function resolveBindingWithDeadline(
   } finally {
     clearTimeout(timer)
   }
-}
-
-/**
- * Split the `"channelId:messageId"` composite the connector bus threads through
- * message-scoped ops (delete / pin / reaction). Discord's REST reaction API is
- * channel-scoped, but the {@link PlatformAdapter} reaction contract passes only
- * a single `messageId`, so the channel rides in the composite.
- */
-function splitChannelMessage(composite: string): [channelId: string, messageId: string] {
-  const idx = composite.indexOf(":")
-  if (idx === -1) {
-    throw new Error(
-      `Discord message ops require a "channelId:messageId" composite id, got "${composite}"`
-    )
-  }
-  return [composite.slice(0, idx), composite.slice(idx + 1)]
 }
 
 /** Derive a filename (with extension) from a URL, falling back to `fallback`. */
@@ -338,12 +328,23 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
+    const emitInbound = async (event: NormalizedInboundEvent) => {
+      if (signal.aborted || !(await gateInboundEvent(opts.id, event))) return
+      lastActivityAt = Date.now()
+      await enrichDiscordInboundMedia(event)
+      await ctx.emit(event)
+    }
 
     // Webhook mode: interactions arrive over the Rust-hosted Interactions
     // Endpoint (message events are NOT delivered — that's gateway-only). No
     // gateway socket is opened; a bound webhook route counts as "running".
     if (opts.transportMode === "webhook") {
-      _webhookHandle = await startWebhookTransport({ adapterId: opts.id, selfId, signal })
+      _webhookHandle = await startWebhookTransport({
+        adapterId: opts.id,
+        selfId,
+        signal,
+        emit: emitInbound,
+      })
       setHealth("running")
       return
     }
@@ -399,6 +400,19 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
           if (dispatch.t === "INTERACTION_CREATE") {
             const interaction = dispatch.d as DiscordInteraction
 
+            if (interaction.type === 2 || interaction.type === 4) {
+              const autocomplete = interaction.type === 4
+              await ackInteraction(
+                interaction.id,
+                interaction.token,
+                autocomplete ? 8 : 4,
+                autocomplete ? { choices: [] } : { content: "Request received.", flags: 64 }
+              ).catch(() => undefined)
+              const command = parseDiscordDispatch(opts.id, selfId, dispatch)
+              if (command) await emitInbound(command)
+              continue
+            }
+
             // Modal two-hop: a component click bound to a modal_open surface
             // must answer with the modal (InteractionResponse type 9)
             // synchronously — NOT a deferred ACK, and NOT dispatched to the bus
@@ -422,8 +436,13 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
                       binding.payload as unknown as DiscordModalPayload
                     )
                   )
-                } catch {
-                  // best-effort — a failed modal open leaves the button un-acted
+                } catch (error) {
+                  if (error instanceof DiscordA2UIValidationError) {
+                    await ackInteraction(interaction.id, interaction.token, 4, {
+                      content: error.message,
+                      flags: 64,
+                    }).catch(() => undefined)
+                  }
                 }
                 continue
               }
@@ -442,7 +461,12 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
                 await ackInteraction(
                   interaction.id,
                   interaction.token,
-                  INTERACTION_RESPONSE_DEFERRED_UPDATE
+                  interaction.type === INTERACTION_TYPE_MODAL_SUBMIT && !interaction.message
+                    ? 4
+                    : INTERACTION_RESPONSE_DEFERRED_UPDATE,
+                  interaction.type === INTERACTION_TYPE_MODAL_SUBMIT && !interaction.message
+                    ? { content: "Submission received.", flags: 64 }
+                    : undefined
                 )
               } catch {
                 // best-effort — still dispatch the callback below
@@ -458,15 +482,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
 
           const event = parseDiscordDispatch(opts.id, selfId, dispatch)
           if (event) {
-            // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
-            if (!(await gateInboundEvent(opts.id, event))) continue
-            lastActivityAt = Date.now()
-            // Download what the parser could only reference, so a posted
-            // screenshot reaches the model as a picture rather than as the
-            // text `[image: https://cdn.discordapp.com/…]`. After the gate:
-            // a message that is going to be dropped costs no downloads.
-            await enrichDiscordInboundMedia(event)
-            await ctx.emit(event)
+            await emitInbound(event)
           }
         }
         if (!stopCalled) {
@@ -522,16 +538,21 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     const idempotencyKey = req.metadata?.idempotencyKey ?? ""
 
     try {
+      const restReq: OutboundRequest = { ...req, segments: otherSegments }
+      const calls = await serializeOutboundAsync(restReq, opts.id)
+      const replyToMessageId = req.replyTo
+        ? splitChannelMessage(req.replyTo.messageId, channelId)[1]
+        : undefined
       for (const [voiceIndex, seg] of voiceSegments.entries()) {
         const result = await sendDiscordVoiceMessage({
           botToken: opts.botToken,
           channelId,
           voiceUrl: seg.url,
           durationSec: seg.durationSec,
-          replyToMessageId: req.replyTo?.messageId,
+          replyToMessageId,
           nonce: idempotencyKey ? discordNonce(idempotencyKey, `voice:${voiceIndex}`) : undefined,
         })
-        if (result.messageId) platformMessageId = result.messageId
+        if (result.messageId) platformMessageId = `${channelId}:${result.messageId}`
       }
 
       if (mediaSegments.length > 0) {
@@ -542,14 +563,12 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
           botToken: token,
           channelId,
           files: mediaSegmentsToFiles(mediaSegments),
-          replyToMessageId: otherSegments.length === 0 ? req.replyTo?.messageId : undefined,
+          replyToMessageId: otherSegments.length === 0 ? replyToMessageId : undefined,
           nonce: idempotencyKey ? discordNonce(idempotencyKey, "media") : undefined,
         })
-        if (id) platformMessageId = id
+        if (id) platformMessageId = `${channelId}:${id}`
       }
 
-      const restReq: OutboundRequest = { ...req, segments: otherSegments }
-      const calls = await serializeOutboundAsync(restReq, opts.id)
       for (const call of calls) {
         const result = (await doRequest(
           call.method,
@@ -557,10 +576,16 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
           call.payload
         )) as { id?: string } | null
         if (result?.id) {
-          platformMessageId = result.id
+          platformMessageId = `${channelId}:${result.id}`
         }
       }
-      return { ok: true, platformMessageId }
+      return {
+        ok: true,
+        platformMessageId,
+        ...(calls.some((call) => call.downgrades?.length)
+          ? { downgrades: calls.flatMap((call) => call.downgrades ?? []) }
+          : {}),
+      }
     } catch (err) {
       return { ok: false, error: toOutboundError(err) }
     }
@@ -568,17 +593,45 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
     const ref = patch.conversationRef as Record<string, unknown>
-    const channelId = String(ref["channelId"] ?? "")
-
-    // Render EVERY content-bearing segment, not just the first text one: a
-    // patch that mixed text with a code block or a mention used to edit the
-    // message down to its opening sentence and silently drop the rest.
-    const content = renderDiscordContentRun(patch.segments)
-
     try {
-      const call = serializeEdit(channelId, messageId, content)
-      await doRequest(call.method, call.url.replace(DISCORD_API_BASE, ""), call.payload)
-      return { ok: true }
+      const [channelId, bareMessageId] = splitChannelMessage(
+        messageId,
+        String(ref["channelId"] ?? "")
+      )
+      const calls = await serializeOutboundAsync(patch, opts.id)
+      const content = calls
+        .map((call) => call.payload.content)
+        .filter(Boolean)
+        .join("\n")
+      const embeds = calls.flatMap(
+        (call) => (call.payload.embeds as Record<string, unknown>[] | undefined) ?? []
+      )
+      const components = calls.flatMap(
+        (call) => (call.payload.components as Record<string, unknown>[] | undefined) ?? []
+      )
+      // Editing targets one existing message: reject overflow instead of
+      // losing native content or sending unrelated continuation messages.
+      if (content.length > 2000 || embeds.length > 10 || components.length > 5) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Discord edit exceeds one message's content limit",
+            retryable: false,
+          },
+        }
+      }
+      await doRequest("PATCH", `/channels/${channelId}/messages/${bareMessageId}`, {
+        content,
+        embeds,
+        components,
+      })
+      return {
+        ok: true,
+        ...(calls.some((call) => call.downgrades?.length)
+          ? { downgrades: calls.flatMap((call) => call.downgrades ?? []) }
+          : {}),
+      }
     } catch (err) {
       return { ok: false, error: toOutboundError(err) }
     }
@@ -718,9 +771,7 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
   async function pinMessage(conversationKey: string, messageId: string): Promise<void> {
     // messageId is "<channelId>:<msgId>" (same convention as delete/edit);
     // fall back to the conversationKey's channel when only a bare id is given.
-    const parts = messageId.split(":")
-    const channelId = parts.length === 2 ? parts[0] : conversationKey.split(":")[2]
-    const msgId = parts.length === 2 ? parts[1] : messageId
+    const [channelId, msgId] = splitChannelMessage(messageId, conversationKey.split(":")[2])
     await doRequest("PUT", `/channels/${channelId}/messages/pins/${msgId}`)
   }
 

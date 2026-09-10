@@ -106,6 +106,7 @@ describe("startDingTalkStream", () => {
     const out: Array<{ topic: string; data: Record<string, unknown> }> = []
     const collector = (async () => {
       for await (const f of client.frames) {
+        await f.ack?.(true)
         out.push(f)
         if (out.length >= 1) break
       }
@@ -148,7 +149,7 @@ describe("startDingTalkStream", () => {
     expect(out).toHaveLength(1)
     expect(out[0].topic).toBe(TOPIC_BOT_MESSAGE)
     expect(out[0].data).toMatchObject({ msgId: "m1", conversationId: "c1" })
-    // the bot frame was ACKed (code 200) before being yielded
+    // the bot frame was ACKed (code 200) after processing
     const cbAck = mockWsSend.mock.calls.find((c) => String(c[1]).includes("cb1"))
     expect(cbAck).toBeTruthy()
     expect(JSON.parse(String(cbAck![1])).code).toBe(200)
@@ -170,6 +171,7 @@ describe("startDingTalkStream", () => {
     const out: Array<{ topic: string; data: Record<string, unknown> }> = []
     const collector = (async () => {
       for await (const f of client.frames) {
+        await f.ack?.(true)
         out.push(f)
         if (out.length >= 1) break
       }
@@ -232,7 +234,7 @@ describe("startDingTalkStream", () => {
     expect(mockWsOpen).toHaveBeenCalled()
   })
 
-  it("skips malformed frames and tolerates a callback with non-JSON data", async () => {
+  it("rejects malformed callback data and continues to the next valid frame", async () => {
     mockHttp.mockResolvedValue(registerOk())
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)
@@ -246,6 +248,7 @@ describe("startDingTalkStream", () => {
     const out: Array<{ topic: string; data: Record<string, unknown> }> = []
     const collector = (async () => {
       for await (const f of client.frames) {
+        await f.ack?.(true)
         out.push(f)
         if (out.length >= 1) break
       }
@@ -258,11 +261,24 @@ describe("startDingTalkStream", () => {
       headers: { topic: TOPIC_BOT_MESSAGE, messageId: "x" },
       data: "{bad json",
     })
+    session.push({
+      type: "CALLBACK",
+      headers: { topic: TOPIC_BOT_MESSAGE, messageId: "valid" },
+      data: "{}",
+    })
 
     await collector
     ctrl.abort()
     expect(out).toHaveLength(1)
-    expect(out[0].data).toEqual({}) // non-JSON data degrades to {}
+    expect(out[0].data).toEqual({})
+    expect(mockWsSend.mock.calls.map((c) => JSON.parse(String(c[1])))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 500,
+          headers: expect.objectContaining({ messageId: "x" }),
+        }),
+      ])
+    )
   })
 
   it("echoes non-JSON ping data verbatim and falls back to {} only when absent", async () => {
@@ -461,4 +477,34 @@ describe("startDingTalkStream", () => {
     await collector
     expect(mockWsClose).toHaveBeenCalled()
   })
+})
+
+it("waits for processing acknowledgment and emits exactly one failed ACK", async () => {
+  mockHttp.mockResolvedValue(registerOk())
+  const session = createFakeWsSession()
+  mockListen.mockImplementation(session.listenImpl)
+  const ctrl = new AbortController()
+  const client = startDingTalkStream({
+    clientId: async () => "ak",
+    clientSecret: async () => "as",
+    signal: ctrl.signal,
+  })
+  const pending = client.frames.next()
+  await session.waitForListeners()
+  session.push({
+    type: "CALLBACK",
+    headers: { topic: TOPIC_BOT_MESSAGE, messageId: "pending" },
+    data: "{}",
+  })
+  const frame = await pending
+  expect(mockWsSend.mock.calls.some((c) => String(c[1]).includes("pending"))).toBe(false)
+  await frame.value?.ack?.(false)
+  await frame.value?.ack?.(true)
+  const responses = mockWsSend.mock.calls
+    .map((c) => JSON.parse(String(c[1])))
+    .filter((frame) => frame.headers.messageId === "pending")
+  expect(responses).toHaveLength(1)
+  expect(responses[0].code).toBe(500)
+  ctrl.abort()
+  await client.frames.return(undefined as never)
 })

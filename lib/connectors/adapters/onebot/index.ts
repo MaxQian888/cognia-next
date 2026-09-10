@@ -36,6 +36,7 @@ import { parseV11Event, type OneBotV11Event } from "./v11"
 import {
   serializeOutboundV11,
   serializeOutboundV12,
+  uploadOutboundV12Media,
   serializeDeleteV11,
   serializeDeleteV12,
   serializeGetGroupMsgHistoryV11,
@@ -107,6 +108,33 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
   let currentVariant: "v11" | "v12" | null = null
+  let supportedActions: Promise<Set<string>> | undefined
+
+  async function getSupportedV12Actions(): Promise<Set<string>> {
+    if (!supportedActions) {
+      supportedActions = transport
+        .send({
+          action: "get_supported_actions",
+          params: {},
+          echo: `${opts.id}:actions:${Date.now()}`,
+        })
+        .then((response) => {
+          if (
+            response.status !== "ok" ||
+            response.retcode !== 0 ||
+            !Array.isArray(response.data) ||
+            !response.data.every((action) => typeof action === "string")
+          )
+            throw new Error("OneBot 12 get_supported_actions failed")
+          return new Set(response.data as string[])
+        })
+        .catch((error) => {
+          supportedActions = undefined
+          throw error
+        })
+    }
+    return supportedActions
+  }
 
   // Pick the transport. Forward-WS needs a URL; a forward-ws row missing one is
   // misconfigured, so we fall back to the safe reverse-WS default.
@@ -240,11 +268,31 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     // variant's action.
     const known = currentVariant
     const first: "v11" | "v12" = known ?? (versionInfoOk ? "v11" : "v12")
-    let data = await fetchIdentityData(first)
+    let detected = first
+    let data = await fetchIdentityData(detected)
     if (data === null && known === null) {
-      data = await fetchIdentityData(first === "v11" ? "v12" : "v11")
+      detected = first === "v11" ? "v12" : "v11"
+      data = await fetchIdentityData(detected)
     }
     if (data === null) return // best-effort: leave lastWhoamiResult untouched
+    currentVariant = detected
+    if (detected === "v12") {
+      try {
+        const features = Array.from(await getSupportedV12Actions())
+        const { getAdapterInstance, updateAdapterInstance } =
+          await import("@/lib/db/adapter-instances")
+        const row = await getAdapterInstance(opts.id)
+        await updateAdapterInstance(opts.id, {
+          implMetadata: {
+            impl: row?.implMetadata?.impl ?? "unknown",
+            version: row?.implMetadata?.version ?? "",
+            features,
+          },
+        })
+      } catch {
+        // Discovery remains best-effort; each media send retries an unavailable probe.
+      }
+    }
 
     const uin = String(data["user_id"])
     // v11 → `nickname`; v12 → `user_displayname` / `user_name`.
@@ -288,6 +336,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     // version bump, …).
     await transport.start({
       onOpen: () => {
+        supportedActions = undefined
         healthState = "running"
         healthReason = undefined
         lastActivityAt = Date.now()
@@ -354,6 +403,9 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           // trusting it would keep the LAN exception open with no connection
           // behind it.
           await enrichOneBotInboundMedia(result.parsed, {
+            ...(result.variant === "v12"
+              ? { transport, supportedActions: getSupportedV12Actions }
+              : {}),
             ...(useForwardWs ? { forwardWsUrl: opts.forwardWsUrl } : {}),
           })
           await ctx.emit(result.parsed)
@@ -367,6 +419,7 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     await transport.stop()
     clearVariantCache(opts.id)
     currentVariant = null
+    supportedActions = undefined
     healthState = "down"
     healthReason = undefined
   }
@@ -379,10 +432,29 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
     const variant = getVariant()
     let calls: SerializedOneBotCall[]
     try {
+      const media = req.segments.filter(
+        (segment) =>
+          segment.type === "image" ||
+          segment.type === "voice" ||
+          segment.type === "video" ||
+          segment.type === "file"
+      )
+      let fileIds: Map<string, string> | undefined
+      if (variant === "v12" && media.length > 0) {
+        // Validate addressing before uploads, which must never send messages.
+        serializeOutboundV12(
+          req,
+          opts.selfBotUin,
+          new Map(media.map((segment) => [segment.url, "pending"]))
+        )
+        if (!(await getSupportedV12Actions()).has("upload_file"))
+          throw new OneBotUnsupportedError("upload_file")
+        fileIds = await uploadOutboundV12Media(req, transport)
+      }
       calls =
         variant === "v11"
           ? serializeOutboundV11(req, opts.selfBotUin)
-          : serializeOutboundV12(req, opts.selfBotUin)
+          : serializeOutboundV12(req, opts.selfBotUin, fileIds)
     } catch (err) {
       // Requests that can never succeed on the wire (no chat target, v12
       // media without upload_file) — non-retryable, per OneBotValidationError.
@@ -392,7 +464,14 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           error: { code: "validation", message: err.message, retryable: false },
         }
       }
-      throw err
+      return {
+        ok: false,
+        error: {
+          code: "platform_5xx",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: true,
+        },
+      }
     }
 
     if (calls.length === 0) {

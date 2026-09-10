@@ -13,7 +13,8 @@
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 
 const TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
-export const QQ_API_BASE = "https://api.sgroup.qq.com"
+/** Official API domain unified on 2026-08-10. */
+export const QQ_API_BASE = "https://api.bot.qq.com"
 
 interface CacheEntry {
   token: string

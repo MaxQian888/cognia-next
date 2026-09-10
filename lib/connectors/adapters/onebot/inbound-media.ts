@@ -29,18 +29,20 @@
  * transport is ACTUALLY dialling it: a URL left behind on the config after a
  * switch back to reverse-ws is not an address anything is talking to.
  *
- * v12 `file_id` references are NOT resolved here: reading one takes a `get_file`
- * action over the connection, which is a different shape of work from a
- * download. Those segments keep their marker, exactly as before.
+ * v12 file_id references resolve over get_file, with inline data preferred
+ * and URL fallback for implementations that cannot return bytes.
  */
 
 import {
   enrichInboundMedia,
   stableMediaRef,
+  MAX_INLINE_BYTES,
   type EnrichableSegment,
   type InboundMediaDeps,
 } from "@/lib/connectors/adapters/_shared/inbound-media"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import type { OneBotTransport } from "./transport"
+import { connectorsAttachmentRead } from "@/lib/connectors/tauri/commands"
 
 export interface EnrichOneBotMediaDeps extends InboundMediaDeps {
   /**
@@ -48,6 +50,8 @@ export interface EnrichOneBotMediaDeps extends InboundMediaDeps {
    * implementation. Absent in `reverse-ws` mode.
    */
   forwardWsUrl?: string
+  transport?: Pick<OneBotTransport, "send">
+  supportedActions?: () => Promise<ReadonlySet<string>>
 }
 
 /** True for an absolute http(s) URL — the only thing worth trying to download. */
@@ -112,12 +116,109 @@ export async function enrichOneBotInboundMedia(
   event: NormalizedInboundEvent,
   deps: EnrichOneBotMediaDeps = {}
 ): Promise<void> {
+  const inline = new Map<string, string>()
+  const headers = new Map<string, Record<string, string>>()
+  if (
+    deps.transport &&
+    event.segments.some(
+      (segment) =>
+        segment.type === "image" ||
+        segment.type === "file" ||
+        segment.type === "voice" ||
+        segment.type === "video"
+    )
+  ) {
+    let supported = false
+    try {
+      supported = (await deps.supportedActions?.())?.has("get_file") ?? true
+    } catch {
+      /* keep unresolved refs */
+    }
+    if (supported) {
+      for (const segment of event.segments) {
+        if (!(
+          segment.type === "image" ||
+          segment.type === "file" ||
+          segment.type === "voice" ||
+          segment.type === "video"
+        ))
+          continue
+        const fileId = segment.url
+        if (!fileId) continue
+        try {
+          let result = await deps.transport.send({
+            action: "get_file",
+            params: { file_id: fileId, type: "data" },
+            echo: `file:${crypto.randomUUID()}`,
+          })
+          if (result.retcode === 10004)
+            result = await deps.transport.send({
+              action: "get_file",
+              params: { file_id: fileId, type: "url" },
+              echo: `file:${crypto.randomUUID()}`,
+            })
+          if (
+            result.status !== "ok" ||
+            result.retcode !== 0 ||
+            !result.data ||
+            typeof result.data !== "object"
+          )
+            continue
+          const data = result.data as {
+            data?: string
+            name?: string
+            url?: string
+            headers?: Record<string, string>
+            sha256?: string
+          }
+          if (segment.type === "file" && typeof data.name === "string" && data.name)
+            segment.name = data.name
+          if (typeof data.data === "string") {
+            if (data.data.length > Math.ceil((deps.maxInlineBytes ?? MAX_INLINE_BYTES) / 3) * 4)
+              continue
+            const decoded = atob(data.data)
+            if (decoded.length > (deps.maxInlineBytes ?? MAX_INLINE_BYTES)) continue
+            if (data.sha256) {
+              const digest = await crypto.subtle.digest(
+                "SHA-256",
+                Uint8Array.from(decoded, (character) => character.charCodeAt(0))
+              )
+              const hex = Array.from(new Uint8Array(digest), (byte) =>
+                byte.toString(16).padStart(2, "0")
+              ).join("")
+              if (hex !== data.sha256.toLowerCase()) continue
+            }
+            segment.rawUrl = fileId
+            if (segment.type === "voice" || segment.type === "video")
+              segment.url = `data:${segment.mimeType ?? "application/octet-stream"};base64,${data.data}`
+            else {
+              inline.set(fileId, data.data)
+            }
+          } else if (isHttpUrl(data.url)) {
+            segment.rawUrl = fileId
+            segment.url = data.url!
+            if (
+              data.headers &&
+              Object.values(data.headers).every((value) => typeof value === "string")
+            )
+              headers.set(segment.url, data.headers)
+          }
+        } catch {
+          /* A failed file must not discard the message or other files. */
+        }
+      }
+    }
+  }
   await enrichInboundMedia(
     event,
     {
       ref: (seg: EnrichableSegment) =>
-        isHttpUrl(seg.url) ? stableMediaRef("onebot", seg.url) : undefined,
-      source: (seg: EnrichableSegment) => ({ url: seg.url }),
+        inline.has(seg.url)
+          ? `onebot-file:${seg.url}`
+          : isHttpUrl(seg.url)
+            ? stableMediaRef("onebot", seg.url)
+            : undefined,
+      source: (seg: EnrichableSegment) => ({ url: seg.url, headers: headers.get(seg.url) }),
       allowPrivateHost: operatorHostAllowance(deps.forwardWsUrl),
       // `segments.ts` names no media type — the CQ code carries only a URL — so
       // without this the shared fallback would declare every QQ picture
@@ -126,6 +227,15 @@ export async function enrichOneBotInboundMedia(
       defaultImageMime: "image/jpeg",
       extractLabel: "onebot-inbound",
     },
-    deps
+    {
+      ...deps,
+      readAttachment: async (adapterId, ref, maxBytes) =>
+        inline.get(ref.replace(/^onebot-file:/, "")) ??
+        (deps.readAttachment ?? connectorsAttachmentRead)(adapterId, ref, maxBytes),
+    }
   )
+  for (const segment of event.segments) {
+    if (segment.type === "file" && inline.has(segment.url))
+      segment.dataBase64 = inline.get(segment.url)
+  }
 }

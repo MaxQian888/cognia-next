@@ -16,6 +16,7 @@ import type { ForwardMessageInput } from "@/types/connectors/adapter"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { toOneBotSegments } from "./segments"
 import { buildOneBotA2UISegments } from "./a2ui-mapper"
+import type { OneBotTransport } from "./transport"
 
 export class OneBotUnsupportedError extends Error {
   constructor(action: string) {
@@ -43,11 +44,76 @@ export interface SerializedOneBotCall {
   /** Echo string for matching responses to requests */
   echo: string
   params: Record<string, unknown>
+  /** OneBot 12 account selector for connections carrying multiple bots. */
+  self?: { platform: string; user_id: string }
 }
 
 let echoCounter = 0
 function nextEcho(): string {
   return `cognia_${Date.now()}_${++echoCounter}`
+}
+
+/** Upload every media segment before the single atomic send_message action. */
+export async function uploadOutboundV12Media(
+  req: OutboundRequest,
+  transport: Pick<OneBotTransport, "send">
+): Promise<Map<string, string>> {
+  const ids = new Map<string, string>()
+  for (const segment of req.segments) {
+    if (!(
+      segment.type === "image" ||
+      segment.type === "file" ||
+      segment.type === "voice" ||
+      segment.type === "video"
+    ))
+      continue
+    if (ids.has(segment.url)) continue
+    const inline =
+      segment.type === "image" || segment.type === "file" ? segment.dataBase64 : undefined
+    const dataUrl = /^data:[^,]*;base64,(.*)$/s.exec(segment.url)
+    const data = inline ?? dataUrl?.[1]
+    if (!data && !/^https?:\/\//i.test(segment.url))
+      throw new OneBotValidationError(
+        "OneBot 12 upload requires HTTP(S) media or inline base64 bytes"
+      )
+    if (data) {
+      try {
+        atob(data)
+      } catch {
+        throw new OneBotValidationError("OneBot 12 media has invalid base64 data")
+      }
+    }
+    let url: URL | undefined
+    if (!data) {
+      try {
+        url = new URL(segment.url)
+      } catch {
+        throw new OneBotValidationError("OneBot 12 media URL is invalid")
+      }
+    }
+    const name =
+      segment.type === "file"
+        ? segment.name
+        : data
+          ? segment.type
+          : url!.pathname.split("/").pop() || segment.type
+    const response = await transport.send({
+      action: "upload_file",
+      echo: nextEcho(),
+      params: data ? { type: "data", name, data } : { type: "url", name, url: segment.url },
+    })
+    if (response.status !== "ok" || response.retcode !== 0) {
+      const message = `OneBot 12 upload_file failed: ${response.retcode}`
+      if (response.retcode >= 10000 && response.retcode < 20000)
+        throw new OneBotValidationError(message)
+      throw new Error(message)
+    }
+    const fileId = (response.data as { file_id?: unknown } | undefined)?.file_id
+    if (typeof fileId !== "string" || !fileId)
+      throw new OneBotValidationError("OneBot 12 upload_file returned no file_id")
+    ids.set(segment.url, fileId)
+  }
+  return ids
 }
 
 // ---------------------------------------------------------------------------
@@ -147,24 +213,32 @@ export function serializeOutboundV11(
  */
 export function serializeOutboundV12(
   req: OutboundRequest,
-  _selfId: string
+  _selfId: string,
+  mediaFileIds: ReadonlyMap<string, string> = new Map()
 ): SerializedOneBotCall[] {
-  const { userId, groupId, messageType } = chatIdFromRef(req)
+  const ref = req.conversationRef as Record<string, unknown>
+  const isChannel = ref.detailType === "channel"
+  const { userId, groupId, messageType } = isChannel ? {} : chatIdFromRef(req)
+  if (
+    isChannel &&
+    (typeof ref.guildId !== "string" ||
+      !ref.guildId ||
+      typeof ref.channelId !== "string" ||
+      !ref.channelId)
+  )
+    throw new OneBotValidationError("OneBot 12 channel send requires guildId and channelId")
 
   const segments = expandA2UISegments(req.segments)
 
-  // GAP: OneBot 12 requires an `upload_file` round-trip first — media
-  // segments carry a `file_id` from that upload, never a raw URL. Every real
-  // target we ship against (NapCat / Lagrange / LLOneBot) is v11, so the v12
-  // upload flow is intentionally not implemented; fail honestly instead of
-  // sending a URL-in-file_id payload a compliant v12 impl rejects.
+  // The adapter resolves upload_file before serialization. Never put a URL
+  // into file_id; require the concrete ids returned by that round-trip.
   const media = segments.find(
-    (s) => s.type === "image" || s.type === "voice" || s.type === "video" || s.type === "file"
+    (s) =>
+      (s.type === "image" || s.type === "voice" || s.type === "video" || s.type === "file") &&
+      !mediaFileIds.get(s.url)
   )
   if (media !== undefined) {
-    throw new OneBotValidationError(
-      `OneBot 12 media send ('${media.type}') requires upload_file; not supported yet`
-    )
+    throw new OneBotValidationError(`OneBot 12 media send ('${media.type}') requires upload_file`)
   }
 
   const allSegments =
@@ -172,21 +246,35 @@ export function serializeOutboundV12(
       ? [{ type: "reply" as const, messageId: req.replyTo.messageId, snippet: "" }, ...segments]
       : segments
 
-  const obSegments = toOneBotSegments(allSegments, "v12")
+  const obSegments = toOneBotSegments(
+    allSegments.map((segment) =>
+      segment.type === "image" ||
+      segment.type === "voice" ||
+      segment.type === "video" ||
+      segment.type === "file"
+        ? { ...segment, url: mediaFileIds.get(segment.url)! }
+        : segment
+    ),
+    "v12"
+  )
   if (obSegments.length === 0) return []
 
-  const detailType = messageType === "private" ? "private" : "group"
+  const detailType = isChannel ? "channel" : messageType === "private" ? "private" : "group"
   const params: Record<string, unknown> = {
     detail_type: detailType,
     message: obSegments,
   }
-  if (detailType === "private") {
+  if (detailType === "channel") {
+    params.guild_id = ref.guildId
+    params.channel_id = ref.channelId
+  } else if (detailType === "private") {
     params.user_id = userId
   } else {
     params.group_id = groupId
   }
 
-  return [{ action: "send_message", echo: nextEcho(), params }]
+  const self = ref.self as SerializedOneBotCall["self"]
+  return [{ action: "send_message", echo: nextEcho(), params, ...(self ? { self } : {}) }]
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import {
   clearQQTokenCacheByToken,
   getQQAccessToken,
   getQQGatewayUrl,
+  QQ_API_BASE,
   qqAuthHeaders,
 } from "./auth"
 
@@ -69,6 +70,9 @@ describe("getQQGatewayUrl", () => {
 })
 
 describe("qqAuthHeaders", () => {
+  it("uses the unified official API base", () => {
+    expect(QQ_API_BASE).toBe("https://api.bot.qq.com")
+  })
   it("uses the QQBot scheme", () => {
     expect(qqAuthHeaders("abc")).toEqual({
       Authorization: "QQBot abc",

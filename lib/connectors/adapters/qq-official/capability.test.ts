@@ -2,11 +2,14 @@ import { QQ_OFFICIAL_A2UI_CAPABILITY, QQ_OFFICIAL_CAPS } from "./capability"
 import { A2UI_COMPONENT_KINDS } from "@/types/connectors/capability"
 
 describe("qq-official capability", () => {
-  it("declares text + reply, but not markdown/media (honest about v1)", () => {
+  it("declares public media support but keeps unavailable files and reviewed templates disabled", () => {
     expect(QQ_OFFICIAL_CAPS).toContain("send.text")
     expect(QQ_OFFICIAL_CAPS).toContain("send.reply")
     expect(QQ_OFFICIAL_CAPS).not.toContain("send.markdown")
-    expect(QQ_OFFICIAL_CAPS).not.toContain("send.image")
+    expect(QQ_OFFICIAL_CAPS).toEqual(
+      expect.arrayContaining(["send.image", "send.video", "send.voice"])
+    )
+    expect(QQ_OFFICIAL_CAPS).not.toContain("send.file")
     expect(QQ_OFFICIAL_CAPS).not.toContain("send.a2ui")
   })
 

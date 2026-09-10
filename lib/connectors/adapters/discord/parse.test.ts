@@ -10,6 +10,116 @@ const ADAPTER_ID = "dc-adapter-1"
 const SELF_ID = "987654321098765432"
 
 describe("parseDiscordDispatch", () => {
+  it("normalizes slash command subcommands, false/zero options and attachments", () => {
+    const raw: DiscordDispatch = {
+      t: "INTERACTION_CREATE",
+      op: 0,
+      d: {
+        type: 2,
+        id: "command-1",
+        channel_id: "channel",
+        guild_id: "guild",
+        member: { user: { id: "caller", username: "Caller" } },
+        data: {
+          name: "review",
+          type: 1,
+          options: [
+            {
+              name: "code",
+              type: 1,
+              options: [
+                { name: "prompt", type: 3, value: "check all paths" },
+                { name: "verbose", type: 5, value: false },
+                { name: "count", type: 4, value: 0 },
+                { name: "file", type: 11, value: "att" },
+              ],
+            },
+          ],
+          resolved: {
+            attachments: {
+              att: {
+                id: "att",
+                filename: "code.ts",
+                url: "https://cdn/code.ts",
+                content_type: "text/plain",
+              },
+            },
+          },
+        },
+      },
+    }
+    const event = parseDiscordDispatch(ADAPTER_ID, SELF_ID, raw)
+    expect(event).toMatchObject({
+      messageId: "command-1",
+      sender: { remoteUserId: "caller" },
+      mentions: { selfMentioned: true },
+      raw,
+    })
+    expect(event!.plainText).toContain("/review code")
+    expect(event!.plainText).toContain("verbose: false")
+    expect(event!.plainText).toContain("count: 0")
+    expect(event!.segments).toContainEqual(
+      expect.objectContaining({ type: "file", url: "https://cdn/code.ts" })
+    )
+  })
+
+  it("retains message-context text/media and the user-context target", () => {
+    const base = {
+      type: 2,
+      id: "command",
+      channel_id: "channel",
+      user: { id: "caller", username: "Caller" },
+    }
+    const message = parseDiscordDispatch(ADAPTER_ID, SELF_ID, {
+      t: "INTERACTION_CREATE",
+      op: 0,
+      d: {
+        ...base,
+        data: {
+          name: "Summarize",
+          type: 3,
+          target_id: "target",
+          resolved: {
+            messages: {
+              target: {
+                id: "target",
+                content: "all original text",
+                attachments: [
+                  {
+                    id: "a",
+                    filename: "image.png",
+                    url: "https://cdn/image.png",
+                    content_type: "image/png",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    })
+    expect(message!.plainText).toContain("all original text")
+    expect(message!.segments).toContainEqual(
+      expect.objectContaining({ type: "image", url: "https://cdn/image.png" })
+    )
+    const user = parseDiscordDispatch(ADAPTER_ID, SELF_ID, {
+      t: "INTERACTION_CREATE",
+      op: 0,
+      d: {
+        ...base,
+        data: {
+          name: "Describe",
+          type: 2,
+          target_id: "target-user",
+          resolved: { users: { "target-user": { id: "target-user", username: "Target" } } },
+        },
+      },
+    })
+    expect(user!.segments).toContainEqual(
+      expect.objectContaining({ type: "mention", userId: "target-user", displayName: "Target" })
+    )
+  })
+
   describe("DM plain text (dm-text.json)", () => {
     const dispatch = dmTextFixture as DiscordDispatch
     const result = parseDiscordDispatch(ADAPTER_ID, SELF_ID, dispatch)

@@ -15,12 +15,13 @@
  * - `limited: true` timelines → gap backfill via `/messages` (dir=b, capped),
  * - `M_UNKNOWN_TOKEN` / `soft_logout` → throws {@link MatrixSyncAuthError}
  *   and stops (retrying a dead token forever would mask the auth failure),
- * - 429 → honors `retry_after_ms`,
+ * - 429 → honors `Retry-After`, with legacy `retry_after_ms` fallback,
  * - other 5xx / network errors → exponential backoff with reset on success,
  *   matching the Telegram long-poll transport.
  */
 
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { parseRetryAfter } from "@/lib/updates/backoff"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import { normalizeHomeserver } from "./auth"
 import type { MatrixSyncResponse, MatrixTimelineEvent } from "./parse"
@@ -283,7 +284,12 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         throw new MatrixSyncAuthError(`Matrix sync auth failed: ${detail}`)
       }
       if (resp.status === 429) {
-        const retryAfterMs = typeof body.retry_after_ms === "number" ? body.retry_after_ms : 5_000
+        const retryAfter = Object.entries(resp.headers).find(
+          ([name]) => name.toLowerCase() === "retry-after"
+        )?.[1]
+        const retryAfterMs =
+          parseRetryAfter(retryAfter, Date.now()) ??
+          (typeof body.retry_after_ms === "number" ? body.retry_after_ms : 5_000)
         await delay(retryAfterMs, opts.signal)
         continue
       }

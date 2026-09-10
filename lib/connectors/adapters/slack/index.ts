@@ -34,11 +34,12 @@ import {
   parseSlackEventCallback,
   parseSlackInteractivePayload,
   parseSlackSlashCommand,
+  type SlackSlashCommandPayload,
 } from "./parse"
 import type { SlackEventEnvelope, SlackInteractivePayload } from "./parse"
 import {
   serializeOutboundAsync,
-  serializeUpdate,
+  threadTsFromRef,
   serializeDeleteMessage,
   serializeReaction,
   serializeReactionRemoval,
@@ -470,7 +471,14 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
               continue
             }
 
-            const event = parseSlackEventCallback(opts.id, opts.selfId, envelope)
+            const event =
+              kind === "slash_command"
+                ? parseSlackSlashCommand(
+                    opts.id,
+                    opts.selfId,
+                    envelope as unknown as SlackSlashCommandPayload
+                  )
+                : parseSlackEventCallback(opts.id, opts.selfId, envelope)
             if (event) {
               // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
               if (!(await gateInboundEvent(opts.id, event))) continue
@@ -649,7 +657,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
 
       const ref = req.conversationRef as Record<string, unknown>
       const refChannel = String(ref["channelId"] ?? "")
-      const refThreadTs = typeof ref["threadTs"] === "string" ? ref["threadTs"] : undefined
+      const refThreadTs = threadTsFromRef(req)
 
       let platformMessageId: string | undefined
       // Post the block/text message first (when there is one) so the reply
@@ -763,8 +771,19 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       }
     }
     try {
-      const call = serializeUpdate(channel, ts, patch)
-      await doRequest("POST", "chat.update", call.payload)
+      const serialized = await serializeOutboundAsync(patch, opts.id)
+      if (serialized.pages.length !== 1) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Slack edit exceeds one message's block limit",
+            retryable: false,
+          },
+        }
+      }
+      const { blocks, text } = serialized.pages[0]
+      await doRequest("POST", "chat.update", { channel, ts, blocks: blocks ?? [], text })
       return { ok: true }
     } catch (err) {
       return { ok: false, error: toOutboundError(err) }
@@ -923,6 +942,8 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
    * ignored: the token itself identifies the user.
    */
   async function setPresenceStatus(input: { text: string; expiresAt?: number }): Promise<void> {
+    if (Array.from(input.text).length > 100)
+      throw new Error("Slack status text exceeds 100 characters")
     const token = await opts.userToken?.().catch(() => "")
     if (!token) {
       throw new Error("Slack presence requires a user token (xoxp-…) with users.profile:write")
@@ -936,12 +957,12 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       },
       body: JSON.stringify({
         profile: {
-          status_text: input.text.slice(0, 100),
+          status_text: input.text,
           // PresenceStatusInput (types/connectors/presence.ts) carries no
           // emoji/icon field — the contract is text + expiry only — so the
           // robot-face badge is a deliberate fixed marker for bot-driven
           // statuses. Revisit if the shared input type ever grows an icon.
-          status_emoji: ":robot_face:",
+          status_emoji: input.text ? ":robot_face:" : "",
           status_expiration: input.expiresAt ? Math.floor(input.expiresAt / 1000) : 0,
         },
       }),

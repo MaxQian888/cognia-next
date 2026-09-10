@@ -161,6 +161,48 @@ function createFakeSocketModeSession() {
 // ---------------------------------------------------------------------------
 
 describe("createSlackAdapter", () => {
+  it("rejects edits requiring multiple Slack messages instead of dropping later blocks", async () => {
+    const result = await makeAdapter().edit!("chan-1:123.456", {
+      conversationRef: { platform: "slack", adapterId: "test", channelId: "chan-1" },
+      segments: Array.from({ length: 51 }, (_, i) => ({
+        type: "text" as const,
+        text: `Line ${i}`,
+      })),
+      metadata: { idempotencyKey: "edit-overflow" },
+    })
+    expect(result.error).toMatchObject({ code: "validation", retryable: false })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("edit() preserves native A2UI content", async () => {
+    mockInvoke.mockResolvedValue({ status: 200, headers: {}, body: '{"ok":true}' })
+    const adapter = makeAdapter()
+    const result = await adapter.edit!("chan-1:123.456", {
+      conversationRef: { platform: "slack", adapterId: "test", channelId: "chan-1" },
+      segments: [
+        {
+          type: "a2ui",
+          surfaceId: "surface",
+          plainTextMirror: "fallback",
+          content: {
+            components: { root: { id: "root", component: "Text", text: "Native updated text" } },
+            dataModel: {},
+            rootId: "root",
+          },
+        },
+      ],
+      metadata: { idempotencyKey: "edit-native" },
+    })
+    expect(result.ok).toBe(true)
+    const body = JSON.parse(
+      (mockInvoke.mock.calls.at(-1)?.[1] as { req: { body: string } }).req.body
+    )
+    expect(body.blocks).toContainEqual({
+      type: "section",
+      text: { type: "mrkdwn", text: "Native updated text" },
+    })
+  })
+
   beforeEach(() => {
     mockInvoke.mockReset()
     mockListen.mockReset()
@@ -406,6 +448,38 @@ describe("createSlackAdapter", () => {
     expect(emitted[0].mentions.selfMentioned).toBe(true)
     expect(emitted[0].conversationKey).toBe("slack:sl-1:C0SLASH")
   }, 15000)
+
+  it("routes verified webhook slash commands to the ordinary inbound pipeline", async () => {
+    let handler: ((event: { payload: unknown }) => void) | undefined
+    mockListen.mockImplementation(async (_eventName: string, callback: typeof handler) => {
+      handler = callback
+      return jest.fn()
+    })
+    const adapter = makeAdapter("events-api-webhook")
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    handler!({
+      payload: {
+        type: "slash_command",
+        command: "/cognia",
+        text: "help me",
+        channel_id: "C123",
+        user_id: "U123",
+        team_id: "T123",
+        trigger_id: "trigger-1",
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0]).toMatchObject({
+      messageId: "trigger-1",
+      plainText: "/cognia help me",
+      mentions: { selfMentioned: true },
+      conversationKey: "slack:sl-1:C123",
+    })
+    await adapter.stop()
+  })
 
   it("routes webhook-delivered interactive payloads to handleInteractivePayload", async () => {
     let webhookHandler: ((event: { payload: unknown }) => void) | null = null
@@ -730,6 +804,24 @@ describe("createSlackAdapter", () => {
       sizeBytes: 1234,
     }
 
+    it.each([
+      { threadId: "1600000000.000888" },
+      { replyTo: { messageId: "C0UP:1600000000.000888" } },
+    ])("shares local attachments into the requested thread %j", async (routing) => {
+      mockUploadApis()
+      const result = await makeAdapter().send({
+        conversationRef: { ...conversationRef, threadTs: undefined },
+        ...routing,
+        segments: [localFileSegment],
+        metadata: { idempotencyKey: "upload-thread" },
+      })
+      expect(result.ok).toBe(true)
+      const complete = uploadCalls().find((call) =>
+        call.req.url?.includes("files.completeUploadExternal")
+      )!
+      expect(JSON.parse(complete.req.body as string).thread_ts).toBe("1600000000.000888")
+    })
+
     it("happy path: 3 calls in order with the documented params, no chat.postMessage", async () => {
       mockUploadApis()
       const result = await makeAdapter().send({
@@ -975,6 +1067,35 @@ describe("createSlackAdapter", () => {
       }
       expect(body.profile.status_text).toBe("AI 1.2M $3.4")
       expect(body.profile.status_expiration).toBe(1_800_000_000)
+    })
+
+    it("rejects an over-limit status instead of truncating its content", async () => {
+      const adapter = createSlackAdapter({
+        id: "sl-1",
+        displayName: "Bot",
+        botToken: async () => "bot",
+        signingSecret: async () => "secret",
+        userToken: async () => "user",
+        selfId: "UBOT123",
+        transport: "socket-mode",
+      })
+      await expect(adapter.setPresenceStatus!({ text: "x".repeat(101) })).rejects.toThrow(/100/)
+      expect(httpCalls()).toHaveLength(0)
+    })
+
+    it("clears both status text and emoji when clearing presence", async () => {
+      const adapter = createSlackAdapter({
+        id: "sl-1",
+        displayName: "Bot",
+        botToken: async () => "bot",
+        signingSecret: async () => "secret",
+        userToken: async () => "user",
+        selfId: "UBOT123",
+        transport: "socket-mode",
+      })
+      await adapter.setPresenceStatus!({ text: "" })
+      const body = JSON.parse((httpCalls()[0][1] as { req: { body: string } }).req.body)
+      expect(body.profile).toEqual({ status_text: "", status_emoji: "", status_expiration: 0 })
     })
 
     it("setPresenceStatus throws without a user token", async () => {

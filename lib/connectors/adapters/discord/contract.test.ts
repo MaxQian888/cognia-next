@@ -124,7 +124,7 @@ describe("Discord adapter contract suite", () => {
         metadata: { idempotencyKey: "k3" },
       }
       const result = await adapter.send(req)
-      expect(result.platformMessageId).toBe("upload-msg-id")
+      expect(result.platformMessageId).toBe("chan-1:upload-msg-id")
       const upload = lastUploadReq()
       expect(upload.channelId).toBe("chan-1")
       expect(upload.files).toEqual([

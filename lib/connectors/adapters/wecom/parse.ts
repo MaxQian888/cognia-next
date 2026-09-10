@@ -40,7 +40,7 @@ export function buildWeComConversationRef(
   return {
     platform: "wecom",
     adapterId,
-    chatId: body.chatid,
+    chatId: body.chatid || (body.chattype === "single" ? (body.from?.userid ?? "") : ""),
     chatType: body.chattype,
     userId: body.from?.userid,
     reqId,
@@ -74,7 +74,12 @@ function guessMimeFromExt(ext?: string): string {
 }
 
 /** Project the inbound body's payload into cross-platform message segments. */
-function bodyToSegments(body: WeComInboundMsgBody): MessageSegment[] {
+function bodyToSegments(
+  body: Pick<
+    WeComInboundMsgBody,
+    "msgtype" | "text" | "markdown" | "image" | "voice" | "video" | "file" | "mixed"
+  >
+): MessageSegment[] {
   const segs: MessageSegment[] = []
   switch (body.msgtype) {
     case "text":
@@ -88,7 +93,13 @@ function bodyToSegments(body: WeComInboundMsgBody): MessageSegment[] {
       break
     case "voice":
       if (body.voice?.url)
-        segs.push({ type: "voice", url: body.voice.url, transcript: body.voice.transcript })
+        segs.push({
+          type: "voice",
+          url: body.voice.url,
+          transcript: body.voice.content ?? body.voice.transcript,
+        })
+      else if (body.voice?.content || body.voice?.transcript)
+        segs.push({ type: "text", text: body.voice.content || body.voice.transcript! })
       break
     case "video":
       if (body.video?.url) segs.push({ type: "video", url: body.video.url })
@@ -128,14 +139,28 @@ export function parseWeComMessage(
   reqId?: string,
   now: number = Date.now()
 ): NormalizedInboundEvent | null {
-  if (!body.chatid || !body.msgid) return null
-  const segments = bodyToSegments(body)
+  const conversationRef = buildWeComConversationRef(adapterId, body, reqId)
+  const chatId = conversationRef.chatId
+  if (!chatId || !body.msgid) return null
+  const quoted = body.quote
+    ? bodyToSegments(body.quote).map((segment): MessageSegment =>
+        segment.type === "text"
+          ? {
+              type: "markdown",
+              md: segment.text
+                .split("\n")
+                .map((line) => `> ${line}`)
+                .join("\n"),
+            }
+          : segment
+      )
+    : []
+  const segments = [...quoted, ...bodyToSegments(body)]
   if (segments.length === 0) return null
 
   const isGroup = body.chattype === "group"
   const userId = body.from?.userid ?? "unknown"
-  const conversationRef = buildWeComConversationRef(adapterId, body, reqId)
-  const conversationKey = buildConversationKey("wecom", adapterId, body.chatid)
+  const conversationKey = buildConversationKey("wecom", adapterId, chatId)
   const plainText = segmentsToPlainText(segments).trim()
 
   return {
@@ -153,9 +178,9 @@ export function parseWeComMessage(
       displayName: body.from?.name,
     },
     channel: {
-      id: body.chatid,
+      id: chatId,
       kind: isGroup ? "group" : "private",
-      platformChannelId: body.chatid,
+      platformChannelId: chatId,
     },
     segments,
     plainText: plainText.length > 0 ? plainText : `[${body.msgtype}]`,

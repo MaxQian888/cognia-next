@@ -53,8 +53,10 @@ function extractText(msg: DingTalkBotMessage): string {
   switch (msg.msgtype) {
     case "text":
       return typeof msg.text?.content === "string" ? msg.text.content.trim() : ""
-    case "richText":
-      return Array.isArray(msg.richText) ? richTextToPlain(msg.richText).trim() : ""
+    case "richText": {
+      const rich = msg.content?.richText ?? msg.richText
+      return Array.isArray(rich) ? richTextToPlain(rich).trim() : ""
+    }
     case "picture":
       return "[picture]"
     case "audio": {
@@ -72,6 +74,61 @@ function extractText(msg: DingTalkBotMessage): string {
   }
 }
 
+/** Preserve media references for the adapter's authenticated download pass. */
+function messageSegments(msg: DingTalkBotMessage): MessageSegment[] {
+  const media = (
+    type: "image" | "voice" | "video" | "file",
+    content: Record<string, unknown>
+  ): MessageSegment | undefined => {
+    const code =
+      typeof content.downloadCode === "string" && content.downloadCode
+        ? content.downloadCode
+        : typeof content.pictureDownloadCode === "string"
+          ? content.pictureDownloadCode
+          : undefined
+    if (!code) return undefined
+    const url = `dingtalk://download/${encodeURIComponent(code)}`
+    if (type === "image") return { type, url }
+    if (type === "file")
+      return {
+        type,
+        url,
+        name: typeof content.fileName === "string" ? content.fileName : "file",
+        mimeType: "application/octet-stream",
+        sizeBytes: Number(content.fileSize) || 0,
+      }
+    const duration = Number(content.duration)
+    const durationSec = Number.isFinite(duration) && duration > 0 ? duration : undefined
+    return type === "voice"
+      ? {
+          type,
+          url,
+          durationSec,
+          transcript: typeof content.recognition === "string" ? content.recognition : undefined,
+        }
+      : { type, url, durationSec, mimeType: content.videoType === "mp4" ? "video/mp4" : undefined }
+  }
+  if (msg.msgtype === "richText") {
+    const rich = msg.content?.richText ?? msg.richText
+    if (Array.isArray(rich))
+      return rich.flatMap((raw): MessageSegment[] => {
+        if (!raw || typeof raw !== "object") return []
+        const node = raw as Record<string, unknown>
+        const parts: MessageSegment[] = []
+        if (typeof node.text === "string" && node.text)
+          parts.push({ type: "text", text: node.text })
+        if (node.type === "picture" || node.pictureDownloadCode || node.downloadCode)
+          parts.push(media("image", node) ?? { type: "text", text: "[picture]" })
+        return parts
+      })
+  }
+  const type = ({ picture: "image", audio: "voice", video: "video", file: "file" } as const)[
+    msg.msgtype as "picture" | "audio" | "video" | "file"
+  ]
+  const segment = type && media(type, msg.content ?? {})
+  return segment ? [segment] : [{ type: "text", text: extractText(msg) }]
+}
+
 /**
  * Parse a DingTalk bot message into a NormalizedInboundEvent. Returns `null`
  * when the payload has no usable id (defensive — a malformed frame should not
@@ -87,7 +144,7 @@ export function parseDingTalkBotMessage(
   const isGroup = msg.conversationType === "2"
   const remoteUserId = msg.senderStaffId || msg.senderId || "unknown"
   const text = extractText(msg)
-  const segments: MessageSegment[] = [{ type: "text", text }]
+  const segments = messageSegments(msg)
 
   const effectiveSelfId = selfId || msg.chatbotUserId || ""
   // atUsers → mentioned user ids (staffId preferred), excluding the bot itself

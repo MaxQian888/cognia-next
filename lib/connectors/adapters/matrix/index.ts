@@ -14,6 +14,7 @@ import type {
   PlatformAdapter,
   ReactionRef,
 } from "@/types/connectors/adapter"
+import { buildConversationKey } from "@/types/connectors/event"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import {
@@ -26,9 +27,15 @@ import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { parseRetryAfter } from "@/lib/updates/backoff"
 import { MATRIX_A2UI_CAPABILITY, MATRIX_CAPS } from "./capability"
 import { normalizeHomeserver } from "./auth"
-import { buildMatrixMessageId, parseMatrixConversationKey, splitMatrixMessageId } from "./ids"
+import {
+  bareMatrixEventId,
+  buildMatrixMessageId,
+  parseMatrixConversationKey,
+  splitMatrixMessageId,
+} from "./ids"
 import { parseMatrixEvent, parseMatrixReplyCorrelation } from "./parse"
 import { resolveInboundMatrixMedia } from "./media"
 import {
@@ -227,8 +234,13 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       body = {}
     }
     if (resp.status < 200 || resp.status >= 300) {
-      // Matrix rate-limit responses carry `retry_after_ms` (M_LIMIT_EXCEEDED).
-      const retryAfterMs = typeof body.retry_after_ms === "number" ? body.retry_after_ms : undefined
+      // Matrix v1.10+ prefers Retry-After; older homeservers use retry_after_ms.
+      const retryAfter = Object.entries(resp.headers).find(
+        ([name]) => name.toLowerCase() === "retry-after"
+      )?.[1]
+      const retryAfterMs =
+        parseRetryAfter(retryAfter, Date.now()) ??
+        (typeof body.retry_after_ms === "number" ? body.retry_after_ms : undefined)
       const errcode = typeof body.errcode === "string" ? body.errcode : `status ${resp.status}`
       const error = typeof body.error === "string" ? body.error : errcode
       throw new MatrixApiError(
@@ -535,6 +547,30 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
     }
   }
 
+  async function bindSurfaceReply(
+    req: OutboundRequest,
+    roomId: string,
+    eventId: string,
+    surfaceId: string
+  ): Promise<void> {
+    try {
+      await recordCallbackBinding({
+        adapterId: opts.id,
+        actionId: eventId,
+        kind: "force_reply",
+        surfaceId,
+        conversationKey: buildConversationKey(
+          "matrix",
+          opts.id,
+          roomId,
+          req.threadId ? bareMatrixEventId(req.threadId) : undefined
+        ),
+      })
+    } catch {
+      // Binding persistence is best-effort; delivery already succeeded.
+    }
+  }
+
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     const ref = req.conversationRef as { roomId?: string }
     const roomId = String(ref.roomId ?? "")
@@ -545,7 +581,7 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       }
     }
 
-    const { contents, a2uiBinding } = serializeOutbound(req)
+    const { contents, a2uiBindings, downgrades } = serializeOutbound(req)
     if (contents.length === 0) {
       return { ok: true }
     }
@@ -559,22 +595,10 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
         if (eventId) {
           lastEventId = eventId
           rememberOwnEvent(eventId)
-        }
-      }
-
-      // Persist the A2UI reply-correlation binding against the BARE sent
-      // event id — inbound replies carry the bare id in `m.in_reply_to`.
-      if (a2uiBinding && lastEventId) {
-        try {
-          await recordCallbackBinding({
-            adapterId: opts.id,
-            actionId: lastEventId,
-            kind: "force_reply",
-            surfaceId: a2uiBinding.surfaceId,
-            conversationKey: req.metadata.sourceMessageId,
-          })
-        } catch {
-          // Binding persistence is best-effort.
+          const binding = a2uiBindings.find((entry) => entry.contentIndex === i)
+          if (binding) {
+            await bindSurfaceReply(req, roomId, eventId, binding.surfaceId)
+          }
         }
       }
 
@@ -583,6 +607,7 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       return {
         ok: true,
         ...(lastEventId ? { platformMessageId: buildMatrixMessageId(roomId, lastEventId) } : {}),
+        ...(downgrades?.length ? { downgrades } : {}),
       }
     } catch (err) {
       return errorToResult(err)
@@ -610,6 +635,17 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
       }
     }
     try {
+      const { a2uiBindings, downgrades } = serializeOutbound(patch)
+      if (a2uiBindings.length > 1) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Matrix edit: multiple interactive A2UI surfaces require separate messages",
+            retryable: false,
+          },
+        }
+      }
       const content = serializeEdit(targetEventId, patch)
       // Stable txn derived from the request idempotency key so retried edits
       // dedup server-side instead of stacking duplicate m.replace events.
@@ -618,9 +654,15 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
         : txn("edit")
       const eventId = await sendRoomEvent(roomId, "m.room.message", txnId, content)
       if (eventId) rememberOwnEvent(eventId)
+      const binding = a2uiBindings[0]
+      if (binding) {
+        // Matrix clients reply to the original event after applying m.replace.
+        await bindSurfaceReply(patch, roomId, targetEventId, binding.surfaceId)
+      }
       return {
         ok: true,
         ...(eventId ? { platformMessageId: buildMatrixMessageId(roomId, eventId) } : {}),
+        ...(downgrades?.length ? { downgrades } : {}),
       }
     } catch (err) {
       return errorToResult(err)

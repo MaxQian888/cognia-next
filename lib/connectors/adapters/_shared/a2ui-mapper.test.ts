@@ -39,6 +39,96 @@ const SAMPLE_SURFACE: A2UISegmentContent = {
 }
 
 describe("walkA2UISurface", () => {
+  it("handles missing components and unresolved bindings without reading prototype properties", () => {
+    const visits: A2UIWalkNode[] = []
+    walkA2UISurface(
+      {
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { children: ["missing", "text"] },
+          text: {
+            component: "Text",
+            text: { path: "/constructor" },
+            error: { path: 42 },
+            style: { path: "/literal" },
+          },
+        },
+      },
+      (node) => visits.push(node)
+    )
+    expect(visits.map((node) => node.component)).toEqual(["Text", "Text"])
+    expect(visits[1].raw).toMatchObject({
+      text: undefined,
+      error: { path: 42 },
+      style: { path: "/literal" },
+    })
+  })
+
+  it("visits card footers, tab bodies, accordion bodies, and dialog actions", () => {
+    const surface: A2UISegmentContent = {
+      rootId: "root",
+      dataModel: {},
+      components: {
+        root: { component: "Card", children: ["tabs"], footer: ["dialog"] },
+        tabs: { component: "Tabs", tabs: [{ id: "tab", children: ["accordion"] }] },
+        accordion: { component: "Accordion", items: [{ id: "item", children: ["text"] }] },
+        text: { component: "Text", text: "Nested content" },
+        dialog: { component: "Dialog", body: ["body"], actions: ["button"] },
+        body: { component: "Text", text: "Dialog body" },
+        button: { component: "Button", text: "Confirm", action: "confirm" },
+      },
+    }
+    const ids: string[] = []
+    walkA2UISurface(surface, (node) => ids.push(node.id))
+    expect(ids).toEqual(["root", "tabs", "accordion", "text", "dialog", "body", "button"])
+  })
+
+  it("resolves bound values for native mappers without mutating the surface or callback payload", () => {
+    const surface: A2UISegmentContent = {
+      rootId: "root",
+      dataModel: { title: "Choose", selected: "b", choices: [{ label: "Beta", value: "b" }] },
+      components: {
+        root: {
+          component: "Select",
+          label: { path: "/title" },
+          value: { path: "/selected" },
+          options: { path: "/choices" },
+          bindingPayload: { path: "/title", action: "open-file" },
+        },
+      },
+    }
+    const before = JSON.stringify(surface)
+    const visit = jest.fn()
+    walkA2UISurface(surface, visit)
+    expect(visit.mock.calls[0][0].raw).toMatchObject({
+      label: "Choose",
+      value: "b",
+      options: [{ label: "Beta", value: "b" }],
+      bindingPayload: { path: "/title", action: "open-file" },
+    })
+    expect(JSON.stringify(surface)).toBe(before)
+  })
+
+  it("omits hidden subtrees, including bound visibility", () => {
+    const ids: string[] = []
+    walkA2UISurface(
+      {
+        rootId: "root",
+        dataModel: { show: false },
+        components: {
+          root: { component: "Column", children: ["hidden", "static", "shown"] },
+          hidden: { component: "Column", visible: { path: "/show" }, children: ["secret"] },
+          secret: { component: "Text", text: "Hidden" },
+          static: { component: "Text", text: "Hidden", visible: false },
+          shown: { component: "Text", text: "Visible" },
+        },
+      },
+      (node) => ids.push(node.id)
+    )
+    expect(ids).toEqual(["root", "shown"])
+  })
+
   it("traverses depth-first from rootId", () => {
     const visits: Array<{ id: string; depth: number }> = []
     walkA2UISurface(SAMPLE_SURFACE, (node, depth) => {
@@ -180,6 +270,50 @@ describe("callback binding persistence", () => {
 })
 
 describe("generatePlainTextMirror", () => {
+  it.each([
+    [{ component: "Link", href: "https://example.com" }, "https://example.com"],
+    [{ component: "Link" }, ""],
+    [{ component: "Image", alt: "Diagram" }, "[Diagram]"],
+    [{ component: "Image" }, "[image]"],
+    [{ component: "Divider" }, "---"],
+    [{ component: "Checkbox", label: "Agree" }, "[ ] Agree"],
+    [{ component: "Checkbox" }, "[ ] checkbox"],
+    [{ component: "Text", text: 42 }, "42"],
+    [{ component: "Text", text: false }, "false"],
+    [{ component: "Text" }, ""],
+    [{ component: "Button", action: "run" }, "[run]"],
+    [{ component: "Button" }, ""],
+    [{ component: "Alert" }, ""],
+    [{ component: "Alert", title: "Warning" }, "[!] Warning"],
+    [{ component: "Card" }, ""],
+    [{ component: "TextField" }, "[input: __________]"],
+    [{ component: "Select" }, "select: "],
+    [{ component: "Select", options: [{ value: "one" }, {}] }, "select: one"],
+  ])("keeps fallback display content for %j", (component, expected) => {
+    expect(
+      generatePlainTextMirror({ rootId: "root", components: { root: component }, dataModel: {} })
+    ).toBe(expected)
+  })
+
+  it("preserves bound text, card descriptions and canonical alert messages on fallback channels", () => {
+    expect(
+      generatePlainTextMirror({
+        rootId: "root",
+        dataModel: { title: "Report", status: "Ready", message: "Backup complete" },
+        components: {
+          root: {
+            component: "Card",
+            title: { path: "/title" },
+            description: "Summary",
+            children: ["text", "alert"],
+          },
+          text: { component: "Text", text: { path: "/status" } },
+          alert: { component: "Alert", message: { path: "/message" } },
+        },
+      })
+    ).toBe("# Report\nSummary\nReady\n[!] Backup complete")
+  })
+
   it("renders a bullet-list projection of common components", () => {
     const out = generatePlainTextMirror(SAMPLE_SURFACE)
     expect(out).toContain("Hello")

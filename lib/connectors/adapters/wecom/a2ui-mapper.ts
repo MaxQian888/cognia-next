@@ -62,7 +62,7 @@ export async function buildWeComTemplateCard(
       case "Alert": {
         if (!desc) {
           const at = stringValue(node.raw.title)
-          const ax = stringValue(node.raw.text)
+          const ax = stringValue(node.raw.message) || stringValue(node.raw.text)
           desc = at && ax ? `${at}: ${ax}` : at || ax
         }
         break

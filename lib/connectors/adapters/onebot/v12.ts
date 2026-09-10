@@ -39,6 +39,8 @@ export interface OneBotV12Event {
   message_id?: string
   user_id?: string
   group_id?: string
+  guild_id?: string
+  channel_id?: string
   /** Notice-only: the id of the message being deleted. */
   operator_id?: string
   self: { platform: string; user_id: string }
@@ -73,6 +75,15 @@ function buildSender(adapterId: string, event: OneBotV12Event): PlatformIdentity
 function v12DeleteToEvent(adapterId: string, event: OneBotV12Event): NormalizedInboundEvent | null {
   const messageId = event.message_id
   if (!messageId) return null
+  if (event.detail_type === "channel_message_delete") {
+    const parsed = parseV12Event(adapterId, {
+      ...event,
+      type: "message",
+      detail_type: "channel",
+      message: [],
+    })
+    return parsed ? { ...parsed, raw: event, kind: "delete", replacesMessageId: messageId } : null
+  }
   const isGroup = event.detail_type === "group_message_delete"
   const userId = event.user_id ?? ""
   const groupId = event.group_id ?? ""
@@ -134,13 +145,36 @@ export function parseV12Event(
   // ── Delete (no edit support — v12 messages are immutable) ────────────
   if (
     event.type === "notice" &&
-    (event.detail_type === "group_message_delete" || event.detail_type === "private_message_delete")
+    (event.detail_type === "group_message_delete" ||
+      event.detail_type === "private_message_delete" ||
+      event.detail_type === "channel_message_delete")
   ) {
     return v12DeleteToEvent(adapterId, event)
   }
 
   // ── Member-change notices → system event (audit-only) ──────────────
   if (event.type === "notice") {
+    if (
+      event.detail_type === "channel_member_increase" ||
+      event.detail_type === "channel_member_decrease"
+    ) {
+      const parsed = parseV12Event(adapterId, {
+        ...event,
+        type: "message",
+        detail_type: "channel",
+        message: [],
+      })
+      return parsed
+        ? {
+            ...parsed,
+            raw: event,
+            messageId: `notice:${event.detail_type}:${event.id}`,
+            kind: "system",
+            systemKind:
+              event.detail_type === "channel_member_increase" ? "member_added" : "member_removed",
+          }
+        : null
+    }
     const systemKind: NormalizedInboundEvent["systemKind"] =
       event.detail_type === "group_member_increase" || event.detail_type === "friend_increase"
         ? "member_added"
@@ -230,8 +264,16 @@ export function parseV12Event(
   const groupId = event.group_id ?? ""
   const selfId = event.self.user_id
   const messageId = event.message_id ?? ""
-
-  const chatKey = detailType === "private" ? `p:${userId}` : `g:${groupId}`
+  const guildId = event.guild_id ?? ""
+  const channelId = event.channel_id ?? ""
+  if (detailType === "channel" && (!guildId || !channelId)) return null
+  if (!["private", "group", "channel"].includes(detailType)) return null
+  const chatKey =
+    detailType === "private"
+      ? `p:${userId}`
+      : detailType === "channel"
+        ? `c:${encodeURIComponent(guildId)}:${encodeURIComponent(channelId)}`
+        : `g:${groupId}`
 
   const conversationKey = buildConversationKey("onebot", adapterId, chatKey)
 
@@ -259,7 +301,8 @@ export function parseV12Event(
     }
   }
 
-  const channelKind = detailType === "private" ? "private" : "group"
+  const channelKind =
+    detailType === "private" ? "private" : detailType === "channel" ? "channel" : "group"
 
   return {
     platform: "onebot",
@@ -271,7 +314,9 @@ export function parseV12Event(
       adapterId,
       chatKey,
       detailType,
-      groupId: detailType !== "private" ? groupId : undefined,
+      groupId: detailType === "group" ? groupId : undefined,
+      ...(detailType === "channel" ? { guildId, channelId } : {}),
+      self: event.self,
       userId,
     },
     conversationKey,
@@ -279,7 +324,8 @@ export function parseV12Event(
     channel: {
       id: conversationKey,
       kind: channelKind,
-      platformChannelId: detailType === "private" ? userId : groupId,
+      platformChannelId:
+        detailType === "private" ? userId : detailType === "channel" ? channelId : groupId,
     },
     segments,
     plainText,

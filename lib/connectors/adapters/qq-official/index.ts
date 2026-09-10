@@ -31,13 +31,14 @@ import { parseQQDispatch, type QQDispatch, type QQScene } from "./parse"
 import {
   QQ_MAX_PASSIVE_REPLIES,
   QQ_PASSIVE_WINDOW_MS,
+  QQValidationError,
   decodeQQMessageId,
   encodeQQMessageId,
   qqPassiveMsgSeq,
   qqPassiveReplyCount,
   registerQQPassiveReply,
   serializeDelete,
-  serializeOutbound,
+  serializeOutboundParts,
   serializeReaction,
   serializeTyping,
 } from "./serialize"
@@ -132,9 +133,14 @@ const LAST_INBOUND_CAP = 500
 const TYPING_MAX_USED_SLOTS = QQ_MAX_PASSIVE_REPLIES - 1
 
 /** Extract `{ id, code, message }` from a QQ JSON body (tolerates non-JSON). */
-function parseQQBody(raw: string): { id?: string; message?: string; code?: number } {
+function parseQQBody(raw: string): {
+  id?: string
+  message?: string
+  code?: number
+  file_info?: string
+} {
   try {
-    return JSON.parse(raw) as { id?: string; message?: string; code?: number }
+    return JSON.parse(raw) as { id?: string; message?: string; code?: number; file_info?: string }
   } catch {
     return {}
   }
@@ -274,7 +280,10 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
     method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     body?: Record<string, unknown>
-  ): Promise<{ status: number; body: { id?: string; message?: string; code?: number } }> {
+  ): Promise<{
+    status: number
+    body: { id?: string; message?: string; code?: number; file_info?: string }
+  }> {
     const doCall = (token: string) =>
       connectorsHttpRequest({
         url: `${apiBase}${path}`,
@@ -304,31 +313,63 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
-    const call = serializeOutbound(req)
-    if (!call) {
-      return {
-        ok: false,
-        error: {
-          code: "validation",
-          message: "QQ send: unaddressable conversationRef",
-          retryable: false,
-        },
-      }
+    let calls: ReturnType<typeof serializeOutboundParts>
+    try {
+      calls = serializeOutboundParts(req, false)
+    } catch (err) {
+      if (!(err instanceof QQValidationError)) throw err
+      return { ok: false, error: { code: "validation", message: err.message, retryable: false } }
     }
     const ref = req.conversationRef as { scene?: QQScene; sceneId?: string }
+    let delivered = 0
+    let platformMessageId: string | undefined
     try {
-      const { body } = await qqRequest("POST", call.path, call.payload)
-      lastActivityAt = Date.now()
+      // Upload all resources before sending any part; uploads never consume
+      // a passive reply slot or proactively deliver a message.
+      const uploaded = new Map<number, string>()
+      for (const [index, call] of calls.entries()) {
+        if (!call.upload) continue
+        const { body } = await qqRequest("POST", call.upload.path, call.upload.payload)
+        if (typeof body.file_info !== "string" || !body.file_info)
+          throw new QQApiError("QQ media upload returned no file_info", 502)
+        uploaded.set(index, body.file_info)
+      }
+      // Recheck capacity/expiry after uploads, then reserve all parts atomically.
+      calls = serializeOutboundParts(req)
+      for (const [index, call] of calls.entries()) {
+        const fileInfo = uploaded.get(index)
+        const payload = fileInfo
+          ? { ...call.payload, media: { file_info: fileInfo } }
+          : call.payload
+        const { body } = await qqRequest("POST", call.path, payload)
+        delivered += 1
+        platformMessageId =
+          body.id && ref.scene && ref.sceneId
+            ? encodeQQMessageId(ref.scene, ref.sceneId, body.id)
+            : body.id
+        lastActivityAt = Date.now()
+      }
       if (healthState === "running") healthReason = undefined
-      // Composite id: delete/reaction need the scene + addressing id later.
-      const platformMessageId =
-        body.id && ref.scene && ref.sceneId
-          ? encodeQQMessageId(ref.scene, ref.sceneId, body.id)
-          : body.id
-      return { ok: true, platformMessageId }
+      const downgrades = calls.flatMap((call) => call.downgrades ?? [])
+      return { ok: true, platformMessageId, ...(downgrades.length ? { downgrades } : {}) }
     } catch (err) {
+      if (delivered > 0)
+        return {
+          ok: false,
+          platformMessageId,
+          error: {
+            code: "reconciliation_required",
+            retryable: false,
+            message: `QQ delivered ${delivered}/${calls.length} parts before failure; retrying the whole message could duplicate delivery. ${err instanceof Error ? err.message : String(err)}`,
+          },
+        }
+      if (err instanceof QQValidationError)
+        return { ok: false, error: { code: "validation", message: err.message, retryable: false } }
       if (err instanceof QQApiError) {
-        if (err.platformCode === QQ_CODE_MSG_LIMIT_EXCEED && "msg_id" in call.payload) {
+        if (
+          err.platformCode === QQ_CODE_MSG_LIMIT_EXCEED &&
+          calls.some((call) => "msg_id" in call.payload)
+        ) {
           // Distinct, non-retryable: the passive reply window elapsed (group
           // 5 min / C2C 60 min) or the 5-reply cap was hit — this msg_id can
           // never be replied to again.

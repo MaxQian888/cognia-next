@@ -10,6 +10,7 @@ import {
   serializeGetMsgV11,
   serializeSendForwardMsgV11,
   OneBotValidationError,
+  uploadOutboundV12Media,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
@@ -128,6 +129,70 @@ describe("serializeOutboundV11", () => {
 // ---------------------------------------------------------------------------
 
 describe("serializeOutboundV12", () => {
+  it("uploads inline and remote media without sending a message or duplicating identical uploads", async () => {
+    const send = jest
+      .fn()
+      .mockResolvedValue({ status: "ok", retcode: 0, data: { file_id: "uploaded" } })
+    const req = makePrivateReq("media")
+    req.segments = [
+      { type: "image", url: "data:image/png;base64,QQ==" },
+      { type: "image", url: "data:image/png;base64,QQ==" },
+      { type: "voice", url: "https://cdn/audio.silk" },
+      { type: "video", url: "https://cdn/video.mp4" },
+      {
+        type: "file",
+        url: "local",
+        dataBase64: "QQ==",
+        name: "note.txt",
+        mimeType: "text/plain",
+        sizeBytes: 1,
+      },
+    ]
+    const ids = await uploadOutboundV12Media(req, { send })
+    expect(ids.size).toBe(4)
+    expect(send).toHaveBeenCalledTimes(4)
+    expect(send.mock.calls.every(([call]) => call.action === "upload_file")).toBe(true)
+    expect(send.mock.calls[0][0].params).toEqual({ type: "data", name: "image", data: "QQ==" })
+    expect(send.mock.calls[3][0].params).toEqual({ type: "data", name: "note.txt", data: "QQ==" })
+  })
+  it("rejects malformed input, missing file ids and failed upload actions", async () => {
+    const req = makePrivateReq("media")
+    const send = jest.fn()
+    req.segments = [{ type: "image", url: "file:///local" }]
+    await expect(uploadOutboundV12Media(req, { send })).rejects.toThrow(OneBotValidationError)
+    req.segments = [{ type: "image", url: "data:image/png;base64,!!!!" }]
+    await expect(uploadOutboundV12Media(req, { send })).rejects.toThrow("base64")
+    req.segments = [{ type: "image", url: "https://cdn/image" }]
+    send.mockResolvedValueOnce({ status: "ok", retcode: 0, data: {} })
+    await expect(uploadOutboundV12Media(req, { send })).rejects.toThrow("no file_id")
+    send.mockResolvedValueOnce({ status: "failed", retcode: 10004 })
+    await expect(uploadOutboundV12Media(req, { send })).rejects.toThrow(OneBotValidationError)
+    send.mockResolvedValueOnce({ status: "failed", retcode: 20000 })
+    await expect(uploadOutboundV12Media(req, { send })).rejects.toThrow("20000")
+  })
+  it("addresses channel targets with both guild_id and channel_id", () => {
+    const req = makePrivateReq("channel")
+    req.conversationRef = {
+      platform: "onebot",
+      adapterId: "ob",
+      detailType: "channel",
+      guildId: "guild",
+      channelId: "room",
+    }
+    expect(serializeOutboundV12(req, "bot")[0].params).toMatchObject({
+      detail_type: "channel",
+      guild_id: "guild",
+      channel_id: "room",
+    })
+  })
+  it("sends media only using ids returned by upload_file", () => {
+    const req = makePrivateReq("image")
+    req.segments = [{ type: "image", url: "https://cdn/image.jpg" }]
+    expect(
+      serializeOutboundV12(req, "bot", new Map([["https://cdn/image.jpg", "uploaded"]]))[0].params
+        .message
+    ).toEqual([{ type: "image", data: { file_id: "uploaded" } }])
+  })
   it("private text → send_message with detail_type=private", () => {
     const calls = serializeOutboundV12(makePrivateReq("hello v12"), "100000")
     expect(calls).toHaveLength(1)

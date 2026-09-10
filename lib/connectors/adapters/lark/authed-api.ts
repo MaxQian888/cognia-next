@@ -153,6 +153,7 @@ export async function withLarkAuthedApi<T>(
     if (resp.status >= 400 || !parsed || parsed.code !== 0) {
       throw new LarkApiError({
         status: resp.status,
+        headers: resp.headers,
         code: parsed?.code ?? null,
         message: `Lark ${path} failed: code=${parsed?.code ?? "?"}, msg=${parsed?.msg ?? resp.body?.slice(0, 200) ?? "unknown"}`,
       })

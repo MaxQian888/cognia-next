@@ -1,8 +1,18 @@
+const mockCdnFetch = jest.fn()
+jest.mock("@/lib/network/proxy-fetch", () => ({
+  proxyFetch: (...args: unknown[]) => mockCdnFetch(...args),
+}))
 import { createWechatPersonalAdapter } from "./index"
 import type { AdapterContext } from "@/types/connectors/adapter"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import type { WechatPersonalConversationRef } from "./parse"
 import { ILINK_ITEM, ILINK_MSG } from "./protocol"
+
+const mockAttachmentRead = jest.fn(async (..._args: unknown[]): Promise<string | null> => null)
+jest.mock("@/lib/connectors/tauri/commands", () => ({
+  ...jest.requireActual("@/lib/connectors/tauri/commands"),
+  connectorsAttachmentRead: (...args: unknown[]) => mockAttachmentRead(...args),
+}))
 
 const mockGate = jest.fn(async (..._a: unknown[]) => true)
 jest.mock("@/lib/connectors/at-gate", () => ({
@@ -73,6 +83,8 @@ const userMsg = (text: string, ctxToken = "ctx-1") => ({
 })
 
 beforeEach(() => {
+  mockAttachmentRead.mockReset()
+  mockAttachmentRead.mockResolvedValue(null)
   mockGate.mockClear()
   mockGate.mockResolvedValue(true)
 })
@@ -190,6 +202,32 @@ describe("createWechatPersonalAdapter — outbound reply (reply-only)", () => {
     expect(a.health().reason).toBe("session_expired_rescan")
   })
 
+  it.each([
+    [200, { ret: 0, errcode: -14 }, "auth_failed", false],
+    [200, { ret: 0, errcode: 42 }, "platform_4xx", true],
+    [500, {}, "platform_5xx", true],
+    [403, { ret: 0 }, "auth_failed", false],
+    [200, null, "bad_response", true],
+  ])("does not claim success for HTTP %s body %j", async (status, body, code, retryable) => {
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    await tick()
+    http.mockResolvedValue({ status, headers: {}, body: JSON.stringify(body) })
+    const result = await a.send({
+      conversationRef: {
+        platform: "wechat-personal",
+        adapterId: "wx1",
+        userId: "alice",
+        contextToken: "ctx",
+      },
+      segments: [{ type: "text", text: "hello" }],
+      metadata: { idempotencyKey: "response-check" },
+    })
+    expect(result).toMatchObject({ ok: false, error: { code, retryable } })
+    await a.stop()
+  })
+
   it("refuses a proactive send with no context_token", async () => {
     const emit = jest.fn(async () => undefined)
     const { ctx } = makeCtx({ emit, getUpdates: () => ({ ret: -14 }) })
@@ -208,7 +246,7 @@ describe("createWechatPersonalAdapter — outbound reply (reply-only)", () => {
 })
 
 describe("createWechatPersonalAdapter — batch resilience & cursor ordering", () => {
-  it("keeps handling the rest of the batch when one handler throws, then advances the cursor", async () => {
+  it("keeps handling the rest of the batch when one handler throws, retains the cursor for replay", async () => {
     const emit = jest
       .fn(async (_e: NormalizedInboundEvent) => undefined)
       .mockImplementationOnce(async () => {
@@ -236,12 +274,72 @@ describe("createWechatPersonalAdapter — batch resilience & cursor ordering", (
     expect(emit).toHaveBeenCalledTimes(2)
     expect((emit.mock.calls[1][0] as NormalizedInboundEvent).plainText).toBe("m2")
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("handler exploded"))
-    // The cursor advanced after the batch: poll #2 carries the new buf.
+    // A failed delivery must be replayed; the next poll retains the old cursor.
     const updates = http.mock.calls.filter((c) =>
       (c[0] as { url: string }).url.includes("getupdates")
     )
     expect(updates.length).toBeGreaterThanOrEqual(2)
-    expect(JSON.parse((updates[1][0] as { body: string }).body).get_updates_buf).toBe("cur9")
+    expect(JSON.parse((updates[1][0] as { body: string }).body).get_updates_buf).toBe("")
+    await a.stop()
+  })
+
+  it("hydrates official nested and quoted media into readable URLs with detected MIME", async () => {
+    const emit = jest.fn(async (_e: NormalizedInboundEvent) => undefined)
+    const fetchAttachment = jest.fn(async () => ({ localUrl: "file:///cache", remoteRef: "r" }))
+    const png = "iVBORw0KGgo="
+    mockAttachmentRead.mockResolvedValue(png)
+    let call = 0
+    const { ctx } = makeCtx({
+      emit,
+      fetchAttachment,
+      getUpdates: () =>
+        ++call === 1
+          ? {
+              msgs: [
+                {
+                  ...userMsg(""),
+                  item_list: [
+                    {
+                      type: ILINK_ITEM.text,
+                      text_item: { text: "look" },
+                      ref_msg: {
+                        message_item: {
+                          type: ILINK_ITEM.image,
+                          image_item: { media: { full_url: "https://cdn/quote" } },
+                        },
+                      },
+                    },
+                    {
+                      type: ILINK_ITEM.image,
+                      image_item: { media: { encrypt_query_param: "image" } },
+                    },
+                    {
+                      type: ILINK_ITEM.file,
+                      file_item: {
+                        media: { full_url: "https://cdn/file" },
+                        file_name: "image.png",
+                      },
+                    },
+                  ],
+                },
+              ],
+            }
+          : { ret: -14 },
+    })
+    const a = adapter()
+    await a.start(ctx)
+    for (let i = 0; i < 30 && !emit.mock.calls.length; i++) await tick()
+    const media = emit.mock.calls[0][0].segments.filter(
+      (segment) => segment.type === "image" || segment.type === "file"
+    )
+    expect(media).toHaveLength(3)
+    for (const segment of media)
+      expect(segment).toMatchObject({
+        dataBase64: png,
+        mimeType: "image/png",
+        url: `data:image/png;base64,${png}`,
+      })
+    expect(fetchAttachment).toHaveBeenCalledTimes(3)
     await a.stop()
   })
 
@@ -267,6 +365,22 @@ describe("createWechatPersonalAdapter — batch resilience & cursor ordering", (
                     type: ILINK_ITEM.image,
                     image_item: { url: "https://cdn/enc.jpg", aes_key: "a2V5" },
                   },
+                  {
+                    type: ILINK_ITEM.image,
+                    image_item: { media: { full_url: "https://cdn/second.jpg", aes_key: "a2V5" } },
+                  },
+                  {
+                    type: ILINK_ITEM.voice,
+                    voice_item: { media: { full_url: "https://cdn/voice" } },
+                  },
+                  {
+                    type: ILINK_ITEM.video,
+                    video_item: { media: { full_url: "https://cdn/video" } },
+                  },
+                  {
+                    type: ILINK_ITEM.file,
+                    file_item: { media: { full_url: "https://cdn/file" }, file_name: "file.pdf" },
+                  },
                 ],
               },
             ],
@@ -279,6 +393,9 @@ describe("createWechatPersonalAdapter — batch resilience & cursor ordering", (
     for (let i = 0; i < 20 && emit.mock.calls.length === 0; i++) await tick()
 
     expect(fetchAttachment).toHaveBeenCalledWith("wx1", "https://cdn/enc.jpg")
+    expect(fetchAttachment).toHaveBeenCalledWith("wx1", "https://cdn/second.jpg")
+    for (const name of ["voice", "video", "file"])
+      expect(fetchAttachment).toHaveBeenCalledWith("wx1", `https://cdn/${name}`)
     const ev = emit.mock.calls[0][0] as NormalizedInboundEvent
     expect(ev.segments[0]).toMatchObject({ type: "image", url: "", alt: "[unavailable image]" })
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("download refused"))
@@ -530,5 +647,120 @@ describe("createWechatPersonalAdapter — numeric reply → callback short-circu
     expect(emit).toHaveBeenCalledTimes(1)
     await a.stop()
     jest.dontMock("@/lib/connectors/bus")
+  })
+})
+
+describe("outbound encrypted media integration", () => {
+  const ref: WechatPersonalConversationRef = {
+    platform: "wechat-personal",
+    adapterId: "wx1",
+    userId: "user",
+    contextToken: "ctx",
+  }
+  beforeEach(() => {
+    mockCdnFetch.mockReset()
+    mockCdnFetch.mockResolvedValue({
+      status: 200,
+      headers: new Headers({ "x-encrypted-param": "download" }),
+    })
+  })
+  it("uploads all media then publishes individual ordered items with stable client IDs", async () => {
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    await tick()
+    http.mockClear()
+    http.mockImplementation(async (req) => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify(req.url.includes("getuploadurl") ? { upload_param: "signed" } : {}),
+    }))
+    const request = {
+      conversationRef: ref,
+      segments: [
+        { type: "text" as const, text: "caption" },
+        { type: "image" as const, url: "data:image/png;base64,AQID" },
+        { type: "video" as const, url: "data:video/mp4;base64,AQID" },
+        {
+          type: "file" as const,
+          url: "data:application/pdf;base64,AQID",
+          name: "a.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 3,
+        },
+        { type: "voice" as const, url: "data:audio/mpeg;base64,AQID" },
+      ],
+      metadata: { idempotencyKey: "stable" },
+    }
+    const result = await a.send(request)
+    expect(result.ok).toBe(true)
+    expect(http.mock.calls.slice(0, 4).every(([req]) => req.url.includes("getuploadurl"))).toBe(
+      true
+    )
+    const sent = http.mock.calls
+      .filter(([req]) => req.url.includes("sendmessage"))
+      .map(([req]) => JSON.parse(req.body).msg)
+    expect(sent.map((msg) => msg.item_list[0].type)).toEqual([1, 2, 5, 4, 4])
+    expect(sent.every((msg) => msg.item_list.length === 1 && msg.context_token === "ctx")).toBe(
+      true
+    )
+    expect(new Set(sent.map((msg) => msg.client_id)).size).toBe(5)
+    expect(result.downgrades).toEqual([
+      { from: "voice", to: "file", reason: "ilink_audio_sent_as_file" },
+    ])
+    expect(result.platformMessageId).toBe(sent[4].client_id)
+    http.mockClear()
+    await a.send(request)
+    expect(
+      http.mock.calls
+        .filter(([req]) => req.url.includes("sendmessage"))
+        .map(([req]) => JSON.parse(req.body).msg.client_id)
+    ).toEqual(sent.map((msg) => msg.client_id))
+    await a.stop()
+  })
+  it("does not publish captions when upload fails", async () => {
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    await tick()
+    http.mockClear()
+    http.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ upload_param: "signed" }),
+    })
+    mockCdnFetch.mockResolvedValue({ status: 403 })
+    const result = await a.send({
+      conversationRef: ref,
+      segments: [
+        { type: "text", text: "caption" },
+        { type: "image", url: "data:image/png;base64,AQID" },
+      ],
+      metadata: { idempotencyKey: "failed" },
+    })
+    expect(result).toMatchObject({ ok: false, error: { retryable: false } })
+    expect(http.mock.calls.some(([req]) => req.url.includes("sendmessage"))).toBe(false)
+    await a.stop()
+  })
+  it("requires reconciliation after partial delivery", async () => {
+    const { ctx, http } = makeCtx({ emit: jest.fn(), getUpdates: () => ({ ret: -14 }) })
+    const a = adapter()
+    await a.start(ctx)
+    await tick()
+    http.mockClear()
+    http
+      .mockResolvedValueOnce({ status: 200, headers: {}, body: "{}" })
+      .mockRejectedValueOnce(new Error("disconnected"))
+    const result = await a.send({
+      conversationRef: ref,
+      segments: [{ type: "text", text: "x".repeat(2001) }],
+      metadata: { idempotencyKey: "partial" },
+    })
+    expect(result).toMatchObject({
+      ok: false,
+      platformMessageId: expect.any(String),
+      error: { code: "reconciliation_required", retryable: false },
+    })
+    await a.stop()
   })
 })

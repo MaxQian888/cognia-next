@@ -111,10 +111,15 @@ function channelIdFromRef(req: OutboundRequest): string {
 }
 
 /** Extract optional thread_ts from the conversation reference. */
-function threadTsFromRef(req: OutboundRequest): string | undefined {
+export function threadTsFromRef(req: OutboundRequest): string | undefined {
   const ref = req.conversationRef as Record<string, unknown>
-  const ts = ref["threadTs"]
-  return typeof ts === "string" ? ts : undefined
+  const ts = req.threadId || ref["threadTs"]
+  if (typeof ts === "string" && ts) return ts
+  const replyId = req.replyTo?.messageId
+  if (!replyId) return undefined
+  // Public Slack message ids include the channel; the Web API needs only ts.
+  const separator = replyId.indexOf(":")
+  return separator < 0 ? replyId : replyId.slice(separator + 1)
 }
 
 /**
@@ -183,7 +188,7 @@ function buildConversationKeyFromRef(req: OutboundRequest, channelId: string): s
   const ref = req.conversationRef as Record<string, unknown>
   const adapterId = typeof ref["adapterId"] === "string" ? ref["adapterId"] : ""
   if (!adapterId || !channelId) return undefined
-  const threadTs = typeof ref["threadTs"] === "string" ? ref["threadTs"] : undefined
+  const threadTs = threadTsFromRef(req)
   return threadTs
     ? `slack:${adapterId}:${channelId}:${threadTs}`
     : `slack:${adapterId}:${channelId}`
@@ -272,8 +277,8 @@ export function serializeAssistantStatus(
  * Set the suggested prompts shown above an assistant thread's input box
  * via `assistant.threads.setSuggestedPrompts`. Same gating as
  * {@link serializeAssistantStatus} — only valid on assistant-app
- * threads. `prompts` is capped at 4 by Slack; we trim defensively so the
- * caller never gets a 4xx for over-supplying.
+ * threads. Reject requests exceeding Slack's four-prompt limit rather than
+ * silently removing the caller's suggested actions.
  */
 export function serializeAssistantSuggestedPrompts(
   channel: string,
@@ -281,14 +286,14 @@ export function serializeAssistantSuggestedPrompts(
   prompts: Array<{ title: string; message: string }>,
   title?: string
 ): SerializedSlackCall {
-  const trimmed = prompts.slice(0, 4)
+  if (prompts.length > 4) throw new RangeError("Slack supports at most 4 suggested prompts")
   return {
     method: "POST",
     url: `${SLACK_API_BASE}/assistant.threads.setSuggestedPrompts`,
     payload: {
       channel_id: channel,
       thread_ts: threadTs,
-      prompts: trimmed,
+      prompts,
       ...(title ? { title } : {}),
     },
   }

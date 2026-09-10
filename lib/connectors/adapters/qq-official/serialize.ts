@@ -30,14 +30,24 @@
  * msg_id has consumed, to honour the 5-reply cap.
  */
 
-import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { OutboundRequest, SegmentDowngrade } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { fnv1a32 } from "../_shared/fnv1a"
+import { isPublicHttpUrl } from "../_shared/inbound-media"
 import type { QQScene } from "./parse"
 
 export interface QQSendCall {
+  downgrades?: SegmentDowngrade[]
   path: string
   payload: Record<string, unknown>
+  upload?: { path: string; payload: { file_type: number; url: string; srv_send_msg: false } }
+}
+
+export class QQValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "QQValidationError"
+  }
 }
 
 /**
@@ -112,7 +122,10 @@ export function __resetQQMsgSeqForTesting(): void {
 }
 
 /** Flatten segments into the plain text QQ `msg_type: 0` accepts. */
-export function buildQQContent(segments: MessageSegment[]): string {
+export function buildQQContent(
+  segments: MessageSegment[],
+  downgrades: SegmentDowngrade[] = []
+): string {
   const parts: string[] = []
   for (const seg of segments) {
     switch (seg.type) {
@@ -137,9 +150,26 @@ export function buildQQContent(segments: MessageSegment[]): string {
       case "emoji":
         parts.push(seg.code)
         break
-      case "location":
-        parts.push(`[location ${seg.lat},${seg.lon}]`)
+      case "mention":
+        parts.push(`@${seg.displayName ?? seg.userId}`)
+        downgrades.push({ from: "mention", to: "text", reason: "qq_mention_text_alternative" })
         break
+      case "reply":
+        parts.push(`> ${seg.snippet}`)
+        downgrades.push({ from: "reply", to: "text", reason: "qq_reply_text_alternative" })
+        break
+      case "poll":
+        parts.push(`${seg.question}\n${seg.options.map((option) => `- ${option}`).join("\n")}`)
+        downgrades.push({ from: "poll", to: "text", reason: "qq_poll_text_alternative" })
+        break
+      case "location":
+        parts.push(`[location ${seg.lat},${seg.lon}${seg.name ? ` ${seg.name}` : ""}]`)
+        downgrades.push({ from: "location", to: "text", reason: "qq_location_text_alternative" })
+        break
+      case "card":
+        throw new QQValidationError(
+          "QQ opaque cards require a supported reviewed template; no generic card payload can be sent"
+        )
       default:
         break
     }
@@ -150,15 +180,13 @@ export function buildQQContent(segments: MessageSegment[]): string {
 /**
  * Passive `msg_id` + `msg_seq` fields for group/C2C payloads.
  *
- * Past the 5-reply limit the msg_id is dropped so the message goes out as a
- * proactive send instead of a guaranteed duplicate/limit rejection — this
- * keeps the reply deliverable, at the cost of the (strict, ~4/month)
- * proactive quota. `send()` in index.ts cannot retry a 5-reply rejection any
- * better, so degrading here is the design that still delivers.
+ * Proactive push was withdrawn on 2025-04-21. Exhausted passive context
+ * must fail explicitly; removing msg_id cannot make the send deliverable.
  */
 function passiveReplyFields(
   msgId: string | undefined,
-  idempotencyKey: string
+  idempotencyKey: string,
+  reserve: boolean
 ): Record<string, unknown> {
   if (!msgId) return {}
   // A request without an idempotency key (should not happen — the runner
@@ -168,12 +196,15 @@ function passiveReplyFields(
   const fields = { msg_id: msgId, msg_seq: qqPassiveMsgSeq(key) }
   // A retry (same key) reproduces the same pair without consuming a slot.
   if (passiveKeysByMsgId.get(msgId)?.has(key)) return fields
-  if (qqPassiveReplyCount(msgId) >= QQ_MAX_PASSIVE_REPLIES) return {}
-  registerQQPassiveReply(msgId, key)
+  if (qqPassiveReplyCount(msgId) >= QQ_MAX_PASSIVE_REPLIES)
+    throw new QQValidationError(
+      "QQ passive reply exceeds the 5-reply limit; proactive push is unavailable"
+    )
+  if (reserve) registerQQPassiveReply(msgId, key)
   return fields
 }
 
-export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
+export function serializeOutbound(req: OutboundRequest, reserve = true): QQSendCall | null {
   const ref = req.conversationRef as {
     scene?: QQScene
     sceneId?: string
@@ -184,46 +215,170 @@ export function serializeOutbound(req: OutboundRequest): QQSendCall | null {
   const sceneId = ref.sceneId
   if (!scene || !sceneId) return null
 
-  const content = buildQQContent(req.segments)
+  const media = req.segments.filter(
+    (segment) =>
+      segment.type === "image" ||
+      segment.type === "voice" ||
+      segment.type === "video" ||
+      segment.type === "file"
+  )
+  if (media.length > 1) throw new QQValidationError("QQ requires one media resource per message")
+  const resource = media[0]
+  if (resource?.type === "file")
+    throw new QQValidationError("QQ public API does not support file uploads")
+  if (resource) {
+    let url: URL
+    try {
+      url = new URL(resource.url)
+    } catch {
+      throw new QQValidationError("QQ media requires a public HTTP(S) URL")
+    }
+    if (!isPublicHttpUrl(url.href))
+      throw new QQValidationError("QQ media requires a public HTTP(S) URL")
+    if ((scene === "channel" || scene === "direct") && resource.type !== "image")
+      throw new QQValidationError(`QQ ${scene} does not support ${resource.type} media`)
+    if (
+      resource.type === "voice" &&
+      resource.mimeType &&
+      !["audio/silk", "audio/x-silk"].includes(resource.mimeType)
+    )
+      throw new QQValidationError("QQ voice resources must use SILK encoding")
+  }
+  const downgrades: SegmentDowngrade[] = []
+  const content = buildQQContent(
+    req.segments.filter((segment) => segment !== resource),
+    downgrades
+  )
   const idempotencyKey = req.metadata?.idempotencyKey ?? ""
-  let msgId = req.replyTo?.messageId ?? ref.msgId
+  const msgId = req.replyTo?.messageId ?? ref.msgId
+  if (!msgId)
+    throw new QQValidationError("QQ requires passive reply context; proactive push is unavailable")
 
-  // Drop an expired msg_id so the send degrades to proactive instead of
-  // failing with the platform's msg-limit error. Only drop when the window
-  // has actually elapsed — a proactive send burns the ~4/month quota, so we
-  // never drop preemptively. Refs without `receivedAt` (pre-existing rows)
-  // are treated as fresh and left for the platform to arbitrate.
+  // Never remove an expired reply context: proactive push is unavailable.
+  // A separately selected reply id has no known timestamp here; only apply
+  // the captured timestamp to the message it actually describes.
   if (
     msgId &&
+    (!req.replyTo?.messageId || req.replyTo.messageId === ref.msgId) &&
     typeof ref.receivedAt === "number" &&
     Date.now() - ref.receivedAt > QQ_PASSIVE_WINDOW_MS[scene]
   ) {
-    msgId = undefined
+    throw new QQValidationError(
+      "QQ passive reply window has expired; proactive push is unavailable"
+    )
   }
 
   switch (scene) {
     case "group":
       return {
+        ...(downgrades.length ? { downgrades } : {}),
         path: `/v2/groups/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, msg_type: 0, ...passiveReplyFields(msgId, idempotencyKey) },
+        payload: {
+          content: resource ? content || " " : content,
+          msg_type: resource ? 7 : 0,
+          ...passiveReplyFields(msgId, idempotencyKey, reserve),
+        },
+        ...(resource
+          ? {
+              upload: {
+                path: `/v2/groups/${encodeURIComponent(sceneId)}/files`,
+                payload: {
+                  file_type: resource.type === "image" ? 1 : resource.type === "video" ? 2 : 3,
+                  url: resource.url,
+                  srv_send_msg: false as const,
+                },
+              },
+            }
+          : {}),
       }
     case "c2c":
       return {
+        ...(downgrades.length ? { downgrades } : {}),
         path: `/v2/users/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, msg_type: 0, ...passiveReplyFields(msgId, idempotencyKey) },
+        payload: {
+          content: resource ? content || " " : content,
+          msg_type: resource ? 7 : 0,
+          ...passiveReplyFields(msgId, idempotencyKey, reserve),
+        },
+        ...(resource
+          ? {
+              upload: {
+                path: `/v2/users/${encodeURIComponent(sceneId)}/files`,
+                payload: {
+                  file_type: resource.type === "image" ? 1 : resource.type === "video" ? 2 : 3,
+                  url: resource.url,
+                  srv_send_msg: false as const,
+                },
+              },
+            }
+          : {}),
       }
     // The guild (channel/direct) v1 endpoints take msg_id only — no msg_seq.
     case "channel":
       return {
+        ...(downgrades.length ? { downgrades } : {}),
         path: `/channels/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, ...(msgId ? { msg_id: msgId } : {}) },
+        payload: {
+          content,
+          ...(resource ? { image: resource.url } : {}),
+          ...(msgId ? { msg_id: msgId } : {}),
+        },
       }
     case "direct":
       return {
+        ...(downgrades.length ? { downgrades } : {}),
         path: `/dms/${encodeURIComponent(sceneId)}/messages`,
-        payload: { content, ...(msgId ? { msg_id: msgId } : {}) },
+        payload: {
+          content,
+          ...(resource ? { image: resource.url } : {}),
+          ...(msgId ? { msg_id: msgId } : {}),
+        },
       }
   }
+}
+
+/** Preserve segment order across QQ's one-media-per-message wire contract. */
+export function serializeOutboundParts(req: OutboundRequest, reserve = true): QQSendCall[] {
+  const parts: MessageSegment[][] = []
+  let current: MessageSegment[] = []
+  for (const segment of req.segments) {
+    current.push(segment)
+    if (
+      segment.type === "image" ||
+      segment.type === "voice" ||
+      segment.type === "video" ||
+      segment.type === "file"
+    ) {
+      parts.push(current)
+      current = []
+    }
+  }
+  if (current.length) parts.push(current)
+  if (!parts.length) throw new QQValidationError("QQ message is empty")
+  const requests = parts.map((segments, index) => ({
+    ...req,
+    segments,
+    metadata: {
+      ...req.metadata,
+      idempotencyKey:
+        parts.length === 1
+          ? req.metadata.idempotencyKey
+          : `${req.metadata.idempotencyKey}:part:${index}`,
+    },
+  }))
+  const preview = requests.map((part) => serializeOutbound(part, false))
+  if (preview.some((call) => !call))
+    throw new QQValidationError("QQ send: unaddressable conversationRef")
+  const ref = req.conversationRef as { scene?: QQScene; msgId?: string }
+  const msgId = req.replyTo?.messageId ?? ref.msgId
+  if (msgId && (ref.scene === "group" || ref.scene === "c2c")) {
+    const newKeys = requests.filter(
+      (part) => !passiveKeysByMsgId.get(msgId)?.has(part.metadata.idempotencyKey)
+    ).length
+    if (qqPassiveReplyCount(msgId) + newKeys > QQ_MAX_PASSIVE_REPLIES)
+      throw new QQValidationError("QQ multipart message exceeds the remaining 5-reply limit")
+  }
+  return reserve ? requests.map((part) => serializeOutbound(part)!) : (preview as QQSendCall[])
 }
 
 // ---------------------------------------------------------------------------

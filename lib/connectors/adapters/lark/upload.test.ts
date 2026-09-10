@@ -217,6 +217,24 @@ describe("resolveLarkMediaKeys", () => {
 })
 
 describe("resolveLarkMediaKeys — A2UI card images", () => {
+  it("uploads bound image URLs and writes the key into the cloned component", async () => {
+    mockInvoke.mockResolvedValueOnce("img_v3_bound")
+    const seg: Extract<MessageSegment, { type: "a2ui" }> = {
+      type: "a2ui",
+      surfaceId: "bound-image",
+      plainTextMirror: "Diagram",
+      content: {
+        rootId: "image",
+        dataModel: { imageUrl: "https://cdn.example.com/bound.png" },
+        components: { image: { component: "Image", src: { path: "/imageUrl" } } },
+      },
+    }
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "token" })
+    const result = out[0] as typeof seg
+    expect(result.content.components.image).toMatchObject({ src: "img_v3_bound" })
+    expect(seg.content.components.image).toMatchObject({ src: { path: "/imageUrl" } })
+  })
+
   function a2uiSegment(src: string): MessageSegment {
     return {
       type: "a2ui",

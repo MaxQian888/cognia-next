@@ -137,7 +137,7 @@ describe("WeChat Personal adapter contract suite", () => {
     })
   })
 
-  describe("edit / delete / typing / send.reaction / history.fetch / send.image (intentionally absent)", () => {
+  describe("edit / delete / typing / send.reaction / history.fetch / native voice (intentionally absent)", () => {
     it("declares none of them and implements no method for them", () => {
       const adapter = makeAdapter()
       for (const cap of [
@@ -146,10 +146,7 @@ describe("WeChat Personal adapter contract suite", () => {
         "typing",
         "send.reaction",
         "history.fetch",
-        "send.image",
-        "send.file",
         "send.voice",
-        "send.video",
       ] as const) {
         expect(adapter.meta.capabilities).not.toContain(cap)
       }

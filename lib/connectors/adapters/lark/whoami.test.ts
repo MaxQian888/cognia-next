@@ -76,6 +76,34 @@ describe("probeBotIdentity", () => {
     clearTokenCache(APP_ID, APP_SECRET)
   })
 
+  it.each([
+    [APP_ID, "ou_current", "tk_verified"],
+    ["cli_other", "ou_current", undefined],
+    [APP_ID, "ou_other", undefined],
+  ])(
+    "retains inbound tenant scope only for the same verified bot (%s, %s)",
+    async (appId, openId, expected) => {
+      await seedRow({
+        lastWhoamiResult: {
+          botName: "Before",
+          appId: appId!,
+          openId: openId!,
+          tenantKey: "tk_verified",
+        },
+      })
+      mockKeyring.mockImplementation(async (_id: string, cred: string) =>
+        cred === "appId" ? APP_ID : APP_SECRET
+      )
+      mockHttp
+        .mockResolvedValueOnce(makeTatResponse())
+        .mockResolvedValueOnce(makeBotInfoResponse({ app_name: "After", open_id: "ou_current" }))
+      await probeBotIdentity(ADAPTER_ID)
+      expect((await getDb().adapterInstances.get(ADAPTER_ID))?.lastWhoamiResult?.tenantKey).toBe(
+        expected
+      )
+    }
+  )
+
   it("happy path — persists bot identity into the adapter row", async () => {
     await seedRow()
     mockKeyring.mockImplementation(async (_id: string, cred: string) => {

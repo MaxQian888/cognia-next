@@ -48,6 +48,11 @@ jest.mock("./a2ui-mapper", () => ({
   buildWeComTemplateCard: jest.fn(async () => null),
 }))
 const mockBuildCard = buildWeComTemplateCard as jest.Mock
+const mockDecryptMedia = jest.fn()
+jest.mock("./media", () => ({
+  ...jest.requireActual("./media"),
+  fetchAndDecryptMedia: (...args: unknown[]) => mockDecryptMedia(...args),
+}))
 
 const mockListen = listen as jest.Mock
 
@@ -137,6 +142,7 @@ function makeAcker(
 }
 
 beforeEach(() => {
+  mockDecryptMedia.mockReset()
   mockListen.mockReset()
   mockWsOpen.mockReset()
   mockWsSend.mockReset()
@@ -467,6 +473,52 @@ describe("createWeComAdapter — inbound", () => {
     bus.trigger("connectors://ws/h1/message", msgFrame("r1", "blocked"))
     await tick()
     expect(emit).not.toHaveBeenCalled()
+    await adapter.stop()
+  })
+  it("routes private callbacks without chatid and resolves every quoted/mixed image independently", async () => {
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit)
+    mockDecryptMedia.mockImplementation(async (url: string) => {
+      if (url.endsWith("bad")) throw new Error("download failed")
+      return Uint8Array.from([0xff, 0xd8, 0xff, 0xe0])
+    })
+    bus.trigger(
+      "connectors://ws/h1/message",
+      JSON.stringify({
+        cmd: "aibot_msg_callback",
+        headers: { req_id: "r-private" },
+        body: {
+          msgid: "official",
+          aibotid: "bot_x",
+          chattype: "single",
+          from: { userid: "alice" },
+          msgtype: "mixed",
+          mixed: {
+            msg_item: [
+              { msgtype: "image", image: { url: "https://cdn/bad", aeskey: "bad-key" } },
+              { msgtype: "image", image: { url: "https://cdn/current", aeskey: "current-key" } },
+            ],
+          },
+          quote: { msgtype: "image", image: { url: "https://cdn/quote", aeskey: "quote-key" } },
+        },
+      })
+    )
+    await tick()
+    const event = emit.mock.calls[0][0]
+    expect(event.segments).toEqual([
+      { type: "image", url: "https://cdn/quote", dataBase64: "/9j/4A==", mimeType: "image/jpeg" },
+      { type: "image", url: "https://cdn/bad" },
+      { type: "image", url: "https://cdn/current", dataBase64: "/9j/4A==", mimeType: "image/jpeg" },
+    ])
+    expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/quote", "quote-key")
+    expect(mockDecryptMedia).toHaveBeenCalledWith("https://cdn/current", "current-key")
+    await adapter.streamReply!({
+      conversationRef: { ...event.conversationRef, reqId: undefined },
+      text: "reply",
+    })
+    expect(sentFrames().find((f) => f.cmd === "aibot_respond_msg")?.headers?.req_id).toBe(
+      "r-private"
+    )
     await adapter.stop()
   })
 })
@@ -952,4 +1004,74 @@ describe("createWeComAdapter — events", () => {
     expect(f!.body).toMatchObject({ msgtype: "text", text: { content: "Hello! How can I help?" } })
     await adapter.stop()
   })
+})
+
+describe("lossless WeCom text chunks", () => {
+  it.each([false, true])("preserves long text with live reply=%s", async (live) => {
+    const emit = makeEmit()
+    const { adapter, bus } = await startSubscribed(emit)
+    let ref: WeComConversationRef = {
+      platform: "wecom",
+      adapterId: "wc1",
+      chatId: "u_alice",
+      chatType: "single",
+    }
+    if (live) {
+      bus.trigger("connectors://ws/h1/message", msgFrame("r-long", "hi"))
+      await tick()
+      ref = emit.mock.calls[0][0].conversationRef as WeComConversationRef
+    }
+    mockWsSend.mockClear()
+    const text = "a".repeat(20479) + "😀" + "中".repeat(8000)
+    const result = await settleWithAcks(
+      bus,
+      adapter.send({
+        conversationRef: ref,
+        segments: [{ type: "text", text }],
+        metadata: { idempotencyKey: "long" },
+      })
+    )
+    expect(result.ok).toBe(true)
+    const frames = sentFrames().filter((frame) =>
+      ["aibot_respond_msg", "aibot_send_msg"].includes(frame.cmd)
+    )
+    const chunks = frames.map(
+      (frame) =>
+        (frame.body?.stream as { content: string } | undefined)?.content ??
+        (frame.body?.markdown as { content: string }).content
+    )
+    expect(chunks.join("")).toBe(text)
+    expect(chunks.every((chunk) => new TextEncoder().encode(chunk).length <= 20480)).toBe(true)
+    if (live) {
+      expect(frames[0].body).toMatchObject({ stream: { finish: true } })
+      expect(frames.slice(1).every((frame) => frame.cmd === "aibot_send_msg")).toBe(true)
+    }
+    await adapter.stop()
+  })
+})
+
+it("does not silently omit rejected media or publish its caption", async () => {
+  const { adapter } = await startSubscribed(makeEmit())
+  const originalFetch = global.fetch
+  global.fetch = jest.fn(async () => ({ ok: false, status: 404 })) as unknown as typeof fetch
+  mockWsSend.mockClear()
+  try {
+    const result = await adapter.send({
+      conversationRef: { platform: "wecom", adapterId: "wc1", chatId: "user", chatType: "single" },
+      segments: [
+        { type: "text", text: "caption" },
+        { type: "image", url: "https://example.com/missing.png" },
+      ],
+      metadata: { idempotencyKey: "missing" },
+    })
+    expect(result).toMatchObject({ ok: false, error: { retryable: false } })
+    expect(
+      sentFrames().some(
+        (frame) => frame.cmd === "aibot_send_msg" || frame.cmd === "aibot_respond_msg"
+      )
+    ).toBe(false)
+  } finally {
+    global.fetch = originalFetch
+    await adapter.stop()
+  }
 })

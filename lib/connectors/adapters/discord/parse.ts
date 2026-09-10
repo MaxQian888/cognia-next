@@ -116,17 +116,42 @@ export interface DiscordReactionDispatch {
   emoji: DiscordReactionEmoji
 }
 
+export interface DiscordModalValue {
+  type?: number
+  custom_id?: string
+  value?: string | boolean | null
+  values?: string[]
+}
+
 export interface DiscordInteractionData {
+  name?: string
+  type?: number
+  target_id?: string
+  options?: DiscordCommandOption[]
+  resolved?: {
+    users?: Record<string, DiscordUser>
+    messages?: Record<string, Partial<DiscordMessage>>
+    attachments?: Record<string, DiscordAttachment>
+  }
   /** Component custom_id (button, select_menu). */
   custom_id?: string
   /** Component type: 2 = button, 3 = select_menu, etc. */
   component_type?: number
   /** Select menu values; first entry is the canonical `value`. */
   values?: string[]
-  /** Modal_submit: nested rows of {custom_id, value} components. */
+  /** Modal_submit: current Label children and legacy ActionRow children. */
   components?: Array<{
-    components?: Array<{ custom_id?: string; value?: string }>
+    type?: number
+    component?: DiscordModalValue
+    components?: DiscordModalValue[]
   }>
+}
+
+export interface DiscordCommandOption {
+  name: string
+  type: number
+  value?: string | number | boolean
+  options?: DiscordCommandOption[]
 }
 
 export interface DiscordInteraction {
@@ -438,7 +463,7 @@ function reactionToEvent(
  *
  *   - type 3 (MESSAGE_COMPONENT): button click (component_type=2),
  *     select menu (component_type=3), etc.
- *   - type 5 (MODAL_SUBMIT): collects all `data.components[][].value`
+ *   - type 5 (MODAL_SUBMIT): collects Label and legacy ActionRow input values
  *     into the `payload` field.
  *
  * Returns null for application commands (type 2) — we don't subscribe.
@@ -503,13 +528,77 @@ export function parseDiscordInteraction(
 function collectModalValues(data: DiscordInteractionData): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const row of data.components ?? []) {
-    for (const comp of row.components ?? []) {
+    for (const comp of row.component ? [row.component] : (row.components ?? [])) {
       if (typeof comp.custom_id === "string") {
-        out[comp.custom_id] = comp.value ?? ""
+        out[comp.custom_id] = comp.values ?? (comp.value !== undefined ? comp.value : "")
       }
     }
   }
   return out
+}
+
+/** Application commands are directed user input, separate from component callbacks. */
+function applicationCommandToEvent(
+  adapterId: string,
+  selfId: string,
+  dispatch: DiscordDispatch
+): NormalizedInboundEvent | null {
+  const interaction = dispatch.d as DiscordInteraction
+  const author = interaction.user ?? interaction.member?.user
+  const data = interaction.data
+  if (interaction.type !== 2 || !interaction.channel_id || !author || !data?.name) return null
+  const path = [data.name]
+  const args: string[] = []
+  const attachments: DiscordAttachment[] = []
+  const walkOptions = (options: DiscordCommandOption[]) => {
+    for (const option of options) {
+      if (option.type === 1 || option.type === 2) {
+        path.push(option.name)
+        walkOptions(option.options ?? [])
+      } else if (option.value !== undefined) {
+        args.push(`${option.name}: ${String(option.value)}`)
+        const attachment =
+          option.type === 11 ? data.resolved?.attachments?.[String(option.value)] : undefined
+        if (attachment) attachments.push(attachment)
+      }
+    }
+  }
+  walkOptions(data.options ?? [])
+  const target = data.target_id ? data.resolved?.messages?.[data.target_id] : undefined
+  const message: DiscordMessage = {
+    id: interaction.id,
+    channel_id: interaction.channel_id,
+    guild_id: interaction.guild_id,
+    author,
+    content: [`/${path.join(" ")}`, ...args, ...(target?.content ? [target.content] : [])].join(
+      "\n"
+    ),
+    timestamp: new Date().toISOString(),
+    mentions: [],
+    attachments: [...attachments, ...(target?.attachments ?? [])],
+    embeds: target?.embeds,
+    sticker_items: target?.sticker_items,
+  }
+  const event = messageToEvent(adapterId, selfId, message, dispatch)
+  if (data.type === 2 && data.target_id) {
+    const user = data.resolved?.users?.[data.target_id]
+    event.segments.push({
+      type: "mention",
+      userId: data.target_id,
+      displayName: user?.global_name ?? user?.username,
+    })
+    event.plainText = segmentsToPlainText(event.segments)
+  }
+  event.mentions.selfMentioned = true
+  event.canReplyToMessage = false
+  // An interaction ID is suitable for dedup, but cannot be used as a reply target.
+  event.conversationRef = {
+    platform: "discord",
+    adapterId,
+    channelId: interaction.channel_id,
+    guildId: interaction.guild_id,
+  }
+  return event
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +621,7 @@ export interface ParseDiscordDispatchOptions {
  * Parse a Discord Gateway dispatch into a NormalizedInboundEvent.
  *
  * Returns `null` for dispatches that flow through other channels:
- *   - INTERACTION_CREATE goes through `parseDiscordInteraction`.
+ *   - Component/modal INTERACTION_CREATE goes through `parseDiscordInteraction`.
  *   - The bot's own MESSAGE_CREATE / MESSAGE_UPDATE echoes (self-echo
  *     guard; disabled via `parseOpts.allowSelfEcho` for history).
  *   - Unknown / unsubscribed dispatches.
@@ -544,6 +633,8 @@ export function parseDiscordDispatch(
   parseOpts?: ParseDiscordDispatchOptions
 ): NormalizedInboundEvent | null {
   switch (dispatch.t) {
+    case "INTERACTION_CREATE":
+      return applicationCommandToEvent(adapterId, selfId, dispatch)
     case "MESSAGE_CREATE":
     case "MESSAGE_UPDATE": {
       const msg = dispatch.d as DiscordMessage

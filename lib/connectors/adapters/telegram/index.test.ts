@@ -1,8 +1,15 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
 
+const mockRecordCallbackBinding = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
+  ...jest.requireActual("@/lib/connectors/adapters/_shared/a2ui-mapper"),
+  recordCallbackBinding: (...args: unknown[]) => mockRecordCallbackBinding(...args),
+}))
+
 const mockDispatchConnectorCallback = jest.fn().mockResolvedValue(undefined)
 const mockGetAdapterInstance = jest.fn().mockResolvedValue(undefined)
+const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockAppendAudit = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/connectors/bus", () => ({
@@ -13,6 +20,7 @@ jest.mock("@/lib/connectors/bus", () => ({
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   getAdapterInstance: (...args: unknown[]) => mockGetAdapterInstance(...args),
+  updateAdapterInstance: (...args: unknown[]) => mockUpdateAdapterInstance(...args),
   // at-gate → sibling-bots pulls this in; keep it inert for these tests.
   listAdapterInstancesByType: jest.fn().mockResolvedValue([]),
 }))
@@ -853,4 +861,365 @@ describe("createTelegramAdapter — webhook registration", () => {
 
     expect(botApiCalls("deleteWebhook")).toHaveLength(0)
   })
+})
+
+it("edit preserves prose alongside A2UI text instead of dropping the later call", async () => {
+  mockInvoke.mockReset()
+  mockInvoke.mockResolvedValue(makeSendOkResp())
+  const adapter = createTelegramAdapter({
+    id: "tg-1",
+    displayName: "Test",
+    transport: "longpoll",
+    botToken: async () => "TOKEN",
+    selfId: "100",
+  })
+  const result = await adapter.edit!("11:777", {
+    conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 11 },
+    segments: [
+      { type: "text", text: "Prose!" },
+      {
+        type: "a2ui",
+        surfaceId: "surface",
+        plainTextMirror: "fallback",
+        content: {
+          rootId: "root",
+          dataModel: {},
+          components: { root: { component: "Text", text: "Native", variant: "heading1" } },
+        },
+      },
+    ],
+    metadata: { idempotencyKey: "edit-mixed" },
+  })
+  expect(result.ok).toBe(true)
+  const body = JSON.parse((mockInvoke.mock.calls.at(-1)?.[1] as { req: { body: string } }).req.body)
+  expect(body.text).toBe("Prose!\nNative")
+  expect(body.entities).toEqual([{ type: "bold", offset: 7, length: 6 }])
+  expect(body).not.toHaveProperty("parse_mode")
+})
+
+it("edit rebases oversized escaped formatting beside plain and short formatted text", async () => {
+  mockInvoke.mockReset()
+  mockInvoke.mockResolvedValue(makeSendOkResp())
+  const adapter = createTelegramAdapter({
+    id: "tg-1",
+    displayName: "Test",
+    transport: "longpoll",
+    botToken: async () => "TOKEN",
+    selfId: "100",
+  })
+  const result = await adapter.edit!("11:777", {
+    conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 11 },
+    segments: [
+      { type: "text", text: "prefix" },
+      { type: "markdown", md: `**${".".repeat(2500)}**` },
+      { type: "markdown", md: "*tail*" },
+    ],
+    metadata: { idempotencyKey: "edit-entities" },
+  })
+  expect(result.ok).toBe(true)
+  const body = JSON.parse(mockInvoke.mock.calls.at(-1)![1].req.body)
+  expect(body.text).toBe(`prefix\n${".".repeat(2500)}\ntail`)
+  expect(body.entities).toEqual([
+    { type: "bold", offset: 7, length: 2500 },
+    { type: "italic", offset: 2508, length: 4 },
+  ])
+})
+
+it.each(["media", "overflow", "empty"])(
+  "edit rejects %s instead of dropping content",
+  async (kind) => {
+    mockInvoke.mockReset()
+    const adapter = createTelegramAdapter({
+      id: "tg-1",
+      displayName: "Test",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "100",
+    })
+    const result = await adapter.edit!("11:777", {
+      conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 11 },
+      segments:
+        kind === "media"
+          ? [{ type: "image", url: "https://example.com/image.png" }]
+          : [{ type: "text", text: kind === "empty" ? "" : "x".repeat(4097) }],
+      metadata: { idempotencyKey: "edit-invalid" },
+    })
+    expect(result.error).toMatchObject({ code: "validation", retryable: false })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  }
+)
+
+describe("Telegram chat migrations", () => {
+  const adapter = () =>
+    createTelegramAdapter({
+      id: "tg-migrate",
+      displayName: "Migrate",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+  const request = {
+    conversationRef: { platform: "telegram" as const, adapterId: "tg-migrate", chatId: "-12" },
+    segments: [{ type: "text" as const, text: "hello" }],
+    metadata: { idempotencyKey: "migrate" },
+  }
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    mockGetAdapterInstance.mockReset().mockResolvedValue(undefined)
+    mockUpdateAdapterInstance.mockClear()
+  })
+  it("retries the migrated chat, returns its ID and persists routing for later sends", async () => {
+    mockGetAdapterInstance.mockResolvedValue({
+      settings: { retained: true },
+      chatAllowlist: ["-12"],
+    })
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ ok: false, parameters: { migrate_to_chat_id: -100999 } }),
+      })
+      .mockResolvedValue(makeSendOkResp(77))
+    const bot = adapter()
+    expect(await bot.send(request)).toMatchObject({ ok: true, platformMessageId: "-100999:77" })
+    await bot.send(request)
+    const ids = mockInvoke.mock.calls
+      .filter(([cmd]) => cmd === "connectors_http_request")
+      .map(([, args]) => JSON.parse(args.req.body).chat_id)
+    expect(ids.map(String)).toEqual(["-12", "-100999", "-100999"])
+    expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+      "tg-migrate",
+      expect.objectContaining({
+        settings: { retained: true, telegramChatMigrations: { "-12": "-100999" } },
+        chatAllowlist: ["-100999"],
+      })
+    )
+  })
+  it("binds a migrated ForceReply prompt to the new chat and preserves its thread", async () => {
+    mockRecordCallbackBinding.mockClear()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ ok: false, parameters: { migrate_to_chat_id: -100999 } }),
+      })
+      .mockResolvedValue(makeSendOkResp(88))
+    const result = await adapter().send({
+      ...request,
+      threadId: "9",
+      segments: [
+        {
+          type: "a2ui",
+          surfaceId: "form",
+          plainTextMirror: "Name",
+          content: {
+            rootId: "field",
+            dataModel: {},
+            components: { field: { id: "field", component: "TextField", label: "Name" } },
+          },
+        },
+      ],
+    })
+    expect(result.ok).toBe(true)
+    expect(mockRecordCallbackBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "force_reply",
+        actionId: "88",
+        conversationKey: "telegram:tg-migrate:-100999:9",
+      })
+    )
+  })
+
+  it("loads saved migration routing after recreation and bounds repeated migration errors", async () => {
+    mockGetAdapterInstance.mockResolvedValue({
+      settings: { telegramChatMigrations: { "-12": "-100999" } },
+    })
+    mockInvoke.mockResolvedValue(makeSendOkResp())
+    await adapter().send(request)
+    expect(JSON.parse(mockInvoke.mock.calls[0][1].req.body).chat_id).toBe("-100999")
+    mockGetAdapterInstance.mockResolvedValue(undefined)
+    mockInvoke.mockReset().mockResolvedValue({
+      status: 400,
+      headers: {},
+      body: JSON.stringify({ ok: false, parameters: { migrate_to_chat_id: -100999 } }),
+    })
+    const result = await adapter().send(request)
+    expect(result.ok).toBe(false)
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("Telegram local multipart uploads", () => {
+  const makeAdapter = () =>
+    createTelegramAdapter({
+      id: "tg-upload",
+      displayName: "Upload",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+  beforeEach(() => mockInvoke.mockReset())
+  it.each([
+    ["image", "file:///tmp/photo%20one.png", "sendPhoto", "photo", "/tmp/photo one.png"],
+    ["voice", "/tmp/voice.ogg", "sendVoice", "voice", "/tmp/voice.ogg"],
+    ["video", "asset://localhost/%2Ftmp%2Fvideo.mp4", "sendVideo", "video", "/tmp/video.mp4"],
+    ["file", "C:\\files\\report.pdf", "sendDocument", "document", "C:\\files\\report.pdf"],
+  ])("uploads local %s bytes with routing", async (type, url, method, field, localPath) => {
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "connectors_media_upload" ? JSON.stringify(makeSendOkResp(71)) : makeSendOkResp(71)
+    )
+    const result = await makeAdapter().send({
+      conversationRef: { platform: "telegram", adapterId: "tg-upload", chatId: "-100" },
+      threadId: "77",
+      replyTo: { messageId: "-100:70" },
+      segments: [
+        { type, url, name: "report.pdf", mimeType: "application/pdf", sizeBytes: 3 } as never,
+      ],
+      metadata: { idempotencyKey: "up" },
+    })
+    expect(result).toMatchObject({ ok: true, platformMessageId: "-100:71" })
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_media_upload", {
+      req: expect.objectContaining({
+        uploadUrl: `https://api.telegram.org/botTOKEN/${method}`,
+        localPath,
+        responseMode: "http",
+        multipart: expect.objectContaining({
+          fieldName: field,
+          fields: expect.objectContaining({
+            chat_id: "-100",
+            message_thread_id: "77",
+            reply_parameters: JSON.stringify({ message_id: 70 }),
+          }),
+        }),
+      }),
+    })
+    expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "connectors_http_request")).toBe(false)
+  })
+  it("preserves Telegram's multipart rate-limit response", async () => {
+    mockInvoke.mockResolvedValue(
+      JSON.stringify({
+        status: 429,
+        headers: {},
+        body: JSON.stringify({
+          ok: false,
+          error_code: 429,
+          description: "limited",
+          parameters: { retry_after: 52 },
+        }),
+      })
+    )
+    const result = await makeAdapter().send({
+      conversationRef: { platform: "telegram", adapterId: "tg-upload", chatId: "-100" },
+      segments: [{ type: "image", url: "/tmp/photo.png" }],
+      metadata: { idempotencyKey: "limited" },
+    })
+    expect(result.error).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      retryAfterMs: 52000,
+    })
+  })
+})
+
+it.each(["send", "edit"] as const)(
+  "%s exposes mixed A2UI downgrade diagnostics",
+  async (method) => {
+    mockInvoke.mockReset().mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ ok: true, result: { message_id: 77 } }),
+    })
+    const adapter = createTelegramAdapter({
+      id: "mixed",
+      displayName: "Mixed",
+      transport: "longpoll",
+      botToken: async () => "T",
+      selfId: "b",
+    })
+    const request = {
+      conversationRef: { platform: "telegram" as const, adapterId: "mixed", chatId: "11" },
+      metadata: { idempotencyKey: "mixed" },
+      segments: [
+        {
+          type: "a2ui" as const,
+          surfaceId: "mixed",
+          plainTextMirror: "Complete table data",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: {
+              root: { id: "root", component: "Column", children: ["button", "table"] },
+              button: { id: "button", component: "Button", text: "Go", action: "go" },
+              table: { id: "table", component: "Table" },
+            },
+          },
+        },
+      ],
+    }
+    const result =
+      method === "send" ? await adapter.send(request) : await adapter.edit!("11:77", request)
+    expect(result.ok).toBe(true)
+    expect(result.downgrades).toEqual([
+      { from: "a2ui", to: "text", reason: expect.stringContaining("Table") },
+    ])
+    const bodies = mockInvoke.mock.calls
+      .filter(([command]) => command === "connectors_http_request")
+      .map(([, args]) => args.req.body)
+      .join("\n")
+    expect(bodies).toContain("Complete table data")
+    expect(bodies).not.toContain('"downgrades"')
+  }
+)
+
+it("preserves direct location and poll segments as text with diagnostics", async () => {
+  mockInvoke.mockReset().mockResolvedValue({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({ ok: true, result: { message_id: 77 } }),
+  })
+  const result = await createTelegramAdapter({
+    id: "direct",
+    displayName: "Direct",
+    transport: "longpoll",
+    botToken: async () => "T",
+    selfId: "b",
+  }).send({
+    conversationRef: { platform: "telegram", adapterId: "direct", chatId: "11" },
+    metadata: { idempotencyKey: "direct" },
+    segments: [
+      { type: "location", lat: 12.3, lon: 45.6, name: "Meeting point" },
+      { type: "poll", question: "Choose", options: ["First", "Second"], multi: true },
+    ],
+  })
+  expect(result.ok).toBe(true)
+  expect(result.downgrades?.map((item) => [item.from, item.to])).toEqual([
+    ["location", "text"],
+    ["poll", "text"],
+  ])
+  const bodies = mockInvoke.mock.calls
+    .filter(([command]) => command === "connectors_http_request")
+    .map(([, args]) => args.req.body)
+    .join("\n")
+  for (const value of ["12.3", "45.6", "Meeting point", "Choose", "First", "Second"])
+    expect(bodies).toContain(value)
+})
+
+it("rejects opaque cards before sending earlier media", async () => {
+  mockInvoke.mockReset()
+  const result = await createTelegramAdapter({
+    id: "direct",
+    displayName: "Direct",
+    transport: "longpoll",
+    botToken: async () => "T",
+    selfId: "b",
+  }).send({
+    conversationRef: { platform: "telegram", adapterId: "direct", chatId: "11" },
+    metadata: { idempotencyKey: "direct" },
+    segments: [
+      { type: "image", url: "https://example.com/image.png" },
+      { type: "card", card: { kind: "opaque", payload: { text: "Keep this" } } },
+    ],
+  })
+  expect(result.error).toMatchObject({ code: "validation", retryable: false })
+  expect(mockInvoke).not.toHaveBeenCalled()
 })

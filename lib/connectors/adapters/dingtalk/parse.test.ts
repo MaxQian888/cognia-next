@@ -17,6 +17,18 @@ function baseMsg(over: Partial<DingTalkBotMessage> = {}): DingTalkBotMessage {
 }
 
 describe("parseDingTalkBotMessage", () => {
+  it("reads richText from the official content envelope", () => {
+    const ev = parseDingTalkBotMessage(
+      "ad_1",
+      "self",
+      baseMsg({
+        msgtype: "richText",
+        content: { richText: [{ text: "official" }, { type: "picture", downloadCode: "code" }] },
+        richText: [{ text: "legacy" }],
+      })
+    )
+    expect(ev?.plainText).toBe("official[picture]")
+  })
   it("parses a 1:1 text message into a private NormalizedInboundEvent", () => {
     const ev = parseDingTalkBotMessage("ad_1", "self_bot", baseMsg())
     expect(ev).not.toBeNull()
@@ -189,3 +201,59 @@ describe("parseDingTalkBotMessage", () => {
     expect(typeof ev!.timestamp).toBe("number")
   })
 })
+
+it("preserves rich text image order and prefers the official downloadCode", () => {
+  const event = parseDingTalkBotMessage(
+    "ad",
+    "self",
+    baseMsg({
+      msgtype: "richText",
+      content: {
+        richText: [
+          { text: "before" },
+          { type: "picture", downloadCode: "download", pictureDownloadCode: "legacy" },
+          { text: "after" },
+          { pictureDownloadCode: "fallback" },
+        ],
+      },
+    })
+  )
+  expect(event?.segments).toEqual([
+    { type: "text", text: "before" },
+    { type: "image", url: "dingtalk://download/download" },
+    { type: "text", text: "after" },
+    { type: "image", url: "dingtalk://download/fallback" },
+  ])
+})
+it.each(["picture", "audio", "video", "file"])(
+  "retains %s download references and metadata",
+  (msgtype) => {
+    const event = parseDingTalkBotMessage(
+      "ad",
+      "self",
+      baseMsg({
+        msgtype,
+        content: {
+          downloadCode: "a+/=",
+          recognition: "spoken",
+          duration: "5",
+          videoType: "mp4",
+          fileName: "doc.pdf",
+          fileSize: 123,
+        },
+      })
+    )
+    expect(event?.segments[0]).toMatchObject({
+      type: (
+        { picture: "image", audio: "voice", video: "video", file: "file" } as Record<string, string>
+      )[msgtype],
+      url: "dingtalk://download/a%2B%2F%3D",
+    })
+    if (msgtype === "audio")
+      expect(event?.segments[0]).toMatchObject({ transcript: "spoken", durationSec: 5 })
+    if (msgtype === "video")
+      expect(event?.segments[0]).toMatchObject({ mimeType: "video/mp4", durationSec: 5 })
+    if (msgtype === "file")
+      expect(event?.segments[0]).toMatchObject({ name: "doc.pdf", sizeBytes: 123 })
+  }
+)

@@ -3,7 +3,10 @@ import { listen } from "@tauri-apps/api/event"
 import { createDiscordAdapter } from "./index"
 import { discordNonce } from "./serialize"
 import { getBus } from "@/lib/connectors/bus"
+import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
+
+jest.mock("@/lib/connectors/at-gate", () => ({ gateInboundEvent: jest.fn(async () => true) }))
 
 // Isolate the interaction-callback dispatch — the adapter forwards
 // INTERACTION_CREATE to `getBus().dispatchConnectorCallback`. Stable closure so
@@ -19,6 +22,7 @@ const mockResolveCallbackBinding = jest.fn()
 jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
   ...jest.requireActual("@/lib/connectors/adapters/_shared/a2ui-mapper"),
   resolveCallbackBinding: (...args: unknown[]) => mockResolveCallbackBinding(...args),
+  recordCallbackBinding: jest.fn().mockResolvedValue(undefined),
 }))
 
 const mockInvoke = invoke as jest.Mock
@@ -138,6 +142,7 @@ async function driveReady(session: ReturnType<typeof createFakeGatewaySession>, 
 
 describe("createDiscordAdapter", () => {
   beforeEach(() => {
+    jest.mocked(gateInboundEvent).mockReset().mockResolvedValue(true)
     mockInvoke.mockReset()
     mockListen.mockReset()
     busDispatch.mockClear()
@@ -162,6 +167,40 @@ describe("createDiscordAdapter", () => {
     expect(adapter.meta.transportModes).toContain("gateway")
     expect(adapter.meta.transportModes).toContain("webhook")
     expect(adapter.meta.capabilities).toContain("send.text")
+  })
+
+  it.each([true, false])("webhook commands respect the policy gate (%s)", async (allowed) => {
+    jest.mocked(gateInboundEvent).mockResolvedValue(allowed)
+    let listener: (event: { payload: unknown }) => void = () => {}
+    mockListen.mockImplementation(async (_name, handler) => {
+      listener = handler
+      return jest.fn()
+    })
+    const adapter = createDiscordAdapter({
+      id: "dc-wh",
+      displayName: "Bot",
+      botToken: async () => "T",
+      selfId: "b",
+      transportMode: "webhook",
+    })
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    listener({
+      payload: {
+        type: 2,
+        id: "cmd",
+        channel_id: "chan",
+        user: { id: "u", username: "U" },
+        data: { name: "ask", type: 1 },
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await adapter.stop()
+    expect(gateInboundEvent).toHaveBeenCalledWith(
+      "dc-wh",
+      expect.objectContaining({ messageId: "cmd", canReplyToMessage: false })
+    )
+    expect(emitted).toHaveLength(allowed ? 1 : 0)
   })
 
   it("webhook mode subscribes to the webhook channel and opens no gateway socket", async () => {
@@ -326,7 +365,7 @@ describe("createDiscordAdapter", () => {
     const result = await adapter.send(req)
 
     expect(result.ok).toBe(true)
-    expect(result.platformMessageId).toBe("sent-id")
+    expect(result.platformMessageId).toBe("channel-abc:sent-id")
 
     const httpCalls = mockInvoke.mock.calls.filter(
       ([cmd]: [string]) => cmd === "connectors_http_request"
@@ -336,6 +375,64 @@ describe("createDiscordAdapter", () => {
     expect(reqPayload.url).toContain("/channels/channel-abc/messages")
     expect(reqPayload.method).toBe("POST")
   })
+
+  it("round-trips a sent message through edit, reactions, pin and delete", async () => {
+    mockInvoke.mockResolvedValue(makeSendOkResp("sent-id"))
+    const adapter = makeAdapter()
+    const request = {
+      conversationRef: {
+        platform: "discord" as const,
+        adapterId: "dc-1",
+        channelId: "channel-abc",
+      },
+      segments: [{ type: "text" as const, text: "hello" }],
+      metadata: { idempotencyKey: "roundtrip" },
+    }
+    const sent = await adapter.send(request)
+    expect(sent.platformMessageId).toBe("channel-abc:sent-id")
+    const id = sent.platformMessageId!
+    expect(
+      await adapter.edit!(id, {
+        ...request,
+        conversationRef: { ...request.conversationRef, channelId: "wrong-channel" },
+      })
+    ).toMatchObject({ ok: true })
+    const reaction = await adapter.addReaction!(id, "👍")
+    await adapter.removeReaction!(id, reaction.reactionId)
+    await adapter.pinMessage!("discord:dc-1:wrong-channel", id)
+    await adapter.unpinMessage!(id)
+    await adapter.delete!(id)
+    const requests = mockInvoke.mock.calls
+      .filter(([cmd]) => cmd === "connectors_http_request")
+      .map(([, args]) => args.req)
+    expect(requests.slice(1).map((req) => [req.method, new URL(req.url).pathname])).toEqual([
+      ["PATCH", "/api/v10/channels/channel-abc/messages/sent-id"],
+      ["PUT", "/api/v10/channels/channel-abc/messages/sent-id/reactions/%F0%9F%91%8D/@me"],
+      ["DELETE", "/api/v10/channels/channel-abc/messages/sent-id/reactions/%F0%9F%91%8D/@me"],
+      ["PUT", "/api/v10/channels/channel-abc/messages/pins/sent-id"],
+      ["DELETE", "/api/v10/channels/channel-abc/messages/pins/sent-id"],
+      ["DELETE", "/api/v10/channels/channel-abc/messages/sent-id"],
+    ])
+  })
+
+  it.each(["image", "voice"] as const)(
+    "strips composite reply IDs before %s uploads",
+    async (type) => {
+      mockInvoke.mockImplementation(async (cmd: string) =>
+        cmd === "connectors_discord_upload" ? "media-id" : makeSendOkResp()
+      )
+      const result = await makeAdapter().send({
+        conversationRef: { platform: "discord", adapterId: "dc-1", channelId: "channel-abc" },
+        segments: [{ type, url: "https://cdn/x/media" }],
+        replyTo: { messageId: "channel-abc:original" },
+        metadata: { idempotencyKey: "reply" },
+      })
+      expect(result).toMatchObject({ ok: true, platformMessageId: "channel-abc:media-id" })
+      const upload = mockInvoke.mock.calls.find(([cmd]) => cmd === "connectors_discord_upload")![1]
+        .req
+      expect(upload.replyToMessageId).toBe("original")
+    }
+  )
 
   it("send() uploads image/file media via connectors_discord_upload", async () => {
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -365,7 +462,7 @@ describe("createDiscordAdapter", () => {
 
     const result = await adapter.send(req)
     expect(result.ok).toBe(true)
-    expect(result.platformMessageId).toBe("uploaded-msg-id")
+    expect(result.platformMessageId).toBe("channel-abc:uploaded-msg-id")
 
     const uploadCall = mockInvoke.mock.calls.find(
       ([cmd]: [string]) => cmd === "connectors_discord_upload"
@@ -454,7 +551,7 @@ describe("createDiscordAdapter", () => {
     }
 
     const result = await adapter.send(req)
-    expect(result.platformMessageId).toBe("vid-msg-id")
+    expect(result.platformMessageId).toBe("channel-abc:vid-msg-id")
 
     const uploadReq = (
       mockInvoke.mock.calls.find(([cmd]: [string]) => cmd === "connectors_discord_upload")![1] as {
@@ -637,112 +734,175 @@ describe("createDiscordAdapter", () => {
       .find((r) => r.url.includes("/interactions/int-1/int-token/callback"))
     expect(ackReq).toBeDefined()
     expect(ackReq!.method).toBe("POST")
-    expect(JSON.parse(ackReq!.body!)).toEqual({ type: 6 })
+    expect(JSON.parse(ackReq!.body!)).toMatchObject({ type: 6 })
 
     expect(busDispatch).toHaveBeenCalledTimes(1)
   }, 10000)
 
-  it("answers a modal_open component click with an InteractionResponse type 9, no dispatch", async () => {
-    mockResolveCallbackBinding.mockResolvedValueOnce({
-      kind: "modal_open",
-      payload: {
-        title: "Feedback",
-        inputs: [{ customId: "name", label: "Name", style: 1, required: true }],
-      },
-    })
-
-    const session = createFakeGatewaySession()
-    mockListen.mockImplementation(session.listenImpl)
-
-    const adapter = createDiscordAdapter({
-      id: "dc-modal",
-      displayName: "Bot",
-      botToken: async () => "T",
-      selfId: "b",
-    })
-    const { ctx } = makeCtx()
-    await adapter.start(ctx)
-    await session.waitForListeners()
-
-    session.push({ op: 10, d: { heartbeat_interval: 100000 } })
-    await new Promise((r) => setTimeout(r, 20))
-
-    session.push({
-      op: 0,
-      t: "INTERACTION_CREATE",
-      s: 2,
-      d: {
-        type: 3,
-        id: "int-9",
-        token: "tok9",
-        channel_id: "c1",
-        member: { user: { id: "u1", username: "U" } },
-        data: { custom_id: "a2ui:s:root:submit", component_type: 2 },
-      },
-    })
-    await new Promise((r) => setTimeout(r, 20))
-    await adapter.stop()
-
-    const ackReq = mockInvoke.mock.calls
-      .filter(([cmd]: [string]) => cmd === "connectors_http_request")
-      .map(([, a]: [string, unknown]) => (a as { req: { url: string; body?: string } }).req)
-      .find((r) => r.url.includes("/interactions/int-9/tok9/callback"))
-    expect(ackReq).toBeDefined()
-    const body = JSON.parse(ackReq!.body!) as {
-      type: number
-      data: { title: string; components: Array<{ components: Array<Record<string, unknown>> }> }
-    }
-    expect(body.type).toBe(9)
-    expect(body.data.title).toBe("Feedback")
-    expect(body.data.components[0].components[0]).toMatchObject({ type: 4, custom_id: "name" })
-
-    // A modal OPEN must not dispatch a callback — the submit will, separately.
-    expect(busDispatch).not.toHaveBeenCalled()
-  }, 10000)
-
-  it("ACKs a MODAL_SUBMIT (type 5) and dispatches the submitted values", async () => {
-    const session = createFakeGatewaySession()
-    mockListen.mockImplementation(session.listenImpl)
-
-    const adapter = createDiscordAdapter({
-      id: "dc-ms",
-      displayName: "Bot",
-      botToken: async () => "T",
-      selfId: "b",
-    })
-    const { ctx } = makeCtx()
-    await adapter.start(ctx)
-    await session.waitForListeners()
-
-    session.push({ op: 10, d: { heartbeat_interval: 100000 } })
-    await new Promise((r) => setTimeout(r, 20))
-
-    session.push({
-      op: 0,
-      t: "INTERACTION_CREATE",
-      s: 2,
-      d: {
-        type: 5, // MODAL_SUBMIT
-        id: "int-5",
-        token: "tok5",
-        channel_id: "c1",
-        member: { user: { id: "u1", username: "U" } },
-        data: {
-          custom_id: "a2ui:s:root:submit",
-          components: [{ components: [{ custom_id: "name", value: "Jane" }] }],
+  it.each([false, true])(
+    "answers modal_open overflow=%s without dispatch",
+    async (overflow) => {
+      mockResolveCallbackBinding.mockResolvedValueOnce({
+        kind: "modal_open",
+        payload: {
+          title: "Feedback",
+          inputs: Array.from({ length: overflow ? 6 : 1 }, () => ({
+            customId: "name",
+            label: "Name",
+            style: 1,
+            required: true,
+          })),
         },
-      },
-    })
-    await new Promise((r) => setTimeout(r, 20))
-    await adapter.stop()
+      })
 
-    const ackReq = mockInvoke.mock.calls
-      .filter(([cmd]: [string]) => cmd === "connectors_http_request")
-      .map(([, a]: [string, unknown]) => (a as { req: { url: string; body?: string } }).req)
-      .find((r) => r.url.includes("/interactions/int-5/tok5/callback"))
-    expect(JSON.parse(ackReq!.body!)).toEqual({ type: 6 })
-    expect(busDispatch).toHaveBeenCalledTimes(1)
-  }, 10000)
+      const session = createFakeGatewaySession()
+      mockListen.mockImplementation(session.listenImpl)
+
+      const adapter = createDiscordAdapter({
+        id: "dc-modal",
+        displayName: "Bot",
+        botToken: async () => "T",
+        selfId: "b",
+      })
+      const { ctx } = makeCtx()
+      await adapter.start(ctx)
+      await session.waitForListeners()
+
+      session.push({ op: 10, d: { heartbeat_interval: 100000 } })
+      await new Promise((r) => setTimeout(r, 20))
+
+      session.push({
+        op: 0,
+        t: "INTERACTION_CREATE",
+        s: 2,
+        d: {
+          type: 3,
+          id: "int-9",
+          token: "tok9",
+          channel_id: "c1",
+          member: { user: { id: "u1", username: "U" } },
+          data: { custom_id: "a2ui:s:root:submit", component_type: 2 },
+        },
+      })
+      await new Promise((r) => setTimeout(r, 20))
+      await adapter.stop()
+
+      const ackReq = mockInvoke.mock.calls
+        .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+        .map(([, a]: [string, unknown]) => (a as { req: { url: string; body?: string } }).req)
+        .find((r) => r.url.includes("/interactions/int-9/tok9/callback"))
+      expect(ackReq).toBeDefined()
+      const body = JSON.parse(ackReq!.body!) as {
+        type: number
+        data: { title: string; components: Array<{ components: Array<Record<string, unknown>> }> }
+      }
+      if (overflow) {
+        expect(body).toMatchObject({
+          type: 4,
+          data: { flags: 64, content: expect.stringContaining("at most 5 inputs") },
+        })
+      } else {
+        expect(body.type).toBe(9)
+        expect(body.data.title).toBe("Feedback")
+        expect(body.data.components[0]).toMatchObject({
+          type: 18,
+          component: { type: 4, custom_id: "name" },
+        })
+      }
+
+      // A modal OPEN must not dispatch a callback — the submit will, separately.
+      expect(busDispatch).not.toHaveBeenCalled()
+    },
+    10000
+  )
+
+  it.each([true, false])(
+    "ACKs a MODAL_SUBMIT with message=%s and dispatches values",
+    async (hasMessage) => {
+      const session = createFakeGatewaySession()
+      mockListen.mockImplementation(session.listenImpl)
+
+      const adapter = createDiscordAdapter({
+        id: "dc-ms",
+        displayName: "Bot",
+        botToken: async () => "T",
+        selfId: "b",
+      })
+      const { ctx } = makeCtx()
+      await adapter.start(ctx)
+      await session.waitForListeners()
+
+      session.push({ op: 10, d: { heartbeat_interval: 100000 } })
+      await new Promise((r) => setTimeout(r, 20))
+
+      session.push({
+        op: 0,
+        t: "INTERACTION_CREATE",
+        s: 2,
+        d: {
+          type: 5, // MODAL_SUBMIT
+          ...(hasMessage ? { message: { id: "source-message" } } : {}),
+          id: "int-5",
+          token: "tok5",
+          channel_id: "c1",
+          member: { user: { id: "u1", username: "U" } },
+          data: {
+            custom_id: "a2ui:s:root:submit",
+            components: [{ components: [{ custom_id: "name", value: "Jane" }] }],
+          },
+        },
+      })
+      await new Promise((r) => setTimeout(r, 20))
+      await adapter.stop()
+
+      const ackReq = mockInvoke.mock.calls
+        .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+        .map(([, a]: [string, unknown]) => (a as { req: { url: string; body?: string } }).req)
+        .find((r) => r.url.includes("/interactions/int-5/tok5/callback"))
+      expect(JSON.parse(ackReq!.body!)).toMatchObject(
+        hasMessage ? { type: 6 } : { type: 4, data: { flags: 64 } }
+      )
+      expect(busDispatch).toHaveBeenCalledTimes(1)
+    },
+    10000
+  )
+
+  it.each([2, 4])(
+    "acknowledges interaction type %i and emits only application commands",
+    async (type) => {
+      const session = createFakeGatewaySession()
+      mockListen.mockImplementation(session.listenImpl)
+      const adapter = makeAdapter()
+      const { ctx, emitted } = makeCtx()
+      await adapter.start(ctx)
+      await session.waitForListeners()
+      session.push({ op: 10, d: { heartbeat_interval: 100000 } })
+      session.push({
+        op: 0,
+        t: "INTERACTION_CREATE",
+        d: {
+          type,
+          id: "cmd",
+          token: "tok",
+          channel_id: "chan",
+          user: { id: "caller", username: "Caller" },
+          data: { type: 1, name: "ask", options: [{ name: "prompt", type: 3, value: "hello" }] },
+        },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      await adapter.stop()
+      const ack = mockInvoke.mock.calls
+        .filter(([cmd]) => cmd === "connectors_http_request")
+        .map(([, args]) => args.req)
+        .find((req) => req.url.includes("/interactions/cmd/tok/callback"))
+      expect(ack).toBeDefined()
+      expect(JSON.parse(ack.body)).toMatchObject(
+        type === 2 ? { type: 4, data: { flags: 64 } } : { type: 8, data: { choices: [] } }
+      )
+      expect(emitted).toHaveLength(type === 2 ? 1 : 0)
+      if (type === 2) expect(emitted[0].plainText).toContain("prompt: hello")
+    }
+  )
 
   it("forwards the configured intents bitmask to the gateway IDENTIFY", async () => {
     const session = createFakeGatewaySession()
@@ -913,6 +1073,70 @@ describe("createDiscordAdapter", () => {
     ) as { content: string }
     expect(body.content).toContain("Here is the fix:")
     expect(body.content).toContain("x = 1")
+    expect(body).toMatchObject({ embeds: [], components: [] })
+  })
+
+  it("rejects edits exceeding a Discord message instead of truncating the patch", async () => {
+    const result = await makeAdapter().edit!("msg-1", {
+      ...makeTextReq(),
+      segments: [{ type: "text", text: "x".repeat(2001) }],
+    })
+    expect(result.error).toMatchObject({ code: "validation", retryable: false })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("rejects oversized native forms before sending any media", async () => {
+    const ids = Array.from({ length: 6 }, (_, i) => `field${i}`)
+    const result = await makeAdapter().send({
+      ...makeTextReq(),
+      segments: [
+        { type: "image", url: "https://example.test/image.png" },
+        {
+          type: "a2ui",
+          surfaceId: "full-form",
+          plainTextMirror: "Six fields",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: {
+              root: { id: "root", component: "Dialog", title: "Form", body: ids },
+              ...Object.fromEntries(
+                ids.map((id) => [id, { id, component: "TextField", label: id }])
+              ),
+            },
+          },
+        },
+      ],
+    })
+    expect(result.error).toMatchObject({ code: "validation", retryable: false })
+    expect(result.error?.message).toContain("at most 5 inputs")
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("edit() preserves native A2UI content", async () => {
+    mockInvoke.mockResolvedValue({ status: 200, headers: {}, body: '{"ok":true}' })
+    const adapter = makeAdapter()
+    const result = await adapter.edit!("msg-1", {
+      conversationRef: { platform: "discord", adapterId: "test", channelId: "chan-1" },
+      segments: [
+        {
+          type: "a2ui",
+          surfaceId: "surface",
+          plainTextMirror: "fallback",
+          content: {
+            components: { root: { id: "root", component: "Text", text: "Native updated text" } },
+            dataModel: {},
+            rootId: "root",
+          },
+        },
+      ],
+      metadata: { idempotencyKey: "edit-native" },
+    })
+    expect(result.ok).toBe(true)
+    const body = JSON.parse(
+      (mockInvoke.mock.calls.at(-1)?.[1] as { req: { body: string } }).req.body
+    )
+    expect(body.content).toBe("Native updated text")
   })
 
   it("edit() maps auth failures too", async () => {
@@ -1061,4 +1285,100 @@ describe("createDiscordAdapter", () => {
     expect(JSON.parse(ackReq!.body!)).toEqual({ type: 6 })
     expect(busDispatch).toHaveBeenCalledTimes(1)
   }, 10000)
+})
+
+it.each(["send", "edit"] as const)(
+  "%s exposes mixed A2UI downgrade diagnostics",
+  async (method) => {
+    mockInvoke
+      .mockReset()
+      .mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ id: "77" }) })
+    const adapter = createDiscordAdapter({
+      id: "mixed",
+      displayName: "Mixed",
+      botToken: async () => "T",
+      selfId: "b",
+    })
+    const request = {
+      conversationRef: { platform: "discord" as const, adapterId: "mixed", channelId: "11" },
+      metadata: { idempotencyKey: "mixed" },
+      segments: [
+        {
+          type: "a2ui" as const,
+          surfaceId: "mixed",
+          plainTextMirror: "Complete table data",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: {
+              root: { id: "root", component: "Column", children: ["button", "table"] },
+              button: { id: "button", component: "Button", text: "Go", action: "go" },
+              table: { id: "table", component: "Table" },
+            },
+          },
+        },
+      ],
+    }
+    const result =
+      method === "send" ? await adapter.send(request) : await adapter.edit!("11:77", request)
+    expect(result.ok).toBe(true)
+    expect(result.downgrades).toEqual([
+      { from: "a2ui", to: "text", reason: expect.stringContaining("Table") },
+    ])
+    const bodies = mockInvoke.mock.calls
+      .filter(([command]) => command === "connectors_http_request")
+      .map(([, args]) => args.req.body)
+      .join("\n")
+    expect(bodies).toContain("Complete table data")
+    expect(bodies).not.toContain('"downgrades"')
+  }
+)
+
+it("preserves direct location and poll segments as text with diagnostics", async () => {
+  mockInvoke
+    .mockReset()
+    .mockResolvedValue({ status: 200, headers: {}, body: JSON.stringify({ id: "77" }) })
+  const result = await createDiscordAdapter({
+    id: "direct",
+    displayName: "Direct",
+    botToken: async () => "T",
+    selfId: "b",
+  }).send({
+    conversationRef: { platform: "discord", adapterId: "direct", channelId: "11" },
+    metadata: { idempotencyKey: "direct" },
+    segments: [
+      { type: "location", lat: 12.3, lon: 45.6, name: "Meeting point" },
+      { type: "poll", question: "Choose", options: ["First", "Second"], multi: true },
+    ],
+  })
+  expect(result.ok).toBe(true)
+  expect(result.downgrades?.map((item) => [item.from, item.to])).toEqual([
+    ["location", "text"],
+    ["poll", "text"],
+  ])
+  const bodies = mockInvoke.mock.calls
+    .filter(([command]) => command === "connectors_http_request")
+    .map(([, args]) => args.req.body)
+    .join("\n")
+  for (const value of ["12.3", "45.6", "Meeting point", "Choose", "First", "Second"])
+    expect(bodies).toContain(value)
+})
+
+it("rejects opaque cards before sending earlier media", async () => {
+  mockInvoke.mockReset()
+  const result = await createDiscordAdapter({
+    id: "direct",
+    displayName: "Direct",
+    botToken: async () => "T",
+    selfId: "b",
+  }).send({
+    conversationRef: { platform: "discord", adapterId: "direct", channelId: "11" },
+    metadata: { idempotencyKey: "direct" },
+    segments: [
+      { type: "image", url: "https://example.com/image.png" },
+      { type: "card", card: { kind: "opaque", payload: { text: "Keep this" } } },
+    ],
+  })
+  expect(result.error).toMatchObject({ code: "validation", retryable: false })
+  expect(mockInvoke).not.toHaveBeenCalled()
 })

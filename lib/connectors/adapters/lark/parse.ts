@@ -533,7 +533,8 @@ function buildSystemEvent(
 export function parseLarkEventEnvelope(
   adapterId: string,
   selfBotOpenId: string,
-  envelope: LarkEventEnvelope
+  envelope: LarkEventEnvelope,
+  options: { replyInThread?: boolean } = {}
 ): NormalizedInboundEvent | null {
   const eventType = envelope.header?.event_type
 
@@ -657,7 +658,18 @@ export function parseLarkEventEnvelope(
   if (message.message_type === "system") return null
 
   const chatId = message.chat_id
-  const threadId = message.thread_id ?? undefined
+  // The root message exists before Feishu allocates an omt_ thread id. Using
+  // that stable root for managed threads keeps the first turn and every reply
+  // on one durable session, including after a host restart.
+  const managedThread =
+    options.replyInThread === true &&
+    message.chat_type !== "p2p" &&
+    (!message.thread_id || !!message.root_id || !message.parent_id)
+  const threadId = managedThread
+    ? message.thread_id
+      ? message.root_id || message.message_id
+      : message.message_id
+    : (message.thread_id ?? undefined)
 
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
   const senderIdentity = {
@@ -720,7 +732,14 @@ export function parseLarkEventEnvelope(
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
     raw: envelope,
-    ...(identityScope ? { channelData: { identityScope } } : {}),
+    ...(identityScope || managedThread
+      ? {
+          channelData: {
+            ...(identityScope ? { identityScope } : {}),
+            ...(managedThread ? { larkManagedThread: true } : {}),
+          },
+        }
+      : {}),
   }
 }
 

@@ -4,8 +4,13 @@
  * group + validation), and that inbound frames are parsed and emitted.
  */
 
+const mockMediaRead = jest.fn()
+const mockMediaFetch = jest.fn()
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 const mockHttp = jest.fn()
 jest.mock("@/lib/connectors/tauri/commands", () => ({
+  connectorsAttachmentRead: (...a: unknown[]) => mockMediaRead(...a),
+  connectorsAttachmentFetch: (...a: unknown[]) => mockMediaFetch(...a),
   connectorsHttpRequest: (...a: unknown[]) => mockHttp(...a),
 }))
 
@@ -634,4 +639,126 @@ describe("transport health (register/ws-open failures)", () => {
     onTransportState({ kind: "connected" })
     expect(a.health().state).toBe("down")
   })
+})
+
+describe("DingTalk media resolution and processing acknowledgments", () => {
+  it("resolves every rich image, isolates failures, and ACKs after persistence", async () => {
+    const ack = jest.fn(async (_success: boolean) => {})
+    framesImpl = async function* () {
+      yield {
+        topic: "/v1.0/im/bot/messages/get",
+        ack,
+        data: {
+          msgId: "media",
+          conversationId: "c",
+          conversationType: "1",
+          robotCode: "robot",
+          msgtype: "richText",
+          content: {
+            richText: [
+              { text: "before" },
+              { downloadCode: "one", type: "picture" },
+              { downloadCode: "bad", type: "picture" },
+              { downloadCode: "two", type: "picture" },
+            ],
+          },
+        },
+      }
+    }
+    mockHttp.mockImplementation(async (request) =>
+      JSON.parse(request.body).downloadCode === "bad"
+        ? { status: 400, body: "{}" }
+        : {
+            status: 200,
+            body: JSON.stringify({
+              downloadUrl: `https://example.com/${JSON.parse(request.body).downloadCode}.jpg`,
+            }),
+          }
+    )
+    mockMediaRead.mockResolvedValue(btoa("\xff\xd8\xffdata"))
+    const emitted: unknown[] = []
+    const ctx = makeCtx("ad_1", (event) => {
+      expect(ack).not.toHaveBeenCalled()
+      emitted.push(event)
+    })
+    const adapter = makeAdapter()
+    await adapter.start(ctx)
+    for (let i = 0; i < 30 && !ack.mock.calls.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(ack).toHaveBeenCalledWith(true)
+    expect(emitted).toHaveLength(1)
+    const event = emitted[0] as import("@/types/connectors/event").NormalizedInboundEvent
+    expect(event.segments[1]).toMatchObject({
+      type: "image",
+      url: "https://example.com/one.jpg",
+      dataBase64: btoa("\xff\xd8\xffdata"),
+      mimeType: "image/jpeg",
+    })
+    expect(event.segments[2]).toMatchObject({ type: "image", url: "dingtalk://download/bad" })
+    expect(event.segments[3]).toMatchObject({ type: "image", url: "https://example.com/two.jpg" })
+    expect(mockHttp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.dingtalk.com/v1.0/robot/messageFiles/download",
+        headers: expect.objectContaining({ "x-acs-dingtalk-access-token": "tok" }),
+      })
+    )
+    await adapter.stop()
+  })
+  it("sends a negative ACK on persistence failure and continues receiving", async () => {
+    const firstAck = jest.fn(async (_success: boolean) => {})
+    const secondAck = jest.fn(async (_success: boolean) => {})
+    framesImpl = async function* () {
+      for (const [index, ack] of [firstAck, secondAck].entries())
+        yield {
+          topic: "/v1.0/im/bot/messages/get",
+          ack,
+          data: {
+            msgId: `m${index}`,
+            conversationId: "c",
+            conversationType: "1",
+            msgtype: "text",
+            text: { content: "hi" },
+          },
+        }
+    }
+    const ctx = makeCtx()
+    ctx.emit = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValueOnce(undefined)
+    const adapter = makeAdapter()
+    await adapter.start(ctx)
+    for (let i = 0; i < 30 && !secondAck.mock.calls.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(firstAck).toHaveBeenCalledWith(false)
+    expect(firstAck).not.toHaveBeenCalledWith(true)
+    expect(secondAck).toHaveBeenCalledWith(true)
+    await adapter.stop()
+  })
+  it("reports media link fallback in the outbound result", async () => {
+    mockHttp.mockResolvedValue(okResp())
+    const adapter = makeAdapter()
+    const request = req(ref({ conversationType: "1", userId: "u" }))
+    request.segments = [{ type: "image", url: "https://example.com/a.jpg" }]
+    expect(await adapter.send(request)).toMatchObject({
+      ok: true,
+      downgrades: [{ from: "image", to: "markdown", reason: "dingtalk_media_rendered_as_link" }],
+    })
+  })
+})
+
+it("rejects opaque cards and non-deliverable inline media before sending text", async () => {
+  const adapter = makeAdapter()
+  const request = req(ref({ conversationType: "1", userId: "u" }))
+  request.segments.push({ type: "image", url: "data:image/png;base64,AQID" })
+  expect(await adapter.send(request)).toMatchObject({
+    ok: false,
+    error: { code: "unsupported_segment", retryable: false },
+  })
+  request.segments = [{ type: "card", card: { kind: "foreign", payload: {} } }]
+  expect(await adapter.send(request)).toMatchObject({
+    ok: false,
+    error: { code: "unsupported_segment" },
+  })
+  expect(mockHttp).not.toHaveBeenCalled()
 })

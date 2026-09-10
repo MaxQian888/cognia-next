@@ -99,6 +99,123 @@ beforeEach(() => {
 })
 
 describe("createQQOfficialAdapter", () => {
+  it.each(["group", "c2c"])(
+    "uploads public media before sending a passive %s message",
+    async (scene) => {
+      mockInvoke
+        .mockResolvedValueOnce(httpResp(200, { file_info: "opaque-file", ttl: 3600 }))
+        .mockResolvedValueOnce(httpResp(200, { id: "media-sent" }))
+      const res = await adapter().send(
+        sendReq({
+          conversationRef: {
+            platform: "qq-official",
+            adapterId: "qq-1",
+            scene,
+            sceneId: "target",
+            msgId: "m1",
+          },
+          segments: [
+            { type: "text", text: "caption" },
+            { type: "image", url: "https://cdn.example.org/image.png" },
+          ],
+        })
+      )
+      expect(res.ok).toBe(true)
+      const calls = httpCalls()
+      expect(calls[0].url).toBe(
+        `https://api.bot.qq.com/v2/${scene === "group" ? "groups" : "users"}/target/files`
+      )
+      expect(JSON.parse(calls[0].body!)).toEqual({
+        file_type: 1,
+        url: "https://cdn.example.org/image.png",
+        srv_send_msg: false,
+      })
+      expect(JSON.parse(calls[1].body!)).toMatchObject({
+        msg_type: 7,
+        content: "caption",
+        media: { file_info: "opaque-file" },
+        msg_id: "m1",
+      })
+    }
+  )
+
+  it("sends multiple resources in order and requires reconciliation after partial failure", async () => {
+    mockInvoke
+      .mockResolvedValueOnce(httpResp(200, { file_info: "image" }))
+      .mockResolvedValueOnce(httpResp(200, { file_info: "video" }))
+      .mockResolvedValueOnce(httpResp(200, { id: "first" }))
+      .mockResolvedValueOnce(httpResp(503, { message: "busy" }))
+    const result = await adapter().send(
+      sendReq({
+        segments: [
+          { type: "image", url: "https://cdn.example.org/a.png" },
+          { type: "text", text: "second caption" },
+          { type: "video", url: "https://cdn.example.org/b.mp4" },
+        ],
+      })
+    )
+    expect(result).toMatchObject({
+      ok: false,
+      platformMessageId: "group:GO:first",
+      error: { code: "reconciliation_required", retryable: false },
+    })
+    const payloads = httpCalls().map((call) => JSON.parse(call.body!))
+    expect(payloads[2]).toMatchObject({ content: " ", media: { file_info: "image" } })
+    expect(payloads[3]).toMatchObject({ content: "second caption", media: { file_info: "video" } })
+    expect(payloads[2].msg_seq).not.toBe(payloads[3].msg_seq)
+  })
+
+  it("does not consume reply slots when upload fails and retries a fresh upload", async () => {
+    const a = adapter()
+    const req = sendReq({
+      segments: [{ type: "voice", url: "https://cdn.example.org/a.silk", mimeType: "audio/silk" }],
+    })
+    mockInvoke.mockResolvedValueOnce(httpResp(503, { message: "upload busy" }))
+    expect((await a.send(req)).error?.retryable).toBe(true)
+    expect(httpCalls()).toHaveLength(1)
+    mockInvoke
+      .mockResolvedValueOnce(httpResp(200, { file_info: "voice" }))
+      .mockResolvedValueOnce(httpResp(200, { id: "voice-sent" }))
+    expect((await a.send(req)).ok).toBe(true)
+    expect(JSON.parse(httpCalls()[2].body!).msg_seq).toBe(qqPassiveMsgSeq("k"))
+  })
+
+  it("uses native image URLs for channel replies and rejects unsupported files before HTTP", async () => {
+    mockInvoke.mockResolvedValue(httpResp(200, { id: "image" }))
+    const result = await adapter().send(
+      sendReq({
+        conversationRef: {
+          platform: "qq-official",
+          adapterId: "qq-1",
+          scene: "channel",
+          sceneId: "channel",
+          msgId: "m1",
+        },
+        segments: [{ type: "image", url: "https://cdn.example.org/a.png" }],
+      })
+    )
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(httpCalls()[0].body!)).toMatchObject({
+      image: "https://cdn.example.org/a.png",
+      msg_id: "m1",
+    })
+    mockInvoke.mockClear()
+    const failed = await adapter().send(
+      sendReq({
+        segments: [
+          {
+            type: "file",
+            url: "https://cdn.example.org/a.pdf",
+            name: "a.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+          },
+        ],
+      })
+    )
+    expect(failed.error).toMatchObject({ code: "validation", retryable: false })
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
   it("exposes correct meta and initial health", () => {
     const a = adapter()
     expect(a.meta.type).toBe("qq-official")
@@ -206,7 +323,7 @@ describe("createQQOfficialAdapter", () => {
     expect(res.error?.message).toContain("reply window")
   })
 
-  it("keeps the generic mapping for code 22009 on a proactive send", async () => {
+  it("rejects a proactive send before HTTP dispatch", async () => {
     mockInvoke.mockResolvedValue(httpResp(400, { message: "msg limit exceed", code: 22009 }))
     const res = await adapter().send(
       sendReq({
@@ -218,8 +335,9 @@ describe("createQQOfficialAdapter", () => {
         },
       })
     )
-    expect(res.error?.code).toBe("platform_4xx")
-    expect(res.error?.message).not.toContain("reply window")
+    expect(res.error?.code).toBe("validation")
+    expect(res.error?.retryable).toBe(false)
+    expect(mockInvoke).not.toHaveBeenCalled()
   })
 })
 
@@ -229,7 +347,7 @@ describe("createQQOfficialAdapter — delete", () => {
     await adapter().delete!("group:GO:sent-1")
     const [call] = httpCalls()
     expect(call.method).toBe("DELETE")
-    expect(call.url).toBe("https://api.sgroup.qq.com/v2/groups/GO/messages/sent-1")
+    expect(call.url).toBe("https://api.bot.qq.com/v2/groups/GO/messages/sent-1")
     expect(call.body).toBeUndefined()
   })
 
@@ -239,7 +357,7 @@ describe("createQQOfficialAdapter — delete", () => {
     await a.delete!("c2c:UO:m1")
     await a.delete!("channel:CH:m2")
     await a.delete!("direct:GUILD:m3")
-    const urls = httpCalls().map((c) => c.url.replace("https://api.sgroup.qq.com", ""))
+    const urls = httpCalls().map((c) => c.url.replace("https://api.bot.qq.com", ""))
     expect(urls).toEqual([
       "/v2/users/UO/messages/m1",
       "/channels/CH/messages/m2?hidetip=false",
@@ -271,7 +389,7 @@ describe("createQQOfficialAdapter — reactions (channel scene only)", () => {
     const ref = await adapter().addReaction!("channel:CH:m9", "1:4")
     const [call] = httpCalls()
     expect(call.method).toBe("PUT")
-    expect(call.url).toBe("https://api.sgroup.qq.com/channels/CH/messages/m9/reactions/1/4")
+    expect(call.url).toBe("https://api.bot.qq.com/channels/CH/messages/m9/reactions/1/4")
     expect(ref).toEqual({ reactionId: "1:4" })
   })
 
@@ -280,7 +398,7 @@ describe("createQQOfficialAdapter — reactions (channel scene only)", () => {
     await adapter().removeReaction!("channel:CH:m9", "2:128512")
     const [call] = httpCalls()
     expect(call.method).toBe("DELETE")
-    expect(call.url).toBe("https://api.sgroup.qq.com/channels/CH/messages/m9/reactions/2/128512")
+    expect(call.url).toBe("https://api.bot.qq.com/channels/CH/messages/m9/reactions/2/128512")
   })
 
   it("throws unsupported for non-channel scenes and on malformed ids / emoji", async () => {
@@ -301,7 +419,7 @@ describe("createQQOfficialAdapter — typing (c2c only)", () => {
     await a.setTyping!("qq-official:qq-1:UO", true)
     const [call] = httpCalls()
     expect(call.method).toBe("POST")
-    expect(call.url).toBe("https://api.sgroup.qq.com/v2/users/UO/messages")
+    expect(call.url).toBe("https://api.bot.qq.com/v2/users/UO/messages")
     const body = JSON.parse(call.body!) as Record<string, unknown>
     expect(body).toMatchObject({
       msg_type: 6,
@@ -438,4 +556,51 @@ describe("createQQOfficialAdapter — health reason", () => {
     expect(a.health()).toMatchObject({ state: "down" })
     expect(a.health().reason).toBeUndefined()
   })
+})
+
+it("propagates all QQ text alternatives across native media parts", async () => {
+  mockInvoke
+    .mockResolvedValueOnce(httpResp(200, { file_info: "uploaded" }))
+    .mockResolvedValueOnce(httpResp(200, { id: "sent1" }))
+    .mockResolvedValueOnce(httpResp(200, { id: "sent2" }))
+  const result = await adapter().send(
+    sendReq({
+      segments: [
+        { type: "mention", userId: "u", displayName: "Alice" },
+        { type: "image", url: "https://example.com/a.jpg" },
+        { type: "reply", messageId: "prior", snippet: "context" },
+        { type: "poll", question: "Pick", options: ["A", "B"] },
+        { type: "location", lat: 1, lon: 2, name: "Office" },
+      ],
+    })
+  )
+  expect(result).toMatchObject({
+    ok: true,
+    downgrades: [
+      { from: "mention", to: "text" },
+      { from: "reply", to: "text" },
+      { from: "poll", to: "text" },
+      { from: "location", to: "text" },
+    ],
+  })
+  const calls = httpCalls()
+  expect(JSON.parse(calls[1].body!)).toMatchObject({
+    msg_type: 7,
+    content: "@Alice",
+    media: { file_info: "uploaded" },
+  })
+  expect(JSON.parse(calls[2].body!).content).toContain("Office")
+})
+it("rejects a trailing QQ opaque card before any upload or send", async () => {
+  const result = await adapter().send(
+    sendReq({
+      segments: [
+        { type: "image", url: "https://example.com/a.jpg" },
+        { type: "card", card: { kind: "custom", payload: { title: "x" } } },
+      ],
+    })
+  )
+  expect(result).toMatchObject({ ok: false, error: { code: "validation", retryable: false } })
+  expect(httpCalls()).toEqual([])
+  expect(qqPassiveReplyCount("m1")).toBe(0)
 })

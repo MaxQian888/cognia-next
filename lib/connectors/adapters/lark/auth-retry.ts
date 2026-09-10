@@ -32,6 +32,7 @@ export interface LarkApiErrorInit {
   status: number
   code: number | null
   message: string
+  headers?: Record<string, string>
 }
 
 /**
@@ -41,12 +42,22 @@ export interface LarkApiErrorInit {
 export class LarkApiError extends Error {
   readonly status: number
   readonly code: number | null
+  readonly retryAfterMs?: number
 
   constructor(init: LarkApiErrorInit) {
     super(init.message)
     this.name = "LarkApiError"
     this.status = init.status
     this.code = init.code
+    if (init.status === 429 || init.code === 99991400) {
+      const reset = Object.entries(init.headers ?? {})
+        .find(([name]) => name.toLowerCase() === "x-ogw-ratelimit-reset")?.[1]
+        ?.trim()
+      const milliseconds = reset ? Number(reset) * 1000 : Number.NaN
+      if (Number.isFinite(milliseconds) && milliseconds >= 0) {
+        this.retryAfterMs = Math.ceil(milliseconds)
+      }
+    }
   }
 }
 

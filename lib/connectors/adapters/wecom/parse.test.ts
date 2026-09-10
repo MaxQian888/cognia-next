@@ -18,6 +18,44 @@ function body(over: Partial<WeComInboundMsgBody>): WeComInboundMsgBody {
 }
 
 describe("parseWeComMessage", () => {
+  it("uses the sender as the private target when the official callback omits chatid", () => {
+    const ev = parseWeComMessage(ADP, SELF, body({ chatid: undefined }), "r")
+    expect(ev?.conversationKey).toBe("wecom:wecom_1:u_alice")
+    expect(ev?.conversationRef).toMatchObject({ chatId: "u_alice", userId: "u_alice" })
+    expect(ev?.channel.platformChannelId).toBe("u_alice")
+    expect(parseWeComMessage(ADP, SELF, body({ chatid: undefined, chattype: "group" }))).toBeNull()
+    expect(parseWeComMessage(ADP, SELF, body({ chatid: undefined, from: undefined }))).toBeNull()
+  })
+
+  it("accepts official voice.content without a nonexistent audio URL", () => {
+    const ev = parseWeComMessage(
+      ADP,
+      SELF,
+      body({ msgtype: "voice", voice: { content: "spoken" } })
+    )
+    expect(ev?.segments).toEqual([{ type: "text", text: "spoken" }])
+  })
+
+  it("preserves quoted content without inventing a reply message id", () => {
+    const quote = {
+      msgtype: "mixed" as const,
+      mixed: {
+        msg_item: [
+          { msgtype: "text", text: { content: "first\nsecond" } },
+          { msgtype: "image", image: { url: "https://cdn/quoted", aeskey: "key" } },
+        ],
+      },
+    }
+    const ev = parseWeComMessage(ADP, SELF, body({ quote }))
+    expect(ev?.segments).toEqual([
+      { type: "markdown", md: "> first\n> second" },
+      { type: "image", url: "https://cdn/quoted" },
+      { type: "text", text: "hello bot" },
+    ])
+    expect(ev?.replyTo).toBeUndefined()
+    expect((ev?.raw as WeComInboundMsgBody).quote).toBe(quote)
+  })
+
   it("parses a single-chat text message as a private DM (not mention-gated)", () => {
     const ev = parseWeComMessage(ADP, SELF, body({}), "r1", 1000)
     expect(ev).not.toBeNull()

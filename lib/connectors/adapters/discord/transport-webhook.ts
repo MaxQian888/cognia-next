@@ -22,7 +22,8 @@
 
 import { connectorListen, type ConnectorUnlistenFn } from "@/lib/connectors/events"
 import { getBus } from "@/lib/connectors/bus"
-import { parseDiscordInteraction, type DiscordDispatch } from "./parse"
+import { parseDiscordDispatch, parseDiscordInteraction, type DiscordDispatch } from "./parse"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
 export interface WebhookTransportHandle {
   stop: () => void
@@ -33,6 +34,8 @@ export interface WebhookTransportOptions {
   /** Bot's own user id (from /users/@me); may be "" if the probe failed. */
   selfId: string
   signal: AbortSignal
+  /** Adapter-owned ingress applies policy gating and media enrichment. */
+  emit: (event: NormalizedInboundEvent) => Promise<void>
 }
 
 /**
@@ -51,6 +54,11 @@ export async function startWebhookTransport(
       // Rust only emits interaction objects here; ignore anything else.
       if (!interaction || typeof interaction !== "object") return
       const dispatch: DiscordDispatch = { t: "INTERACTION_CREATE", op: 0, d: interaction }
+      const command = parseDiscordDispatch(adapterId, selfId, dispatch)
+      if (command) {
+        void opts.emit(command).catch(() => undefined)
+        return
+      }
       const callback = parseDiscordInteraction(adapterId, selfId, dispatch)
       if (!callback) return
       void getBus()

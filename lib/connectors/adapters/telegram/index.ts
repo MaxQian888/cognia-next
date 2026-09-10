@@ -13,7 +13,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
 import { createTelegramAlbumBuffer, type TelegramAlbumBuffer } from "./album"
 import { enrichTelegramInboundMedia } from "./inbound-media"
@@ -25,7 +25,9 @@ import {
   parseTelegramForceReplyCorrelation,
   type TelegramUpdate,
 } from "./parse"
-import { serializeOutboundAsync, serializeReaction } from "./serialize"
+import { serializeOutboundAsync, serializeReaction, TelegramSerializationError } from "./serialize"
+import { markdownV2Entities, type TelegramTextEntity } from "./markdown-v2"
+import { fileUriToPath } from "@/lib/files/path-uri"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import { TELEGRAM_ALLOWED_UPDATES } from "./allowed-updates"
 import { startLongPoll } from "./transport-longpoll"
@@ -40,7 +42,7 @@ import {
 } from "./webhook-registration"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
-import { getAdapterInstance } from "@/lib/db/adapter-instances"
+import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
 
 export interface TelegramAdapterOptions {
@@ -144,6 +146,40 @@ async function callbackChatAllowed(
 }
 
 export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAdapter {
+  const chatMigrations = new Map<string, string>()
+  let loadChatMigrations: Promise<void> | undefined
+  async function resolveChatId(chatId: unknown): Promise<unknown> {
+    loadChatMigrations ??= getAdapterInstance(opts.id)
+      .then((row) => {
+        const saved = row?.settings?.telegramChatMigrations
+        if (saved && typeof saved === "object") {
+          for (const [from, to] of Object.entries(saved)) {
+            if (typeof to === "string" && /^-?\d+$/.test(to)) chatMigrations.set(from, to)
+          }
+        }
+      })
+      .catch(() => undefined)
+    await loadChatMigrations
+    let resolved = chatId
+    const visited = new Set<string>()
+    while (chatMigrations.has(String(resolved)) && !visited.has(String(resolved))) {
+      visited.add(String(resolved))
+      resolved = chatMigrations.get(String(resolved))!
+    }
+    return resolved
+  }
+
+  async function rememberChatMigration(from: string, to: string): Promise<void> {
+    chatMigrations.set(from, to)
+    const row = await getAdapterInstance(opts.id).catch(() => undefined)
+    if (!row) return
+    const migrateList = (ids: string[] | undefined) => ids?.map((id) => (id === from ? to : id))
+    await updateAdapterInstance(opts.id, {
+      settings: { ...row.settings, telegramChatMigrations: Object.fromEntries(chatMigrations) },
+      ...(row.chatAllowlist ? { chatAllowlist: migrateList(row.chatAllowlist) } : {}),
+      ...(row.chatBlocklist ? { chatBlocklist: migrateList(row.chatBlocklist) } : {}),
+    }).catch(() => undefined)
+  }
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
   let healthReason: string | undefined = undefined
@@ -174,15 +210,63 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
 
   async function doSend(
     method: string,
-    payload: Record<string, unknown>
-  ): Promise<{ message_id?: number }> {
+    payload: Record<string, unknown>,
+    upload?: { filename?: string; contentType?: string },
+    allowMigrationRetry = true
+  ): Promise<{ message_id?: number; chat_id?: string }> {
+    if (payload.chat_id !== undefined)
+      payload = { ...payload, chat_id: await resolveChatId(payload.chat_id) }
     const token = await opts.botToken()
-    const resp = await connectorsHttpRequest({
-      url: `${TELEGRAM_API_BASE}/bot${token}/${method}`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
+    const url = `${TELEGRAM_API_BASE}/bot${token}/${method}`
+    const field = (
+      {
+        sendPhoto: "photo",
+        sendVoice: "voice",
+        sendVideo: "video",
+        sendDocument: "document",
+      } as Record<string, string>
+    )[method]
+    const source = field ? payload[field] : undefined
+    let localPath: string | undefined
+    if (typeof source === "string") {
+      const asset = source.match(/^(?:asset:\/\/localhost|https?:\/\/asset\.localhost)\/(.+)$/i)
+      if (asset) {
+        const decoded = decodeURIComponent(asset[1])
+        localPath = /^[A-Za-z]:[\\/]/.test(decoded) ? decoded : `/${decoded.replace(/^\/+/, "")}`
+      } else {
+        localPath = fileUriToPath(source) ?? undefined
+        if (!localPath && !/^https?:\/\//i.test(source) && /[\\/]|\.[a-zA-Z0-9]+$/.test(source))
+          localPath = source
+      }
+    }
+    const resp =
+      localPath && field
+        ? (JSON.parse(
+            await connectorsMediaUpload({
+              uploadUrl: url,
+              localPath,
+              responseMode: "http",
+              contentType: upload?.contentType,
+              multipart: {
+                fieldName: field,
+                filename: upload?.filename || localPath.split(/[\\/]/).pop() || field,
+                fields: Object.fromEntries(
+                  Object.entries(payload)
+                    .filter(([key, value]) => key !== field && value !== undefined)
+                    .map(([key, value]) => [
+                      key,
+                      typeof value === "string" ? value : JSON.stringify(value),
+                    ])
+                ),
+              },
+            })
+          ) as { status: number; headers: Record<string, string>; body: string })
+        : await connectorsHttpRequest({
+            url,
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
     let body: {
       ok: boolean
       result?: { message_id?: number }
@@ -199,7 +283,18 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
         undefined
       )
     }
-    if (!body.ok) {
+    if (resp.status >= 400 || body?.ok !== true) {
+      const migratedChat = body.parameters?.migrate_to_chat_id
+      if (
+        allowMigrationRetry &&
+        payload.chat_id !== undefined &&
+        Number.isSafeInteger(migratedChat) &&
+        migratedChat !== 0 &&
+        String(migratedChat) !== String(payload.chat_id)
+      ) {
+        await rememberChatMigration(String(payload.chat_id), String(migratedChat))
+        return doSend(method, { ...payload, chat_id: migratedChat }, upload, false)
+      }
       // Telegram returns `parameters.retry_after` in seconds whenever
       // the bot is rate-limited (HTTP 429) — surface it as ms so the
       // caller / outbound runner can honour the cool-down.
@@ -215,7 +310,10 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
         retryAfterMs
       )
     }
-    return body.result ?? {}
+    return {
+      ...body.result,
+      ...(payload.chat_id !== undefined ? { chat_id: String(payload.chat_id) } : {}),
+    }
   }
 
   function extractRetryAfter(headers: Record<string, string>): number | undefined {
@@ -635,18 +733,22 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
-    const calls = await serializeOutboundAsync(req, opts.id)
     let platformMessageId: string | undefined
 
     try {
+      const calls = await serializeOutboundAsync(req, opts.id)
       for (const call of calls) {
-        const result = await doSend(call.method, call.payload as Record<string, unknown>)
+        const result = await doSend(
+          call.method,
+          call.payload as Record<string, unknown>,
+          call.upload
+        )
         if (result.message_id !== undefined) {
           // Composite "chatId:messageId" (audited fix #1) — message-scoped
           // ops (delete / edit / reactions) receive only this one string
           // back from callers, and Telegram requires chat_id + message_id.
           // Same convention as the Discord adapter's "channelId:messageId".
-          const sentChatId = String(call.payload["chat_id"] ?? "")
+          const sentChatId = result.chat_id ?? String(call.payload["chat_id"] ?? "")
           platformMessageId = `${sentChatId}:${result.message_id}`
           // B2 — post-send ForceReply binding. The mapper signals which
           // A2UI surface + component asked for input; we couldn't know
@@ -663,7 +765,10 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
                 kind: "force_reply",
                 surfaceId: call.forceReplyBinding.surfaceId,
                 componentId: call.forceReplyBinding.componentId,
-                conversationKey: call.forceReplyBinding.conversationKey,
+                conversationKey: call.forceReplyBinding.conversationKey?.replace(
+                  `telegram:${opts.id}:${call.payload.chat_id}`,
+                  `telegram:${opts.id}:${result.chat_id ?? call.payload.chat_id}`
+                ),
               })
             } catch {
               // Binding persistence is best-effort — a Dexie outage
@@ -672,10 +777,19 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
           }
         }
       }
-      return { ok: true, platformMessageId }
+      return {
+        ok: true,
+        platformMessageId,
+        ...(calls.some((call) => call.downgrades?.length)
+          ? { downgrades: calls.flatMap((call) => call.downgrades ?? []) }
+          : {}),
+      }
     } catch (err) {
       // Surface rate-limit retryAfter so the outbound runner's circuit
       // breaker + backoff honour Telegram's explicit cool-down.
+      if (err instanceof TelegramSerializationError) {
+        return { ok: false, error: { code: "validation", message: err.message, retryable: false } }
+      }
       if (err instanceof TelegramApiError) {
         const code =
           err.status === 429 ? "rate_limited" : err.status >= 500 ? "platform_5xx" : "platform_4xx"
@@ -715,27 +829,72 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       chatId = ref["chatId"]
     }
 
-    // Reuse send()'s serializer so markdown keeps its parse_mode and inline
-    // keyboards keep their reply_markup (audited fix #8) — the old path sent
-    // the raw markdown source as plain text and dropped any markup.
-    const calls = await serializeOutboundAsync(patch, opts.id)
-    const textCall = calls.find(
-      (c) => c.method === "sendMessage" && typeof c.payload["text"] === "string"
-    )
-    const text = textCall ? (textCall.payload["text"] as string) : ""
-
     try {
+      const calls = await serializeOutboundAsync(patch, opts.id)
+      // A text edit cannot replace photo messages or establish ForceReply
+      // bindings. Never acknowledge success after discarding those calls.
+      if (
+        calls.length === 0 ||
+        calls.some((call) => call.method !== "sendMessage" || call.forceReplyBinding)
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Telegram text edit requires text and inline keyboard content",
+            retryable: false,
+          },
+        }
+      }
+      let text = ""
+      const entities: TelegramTextEntity[] = []
+      for (const [index, call] of calls.entries()) {
+        const body = String(call.payload.text ?? "")
+        const rendered =
+          call.payload.parse_mode === "MarkdownV2"
+            ? markdownV2Entities(body)
+            : {
+                text: body,
+                entities: (call.payload.entities as TelegramTextEntity[] | undefined) ?? [],
+              }
+        if (index > 0) text += "\n"
+        const offset = text.length
+        text += rendered.text
+        entities.push(
+          ...rendered.entities.map((entity) => ({ ...entity, offset: offset + entity.offset }))
+        )
+      }
+      if (!text || text.length > 4096) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "Telegram edit exceeds one message's text limit or is empty",
+            retryable: false,
+          },
+        }
+      }
+      const inlineKeyboard = calls.flatMap((call) => {
+        const markup = call.payload.reply_markup as { inline_keyboard?: unknown[] } | undefined
+        return markup?.inline_keyboard ?? []
+      })
       await doSend("editMessageText", {
         chat_id: chatId,
         message_id: Number(msgId),
         text,
-        ...(textCall?.payload["parse_mode"] ? { parse_mode: textCall.payload["parse_mode"] } : {}),
-        ...(textCall?.payload["reply_markup"]
-          ? { reply_markup: textCall.payload["reply_markup"] }
-          : {}),
+        entities,
+        reply_markup: { inline_keyboard: inlineKeyboard },
       })
-      return { ok: true }
+      return {
+        ok: true,
+        ...(calls.some((call) => call.downgrades?.length)
+          ? { downgrades: calls.flatMap((call) => call.downgrades ?? []) }
+          : {}),
+      }
     } catch (err) {
+      if (err instanceof TelegramSerializationError) {
+        return { ok: false, error: { code: "validation", message: err.message, retryable: false } }
+      }
       if (err instanceof TelegramApiError) {
         // "message is not modified" is Telegram's way of saying the target
         // already shows this content — a success no-op, not a retryable

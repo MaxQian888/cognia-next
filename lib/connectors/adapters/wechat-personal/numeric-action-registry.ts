@@ -100,6 +100,11 @@ export function consumeNumericAction(
   return hit.actionId
 }
 
+/** Replace a menu without retaining digits from the previous surface. */
+export function clearNumericActions(conversationKey: string): void {
+  byConversation.delete(conversationKey)
+}
+
 /** Test seam — clear every conversation's bindings. */
 export function __resetNumericActionRegistryForTesting(): void {
   byConversation.clear()

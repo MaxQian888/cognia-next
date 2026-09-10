@@ -241,3 +241,17 @@ describe("encodeDingTalkMessageId / decodeDingTalkMessageId / serializeRecall", 
     expect(decodeDingTalkMessageId("dt:group:r::k")).toBeNull()
   })
 })
+
+it("preserves reply, location, and poll content with explicit text alternatives", () => {
+  const out = serializeOutbound({
+    conversationRef: { platform: "dingtalk", adapterId: "ad" },
+    segments: [
+      { type: "reply", messageId: "m", snippet: "prior" },
+      { type: "location", lat: 1, lon: 2, name: "Office" },
+      { type: "poll", question: "Pick", options: ["A", "B"] },
+    ],
+    metadata: { idempotencyKey: "alt" },
+  })
+  expect(out?.msgParam.content).toBe("> prior\nOffice: 1,2\nPick\n- A\n- B")
+  expect(out?.downgrades?.map((value) => value.from)).toEqual(["reply", "location", "poll"])
+})

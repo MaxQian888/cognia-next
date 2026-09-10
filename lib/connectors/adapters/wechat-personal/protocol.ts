@@ -1,7 +1,7 @@
 /**
  * Personal WeChat — iLink (智联) bot HTTP protocol.
  *
- * Half-official Tencent gateway at `https://ilinkai.weixin.qq.com` (the
+ * Tencent iLink gateway at `https://ilinkai.weixin.qq.com` (the
  * OpenClaw "微信 ClawBot" feature). HTTP/JSON, not WebSocket: the client
  * long-polls `getupdates` and replies via `sendmessage`. Every reply MUST echo
  * the inbound message's `context_token` — there is NO proactive-send path
@@ -11,8 +11,7 @@
  * shapes + builders. The long-poll loop lives in `index.ts`, QR login in
  * `auth.ts`, normalisation in `parse.ts`, media crypto in `media.ts`.
  *
- * Refs: github.com/hao-ji-xing/openclaw-weixin/blob/main/weixin-bot-api.md,
- *       github.com/epiral/weixin-bot/blob/main/docs/protocol-spec.md
+ * Ref: https://github.com/Tencent/openclaw-weixin (SDK 2.4.8).
  */
 
 export const ILINK_DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
@@ -81,6 +80,17 @@ export const ILINK_MSG = {
 } as const
 
 export interface IlinkMediaItem {
+  media?: {
+    full_url?: string
+    encrypt_query_param?: string
+    aes_key?: string
+    encrypt_type?: number
+  }
+  /** Official image-specific AES key, hex encoded. */
+  aeskey?: string
+  len?: string
+  text?: string
+
   /** CDN download URL (encrypted content). */
   url?: string
   /** Base64 AES-128 key for ECB decryption of the CDN payload. */
@@ -92,6 +102,7 @@ export interface IlinkMediaItem {
 
 export interface IlinkItem {
   type: number
+  ref_msg?: { title?: string; message_item?: IlinkItem }
   text_item?: { text?: string }
   image_item?: IlinkMediaItem
   voice_item?: IlinkMediaItem & { transcript?: string }
@@ -100,6 +111,10 @@ export interface IlinkItem {
 }
 
 export interface IlinkMessage {
+  message_id?: number | string
+  client_id?: string
+  create_time_ms?: number
+  group_id?: string
   from_user_id: string
   to_user_id: string
   message_type: number
@@ -110,7 +125,7 @@ export interface IlinkMessage {
 }
 
 export interface IlinkGetUpdatesResponse {
-  ret: number
+  ret?: number
   errcode?: number
   errmsg?: string
   msgs?: IlinkMessage[]
@@ -120,7 +135,7 @@ export interface IlinkGetUpdatesResponse {
 
 export interface IlinkQrcodeResponse {
   qrcode?: string
-  /** Base64 PNG of the QR image (data URI body) — exact field name per docs. */
+  /** Official QR payload URL, to be encoded into a QR image by the client. */
   qrcode_img_content?: string
   errcode?: number
   errmsg?: string
@@ -134,6 +149,9 @@ export interface IlinkQrStatusResponse {
   baseurl?: string
   /** The scanned account's id, when the gateway returns it on confirm. */
   account_id?: string
+  ilink_bot_id?: string
+  ilink_user_id?: string
+  redirect_host?: string
   errcode?: number
   errmsg?: string
 }
@@ -192,4 +210,27 @@ export function buildSendMediaBody(
     },
     base_info: { channel_version: ILINK_CHANNEL_VERSION },
   }
+}
+
+/** Preserve either error indicator; protobuf JSON may omit zero-valued status fields. */
+export function ilinkResultCode(value: unknown): number | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const { ret, errcode } = value as { ret?: unknown; errcode?: unknown }
+  for (const code of [ret, errcode]) {
+    if (code !== undefined && (typeof code !== "number" || !Number.isFinite(code))) return undefined
+  }
+  if (ret === ILINK_RET_SESSION_EXPIRED || errcode === ILINK_RET_SESSION_EXPIRED)
+    return ILINK_RET_SESSION_EXPIRED
+  if (typeof ret === "number" && ret !== 0) return ret
+  if (typeof errcode === "number" && errcode !== 0) return errcode
+  return 0
+}
+
+/** Official CDN resolver, with legacy direct URLs retained for existing accounts. */
+export function ilinkMediaUrl(item: IlinkMediaItem | undefined): string | undefined {
+  if (item?.media?.full_url) return item.media.full_url
+  if (item?.media?.encrypt_query_param) {
+    return `https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=${encodeURIComponent(item.media.encrypt_query_param)}`
+  }
+  return item?.url
 }

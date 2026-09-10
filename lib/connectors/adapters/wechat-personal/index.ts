@@ -22,12 +22,15 @@ import { buildConversationKey } from "@/types/connectors/event"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   ILINK_DEFAULT_BASE_URL,
+  ilinkResultCode,
+  ilinkMediaUrl,
   ILINK_PATHS,
   ILINK_RET_SESSION_EXPIRED,
   ILINK_LONGPOLL_TIMEOUT_MS,
   buildIlinkHeaders,
   buildGetUpdatesBody,
   buildSendTextBody,
+  buildSendMediaBody,
   type IlinkGetUpdatesResponse,
   type IlinkMessage,
 } from "./protocol"
@@ -40,7 +43,14 @@ import { getBus } from "@/lib/connectors/bus"
 import { reconnectBackoffMs } from "@/lib/connectors/adapters/_shared/reconnect-backoff"
 import { serializeIlinkSegments } from "./serialize"
 import { WECHAT_PERSONAL_CAPS, WECHAT_PERSONAL_A2UI_CAPABILITY } from "./capability"
-import { fetchAndDecryptIlinkMediaViaTauri, bytesToBase64 } from "./media"
+import {
+  fetchAndDecryptIlinkMediaViaTauri,
+  bytesToBase64,
+  uploadIlinkMedia,
+  IlinkMediaError,
+} from "./media"
+import { md5Hex } from "../wecom/md5"
+import { sniffImageMediaType } from "../_shared/inbound-media"
 
 export interface WechatPersonalAdapterOptions {
   id: string
@@ -120,32 +130,68 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
     return raw.replace(/\/+$/, "")
   }
 
-  /** Best-effort: decrypt the first inbound image and inline it as base64. */
+  /** Resolve each encrypted attachment independently, including quoted media. */
   async function resolveInboundImage(segments: MessageSegment[], msg: IlinkMessage): Promise<void> {
-    const img = msg.item_list?.find((i) => i.image_item?.url)?.image_item
-    if (!img?.url) return
-    const seg = segments.find((s) => s.type === "image")
-    if (!seg || seg.type !== "image") return
-    try {
-      // The CDN payload is AES-encrypted and the renderer fetch() is
-      // CORS-blocked in the Tauri webview — download through the Rust
-      // attachment cache, then decrypt from the cached bytes.
-      const bytes = await fetchAndDecryptIlinkMediaViaTauri({
-        adapterId: opts.id,
-        url: img.url,
-        aesKeyBase64: img.aes_key,
-        fetchAttachment: (adapterId, remoteRef) => ctx!.tauri.fetchAttachment(adapterId, remoteRef),
+    const media = (msg.item_list ?? [])
+      .flatMap((item) => [item.ref_msg?.message_item, item])
+      .flatMap((item) => {
+        const value = item?.image_item ?? item?.voice_item ?? item?.video_item ?? item?.file_item
+        return value && ilinkMediaUrl(value) ? [value] : []
       })
-      seg.dataBase64 = bytesToBase64(bytes)
-      seg.mimeType = "image/jpeg"
-    } catch (err) {
-      // The raw CDN url points at AES-encrypted bytes — blank it so no
-      // downstream fetcher downloads garbage; keep a placeholder marker.
-      ctx?.logger.warn(
-        `ilink image resolve failed: ${err instanceof Error ? err.message : String(err)}`
-      )
-      seg.url = ""
-      seg.alt = "[unavailable image]"
+    const mediaSegments = segments.filter(
+      (segment) =>
+        segment.type === "image" ||
+        segment.type === "voice" ||
+        segment.type === "video" ||
+        segment.type === "file"
+    )
+    for (const [index, item] of media.entries()) {
+      const seg = mediaSegments[index]
+      if (!seg) continue
+      try {
+        if (item.aeskey && !/^[a-fA-F0-9]{32}$/.test(item.aeskey))
+          throw new Error("Invalid image AES key")
+        const key = item.aeskey
+          ? bytesToBase64(
+              Uint8Array.from(item.aeskey.match(/.{1,2}/g) ?? [], (hex) => Number.parseInt(hex, 16))
+            )
+          : (item.media?.aes_key ?? item.aes_key)
+        const bytes = await fetchAndDecryptIlinkMediaViaTauri({
+          adapterId: opts.id,
+          url: ilinkMediaUrl(item)!,
+          aesKeyBase64: key,
+          fetchAttachment: (adapterId, remoteRef) =>
+            ctx!.tauri.fetchAttachment(adapterId, remoteRef),
+        })
+        const dataBase64 = bytesToBase64(bytes)
+        const voiceMime: Record<number, string> = {
+          1: "audio/pcm",
+          2: "audio/adpcm",
+          4: "audio/speex",
+          5: "audio/amr",
+          6: "audio/silk",
+          7: "audio/mpeg",
+          8: "audio/ogg",
+        }
+        seg.mimeType =
+          sniffImageMediaType(dataBase64) ??
+          (seg.type === "video"
+            ? "video/mp4"
+            : seg.type === "voice"
+              ? voiceMime[Number(item.encode_type)]
+              : undefined) ??
+          "application/octet-stream"
+        if (seg.type === "image" || seg.type === "file") seg.dataBase64 = dataBase64
+        seg.rawUrl = seg.url
+        seg.url = `data:${seg.mimeType};base64,${dataBase64}`
+      } catch (err) {
+        ctx?.logger.warn(
+          `ilink media resolve failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+        seg.rawUrl = seg.url
+        seg.url = ""
+        if (seg.type === "image") seg.alt = "[unavailable image]"
+      }
     }
   }
 
@@ -203,12 +249,15 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       ctx?.logger.warn(`ilink getupdates returned a non-JSON body (status ${resp.status})`)
       return "error"
     }
-    if (parsed.ret === ILINK_RET_SESSION_EXPIRED || parsed.errcode === ILINK_RET_SESSION_EXPIRED) {
+    const resultCode = ilinkResultCode(parsed)
+    if (resultCode === ILINK_RET_SESSION_EXPIRED) {
       return "expired"
     }
-    if (parsed.ret !== 0) {
+    if (resp.status >= 400 || resultCode !== 0) {
       healthReason = "bad_response"
-      ctx?.logger.warn(`ilink getupdates failed: ret ${parsed.ret} ${parsed.errmsg ?? ""}`.trim())
+      ctx?.logger.warn(
+        `ilink getupdates failed: HTTP ${resp.status}, ret ${resultCode} ${parsed?.errmsg ?? ""}`.trim()
+      )
       return "error"
     }
 
@@ -216,17 +265,22 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
     healthReason = undefined
     lastActivityAt = Date.now()
     // Process the batch BEFORE advancing the cursor — advancing first would
-    // silently drop the unprocessed tail if a handler threw mid-batch. Each
-    // message gets its own guard so one poison message can't take the rest
-    // of the batch (or the cursor advance) down with it.
+    // silently drop the unprocessed tail if a handler threw mid-batch. Process
+    // the remaining messages, but retain the cursor if any delivery fails.
+    let deliveryFailed = false
     for (const msg of parsed.msgs ?? []) {
       try {
         await handleMessage(msg)
       } catch (err) {
+        deliveryFailed = true
         ctx?.logger.warn(
           `ilink message handling failed: ${err instanceof Error ? err.message : String(err)}`
         )
       }
+    }
+    if (deliveryFailed) {
+      healthReason = "inbound_delivery_failed"
+      return "error"
     }
     if (typeof parsed.get_updates_buf === "string") cursor = parsed.get_updates_buf
     return "ok"
@@ -296,25 +350,47 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
       adapterId: opts.id,
       conversationKey,
     })
-    if (serialized.textChunks.length === 0) {
+    if (serialized.parts.length === 0) {
       return {
         ok: false,
         error: { code: "validation", message: "empty message", retryable: false },
       }
     }
 
+    let delivered = 0
+    let lastClientId: string | undefined
     try {
       const [token, baseUrl] = await Promise.all([opts.token(), resolveBaseUrl()])
-      for (const chunk of serialized.textChunks) {
+      const bodies = []
+      // Finish every upload before publishing any part of the reply.
+      for (const part of serialized.parts) {
+        if (part.type === "text")
+          bodies.push(buildSendTextBody(ref.userId, contextToken, part.text))
+        else {
+          const uploaded = await uploadIlinkMedia({
+            adapterId: opts.id,
+            baseUrl,
+            token,
+            userId: ref.userId,
+            segment: part.segment,
+            tauri: ctx!.tauri,
+          })
+          bodies.push(
+            buildSendMediaBody(ref.userId, contextToken, uploaded.itemType, uploaded.mediaItem)
+          )
+        }
+      }
+      for (const [index, body] of bodies.entries()) {
+        body.msg.client_id = `cognia-${md5Hex(`${opts.id}:${req.metadata.idempotencyKey}:${index}`)}`
         const resp = await ctx!.tauri.httpRequest({
           url: `${baseUrl}${ILINK_PATHS.sendMessage}`,
           method: "POST",
           headers: buildIlinkHeaders(token),
-          body: JSON.stringify(buildSendTextBody(ref.userId, contextToken, chunk)),
+          body: JSON.stringify(body),
           timeoutMs: 15_000,
         })
         const parsed = JSON.parse(resp.body) as { ret?: number; errcode?: number; errmsg?: string }
-        const ret = parsed.ret ?? parsed.errcode ?? 0
+        const ret = ilinkResultCode(parsed)
         if (ret === ILINK_RET_SESSION_EXPIRED) {
           // Dead session — retrying is useless until the operator re-scans
           // the QR code. Degrade health so the settings UI surfaces it and
@@ -330,25 +406,54 @@ export function createWechatPersonalAdapter(opts: WechatPersonalAdapterOptions):
             },
           }
         }
-        if (ret !== 0) {
+        if (resp.status >= 400 || ret !== 0) {
+          const code =
+            resp.status === 401 || resp.status === 403
+              ? "auth_failed"
+              : resp.status === 429
+                ? "rate_limited"
+                : resp.status >= 500
+                  ? "platform_5xx"
+                  : resp.status >= 400 || ret !== undefined
+                    ? "platform_4xx"
+                    : "bad_response"
           return {
             ok: false,
             error: {
-              code: "platform_4xx",
-              message: parsed.errmsg ?? `ret ${ret}`,
-              retryable: true,
+              code: delivered > 0 ? "reconciliation_required" : code,
+              message: parsed?.errmsg ?? `HTTP ${resp.status}, ret ${ret ?? "missing"}`,
+              retryable:
+                delivered === 0 &&
+                code !== "auth_failed" &&
+                (resp.status < 400 || resp.status === 429 || resp.status >= 500),
             },
           }
         }
+        delivered += 1
+        lastClientId = body.msg.client_id
       }
-      return { ok: true, downgrades: serialized.downgrades }
+      return { ok: true, platformMessageId: lastClientId, downgrades: serialized.downgrades }
     } catch (err) {
+      if (err instanceof IlinkMediaError && err.sessionExpired) {
+        healthState = "degraded"
+        healthReason = "session_expired_rescan"
+      }
       return {
         ok: false,
+        platformMessageId: lastClientId,
         error: {
-          code: "network",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
+          code:
+            delivered > 0
+              ? "reconciliation_required"
+              : err instanceof IlinkMediaError
+                ? err.sessionExpired
+                  ? "auth_failed"
+                  : "validation"
+                : "network",
+          message: `${delivered > 0 ? `${delivered} message part(s) delivered; ` : ""}${err instanceof Error ? err.message : String(err)}`,
+          retryable:
+            delivered === 0 &&
+            (err instanceof IlinkMediaError ? err.retryable && !err.sessionExpired : true),
         },
       }
     }

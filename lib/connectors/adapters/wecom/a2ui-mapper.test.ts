@@ -52,6 +52,18 @@ describe("buildWeComTemplateCard", () => {
     })
   })
 
+  it("preserves canonical Alert.message in the native card description", async () => {
+    const seg = surface()
+    seg.content.components.root = { component: "Column", children: ["alert", "b1"] }
+    seg.content.components.alert = {
+      component: "Alert",
+      title: "Warning",
+      message: "Action required",
+    }
+    const card = await buildWeComTemplateCard("adp", seg)
+    expect(card?.main_title?.desc).toBe("Warning: Action required")
+  })
+
   it("returns null for a surface with no buttons", async () => {
     const noButtons: A2UIMessageSegment = {
       type: "a2ui",

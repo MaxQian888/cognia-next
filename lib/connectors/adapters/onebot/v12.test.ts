@@ -17,6 +17,39 @@ function makeBase(): OneBotV12Event {
 }
 
 describe("parseV12Event", () => {
+  it.each(["channel_message_delete", "channel_member_increase", "channel_member_decrease"])(
+    "preserves channel addressing for %s",
+    (detail_type) => {
+      const event = {
+        ...makeBase(),
+        type: "notice",
+        detail_type,
+        guild_id: "guild",
+        channel_id: "room",
+      }
+      const parsed = parseV12Event(ADAPTER_ID, event)
+      expect(parsed?.conversationKey).toBe(`onebot:${ADAPTER_ID}:c:guild:room`)
+      expect(parsed?.channel.kind).toBe("channel")
+      expect(parsed?.kind).toBe(detail_type === "channel_message_delete" ? "delete" : "system")
+      expect(parsed?.raw).toBe(event)
+    }
+  )
+  it("keeps channel messages in their guild and channel instead of the empty group", () => {
+    const result = parseV12Event(ADAPTER_ID, {
+      ...makeBase(),
+      detail_type: "channel",
+      guild_id: "guild",
+      channel_id: "room",
+    })
+    expect(result?.channel.kind).toBe("channel")
+    expect(result?.conversationKey).toBe(`onebot:${ADAPTER_ID}:c:guild:room`)
+    expect(result?.conversationRef).toMatchObject({
+      detailType: "channel",
+      guildId: "guild",
+      channelId: "room",
+    })
+    expect(parseV12Event(ADAPTER_ID, { ...makeBase(), detail_type: "channel" })).toBeNull()
+  })
   it("notice with no detail_type → null (no fabricated join event)", () => {
     // Unrecognised notices used to default to systemKind "member_added",
     // fabricating join events for every unknown v12 notice type. They now

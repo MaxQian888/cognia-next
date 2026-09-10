@@ -167,7 +167,7 @@ describe("Telegram adapter contract suite", () => {
       expect(call.body).toMatchObject({ chat_id: 11, message_id: 777, text: "edited" })
     })
 
-    it("edit() accepts the composite chatId:messageId and keeps parse_mode (audited fix #8)", async () => {
+    it("edit() accepts the composite chatId:messageId and preserves formatting entities", async () => {
       mockInvoke.mockResolvedValueOnce(makeSendOkResp())
       const adapter = makeAdapter()
       const patch: OutboundRequest = {
@@ -181,8 +181,8 @@ describe("Telegram adapter contract suite", () => {
       expect(call.body).toMatchObject({
         chat_id: "11",
         message_id: 777,
-        text: "*edited*",
-        parse_mode: "MarkdownV2",
+        text: "edited",
+        entities: [{ type: "bold", offset: 0, length: 6 }],
       })
     })
   })

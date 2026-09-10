@@ -40,6 +40,7 @@ import { getBus } from "@/lib/connectors/bus"
 import { WECOM_CAPS, WECOM_A2UI_CAPABILITY } from "./capability"
 import {
   WECOM_WS_URL,
+  WECOM_MARKDOWN_MAX_BYTES,
   WECOM_PING_INTERVAL_MS,
   classifyInboundFrame,
   buildSubscribeFrame,
@@ -58,9 +59,10 @@ import {
   type WeComProactiveBody,
 } from "./protocol"
 import { parseWeComMessage, type WeComConversationRef } from "./parse"
-import { serializeSegments, type WeComMediaSegment } from "./serialize"
+import { serializeSegments, clampUtf8, type WeComMediaSegment } from "./serialize"
 import { buildWeComTemplateCard, parseTemplateCardEvent, buildAckUpdateCard } from "./a2ui-mapper"
 import { uploadWeComMedia, fetchAndDecryptMedia, bytesToBase64 } from "./media"
+import { sniffImageMediaType } from "../_shared/inbound-media"
 import { resolveWelcomeMessage, type WeComAdapterSettings } from "./welcome"
 import { buildMenuClickInboundEvent, buildWeComMenuCard, parseMenuButtonClick } from "./menu-card"
 import { normalizeQuickCommandList, resolveQuickCommand } from "@/lib/connectors/quick-commands"
@@ -330,9 +332,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
   async function handleMessage(body: WeComInboundMsgBody, reqId?: string): Promise<void> {
     if (!selfId && body.aibotid) selfId = body.aibotid
-    recordActiveReq(reqId, body.chatid)
     const event = parseWeComMessage(opts.id, selfId, body, reqId)
     if (!event) return
+    recordActiveReq(reqId, (event.conversationRef as WeComConversationRef).chatId)
     // Best-effort: decrypt + inline an image so the model receives it.
     await resolveInboundImage(event.segments, body)
     if (!(await gateInboundEvent(opts.id, event))) return
@@ -366,7 +368,10 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       // Every card click opens a fresh reply window — record it (keyed to
       // the chat too) BEFORE dispatching, so the triggered turn replies
       // through the live req instead of degrading to a proactive push.
-      recordActiveReq(reqId, body.chatid)
+      recordActiveReq(
+        reqId,
+        body.chatid || (body.chattype === "single" ? body.from?.userid : undefined)
+      )
       // Ack the card within 5 s so the user sees the click registered.
       // Counted: its ack shares the (now-active) req_id a later reply may
       // await via `request()` — see `ackDebts`.
@@ -406,7 +411,7 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   }
 
   /**
-   * Decrypt the first inbound image and inline it as base64 on the segment so
+   * Decrypt inbound and quoted images and inline base64 on each segment so
    * `inboundEventToSendContent` hands the model a real image. Best-effort: any
    * fetch / decrypt failure leaves the URL marker untouched.
    */
@@ -414,16 +419,23 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     segments: MessageSegment[],
     body: WeComInboundMsgBody
   ): Promise<void> {
-    if (body.msgtype !== "image" || !body.image?.url) return
-    try {
-      const bytes = await fetchAndDecryptMedia(body.image.url, body.image.aeskey)
-      const seg = segments.find((s) => s.type === "image")
-      if (seg && seg.type === "image") {
-        ;(seg as { dataBase64?: string; mimeType?: string }).dataBase64 = bytesToBase64(bytes)
-        ;(seg as { mimeType?: string }).mimeType = "image/png"
+    const refs = [body.quote, body].flatMap((content) => {
+      if (content?.msgtype === "image" && content.image) return [content.image]
+      if (content?.msgtype === "mixed")
+        return (content.mixed?.msg_item ?? []).flatMap((item) => (item.image ? [item.image] : []))
+      return []
+    })
+    for (const seg of segments) {
+      if (seg.type !== "image") continue
+      const ref = refs.find((candidate) => candidate.url === seg.url)
+      if (!ref) continue
+      try {
+        const bytes = await fetchAndDecryptMedia(ref.url, ref.aeskey)
+        seg.dataBase64 = bytesToBase64(bytes)
+        seg.mimeType = sniffImageMediaType(seg.dataBase64) ?? "image/png"
+      } catch {
+        /* Preserve the URL marker and continue resolving the remaining images. */
       }
-    } catch {
-      /* keep the URL marker — Inbox still shows [image] */
     }
   }
 
@@ -566,20 +578,16 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   }
 
   // ── outbound: media upload ────────────────────────────────────────────────
-  async function uploadMedia(seg: WeComMediaSegment): Promise<string | null> {
-    try {
-      // `proxyFetch`, as in `media.ts`: the segment URL is a remote CDN the
-      // packaged shell's `connect-src` does not list.
-      const resp = await proxyFetch(seg.url)
-      if (!resp.ok) return null
-      const bytes = new Uint8Array(await resp.arrayBuffer())
-      const name = seg.name ?? `media.${seg.type === "image" ? "png" : "bin"}`
-      // `requestOk` so a rejected upload step (errcode != 0) throws and the
-      // media degrades instead of silently referencing a bogus media_id.
-      return await uploadWeComMedia(requestOk, opts.id, bytes, name, seg.type)
-    } catch {
-      return null
-    }
+  async function uploadMedia(seg: WeComMediaSegment): Promise<string> {
+    const resp = await proxyFetch(seg.url)
+    if (!resp.ok)
+      throw new WeComAckError(
+        `Media download HTTP ${resp.status}`,
+        resp.status === 429 || resp.status >= 500
+      )
+    const bytes = new Uint8Array(await resp.arrayBuffer())
+    const name = seg.name ?? `media.${seg.type === "image" ? "png" : "bin"}`
+    return uploadWeComMedia(requestOk, opts.id, bytes, name, seg.type)
   }
 
   // ── outbound: send ────────────────────────────────────────────────────────
@@ -596,9 +604,14 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
       // `send()` later awaits — see `ackDebts`.
       await rawSendCounted(
         reqId,
-        buildStreamRespondFrame(reqId, streamIdFor(reqId), req.text, false)
+        buildStreamRespondFrame(
+          reqId,
+          streamIdFor(reqId),
+          clampUtf8(req.text, WECOM_MARKDOWN_MAX_BYTES),
+          false
+        )
       )
-      openStreams.set(reqId, req.text)
+      openStreams.set(reqId, clampUtf8(req.text, WECOM_MARKDOWN_MAX_BYTES))
     } catch {
       /* preview only — the durable send() path is authoritative */
     }
@@ -626,6 +639,21 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     const ref = req.conversationRef as WeComConversationRef
     const serialized = serializeSegments(req.segments)
+    const [firstMarkdown = "", ...overflowMarkdown] = serialized.markdownChunks
+    if (overflowMarkdown.length > 0 && !ref.chatId)
+      return {
+        ok: false,
+        error: {
+          code: "validation",
+          message: "A chat ID is required to deliver all text chunks",
+          retryable: false,
+        },
+      }
+    let delivered = 0
+    const deliver = async (frame: Parameters<typeof requestOk>[0]) => {
+      await requestOk(frame)
+      delivered += 1
+    }
 
     // Map the first interactive A2UI surface to a template_card (records
     // callback bindings). Subsequent surfaces degrade via their mirror text
@@ -646,9 +674,21 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
     // Upload any media segments to obtain media_ids.
     const mediaIds: Array<{ type: WeComMediaSegment["type"]; mediaId: string }> = []
-    for (const m of serialized.media) {
-      const id = await uploadMedia(m)
-      if (id) mediaIds.push({ type: m.type, mediaId: id })
+    try {
+      for (const m of serialized.media) {
+        const id = await uploadMedia(m)
+        mediaIds.push({ type: m.type, mediaId: id })
+      }
+    } catch (error) {
+      const retryable = error instanceof WeComAckError ? error.retryable : true
+      return {
+        ok: false,
+        error: {
+          code: retryable ? "platform_5xx" : "platform_4xx",
+          message: error instanceof Error ? error.message : String(error),
+          retryable,
+        },
+      }
     }
 
     const hasContent = Boolean(serialized.markdown) || allCards.length > 0 || mediaIds.length > 0
@@ -665,32 +705,42 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
           // after a finished stream is dropped. A card-only final after
           // streamed frames folds in here too, closing the stream with the
           // last previewed text so the preview never hangs in "generating".
-          await requestOk(
+          await deliver(
             buildStreamWithTemplateCardFrame(
               reqId,
               streamId,
-              serialized.markdown || openStreamText || "",
+              firstMarkdown || openStreamText || "",
               primaryCard
             )
           )
         } else if (serialized.markdown) {
           // Finalise the (possibly already-streamed) text as a finished stream.
-          await requestOk(buildStreamRespondFrame(reqId, streamId, serialized.markdown, true))
+          await deliver(buildStreamRespondFrame(reqId, streamId, firstMarkdown, true))
         } else if (openStreamText !== undefined) {
           // Media-only (or empty) final while a stream preview is open —
           // close it explicitly or the platform preview sticks "generating".
-          await requestOk(buildStreamRespondFrame(reqId, streamId, openStreamText, true))
+          await deliver(buildStreamRespondFrame(reqId, streamId, openStreamText, true))
         } else if (primaryCard) {
-          await requestOk(buildTemplateCardRespondFrame(reqId, primaryCard))
+          await deliver(buildTemplateCardRespondFrame(reqId, primaryCard))
+        }
+        for (const content of overflowMarkdown) {
+          await deliver(
+            buildSendMsgFrame(newReqId(opts.id), {
+              chatid: ref.chatId,
+              chat_type: ref.chatType === "group" ? 2 : 1,
+              msgtype: "markdown",
+              markdown: { content },
+            })
+          )
         }
         openStreams.delete(reqId)
         for (const card of extraCards) {
-          await requestOk(buildTemplateCardRespondFrame(reqId, card))
+          await deliver(buildTemplateCardRespondFrame(reqId, card))
         }
         // UNVERIFIED: the doc does not state whether media respond frames are
         // accepted on a req_id after a finished stream reply; kept as-is.
         for (const m of mediaIds) {
-          await requestOk({
+          await deliver({
             cmd: "aibot_respond_msg",
             headers: { req_id: reqId },
             body: { msgtype: m.type, [m.type]: { media_id: m.mediaId } },
@@ -717,12 +767,12 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
         }
       }
       const frames: WeComProactiveBody[] = []
-      if (serialized.markdown) {
+      for (const content of serialized.markdownChunks) {
         frames.push({
           chatid,
           chat_type: chatType,
           msgtype: "markdown",
-          markdown: { content: serialized.markdown },
+          markdown: { content },
         })
       }
       for (const card of allCards) {
@@ -743,16 +793,17 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
         }
       }
       for (const body of frames) {
-        await requestOk(buildSendMsgFrame(newReqId(opts.id), body))
+        await deliver(buildSendMsgFrame(newReqId(opts.id), body))
       }
       lastActivityAt = Date.now()
       return { ok: true, downgrades: serialized.downgrades }
     } catch (err) {
-      const retryable = err instanceof WeComAckError ? err.retryable : true
+      const retryable = delivered === 0 && (err instanceof WeComAckError ? err.retryable : true)
       return {
         ok: false,
         error: {
-          code: retryable ? "platform_5xx" : "platform_4xx",
+          code:
+            delivered > 0 ? "reconciliation_required" : retryable ? "platform_5xx" : "platform_4xx",
           message: err instanceof Error ? err.message : String(err),
           retryable,
         },

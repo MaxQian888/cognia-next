@@ -142,9 +142,6 @@ export function parseWechatOaXml(
 
   const msgId = extractXmlField(xml, "MsgId") ?? `${createTime}:${fromUser}`
 
-  // GAP: media upload/download — `wxmedia://<MediaId>` pseudo-URLs are not
-  // resolved to fetchable bytes (needs /cgi-bin/media/get on the send-path
-  // token); downstream consumers treat them as opaque references.
   const segments: MessageSegment[] = []
   switch (msgType) {
     case "text": {
@@ -155,7 +152,11 @@ export function parseWechatOaXml(
     case "image": {
       const picUrl = extractXmlField(xml, "PicUrl")
       const mediaId = extractXmlField(xml, "MediaId")
-      segments.push({ type: "image", url: picUrl ?? `wxmedia://${mediaId ?? ""}` })
+      segments.push({
+        type: "image",
+        url: picUrl ?? `wxmedia://${mediaId ?? ""}`,
+        ...(mediaId ? { rawUrl: `wxmedia://${mediaId}` } : {}),
+      })
       break
     }
     case "voice": {
@@ -165,6 +166,7 @@ export function parseWechatOaXml(
         type: "voice",
         url: `wxmedia://${mediaId ?? ""}`,
         transcript: recognition || undefined,
+        mimeType: extractXmlField(xml, "Format") === "mp3" ? "audio/mpeg" : "audio/amr",
       })
       break
     }

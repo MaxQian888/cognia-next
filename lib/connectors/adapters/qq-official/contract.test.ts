@@ -92,22 +92,27 @@ describe("QQ Official adapter contract suite", () => {
   describe("send.text capability", () => {
     it("group text becomes POST /v2/groups/{openid}/messages msg_type 0 and returns a scene-qualified id", async () => {
       const res = await makeAdapter().send(
-        req("group", "GO", undefined, [{ type: "text", text: "hi" }])
+        req("group", "GO", "inbound-group", [{ type: "text", text: "hi" }])
       )
       expect(res.ok).toBe(true)
       expect(res.platformMessageId).toBe("group:GO:sent-1")
       const call = lastHttpCall()
       expect(call.method).toBe("POST")
-      expect(call.url).toBe("https://api.sgroup.qq.com/v2/groups/GO/messages")
-      expect(call.body).toEqual({ content: "hi", msg_type: 0 })
+      expect(call.url).toBe("https://api.bot.qq.com/v2/groups/GO/messages")
+      expect(call.body).toEqual({
+        content: "hi",
+        msg_type: 0,
+        msg_id: "inbound-group",
+        msg_seq: expect.any(Number),
+      })
     })
 
     it("addresses c2c / channel / direct on their scene endpoints", async () => {
       const adapter = makeAdapter()
-      await adapter.send(req("c2c", "UO", undefined, [{ type: "text", text: "a" }]))
-      await adapter.send(req("channel", "CH", undefined, [{ type: "text", text: "b" }]))
-      await adapter.send(req("direct", "G", undefined, [{ type: "text", text: "c" }]))
-      expect(httpCalls().map((c) => c.url.replace("https://api.sgroup.qq.com", ""))).toEqual([
+      await adapter.send(req("c2c", "UO", "inbound-c2c", [{ type: "text", text: "a" }]))
+      await adapter.send(req("channel", "CH", "inbound-channel", [{ type: "text", text: "b" }]))
+      await adapter.send(req("direct", "G", "inbound-direct", [{ type: "text", text: "c" }]))
+      expect(httpCalls().map((c) => c.url.replace("https://api.bot.qq.com", ""))).toEqual([
         "/v2/users/UO/messages",
         "/channels/CH/messages",
         "/dms/G/messages",
@@ -145,7 +150,7 @@ describe("QQ Official adapter contract suite", () => {
       await adapter.delete!("group:GO:m1")
       await adapter.delete!("channel:CH:m2")
       expect(
-        httpCalls().map((c) => [c.method, c.url.replace("https://api.sgroup.qq.com", "")])
+        httpCalls().map((c) => [c.method, c.url.replace("https://api.bot.qq.com", "")])
       ).toEqual([
         ["DELETE", "/v2/groups/GO/messages/m1"],
         ["DELETE", "/channels/CH/messages/m2?hidetip=false"],
@@ -166,7 +171,7 @@ describe("QQ Official adapter contract suite", () => {
       expect(ref).toEqual({ reactionId: "1:4" })
       await adapter.removeReaction!("channel:CH:m9", "1:4")
       expect(
-        httpCalls().map((c) => [c.method, c.url.replace("https://api.sgroup.qq.com", "")])
+        httpCalls().map((c) => [c.method, c.url.replace("https://api.bot.qq.com", "")])
       ).toEqual([
         ["PUT", "/channels/CH/messages/m9/reactions/1/4"],
         ["DELETE", "/channels/CH/messages/m9/reactions/1/4"],
@@ -190,7 +195,7 @@ describe("QQ Official adapter contract suite", () => {
       mockInvoke.mockResolvedValue(httpResp(200, {}))
       await adapter.setTyping!("qq-official:qq-contract:UO", true)
       const call = lastHttpCall()
-      expect(call.url).toBe("https://api.sgroup.qq.com/v2/users/UO/messages")
+      expect(call.url).toBe("https://api.bot.qq.com/v2/users/UO/messages")
       expect(call.body).toMatchObject({
         msg_type: 6,
         input_notify: { input_type: 1, input_second: 60 },

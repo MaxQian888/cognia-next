@@ -11,6 +11,13 @@ function req(openId: string | undefined, segments: MessageSegment[]): OutboundRe
 }
 
 describe("buildWechatContent", () => {
+  it("preserves mention IDs and rejects opaque cards", () => {
+    expect(buildWechatContent([{ type: "mention", userId: "u" }])).toBe("@u")
+    expect(buildWechatContent([{ type: "location", lat: 1, lon: 2 }])).toBe("Location: 1,2")
+    expect(() =>
+      buildWechatContent([{ type: "card", card: { kind: "unknown", payload: {} } }])
+    ).toThrow(/opaque/)
+  })
   it("flattens segments into text", () => {
     expect(
       buildWechatContent([

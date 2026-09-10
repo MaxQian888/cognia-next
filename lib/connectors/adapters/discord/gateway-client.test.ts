@@ -489,6 +489,47 @@ describe("startGatewayClient", () => {
     expect(fatal).toMatchObject({ code: 4014, reason: "disallowed intents" })
   }, 10000)
 
+  it.each([4007, 4009])("identifies a new session after close %i", async (code) => {
+    const first = createFakeWsSession()
+    const second = createFakeWsSession()
+    mockListen.mockImplementation((...args) =>
+      (mockWsOpen.mock.calls.length === 1 ? first : second).listenImpl(...args)
+    )
+    const ctrl = new AbortController()
+    const client = startGatewayClient({
+      botToken: async () => "T",
+      signal: ctrl.signal,
+      _gatewayUrl: "wss://fake",
+      _backoffBaseMs: 1,
+    })
+    const done = (async () => {
+      for await (const _ of client.dispatches) {
+        /* drain */
+      }
+    })()
+    try {
+      await first.waitForListeners()
+      first.push({ op: 10, d: { heartbeat_interval: 100000 } })
+      first.push({
+        op: 0,
+        t: "READY",
+        s: 12,
+        d: { session_id: "expired", resume_gateway_url: "wss://resume" },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      first.triggerClose({ code })
+      await second.waitForListeners()
+      second.push({ op: 10, d: { heartbeat_interval: 100000 } })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(mockWsOpen).toHaveBeenNthCalledWith(2, "wss://fake")
+      expect(sentFrames(2)).toHaveLength(2)
+      expect(sentFrames(6)).toHaveLength(0)
+    } finally {
+      ctrl.abort()
+      await done
+    }
+  })
+
   it("treats a legacy close payload (undefined) as non-fatal and reconnects", async () => {
     const session = createFakeWsSession()
     mockListen.mockImplementation(session.listenImpl)

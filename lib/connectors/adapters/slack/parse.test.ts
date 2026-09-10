@@ -404,6 +404,7 @@ describe("parseSlackSlashCommand", () => {
       trigger_id: undefined,
     })
     expect(event!.messageId).toMatch(/^slash-\d+$/)
+    expect(event!.canReplyToMessage).toBe(false)
   })
 
   it("returns null when required fields are missing", () => {

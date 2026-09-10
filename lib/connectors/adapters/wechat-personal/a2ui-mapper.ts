@@ -5,7 +5,7 @@
  * through `sendmessage` as text. To preserve A2UI interactivity we:
  *
  *   1. Walk the surface and pick out every interactive component
- *      (`Button`, `Select`, `RadioGroup`, `Checkbox`).
+ *      (`Button`; value-taking controls remain text fallbacks).
  *   2. Assign numerics `1..9` so the user can reply with a single ASCII
  *      digit and we never juggle multi-character input.
  *   3. Record the binding the bus will need to route the inbound digit
@@ -37,13 +37,14 @@
  */
 
 import {
+  bindingHintFields,
   buildActionId,
   generatePlainTextMirror,
   recordCallbackBinding,
   walkA2UISurface,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import type { A2UIMessageSegment } from "@/types/connectors/segment"
-import { setNumericAction } from "./numeric-action-registry"
+import { clearNumericActions, setNumericAction } from "./numeric-action-registry"
 
 interface NumberedInteractive {
   componentId: string
@@ -57,9 +58,8 @@ interface NumberedInteractive {
   wireActionId: string
   /** True when a fresh `callback_query` binding row must be written. */
   needsBindingWrite: boolean
+  bindingHints?: ReturnType<typeof bindingHintFields>
 }
-
-const INTERACTIVE_KINDS = new Set(["Button", "Select", "RadioGroup", "Checkbox"])
 
 const MAX_NUMERIC = 9
 const FOOTER_PREFIX = "回复数字触发按钮："
@@ -75,11 +75,14 @@ function preserveExistingWireActionId(value: string): boolean {
  * unit coverage; callers go through `buildIlinkA2UISurface` which also
  * persists bindings.
  */
-export function collectNumberedInteractives(segment: A2UIMessageSegment): NumberedInteractive[] {
+export function collectNumberedInteractives(
+  segment: A2UIMessageSegment,
+  numericOffset = 0
+): NumberedInteractive[] {
   const out: NumberedInteractive[] = []
   walkA2UISurface(segment.content, (node) => {
-    if (!INTERACTIVE_KINDS.has(node.component as string)) return
-    if (out.length >= MAX_NUMERIC) return
+    if (node.component !== "Button" || node.raw.disabled === true) return
+    if (out.length + numericOffset >= MAX_NUMERIC) return
     const raw = node.raw
     const action = stringValue(raw.action) || node.id
     const value = stringValue(raw.value)
@@ -90,7 +93,7 @@ export function collectNumberedInteractives(segment: A2UIMessageSegment): Number
       // binding row, just point the numeric at it.
       out.push({
         componentId: node.id,
-        numeric: out.length + 1,
+        numeric: numericOffset + out.length + 1,
         label,
         wireActionId: value,
         needsBindingWrite: false,
@@ -101,10 +104,11 @@ export function collectNumberedInteractives(segment: A2UIMessageSegment): Number
     const wireActionId = buildActionId(segment.surfaceId, node.id, action)
     out.push({
       componentId: node.id,
-      numeric: out.length + 1,
+      numeric: numericOffset + out.length + 1,
       label,
       wireActionId,
       needsBindingWrite: true,
+      bindingHints: bindingHintFields(raw),
     })
   })
   return out
@@ -114,6 +118,8 @@ export interface BuildIlinkA2UIInput {
   adapterId: string
   conversationKey: string
   segment: A2UIMessageSegment
+  /** Continue numbering across surfaces in the same outbound message. */
+  numericOffset?: number
 }
 
 export interface BuildIlinkA2UIOutput {
@@ -132,14 +138,15 @@ export interface BuildIlinkA2UIOutput {
 export async function buildIlinkA2UISurface(
   input: BuildIlinkA2UIInput
 ): Promise<BuildIlinkA2UIOutput> {
-  const { segment, adapterId, conversationKey } = input
+  const { segment, adapterId, conversationKey, numericOffset = 0 } = input
   const baseMirror =
     segment.plainTextMirror.trim().length > 0
       ? segment.plainTextMirror
       : generatePlainTextMirror(segment.content)
 
-  const numbered = collectNumberedInteractives(segment)
+  const numbered = collectNumberedInteractives(segment, numericOffset)
   if (numbered.length === 0) {
+    if (numericOffset === 0) clearNumericActions(conversationKey)
     return { textMirror: baseMirror, numberedCount: 0 }
   }
 
@@ -153,11 +160,17 @@ export async function buildIlinkA2UISurface(
           surfaceId: segment.surfaceId,
           componentId: entry.componentId,
           conversationKey,
+          ...entry.bindingHints,
         })
       }
-      setNumericAction(conversationKey, entry.numeric, entry.wireActionId)
     })
   )
+
+  // Publish the menu only after all binding writes succeed.
+  if (numericOffset === 0) clearNumericActions(conversationKey)
+  for (const entry of numbered) {
+    setNumericAction(conversationKey, entry.numeric, entry.wireActionId)
+  }
 
   const footer = FOOTER_PREFIX + numbered.map((e) => `${e.numeric}) ${e.label}`).join("  ")
   return {

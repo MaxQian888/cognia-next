@@ -58,8 +58,8 @@ export const MATRIX_CAPS: readonly Capability[] = [
  *
  * Fallback (rendered via `plainTextMirror`):
  *   - Image: an A2UI `Image` sub-component inside a surface is NOT uploaded to
- *     the media repo — `a2uiToMatrixHtml` degrades it to an `[alt]` text
- *     placeholder. (The native upload pipeline described above applies only to
+ *     the media repo — `a2uiToMatrixHtml` retains its source URL as a link
+ *     and the complete mirror with a downgrade diagnostic. (The native upload pipeline described above applies only to
  *     top-level `image` MESSAGE segments, not A2UI Image nodes.)
  *   - Everything else (Checkbox / Slider / DatePicker / Table / Chart /
  *     overlay widgets) degrades to the plain-text mirror.
@@ -78,9 +78,9 @@ export const MATRIX_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityM
   RadioGroup: "simulated",
   TextField: "simulated",
   TextArea: "simulated",
-  // A2UI Image degrades to an `[alt]` text placeholder in a2uiToMatrixHtml —
+  // A2UI Image preserves its source link and mirror in a2uiToMatrixHtml —
   // it is not uploaded as native media (that path is only for top-level image
   // message segments). Declaring it "native" mislead the assistant into
-  // emitting images that render as bare `[alt]` text for the recipient.
+  // emitting images that are delivered as references instead of native media.
   Image: "fallback",
 })

@@ -1,19 +1,17 @@
-/**
- * iLink outbound serialisation — text only in v1.
- *
- * Text / markdown / code / mention / A2UI-mirror segments concatenate into a
- * plain-text body, split into ≤2000-char chunks (the gateway rejects longer
- * single items). Media segments degrade to a text marker with a recorded
- * downgrade (outbound media needs AES-128-ECB *encryption* + the CDN upload
- * handshake — out of scope for v1; inbound media is still received).
- */
-
 import type { MessageSegment } from "@/types/connectors/segment"
 import { isA2UISegment } from "@/types/connectors/segment"
 import type { SegmentDowngrade } from "@/types/connectors/outbound"
 import { buildIlinkA2UISurface } from "./a2ui-mapper"
 
+export type IlinkOutboundMedia = Extract<
+  MessageSegment,
+  { type: "image" | "voice" | "video" | "file" }
+>
+export type IlinkOutboundPart =
+  { type: "text"; text: string } | { type: "media"; segment: IlinkOutboundMedia }
+
 export interface WechatPersonalSerialized {
+  parts: IlinkOutboundPart[]
   /** Plain-text chunks (≤2000 chars each), in order. */
   textChunks: string[]
   downgrades: SegmentDowngrade[]
@@ -29,7 +27,13 @@ const MAX_CHARS = 2000
 function chunkText(text: string): string[] {
   if (text.length <= MAX_CHARS) return text.length > 0 ? [text] : []
   const chunks: string[] = []
-  for (let i = 0; i < text.length; i += MAX_CHARS) chunks.push(text.slice(i, i + MAX_CHARS))
+  let remaining = text
+  while (remaining.length > 0) {
+    let end = Math.min(MAX_CHARS, remaining.length)
+    if (end < remaining.length && /[\uD800-\uDBFF]/.test(remaining[end - 1])) end -= 1
+    chunks.push(remaining.slice(0, end))
+    remaining = remaining.slice(end)
+  }
   return chunks
 }
 
@@ -47,16 +51,24 @@ export async function serializeIlinkSegments(
   ctx?: WechatPersonalSerializeContext
 ): Promise<WechatPersonalSerialized> {
   const lines: string[] = []
+  const parts: IlinkOutboundPart[] = []
+  const flushText = () => {
+    parts.push(...chunkText(lines.join("\n\n")).map((text) => ({ type: "text" as const, text })))
+    lines.length = 0
+  }
   const downgrades: SegmentDowngrade[] = []
+  let numericOffset = 0
 
   for (const seg of segments) {
     if (isA2UISegment(seg)) {
       if (ctx) {
-        const { textMirror } = await buildIlinkA2UISurface({
+        const { textMirror, numberedCount } = await buildIlinkA2UISurface({
           adapterId: ctx.adapterId,
           conversationKey: ctx.conversationKey,
           segment: seg,
+          numericOffset,
         })
+        numericOffset += numberedCount
         if (textMirror) lines.push(textMirror)
       } else if (seg.plainTextMirror) {
         lines.push(seg.plainTextMirror)
@@ -82,24 +94,41 @@ export async function serializeIlinkSegments(
       case "location":
         lines.push(`📍 ${seg.name ?? `${seg.lat},${seg.lon}`}`)
         break
+      case "emoji":
+        lines.push(`:${seg.code}:`)
+        downgrades.push({ from: "emoji", to: "text", reason: "ilink_no_native_emoji_segment" })
+        break
+      case "poll":
+        lines.push(
+          [seg.question, ...seg.options.map((option, index) => `${index + 1}. ${option}`)].join(
+            "\n"
+          )
+        )
+        downgrades.push({ from: "poll", to: "text", reason: "ilink_no_native_poll" })
+        break
+      case "card":
+        lines.push(
+          `[${seg.card.kind}] ${typeof seg.card.payload === "string" ? seg.card.payload : (JSON.stringify(seg.card.payload) ?? "")}`
+        )
+        downgrades.push({ from: "card", to: "text", reason: "ilink_no_native_card" })
+        break
       case "image":
-        downgrades.push({ from: "image", to: "text", reason: "ilink_outbound_media_unsupported" })
-        lines.push("[图片]")
-        break
-      case "voice":
-        downgrades.push({ from: "voice", to: "text", reason: "ilink_outbound_media_unsupported" })
-        lines.push("[语音]")
-        break
       case "video":
-        downgrades.push({ from: "video", to: "text", reason: "ilink_outbound_media_unsupported" })
-        lines.push("[视频]")
-        break
       case "file":
-        downgrades.push({ from: "file", to: "text", reason: "ilink_outbound_media_unsupported" })
-        lines.push(`[文件: ${seg.name}]`)
+      case "voice":
+        flushText()
+        parts.push({ type: "media", segment: seg })
+        if (seg.type === "voice") {
+          downgrades.push({ from: "voice", to: "file", reason: "ilink_audio_sent_as_file" })
+        }
         break
     }
   }
 
-  return { textChunks: chunkText(lines.join("\n\n").trim()), downgrades }
+  flushText()
+  return {
+    parts,
+    textChunks: parts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+    downgrades,
+  }
 }

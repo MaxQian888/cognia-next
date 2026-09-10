@@ -881,3 +881,44 @@ describe("identityScope stamping (plan 2026-07-24 Phase 1)", () => {
     expect(unknown.identityScope).toEqual({ tenantKey: "tk_menu", appId: "cli_app" })
   })
 })
+
+describe("default reply threads", () => {
+  it("keeps the initial group request and native thread follow-ups on one stable root key", () => {
+    const root = structuredClone(groupMentionFixture) as LarkEventEnvelope
+    const first = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, root, {
+      replyInThread: true,
+    })!
+    const next = structuredClone(root)
+    next.event.message!.message_id = "om_followup"
+    next.event.message!.root_id = root.event.message!.message_id
+    next.event.message!.thread_id = "omt_server_thread"
+    const followup = parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, next, {
+      replyInThread: true,
+    })!
+    expect(first.channel.kind).toBe("thread")
+    expect(first.conversationKey).toBe(followup.conversationKey)
+    expect(first.conversationRef).toMatchObject({
+      threadRootMessageId: root.event.message!.message_id,
+    })
+    expect(followup.channelData).toMatchObject({ larkManagedThread: true })
+    const historyRoot = structuredClone(root)
+    historyRoot.event.message!.thread_id = "omt_server_thread"
+    expect(
+      parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, historyRoot, { replyInThread: true })!
+        .conversationKey
+    ).toBe(first.conversationKey)
+    const other = structuredClone(root)
+    other.event.message!.message_id = "om_other_request"
+    expect(
+      parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, other, { replyInThread: true })!
+        .conversationKey
+    ).not.toBe(first.conversationKey)
+  })
+  it("keeps private chats unthreaded", () => {
+    expect(
+      parseLarkEventEnvelope(ADAPTER_ID, SELF_BOT_OPEN_ID, dmTextFixture as LarkEventEnvelope, {
+        replyInThread: true,
+      })!.channel.kind
+    ).toBe("private")
+  })
+})

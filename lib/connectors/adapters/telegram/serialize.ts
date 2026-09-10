@@ -5,13 +5,26 @@
  * Each call is `{ method, payload }` — the adapter posts them in order.
  */
 
-import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { OutboundRequest, SegmentDowngrade } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
-import { escapeMdV2, escapeMdV2Code, chunkTelegramText, TELEGRAM_TEXT_LIMIT } from "./markdown-v2"
+import {
+  escapeMdV2,
+  escapeMdV2Code,
+  chunkTelegramText,
+  chunkTelegramMarkdownV2,
+  TELEGRAM_TEXT_LIMIT,
+} from "./markdown-v2"
 import { mdToMarkdownV2 } from "./md-to-mdv2"
 import { buildTelegramA2UICalls } from "./a2ui-mapper"
 
+import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { TELEGRAM_A2UI_CAPABILITY } from "./capability"
+
+export class TelegramSerializationError extends Error {}
+
 export interface SerializedTelegramCall {
+  /** Local rendering diagnostics; never sent to the platform. */
+  downgrades?: SegmentDowngrade[]
   /** Telegram Bot API method name. */
   method:
     | "sendMessage"
@@ -24,6 +37,8 @@ export interface SerializedTelegramCall {
     | "sendChatAction"
     | "setMessageReaction"
   payload: Record<string, unknown>
+  /** Local upload hints; consumed by the adapter, never sent in the JSON payload. */
+  upload?: { filename?: string; contentType?: string }
   /**
    * Post-send binding intent (ADR-0009 v41 / B2). When set, the adapter's
    * send loop captures the returned platform `message_id` and records a
@@ -112,34 +127,34 @@ function serializeSegment(
     }
 
     case "image":
-      // GAP: local-file (non-URL) uploads need a multipart Rust command like
-      // connectors_discord_upload — follow-up; URL-based sends work today.
       return {
         method: "sendPhoto",
         payload: { chat_id: chatId, photo: seg.url, ...routing },
+        upload: { contentType: seg.mimeType },
       }
 
     case "voice":
       return {
         method: "sendVoice",
         payload: { chat_id: chatId, voice: seg.url, ...routing },
+        upload: { contentType: seg.mimeType },
       }
 
     case "video":
       return {
         method: "sendVideo",
         payload: { chat_id: chatId, video: seg.url, ...routing },
+        upload: { contentType: seg.mimeType },
       }
 
     case "file":
       return {
         method: "sendDocument",
         payload: { chat_id: chatId, document: seg.url, ...routing },
+        upload: { filename: seg.name, contentType: seg.mimeType },
       }
 
     case "mention": {
-      // GAP: each mention segment fans out into its own sendMessage instead
-      // of being merged inline with adjacent text segments — follow-up.
       // Inline mention rendered as MarkdownV2 text_mention link
       const name = escapeMdV2(seg.displayName ?? seg.userId)
       const mentionText = `[${name}](tg://user?id=${seg.userId})`
@@ -152,6 +167,27 @@ function serializeSegment(
           ...routing,
         },
       }
+    }
+
+    case "location":
+    case "poll": {
+      const text =
+        seg.type === "location"
+          ? [seg.name, String(seg.lat) + ", " + String(seg.lon)].filter(Boolean).join("\n")
+          : [
+              seg.question,
+              ...(seg.multi ? ["Multiple selections allowed"] : []),
+              ...seg.options.map((option, index) => String(index + 1) + ". " + option),
+            ].join("\n")
+      const downgrades: SegmentDowngrade[] = [
+        {
+          from: seg.type,
+          to: "text",
+          reason:
+            "Native " + seg.type + " sending is unavailable; complete content retained as text",
+        },
+      ]
+      return { method: "sendMessage", payload: { chat_id: chatId, text, ...routing }, downgrades }
     }
 
     case "reply":
@@ -181,6 +217,57 @@ function serializeSegment(
   }
 }
 
+const TELEGRAM_INLINE_TYPES = new Set(["text", "markdown", "code", "mention", "emoji"])
+const TELEGRAM_BLOCK_TYPES = new Set(["text", "markdown", "code"])
+
+/** Group adjacent content so mentions remain inside the sentence containing them. */
+function segmentRuns(segments: MessageSegment[]): MessageSegment[][] {
+  const runs: MessageSegment[][] = []
+  let content: MessageSegment[] = []
+  for (const segment of segments) {
+    if (segment.type === "reply") continue
+    if (TELEGRAM_INLINE_TYPES.has(segment.type)) content.push(segment)
+    else {
+      if (content.length) runs.push(content)
+      content = []
+      runs.push([segment])
+    }
+  }
+  if (content.length) runs.push(content)
+  return runs
+}
+
+function serializeRun(
+  run: MessageSegment[],
+  chatId: string | number,
+  routing: Record<string, unknown>
+): SerializedTelegramCall | null {
+  if (run.length === 1) return serializeSegment(run[0], chatId, routing)
+  const calls = run.map((segment) => serializeSegment(segment, chatId, routing)!)
+  const formatted = calls.some((call) => call.payload.parse_mode === "MarkdownV2")
+  let text = ""
+  for (const [index, call] of calls.entries()) {
+    if (
+      index > 0 &&
+      TELEGRAM_BLOCK_TYPES.has(run[index].type) &&
+      TELEGRAM_BLOCK_TYPES.has(run[index - 1].type) &&
+      !text.endsWith("\n")
+    )
+      text += "\n"
+    const body = String(call.payload.text ?? "")
+    text += formatted && !call.payload.parse_mode ? escapeMdV2(body) : body
+  }
+  return {
+    method: "sendMessage",
+    payload: {
+      chat_id: chatId,
+      text,
+      ...(formatted ? { parse_mode: "MarkdownV2" } : {}),
+      ...routing,
+    },
+  }
+}
+
 /**
  * Project an `OutboundRequest` into an ordered list of Telegram Bot API
  * calls (sync path). a2ui segments degrade to `plainTextMirror` because
@@ -189,12 +276,17 @@ function serializeSegment(
  * `send()` method to get the rich projection.
  */
 export function serializeOutbound(req: OutboundRequest): SerializedTelegramCall[] {
+  if (req.segments.some((segment) => segment.type === "card")) {
+    throw new TelegramSerializationError(
+      "Opaque native cards are not supported by telegram; use an A2UI surface or text"
+    )
+  }
   const chatId = chatIdFromRef(req)
   const routing = routingFields(req)
   const calls: SerializedTelegramCall[] = []
 
-  for (const seg of req.segments) {
-    const call = serializeSegment(seg, chatId, routing)
+  for (const run of segmentRuns(req.segments)) {
+    const call = serializeRun(run, chatId, routing)
     if (call) calls.push(call)
   }
 
@@ -219,14 +311,19 @@ function expandOversizedTextCalls(calls: SerializedTelegramCall[]): SerializedTe
       out.push(call)
       continue
     }
-    const chunks = chunkTelegramText(text)
+    const formatted = call.payload["parse_mode"] === "MarkdownV2"
+    const chunks = formatted
+      ? chunkTelegramMarkdownV2(text)
+      : chunkTelegramText(text).map((text) => ({ text }))
     chunks.forEach((chunk, idx) => {
-      const payload: Record<string, unknown> = { ...call.payload, text: chunk }
+      const payload: Record<string, unknown> = { ...call.payload, ...chunk }
+      if (formatted) delete payload["parse_mode"]
       if (idx > 0) delete payload["reply_parameters"]
       if (idx < chunks.length - 1) delete payload["reply_markup"]
       out.push({
         method: call.method,
         payload,
+        ...(idx === 0 && call.downgrades ? { downgrades: call.downgrades } : {}),
         ...(idx === chunks.length - 1 && call.forceReplyBinding
           ? { forceReplyBinding: call.forceReplyBinding }
           : {}),
@@ -249,12 +346,39 @@ export async function serializeOutboundAsync(
   req: OutboundRequest,
   adapterId: string
 ): Promise<SerializedTelegramCall[]> {
+  if (req.segments.some((segment) => segment.type === "card")) {
+    throw new TelegramSerializationError(
+      "Opaque native cards are not supported by telegram; use an A2UI surface or text"
+    )
+  }
   const chatId = chatIdFromRef(req)
   const routing = routingFields(req)
   const calls: SerializedTelegramCall[] = []
 
-  for (const seg of req.segments) {
+  for (const run of segmentRuns(req.segments)) {
+    const seg = run[0]
     if (seg.type === "a2ui") {
+      const fallbackKinds = new Set<string>()
+      walkA2UISurface(seg.content, (node) => {
+        const support = (TELEGRAM_A2UI_CAPABILITY as Readonly<Record<string, string>>)[
+          node.component
+        ]
+        if (support !== "native" && support !== "simulated") fallbackKinds.add(node.component)
+      })
+      const downgrades: SegmentDowngrade[] = fallbackKinds.size
+        ? [
+            {
+              from: "a2ui",
+              to: "text",
+              reason:
+                "A2UI surface " +
+                seg.surfaceId +
+                " uses its text mirror for: " +
+                [...fallbackKinds].join(", "),
+            },
+          ]
+        : []
+
       const a2uiCalls = await buildTelegramA2UICalls({
         adapterId,
         chatId,
@@ -263,18 +387,18 @@ export async function serializeOutboundAsync(
         conversationKey: extractConversationKey(req),
         routing,
       })
-      if (a2uiCalls.length === 0) {
+      if (a2uiCalls.length === 0 || fallbackKinds.size > 0) {
         // Mapper produced nothing native — fall back to the text mirror.
         calls.push({
           method: "sendMessage",
           payload: { chat_id: chatId, text: seg.plainTextMirror, ...routing },
+          ...(downgrades.length ? { downgrades } : {}),
         })
-      } else {
-        calls.push(...a2uiCalls)
       }
+      calls.push(...a2uiCalls)
       continue
     }
-    const call = serializeSegment(seg, chatId, routing)
+    const call = serializeRun(run, chatId, routing)
     if (call) calls.push(call)
   }
 

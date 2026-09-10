@@ -1,6 +1,7 @@
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import {
   serializeOutbound,
+  serializeOutboundAsync,
   serializePostMessage,
   serializeUpdate,
   serializeDeleteMessage,
@@ -205,17 +206,45 @@ describe("serializeAssistantSuggestedPrompts", () => {
     })
   })
 
-  it("trims prompts to Slack's hard cap of 4", () => {
+  it("rejects prompts exceeding Slack's hard cap of 4", () => {
     const prompts = Array.from({ length: 6 }, (_, i) => ({
       title: `t${i}`,
       message: `m${i}`,
     }))
-    const call = serializeAssistantSuggestedPrompts("C123", "1.0", prompts)
-    expect((call.payload["prompts"] as unknown[]).length).toBe(4)
+    expect(() => serializeAssistantSuggestedPrompts("C123", "1.0", prompts)).toThrow("at most 4")
   })
 
   it("omits the title field when not provided", () => {
     const call = serializeAssistantSuggestedPrompts("C123", "1.0", [{ title: "x", message: "y" }])
     expect("title" in call.payload).toBe(false)
+  })
+})
+
+describe("Slack unified reply routing", () => {
+  it.each([
+    [{ threadId: "1.001" }, "1.001"],
+    [{ replyTo: { messageId: "1.002" } }, "1.002"],
+    [{ replyTo: { messageId: "C123:1.003" } }, "1.003"],
+  ])("routes sync and async sends with %j", async (routing, expected) => {
+    const req: OutboundRequest = {
+      conversationRef: makeRef("C123") as never,
+      segments: [{ type: "text", text: "reply" }],
+      metadata: { idempotencyKey: "reply" },
+      ...routing,
+    }
+    expect(serializeOutbound(req).payload.thread_ts).toBe(expected)
+    const serialized = await serializeOutboundAsync(req, "sl-1")
+    expect(serialized.threadTs).toBe(expected)
+    expect(serialized.pages[0].thread_ts).toBe(expected)
+  })
+  it("keeps the known parent thread when replying to a message within it", () => {
+    expect(
+      serializeOutbound({
+        conversationRef: makeRef("C123", "1.001") as never,
+        segments: [{ type: "text", text: "reply" }],
+        metadata: { idempotencyKey: "reply" },
+        replyTo: { messageId: "C123:1.003" },
+      }).payload.thread_ts
+    ).toBe("1.001")
   })
 })

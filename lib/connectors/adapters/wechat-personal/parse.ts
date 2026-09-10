@@ -13,7 +13,7 @@ import { buildConversationKey } from "@/types/connectors/event"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
-import { ILINK_ITEM, ILINK_MSG, type IlinkItem, type IlinkMessage } from "./protocol"
+import { ilinkMediaUrl, ILINK_ITEM, ILINK_MSG, type IlinkItem, type IlinkMessage } from "./protocol"
 import { consumeNumericAction } from "./numeric-action-registry"
 
 export interface WechatPersonalConversationRef extends ConversationReference {
@@ -53,21 +53,34 @@ function itemToSegment(item: IlinkItem): MessageSegment | null {
     case ILINK_ITEM.text:
       return item.text_item?.text ? { type: "text", text: item.text_item.text } : null
     case ILINK_ITEM.image:
-      return item.image_item?.url ? { type: "image", url: item.image_item.url } : null
-    case ILINK_ITEM.voice:
-      return item.voice_item?.url
-        ? { type: "voice", url: item.voice_item.url, transcript: item.voice_item.transcript }
+      return ilinkMediaUrl(item.image_item)
+        ? { type: "image", url: ilinkMediaUrl(item.image_item)! }
         : null
+    case ILINK_ITEM.voice:
+      return ilinkMediaUrl(item.voice_item)
+        ? {
+            type: "voice",
+            url: ilinkMediaUrl(item.voice_item)!,
+            transcript: item.voice_item?.text ?? item.voice_item?.transcript,
+          }
+        : item.voice_item?.text
+          ? { type: "text", text: item.voice_item.text }
+          : null
     case ILINK_ITEM.video:
-      return item.video_item?.url ? { type: "video", url: item.video_item.url } : null
+      return ilinkMediaUrl(item.video_item)
+        ? { type: "video", url: ilinkMediaUrl(item.video_item)! }
+        : null
     case ILINK_ITEM.file:
-      return item.file_item?.url
+      return ilinkMediaUrl(item.file_item)
         ? {
             type: "file",
-            url: item.file_item.url,
-            name: item.file_item.file_name ?? "file",
+            url: ilinkMediaUrl(item.file_item)!,
+            name: item.file_item?.file_name ?? "file",
             mimeType: "application/octet-stream",
-            sizeBytes: 0,
+            sizeBytes:
+              Number.isFinite(Number(item.file_item?.len)) && Number(item.file_item?.len) >= 0
+                ? Number(item.file_item?.len)
+                : 0,
           }
         : null
     default:
@@ -87,9 +100,21 @@ export function parseIlinkMessage(
   if (msg.message_type !== ILINK_MSG.fromUser) return null
   if (!msg.from_user_id || !msg.context_token) return null
 
-  const segments = (msg.item_list ?? [])
-    .map(itemToSegment)
-    .filter((s): s is MessageSegment => s !== null)
+  const segments = (msg.item_list ?? []).flatMap((item): MessageSegment[] => {
+    const result: MessageSegment[] = []
+    const quote = item.ref_msg
+    if (quote) {
+      const quoted = quote.message_item ? itemToSegment(quote.message_item) : null
+      const snippet = [quote.title, quoted?.type === "text" ? quoted.text : undefined]
+        .filter(Boolean)
+        .join(" | ")
+      if (snippet) result.push({ type: "reply", messageId: "", snippet })
+      if (quoted && quoted.type !== "text") result.push(quoted)
+    }
+    const segment = itemToSegment(item)
+    if (segment) result.push(segment)
+    return result
+  })
   if (segments.length === 0) return null
 
   const conversationRef: WechatPersonalConversationRef = {
@@ -106,14 +131,13 @@ export function parseIlinkMessage(
     platform: "wechat-personal",
     adapterId,
     selfId: msg.to_user_id ?? "",
-    // Personal WeChat gives no stable per-message id; derive one from the
-    // context_token + session + a content fingerprint so the dedup ledger
-    // has a key that is STABLE across gateway redeliveries (a wall-clock
-    // component here would defeat dedup entirely) yet still distinguishes
-    // different content should the gateway ever reuse a context_token.
-    messageId: `${msg.context_token}:${msg.session_id ?? ""}:${cyrb53(
-      JSON.stringify(msg.item_list ?? [])
-    ).toString(36)}`,
+    // Prefer server identity; older gateways require a stable content fingerprint.
+    messageId:
+      msg.message_id != null
+        ? String(msg.message_id)
+        : `${msg.context_token}:${msg.session_id ?? ""}:${cyrb53(
+            JSON.stringify(msg.item_list ?? [])
+          ).toString(36)}`,
     conversationRef,
     conversationKey,
     sender: {
@@ -126,7 +150,8 @@ export function parseIlinkMessage(
     segments,
     plainText: plainText.length > 0 ? plainText : "[message]",
     mentions: { selfMentioned: false, users: [] },
-    timestamp: now,
+    timestamp:
+      Number.isFinite(msg.create_time_ms) && msg.create_time_ms! > 0 ? msg.create_time_ms! : now,
     raw: msg,
     kind: "create",
   }
@@ -136,12 +161,8 @@ const SINGLE_DIGIT_RE = /^\s*([1-9])\s*$/
 
 function extractTextForNumeric(msg: IlinkMessage): string {
   const items = msg.item_list ?? []
-  for (const item of items) {
-    if (item.type === ILINK_ITEM.text && item.text_item?.text) {
-      return item.text_item.text
-    }
-  }
-  return ""
+  if (items.some((item) => item.type !== ILINK_ITEM.text || item.ref_msg)) return ""
+  return items.map((item) => item.text_item?.text ?? "").join("\n")
 }
 
 /**
@@ -196,7 +217,8 @@ export function tryParseNumericCallback(
       adapterId,
       remoteUserId: userId,
     },
-    timestamp: now,
+    timestamp:
+      Number.isFinite(msg.create_time_ms) && msg.create_time_ms! > 0 ? msg.create_time_ms! : now,
     raw: msg,
   }
 }

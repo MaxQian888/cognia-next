@@ -1,3 +1,4 @@
+import { ilinkResultCode } from "./protocol"
 import {
   newWechatUin,
   buildIlinkHeaders,
@@ -60,5 +61,23 @@ describe("request body builders", () => {
       type: ILINK_ITEM.file,
       file_item: { file_name: "a.pdf" },
     })
+  })
+})
+
+describe("ilinkResultCode", () => {
+  it.each([
+    [{ ret: 0 }, 0],
+    [{ errcode: 0 }, 0],
+    [{ ret: 0, errcode: -14 }, -14],
+    [{ ret: 42, errcode: -14 }, -14],
+    [{ ret: 42, errcode: 0 }, 42],
+    [{ ret: 0, errcode: 42 }, 42],
+    [{}, 0],
+    [null, undefined],
+    [[], undefined],
+    [{ ret: "0" }, undefined],
+    [{ ret: Number.NaN }, undefined],
+  ])("classifies %j as %s", (body, expected) => {
+    expect(ilinkResultCode(body)).toBe(expected)
   })
 })

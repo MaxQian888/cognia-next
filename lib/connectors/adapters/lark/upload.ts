@@ -259,7 +259,9 @@ export function replaceA2UIImageUrls(
       const value = node.raw[field]
       if (typeof value === "string") {
         const key = mapping.get(value)
-        if (key) node.raw[field] = key
+        // Walker payloads resolve data bindings for display; update the
+        // cloned source component rather than that projected payload.
+        if (key) (clone.components[node.id] as Record<string, unknown>)[field] = key
       }
     }
   })

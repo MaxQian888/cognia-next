@@ -1,3 +1,7 @@
+jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
+  ...jest.requireActual("@/lib/connectors/adapters/_shared/a2ui-mapper"),
+  recordCallbackBinding: jest.fn().mockResolvedValue(undefined),
+}))
 import {
   serializeOutbound,
   serializeDelete,
@@ -70,14 +74,14 @@ describe("renderDiscordContentRun", () => {
     expect(renderDiscordContentRun([{ type: "code", code: "raw" }])).toBe("\`\`\`\nraw\n\`\`\`")
   })
 
-  it("trims trailing whitespace and ignores empty pieces", () => {
+  it("preserves trailing whitespace and ignores empty pieces", () => {
     expect(
       renderDiscordContentRun([
         { type: "text", text: "hi" },
         { type: "text", text: "" },
         { type: "text", text: "   " },
       ])
-    ).toBe("hi")
+    ).toBe("hi\n   ")
   })
 
   it("returns an empty string for no content", () => {
@@ -134,8 +138,10 @@ describe("mergeDiscordContentSegments", () => {
     ).toEqual([{ type: "markdown", md: "a\nb" }])
   })
 
-  it("emits nothing for a run that renders empty", () => {
-    expect(mergeDiscordContentSegments([{ type: "text", text: "  " }])).toEqual([])
+  it("preserves a whitespace-only run", () => {
+    expect(mergeDiscordContentSegments([{ type: "text", text: "  " }])).toEqual([
+      { type: "markdown", md: "  " },
+    ])
   })
 })
 
@@ -314,6 +320,18 @@ describe("serializeOutbound", () => {
     expect(calls).toHaveLength(0)
   })
 
+  it("uses bare IDs from a public composite reply reference", () => {
+    const calls = serializeOutbound(
+      makeReq([{ type: "text", text: "reply" }], {
+        replyTo: { messageId: "9876543210987654321:999" },
+      })
+    )
+    expect(calls[0].payload.message_reference).toMatchObject({
+      channel_id: "9876543210987654321",
+      message_id: "999",
+    })
+  })
+
   it("replyTo sets message_reference on the first call", () => {
     const calls = serializeOutbound(
       makeReq([{ type: "text", text: "ok" }], {
@@ -378,7 +396,64 @@ describe("chunkDiscordContent", () => {
     const first = "p".repeat(1500)
     const second = "q".repeat(1000)
     const chunks = chunkDiscordContent(`${first}\n${second}`)
-    expect(chunks).toEqual([first, second])
+    expect(chunks).toEqual([first + "\n", second])
+  })
+
+  it("preserves surrogate pairs and every whitespace character", () => {
+    const text = "a".repeat(1999) + "😀  \n" + "z".repeat(2000) + "  "
+    const chunks = chunkDiscordContent(text)
+    expect(chunks.join("")).toBe(text)
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.length <= 2000 && !/[\uD800-\uDBFF]$/.test(chunk) && !/^[\uDC00-\uDFFF]/.test(chunk)
+      )
+    ).toBe(true)
+  })
+
+  it("reopens code fences with the language and preserves code bytes", () => {
+    const code = "const x = '😀';\n".repeat(300)
+    const chunks = chunkDiscordContent("```ts\n" + code + "```")
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(
+      chunks.every(
+        (chunk) => chunk.length <= 2000 && chunk.startsWith("```ts\n") && chunk.endsWith("```")
+      )
+    ).toBe(true)
+    expect(chunks.map((chunk) => chunk.slice(6, -3)).join("")).toBe(code)
+  })
+
+  it("reopens nested emphasis and long link labels", () => {
+    const label = "x".repeat(5000)
+    const chunks = chunkDiscordContent("**[" + label + "](https://example.com)**")
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.length <= 2000 &&
+          chunk.startsWith("**[") &&
+          chunk.endsWith("](https://example.com)**")
+      )
+    ).toBe(true)
+    expect(chunks.map((chunk) => chunk.slice(3, -"](https://example.com)**".length)).join("")).toBe(
+      label
+    )
+  })
+
+  it("keeps escapes and Discord mention tokens atomic", () => {
+    for (const token of ["\\*", "<@123456789>", "<:happy:123456>"]) {
+      const text = "a".repeat(1999) + token + "tail"
+      const chunks = chunkDiscordContent(text)
+      expect(chunks.join("")).toBe(text)
+      expect(chunks.some((chunk) => chunk.includes(token))).toBe(true)
+    }
+  })
+
+  it("rejects impossible limits instead of looping or corrupting markup", () => {
+    expect(() => chunkDiscordContent("abc", 0)).toThrow("positive")
+    expect(() => chunkDiscordContent("😀", 1)).toThrow("cannot fit")
+    expect(() => chunkDiscordContent("[" + "x".repeat(20) + "](https://example.com)", 10)).toThrow(
+      "cannot fit"
+    )
   })
 
   it("hard-cuts at the limit when no newline exists in the window", () => {
@@ -483,5 +558,40 @@ describe("serializeFetchHistory", () => {
   it("defaults limit to 50 when omitted", () => {
     const call = serializeFetchHistory("123", {})
     expect(call.url).toContain("limit=50")
+  })
+})
+
+describe("mixed A2UI fallback", () => {
+  it("keeps native controls and the complete unsupported-content mirror with a diagnostic", async () => {
+    const calls = await serializeOutboundAsync(
+      makeReq([
+        {
+          type: "a2ui",
+          surfaceId: "mixed",
+          plainTextMirror: "Table: all rows preserved",
+          content: {
+            rootId: "root",
+            dataModel: {},
+            components: {
+              root: { id: "root", component: "Column", children: ["button", "table"] },
+              button: { id: "button", component: "Button", text: "Go", action: "go" },
+              table: { id: "table", component: "Table", rows: [["all rows preserved"]] },
+            },
+          },
+        },
+      ]),
+      "adapter"
+    )
+    expect(calls.map((call) => call.payload.content ?? "").join("\n")).toContain(
+      "Table: all rows preserved"
+    )
+    expect(calls.some((call) => call.payload.components)).toBe(true)
+    expect(calls.flatMap((call) => call.downgrades ?? [])).toEqual([
+      {
+        from: "a2ui",
+        to: "text",
+        reason: expect.stringContaining("Table"),
+      },
+    ])
   })
 })

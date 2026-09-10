@@ -134,3 +134,17 @@ describe("classifyScopeError", () => {
     expect(classifyScopeError(new Error("boom"), "s")).toBeNull()
   })
 })
+
+describe("Lark rate-limit reset headers", () => {
+  it.each([429, 400, 200])("retains the server delay on HTTP %s", async (status) => {
+    mHttp.mockResolvedValue({
+      status,
+      headers: { "x-ogw-ratelimit-reset": "1.5" },
+      body: JSON.stringify({ code: 99991400, msg: "limited" }),
+    })
+    await expect(larkTenantRequest(CREDS, "GET", "/x")).rejects.toMatchObject({
+      retryAfterMs: 1500,
+    })
+    expect(mHttp).toHaveBeenCalledTimes(1)
+  })
+})

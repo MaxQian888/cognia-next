@@ -14,6 +14,7 @@ import {
   registerQQPassiveReply,
   serializeDelete,
   serializeOutbound,
+  serializeOutboundParts,
   serializeReaction,
   serializeTyping,
 } from "./serialize"
@@ -61,6 +62,70 @@ describe("buildQQContent", () => {
 })
 
 describe("serializeOutbound", () => {
+  it("preflights every multipart reply without spending slots or dropping trailing text", () => {
+    const input = req(
+      "group",
+      "GO",
+      [
+        { type: "image", url: "https://cdn.example.org/a.png" },
+        { type: "text", text: "after image" },
+      ],
+      {},
+      "m1"
+    )
+    const preview = serializeOutboundParts(input, false)
+    expect(qqPassiveReplyCount("m1")).toBe(0)
+    expect(preview.map((part) => part.payload.msg_type)).toEqual([7, 0])
+    expect(preview[1].payload.content).toBe("after image")
+    expect(serializeOutboundParts(input)).toEqual(preview)
+    expect(qqPassiveReplyCount("m1")).toBe(2)
+    expect(serializeOutboundParts(input)).toEqual(preview)
+    expect(qqPassiveReplyCount("m1")).toBe(2)
+  })
+  it("rejects an over-cap multipart message atomically", () => {
+    const input = req(
+      "group",
+      "GO",
+      Array.from({ length: 6 }, (_, i) => ({
+        type: "image" as const,
+        url: `https://cdn.example.org/${i}.png`,
+      })),
+      {},
+      "m1"
+    )
+    expect(() => serializeOutboundParts(input)).toThrow("5-reply")
+    expect(qqPassiveReplyCount("m1")).toBe(0)
+  })
+  it("rejects non-public URLs, non-SILK voice, unsupported channel video, and empty input", () => {
+    expect(() =>
+      serializeOutboundParts(
+        req("group", "GO", [{ type: "image", url: "http://127.0.0.1/x" }], {}, "m1")
+      )
+    ).toThrow("public")
+    expect(() =>
+      serializeOutboundParts(
+        req(
+          "group",
+          "GO",
+          [{ type: "voice", url: "https://cdn.example.org/x", mimeType: "audio/mpeg" }],
+          {},
+          "m1"
+        )
+      )
+    ).toThrow("SILK")
+    expect(() =>
+      serializeOutboundParts(
+        req("channel", "CH", [{ type: "video", url: "https://cdn.example.org/x" }], {}, "m1")
+      )
+    ).toThrow("does not support")
+    expect(() => serializeOutboundParts(req("group", "GO", [], {}, "m1"))).toThrow("empty")
+  })
+  it.each(["group", "c2c", "channel", "direct"] as const)(
+    "rejects removed proactive sends in %s",
+    (scene) => {
+      expect(() => serializeOutbound(req(scene, "target", HI))).toThrow("proactive")
+    }
+  )
   it("addresses a group message and threads the inbound msg_id as a passive reply", () => {
     const call = serializeOutbound(req("group", "GO", HI, {}, "m1"))
     expect(call).toEqual({
@@ -85,7 +150,7 @@ describe("serializeOutbound", () => {
   })
 
   it("addresses a direct (dms) message", () => {
-    const call = serializeOutbound(req("direct", "GUILD", HI))
+    const call = serializeOutbound(req("direct", "GUILD", HI, {}, "direct-msg"))
     expect(call?.path).toBe("/dms/GUILD/messages")
   })
 
@@ -94,6 +159,12 @@ describe("serializeOutbound", () => {
       req("group", "GO", HI, { replyTo: { messageId: "explicit" } }, "captured")
     )
     expect(call?.payload.msg_id).toBe("explicit")
+  })
+  it("does not age an explicit different reply id using the captured message timestamp", () => {
+    expect(
+      serializeOutbound(req("group", "GO", HI, { replyTo: { messageId: "different" } }, "old", 1))
+        ?.payload.msg_id
+    ).toBe("different")
   })
 
   it("returns null for an unaddressable ref", () => {
@@ -142,15 +213,12 @@ describe("serializeOutbound — msg_seq", () => {
     expect(qqPassiveReplyCount("m2")).toBe(1)
   })
 
-  it("drops msg_id past the 5 distinct-reply cap so the send degrades to proactive", () => {
+  it("rejects a sixth distinct passive reply without removing its context", () => {
     for (let i = 1; i <= QQ_MAX_PASSIVE_REPLIES; i++) {
       const call = serializeOutbound(withKey(`job-${i}`))
       expect(call?.payload.msg_seq).toBe(qqPassiveMsgSeq(`job-${i}`))
     }
-    const sixth = serializeOutbound(withKey("job-6"))
-    expect(sixth?.payload).not.toHaveProperty("msg_id")
-    expect(sixth?.payload).not.toHaveProperty("msg_seq")
-    expect(sixth?.payload.content).toBe("hi")
+    expect(() => serializeOutbound(withKey("job-6"))).toThrow("5-reply")
     // The rejected job does not consume a slot; a retry of an earlier job still passes.
     expect(qqPassiveReplyCount("m1")).toBe(QQ_MAX_PASSIVE_REPLIES)
     expect(serializeOutbound(withKey("job-1"))?.payload.msg_seq).toBe(qqPassiveMsgSeq("job-1"))
@@ -211,14 +279,12 @@ describe("serializeOutbound — passive window expiry", () => {
     expect(call?.payload.msg_id).toBe("m1")
   })
 
-  it("omits msg_id and msg_seq once the group window has elapsed", () => {
+  it("rejects replies once the group window has elapsed", () => {
     const now = 1_000_000_000
     jest.spyOn(Date, "now").mockReturnValue(now)
-    const call = serializeOutbound(
-      req("group", "GO", HI, {}, "m1", now - QQ_PASSIVE_WINDOW_MS.group - 1)
-    )
-    expect(call?.payload).not.toHaveProperty("msg_id")
-    expect(call?.payload).not.toHaveProperty("msg_seq")
+    expect(() =>
+      serializeOutbound(req("group", "GO", HI, {}, "m1", now - QQ_PASSIVE_WINDOW_MS.group - 1))
+    ).toThrow("reply window")
   })
 
   it("uses the 60-minute window for c2c", () => {
@@ -226,15 +292,17 @@ describe("serializeOutbound — passive window expiry", () => {
     jest.spyOn(Date, "now").mockReturnValue(now)
     const fresh = serializeOutbound(req("c2c", "UO", HI, {}, "m1", now - 30 * 60_000))
     expect(fresh?.payload.msg_id).toBe("m1")
-    const stale = serializeOutbound(req("c2c", "UO", HI, {}, "m2", now - 61 * 60_000))
-    expect(stale?.payload).not.toHaveProperty("msg_id")
+    expect(() => serializeOutbound(req("c2c", "UO", HI, {}, "m2", now - 61 * 60_000))).toThrow(
+      "reply window"
+    )
   })
 
-  it("drops an expired msg_id on channel sends too", () => {
+  it("rejects an expired msg_id on channel sends too", () => {
     const now = 1_000_000_000
     jest.spyOn(Date, "now").mockReturnValue(now)
-    const call = serializeOutbound(req("channel", "CH", HI, {}, "m3", now - 6 * 60_000))
-    expect(call?.payload).not.toHaveProperty("msg_id")
+    expect(() => serializeOutbound(req("channel", "CH", HI, {}, "m3", now - 6 * 60_000))).toThrow(
+      "reply window"
+    )
   })
 
   it("treats refs without receivedAt as fresh (pre-existing rows)", () => {
@@ -322,6 +390,73 @@ describe("serializeTyping", () => {
         msg_id: "in-1",
         msg_seq: 77,
       },
+    })
+  })
+})
+
+describe("QQ text alternatives", () => {
+  it.each(["group", "c2c", "channel", "direct"] as const)(
+    "preserves mention, reply, poll and location in %s",
+    (scene) => {
+      const call = serializeOutbound(
+        req(
+          scene,
+          "target",
+          [
+            { type: "mention", userId: "u", displayName: "Alice" },
+            { type: "reply", messageId: "prior", snippet: "context" },
+            { type: "poll", question: "Pick", options: ["A", "B"] },
+            { type: "location", lat: 1, lon: 2, name: "Office" },
+          ],
+          {},
+          "m1"
+        )
+      )
+      expect(call?.payload.content).toBe("@Alice\n> context\nPick\n- A\n- B\n[location 1,2 Office]")
+      expect(call?.downgrades).toEqual(
+        ["mention", "reply", "poll", "location"].map((from) => ({
+          from,
+          to: "text",
+          reason: `qq_${from}_text_alternative`,
+        }))
+      )
+    }
+  )
+  it("rejects a trailing opaque card before reserving any multipart reply slot", () => {
+    const input = req(
+      "group",
+      "target",
+      [
+        { type: "image", url: "https://example.com/a.jpg" },
+        { type: "card", card: { kind: "custom", payload: { title: "opaque" } } },
+      ],
+      {},
+      "m1"
+    )
+    expect(() => serializeOutboundParts(input)).toThrow(/opaque cards/)
+    expect(qqPassiveReplyCount("m1")).toBe(0)
+  })
+  it("keeps text alternatives with native media and subsequent messages", () => {
+    const input = req(
+      "group",
+      "target",
+      [
+        { type: "mention", userId: "u" },
+        { type: "image", url: "https://example.com/a.jpg" },
+        { type: "reply", messageId: "prior", snippet: "after" },
+      ],
+      {},
+      "m1"
+    )
+    const calls = serializeOutboundParts(input)
+    expect(calls[0]).toMatchObject({
+      payload: { content: "@u", msg_type: 7 },
+      upload: { payload: { file_type: 1 } },
+      downgrades: [{ from: "mention" }],
+    })
+    expect(calls[1]).toMatchObject({
+      payload: { content: "> after", msg_type: 0 },
+      downgrades: [{ from: "reply" }],
     })
   })
 })

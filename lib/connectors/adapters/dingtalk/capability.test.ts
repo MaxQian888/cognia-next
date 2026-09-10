@@ -18,7 +18,7 @@ describe("dingtalk capability", () => {
     expect(DINGTALK_A2UI_CAPABILITY.Text).toBe("native")
     expect(DINGTALK_A2UI_CAPABILITY.Card).toBe("native")
     expect(DINGTALK_A2UI_CAPABILITY.Image).toBe("native")
-    expect(DINGTALK_A2UI_CAPABILITY.Button).toBe("simulated")
+    expect(DINGTALK_A2UI_CAPABILITY.Button).toBe("fallback")
     expect(DINGTALK_A2UI_CAPABILITY.Select).toBe("fallback")
     expect(DINGTALK_A2UI_CAPABILITY.TextField).toBe("fallback")
   })

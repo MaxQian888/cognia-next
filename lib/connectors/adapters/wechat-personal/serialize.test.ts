@@ -2,7 +2,10 @@ import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { serializeIlinkSegments } from "./serialize"
 import type { A2UIMessageSegment } from "@/types/connectors/segment"
-import { __resetNumericActionRegistryForTesting } from "./numeric-action-registry"
+import {
+  __peekNumericActionForTesting,
+  __resetNumericActionRegistryForTesting,
+} from "./numeric-action-registry"
 
 const dbFixture = createDbTestFixture()
 
@@ -21,6 +24,27 @@ describe("serializeIlinkSegments", () => {
     ])
     expect(out.textChunks).toEqual(["Hello\n\nworld"])
     expect(out.downgrades).toEqual([])
+  })
+
+  it("preserves unsupported interactive content as explicit text downgrades", async () => {
+    const out = await serializeIlinkSegments([
+      { type: "emoji", code: "smile" },
+      { type: "poll", question: "Pick one", options: ["A", "B"] },
+      {
+        type: "card",
+        card: { kind: "example", payload: { title: "Complete title", body: "Complete body" } },
+      },
+    ])
+    expect(out.textChunks.join("")).toContain("smile")
+    expect(out.textChunks.join("")).toContain("Pick one\n1. A\n2. B")
+    expect(out.textChunks.join("")).toContain("Complete body")
+    expect(out.downgrades.map((value) => value.from)).toEqual(["emoji", "poll", "card"])
+  })
+
+  it("preserves leading indentation and trailing whitespace across text chunks", async () => {
+    const text = "    " + "x".repeat(2100) + "  \n"
+    const out = await serializeIlinkSegments([{ type: "code", code: text }])
+    expect(out.textChunks.join("")).toBe(text)
   })
 
   it("falls back to seg.plainTextMirror when no ctx is supplied", async () => {
@@ -62,17 +86,28 @@ describe("serializeIlinkSegments", () => {
     expect(bindings.filter((b) => b.kind === "callback_query")).toHaveLength(2)
   })
 
-  it("degrades outbound media to a text marker + records a downgrade", async () => {
+  it("preserves ordered media parts without text placeholders", async () => {
+    const image = { type: "image" as const, url: "u" }
+    const file = {
+      type: "file" as const,
+      url: "u",
+      name: "a.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1,
+    }
     const out = await serializeIlinkSegments([
-      { type: "image", url: "u" },
-      { type: "file", url: "u", name: "a.pdf", mimeType: "application/pdf", sizeBytes: 1 },
+      { type: "text", text: "before" },
+      image,
+      { type: "text", text: "between" },
+      file,
     ])
-    expect(out.textChunks[0]).toContain("[图片]")
-    expect(out.textChunks[0]).toContain("[文件: a.pdf]")
-    expect(out.downgrades).toEqual([
-      { from: "image", to: "text", reason: "ilink_outbound_media_unsupported" },
-      { from: "file", to: "text", reason: "ilink_outbound_media_unsupported" },
+    expect(out.parts).toEqual([
+      { type: "text", text: "before" },
+      { type: "media", segment: image },
+      { type: "text", text: "between" },
+      { type: "media", segment: file },
     ])
+    expect(out.downgrades).toEqual([])
   })
 
   it("splits text longer than 2000 chars into multiple chunks", async () => {
@@ -86,4 +121,53 @@ describe("serializeIlinkSegments", () => {
   it("produces no chunks for an empty segment list", async () => {
     expect((await serializeIlinkSegments([])).textChunks).toEqual([])
   })
+})
+
+it("uses unique digits across surfaces in one message and caps the combined menu at nine", async () => {
+  const ctx = { adapterId: "ad", conversationKey: "wechat-personal:ad:u1" }
+  const surfaces: A2UIMessageSegment[] = Array.from({ length: 10 }, (_, i) => ({
+    type: "a2ui",
+    surfaceId: `s${i}`,
+    plainTextMirror: `Surface ${i}`,
+    content: {
+      rootId: "button",
+      dataModel: {},
+      components: {
+        button: { component: "Button", text: `Action ${i}` },
+      },
+    },
+  }))
+  const out = await serializeIlinkSegments(surfaces, ctx)
+  const text = out.textChunks.join("")
+  expect(text).toContain("1) Action 0")
+  expect(text).toContain("2) Action 1")
+  expect(text).toContain("9) Action 8")
+  expect(text).not.toContain("10) Action")
+  expect(text).not.toContain("1) Action 9")
+  expect(__peekNumericActionForTesting(ctx.conversationKey, 1)).toBe("a2ui:s0:button:button")
+  expect(__peekNumericActionForTesting(ctx.conversationKey, 9)).toBe("a2ui:s8:button:button")
+  expect(await getDb().connectorCallbackBindings.count()).toBe(9)
+})
+
+it("retains mention, reply, location, and code context while preserving audio and video", async () => {
+  const out = await serializeIlinkSegments([
+    { type: "code", code: "return 1" },
+    { type: "mention", userId: "u1", displayName: "Alice" },
+    { type: "mention", userId: "u2" },
+    { type: "reply", messageId: "m1", snippet: "Previous question" },
+    { type: "location", lat: 1, lon: 2, name: "Office" },
+    { type: "location", lat: 3, lon: 4 },
+    { type: "voice", url: "audio" },
+    { type: "video", url: "video" },
+  ])
+  expect(out.textChunks).toEqual([
+    "return 1\n\n@Alice\n\n@u2\n\n> Previous question\n\n📍 Office\n\n📍 3,4",
+  ])
+  expect(out.downgrades.map((entry) => entry.from)).toEqual(["voice"])
+})
+
+it("does not split surrogate pairs at text chunk boundaries", async () => {
+  const text = "x".repeat(1999) + "😀" + "end"
+  const out = await serializeIlinkSegments([{ type: "text", text }])
+  expect(out.textChunks).toEqual(["x".repeat(1999), "😀end"])
 })

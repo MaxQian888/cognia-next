@@ -12,9 +12,10 @@
  * and sends a native `m.image` / `m.file` / `m.audio` / `m.video` event.
  */
 
-import type { OutboundRequest } from "@/types/connectors/outbound"
+import type { OutboundRequest, SegmentDowngrade } from "@/types/connectors/outbound"
 import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segment"
 import { walkA2UISurface } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { MATRIX_A2UI_CAPABILITY } from "./capability"
 import { bareMatrixEventId } from "./ids"
 import type { MatrixMentions, MatrixRelatesTo } from "./parse"
 
@@ -49,6 +50,7 @@ export interface MatrixMediaChunk {
 export type MatrixSerializedContent = MatrixSendContent | MatrixMediaChunk
 
 export interface MatrixSerializedSend {
+  downgrades?: SegmentDowngrade[]
   /** One `m.room.message` content per outbound chunk, in render order. */
   contents: MatrixSerializedContent[]
   /**
@@ -56,7 +58,7 @@ export interface MatrixSerializedSend {
    * components. The index binds `surfaceId` to the sent event id so a user
    * reply correlates back to the surface (force_reply pattern).
    */
-  a2uiBinding?: { surfaceId: string }
+  a2uiBindings: Array<{ surfaceId: string; contentIndex: number }>
 }
 
 // ---------------------------------------------------------------------------
@@ -113,12 +115,18 @@ export function mdToMatrixHtml(md: string): string {
 export function a2uiToMatrixHtml(content: A2UISegmentContent): {
   html: string
   hasInteractive: boolean
+  imageReferences: string[]
+  fallbackKinds: string[]
 } {
   const lines: string[] = []
   let optionIdx = 0
   let hasInteractive = false
+  const imageReferences: string[] = []
+  const fallbackKinds = new Set<string>()
 
   walkA2UISurface(content, (node) => {
+    const support = (MATRIX_A2UI_CAPABILITY as Readonly<Record<string, string>>)[node.component]
+    if (support !== "native" && support !== "simulated") fallbackKinds.add(node.component)
     switch (node.component) {
       case "Text": {
         const t = stringValue(node.raw.text)
@@ -138,11 +146,13 @@ export function a2uiToMatrixHtml(content: A2UISegmentContent): {
       case "Card": {
         const title = stringValue(node.raw.title)
         if (title) lines.push(`<strong>${escapeHtml(title)}</strong>`)
+        const description = stringValue(node.raw.description)
+        if (description) lines.push(escapeHtml(description))
         break
       }
       case "Alert": {
         const title = stringValue(node.raw.title)
-        const text = stringValue(node.raw.text)
+        const text = stringValue(node.raw.message) || stringValue(node.raw.text)
         const inner = `${title ? `<strong>${escapeHtml(title)}</strong>` : ""}${
           title && text ? ": " : ""
         }${text ? escapeHtml(text) : ""}`
@@ -150,6 +160,12 @@ export function a2uiToMatrixHtml(content: A2UISegmentContent): {
         break
       }
       case "Button": {
+        const href = stringValue(node.raw.href) || stringValue(node.raw.url)
+        if (href) {
+          const label = stringValue(node.raw.text) || href
+          lines.push(`<a href="${escapeAttr(href)}">${escapeHtml(label)}</a>`)
+          break
+        }
         hasInteractive = true
         optionIdx += 1
         const label =
@@ -181,7 +197,17 @@ export function a2uiToMatrixHtml(content: A2UISegmentContent): {
       }
       case "Image": {
         const alt = stringValue(node.raw.alt) || "image"
-        lines.push(`[${escapeHtml(alt)}]`)
+        const source = stringValue(node.raw.src) || stringValue(node.raw.url)
+        if (source) {
+          imageReferences.push(`[${alt}] ${source}`)
+          lines.push(
+            /^(https?:|mxc:)\/\//i.test(source)
+              ? `<a href="${escapeAttr(source)}">${escapeHtml(alt)}</a>`
+              : escapeHtml(`[${alt}] ${source}`)
+          )
+        } else {
+          lines.push(`[${escapeHtml(alt)}]`)
+        }
         break
       }
       case "Row":
@@ -196,7 +222,36 @@ export function a2uiToMatrixHtml(content: A2UISegmentContent): {
   if (hasInteractive) {
     lines.push("<em>↩ Reply to this message to respond.</em>")
   }
-  return { html: lines.join("<br/>"), hasInteractive }
+  return {
+    html: lines.join("<br/>"),
+    hasInteractive,
+    imageReferences,
+    fallbackKinds: [...fallbackKinds],
+  }
+}
+
+/** Retain fallback content in both Matrix body representations. */
+function projectA2uiSurface(seg: Extract<MessageSegment, { type: "a2ui" }>) {
+  const rendered = a2uiToMatrixHtml(seg.content)
+  const mirror = seg.plainTextMirror || "[interactive message]"
+  const body = [mirror, ...rendered.imageReferences].join("\n")
+  const html = rendered.fallbackKinds.length
+    ? [rendered.html, escapeHtml(mirror)].filter(Boolean).join("<br/>")
+    : rendered.html || escapeHtml(mirror)
+  const downgrades: SegmentDowngrade[] = rendered.fallbackKinds.length
+    ? [
+        {
+          from: "a2ui",
+          to: "text",
+          reason:
+            "A2UI surface " +
+            seg.surfaceId +
+            " uses text references and its mirror for: " +
+            rendered.fallbackKinds.join(", "),
+        },
+      ]
+    : []
+  return { body, html, hasInteractive: rendered.hasInteractive, downgrades }
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +276,13 @@ function renderSegments(segments: MessageSegment[]): RenderedBody {
 
   for (const seg of segments) {
     switch (seg.type) {
+      case "a2ui": {
+        const { html, body } = projectA2uiSurface(seg)
+        textParts.push(body)
+        htmlParts.push(html)
+        usedHtml = true
+        break
+      }
       case "text":
         textParts.push(seg.text)
         htmlParts.push(escapeHtml(seg.text))
@@ -299,7 +361,8 @@ function renderSegments(segments: MessageSegment[]): RenderedBody {
 
 export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
   const contents: MatrixSerializedContent[] = []
-  let a2uiBinding: { surfaceId: string } | undefined
+  const downgrades: SegmentDowngrade[] = []
+  const a2uiBindings: MatrixSerializedSend["a2uiBindings"] = []
   let buffer: MessageSegment[] = []
 
   const flush = (): void => {
@@ -321,15 +384,18 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
   for (const seg of req.segments) {
     if (seg.type === "a2ui") {
       flush()
-      const { html, hasInteractive } = a2uiToMatrixHtml(seg.content)
+      const projection = projectA2uiSurface(seg)
+      const { html, body, hasInteractive } = projection
+      downgrades.push(...projection.downgrades)
       const content: MatrixSendContent = {
         msgtype: OUTBOUND_MSGTYPE,
-        body: seg.plainTextMirror || "[interactive message]",
+        body,
         format: "org.matrix.custom.html",
-        formatted_body: html || escapeHtml(seg.plainTextMirror || "[interactive message]"),
+        formatted_body: html,
       }
       contents.push(content)
-      if (hasInteractive) a2uiBinding = { surfaceId: seg.surfaceId }
+      if (hasInteractive)
+        a2uiBindings.push({ surfaceId: seg.surfaceId, contentIndex: contents.length - 1 })
     } else if (
       seg.type === "image" ||
       seg.type === "video" ||
@@ -369,7 +435,7 @@ export function serializeOutbound(req: OutboundRequest): MatrixSerializedSend {
     }
   }
 
-  return { contents, a2uiBinding }
+  return { contents, a2uiBindings, ...(downgrades.length ? { downgrades } : {}) }
 }
 
 /**

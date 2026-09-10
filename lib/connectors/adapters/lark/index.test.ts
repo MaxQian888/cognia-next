@@ -1216,8 +1216,9 @@ describe("createLarkAdapter", () => {
         cmd === "connectors_http_request" && args.req?.url?.includes("/im/v1/messages")
     )
     const url = new URL((historyCall![1] as { req: { url: string } }).req.url)
-    expect(url.searchParams.get("container_id")).toBe("oc_target")
-    expect(url.searchParams.get("start_time")).toBe("1714900000")
+    expect(url.searchParams.get("container_id_type")).toBe("thread")
+    expect(url.searchParams.get("container_id")).toBe("omt_target")
+    expect(url.searchParams.has("start_time")).toBe(false)
     expect(url.searchParams.get("page_token")).toBe("p1")
     expect(page.nextCursor).toEqual({
       kind: "timestamp",
@@ -1236,14 +1237,82 @@ describe("createLarkAdapter", () => {
     ).rejects.toThrow(/message ids are not timestamps/)
   })
 
+  it.each([true, false])(
+    "recovers managed thread history (allocated thread: %s)",
+    async (allocated) => {
+      const root = {
+        message_id: "om_root",
+        chat_id: "oc_chat",
+        msg_type: "text",
+        body: { content: JSON.stringify({ text: "root" }) },
+        create_time: "1714900000000",
+        sender: { id: "ou_user", id_type: "open_id", sender_type: "user" },
+        ...(allocated ? { thread_id: "omt_real" } : {}),
+      }
+      const historyUrls: URL[] = []
+      mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+        if (cmd === "connectors_keyring_get") return null
+        if (cmd !== "connectors_http_request") return undefined
+        const url = new URL((args as { req: { url: string } }).req.url)
+        if (url.pathname.includes("tenant_access_token")) return makeTatOkResp("t-managed")
+        historyUrls.push(url)
+        const items = url.pathname.endsWith("/om_root")
+          ? [root]
+          : [
+              root,
+              {
+                ...root,
+                message_id: "om_reply",
+                root_id: "om_root",
+                parent_id: "om_root",
+                create_time: "1714900001000",
+              },
+              {
+                ...root,
+                message_id: "om_later",
+                root_id: "om_root",
+                parent_id: "om_reply",
+                create_time: "1714900003000",
+              },
+            ]
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ code: 0, data: { items, has_more: false } }),
+        }
+      })
+      const events = []
+      for await (const event of makeAdapter().fetchHistory!("lark:lark-1:oc_chat:om_root", {
+        after: "1714900000000",
+        before: "1714900002000",
+      }))
+        events.push(event)
+      expect(events.map((event) => event.messageId)).toEqual(
+        allocated ? ["om_root", "om_reply"] : ["om_root"]
+      )
+      expect(historyUrls[0].pathname).toBe("/open-apis/im/v1/messages/om_root")
+      expect(historyUrls).toHaveLength(allocated ? 2 : 1)
+      if (allocated) {
+        expect(historyUrls[1].searchParams.get("container_id_type")).toBe("thread")
+        expect(historyUrls[1].searchParams.get("container_id")).toBe("omt_real")
+        expect(historyUrls[1].searchParams.has("start_time")).toBe(false)
+        expect(historyUrls[1].searchParams.has("end_time")).toBe(false)
+      }
+    }
+  )
+
   // ── outbound error classification (retryability contract) ──
-  const send400 = (body: Record<string, unknown>, status = 400) => {
+  const send400 = (
+    body: Record<string, unknown>,
+    status = 400,
+    headers: Record<string, string> = {}
+  ) => {
     mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "connectors_keyring_get") return null
       if (cmd !== "connectors_http_request") return undefined
       const url = (args as { req: { url: string } }).req.url
       if (url.includes("tenant_access_token")) return makeTatOkResp("t-err")
-      return { status, headers: {}, body: JSON.stringify(body) }
+      return { status, headers, body: JSON.stringify(body) }
     })
   }
   const sendReq = {
@@ -1275,6 +1344,17 @@ describe("createLarkAdapter", () => {
     const res = await makeAdapter().send(sendReq)
     expect(res.error?.code).toBe("rate_limited")
     expect(res.error?.retryable).toBe(true)
+  })
+
+  it.each([429, 400, 200])("send() preserves the rate-limit wait for HTTP %s", async (status) => {
+    send400({ code: 99991400, msg: "frequency limit" }, status, {
+      "X-Ogw-Ratelimit-Reset": "52",
+    })
+    expect((await makeAdapter().send(sendReq)).error).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      retryAfterMs: 52_000,
+    })
   })
 
   it("send() keeps 5xx retryable as platform_5xx", async () => {

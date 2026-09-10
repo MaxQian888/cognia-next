@@ -415,6 +415,7 @@ export function parseSlackSlashCommand(
     // Slash commands carry no message ts — the trigger_id is the only
     // stable platform-side id for the invocation.
     messageId: payload.trigger_id ?? `slash-${now}`,
+    canReplyToMessage: false,
     conversationRef: {
       platform: "slack",
       adapterId,
@@ -533,7 +534,9 @@ export function parseSlackInteractivePayload(
       action.type === "users_select" ||
       action.type === "channels_select"
         ? "select"
-        : action.type === "datepicker" || action.type === "timepicker"
+        : action.type === "datepicker" ||
+            action.type === "timepicker" ||
+            action.type === "plain_text_input"
           ? "input"
           : action.type === "checkboxes" || action.type === "radio_buttons"
             ? "checkbox"
@@ -551,7 +554,13 @@ export function parseSlackInteractivePayload(
       value = action.selected_date ?? ""
     } else if (action.type === "timepicker") {
       value = action.selected_time ?? ""
-    } else if (action.type === "checkboxes" || action.type === "radio_buttons") {
+    } else if (action.type === "checkboxes") {
+      const values = (action.selected_options ?? [])
+        .map((option) => option.value)
+        .filter((value): value is string => typeof value === "string")
+      value = values[0] ?? ""
+      payloadFields = { values }
+    } else if (action.type === "radio_buttons") {
       value = action.selected_option?.value ?? ""
     } else {
       value = action.value ?? ""

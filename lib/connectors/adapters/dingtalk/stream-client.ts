@@ -11,7 +11,7 @@
  *      single-use and expires in ~90s, so we open the socket immediately.
  *   2. Frames: { specVersion, type: "SYSTEM"|"EVENT"|"CALLBACK",
  *      headers: { messageId, topic, contentType, time }, data: "<json-string>" }.
- *   3. Every non-SYSTEM frame must be ACKed: { code: 200, message: "OK",
+ *   3. Every non-SYSTEM frame must be ACKed: { code: 200, message: code === 200 ? "OK" : "Processing failed",
  *      headers: { messageId, contentType }, data: "<json>" }.
  *   4. Keepalive: a SYSTEM frame with topic "ping" must be echoed back with the
  *      same `opaque`; a SYSTEM "disconnect" frame ends the connection.
@@ -37,9 +37,10 @@ export const DEFAULT_DINGTALK_SUBSCRIPTIONS = [
 
 export const TOPIC_BOT_MESSAGE = "/v1.0/im/bot/messages/get"
 
-/** A decoded, ACKed inbound frame handed to the adapter loop. */
+/** A decoded inbound frame awaiting processing acknowledgment handed to the adapter loop. */
 export interface DingTalkStreamFrame {
   topic: string
+  ack?: (success: boolean) => Promise<void>
   /** The frame's `data` field, already JSON-parsed. */
   data: Record<string, unknown>
 }
@@ -144,10 +145,10 @@ export async function registerDingTalkConnection(
  * `{"status":"SUCCESS","message":"success"}` envelope the protocol requires,
  * and CALLBACK frames carry `{"response":null}`.
  */
-function ackFrame(messageId: string, dataJson: string): string {
+function ackFrame(messageId: string, dataJson: string, code = 200): string {
   return JSON.stringify({
-    code: 200,
-    message: "OK",
+    code,
+    message: code === 200 ? "OK" : "Processing failed",
     headers: { messageId, contentType: "application/json" },
     data: dataJson,
   })
@@ -290,18 +291,34 @@ export function startDingTalkStream(opts: DingTalkStreamOptions): DingTalkStream
               continue
             }
 
-            // CALLBACK / EVENT — ACK first (fire-and-forget), then surface.
-            // EVENT acks require the SUCCESS envelope; CALLBACK acks carry
-            // the `{response:null}` shape.
-            const ackData = type === "EVENT" ? EVENT_ACK_DATA : CALLBACK_ACK_DATA
-            void connectorsWsSend(handleId, ackFrame(messageId, ackData)).catch(() => {})
-            let data: Record<string, unknown> = {}
-            try {
-              data = frame.data ? (JSON.parse(frame.data) as Record<string, unknown>) : {}
-            } catch {
-              data = {}
+            // Match the official SDK: acknowledge only after the consumer has
+            // processed the frame. Failed persistence must not receive success.
+            let acknowledged = false
+            const ack = async (success: boolean) => {
+              if (acknowledged) return
+              const data = success
+                ? type === "EVENT"
+                  ? EVENT_ACK_DATA
+                  : CALLBACK_ACK_DATA
+                : JSON.stringify(
+                    type === "EVENT"
+                      ? { status: "LATER", message: "processing failed" }
+                      : { response: null }
+                  )
+              await connectorsWsSend(handleId, ackFrame(messageId, data, success ? 200 : 500))
+              acknowledged = true
             }
-            yield { topic, data }
+            let data: Record<string, unknown>
+            try {
+              data = frame.data ? JSON.parse(frame.data) : {}
+              if (!data || typeof data !== "object" || Array.isArray(data))
+                throw new Error("Invalid callback data")
+            } catch {
+              await ack(false)
+              continue
+            }
+            yield { topic, data, ack }
+            if (!acknowledged) await ack(true)
           }
         }
       } finally {

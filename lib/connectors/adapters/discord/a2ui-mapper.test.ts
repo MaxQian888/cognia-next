@@ -144,7 +144,7 @@ describe("buildDiscordA2UIPayload", () => {
     expect(modalPayload.inputs[1]).toMatchObject({ style: 2 })
   })
 
-  it("caps modal inputs at Discord's 5-field limit", async () => {
+  it("rejects modal overflow without persisting a truncated form", async () => {
     const ids = ["f1", "f2", "f3", "f4", "f5", "f6", "f7"]
     const components: A2UISegmentContent["components"] = {
       root: { id: "root", component: "Dialog", title: "Big", body: ids },
@@ -152,13 +152,71 @@ describe("buildDiscordA2UIPayload", () => {
     for (const id of ids) components[id] = { id, component: "TextField", label: id }
     const surface: A2UISegmentContent = { components, dataModel: {}, rootId: "root" }
 
-    await buildDiscordA2UIPayload(baseInput(surface))
-    const binding = await resolveCallbackBinding("adp_dc", "a2ui:sfc_1:root:submit")
-    const modalPayload = binding?.payload as { inputs: unknown[] }
-    expect(modalPayload.inputs).toHaveLength(5)
+    await expect(buildDiscordA2UIPayload(baseInput(surface))).rejects.toThrow("at most 5 inputs")
+    expect(await resolveCallbackBinding("adp_dc", "a2ui:sfc_1:root:submit")).toBeUndefined()
   })
 
-  it("buildDiscordModalData wraps each input in its own ActionRow (type 9 data)", () => {
+  it("rejects persisted modal overflow instead of slicing fields", () => {
+    expect(() =>
+      buildDiscordModalData("cid", {
+        title: "Full form",
+        inputs: Array.from({ length: 6 }, (_, i) => ({
+          customId: String(i),
+          label: String(i),
+          style: 1 as const,
+        })),
+      })
+    ).toThrow("at most 5 inputs")
+  })
+
+  it.each(["Button", "Select"] as const)("rejects %s row overflow", async (component) => {
+    const count = component === "Button" ? 26 : 6
+    const ids = Array.from({ length: count }, (_, i) => String(i))
+    const surface = {
+      rootId: "root",
+      dataModel: {},
+      components: {
+        root: { id: "root", component: "Column", children: ids },
+        ...Object.fromEntries(
+          ids.map((id) => [id, { id, component, text: id, options: [{ value: "a", label: "A" }] }])
+        ),
+      },
+    } as A2UISegmentContent
+    await expect(buildDiscordA2UIPayload(baseInput(surface))).rejects.toThrow(
+      "at most 5 action rows"
+    )
+  })
+
+  it("rejects select option overflow without dropping choices", async () => {
+    const surface = {
+      rootId: "select",
+      dataModel: {},
+      components: {
+        select: {
+          id: "select",
+          component: "Select",
+          options: Array.from({ length: 26 }, (_, i) => ({ value: String(i), label: String(i) })),
+        },
+      },
+    } as A2UISegmentContent
+    await expect(buildDiscordA2UIPayload(baseInput(surface))).rejects.toThrow("1 to 25 options")
+  })
+
+  it.each([
+    [{ title: "x".repeat(46) }, {}, "titles"],
+    [{}, { label: "x".repeat(46) }, "labels"],
+    [{}, { placeholder: "x".repeat(101) }, "placeholders"],
+  ])("rejects overflowing modal text instead of truncating", (modal, input, field) => {
+    expect(() =>
+      buildDiscordModalData("cid", {
+        title: "Form",
+        ...modal,
+        inputs: [{ customId: "field", label: "Field", style: 1, ...input }],
+      })
+    ).toThrow(`Discord modal ${field} support at most`)
+  })
+
+  it("buildDiscordModalData wraps each input in a Label (type 9 data)", () => {
     const data = buildDiscordModalData("cid", {
       title: "T",
       inputs: [
@@ -170,19 +228,22 @@ describe("buildDiscordA2UIPayload", () => {
     expect(data.title).toBe("T")
     const rows = data.components as Array<{
       type: number
-      components: Array<Record<string, unknown>>
+      label: string
+      component: Record<string, unknown>
     }>
     expect(rows).toHaveLength(2)
-    expect(rows[0].type).toBe(1)
-    expect(rows[0].components[0]).toMatchObject({
+    expect(rows[0].type).toBe(18)
+    expect(rows[0].label).toBe("A")
+    expect(rows[0].component).not.toHaveProperty("label")
+    expect(rows[0].component).toMatchObject({
       type: 4,
       custom_id: "a",
-      label: "A",
       style: 1,
       required: true,
       placeholder: "ph",
     })
-    expect(rows[1].components[0]).toMatchObject({
+    expect(rows[1].label).toBe("B")
+    expect(rows[1].component).toMatchObject({
       type: 4,
       custom_id: "b",
       style: 2,
@@ -302,4 +363,19 @@ describe("buildDiscordA2UIPayload", () => {
     expect(payload.embeds).toBeUndefined()
     expect(payload.components).toBeUndefined()
   })
+})
+
+it("preserves canonical Card.description and Alert.message", async () => {
+  const surface: A2UISegmentContent = {
+    rootId: "root",
+    dataModel: {},
+    components: {
+      root: { component: "Column", children: ["card", "alert"] },
+      card: { component: "Card", title: "Summary", description: "Card details" },
+      alert: { component: "Alert", title: "Notice", message: "Canonical alert message" },
+    },
+  }
+  const result = await buildDiscordA2UIPayload(baseInput(surface))
+  expect(JSON.stringify(result)).toContain("Card details")
+  expect(JSON.stringify(result)).toContain("Canonical alert message")
 })

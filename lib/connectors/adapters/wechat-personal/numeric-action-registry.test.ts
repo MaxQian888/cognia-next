@@ -2,6 +2,7 @@ import {
   __countNumericActionsForTesting,
   __resetNumericActionRegistryForTesting,
   consumeNumericAction,
+  clearNumericActions,
   __peekNumericActionForTesting,
   setNumericAction,
 } from "./numeric-action-registry"
@@ -80,4 +81,21 @@ describe("consumeNumericAction", () => {
     expect(consumeNumericAction("conv", 1, 200_000)).toBeUndefined()
     expect(__countNumericActionsForTesting("conv")).toBe(0)
   })
+})
+
+it("clears only the replaced conversation's menu", () => {
+  setNumericAction("a", 1, "a:1")
+  setNumericAction("a", 2, "a:2")
+  setNumericAction("b", 1, "b:1")
+  clearNumericActions("a")
+  expect(__countNumericActionsForTesting("a")).toBe(0)
+  expect(__peekNumericActionForTesting("b", 1)).toBe("b:1")
+})
+
+it("prunes expired menu entries even when the requested digit was never registered", () => {
+  setNumericAction("expired", 1, "old", 0)
+  setNumericAction("expired", 2, "live", 80_000)
+  expect(consumeNumericAction("expired", 9, 100_000)).toBeUndefined()
+  expect(__countNumericActionsForTesting("expired")).toBe(1)
+  expect(__peekNumericActionForTesting("missing", 1)).toBeUndefined()
 })

@@ -1,4 +1,4 @@
-import { serializeSegments, clampUtf8 } from "./serialize"
+import { serializeSegments, clampUtf8, chunkUtf8 } from "./serialize"
 import type { A2UIMessageSegment, MessageSegment } from "@/types/connectors/segment"
 
 describe("serializeSegments", () => {
@@ -103,4 +103,18 @@ describe("clampUtf8", () => {
     expect(out).toBe("你好")
     expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(6)
   })
+})
+
+it("retains every UTF-8 code point across bounded chunks", () => {
+  const text = "a".repeat(20479) + "😀" + "中文".repeat(5000)
+  const out = serializeSegments([{ type: "text", text }])
+  expect(out.markdown).toBe(text)
+  expect(out.markdownChunks.join("")).toBe(text)
+  expect(out.markdownChunks.every((chunk) => new TextEncoder().encode(chunk).length <= 20480)).toBe(
+    true
+  )
+  expect(out.markdownChunks[0]).toBe("a".repeat(20479))
+  expect(clampUtf8("a😀", 4)).toBe("a")
+  expect(chunkUtf8("", 4)).toEqual([])
+  expect(() => chunkUtf8("x", 0)).toThrow()
 })

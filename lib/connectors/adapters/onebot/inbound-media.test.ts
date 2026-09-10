@@ -83,6 +83,69 @@ describe("operatorHostAllowance", () => {
 })
 
 describe("enrichOneBotInboundMedia", () => {
+  it("resolves v12 file bytes and document names through get_file before extraction", async () => {
+    const send = jest
+      .fn()
+      .mockResolvedValue({ status: "ok", retcode: 0, data: { data: "SGVsbG8=", name: "note.txt" } })
+    const extractDocText = jest.fn().mockResolvedValue("Hello")
+    const e = event([
+      { type: "file", url: "fid", name: "file", mimeType: "text/plain", sizeBytes: 0 },
+    ])
+    await enrichOneBotInboundMedia(e, {
+      ...deps(),
+      transport: { send },
+      supportedActions: async () => new Set(["get_file"]),
+      extractDocText,
+    })
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "get_file", params: { file_id: "fid", type: "data" } })
+    )
+    expect(e.segments[0]).toMatchObject({ name: "note.txt", ocrText: "Hello", rawUrl: "fid" })
+  })
+
+  it("falls back to get_file URL and forwards required download headers", async () => {
+    const send = jest
+      .fn()
+      .mockResolvedValueOnce({ status: "failed", retcode: 10004 })
+      .mockResolvedValueOnce({
+        status: "ok",
+        retcode: 0,
+        data: { url: CDN, headers: { Authorization: "Bearer media" } },
+      })
+    const d = deps()
+    const e = event([image("fid")])
+    await enrichOneBotInboundMedia(e, { ...d, transport: { send } })
+    expect(send.mock.calls[1][0].params).toEqual({ file_id: "fid", type: "url" })
+    expect(d._fetch).toHaveBeenCalledWith("ob-1", "onebot:/gchatpic_new/1/2/0", CDN, {
+      Authorization: "Bearer media",
+    })
+    expect(e.segments[0]).toMatchObject({ dataBase64: "QUJD", rawUrl: "fid" })
+  })
+
+  it("does not call an unsupported get_file action", async () => {
+    const send = jest.fn()
+    const e = event([image("fid")])
+    await enrichOneBotInboundMedia(e, {
+      ...deps(),
+      transport: { send },
+      supportedActions: async () => new Set(),
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(e.segments[0]).toEqual(image("fid"))
+  })
+
+  it("rejects over-limit and malformed inline files independently", async () => {
+    const send = jest
+      .fn()
+      .mockResolvedValueOnce({ status: "ok", retcode: 0, data: { data: "SGVsbG8=" } })
+      .mockResolvedValueOnce({ status: "ok", retcode: 0, data: { data: "!!!!" } })
+      .mockResolvedValueOnce({ status: "ok", retcode: 0, data: { data: "QQ==" } })
+    const e = event([image("big"), image("bad"), image("good")])
+    await enrichOneBotInboundMedia(e, { ...deps(), maxInlineBytes: 2, transport: { send } })
+    expect(e.segments[0]).toEqual(image("big"))
+    expect(e.segments[1]).toEqual(image("bad"))
+    expect(e.segments[2]).toMatchObject({ dataBase64: "QQ==" })
+  })
   it("inlines an image from QQ's CDN", async () => {
     const d = deps()
     const e = event([image()])

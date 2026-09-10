@@ -43,6 +43,7 @@ async function rawRequest(
   if (resp.status >= 400) {
     throw new LarkApiError({
       status: resp.status,
+      headers: resp.headers,
       code: extractLarkCode(resp.body),
       message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
     })
@@ -51,6 +52,7 @@ async function rawRequest(
   if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
     throw new LarkApiError({
       status: resp.status,
+      headers: resp.headers,
       code: parsed.code,
       message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
     })

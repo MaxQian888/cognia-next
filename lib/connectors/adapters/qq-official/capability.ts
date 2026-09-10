@@ -13,7 +13,8 @@ import {
  * per-template review on the QQ console, so they are out of scope for v1 —
  * markdown segments degrade to text via the default chain, which is honest
  * about what the adapter actually delivers. Outbound media (rich media upload)
- * is also deferred.
+ * uses public-URL uploads for group/C2C image, video and SILK voice. Guild
+ * channel/direct scenes support native images; file uploads are not public.
  *
  * Scene-limited mutations (the flag is declared platform-wide; the adapter
  * throws `unsupported` outside the scene):
@@ -28,6 +29,9 @@ import {
 export const QQ_OFFICIAL_CAPS: readonly Capability[] = [
   "send.reply",
   "send.text",
+  "send.image",
+  "send.video",
+  "send.voice",
   "delete",
   "typing",
   "send.reaction",
