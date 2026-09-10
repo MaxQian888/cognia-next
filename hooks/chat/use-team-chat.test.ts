@@ -8,10 +8,13 @@
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-const isTauriMock = jest.fn().mockReturnValue(true)
+// The factory must not close over a `const` declared in this file: hoisted
+// imports evaluate a keyring store that calls `isTauri()` at module load,
+// before that binding exists (see jest-gotchas, TDZ in jest.mock factories).
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
+  isTauri: jest.fn().mockReturnValue(true),
 }))
+const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 
 const sendPromptMock = jest.fn<Promise<undefined>, [subId: string, ...args: unknown[]]>(
   async (..._args) => undefined
@@ -97,6 +100,7 @@ const routeTurnMock = jest.fn((..._a: unknown[]): unknown[] => [])
 const stripDispatchesMock = jest.fn((s: string) => s)
 
 jest.mock("@/lib/claude/team-router", () => ({
+  ...jest.requireActual("@/lib/claude/team-router"),
   buildSupervisorRoster: (...a: unknown[]) => buildSupervisorRosterMock(...a),
   parseDispatches: (...a: unknown[]) => parseDispatchesMock(...a),
   parseMentions: (...a: unknown[]) => parseMentionsMock(...a),
@@ -324,8 +328,10 @@ jest.mock("@/stores/ui", () => ({
 }))
 
 import { useTeamChat } from "./use-team-chat"
+import { __resetRoomRunnersForTests } from "@/lib/chat/room/runner-host"
 
 beforeEach(() => {
+  __resetRoomRunnersForTests()
   isTauriMock.mockReset().mockReturnValue(true)
   sendPromptMock.mockReset().mockResolvedValue(undefined)
   interruptSessionMock.mockReset().mockResolvedValue(undefined)

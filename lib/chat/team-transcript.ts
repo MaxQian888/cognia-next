@@ -34,20 +34,11 @@
  * would teach members to write an address the router reads differently.
  */
 
-import {
-  buildRoomRosterSection,
-  collectRoomParticipants,
-  mergeRoomParticipants,
-  type RoomParticipant,
-} from "./room-roster"
+import { buildRoomRosterSection, type RoomParticipant } from "./room-roster"
+import { projectRoomParticipants } from "./room/participants"
 import { HANDOFF_STOP_TOKEN } from "@/lib/claude/team-router"
 import { bareToolName } from "./tool-summary"
-import {
-  makeSpeaker,
-  resolveMessageSpeaker,
-  speakerTranscriptName,
-  type SpeakerSource,
-} from "./speaker"
+import { resolveMessageSpeaker, speakerTranscriptName, type SpeakerSource } from "./speaker"
 
 /** A team member as the transcript needs it: identity, name, and its role in THIS team. */
 export interface TeamTranscriptMember {
@@ -211,13 +202,16 @@ function rosterFor(
   respondingCharacterId: string,
   members: readonly TeamTranscriptMember[]
 ): RoomParticipant[] {
-  const declared: RoomParticipant[] = members.map((member) => ({
-    speaker: makeSpeaker("agent", member.id, member.name),
-    ...(member.role?.trim() ? { role: member.role.trim() } : {}),
-    isSelf: member.id === respondingCharacterId,
-  }))
-  const humans = collectRoomParticipants(messages.filter((message) => message.role === "user"))
-  return mergeRoomParticipants(declared, humans)
+  // The same projection the header chip renders (ADR-0177), so the model and
+  // the user are told about one room. Only user turns are observed here: a
+  // member's own replies are already on the declared side.
+  return projectRoomParticipants({
+    kind: "team",
+    characters: members,
+    members: members.map((member) => ({ characterId: member.id, role: member.role })),
+    messages: messages.filter((message) => message.role === "user"),
+    selfId: respondingCharacterId,
+  }).participants
 }
 
 function transcriptLines(

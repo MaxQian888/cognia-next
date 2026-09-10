@@ -8,6 +8,7 @@
 import type { UIMessage } from "ai"
 
 export * from "./collaboration"
+export * from "./room-settings"
 import type {
   SearchProviderType,
   SearchProviderSettings,
@@ -2280,6 +2281,13 @@ export interface ChatSession {
   permissionMode?: SendOptions["permissionMode"]
   /** Free-form shared notes injected into every team member's transcript. */
   scratchpad?: string
+  /**
+   * Per-room overrides (ADR-0177): reply mode, room instructions, memory
+   * switch, muted members. Read through `lib/chat/room/settings.ts`, which
+   * also mirrors `memory` onto `memoryUse` / `memoryLearn`. Non-indexed, so
+   * adding it needs no Dexie version bump.
+   */
+  roomSettings?: import("./room-settings").RoomSettings
   /** Bounded, structured run context that survives turns and compaction. */
   workingSet?: import("./working-set").SessionWorkingSetV1
   /**
