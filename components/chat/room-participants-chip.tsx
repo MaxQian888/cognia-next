@@ -12,11 +12,14 @@
  * could tell you what a conversation would cost and where it came from, and
  * not who was in it.
  *
- * So this asks the question the same way the prompt does. `lib/chat/speaker.ts`
- * resolves who wrote each message whatever plane it came from, and
- * `lib/chat/room-roster.ts` merges that with a declared member list. The chip
- * is those two functions with faces attached, which is what keeps the header
- * and the model looking at the same room.
+ * So this asks the question the same way the prompt does. `lib/chat/room/
+ * participants.ts` (ADR-0177) reads the declared membership from whichever
+ * store the room's kind keeps (team slots, the collab membership mirror) and
+ * merges it with whoever `lib/chat/speaker.ts` says has spoken. The chip is
+ * that projection with faces attached, which is what keeps the header and the
+ * model looking at the same room. The projection also says how complete it
+ * is, and an IM group, which declares no members at all, gets a line saying
+ * only those who have spoken are listed.
  *
  * # Why it self-hides on a count rather than on a session kind
  *
@@ -39,18 +42,17 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useClientLiveQuery } from "@/hooks/data"
 import { useTeamMemberRoles, useTeamMembers } from "@/hooks/use-team-members"
-import {
-  collectRoomParticipants,
-  mergeRoomParticipants,
-  MAX_ROSTER_PARTICIPANTS,
-  type RoomParticipant,
-} from "@/lib/chat/room-roster"
-import { makeSpeaker, type SpeakerSource } from "@/lib/chat/speaker"
+import { roomKindOf } from "@/lib/chat/room/kind"
+import { projectRoomParticipants, type RoomRosterCompleteness } from "@/lib/chat/room/participants"
+import { MAX_ROSTER_PARTICIPANTS } from "@/lib/chat/room-roster"
+import type { SpeakerSource } from "@/lib/chat/speaker"
 import { deterministicColor, type AvatarSubject } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat"
 import type { Character, ChatSession } from "@cognia/agent-config-types"
+import type { SessionMembership } from "@cognia/agent-config-types/collaboration"
 
 /** Faces shown side by side before the rest collapse into the count. */
 const STACKED_FACES = 3
@@ -70,18 +72,27 @@ export function RoomParticipantsChip({
   className?: string
 }) {
   const t = useTranslations("chatRoom")
-  const teamId = session.kind === "team" ? session.teamId : undefined
+  const kind = roomKindOf(session)
+  const teamId = kind === "team" ? session.teamId : undefined
   const members = useTeamMembers(teamId)
   const roles = useTeamMemberRoles(teamId)
+  const memberships = useSharedRoomMemberships(kind === "shared" ? session.id : null)
   const messages = useChatStore((state) => state.sessions[session.id]?.messages)
 
-  const rows = useMemo(
+  const { rows, completeness } = useMemo(
     // `UIMessage.metadata` is `unknown` by construction, while `SpeakerSource`
     // wants the record it actually holds. The resolver reads that field
     // defensively at every step, so the widening is safe and the same one
-    // `use-team-chat.ts` makes when it feeds these rows to the prompt.
-    () => buildRows(members, roles, (messages ?? []) as unknown as readonly SpeakerSource[]),
-    [members, roles, messages]
+    // the room runner makes when it feeds these rows to the prompt.
+    () =>
+      buildRows({
+        kind,
+        members,
+        roles,
+        memberships,
+        messages: (messages ?? []) as unknown as readonly SpeakerSource[],
+      }),
+    [kind, members, roles, memberships, messages]
   )
 
   if (rows.length < 2) return null
@@ -131,8 +142,34 @@ export function RoomParticipantsChip({
             {t("andMore", { count: rows.length - MAX_ROSTER_PARTICIPANTS })}
           </DropdownMenuLabel>
         ) : null}
+        {completeness === "observed" ? (
+          <DropdownMenuLabel
+            className="text-[11px] font-normal text-muted-foreground"
+            data-testid="room-participants-observed"
+          >
+            {t("observedOnly")}
+          </DropdownMenuLabel>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * A shared room's members, from the collab membership mirror. Read only for a
+ * shared session, and read lazily so a chip on a team or IM room never touches
+ * the mirror at all.
+ */
+function useSharedRoomMemberships(sessionId: string | null): readonly SessionMembership[] {
+  return useClientLiveQuery<readonly SessionMembership[]>(
+    () =>
+      sessionId
+        ? import("@/lib/db/schema").then(({ getDb }) =>
+            getDb().collabChatMemberships.where("sessionId").equals(sessionId).toArray()
+          )
+        : Promise.resolve([]),
+    [sessionId],
+    []
   )
 }
 
@@ -144,19 +181,24 @@ export function RoomParticipantsChip({
  * knows the roles. A character that has spoken is matched back to its row by
  * id, so a member keeps its own avatar instead of the colour its id hashes to.
  */
-function buildRows(
-  members: readonly Character[],
-  roles: ReadonlyMap<string, string>,
+function buildRows(input: {
+  kind: ReturnType<typeof roomKindOf>
+  members: readonly Character[]
+  roles: ReadonlyMap<string, string>
+  memberships: readonly SessionMembership[]
   messages: readonly SpeakerSource[]
-): Row[] {
-  const declared: RoomParticipant[] = members.map((member) => ({
-    speaker: makeSpeaker("agent", member.id, member.name),
-    ...(roles.get(member.id) ? { role: roles.get(member.id)! } : {}),
-  }))
-  const merged = mergeRoomParticipants(declared, collectRoomParticipants(messages))
+}): { rows: Row[]; completeness: RoomRosterCompleteness } {
+  const { kind, members, roles, memberships, messages } = input
+  const { participants, completeness } = projectRoomParticipants({
+    kind,
+    characters: members,
+    members: [...roles].map(([characterId, role]) => ({ characterId, role })),
+    memberships,
+    messages,
+  })
   const characterById = new Map(members.map((member) => [member.id, member]))
 
-  return merged.map((participant) => {
+  const rows = participants.map((participant) => {
     const character = characterById.get(participant.speaker.id)
     return {
       id: participant.speaker.id,
@@ -172,4 +214,5 @@ function buildRows(
       ...(participant.role ? { role: participant.role } : {}),
     }
   })
+  return { rows, completeness }
 }

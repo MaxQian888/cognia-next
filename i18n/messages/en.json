@@ -8191,6 +8191,12 @@
     "userId": "User ID",
     "userIdPlaceholder": "usr_…"
   },
+  "chatRoom": {
+    "andMore": "{count, plural, other {# more}}",
+    "listLabel": "In this room",
+    "observedOnly": "Only members who have spoken are listed.",
+    "participants": "{count, plural, other {# in this room}}"
+  },
   "chatTemplatesSettings": {
     "adopt": "Adopt into my library",
     "adopted": "Adopted {name}.",
@@ -9535,6 +9541,29 @@
       "noTeamSession": "Open a team conversation to see its members.",
       "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
       "openChat": "Open chat with {name}",
+      "roomSettings": {
+        "inertNote": "Reply mode and muting are stored now and take effect in a later release.",
+        "instructions": "Room instructions",
+        "instructionsPlaceholder": "Guidance every member reads at the top of each turn…",
+        "memory": "Long-term memory",
+        "memoryHint": "Members recall and save long-term memories in this room.",
+        "memoryOff": "Memory off",
+        "memoryOffHint": "Members neither recall nor save long-term memories here.",
+        "memoryOn": "Memory on",
+        "mute": "Mute {name} in this room",
+        "muted": "Muted",
+        "mutedMembers": "Muted members",
+        "noMuted": "Nobody is muted.",
+        "replyMode": "Reply mode",
+        "replyModes": {
+          "asleep": "Asleep",
+          "auto": "Replies to everything",
+          "mention_only": "Replies only when mentioned"
+        },
+        "summary": "{replyMode} · {memory}",
+        "title": "Room settings",
+        "unmute": "Unmute {name}"
+      },
       "sharedNotes": "Shared notes",
       "show": "Show members",
       "status": {

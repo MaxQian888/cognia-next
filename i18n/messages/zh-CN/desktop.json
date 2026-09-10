@@ -375,6 +375,29 @@
     "noTeamSession": "打开一个团队会话即可查看其成员。",
     "notesPlaceholder": "笔记会在每轮对话中注入到所有成员的对话上下文中…",
     "openChat": "打开与 {name} 的对话",
+    "roomSettings": {
+      "title": "房间设置",
+      "summary": "{replyMode} · {memory}",
+      "replyMode": "回复模式",
+      "replyModes": {
+        "auto": "回复所有消息",
+        "mention_only": "仅被 @ 时回复",
+        "asleep": "休眠"
+      },
+      "inertNote": "回复模式与静音现已保存，将在后续版本生效。",
+      "instructions": "房间指令",
+      "instructionsPlaceholder": "每位成员在每轮开始时都会读到的指引…",
+      "memory": "长期记忆",
+      "memoryOn": "记忆开启",
+      "memoryOff": "记忆关闭",
+      "memoryHint": "成员会在此房间中回忆并保存长期记忆。",
+      "memoryOffHint": "成员在此房间中既不回忆也不保存长期记忆。",
+      "mutedMembers": "已静音成员",
+      "noMuted": "没有成员被静音。",
+      "mute": "在此房间静音 {name}",
+      "unmute": "取消静音 {name}",
+      "muted": "已静音"
+    },
     "sharedNotes": "共享笔记",
     "show": "显示成员",
     "status": {

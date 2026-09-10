@@ -61,7 +61,7 @@ jest.mock("@/components/desktop/avatar-badge", () => ({
 
 let team: Team | undefined
 let characters: Character[]
-let session: { scratchpad?: string } | undefined
+let session: { scratchpad?: string; roomSettings?: Record<string, unknown> } | undefined
 jest.mock("@/hooks/data", () => ({
   // Every query in this panel is keyed off a different loader; dispatch on
   // which one the component passed rather than on call order.
@@ -240,4 +240,112 @@ it("renders the empty roster message for a team with no resolvable members", () 
   characters = []
   render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
   expect(screen.getByTestId("team-members-panel")).toHaveTextContent("desktop.memberList.empty")
+})
+
+describe("room settings (ADR-0177)", () => {
+  const open = () => fireEvent.click(screen.getByTestId("room-settings-toggle"))
+
+  it("stays folded under a one-line summary until asked", () => {
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    const summary = screen.getByTestId("room-settings-summary")
+    expect(summary).toHaveTextContent("replyModes.auto")
+    expect(summary).toHaveTextContent("memoryOn")
+    expect(screen.queryByTestId("room-instructions")).toBeNull()
+    open()
+    expect(screen.getByTestId("room-instructions")).toBeInTheDocument()
+    expect(screen.getByTestId("room-settings-toggle")).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("stores the reply mode and says it is not live yet", () => {
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    open()
+    const button = screen.getByTestId("room-reply-mode-mention_only")
+    // Dormant on purpose (batch 3 reads it): labelled inert and pinned here.
+    expect(button).toHaveAttribute("data-inert", "true")
+    expect(screen.getByTestId("room-settings-inert-note")).toHaveTextContent(
+      "desktop.memberList.roomSettings.inertNote"
+    )
+    fireEvent.click(button)
+    expect(updateSession).toHaveBeenCalledWith("s-1", {
+      roomSettings: { replyMode: "mention_only" },
+    })
+  })
+
+  it("mirrors the memory switch onto the two flags the memory plane reads", () => {
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    open()
+    const toggle = screen.getByTestId("room-memory-switch")
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByText("desktop.memberList.roomSettings.memoryHint")).toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(updateSession).toHaveBeenCalledWith("s-1", {
+      roomSettings: { memory: false },
+      memoryUse: false,
+      memoryLearn: false,
+    })
+  })
+
+  it("reads a room whose memory was switched off and shows the off copy", () => {
+    session = { roomSettings: { memory: false } }
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    expect(screen.getByTestId("room-settings-summary")).toHaveTextContent("memoryOff")
+    open()
+    expect(screen.getByTestId("room-memory-switch")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByText("desktop.memberList.roomSettings.memoryOffHint")).toBeInTheDocument()
+  })
+
+  it("persists the instructions after the typing pauses", () => {
+    jest.useFakeTimers()
+    try {
+      render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+      open()
+      fireEvent.change(screen.getByTestId("room-instructions"), {
+        target: { value: "Answer in one line." },
+      })
+      expect(updateSession).not.toHaveBeenCalled()
+      act(() => {
+        jest.advanceTimersByTime(500)
+      })
+      expect(updateSession).toHaveBeenCalledWith("s-1", {
+        roomSettings: { instructions: "Answer in one line." },
+      })
+      expect(screen.getByTestId("room-settings")).toHaveTextContent("charsCount:19")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("marks a muted member on its row and lets the section unmute it", () => {
+    session = { roomSettings: { mutedMemberIds: ["c-2"], replyMode: "asleep" } }
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    const badge = screen.getByTestId("team-member-muted-c-2")
+    expect(badge).toHaveTextContent("desktop.memberList.roomSettings.muted")
+    expect(badge).toHaveAttribute("data-inert", "true")
+    expect(screen.queryByTestId("team-member-muted-c-1")).toBeNull()
+    open()
+    fireEvent.click(screen.getByTestId("room-unmute-c-2"))
+    expect(updateSession).toHaveBeenCalledWith("s-1", {
+      roomSettings: { mutedMemberIds: [], replyMode: "asleep" },
+    })
+  })
+
+  it("mutes a member from its context menu without touching the other settings", async () => {
+    session = { roomSettings: { instructions: "keep" } }
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    fireEvent.contextMenu(screen.getByTestId("team-member-c-1"))
+    const item = await screen.findByTestId("team-member-mute-c-1")
+    expect(item).toHaveTextContent("mute:Brainstorm Buddy")
+    fireEvent.click(item)
+    expect(updateSession).toHaveBeenCalledWith("s-1", {
+      roomSettings: { instructions: "keep", mutedMemberIds: ["c-1"] },
+    })
+  })
+
+  it("says nobody is muted when the list is empty", () => {
+    render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+    open()
+    expect(screen.getByTestId("room-muted-members")).toHaveTextContent(
+      "desktop.memberList.roomSettings.noMuted"
+    )
+  })
 })

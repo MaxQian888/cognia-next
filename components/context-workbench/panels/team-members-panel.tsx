@@ -18,6 +18,11 @@
  *   transcript, and it was previously only visible in team settings.
  * - **Shared notes.** The session `scratchpad`, injected into every member's
  *   transcript each turn. Collapsible, debounced-persisted, unchanged.
+ * - **Room settings** (ADR-0177). Reply mode, room instructions, the memory
+ *   switch and the muted members, stored on `ChatSession.roomSettings`.
+ *   Instructions reach every member's prompt and the memory switch is what
+ *   the memory plane reads. Reply mode and muting are stored now and honoured
+ *   by the router in a later batch, and the section says so.
  * - **The members.** Each with its live status, its role in *this* team, the
  *   model it actually runs on (the member override, else the character's), and
  *   a supervisor marker when the team has a leader.
@@ -34,7 +39,14 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { AtSignIcon, ChevronDownIcon, ChevronRightIcon, CrownIcon, UsersIcon } from "lucide-react"
+import {
+  AtSignIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CrownIcon,
+  Settings2Icon,
+  UsersIcon,
+} from "lucide-react"
 
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Button } from "@/components/ui/button"
@@ -47,10 +59,18 @@ import {
 } from "@/components/ui/context-menu"
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useClientLiveQuery } from "@/hooks/data"
 import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { requestComposerMention } from "@/lib/chat/composer-mention-request"
+import {
+  MAX_ROOM_INSTRUCTIONS_CHARS,
+  ROOM_REPLY_MODES,
+  resolveRoomSettings,
+  roomSettingsPatch,
+} from "@/lib/chat/room/settings"
+import type { RoomSettings } from "@/lib/chat/room/types"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { getTeam } from "@/lib/db/teams"
@@ -59,7 +79,7 @@ import { avatarColor } from "@/lib/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useUIStore, type MemberStatus } from "@/stores/ui"
 import { loggers } from "@cognia/logging"
-import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
+import type { Character, ChatSession, Team, TeamMember } from "@cognia/agent-config-types"
 
 const log = loggers.ui
 
@@ -94,6 +114,13 @@ export function TeamMembersPanel({ teamSessionId, teamId, onNavigated }: Props) 
     [teamId],
     undefined
   )
+
+  const session = useClientLiveQuery<ChatSession | undefined>(
+    () => (teamSessionId ? getSession(teamSessionId) : Promise.resolve(undefined)),
+    [teamSessionId],
+    undefined
+  )
+  const roomSettings = useMemo(() => resolveRoomSettings(session), [session])
 
   const memberIdsKey = team?.members.map((m) => m.characterId).join(",") ?? ""
   const characters = useClientLiveQuery<Character[]>(
@@ -148,6 +175,12 @@ export function TeamMembersPanel({ teamSessionId, teamId, onNavigated }: Props) 
 
       <SharedNotes teamSessionId={teamSessionId} />
 
+      <RoomSettingsSection
+        teamSessionId={teamSessionId}
+        session={session}
+        members={rows.map((row) => row.character)}
+      />
+
       <ScrollArea className="flex-1">
         {rows.length === 0 ? (
           <p className="px-3 py-4 text-xs text-muted-foreground">{t("empty")}</p>
@@ -161,6 +194,12 @@ export function TeamMembersPanel({ teamSessionId, teamId, onNavigated }: Props) 
                 character={character}
                 supervisor={team?.supervisorCharacterId === character.id}
                 status={memberStatus[`${teamSessionId}::${character.id}`] ?? "idle"}
+                muted={roomSettings.mutedMemberIds.includes(character.id)}
+                onToggleMute={() =>
+                  persistRoomSettings(teamSessionId, session, {
+                    mutedMemberIds: toggleId(roomSettings.mutedMemberIds, character.id),
+                  })
+                }
                 onNavigated={onNavigated}
               />
             ))}
@@ -248,12 +287,213 @@ function SharedNotes({ teamSessionId }: { teamSessionId: string }) {
   )
 }
 
+function toggleId(ids: readonly string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((existing) => existing !== id) : [...ids, id]
+}
+
+/** One write path for every control, so the memory mirror can never be skipped. */
+function persistRoomSettings(
+  teamSessionId: string,
+  session: ChatSession | undefined,
+  change: Partial<RoomSettings>
+): void {
+  void updateSession(teamSessionId, roomSettingsPatch(session?.roomSettings, change)).catch(
+    (err) => {
+      log.error("room settings persist failed", err, { teamSessionId })
+    }
+  )
+}
+
+/**
+ * The room's own settings (ADR-0177, batch 1). Collapsed by default with a
+ * one-line summary, because the members list is what the panel is for.
+ *
+ * Reply mode and muting are the two dormant controls: their values are stored
+ * on the row today and read by the router in batch 3. They render, they
+ * persist, and the note under them says they do not yet steer a turn, which
+ * is the label hard rule 7 asks for.
+ */
+function RoomSettingsSection({
+  teamSessionId,
+  session,
+  members,
+}: {
+  teamSessionId: string
+  session: ChatSession | undefined
+  members: readonly Character[]
+}) {
+  const t = useTranslations("desktop.memberList")
+  const [collapsed, setCollapsed] = useState(true)
+  const resolved = useMemo(() => resolveRoomSettings(session), [session])
+
+  const [draft, setDraft] = useState(resolved.instructions)
+  const lastSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (lastSessionRef.current === teamSessionId) return
+    lastSessionRef.current = teamSessionId
+    setDraft(resolved.instructions)
+  }, [teamSessionId, resolved.instructions])
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (lastSessionRef.current !== teamSessionId) return
+    if (draft === resolved.instructions) return
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      persistRoomSettings(teamSessionId, session, { instructions: draft })
+    }, 500)
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, teamSessionId])
+
+  const nameOf = (id: string) => members.find((member) => member.id === id)?.name ?? id
+  const summary = t("roomSettings.summary", {
+    replyMode: t(`roomSettings.replyModes.${resolved.replyMode}`),
+    memory: t(resolved.memory ? "roomSettings.memoryOn" : "roomSettings.memoryOff"),
+  })
+
+  return (
+    <div className="shrink-0 border-b" data-testid="room-settings">
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => setCollapsed((value) => !value)}
+        aria-expanded={!collapsed}
+        data-testid="room-settings-toggle"
+        className="h-8 w-full justify-start gap-1.5 rounded-none px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+      >
+        {collapsed ? (
+          <ChevronRightIcon className="size-3 shrink-0" />
+        ) : (
+          <ChevronDownIcon className="size-3 shrink-0" />
+        )}
+        <Settings2Icon className="size-3 shrink-0" />
+        <span className="truncate">{t("roomSettings.title")}</span>
+        <span
+          className="ml-auto min-w-0 truncate font-normal normal-case tracking-normal"
+          data-testid="room-settings-summary"
+        >
+          {summary}
+        </span>
+      </Button>
+      {collapsed ? null : (
+        <div className="flex flex-col gap-3 px-3 pb-3 text-xs">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              {t("roomSettings.replyMode")}
+            </span>
+            <div
+              className="flex flex-wrap gap-1"
+              role="group"
+              aria-label={t("roomSettings.replyMode")}
+            >
+              {ROOM_REPLY_MODES.map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  size="sm"
+                  variant={resolved.replyMode === mode ? "secondary" : "outline"}
+                  aria-pressed={resolved.replyMode === mode}
+                  data-inert="true"
+                  data-testid={`room-reply-mode-${mode}`}
+                  onClick={() => persistRoomSettings(teamSessionId, session, { replyMode: mode })}
+                  className="h-7 px-2 text-xs"
+                >
+                  {t(`roomSettings.replyModes.${mode}`)}
+                </Button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground" data-testid="room-settings-inert-note">
+              {t("roomSettings.inertNote")}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label
+              htmlFor={`room-instructions-${teamSessionId}`}
+              className="flex items-center text-[11px] font-medium text-muted-foreground"
+            >
+              <span className="truncate">{t("roomSettings.instructions")}</span>
+              <span className="ml-auto shrink-0 font-normal tabular-nums">
+                {draft.length > 0 ? t("charsCount", { count: draft.length }) : ""}
+              </span>
+            </label>
+            <Textarea
+              id={`room-instructions-${teamSessionId}`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={3}
+              maxLength={MAX_ROOM_INSTRUCTIONS_CHARS}
+              placeholder={t("roomSettings.instructionsPlaceholder")}
+              data-testid="room-instructions"
+              className="resize-y text-xs"
+            />
+          </div>
+
+          <div className="flex items-start gap-2">
+            <Switch
+              id={`room-memory-${teamSessionId}`}
+              checked={resolved.memory}
+              onCheckedChange={(memory) => persistRoomSettings(teamSessionId, session, { memory })}
+              aria-label={t("roomSettings.memory")}
+              data-testid="room-memory-switch"
+            />
+            <label htmlFor={`room-memory-${teamSessionId}`} className="flex min-w-0 flex-col">
+              <span className="text-xs font-medium">{t("roomSettings.memory")}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {t(resolved.memory ? "roomSettings.memoryHint" : "roomSettings.memoryOffHint")}
+              </span>
+            </label>
+          </div>
+
+          <div className="flex flex-col gap-1" data-testid="room-muted-members">
+            <span className="text-[11px] font-medium text-muted-foreground">
+              {t("roomSettings.mutedMembers")}
+            </span>
+            {resolved.mutedMemberIds.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">{t("roomSettings.noMuted")}</p>
+            ) : (
+              <ul className="flex flex-wrap gap-1">
+                {resolved.mutedMemberIds.map((id) => (
+                  <li key={id}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-inert="true"
+                      data-testid={`room-unmute-${id}`}
+                      title={t("roomSettings.unmute", { name: nameOf(id) })}
+                      aria-label={t("roomSettings.unmute", { name: nameOf(id) })}
+                      onClick={() =>
+                        persistRoomSettings(teamSessionId, session, {
+                          mutedMemberIds: toggleId(resolved.mutedMemberIds, id),
+                        })
+                      }
+                      className="h-6 px-2 text-[11px]"
+                    >
+                      {nameOf(id)}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MemberRow({
   teamSessionId,
   slot,
   character,
   supervisor,
   status,
+  muted,
+  onToggleMute,
   onNavigated,
 }: {
   teamSessionId: string
@@ -261,6 +501,8 @@ function MemberRow({
   character: Character
   supervisor: boolean
   status: MemberStatus
+  muted: boolean
+  onToggleMute: () => void
   onNavigated?: () => void
 }) {
   const t = useTranslations("desktop.memberList")
@@ -335,6 +577,15 @@ function MemberRow({
                     aria-label={t("supervisor")}
                   />
                 ) : null}
+                {muted ? (
+                  <span
+                    className="shrink-0 rounded-sm bg-muted px-1 text-[10px] text-muted-foreground"
+                    data-inert="true"
+                    data-testid={`team-member-muted-${character.id}`}
+                  >
+                    {t("roomSettings.muted")}
+                  </span>
+                ) : null}
               </span>
               {/* Role in *this* team, then the model it will actually answer
                   with — the two facts that tell members of one team apart. */}
@@ -363,6 +614,15 @@ function MemberRow({
         <ContextMenuSeparator />
         <ContextMenuItem disabled={status !== "thinking"} onSelect={stop}>
           {t("stopMember")}
+        </ContextMenuItem>
+        <ContextMenuItem
+          data-inert="true"
+          data-testid={`team-member-mute-${character.id}`}
+          onSelect={onToggleMute}
+        >
+          {muted
+            ? t("roomSettings.unmute", { name: character.name })
+            : t("roomSettings.mute", { name: character.name })}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

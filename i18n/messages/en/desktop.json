@@ -375,6 +375,29 @@
     "noTeamSession": "Open a team conversation to see its members.",
     "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
     "openChat": "Open chat with {name}",
+    "roomSettings": {
+      "title": "Room settings",
+      "summary": "{replyMode} · {memory}",
+      "replyMode": "Reply mode",
+      "replyModes": {
+        "auto": "Replies to everything",
+        "mention_only": "Replies only when mentioned",
+        "asleep": "Asleep"
+      },
+      "inertNote": "Reply mode and muting are stored now and take effect in a later release.",
+      "instructions": "Room instructions",
+      "instructionsPlaceholder": "Guidance every member reads at the top of each turn…",
+      "memory": "Long-term memory",
+      "memoryOn": "Memory on",
+      "memoryOff": "Memory off",
+      "memoryHint": "Members recall and save long-term memories in this room.",
+      "memoryOffHint": "Members neither recall nor save long-term memories here.",
+      "mutedMembers": "Muted members",
+      "noMuted": "Nobody is muted.",
+      "mute": "Mute {name} in this room",
+      "unmute": "Unmute {name}",
+      "muted": "Muted"
+    },
     "sharedNotes": "Shared notes",
     "show": "Show members",
     "status": {

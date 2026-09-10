@@ -19,6 +19,12 @@ jest.mock("@/hooks/use-team-members", () => ({
   useTeamMemberRoles: () => mockRoles,
 }))
 
+let mockMemberships: unknown[] = []
+jest.mock("@/hooks/data", () => ({
+  useClientLiveQuery: (loader: () => Promise<unknown>) =>
+    loader.toString().includes("collabChatMemberships") ? mockMemberships : [],
+}))
+
 let mockMessages: unknown[] = []
 jest.mock("@/stores/chat", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -55,6 +61,7 @@ function imTurn(id: string, displayName: string) {
 beforeEach(() => {
   mockMembers = []
   mockRoles = new Map()
+  mockMemberships = []
   mockMessages = []
 })
 
@@ -126,5 +133,44 @@ describe("RoomParticipantsChip", () => {
 
     expect(await screen.findByText("Ben")).toBeInTheDocument()
     expect(screen.queryByText("13800138000")).not.toBeInTheDocument()
+  })
+
+  it("vouches for a team roster, and says an IM group's list is only who has spoken", async () => {
+    const user = userEvent.setup({ delay: null })
+    mockMembers = [character("char_a", "Ana"), character("char_b", "Ben")]
+    const team = render(
+      <RoomParticipantsChip session={session({ kind: "team", teamId: "team_1" })} />
+    )
+    await user.click(screen.getByTestId("room-participants-chip"))
+    await screen.findByText("Ana")
+    expect(screen.queryByTestId("room-participants-observed")).not.toBeInTheDocument()
+    team.unmount()
+
+    mockMembers = []
+    mockMessages = [imTurn("tg:1", "Ana"), imTurn("tg:2", "Ben")]
+    render(
+      <RoomParticipantsChip
+        session={session({ platformBinding: { platform: "telegram" } as never })}
+      />
+    )
+    await user.click(screen.getByTestId("room-participants-chip"))
+    expect(await screen.findByTestId("room-participants-observed")).toHaveTextContent(
+      "observedOnly"
+    )
+  })
+
+  it("reads a shared room's members from the collab mirror, guests included", async () => {
+    mockMemberships = [
+      { userId: "usr_1", role: "owner", guest: false, displayName: "Ana" },
+      { userId: "usr_2", role: "member", guest: true, displayName: "Guest Ben" },
+    ]
+    const user = userEvent.setup({ delay: null })
+    render(<RoomParticipantsChip session={session({ collaboration: {} as never })} />)
+    expect(screen.getByTestId("room-participants-chip").textContent).toContain("2")
+    await user.click(screen.getByTestId("room-participants-chip"))
+    expect(await screen.findByText("Ana")).toBeInTheDocument()
+    expect(screen.getByText("Guest Ben")).toBeInTheDocument()
+    expect(screen.getByText("owner")).toBeInTheDocument()
+    expect(screen.queryByTestId("room-participants-observed")).not.toBeInTheDocument()
   })
 })
