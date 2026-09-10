@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { listPlugins } from "@/lib/db/plugins"
 import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
+import { cn } from "@/lib/utils"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePluginsStore } from "@/stores/plugins"
 
@@ -23,7 +24,24 @@ function hasUpdate(row: PluginRow): boolean {
   return !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
 }
 
-export function PluginBatchActionsBar() {
+export interface PluginBatchActionsBarProps {
+  /**
+   * Extra classes for the floating bar.
+   *
+   * The bar is mounted by BOTH shells — `PluginPanel` on the desktop and
+   * `PluginsMobileBody` on `/plugins` and `/me/plugins` — and only one of them
+   * has a `MobileTabBar` under it, so the offset is the caller's to state.
+   * Compact callers pass `COMPACT_ABOVE_TAB_BAR_BOTTOM`; the default below
+   * clears the safe area only, which is right where there is no tab bar and
+   * inside it where there is.
+   *
+   * Merged through `cn()`, so a `bottom-*` here REPLACES the default rather
+   * than racing it on stylesheet order.
+   */
+  className?: string
+}
+
+export function PluginBatchActionsBar({ className }: PluginBatchActionsBarProps = {}) {
   const t = useTranslations("plugins.batchActions")
   const selection = usePluginsStore((s) => s.selection)
   const clearSelection = usePluginsStore((s) => s.clearSelection)
@@ -103,7 +121,10 @@ export function PluginBatchActionsBar() {
       // tall vertical column (with the `w-px` dividers rendering as stray
       // horizontal rules). Forcing row + wrap keeps it a horizontal toolbar
       // that only wraps onto extra rows when genuinely too narrow.
-      className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 flex flex-row flex-wrap items-center justify-center gap-2 px-4 py-2 shadow-lg overflow-hidden max-w-[min(calc(100vw-1rem),32rem)]"
+      className={cn(
+        "fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 flex flex-row flex-wrap items-center justify-center gap-2 px-4 py-2 shadow-lg overflow-hidden max-w-[min(calc(100vw-1rem),32rem)]",
+        className
+      )}
       role="region"
       aria-label={t("ariaLabel")}
     >

@@ -194,6 +194,25 @@ export async function restorePluginTables(
     registerMissing?: boolean
     requiredStoreNames?: readonly string[]
     recreateDatabase?: () => Dexie
+    /**
+     * Floor for the version this consolidated declaration lands on.
+     *
+     * Runtime registration bumps ONCE PER PLUGIN (`applyPluginTables`), so a
+     * host that enabled two table-owning plugins ends the session at
+     * `CURRENT_SCHEMA_VERSION + 2`. This function re-declares every one of
+     * those tables in a SINGLE patch, so it lands on `+1`, a lower number
+     * describing the identical store set. On a real IndexedDB that difference
+     * is invisible, because `nativeVerno` carries the previous session's
+     * number forward. On the headless brain it is not: fake-indexeddb starts
+     * empty on every boot, `nativeVerno` is 0, and the restored database ends
+     * up one version BELOW the snapshot that this very process wrote, which
+     * `restoreTableStore` refuses as incompatible, moving the manifest aside
+     * and silently rebooting the brain on an empty database.
+     *
+     * Callers that know the version the persisted data was written at pass it
+     * here so the consolidated declaration lands no lower.
+     */
+    minimumVersion?: number
   } = {}
 ): Promise<string[]> {
   // Serialized against applyPluginTables/removePluginTables via the shared lock
@@ -281,9 +300,10 @@ export async function restorePluginTables(
     // records the existing stores in its schema snapshot but runs no upgrade
     // transaction. A genuinely-missing store still forces a clean explicit bump.
     const nativeVerno = Math.round(db.backendDB().version / 10)
-    const targetVersion = requiresCreate
-      ? await nextSchemaVersion(db)
-      : Math.max(db.verno, nativeVerno)
+    const targetVersion = Math.max(
+      requiresCreate ? await nextSchemaVersion(db) : Math.max(db.verno, nativeVerno),
+      options.minimumVersion ?? 0
+    )
     db.close()
     // Boot-time repairs use a fresh, unopened CogniaDB. Declaring the complete
     // repaired schema before that instance's first open avoids WKWebView's

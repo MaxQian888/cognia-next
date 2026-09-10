@@ -75,6 +75,7 @@ jest.mock("@/lib/plugin/lifecycle/updater", () => ({
 
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { usePluginsStore } from "@/stores/plugins"
+import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 
 beforeEach(() => {
   setPluginEnabledForHostMock.mockClear()
@@ -170,5 +171,35 @@ describe("PluginBatchActionsBar", () => {
     fireEvent.click(screen.getByLabelText("clearSelection"))
     expect(usePluginsStore.getState().deleteQueue).toEqual([])
     expect(usePluginsStore.getState().selection.size).toBe(0)
+  })
+
+  /**
+   * The bar is `fixed`, and the two shells that mount it disagree about what
+   * is at the bottom of the viewport: `PluginPanel` has nothing there,
+   * `PluginsMobileBody` has `MobileTabBar`. The offset is therefore the
+   * caller's to state, and the merge has to actually REPLACE the default —
+   * two `bottom-*` utilities both present would be decided by stylesheet
+   * order, not by the caller.
+   */
+  describe("bottom offset", () => {
+    const bar = () => screen.getByRole("region", { name: "ariaLabel" })
+
+    it("clears only the safe area by default, for the shell with no tab bar", () => {
+      render(<PluginBatchActionsBar />)
+      expect(bar().className).toContain("bottom-[max(1rem,env(safe-area-inset-bottom))]")
+    })
+
+    it("takes the caller's lift instead of the default, not alongside it", () => {
+      render(<PluginBatchActionsBar className={COMPACT_ABOVE_TAB_BAR_BOTTOM} />)
+      expect(bar().className).toContain(COMPACT_ABOVE_TAB_BAR_BOTTOM)
+      expect(bar().className).not.toContain("bottom-[max(1rem,env(safe-area-inset-bottom))]")
+    })
+
+    it("keeps the rest of the floating-bar geometry when a class is passed", () => {
+      render(<PluginBatchActionsBar className={COMPACT_ABOVE_TAB_BAR_BOTTOM} />)
+      for (const cls of ["fixed", "left-1/2", "-translate-x-1/2", "z-30"]) {
+        expect(bar().className).toContain(cls)
+      }
+    })
   })
 })

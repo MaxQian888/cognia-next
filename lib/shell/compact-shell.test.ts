@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 
-import { COMPACT_PAGE_MIN_H, usesCompactShell } from "./compact-shell"
+import { COMPACT_ABOVE_TAB_BAR_BOTTOM, COMPACT_PAGE_MIN_H, usesCompactShell } from "./compact-shell"
 
 describe("usesCompactShell", () => {
   it("gives the compact shell to a narrow browser tab", () => {
@@ -64,6 +64,47 @@ describe("COMPACT_PAGE_MIN_H", () => {
   it("scans a directory that actually contains compact page bodies", () => {
     const root = join(__dirname, "..", "..")
     expect(grep("COMPACT_PAGE_MIN_H", join(root, "components", "mobile")).length).toBeGreaterThan(2)
+  })
+})
+
+describe("COMPACT_ABOVE_TAB_BAR_BOTTOM", () => {
+  it("clears the reserve COMPACT_PAGE_MIN_H subtracts, plus a gap off the bar", () => {
+    // Same two terms as the tab bar's own
+    // `h-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]`. A floating
+    // control offset only by the safe area renders INSIDE that band.
+    expect(COMPACT_ABOVE_TAB_BAR_BOTTOM).toBe(
+      "bottom-[calc(theme(spacing.14)+env(safe-area-inset-bottom,0px)+1rem)]"
+    )
+  })
+
+  it("is a complete class literal, not an expression Tailwind cannot see", () => {
+    // Tailwind scans source text. A `bottom-[calc(${reserve}+1rem)]` assembled
+    // at runtime compiles to no CSS at all and the control silently keeps its
+    // default offset.
+    expect(COMPACT_ABOVE_TAB_BAR_BOTTOM.startsWith("bottom-[")).toBe(true)
+    expect(COMPACT_ABOVE_TAB_BAR_BOTTOM).not.toContain("${")
+  })
+
+  /**
+   * The sweep. Every control lifted above the tab bar states the reserve once,
+   * here — re-inlining it is how the two spellings drift and how the next one
+   * gets the arithmetic subtly wrong.
+   */
+  it("is the only spelling of the lift outside this module", () => {
+    const root = join(__dirname, "..", "..")
+    const pattern = "bottom-\\[calc\\(theme\\(spacing\\.14\\)"
+    const hits = [...grep(pattern, join(root, "app")), ...grep(pattern, join(root, "components"))]
+    expect(hits).toEqual([])
+  })
+
+  // Guard the guard: an empty walk makes the assertion above vacuously true.
+  it("scans directories that actually lift controls above the tab bar", () => {
+    const root = join(__dirname, "..", "..")
+    const hits = [
+      ...grep("COMPACT_ABOVE_TAB_BAR_BOTTOM", join(root, "app")),
+      ...grep("COMPACT_ABOVE_TAB_BAR_BOTTOM", join(root, "components")),
+    ]
+    expect(hits.length).toBeGreaterThan(1)
   })
 })
 

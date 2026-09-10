@@ -29,9 +29,11 @@ import {
   type PluginAgentTurnRequest,
   type PluginAgentTurnResult,
 } from "@cognia/plugin-sdk/api/agent-turn"
+import { createUnattendedPermissionResponder } from "@/lib/claude/unattended-permission-responder"
 
 export {
   PluginAgentTurnError,
+  type PluginAgentTurnDenial,
   type PluginAgentTurnRequest,
   type PluginAgentTurnResult,
 } from "@cognia/plugin-sdk/api/agent-turn"
@@ -101,14 +103,22 @@ export async function runPluginAgentTurn(
   })
   if (request.permissionMode) sendOptions.permissionMode = request.permissionMode
 
+  // Nobody is watching this turn. A permission request is answered here,
+  // now, with a recorded denial, rather than left to whichever shell-specific
+  // listener happens to exist (desktop: silent auto-deny; headless: a
+  // five-minute hang reported as a timeout).
+  const permissions = createUnattendedPermissionResponder("plugin")
   const result = await runner.runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
     ...(request.signal ? { signal: request.signal } : {}),
     ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
+    onPermissionRequest: permissions.onPermissionRequest,
   })
 
   return {
     sessionId,
     text: result.text,
     ...(result.messageId ? { messageId: result.messageId } : {}),
+    status: permissions.needsApproval() ? "needs_approval" : "completed",
+    ...(permissions.needsApproval() ? { needsApproval: [...permissions.denials] } : {}),
   }
 }

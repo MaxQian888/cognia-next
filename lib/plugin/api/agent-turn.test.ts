@@ -49,6 +49,40 @@ beforeEach(() => {
 })
 
 describe("runPluginAgentTurn", () => {
+  it("answers a permission ask itself and reports needs_approval instead of completed", async () => {
+    runAndCaptureAssistantReply.mockImplementation(async (...args: unknown[]) => {
+      const opts = args[3] as {
+        onPermissionRequest?: (req: unknown) => { decision: string; message?: string }
+      }
+      const decision = opts.onPermissionRequest?.({
+        type: "permission_request",
+        sessionId: "s1",
+        requestId: "r1",
+        toolUseID: "tu1",
+        toolName: "Edit",
+        input: {},
+      })
+      expect(decision?.decision).toBe("deny")
+      expect(decision?.message).toContain("needs_approval")
+      return { text: "I could not edit the file.", messageId: "m1" }
+    })
+    const result = await runPluginAgentTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
+    expect(result.status).toBe("needs_approval")
+    expect(result.needsApproval).toEqual([
+      expect.objectContaining({ requestId: "r1", toolName: "Edit" }),
+    ])
+  })
+
+  it("reports completed when the turn never asked for a permission", async () => {
+    const result = await runPluginAgentTurn({ characterId: "c1", prompt: "go", cwd: "/repo" })
+    expect(result.status).toBe("completed")
+    expect(result.needsApproval).toBeUndefined()
+    const [, , , opts] = runAndCaptureAssistantReply.mock.calls[0] as unknown[]
+    expect((opts as { onPermissionRequest?: unknown }).onPermissionRequest).toEqual(
+      expect.any(Function)
+    )
+  })
+
   it("refuses an empty prompt or cwd before touching the database", async () => {
     await expect(runPluginAgentTurn({ ...base, prompt: "  " })).rejects.toBeInstanceOf(
       PluginAgentTurnError

@@ -440,7 +440,18 @@ fn plugin_db_connection(
     state: &PluginRuntimeState,
     plugin_id: &str,
 ) -> std::result::Result<Arc<Mutex<Connection>>, PluginApiError> {
+    // Keep revocation ordered before cache clearing, including cold opens.
+    let account = state.active_account.read();
+    if account.is_none() {
+        return Err(PluginApiError::permission_denied(
+            "plugin account is locked or unbound",
+        ));
+    }
     if let Some(conn) = state.db_connections.read().get(plugin_id).cloned() {
+        return Ok(conn);
+    }
+    let mut connections = state.db_connections.write();
+    if let Some(conn) = connections.get(plugin_id).cloned() {
         return Ok(conn);
     }
     let data_dir = state.plugin_dir(plugin_id).join("data");
@@ -451,10 +462,7 @@ fn plugin_db_connection(
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
         .map_err(|e| PluginApiError::internal(format!("db: pragma: {e}")))?;
     let handle = Arc::new(Mutex::new(conn));
-    state
-        .db_connections
-        .write()
-        .insert(plugin_id.to_string(), handle.clone());
+    connections.insert(plugin_id.to_string(), handle.clone());
     Ok(handle)
 }
 
@@ -737,7 +745,21 @@ fn managed_ide_key(payload: &Value) -> std::result::Result<String, PluginApiErro
 fn managed_ide_state_connection(
     state: &PluginRuntimeState,
     plugin_id: &str,
-) -> std::result::Result<Connection, PluginApiError> {
+) -> std::result::Result<Arc<Mutex<Connection>>, PluginApiError> {
+    // Keep revocation ordered before cache clearing, including cold opens.
+    let account = state.active_account.read();
+    if account.is_none() {
+        return Err(PluginApiError::permission_denied(
+            "plugin account is locked or unbound",
+        ));
+    }
+    if let Some(connection) = state.managed_ide_connections.read().get(plugin_id).cloned() {
+        return Ok(connection);
+    }
+    let mut connections = state.managed_ide_connections.write();
+    if let Some(connection) = connections.get(plugin_id).cloned() {
+        return Ok(connection);
+    }
     let data_dir = state.plugin_host_state_dir(plugin_id);
     std::fs::create_dir_all(&data_dir)
         .map_err(|error| PluginApiError::internal(format!("managed IDE state mkdir: {error}")))?;
@@ -760,6 +782,8 @@ fn managed_ide_state_connection(
              );",
         )
         .map_err(|error| PluginApiError::internal(format!("managed IDE state schema: {error}")))?;
+    let connection = Arc::new(Mutex::new(connection));
+    connections.insert(plugin_id.to_string(), Arc::clone(&connection));
     Ok(connection)
 }
 
@@ -770,7 +794,8 @@ fn handle_managed_ide_state(
     payload: &Value,
 ) -> std::result::Result<Value, PluginApiError> {
     let partition = managed_ide_partition(payload)?;
-    let mut connection = managed_ide_state_connection(state, plugin_id)?;
+    let connection = managed_ide_state_connection(state, plugin_id)?;
+    let mut connection = connection.lock();
     match op {
         "get" => {
             let key = managed_ide_key(payload)?;
@@ -902,6 +927,7 @@ fn handle_managed_ide_secrets(
     let partition = managed_ide_partition(payload)?;
     let namespace = format!("plugin-ide:{plugin_id}:{partition}");
     let connection = managed_ide_state_connection(state, plugin_id)?;
+    let connection = connection.lock();
     match op {
         "get" => {
             let key = managed_ide_key(payload)?;
@@ -1943,6 +1969,106 @@ mod tests {
     }
 
     #[test]
+    fn managed_ide_state_connection_is_shared_but_separate_from_plugin_sql() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let tmp = TempDir::new().unwrap();
+        let state = Arc::new(seeded_state(&tmp));
+        let barrier = Arc::new(Barrier::new(16));
+        let workers: Vec<_> = (0..16)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    managed_ide_state_connection(&state, "demo").unwrap()
+                })
+            })
+            .collect();
+        let connections: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        let cached = managed_ide_state_connection(&state, "demo").unwrap();
+        assert!(connections
+            .iter()
+            .all(|connection| Arc::ptr_eq(connection, &cached)));
+        let plugin = plugin_db_connection(&state, "demo").unwrap();
+        assert!(!Arc::ptr_eq(&plugin, &cached));
+        assert!(!plugin
+            .lock()
+            .table_exists(None, "managed_ide_state")
+            .unwrap());
+        let other = managed_ide_state_connection(&state, "other").unwrap();
+        assert!(!Arc::ptr_eq(&cached, &other));
+    }
+
+    #[test]
+    fn managed_ide_state_open_failure_retries_and_reopened_state_keeps_data() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let directory = state.plugin_host_state_dir("demo");
+        std::fs::create_dir_all(directory.parent().unwrap()).unwrap();
+        std::fs::write(&directory, "blocked").unwrap();
+        assert!(managed_ide_state_connection(&state, "demo").is_err());
+        assert!(state.managed_ide_connections.read().is_empty());
+        std::fs::remove_file(&directory).unwrap();
+        let scope = ide_scope("acct_test", "local", "/workspace/a", "workspace");
+        let payload = json!({"scope": scope["scope"], "key": "selection", "value": {"line": 3}});
+        handle_managed_ide_state(&state, "demo", "set", &payload).unwrap();
+        drop(state);
+        let reopened = seeded_state(&tmp);
+        assert_eq!(
+            handle_managed_ide_state(&reopened, "demo", "get", &payload).unwrap(),
+            json!({"line": 3})
+        );
+    }
+
+    #[test]
+    fn db_caches_require_an_active_account_and_refresh_after_account_changes() {
+        let tmp = TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        for error in [
+            plugin_db_connection(&state, "demo").unwrap_err(),
+            managed_ide_state_connection(&state, "demo").unwrap_err(),
+        ] {
+            assert_eq!(error.code, "PERMISSION_DENIED");
+        }
+        assert!(state.db_connections.read().is_empty());
+        assert!(state.managed_ide_connections.read().is_empty());
+        state.activate_account("acct_a").unwrap();
+        let plugin_a = plugin_db_connection(&state, "demo").unwrap();
+        let ide_a = managed_ide_state_connection(&state, "demo").unwrap();
+        state.clear_account();
+        assert!(plugin_db_connection(&state, "demo").is_err());
+        assert!(managed_ide_state_connection(&state, "demo").is_err());
+        state.activate_account("acct_b").unwrap();
+        assert!(state.db_connections.read().is_empty());
+        assert!(state.managed_ide_connections.read().is_empty());
+        let plugin_b = plugin_db_connection(&state, "demo").unwrap();
+        let ide_b = managed_ide_state_connection(&state, "demo").unwrap();
+        assert!(!Arc::ptr_eq(&plugin_a, &plugin_b));
+        assert!(!Arc::ptr_eq(&ide_a, &ide_b));
+        state.activate_account("acct_b").unwrap();
+        assert!(Arc::ptr_eq(
+            &plugin_b,
+            &plugin_db_connection(&state, "demo").unwrap()
+        ));
+        assert!(Arc::ptr_eq(
+            &ide_b,
+            &managed_ide_state_connection(&state, "demo").unwrap()
+        ));
+        state.clear_account();
+        state.db_connections.write().clear();
+        state.managed_ide_connections.write().clear();
+        assert!(plugin_db_connection(&state, "demo").is_err());
+        assert!(managed_ide_state_connection(&state, "demo").is_err());
+        assert!(state.db_connections.read().is_empty());
+        assert!(state.managed_ide_connections.read().is_empty());
+    }
+
+    #[test]
     fn managed_ide_state_is_host_owned_and_partitioned() {
         let tmp = TempDir::new().unwrap();
         let state = seeded_state(&tmp);
@@ -2463,6 +2589,59 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.message.contains("timed out"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn db_concurrent_first_access_uses_one_cached_connection() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let tmp = TempDir::new().unwrap();
+        let state = Arc::new(seeded_state(&tmp));
+        let barrier = Arc::new(Barrier::new(16));
+        let workers: Vec<_> = (0..16)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    plugin_db_connection(&state, "demo")
+                })
+            })
+            .collect();
+        let connections: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap().expect("open plugin database"))
+            .collect();
+        let cached = state.db_connections.read().get("demo").cloned().unwrap();
+        assert!(
+            connections
+                .iter()
+                .all(|connection| Arc::ptr_eq(connection, &cached)),
+            "concurrent first calls must share the transaction connection"
+        );
+    }
+
+    #[test]
+    fn db_failed_open_is_retryable_and_plugin_connections_are_isolated() {
+        let tmp = TempDir::new().unwrap();
+        let state = seeded_state(&tmp);
+        let data = state.plugin_dir("demo").join("data");
+        std::fs::write(&data, "blocked").unwrap();
+        assert!(plugin_db_connection(&state, "demo").is_err());
+        assert!(!state.db_connections.read().contains_key("demo"));
+        std::fs::remove_file(&data).unwrap();
+        let demo = plugin_db_connection(&state, "demo").unwrap();
+        let again = plugin_db_connection(&state, "demo").unwrap();
+        assert!(Arc::ptr_eq(&demo, &again));
+        demo.lock()
+            .execute_batch("CREATE TABLE only_demo (id INTEGER);")
+            .unwrap();
+        let other = plugin_db_connection(&state, "other").unwrap();
+        assert!(!Arc::ptr_eq(&demo, &other));
+        assert!(!other.lock().table_exists(None, "only_demo").unwrap());
+        assert!(state.plugin_dir("demo").join("data/plugin.db").is_file());
+        assert!(state.plugin_dir("other").join("data/plugin.db").is_file());
     }
 
     #[test]

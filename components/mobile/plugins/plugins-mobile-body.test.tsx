@@ -32,7 +32,12 @@ jest.mock("@/components/plugins/dialogs/plugin-filter-sheet", () => ({
   PluginFilterSheet: () => null,
 }))
 jest.mock("@/components/plugins/plugin-batch-actions-bar", () => ({
-  PluginBatchActionsBar: () => null,
+  // Renders its `className` rather than nothing: the offset this body hands the
+  // bar is the whole reason the bar doesn't cover the tab bar, and a `() => null`
+  // stub is exactly what let that regress unnoticed.
+  PluginBatchActionsBar: ({ className }: { className?: string }) => (
+    <div data-testid="stub-batch-bar" data-classname={className} />
+  ),
 }))
 jest.mock("@/components/plugins/plugin-panel-toolbar", () => ({
   PluginPanelToolbar: () => <div data-testid="stub-toolbar" />,
@@ -78,6 +83,8 @@ jest.mock("@/hooks/plugins", () => ({
 import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import { usePluginsStore } from "@/stores/plugins"
+
+import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 
 import { PluginsMobileBody } from "./plugins-mobile-body"
 
@@ -175,5 +182,28 @@ describe("PluginsMobileBody", () => {
     expect(screen.queryByRole("heading", { name: "title" })).toBeNull()
     fireEvent.click(screen.getByTestId("plugins-mobile-refresh"))
     expect(mockSync).toHaveBeenCalled()
+  })
+
+  /**
+   * Both routes that mount this body — `/plugins` and `/me/plugins` — keep
+   * `MobileTabBar` on screen (neither is in `TAB_BAR_HIDDEN_PREFIXES`, neither
+   * is a `/workflows/` sub-route). The bar's own default offset clears the
+   * safe area only, which parks it inside the tab bar's band, so the lift has
+   * to come from here.
+   */
+  it("lifts the batch actions bar above the compact shell's tab bar", () => {
+    render(<PluginsMobileBody />)
+    expect(screen.getByTestId("stub-batch-bar")).toHaveAttribute(
+      "data-classname",
+      COMPACT_ABOVE_TAB_BAR_BOTTOM
+    )
+  })
+
+  it("lifts it on the `/me/plugins` mount too, which also keeps the tab bar", () => {
+    render(<PluginsMobileBody showHeader={false} />)
+    expect(screen.getByTestId("stub-batch-bar")).toHaveAttribute(
+      "data-classname",
+      COMPACT_ABOVE_TAB_BAR_BOTTOM
+    )
   })
 })

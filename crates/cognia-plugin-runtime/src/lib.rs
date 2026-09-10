@@ -155,6 +155,10 @@ pub struct PluginRuntimeState {
     /// BEGIN/COMMIT/ROLLBACK statements. The inner `Mutex` serialises access so
     /// the connection (which is `!Sync`) can live in shared state.
     pub db_connections: Arc<RwLock<HashMap<String, Arc<Mutex<rusqlite::Connection>>>>>,
+    /// Host-owned managed IDE state uses a separate cache and database from
+    /// arbitrary plugin SQL, keyed by plugin id and cleared at account teardown.
+    pub(crate) managed_ide_connections:
+        Arc<RwLock<HashMap<String, Arc<Mutex<rusqlite::Connection>>>>>,
     /// Per-plugin allowlist of shell commands (program names) the plugin
     /// declared in its manifest `shellCommands`. DENY-by-default: a plugin with
     /// no entry — or an empty list — may execute NO command. This is the
@@ -209,6 +213,7 @@ impl PluginRuntimeState {
             processes: Arc::new(RwLock::new(HashMap::new())),
             node_plugin_processes: Arc::new(Mutex::new(HashMap::new())),
             db_connections: Arc::new(RwLock::new(HashMap::new())),
+            managed_ide_connections: Arc::new(RwLock::new(HashMap::new())),
             shell_allowlist: Arc::new(RwLock::new(HashMap::new())),
         };
         let recovery = marketplace::recover_update_transactions_for_state(&state);
@@ -232,6 +237,8 @@ impl PluginRuntimeState {
         let mut active = self.active_account.write();
         if active.as_deref() != Some(account_id.as_str()) {
             self.permissions.write().clear();
+            self.db_connections.write().clear();
+            self.managed_ide_connections.write().clear();
             *active = Some(account_id);
         }
         Ok(())
@@ -442,6 +449,7 @@ pub async fn teardown_account_runtimes(
     plugins.context_menus.write().clear();
     plugins.tray_items.write().clear();
     plugins.db_connections.write().clear();
+    plugins.managed_ide_connections.write().clear();
     plugins.network_allowlist.write().clear();
     plugins.network_rules.write().clear();
     plugins.shell_allowlist.write().clear();
@@ -777,6 +785,15 @@ mod tests {
         plugins.set_network_allowlist("demo", vec!["example.com".into()]);
         plugins.set_shell_allowlist("demo", vec!["git".into()]);
 
+        plugins.db_connections.write().insert(
+            "demo".into(),
+            Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap())),
+        );
+        plugins.managed_ide_connections.write().insert(
+            "demo".into(),
+            Arc::new(Mutex::new(rusqlite::Connection::open_in_memory().unwrap())),
+        );
+
         let python = python::PythonRuntimeState::new(temp.path().join("python"));
         let wasm = wasm::WasmPluginState::default();
         let vscode = vscode::VscodeExtensionState::new(temp.path().join("vscode"));
@@ -789,6 +806,8 @@ mod tests {
         assert!(plugins.permissions.read().is_empty());
         assert!(plugins.network_allowlist.read().is_empty());
         assert!(plugins.shell_allowlist.read().is_empty());
+        assert!(plugins.db_connections.read().is_empty());
+        assert!(plugins.managed_ide_connections.read().is_empty());
         assert!(python::commands::plugin_python_list_for_state(&python).is_empty());
         assert!(wasm::WasmPluginHost::snapshot(&wasm).is_empty());
         assert!(vscode::commands::plugin_vscode_list_for_state(&vscode).is_empty());

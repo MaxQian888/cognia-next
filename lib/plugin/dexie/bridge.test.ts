@@ -380,6 +380,35 @@ describe("restorePluginTables", () => {
     expect(restored).toEqual([])
   })
 
+  it("lands on minimumVersion so a consolidated restore matches a per-plugin snapshot", async () => {
+    // Runtime registration bumps once per table-owning plugin, so two plugins
+    // leave a session (and its snapshot) at base + 2. The consolidated restore
+    // declares both in ONE patch, which lands at base + 1 without this floor,
+    // and the headless brain then rejects its own snapshot as incompatible.
+    const restored = await restorePluginTables(
+      db,
+      new Map([
+        ["plugin-a", { tables: [{ name: "x", schema: "++id" }] }],
+        ["plugin-b", { tables: [{ name: "y", schema: "&id" }] }],
+      ]),
+      { registerMissing: true, minimumVersion: 3 }
+    )
+
+    expect(restored.sort()).toEqual(["plugin-a:x", "plugin-b:y"])
+    expect(db.verno).toBe(3)
+  })
+
+  it("never lowers the version when minimumVersion is below the natural target", async () => {
+    const restored = await restorePluginTables(
+      db,
+      new Map([["plugin-a", { tables: [{ name: "x", schema: "++id" }] }]]),
+      { registerMissing: true, minimumVersion: 1 }
+    )
+
+    expect(restored).toEqual(["plugin-a:x"])
+    expect(db.verno).toBeGreaterThan(1)
+  })
+
   it("registers manifest-only tables in one boot-time bump when requested", async () => {
     const restored = await restorePluginTables(
       db,

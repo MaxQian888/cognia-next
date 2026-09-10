@@ -47,6 +47,32 @@ import type { Platform } from "@/lib/platform/detect"
 export const COMPACT_PAGE_MIN_H =
   "min-h-[calc(100dvh-theme(spacing.14)-env(safe-area-inset-bottom))]"
 
+/**
+ * `bottom` for a viewport-anchored control that has to sit ABOVE the compact
+ * shell's tab bar.
+ *
+ * `MobileTabBar` is `fixed inset-x-0 bottom-0` at
+ * `h-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]`. The usual spelling
+ * for a floating control — `bottom-[max(1rem,env(safe-area-inset-bottom))]` —
+ * only clears the safe area, so under the compact shell it renders INSIDE that
+ * band and covers the bottom navigation. Same reserve as `COMPACT_PAGE_MIN_H`,
+ * plus a 1rem gap so the control doesn't sit flush on the bar's border.
+ *
+ * A complete class literal, like `COMPACT_PAGE_MIN_H` above: Tailwind scans
+ * source text, so an expression assembled from fragments generates no CSS.
+ *
+ * The `,0px` fallback is the one deliberate difference from the tab bar's own
+ * declaration. An unsupported `env()` with no fallback invalidates the whole
+ * property, and losing `bottom` drops a `fixed` control back to its static
+ * offset; the bar only loses the inset off its height.
+ *
+ * Compact shell only — the desktop shell has no tab bar, so the lift would
+ * leave a stray gap there. Pass it from the compact caller rather than baking a
+ * platform check into a component both shells mount.
+ */
+export const COMPACT_ABOVE_TAB_BAR_BOTTOM =
+  "bottom-[calc(theme(spacing.14)+env(safe-area-inset-bottom,0px)+1rem)]"
+
 export function usesCompactShell(platform: Platform, compact: boolean): boolean {
   if (platform === "mobile") return true
   // Tauri for the window-controls reason above. `headless` has no webview at

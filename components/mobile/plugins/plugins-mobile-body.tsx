@@ -55,6 +55,7 @@ import {
 } from "@/hooks/plugins"
 import { isMirroredPluginClient } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { isTauri } from "@/lib/platform/detect"
+import { COMPACT_ABOVE_TAB_BAR_BOTTOM } from "@/lib/shell/compact-shell"
 import { usePluginsStore, type PluginNavSection } from "@/stores/plugins"
 
 export interface PluginsMobileBodyProps {
@@ -130,7 +131,12 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
         onClose={() => setRollbackTarget(null)}
       />
       <PluginFilterSheet />
-      <PluginBatchActionsBar />
+      {/* The bar is `fixed` and shared with the desktop panel, where its
+          safe-area-only offset is correct. Here it is not: both routes that
+          mount this body (`/plugins` and `/me/plugins`) keep `MobileTabBar`
+          on screen, so the default offset parks the bar inside the tab bar's
+          band and covers the bottom navigation. */}
+      <PluginBatchActionsBar className={COMPACT_ABOVE_TAB_BAR_BOTTOM} />
 
       {showHeader ? (
         <header className="safe-area-pt flex shrink-0 items-center gap-2 border-b px-3 py-2">
