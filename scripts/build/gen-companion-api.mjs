@@ -604,7 +604,7 @@ const HOST_CATEGORIES = [
     title: "Extensions and providers",
     description: "Plugins, skills, MCP servers, provider catalogs, the gateway plane, and diagnostics.",
     skill: "cognia-host-extensions",
-    pattern: /^(plugin_(?!media_)|skill_|skills_|mcp_|provider_|gateway_)/,
+    pattern: /^(plugin_|skill_|skills_|mcp_|provider_|gateway_)/,
   },
   {
     id: "knowledge",
