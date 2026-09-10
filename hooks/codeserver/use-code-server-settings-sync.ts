@@ -79,7 +79,7 @@ export function useCodeServerSettingsSync(
   )
 
   useEffect(() => {
-    if (!enabled || !isTauri() || !resolvedTheme) return
+    if (!enabled || !resolvedTheme) return
     let cancelled = false
     void (async () => {
       const activePluginTheme = activePluginThemeId
@@ -103,7 +103,7 @@ export function useCodeServerSettingsSync(
       // platform default. Routed through `getShellColors` — the same helper the
       // desktop window and the mobile status bar use — so there is one
       // palette-token-to-shell-hex conversion rather than a second one here.
-      if (linkTheme) {
+      if (linkTheme && isTauri()) {
         setCodeServerPaneBackground(
           getShellColors(
             {
@@ -128,8 +128,8 @@ export function useCodeServerSettingsSync(
         linkTheme,
       })
       // Read-merge-write so anything the user set from inside VS Code survives.
-      const existing = await codeServerClient.readUserSettings(profile).catch(() => "")
-      if (cancelled) return
+      const existing = await codeServerClient.readUserSettings(profile).catch(() => null)
+      if (cancelled || existing === null) return
       await codeServerClient
         .writeUserSettings(
           mergeCodeServerSettings(existing, managed, {

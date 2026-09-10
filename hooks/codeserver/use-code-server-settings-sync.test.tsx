@@ -211,10 +211,11 @@ it("does nothing while disabled", async () => {
   await waitFor(() => expect(client.readUserSettings).not.toHaveBeenCalled())
 })
 
-it("does nothing outside the desktop shell", async () => {
+it("syncs browser settings without calling the native webview", async () => {
   mockIsTauri = false
   renderHook(() => useCodeServerSettingsSync(true))
-  await waitFor(() => expect(client.readUserSettings).not.toHaveBeenCalled())
+  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalled())
+  expect(setPaneBackground).not.toHaveBeenCalled()
 })
 
 it("waits for next-themes to settle before writing anything", async () => {
@@ -230,9 +231,8 @@ it("never lets a sync failure escape", async () => {
 
   renderHook(() => useCodeServerSettingsSync(true))
 
-  // The write is still attempted from the empty-settings fallback, and neither
-  // rejection surfaces as an unhandled promise.
-  await waitFor(() => expect(client.writeUserSettings).toHaveBeenCalled())
+  await waitFor(() => expect(client.readUserSettings).toHaveBeenCalled())
+  expect(client.writeUserSettings).not.toHaveBeenCalled()
 })
 
 it("paints the native pane webview in the same background as the app", async () => {

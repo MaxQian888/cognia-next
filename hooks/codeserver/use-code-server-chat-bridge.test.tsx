@@ -261,12 +261,13 @@ it("does not subscribe while disabled", async () => {
   expect(handlers).toHaveLength(0)
 })
 
-it("does not subscribe outside the desktop shell", async () => {
+it("stages chat context from a browser transport", async () => {
   mockIsTauri = false
   renderHook(() => useCodeServerChatBridge(true, "/work/proj"))
   await flush()
-
-  expect(handlers).toHaveLength(0)
+  emit(makeChatEvent())
+  await flush()
+  expect(addContextSelection).toHaveBeenCalledTimes(1)
 })
 
 it("unsubscribes on unmount", async () => {

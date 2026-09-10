@@ -19,7 +19,6 @@ import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-loca
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
 import { useCodeServerProjectOpener } from "@/hooks/codeserver/use-code-server-project-opener"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
-import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 // Re-exported where it has always lived: `joinProjectPath` moved next to the
@@ -78,25 +77,6 @@ export function CodeServerPane({
   })
   const percent = progress != null ? Math.round(progress * 100) : null
 
-  /**
-   * Whether the workbench on screen is the one this process owns.
-   *
-   * Most of the app-to-IDE half no longer cares. The `codeserver_agent_*`
-   * verbs, `open_file`, and the settings / argv readers and writers are
-   * `target: "execution"` now, so `RoutingTransport` carries them to whichever
-   * host owns the workbench. Opening a file, applying an edit, saving all
-   * buffers, the theme sync and the language sync all land on the remote
-   * machine.
-   *
-   * What stays local is the reverse direction. The companion extension reports
-   * editor changes as Tauri events on the process that spawned code-server,
-   * and an event bus is not part of the companion RPC surface: there is no
-   * request for the app to make, so nothing carries them across. A remote
-   * workbench therefore drives nothing back into this app, which is why the
-   * two event consumers below keep this gate and the rest have lost it.
-   */
-  const localWorkbench = !useRemoteHostActive()
-
   const cancelDownload = useCallback(() => {
     // Fire-and-forget: the backend drops the streaming future and deletes the
     // partial archive, and the in-flight `ensure` rejects on its own. Swallow
@@ -133,15 +113,15 @@ export function CodeServerPane({
   )
   // Republish the extension's pushed editor changes as the app's active-editor
   // signal, so "what the user is looking at" stays live without anyone polling.
-  useCodeServerEditorEvents(phase === "ready" && localWorkbench, root)
+  useCodeServerEditorEvents(phase === "ready" && profile === "managed", root)
   // Bridge the extension's context-menu actions (Add to Chat, Explain, Fix…)
   // into the app's chat composer so they appear as staged context chips.
-  useCodeServerChatBridge(phase === "ready" && localWorkbench, root)
+  useCodeServerChatBridge(phase === "ready" && profile === "managed", root)
   // Feeds the extension's status bar item and side-bar trees. Gated on `ready`
   // only: pushing before the workbench is up just fails, and the live queries
   // re-push as soon as it is. Ungated on host, because the snapshot rides the
   // same execution-targeted command as the rest of the agent drive.
-  useCodeServerWorkspaceSync(phase === "ready", root)
+  useCodeServerWorkspaceSync(phase === "ready" && profile === "managed", root)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.

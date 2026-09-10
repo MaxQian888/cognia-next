@@ -4,7 +4,6 @@ import { useEffect } from "react"
 
 import { CODESERVER_EVENTS, type CodeServerEditorEvent } from "@/lib/codeserver/client"
 import { notifyActiveEditorChanged } from "@/lib/files/project-editor-bridge"
-import { isTauri } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 
@@ -42,7 +41,7 @@ const ACTIVE_EDITOR_EVENTS: ReadonlySet<CodeServerEditorEvent["name"]> = new Set
  */
 export function useCodeServerEditorEvents(enabled: boolean, root?: string): void {
   useEffect(() => {
-    if (!enabled || !isTauri()) return
+    if (!enabled) return
     let cancelled = false
     let unlisten: (() => void) | null = null
     void onTauriEvent<CodeServerEditorEvent>(CODESERVER_EVENTS.editorEvent, (payload) => {

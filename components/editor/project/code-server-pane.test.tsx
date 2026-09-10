@@ -538,17 +538,13 @@ describe("<CodeServerPane /> against a remote host", () => {
     expect(localeSync.mock.calls[0][0]).toBe(true)
   })
 
-  it("still stands down the two consumers that read editor events", () => {
-    // The reverse direction has no remote form: the companion extension
-    // reports editor changes as Tauri events on the process that spawned
-    // code-server, and an event bus is not part of the companion RPC surface.
-    // Leaving these on would listen to a local channel nothing publishes to.
+  it("receives remote editor events through the companion event stream", () => {
     mockRemoteHostActive = true
     paneState.phase = "ready"
     paneState.mounted = true
     renderPane()
-    expect(editorEvents).toHaveBeenCalledWith(false, "/repo")
-    expect(chatBridge).toHaveBeenCalledWith(false, "/repo")
+    expect(editorEvents).toHaveBeenCalledWith(true, "/repo")
+    expect(chatBridge).toHaveBeenCalledWith(true, "/repo")
   })
 
   it("registers as the project-editor opener against a remote host", () => {

@@ -1,4 +1,5 @@
-jest.mock("@/lib/tauri", () => ({ transport: { call: jest.fn() } }))
+let mockIsTauri = true
+jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri, transport: { call: jest.fn() } }))
 jest.mock("@/lib/tauri/companion-auth", () => ({
   companionAuthorizationHeaders: async () => ({ Authorization: "Bearer device-access-token" }),
 }))
@@ -12,6 +13,7 @@ import { __resetRemoteIdeRelayForTesting } from "./remote-relay"
 const call = transport.call as jest.Mock
 
 beforeEach(() => {
+  mockIsTauri = true
   __resetRoutingForTests()
   __resetRemoteIdeRelayForTesting()
   call.mockReset().mockResolvedValue(undefined)
@@ -317,4 +319,25 @@ it("still tears down the relay when the caller detaches mid-stop", async () => {
 it("does not touch the relay when no remote host was active", async () => {
   await codeServerClient.stopAll()
   expect(call.mock.calls.map((c) => c[0])).toEqual(["codeserver_stop_all"])
+})
+
+it("never binds or stops a native relay from a browser", async () => {
+  mockIsTauri = false
+  setActiveRemoteEndpoint({
+    baseUrl: "http://127.0.0.1:27891",
+    deviceId: "device-1",
+    devicePrivateKeyJwk: {},
+    deviceKeyThumbprint: "thumb",
+    serverVersion: "1",
+  })
+  const status = { running: true, port: 43210, version: "4.128.0" }
+  call.mockResolvedValue(status)
+  await expect(codeServerClient.ensure("/repo")).resolves.toEqual(status)
+  await codeServerClient.stop("/repo")
+  await codeServerClient.stopAll()
+  expect(call.mock.calls.map(([name]) => name)).toEqual([
+    "codeserver_ensure",
+    "codeserver_stop",
+    "codeserver_stop_all",
+  ])
 })

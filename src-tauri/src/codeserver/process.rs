@@ -929,6 +929,10 @@ fn code_server_args(
         args.push("--disable-workspace-trust".to_string());
     }
     args.extend([
+        "--session-socket".to_string(),
+        session_socket_path(user_data_dir)
+            .to_string_lossy()
+            .into_owned(),
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
@@ -946,6 +950,10 @@ pub(super) fn open_file_args(
     target: &str,
 ) -> Vec<String> {
     vec![
+        "--session-socket".to_string(),
+        session_socket_path(user_data_dir)
+            .to_string_lossy()
+            .into_owned(),
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
@@ -953,6 +961,63 @@ pub(super) fn open_file_args(
         "--reuse-window".to_string(),
         target.to_string(),
     ]
+}
+
+fn session_socket_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        // SAFETY: geteuid only reads the current process identity.
+        PathBuf::from("/tmp").join(format!("cgncs-{}", unsafe { libc::geteuid() }))
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("cognia-code-server")
+    }
+}
+
+/// Deep workspace/profile paths exceed Unix socket limits, especially on macOS.
+/// Both server startup and CLI navigation must use the same short profile socket.
+pub(super) fn session_socket_path(user_data_dir: &Path) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(user_data_dir.to_string_lossy().as_bytes());
+    session_socket_dir().join(format!("{}.sock", hex::encode(&digest[..16])))
+}
+
+pub(super) fn prepare_session_socket_dir() -> Result<(), String> {
+    prepare_session_socket_dir_at(&session_socket_dir())
+}
+
+fn prepare_session_socket_dir_at(directory: &Path) -> Result<(), String> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    match builder.create(&directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(format!("create code-server socket directory: {error}")),
+    }
+    let metadata = std::fs::symlink_metadata(&directory)
+        .map_err(|error| format!("inspect code-server socket directory: {error}"))?;
+    if !metadata.is_dir() {
+        return Err("code-server socket directory must be a private directory".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // SAFETY: geteuid only reads the current process identity.
+        if metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o077 != 0
+        {
+            return Err(
+                "code-server socket directory must be owned by this user with mode 0700"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn resolve_open_target(
@@ -1212,6 +1277,7 @@ async fn uninstall_managed_proxy(
 }
 
 fn spawn_child(binary: &str, args: &[String], envs: &[(&str, String)]) -> Result<Child, String> {
+    prepare_session_socket_dir()?;
     let mut cmd = Command::new(binary);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -1461,6 +1527,8 @@ mod tests {
         assert_eq!(
             args,
             vec![
+                "--session-socket",
+                session_socket_path(Path::new("/data/ud")).to_str().unwrap(),
                 "--user-data-dir",
                 "/data/ud",
                 "--extensions-dir",
@@ -1469,6 +1537,52 @@ mod tests {
                 "/work/proj/src/main.ts:42:7",
             ]
         );
+    }
+
+    #[test]
+    fn session_socket_is_short_stable_and_profile_scoped() {
+        let managed = Path::new("/very/long/profile/path").join("workspace/".repeat(40));
+        let native = managed.join("native");
+        let socket = session_socket_path(&managed);
+        assert!(socket.to_string_lossy().len() < 100);
+        assert_eq!(socket, session_socket_path(&managed));
+        assert_ne!(socket, session_socket_path(&native));
+        let args = code_server_args(
+            "/work",
+            12345,
+            &managed,
+            Path::new("/ext"),
+            IdeProfile::Managed,
+        );
+        let cli = open_file_args(&managed, Path::new("/ext"), "/work/main.ts:2:3");
+        let startup_socket = args
+            .windows(2)
+            .find(|pair| pair[0] == "--session-socket")
+            .unwrap();
+        let cli_socket = cli
+            .windows(2)
+            .find(|pair| pair[0] == "--session-socket")
+            .unwrap();
+        assert_eq!(startup_socket[1], cli_socket[1]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn session_socket_directory_is_private_and_refuses_symlinks() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("sockets");
+        prepare_session_socket_dir_at(&directory).unwrap();
+        prepare_session_socket_dir_at(&directory).unwrap();
+        assert_eq!(
+            std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let alias = root.path().join("alias");
+        symlink(&directory, &alias).unwrap();
+        assert!(prepare_session_socket_dir_at(&alias).is_err());
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(prepare_session_socket_dir_at(&directory).is_err());
     }
 
     #[test]

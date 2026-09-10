@@ -98,16 +98,27 @@ export function useCodeServerWorkspaceSync(enabled: boolean, root: string): void
       },
     })
 
-    const serialized = JSON.stringify(snapshot)
+    const serialized = JSON.stringify({ root, snapshot })
     if (serialized === lastPushed.current) return
-    lastPushed.current = serialized
 
-    // Best-effort: the workbench may still be booting, or the companion
-    // extension may not have dialled back yet. The next live-query tick pushes
-    // again, and a panel that is briefly empty is a far smaller problem than a
-    // render loop or a surfaced error for something the user never asked for.
-    void codeServerClient.pushWorkspaceSnapshot(root, snapshot).catch(() => {
-      lastPushed.current = null
-    })
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const push = async () => {
+      try {
+        await codeServerClient.pushWorkspaceSnapshot(root, snapshot)
+        if (!cancelled) lastPushed.current = serialized
+      } catch {
+        if (cancelled) return
+        lastPushed.current = null
+        // HTTP readiness precedes extension registration. Retry even when the
+        // workspace data stays unchanged, and stop when this pane goes away.
+        timer = setTimeout(() => void push(), 2_000)
+      }
+    }
+    void push()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [enabled, root, issues, plans, runs, t])
 }

@@ -25,7 +25,7 @@ jest.mock("@/lib/codeserver/client", () => ({
   codeServerClient: { pushWorkspaceSnapshot: (...a: unknown[]) => push(...a) },
 }))
 
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 import { useCodeServerWorkspaceSync } from "./use-code-server-workspace-sync"
 
 const issue = (over: Record<string, unknown> = {}) => ({
@@ -59,10 +59,11 @@ it("stays silent until the workbench is ready", () => {
   expect(push).not.toHaveBeenCalled()
 })
 
-it("does not re-push an identical snapshot", () => {
+it("does not re-push an identical snapshot", async () => {
   // The live queries re-fire on any write to the tables they touched, including
   // ones that change nothing this panel shows.
   const { rerender } = renderHook(() => useCodeServerWorkspaceSync(true, "/repo"))
+  await act(async () => {})
   rerender()
   rerender()
   expect(push).toHaveBeenCalledTimes(1)
@@ -91,4 +92,31 @@ it("retries after a failed push instead of latching the deduper", () => {
     rerender()
     expect(push).toHaveBeenCalledTimes(2)
   })
+})
+
+it("sends the same data to a newly selected workspace", () => {
+  const { rerender } = renderHook(({ root }) => useCodeServerWorkspaceSync(true, root), {
+    initialProps: { root: "/first" },
+  })
+  rerender({ root: "/second" })
+  expect(push).toHaveBeenLastCalledWith("/second", expect.any(Object))
+})
+
+it("retries extension startup without a data change and cancels on unmount", async () => {
+  jest.useFakeTimers()
+  try {
+    push.mockRejectedValueOnce(new Error("extension starting"))
+    const { unmount } = renderHook(() => useCodeServerWorkspaceSync(true, "/repo"))
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2_000)
+    })
+    expect(push).toHaveBeenCalledTimes(2)
+    unmount()
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(10_000)
+    })
+    expect(push).toHaveBeenCalledTimes(2)
+  } finally {
+    jest.useRealTimers()
+  }
 })

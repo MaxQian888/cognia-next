@@ -1,17 +1,44 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const ensure = jest.fn()
+const status = jest.fn()
+const stop = jest.fn()
+const mockSettingsSync = jest.fn()
+const mockLocaleSync = jest.fn()
+const mockWorkspaceSync = jest.fn()
+const mockEditorEvents = jest.fn()
+const mockChatBridge = jest.fn()
 const resolveEndpoint = jest.fn()
 const useCodeServerProjectOpener = jest.fn()
+
+jest.mock("@/hooks/codeserver/use-code-server-settings-sync", () => ({
+  useCodeServerSettingsSync: (...args: unknown[]) => mockSettingsSync(...args),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-locale-sync", () => ({
+  useCodeServerLocaleSync: (...args: unknown[]) => mockLocaleSync(...args),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-workspace-sync", () => ({
+  useCodeServerWorkspaceSync: (...args: unknown[]) => mockWorkspaceSync(...args),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
+  useCodeServerEditorEvents: (...args: unknown[]) => mockEditorEvents(...args),
+}))
+jest.mock("@/hooks/codeserver/use-code-server-chat-bridge", () => ({
+  useCodeServerChatBridge: (...args: unknown[]) => mockChatBridge(...args),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }))
 jest.mock("@/lib/codeserver/client", () => ({
-  codeServerClient: { ensure: (...args: unknown[]) => ensure(...args) },
+  codeServerClient: {
+    ensure: (...args: unknown[]) => ensure(...args),
+    status: (...args: unknown[]) => status(...args),
+    stop: (...args: unknown[]) => stop(...args),
+  },
 }))
 jest.mock("@/lib/tauri/companion-endpoint", () => ({
   defaultCompanionEndpointResolver: () => resolveEndpoint(),
@@ -50,6 +77,8 @@ beforeEach(() => {
   mockReportEmbedded = undefined
   ensure.mockResolvedValue({ running: true, port: 8321 })
   resolveEndpoint.mockResolvedValue(null)
+  status.mockResolvedValue({ running: true, port: 8321 })
+  stop.mockResolvedValue(true)
 })
 
 describe("CodeServerWebPane", () => {
@@ -81,7 +110,7 @@ describe("CodeServerWebPane", () => {
 
     // The workbench answers first. Rendering here would read the unresolved
     // host as "this shell IS the host" and frame 127.0.0.1 on another machine.
-    await waitFor(() => expect(ensure).toHaveBeenCalled())
+    expect(ensure).not.toHaveBeenCalled()
     expect(screen.queryByTestId("web-frame")).toBeNull()
     expect(screen.getByTestId("code-server-web-loading")).toBeInTheDocument()
 
@@ -182,4 +211,90 @@ describe("CodeServerWebPane", () => {
       expect.objectContaining({ enabled: false })
     )
   })
+})
+
+it("wires settings, language, workspace and editor events for a managed web pane", async () => {
+  render(<CodeServerWebPane root="/repo" />)
+  await waitFor(() => expect(mockWorkspaceSync).toHaveBeenLastCalledWith(true, "/repo"))
+  expect(mockSettingsSync).toHaveBeenLastCalledWith(true, "managed")
+  expect(mockLocaleSync).toHaveBeenLastCalledWith(
+    true,
+    expect.objectContaining({ restart: expect.any(Function) }),
+    "managed"
+  )
+  expect(mockEditorEvents).toHaveBeenLastCalledWith(true, "/repo")
+  expect(mockChatBridge).toHaveBeenLastCalledWith(true, "/repo")
+})
+
+it("keeps broker hooks disabled for the native extension profile", async () => {
+  render(<CodeServerWebPane root="/repo" profile="native" />)
+  await waitFor(() => expect(screen.getByTestId("web-frame")).toBeInTheDocument())
+  expect(mockWorkspaceSync).toHaveBeenLastCalledWith(false, "/repo")
+  expect(mockEditorEvents).toHaveBeenLastCalledWith(false, "/repo")
+  expect(mockChatBridge).toHaveBeenLastCalledWith(false, "/repo")
+})
+
+it("fails closed when the host identity cannot be resolved and re-resolves on retry", async () => {
+  resolveEndpoint.mockRejectedValueOnce(new Error("vault locked"))
+  render(<CodeServerWebPane root="/repo" />)
+  await waitFor(() => expect(screen.getByText(/vault locked/)).toBeInTheDocument())
+  expect(ensure).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+  await waitFor(() => expect(screen.getByTestId("web-frame")).toBeInTheDocument())
+  expect(resolveEndpoint).toHaveBeenCalledTimes(2)
+})
+
+it("withdraws a stopped workbench and can start it again", async () => {
+  jest.useFakeTimers()
+  try {
+    render(<CodeServerWebPane root="/repo" />)
+    await act(async () => {})
+    status.mockResolvedValue({ running: false, port: null })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000)
+    })
+    expect(screen.getByTestId("code-server-web-error")).toBeInTheDocument()
+    expect(useCodeServerProjectOpener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    )
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    await act(async () => {})
+    expect(ensure).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("web-frame")).toBeInTheDocument()
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+it("does not show a previous root while the next workspace is starting", async () => {
+  const { rerender } = render(<CodeServerWebPane root="/first" />)
+  await waitFor(() => expect(screen.getByTestId("web-frame")).toBeInTheDocument())
+  ensure.mockImplementationOnce(() => new Promise(() => {}))
+  await act(async () => {
+    rerender(<CodeServerWebPane root="/second" />)
+  })
+  expect(screen.queryByTestId("web-frame")).not.toBeInTheDocument()
+  expect(useCodeServerProjectOpener).toHaveBeenLastCalledWith(
+    expect.objectContaining({ root: "/second", enabled: false })
+  )
+})
+
+it("withdraws broker actions when another tab switches the workspace profile", async () => {
+  jest.useFakeTimers()
+  try {
+    render(<CodeServerWebPane root="/repo" profile="managed" />)
+    await act(async () => {})
+    status.mockResolvedValue({ running: true, port: 9321, profile: "native" })
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000)
+    })
+    expect(screen.getByText("projectEditor.proIde.profileChanged")).toBeInTheDocument()
+    expect(screen.queryByTestId("web-frame")).not.toBeInTheDocument()
+    expect(mockWorkspaceSync).toHaveBeenLastCalledWith(false, "/repo")
+    expect(useCodeServerProjectOpener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    )
+  } finally {
+    jest.useRealTimers()
+  }
 })

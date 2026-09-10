@@ -11,7 +11,7 @@
 import type { ElementRect } from "@/lib/browser/protocol"
 import type { ActiveEditorContext, ActiveEditorDiagnostic } from "@/lib/files/project-editor-bridge"
 import { ensureRemoteIdeRelay, stopRemoteIdeRelayRefresh } from "@/lib/codeserver/remote-relay"
-import { transport } from "@/lib/tauri"
+import { isTauri, transport } from "@/lib/tauri"
 import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
 
 /** Mirror of `codeserver::process::CodeServerStatus`. */
@@ -235,8 +235,8 @@ export const codeServerClient = {
   supported: () => transport.call<boolean>("codeserver_supported", {}),
   /** Ensure a healthy code-server serves `root`; returns its loopback port. */
   ensure: async (root: string, profile: CodeServerProfile = "managed") => {
+    const endpoint = isTauri() ? getActiveRemoteEndpoint() : null
     const status = await transport.call<CodeServerStatus>("codeserver_ensure", { root, profile })
-    const endpoint = getActiveRemoteEndpoint()
     if (!endpoint) return status
     if (!status.relayPath) {
       throw new Error("remote host did not provide a managed IDE relay path")
@@ -260,7 +260,7 @@ export const codeServerClient = {
    * report "local" and skip the relay teardown for the host being left.
    */
   stop: async (root: string) => {
-    const hadRemote = getActiveRemoteEndpoint() != null
+    const hadRemote = isTauri() && getActiveRemoteEndpoint() != null
     const stopped = await transport.call<boolean>("codeserver_stop", { root })
     if (hadRemote) {
       stopRemoteIdeRelayRefresh()
@@ -280,7 +280,7 @@ export const codeServerClient = {
    * the remote process. Same pre-await snapshot as {@link stop}.
    */
   stopAll: async () => {
-    const hadRemote = getActiveRemoteEndpoint() != null
+    const hadRemote = isTauri() && getActiveRemoteEndpoint() != null
     await transport.call<void>("codeserver_stop_all", {})
     if (hadRemote) {
       stopRemoteIdeRelayRefresh()

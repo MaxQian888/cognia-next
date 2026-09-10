@@ -77,12 +77,13 @@ it("preserves the other runtime arguments in the file", async () => {
   expect(written()).toEqual({ "enable-crash-reporter": false, locale: "zh-cn" })
 })
 
-it("treats an unreadable argv.json as empty rather than skipping the sync", async () => {
+it("preserves runtime arguments when the host read fails", async () => {
   client.readRuntimeArgs.mockRejectedValue(new Error("no app data dir"))
   renderHook(() => useCodeServerLocaleSync(true, { restart }))
 
-  await waitFor(() => expect(client.writeRuntimeArgs).toHaveBeenCalled())
-  expect(written().locale).toBe("zh-cn")
+  await waitFor(() => expect(client.readRuntimeArgs).toHaveBeenCalled())
+  expect(client.writeRuntimeArgs).not.toHaveBeenCalled()
+  expect(restart).not.toHaveBeenCalled()
 })
 
 it("does not restart when the write failed", async () => {
@@ -99,10 +100,10 @@ it("does nothing while disabled", async () => {
   await waitFor(() => expect(client.readRuntimeArgs).not.toHaveBeenCalled())
 })
 
-it("does nothing outside the desktop shell", async () => {
+it("syncs and restarts a browser workbench", async () => {
   mockIsTauri = false
   renderHook(() => useCodeServerLocaleSync(true, { restart }))
-  await waitFor(() => expect(client.readRuntimeArgs).not.toHaveBeenCalled())
+  await waitFor(() => expect(restart).toHaveBeenCalled())
 })
 
 it("does not restart just because the restart callback identity changed", async () => {

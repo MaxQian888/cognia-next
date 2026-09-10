@@ -112,12 +112,12 @@ it("does not subscribe while disabled", async () => {
   expect(handlers).toHaveLength(0)
 })
 
-it("does not subscribe outside the desktop shell", async () => {
+it("republishes editor activity through the browser transport", async () => {
   mockIsTauri = false
   renderHook(() => useCodeServerEditorEvents(true, "/work/proj"))
   await flush()
-
-  expect(handlers).toHaveLength(0)
+  emit({ name: "documentSaved" })
+  expect(notifyActiveEditorChanged).toHaveBeenCalledTimes(1)
 })
 
 it("unsubscribes on unmount", async () => {

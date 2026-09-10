@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl"
 
 import { CODESERVER_EVENTS, type CodeServerEditorEvent } from "@/lib/codeserver/client"
 import { startNewSession } from "@/lib/chat/start-session"
-import { isTauri } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useChatStore } from "@/stores/chat"
@@ -85,7 +84,7 @@ export function useCodeServerChatBridge(enabled: boolean, root?: string): void {
   }, [t])
 
   useEffect(() => {
-    if (!enabled || !isTauri()) return
+    if (!enabled) return
     let cancelled = false
     let unlisten: (() => void) | null = null
 

@@ -144,6 +144,24 @@ impl RemoteCodeServerState {
         if broker_enabled {
             install_managed_extensions(&binary, &self.data_dir, &paths).await;
         }
+        // The renderer persists display language before ensure/restart. Headless
+        // must prepare the same language pack as the desktop before VS Code starts.
+        let locale = tokio::fs::read_to_string(super::process::runtime_args_path_at(
+            &code_server_root,
+            profile,
+        )?)
+        .await
+        .ok()
+        .and_then(|raw| super::process::locale_from_runtime_args(&raw));
+        if let Some(locale) = locale.as_deref() {
+            super::process::install_language_pack(
+                &binary,
+                &paths.extensions_dir,
+                &paths.user_data_dir,
+                locale,
+            )
+            .await;
+        }
 
         let port = reserve_loopback_port()?;
         let relay_id = Uuid::new_v4().simple().to_string();
@@ -154,7 +172,9 @@ impl RemoteCodeServerState {
             let (broker_port, broker_token) = channel
                 .register_instance_for_host(&canonical, &self.host_id)
                 .await?;
-            let content_port = channel.content_port().await?;
+            let content_port = channel.content_port().await.inspect_err(|_| {
+                channel.deregister(&canonical);
+            })?;
             envs.extend([
                 ("COGNIA_CS_AGENT_PORT", broker_port.to_string()),
                 ("COGNIA_CS_AGENT_TOKEN", broker_token),
@@ -339,6 +359,11 @@ impl RemoteCodeServerState {
         if let Some(instance) = instance.as_mut() {
             instance.retire();
             super::agent_channel::global().deregister(&canonical);
+            // A profile switch must finish retiring the previous process before
+            // another child starts against this workspace.
+            if let Err(error) = instance.child.wait().await {
+                log::warn!("reap remote code-server for {canonical}: {error}");
+            }
             true
         } else {
             false
@@ -665,10 +690,13 @@ pub(crate) fn stopped_status() -> RemoteCodeServerStatus {
 }
 
 fn canonicalize_workspace(root: &str) -> Result<String, String> {
-    Path::new(root)
+    let canonical = Path::new(root)
         .canonicalize()
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|error| format!("resolve project root {root}: {error}"))
+        .map_err(|error| format!("resolve project root {root}: {error}"))?;
+    if !canonical.is_dir() {
+        return Err(format!("project root is not a directory: {root}"));
+    }
+    Ok(canonical.to_string_lossy().into_owned())
 }
 
 fn load_or_create_host_id(data_dir: &Path) -> String {
@@ -722,6 +750,7 @@ async fn verify_pinned_binary(binary: &str) -> Result<(), String> {
         Command::new(binary)
             .arg("--version")
             .stdin(Stdio::null())
+            .kill_on_drop(true)
             .output(),
     )
     .await
@@ -766,6 +795,10 @@ fn code_server_args(
         args.push("--disable-workspace-trust".to_string());
     }
     args.extend([
+        "--session-socket".to_string(),
+        super::process::session_socket_path(&paths.user_data_dir)
+            .to_string_lossy()
+            .into_owned(),
         "--user-data-dir".to_string(),
         paths.user_data_dir.to_string_lossy().into_owned(),
         "--extensions-dir".to_string(),
@@ -789,6 +822,7 @@ fn spawn_code_server(
     args: &[String],
     envs: &[(&str, String)],
 ) -> Result<Child, String> {
+    super::process::prepare_session_socket_dir()?;
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -1311,6 +1345,83 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn workspace_roots_must_be_existing_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.ts");
+        std::fs::write(&file, "export {};").unwrap();
+        assert_eq!(
+            canonicalize_workspace(dir.path().to_str().unwrap()).unwrap(),
+            dir.path().canonicalize().unwrap().to_string_lossy()
+        );
+        assert!(canonicalize_workspace(file.to_str().unwrap())
+            .unwrap_err()
+            .contains("not a directory"));
+        assert!(canonicalize_workspace(dir.path().join("missing").to_str().unwrap()).is_err());
+    }
+
+    #[tokio::test]
+    async fn persisted_runtime_locale_is_available_to_the_next_headless_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = RemoteCodeServerState::new(dir.path().to_path_buf());
+        state
+            .write_runtime_args("{\"locale\":\"zh-cn\"}".to_string(), IdeProfile::Managed)
+            .await
+            .unwrap();
+        let path = super::super::process::runtime_args_path_at(
+            &state.code_server_root(),
+            IdeProfile::Managed,
+        )
+        .unwrap();
+        let persisted = tokio::fs::read_to_string(path).await.unwrap();
+        assert_eq!(
+            super::super::process::locale_from_runtime_args(&persisted).as_deref(),
+            Some("zh-cn")
+        );
+        assert_eq!(
+            state.read_runtime_args(IdeProfile::Native).await.unwrap(),
+            ""
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stopping_an_instance_reaps_it_and_revokes_its_relay() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = canonicalize_workspace(dir.path().to_str().unwrap()).unwrap();
+        let state = RemoteCodeServerState::new(dir.path().to_path_buf());
+        let child = Command::new("/bin/sh")
+            .args(["-c", "exec sleep 60"])
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        state.instances.lock().await.insert(
+            root.clone(),
+            RemoteInstance {
+                port: 43117,
+                profile: IdeProfile::Native,
+                child,
+                relay_id: "test-relay".to_string(),
+                allowed_devices: HashSet::from(["dev-1".to_string()]),
+                binary_path: PathBuf::from("/bin/echo"),
+                user_data_dir: dir.path().join("user-data"),
+                extensions_dir: dir.path().join("extensions"),
+            },
+        );
+        assert_eq!(state.relay_port("test-relay", "dev-1").await, Some(43117));
+        assert!(state.stop(&root).await);
+        assert_eq!(state.relay_port("test-relay", "dev-1").await, None);
+        assert!(!state.status(&root, "dev-1").await.unwrap().running);
+        assert!(!state.stop(&root).await);
+        // SAFETY: signal zero only checks process existence; it sends no signal.
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
 
     #[test]
     fn preloaded_path_is_pinned_and_never_uses_npm_fallback() {

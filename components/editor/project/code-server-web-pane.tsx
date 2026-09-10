@@ -1,21 +1,6 @@
 "use client"
 
-// The "Pro IDE" surface for a shell that has no native webview to pin.
-//
-// The desktop twin (`code-server-pane.tsx`) owns a native child webview and is
-// unreachable off Tauri, which left every browser and phone with a toggle that
-// said "not supported on this platform" even while the host it was paired with
-// was perfectly capable of running the workbench. It is not the platform that
-// decides, it is where the browser is standing: a tab on the host's own machine
-// reaches the workbench over loopback, and one anywhere else cannot, because
-// the only other route in authenticates every request and an iframe carries no
-// bearer token. `lib/codeserver/web-embed.ts` holds that reasoning and
-// `CodeServerWebFrame` renders both outcomes.
-//
-// What this component adds is the lifecycle around the frame: ensure the host
-// has a workbench running for this root, and register it as the project-editor
-// opener so terminal links, review jumps and agent file-follows land in it
-// rather than falling back to the read-only viewer.
+// Browser workbench lifecycle; shared hooks route editor operations to its host.
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -23,6 +8,12 @@ import { Loader2Icon, RotateCwIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { CodeServerWebFrame } from "./code-server-web-frame"
+import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
+import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
+import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-workspace-sync"
+import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
+import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
+import { toast } from "sonner"
 import { useCodeServerProjectOpener } from "@/hooks/codeserver/use-code-server-project-opener"
 import {
   type CodeServerProfile,
@@ -43,41 +34,33 @@ interface Props {
 
 type Phase = "starting" | "ready" | "error"
 
-export function CodeServerWebPane({ root, profile = "managed", beforeOpen }: Props) {
+export function CodeServerWebPane(props: Props) {
+  return <WebWorkbenchSession key={`${props.root}:${props.profile ?? "managed"}`} {...props} />
+}
+
+function WebWorkbenchSession({ root, profile = "managed", beforeOpen }: Props) {
   const t = useTranslations("projectEditor")
   const [phase, setPhase] = useState<Phase>("starting")
   const [status, setStatus] = useState<CodeServerStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
-  /**
-   * The Host's base URL, or null when this shell IS the host.
-   *
-   * Resolved once and held. Which machine the Host is does not change without
-   * a re-pair, and letting it flip would swap the frame for a refusal notice
-   * (or the reverse) under a user who is working in it.
-   */
   const [hostBaseUrl, setHostBaseUrl] = useState<string | null>(null)
   const [hostResolved, setHostResolved] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const endpoint = await defaultCompanionEndpointResolver().catch(() => null)
-      if (cancelled) return
-      setHostBaseUrl(endpoint?.baseUrl ?? null)
-      setHostResolved(true)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const [framingRefused, setFramingRefused] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       setError(null)
       setPhase("starting")
+      setHostResolved(false)
+      setFramingRefused(false)
       try {
+        // Identity failures must not become a null endpoint (local host).
+        const endpoint = await defaultCompanionEndpointResolver()
+        if (cancelled) return
+        setHostBaseUrl(endpoint?.baseUrl ?? null)
+        setHostResolved(true)
         // `ensure` rather than `status`: the browser is the surface the user
         // just switched to, so starting the workbench is the expected effect of
         // that switch. It is idempotent, so an already-running host is a
@@ -98,6 +81,52 @@ export function CodeServerWebPane({ root, profile = "managed", beforeOpen }: Pro
   }, [attempt, profile, root])
 
   const retry = useCallback(() => setAttempt((n) => n + 1), [])
+  const restart = useCallback(() => {
+    setPhase("starting")
+    void codeServerClient
+      .stop(root)
+      .then(retry)
+      .catch((cause: unknown) => {
+        setError(String(cause))
+        setPhase("error")
+      })
+  }, [root, retry])
+
+  // Headless instances do not have the desktop pane's process watchdog.
+  // Check serially so a slow host never accumulates overlapping requests.
+  useEffect(() => {
+    if (phase !== "ready") return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const check = async () => {
+      try {
+        const next = await codeServerClient.status(root)
+        if (cancelled) return
+        if (next.profile && next.profile !== profile) {
+          setPhase("error")
+          setError(t("proIde.profileChanged"))
+          return
+        }
+        if (!next.running) {
+          setStatus(next)
+          setPhase("error")
+          setError(null)
+          return
+        }
+        setStatus(next)
+        timer = setTimeout(() => void check(), 5_000)
+      } catch (cause) {
+        if (cancelled) return
+        setError(String(cause))
+        setPhase("error")
+      }
+    }
+    timer = setTimeout(() => void check(), 5_000)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [phase, profile, root, t])
 
   // Only once the workbench answers, and only when the frame can actually show
   // it. Registering while the user is looking at a "open it on the host's own
@@ -115,13 +144,25 @@ export function CodeServerWebPane({ root, profile = "managed", beforeOpen }: Pro
   // and then the frame shows an "open in a tab" link instead. Start from the
   // target so the opener is live on the first render the frame is shown, and
   // let the frame withdraw it if the embed never loads.
-  const [framingRefused, setFramingRefused] = useState(false)
   const onEmbeddedChange = useCallback(
     (frameEmbedded: boolean) => setFramingRefused(!frameEmbedded),
     []
   )
   const embedded = phase === "ready" && hostResolved && targetKind === "embed" && !framingRefused
+  const managed = embedded && profile === "managed"
   useCodeServerProjectOpener({ root, enabled: embedded, beforeOpen })
+  useCodeServerSettingsSync(phase === "ready", profile)
+  useCodeServerLocaleSync(
+    phase === "ready",
+    {
+      restart,
+      onUntranslated: (locale) => toast.info(t("proIde.languageUnavailable", { locale })),
+    },
+    profile
+  )
+  useCodeServerWorkspaceSync(managed, root)
+  useCodeServerEditorEvents(managed, root)
+  useCodeServerChatBridge(managed, root)
 
   if (phase === "error") {
     return (

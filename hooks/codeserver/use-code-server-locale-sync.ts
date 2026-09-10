@@ -8,7 +8,6 @@ import {
   vscodeLocaleForAppLanguage,
   withRuntimeArgsLocale,
 } from "@/lib/codeserver/locale"
-import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores"
 
 export interface UseCodeServerLocaleSyncOptions {
@@ -60,12 +59,12 @@ export function useCodeServerLocaleSync(
   }, [options.restart, options.onUntranslated])
 
   useEffect(() => {
-    if (!enabled || !isTauri()) return
+    if (!enabled) return
     let cancelled = false
     void (async () => {
       const desired = vscodeLocaleForAppLanguage(language)
-      const existingRaw = await codeServerClient.readRuntimeArgs(profile).catch(() => "")
-      if (cancelled) return
+      const existingRaw = await codeServerClient.readRuntimeArgs(profile).catch(() => null)
+      if (cancelled || existingRaw === null) return
       if (readRuntimeArgsLocale(existingRaw) === desired) return
       try {
         await codeServerClient.writeRuntimeArgs(
