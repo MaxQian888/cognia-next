@@ -1340,8 +1340,17 @@ async fn pair_through_running_server(advertised_base_url: &str) -> Option<String
         }
     };
     let issue = body.get("result").cloned().unwrap_or(body);
+    encode_running_pair_invitation(&issue, advertised_base_url)
+}
+
+fn encode_running_pair_invitation(
+    issue: &serde_json::Value,
+    advertised_base_url: &str,
+) -> Option<String> {
+    // Keep the CLI's resolved --advertise-url / COGNIA_PUBLIC_URL, just as the
+    // standalone issuer does; the running host may advertise a different listener.
     let mut payload = serde_json::json!({
-        "base": issue.get("baseUrl").and_then(|v| v.as_str()).unwrap_or(advertised_base_url),
+        "base": advertised_base_url,
         "host": issue.get("hostId")?,
         "tenant": issue.get("tenantId")?,
         "exp": issue.get("expiresAtMs")?,
@@ -1941,8 +1950,8 @@ async fn run_serve(
 mod tests {
     use super::{
         agent_session_store_path, browser_plane_base_url, color_enabled,
-        encode_pair_invitation_payload, format_log_line, lark_entry, plugin_storage_dir,
-        report_lark_env, Cli, CliCommand, DevicesCommand,
+        encode_pair_invitation_payload, encode_running_pair_invitation, format_log_line,
+        lark_entry, plugin_storage_dir, report_lark_env, Cli, CliCommand, DevicesCommand,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use clap::Parser;
@@ -2186,6 +2195,44 @@ mod tests {
         assert_eq!(payload["mode"], "owner-invitation");
         assert!(payload.get("pairJwt").is_none());
         assert!(payload.get("deviceJwt").is_none());
+    }
+
+    #[test]
+    fn running_pair_payload_honors_advertised_url_and_preserves_the_issued_credentials() {
+        for relay in [
+            serde_json::Value::Null,
+            serde_json::json!({ "url": "wss://relay.example/signaling", "room": { "roomId": "pairing-room" }, "mobilePrivateKeyJwk": { "d": "one-shot-key" } }),
+        ] {
+            let issue = serde_json::json!({
+                "baseUrl": "https://127.0.0.1:27890",
+                "hostId": "host-a",
+                "tenantId": "tenant-a",
+                "expiresAtMs": 1_900_000_000_000i64,
+                "appVersion": "1.2.3",
+                "fingerprint": "sha256-fingerprint",
+                "invitation": "one-time-owner-invitation",
+                "relay": relay,
+            });
+            let encoded = encode_running_pair_invitation(&issue, "http://127.0.0.1:27891")
+                .expect("running server invitation");
+            let (header, body) = encoded.split_once('|').unwrap();
+            assert_eq!(header, if relay.is_null() { "cgnp3" } else { "cgnp4" });
+            let payload: serde_json::Value =
+                serde_json::from_slice(&URL_SAFE_NO_PAD.decode(body).unwrap()).unwrap();
+            assert_eq!(payload["base"], "http://127.0.0.1:27891");
+            assert_eq!(payload["host"], issue["hostId"]);
+            assert_eq!(payload["tenant"], issue["tenantId"]);
+            assert_eq!(payload["exp"], issue["expiresAtMs"]);
+            assert_eq!(payload["ver"], issue["appVersion"]);
+            assert_eq!(payload["fp"], issue["fingerprint"]);
+            assert_eq!(payload["invitation"], issue["invitation"]);
+            assert_eq!(payload["mode"], "owner-invitation");
+            if relay.is_null() {
+                assert!(payload.get("relay").is_none());
+            } else {
+                assert_eq!(payload["relay"], relay);
+            }
+        }
     }
 
     #[test]

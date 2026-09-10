@@ -904,6 +904,92 @@ async fn headless_claude_arms_reach_the_registry_sidecar() {
     assert!(err.1 .0.message.contains("not running"));
 }
 
+/// The two sidecar round-trips a paired device drives on the host's own
+/// runtime. They used to be `target: client`, so a phone's model picker was
+/// refused by its own transport; now the arm reaches the host's sidecar and
+/// rejects an off-allowlist method before anything touches stdin.
+#[tokio::test]
+async fn session_control_and_session_api_arms_reach_the_sidecar_and_gate_the_method() {
+    let state = test_state();
+    let host = headless_host();
+
+    // A method outside the SDK allowlist is a malformed request, not a sidecar
+    // error: it must never be written to stdin.
+    let err = dispatch(
+        "claude_session_control",
+        json!({ "sessionId": "s1", "requestId": "req-1", "method": "evalSync" }),
+        &state,
+        &host,
+        "dev1",
+        Some(ACCOUNT_ID),
+        Some("device"),
+    )
+    .await
+    .expect_err("evalSync is not an allowlisted control method");
+    assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    assert!(err.1 .0.message.contains("unsupported control method"));
+
+    // setModel, the phone's actual ask, reaches write_command: against the
+    // registry's not-running sidecar that surfaces as the plain "not running"
+    // error, proving the frame was built and handed to the supervisor.
+    let err = dispatch(
+        "claude_session_control",
+        json!({
+            "sessionId": "s1",
+            "requestId": "req-2",
+            "method": "setModel",
+            "params": { "model": "claude-opus-4-8" },
+            "commandId": "cmd-1"
+        }),
+        &state,
+        &host,
+        "dev1",
+        Some(ACCOUNT_ID),
+        Some("device"),
+    )
+    .await
+    .expect_err("no sidecar running");
+    assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        err.1 .0.message.contains("not running"),
+        "{}",
+        err.1 .0.message
+    );
+
+    // The session-level SDK arm gates its own allowlist the same way; the
+    // transcript-mutating names are exactly what must not be reachable by
+    // any spelling the allowlist does not name.
+    let err = dispatch(
+        "agent_session_api",
+        json!({ "requestId": "req-3", "method": "deleteEverything" }),
+        &state,
+        &host,
+        "dev1",
+        Some(ACCOUNT_ID),
+        Some("device"),
+    )
+    .await
+    .expect_err("deleteEverything is not a session api method");
+    assert_eq!(err.0, StatusCode::BAD_REQUEST);
+    assert!(err.1 .0.message.contains("unsupported session api method"));
+
+    // An empty request id can never be correlated; the shared body refuses it
+    // before spawning anything.
+    let err = dispatch(
+        "agent_session_api",
+        json!({ "requestId": "", "method": "listSessions" }),
+        &state,
+        &host,
+        "dev1",
+        Some(ACCOUNT_ID),
+        Some("device"),
+    )
+    .await
+    .expect_err("empty request id");
+    assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(err.1 .0.message.contains("requestId must not be empty"));
+}
+
 // ── External-agent arms: scope + policy + audit (ADR-0059 R11) ──────────
 
 #[test]
@@ -2968,6 +3054,120 @@ async fn integration_ingress_uses_the_headless_workflow_state() {
     )
     .await
     .expect("unregister integration route");
+}
+
+/// The workflow mirror and trigger daemons answer the brain on the headless
+/// host, and nobody else.
+///
+/// The brain's `lib/workflow/runtime/tauri-bridge.ts` has no `invoke`; these
+/// arms are the only way its orchestrator reaches cognia-server's run-state
+/// mirror and cron daemon. A paired device holds a device JWT and must be
+/// refused: the mirror is the host's own crash-resume state and the router
+/// holds webhook secrets.
+#[tokio::test]
+async fn workflow_mirror_commands_serve_the_headless_workflow_state() {
+    let state = test_state();
+    let services = crate::headless::HeadlessServices::stub_for_tests();
+    let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
+    let run_id = format!("run_mirror_{}", uuid::Uuid::new_v4().simple());
+    let persist = json!({
+        "input": {
+            "runId": run_id,
+            "workflowId": "wf_mirror",
+            "status": "running",
+            "snapshot": { "id": "wf_mirror" },
+        }
+    });
+
+    let denied = dispatch(
+        "workflow_persist_run_state",
+        persist.clone(),
+        &state,
+        &host,
+        "device-1",
+        Some(ACCOUNT_ID),
+        Some("device"),
+    )
+    .await
+    .expect_err("paired devices cannot write the host's workflow mirror");
+    assert_eq!(denied.0, StatusCode::FORBIDDEN);
+
+    let brain = |name: &'static str, args: Value| {
+        let state = state.clone();
+        let host = host.clone();
+        async move {
+            dispatch(
+                name,
+                args,
+                &state,
+                &host,
+                "brain-local",
+                Some(ACCOUNT_ID),
+                Some("service"),
+            )
+            .await
+        }
+    };
+
+    brain("workflow_persist_run_state", persist)
+        .await
+        .expect("persist a running row");
+    let rows = brain("workflow_reload_in_flight_runs", json!({}))
+        .await
+        .expect("reload in-flight rows");
+    let mine: Vec<&Value> = rows
+        .as_array()
+        .expect("a list of rows")
+        .iter()
+        .filter(|row| row["runId"] == run_id)
+        .collect();
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0]["workflowId"], "wf_mirror");
+    assert_eq!(mine[0]["snapshot"]["id"], "wf_mirror");
+
+    brain("workflow_ack_completed", json!({ "runId": run_id }))
+        .await
+        .expect("ack the completed run");
+    let rows = brain("workflow_reload_in_flight_runs", json!({}))
+        .await
+        .expect("reload after ack");
+    assert!(rows
+        .as_array()
+        .expect("a list of rows")
+        .iter()
+        .all(|row| row["runId"] != run_id));
+
+    let before = services.workflow.cron.entry_count();
+    brain(
+        "workflow_register_trigger",
+        json!({
+            "input": {
+                "triggerId": "trg_mirror",
+                "workflowId": "wf_mirror",
+                "kind": "trigger.cron",
+                "enabled": true,
+                "cron": "0 0 9 * * 1-5",
+            }
+        }),
+    )
+    .await
+    .expect("register a cron trigger with the headless daemon");
+    assert_eq!(services.workflow.cron.entry_count(), before + 1);
+    brain(
+        "workflow_unregister_trigger",
+        json!({ "workflowId": "wf_mirror", "triggerId": "trg_mirror" }),
+    )
+    .await
+    .expect("unregister the cron trigger");
+    assert_eq!(services.workflow.cron.entry_count(), before);
+
+    let url = brain(
+        "workflow_get_webhook_url",
+        json!({ "workflowId": "wf_mirror", "triggerId": "trg_missing" }),
+    )
+    .await
+    .expect("an unknown webhook trigger answers null, not an error");
+    assert_eq!(url, Value::Null);
 }
 
 /// A headless host must never answer approval RPCs from its own Rust

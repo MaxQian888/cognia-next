@@ -465,9 +465,9 @@ pub(super) async fn dispatch(
             .and_then(to_json)
         }
         "task_workspace_maintenance_events" => {
-            let limit: Option<u32> = optional(&args, "limit")?;
+            let page = page_request(&args)?;
             crate::task_workspace::service()
-                .and_then(|service| service.list_workspace_maintenance_events(limit.unwrap_or(100)))
+                .and_then(|service| crate::task_workspace::maintenance_events_page(&service, &page))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -603,11 +603,10 @@ pub(super) async fn dispatch(
         }
         "task_workspace_list_resource_events" => {
             let run_id: String = required(&args, "runId")?;
-            let cursor: Option<u64> = optional(&args, "cursor")?;
-            let limit: Option<u32> = optional(&args, "limit")?;
+            let page = page_request(&args)?;
             crate::task_workspace::service()
                 .and_then(|service| {
-                    service.list_resource_events(&run_id, cursor, limit.unwrap_or(200))
+                    crate::task_workspace::resource_events_page(&service, &run_id, &page)
                 })
                 .map_err(RpcError::internal)
                 .and_then(to_json)

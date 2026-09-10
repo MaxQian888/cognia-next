@@ -16,6 +16,12 @@ pub(super) const COMMANDS: &[&str] = &[
     "claude_set_mode",
     "claude_approve",
     "claude_close_session",
+    // Sidecar round-trips a paired device drives on the host's own agent
+    // runtime: live `Query` control (setModel, context usage, MCP status) and
+    // the session-level SDK functions (transcripts on disk). Both reply on
+    // `claude://message`, a default-on channel for every device.
+    "claude_session_control",
+    "agent_session_api",
     "claude_plugin_tool_response",
     "claude_tool_result_decision",
     "claude_protocol_adapter_message",
@@ -104,6 +110,68 @@ pub(super) async fn dispatch(
                 &host.sidecar_state(),
                 session_id,
                 command_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        // Live SDK `Query` control on a running session. Until now the manifest
+        // declared this `target: client`, so a phone's model picker was refused
+        // by its own transport before any request left the device, while the
+        // host's sidecar could have answered it exactly as it answers the
+        // desktop webview: the frame goes down stdin, and the correlated
+        // `control_response` comes back on `claude://message`, which both hosts
+        // publish to the companion event bus for every paired device. The
+        // method allowlist is checked here so an unknown method is a 400 and
+        // never reaches stdin (the shared body checks it again).
+        "claude_session_control" => {
+            let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
+            let method: String = required(&args, "method")?;
+            let params: Option<Value> = optional(&args, "params")?;
+            let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
+            if !claude_commands::is_allowed_control_method(&method) {
+                return Err(RpcError::malformed(format!(
+                    "claude_session_control: unsupported control method: {method}"
+                )));
+            }
+            claude_commands::claude_session_control_impl(
+                &host.sidecar_state(),
+                session_id,
+                request_id,
+                method,
+                params,
+                command_id,
+            )
+            .await
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+
+        // Session-level SDK functions (list / fork / rename / delete transcripts
+        // in the SessionStore). Same round-trip as the control arm, answered by
+        // a `session_api_response`. This one spawns the sidecar if it is cold,
+        // through the host's own supervisor, which is why the arm hands the
+        // shared body `host.sidecar_host()` and not just the state.
+        "agent_session_api" => {
+            let request_id: String = required_aliased(&args, "request_id", "requestId")?;
+            let method: String = required(&args, "method")?;
+            let params: Option<Value> = optional(&args, "params")?;
+            let send_options: Option<Value> =
+                optional_aliased(&args, "send_options", "sendOptions")?;
+            if !claude_commands::is_allowed_session_api_method(&method) {
+                return Err(RpcError::malformed(format!(
+                    "agent_session_api: unsupported session api method: {method}"
+                )));
+            }
+            claude_commands::agent_session_api_impl(
+                host.sidecar_host(),
+                host.sidecar_state(),
+                request_id,
+                method,
+                params,
+                send_options,
             )
             .await
             .map(|_| Value::Null)

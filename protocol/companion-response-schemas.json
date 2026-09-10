@@ -3265,11 +3265,6 @@
       "additionalProperties": true,
       "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
     },
-    "NullableLegacyRecord": {
-      "type": ["object", "null"],
-      "additionalProperties": true,
-      "x-cognia-opaque-reason": "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset or GC."
-    },
     "LegacyResult": {
       "type": ["object", "array", "string", "number", "boolean", "null"],
       "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
@@ -5086,7 +5081,7 @@
     "SyncDelta": {
       "type": "object",
       "x-cognia-wire-source": "lib/sync/types.ts SyncDelta",
-      "description": "One table's delta. `rows` are upserts and `deleted_ids` are tombstones; both share the `next_since` cursor space so an upsert and a deletion each cross the wire exactly once. `has_more` is set only by paged tables, and the caller keeps pulling while it is true.",
+      "description": "One table's delta. Cursor-aware paged pulls return next_cursor, preserving row timestamp ties independently of deletion watermarks. Persist and return it alongside next_since; drain while has_more is true. Legacy clients may use next_since alone.",
       "required": ["rows", "deleted_ids", "next_since"],
       "properties": {
         "rows": {
@@ -5103,6 +5098,10 @@
         },
         "next_since": {
           "type": "integer"
+        },
+        "next_cursor": {
+          "type": "string",
+          "maxLength": 4096
         },
         "has_more": {
           "type": "boolean"
@@ -5439,37 +5438,6 @@
     "TaskTriggerType": {
       "type": "string",
       "enum": ["cron", "interval", "once", "event"]
-    },
-    "TaskWorkspaceApplyOutcome": {
-      "type": "object",
-      "x-cognia-wire-source": "lib/task-workspace/types.ts ApplyOutcome",
-      "required": ["state", "revision", "conflicts"],
-      "properties": {
-        "state": {
-          "type": "string",
-          "enum": ["ready", "applied", "reverted", "conflict"]
-        },
-        "revision": {
-          "type": "integer"
-        },
-        "conflicts": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["path", "reason"],
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": false
-          }
-        }
-      },
-      "additionalProperties": false
     },
     "TerminalExecResult": {
       "type": "object",
@@ -6599,6 +6567,118 @@
       },
       "additionalProperties": false
     },
+    "WorkflowInFlightRun": {
+      "type": "object",
+      "required": ["runId", "workflowId", "snapshot", "startedAt"],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        },
+        "lastStepId": {
+          "type": "string"
+        },
+        "snapshot": {
+          "description": "The frozen workflow definition the run started from.",
+          "additionalProperties": true
+        },
+        "startedAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowInFlightRunList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WorkflowInFlightRun"
+      }
+    },
+    "WorkflowWaitpoint": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "runId",
+        "workflowId",
+        "stepId",
+        "key",
+        "createdAt",
+        "notBefore",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        },
+        "stepId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "correlationId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer"
+        },
+        "notBefore": {
+          "type": "integer"
+        },
+        "expiresAt": {
+          "type": "integer"
+        },
+        "resolution": {},
+        "notificationSentAt": {
+          "type": "integer"
+        },
+        "resolutionNotificationSentAt": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowWaitpointList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/WorkflowWaitpoint"
+      }
+    },
+    "WorkflowWaitpointOrNull": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorkflowWaitpoint"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "WorkflowRunList": {
       "type": "object",
       "x-cognia-wire-source": "lib/companion/desktop-write-source.ts workflowRunList",
@@ -6745,6 +6825,10 @@
     "MediaTransfer": {
       "type": "object",
       "properties": {
+        "chunkEncoding": {
+          "type": "string",
+          "const": "base64"
+        },
         "transferId": {
           "type": "string",
           "minLength": 1
@@ -6853,42 +6937,6 @@
         }
       }
     },
-    "TaskWorkspaceMaintenanceEventPage": {
-      "type": "object",
-      "description": "One page of task-workspace maintenance events (ADR-0175 B3). Item shape stays owned by the task-workspace domain.",
-      "required": ["items"],
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/LegacyResult"
-          },
-          "x-cognia-opaque-reason": "The page envelope is the contract; the items are an existing domain collection whose compatibility remains owned by that domain."
-        },
-        "nextPageToken": {
-          "type": "string",
-          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
-        }
-      }
-    },
-    "TaskWorkspaceResourceEventPage": {
-      "type": "object",
-      "description": "One page of a run's task-workspace resource events (ADR-0175 B3). Item shape stays owned by the task-workspace domain.",
-      "required": ["items"],
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/LegacyResult"
-          },
-          "x-cognia-opaque-reason": "The page envelope is the contract; the items are an existing domain collection whose compatibility remains owned by that domain."
-        },
-        "nextPageToken": {
-          "type": "string",
-          "description": "Opaque. Hand back unchanged as `pageToken` to read the next page; absent on the last page."
-        }
-      }
-    },
     "RoomSendResult": {
       "type": "object",
       "required": ["accepted"],
@@ -6899,6 +6947,1883 @@
         }
       },
       "additionalProperties": false
+    },
+    "AppliedFile": {
+      "additionalProperties": false,
+      "properties": {
+        "afterApplyHash": {
+          "type": ["string", "null"]
+        },
+        "afterKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "beforeApplyHash": {
+          "type": ["string", "null"]
+        },
+        "beforeKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "beforeMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "binary": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "afterApplyHash",
+        "afterKind",
+        "afterMode",
+        "beforeApplyHash",
+        "beforeKind",
+        "beforeMode",
+        "binary",
+        "path"
+      ],
+      "type": "object"
+    },
+    "ApplyOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/PatchConflict"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/PatchState"
+        }
+      },
+      "required": ["conflicts", "revision", "state"],
+      "type": "object"
+    },
+    "BundleHandoffOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleTurnId": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/WorkspaceBundleOutcome"
+        },
+        "request": {
+          "$ref": "#/$defs/BundleHandoffRequest"
+        }
+      },
+      "required": ["bundleTurnId", "outcome", "request"],
+      "type": "object"
+    },
+    "BundleHandoffRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "allowIrreversible": {
+          "default": false,
+          "type": "boolean"
+        },
+        "bundleTurnId": {
+          "type": "string"
+        },
+        "selections": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BundleHandoffRootSelection"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["allowIrreversible", "bundleTurnId", "selections"],
+      "type": "object"
+    },
+    "BundleHandoffRootSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "logicalRootId": {
+          "type": "string"
+        },
+        "selection": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PatchSelection"
+          },
+          "type": "array"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": ["logicalRootId", "selection", "workspaceId"],
+      "type": "object"
+    },
+    "BundleHandoffUndoOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "bundleTurnId": {
+          "type": "string"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/PatchConflict"
+          },
+          "type": "array"
+        },
+        "reApplied": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reverted": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkspaceState"
+        }
+      },
+      "required": ["bundleId", "bundleTurnId", "conflicts", "reApplied", "reverted", "state"],
+      "type": "object"
+    },
+    "ChangeKind": {
+      "enum": ["created", "modified", "deleted", "renamed"],
+      "type": "string"
+    },
+    "ContributionOrigin": {
+      "enum": ["agent", "user", "unknown"],
+      "type": "string"
+    },
+    "DownloadHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkBytes": {
+          "default": 24576,
+          "format": "uint",
+          "minimum": 1,
+          "maximum": 65536,
+          "type": "integer"
+        },
+        "handleId": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["chunkBytes", "handleId", "hash", "mediaType", "path", "sensitive", "size"],
+      "type": "object"
+    },
+    "ImportedWorkspaceHint": {
+      "additionalProperties": false,
+      "description": "A hint about a worktree found on disk that Registry did not create.\n\nThe planner records only the source root + execution root so callers can\ninsert a signed `WorkspaceRecord` with `owner_type = Imported` after\nverifying paths.",
+      "properties": {
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "executionRoot": {
+          "type": "string"
+        },
+        "gitCommonDir": {
+          "type": ["string", "null"]
+        },
+        "sourceRoot": {
+          "type": "string"
+        }
+      },
+      "required": ["branch", "executionRoot", "gitCommonDir", "sourceRoot"],
+      "type": "object"
+    },
+    "IsolationKind": {
+      "enum": ["gitWorktree", "shadow"],
+      "type": "string"
+    },
+    "Page_of_ResourceEvent": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ResourceEvent"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "type": "object"
+    },
+    "Page_of_WorkspaceMaintenanceEvent": {
+      "additionalProperties": false,
+      "description": "One page of a collection.\n\nSparse rather than closed: `nextPageToken` is absent on the last page, and\nthat absence is the signal a client reads.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceMaintenanceEvent"
+          },
+          "type": "array"
+        },
+        "nextPageToken": {
+          "description": "Present exactly when another page exists.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["items"],
+      "type": "object"
+    },
+    "PatchConflict": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["path", "reason"],
+      "type": "object"
+    },
+    "PatchFile": {
+      "additionalProperties": false,
+      "properties": {
+        "afterHash": {
+          "type": ["string", "null"]
+        },
+        "afterMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "beforeHash": {
+          "type": ["string", "null"]
+        },
+        "beforeMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "binary": {
+          "type": "boolean"
+        },
+        "hunks": {
+          "items": {
+            "$ref": "#/$defs/PatchHunk"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ChangeKind"
+        },
+        "oldPath": {
+          "type": ["string", "null"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "resourceKind": {
+          "$ref": "#/$defs/ResourceKind"
+        }
+      },
+      "required": [
+        "afterHash",
+        "afterMode",
+        "beforeHash",
+        "beforeMode",
+        "binary",
+        "hunks",
+        "kind",
+        "oldPath",
+        "path",
+        "resourceKind"
+      ],
+      "type": "object"
+    },
+    "PatchHunk": {
+      "additionalProperties": false,
+      "properties": {
+        "additions": {
+          "default": 0,
+          "description": "Added/deleted source lines in this hunk. Persisted as metrics only so\nconsumers can measure a partial apply without retaining patch text.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deletions": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "forwardPatchHash": {
+          "type": "string"
+        },
+        "header": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "inversePatchHash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "additions",
+        "deletions",
+        "forwardPatchHash",
+        "header",
+        "id",
+        "inversePatchHash"
+      ],
+      "type": "object"
+    },
+    "PatchSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "hunkIds": {
+          "description": "Empty means the whole file. Non-empty IDs select textual hunks.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": ["hunkIds", "path"],
+      "type": "object"
+    },
+    "PatchSet": {
+      "additionalProperties": false,
+      "properties": {
+        "appliedFiles": {
+          "items": {
+            "$ref": "#/$defs/AppliedFile"
+          },
+          "type": "array"
+        },
+        "appliedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "appliedSelection": {
+          "default": [],
+          "description": "Exact file/hunk selection used by the successful apply. An empty\nselection means every file. `applied_selection_known` distinguishes\nthat from patch rows written before this field existed.",
+          "items": {
+            "$ref": "#/$defs/PatchSelection"
+          },
+          "type": "array"
+        },
+        "appliedSelectionKnown": {
+          "default": false,
+          "type": "boolean"
+        },
+        "baseRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/PatchFile"
+          },
+          "type": "array"
+        },
+        "patchId": {
+          "type": "string"
+        },
+        "reversible": {
+          "default": true,
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/PatchState"
+        },
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "appliedFiles",
+        "appliedRevision",
+        "appliedSelection",
+        "appliedSelectionKnown",
+        "baseRevision",
+        "createdAt",
+        "files",
+        "patchId",
+        "reversible",
+        "runId",
+        "state",
+        "taskId"
+      ],
+      "type": "object"
+    },
+    "PatchState": {
+      "enum": ["ready", "applied", "reverted", "conflict"],
+      "type": "string"
+    },
+    "PruneOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "reclaimedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removedBlobCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removedTaskIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["reclaimedBytes", "removedBlobCount", "removedTaskIds"],
+      "type": "object"
+    },
+    "ReconcileOutcome": {
+      "additionalProperties": false,
+      "description": "Outcome of one reconcile pass. Callers persist the changes; the\nplanner itself does not mutate.",
+      "properties": {
+        "imported": {
+          "description": "Worktrees on disk that Registry did not create. Callers store these\nas `Imported` — they must never be auto-pruned.",
+          "items": {
+            "$ref": "#/$defs/ImportedWorkspaceHint"
+          },
+          "type": "array"
+        },
+        "orphaned": {
+          "description": "Rows the Registry knew about but whose owner_ref no longer resolves\n(session gone, task deleted, etc.). Callers should demote these to\n`Restorable` or archive them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reclaimed": {
+          "description": "Rows the Registry already knew about and which passed signature\nverification. Nothing changes for these.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["imported", "orphaned", "reclaimed"],
+      "type": "object"
+    },
+    "RemoteSourceCheckout": {
+      "additionalProperties": false,
+      "properties": {
+        "mirrorPath": {
+          "description": "The bare mirror this checkout was derived from, and still fetches from.",
+          "type": "string"
+        },
+        "resolvedRef": {
+          "description": "The ref the requested base resolves to in this checkout, when the base\nnames one. `None` for a base that is only meaningful against a working\ntree the caller has not created yet.",
+          "type": ["string", "null"]
+        },
+        "sourceRoot": {
+          "description": "The non-bare git root a bundle can now be acquired over.",
+          "type": "string"
+        }
+      },
+      "required": ["mirrorPath", "resolvedRef", "sourceRoot"],
+      "type": "object"
+    },
+    "ResourceCaptureClass": {
+      "enum": ["source", "generated"],
+      "type": "string"
+    },
+    "ResourceChange": {
+      "additionalProperties": false,
+      "properties": {
+        "afterMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "agentId": {
+          "type": ["string", "null"]
+        },
+        "beforeHash": {
+          "type": ["string", "null"]
+        },
+        "beforeMode": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "binary": {
+          "type": "boolean"
+        },
+        "captureClass": {
+          "$ref": "#/$defs/ResourceCaptureClass",
+          "default": "source"
+        },
+        "contentCaptured": {
+          "default": true,
+          "type": "boolean"
+        },
+        "deletions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "hash": {
+          "type": ["string", "null"]
+        },
+        "insertions": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "kind": {
+          "$ref": "#/$defs/ChangeKind"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "oldPath": {
+          "type": ["string", "null"]
+        },
+        "origin": {
+          "$ref": "#/$defs/ContributionOrigin"
+        },
+        "path": {
+          "type": "string"
+        },
+        "resourceKind": {
+          "$ref": "#/$defs/ResourceKind"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "afterMode",
+        "agentId",
+        "beforeHash",
+        "beforeMode",
+        "binary",
+        "captureClass",
+        "contentCaptured",
+        "deletions",
+        "hash",
+        "insertions",
+        "kind",
+        "mediaType",
+        "oldPath",
+        "origin",
+        "path",
+        "resourceKind",
+        "revision",
+        "runId",
+        "sensitive",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ResourceEncoding": {
+      "enum": ["utf8", "binary"],
+      "type": "string"
+    },
+    "ResourceEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": ["string", "null"]
+        },
+        "captureClass": {
+          "$ref": "#/$defs/ResourceCaptureClass"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/$defs/ResourceEventEvidence"
+        },
+        "kind": {
+          "$ref": "#/$defs/ResourceEventKind"
+        },
+        "mediaType": {
+          "type": ["string", "null"]
+        },
+        "observedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "oldPath": {
+          "type": ["string", "null"]
+        },
+        "origin": {
+          "$ref": "#/$defs/ContributionOrigin"
+        },
+        "overflow": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": ["string", "null"]
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "reconciled": {
+          "type": "boolean"
+        },
+        "resourceKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resyncRequired": {
+          "type": "boolean"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "agentId",
+        "captureClass",
+        "eventId",
+        "evidence",
+        "kind",
+        "mediaType",
+        "observedAt",
+        "oldPath",
+        "origin",
+        "overflow",
+        "path",
+        "provisional",
+        "reconciled",
+        "resourceKind",
+        "resyncRequired",
+        "runId",
+        "sensitive",
+        "seq",
+        "size",
+        "taskId",
+        "toolCallId"
+      ],
+      "type": "object"
+    },
+    "ResourceEventCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "created": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deleted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generated": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "modified": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "renamed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["created", "deleted", "generated", "modified", "renamed", "source"],
+      "type": "object"
+    },
+    "ResourceEventEvidence": {
+      "enum": ["watcher", "tool", "reconcile"],
+      "type": "string"
+    },
+    "ResourceEventKind": {
+      "enum": ["created", "modified", "deleted", "renamed", "any", "gap", "resync"],
+      "type": "string"
+    },
+    "ResourceKind": {
+      "enum": ["file", "symlink"],
+      "type": "string"
+    },
+    "ResourceRead": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": ["string", "null"]
+        },
+        "encoding": {
+          "$ref": "#/$defs/ResourceEncoding"
+        },
+        "hash": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "nextOffset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "sensitive": {
+          "type": "boolean"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content",
+        "encoding",
+        "hash",
+        "mediaType",
+        "nextOffset",
+        "sensitive",
+        "size",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "ResourceTimelineCompleteness": {
+      "enum": ["complete", "resyncRequired", "reconciled"],
+      "type": "string"
+    },
+    "ResourceTrackingPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "autoDetect": {
+          "default": true,
+          "type": "boolean"
+        },
+        "generatedOutputRoots": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["autoDetect", "generatedOutputRoots"],
+      "type": "object"
+    },
+    "RunState": {
+      "enum": ["running", "settling", "ready", "failed", "cancelled"],
+      "type": "string"
+    },
+    "TaskResourceManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/ResourceEvent"
+          },
+          "type": "array"
+        },
+        "exportedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceChange"
+          },
+          "type": "array"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/TaskRun"
+          },
+          "type": "array"
+        },
+        "schemaVersion": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "summaries": {
+          "items": {
+            "$ref": "#/$defs/TaskResourceSummary"
+          },
+          "type": "array"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskWorkspace"
+        }
+      },
+      "required": [
+        "events",
+        "exportedAt",
+        "resources",
+        "runs",
+        "schemaVersion",
+        "summaries",
+        "task"
+      ],
+      "type": "object"
+    },
+    "TaskResourceSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "$ref": "#/$defs/ResourceTimelineCompleteness"
+        },
+        "counts": {
+          "$ref": "#/$defs/ResourceEventCounts"
+        },
+        "eventCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "overflowCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": ["completeness", "counts", "eventCount", "overflowCount", "runId"],
+      "type": "object"
+    },
+    "TaskRun": {
+      "additionalProperties": false,
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "agentKind": {
+          "type": "string"
+        },
+        "attemptId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "base": {
+          "$ref": "#/$defs/WorkspaceBaseSpec",
+          "default": {
+            "kind": "workingState"
+          }
+        },
+        "baselineRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "executionRoot": {
+          "type": "string"
+        },
+        "executionRunId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "isolationKind": {
+          "$ref": "#/$defs/IsolationKind"
+        },
+        "isolationRef": {
+          "type": ["string", "null"]
+        },
+        "parentRunId": {
+          "type": ["string", "null"]
+        },
+        "providerAttemptId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "settledAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "surface": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "traceId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "trackingPolicy": {
+          "$ref": "#/$defs/ResourceTrackingPolicy",
+          "default": {
+            "autoDetect": true,
+            "generatedOutputRoots": []
+          }
+        },
+        "turnId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "workspaceId": {
+          "default": null,
+          "type": ["string", "null"]
+        },
+        "workspaceKey": {
+          "default": null,
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "agentId",
+        "agentKind",
+        "attemptId",
+        "base",
+        "baselineRevision",
+        "createdAt",
+        "executionRoot",
+        "executionRunId",
+        "isolationKind",
+        "isolationRef",
+        "parentRunId",
+        "providerAttemptId",
+        "runId",
+        "settledAt",
+        "state",
+        "surface",
+        "taskId",
+        "traceId",
+        "trackingPolicy",
+        "turnId",
+        "workspaceId",
+        "workspaceKey"
+      ],
+      "type": "object"
+    },
+    "TaskWorkspace": {
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskWorkspaceState"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "workspaceRoot": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "expiresAt",
+        "pinned",
+        "revision",
+        "sessionId",
+        "state",
+        "taskId",
+        "workspaceRoot"
+      ],
+      "type": "object"
+    },
+    "TaskWorkspaceState": {
+      "enum": ["active", "ready", "applied", "conflict", "expired"],
+      "type": "string"
+    },
+    "TaskWorkspaceStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "editorBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "eventName": {
+          "type": "string"
+        },
+        "maxTransferChunkBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "textPreviewBytes": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available",
+        "editorBytes",
+        "eventName",
+        "maxTransferChunkBytes",
+        "textPreviewBytes"
+      ],
+      "type": "object"
+    },
+    "TransferChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkHash": {
+          "type": "string"
+        },
+        "dataBase64": {
+          "type": "string"
+        },
+        "eof": {
+          "type": "boolean"
+        },
+        "nextOffset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["chunkHash", "dataBase64", "eof", "nextOffset", "offset"],
+      "type": "object"
+    },
+    "UploadHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkBytes": {
+          "default": 24576,
+          "format": "uint",
+          "minimum": 1,
+          "maximum": 65536,
+          "type": "integer"
+        },
+        "expectedSize": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "handleId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": ["chunkBytes", "expectedSize", "handleId", "path"],
+      "type": "object"
+    },
+    "WorkspaceBaseSpec": {
+      "description": "The base ref a managed workspace was materialized against.\n\nInteractive worktrees default to `WorkingState` (dirty local content is\ncarried into the isolated root). Background and scheduled Git tasks\ndefault to `RemoteDefault` and refresh `origin/HEAD` at fire time.",
+      "oneOf": [
+        {
+          "description": "Snapshot of the current working tree, including uncommitted edits.",
+          "properties": {
+            "kind": {
+              "const": "workingState",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "description": "The current HEAD of the local branch.",
+          "properties": {
+            "kind": {
+              "const": "localHead",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "description": "`origin/HEAD` (or the configured default branch), refreshed at\nacquisition.",
+          "properties": {
+            "kind": {
+              "const": "remoteDefault",
+              "type": "string"
+            }
+          },
+          "required": ["kind"],
+          "type": "object"
+        },
+        {
+          "description": "A specific git ref (branch, tag, commit).",
+          "properties": {
+            "gitRef": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "gitRef",
+              "type": "string"
+            }
+          },
+          "required": ["kind", "gitRef"],
+          "type": "object"
+        },
+        {
+          "description": "A pull request head that the Registry will fetch.",
+          "properties": {
+            "fetchRef": {
+              "default": null,
+              "type": ["string", "null"]
+            },
+            "headSha": {
+              "default": null,
+              "type": ["string", "null"]
+            },
+            "kind": {
+              "const": "pullRequest",
+              "type": "string"
+            },
+            "number": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": ["kind", "provider", "repo", "number"],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkspaceBundle": {
+      "additionalProperties": false,
+      "description": "A collection of `WorkspaceRootLease`s acquired atomically for one execution.\n\nThe Registry acquires a Bundle in one call; on failure it rolls back every\nlease it already provisioned. See `bundle.rs` for the acquisition and\natomic-apply implementations.",
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "environmentKind": {
+          "$ref": "#/$defs/WorkspaceEnvironmentKind",
+          "default": "managed"
+        },
+        "lastUsedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "leases": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceRootLease"
+          },
+          "type": "array"
+        },
+        "ownerRef": {
+          "type": ["string", "null"]
+        },
+        "ownerType": {
+          "$ref": "#/$defs/WorkspaceOwnerType"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkspaceState"
+        }
+      },
+      "required": [
+        "bundleId",
+        "createdAt",
+        "environmentKind",
+        "lastUsedAt",
+        "leases",
+        "ownerRef",
+        "ownerType",
+        "pinned",
+        "state"
+      ],
+      "type": "object"
+    },
+    "WorkspaceBundleOutcome": {
+      "additionalProperties": false,
+      "description": "Outcome of a `WorkspaceBundle` apply. On compensation failure the bundle\nends up in `state = Conflict` and `conflicts` is non-empty.",
+      "properties": {
+        "applied": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/PatchConflict"
+          },
+          "type": "array"
+        },
+        "rolledBack": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkspaceState"
+        }
+      },
+      "required": ["applied", "bundleId", "conflicts", "rolledBack", "state"],
+      "type": "object"
+    },
+    "WorkspaceBundleTurnLease": {
+      "additionalProperties": false,
+      "description": "Persisted grouping for all TaskRuns opened for one Bundle turn.",
+      "properties": {
+        "additionalAliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "bundleTurnId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "primaryAlias": {
+          "type": "string"
+        },
+        "primaryLogicalRootId": {
+          "type": "string"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceBundleTurnRunLease"
+          },
+          "type": "array"
+        },
+        "settledAt": {
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        }
+      },
+      "required": [
+        "additionalAliases",
+        "bundleId",
+        "bundleTurnId",
+        "createdAt",
+        "primaryAlias",
+        "primaryLogicalRootId",
+        "runs",
+        "settledAt",
+        "state"
+      ],
+      "type": "object"
+    },
+    "WorkspaceBundleTurnOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "bundleTurnId": {
+          "type": "string"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceChange"
+          },
+          "type": "array"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceBundleTurnRunOutcome"
+          },
+          "type": "array"
+        },
+        "settledAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        }
+      },
+      "required": ["bundleId", "bundleTurnId", "resources", "runs", "settledAt", "state"],
+      "type": "object"
+    },
+    "WorkspaceBundleTurnRunLease": {
+      "additionalProperties": false,
+      "properties": {
+        "logicalRootIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "run": {
+          "$ref": "#/$defs/TaskRun"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": ["logicalRootIds", "run", "workspaceId"],
+      "type": "object"
+    },
+    "WorkspaceBundleTurnRunOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "logicalRootIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceChange"
+          },
+          "type": "array"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": ["logicalRootIds", "resources", "runId", "state", "workspaceId"],
+      "type": "object"
+    },
+    "WorkspaceEnvironmentAction": {
+      "description": "Server-authoritative actions that may be offered for an environment.",
+      "oneOf": [
+        {
+          "enum": [
+            "open",
+            "remove",
+            "prune",
+            "adopt",
+            "pin",
+            "makePermanent",
+            "archive",
+            "restore",
+            "delete",
+            "handoff",
+            "createBranchHere",
+            "publish"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "review",
+          "description": "Reserved. `environment_actions` never emits `Review`, `Handoff` or\n`Publish`, and `environment_actions_only_advertise_executable_lifecycle_and_git_operations`\npins that it must not: an inventory row is a directory, and reviewing or\nhanding off a *turn's* changes is the bundle handoff API's job, not this\none's. They stay in the vocabulary because the transport contract is\nshared with that API. Adding one here without a producer would put a\nbutton in the UI that nothing answers.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkspaceEnvironmentKind": {
+      "description": "Product lifecycle of a physical execution environment.",
+      "enum": ["managed", "permanent", "imported"],
+      "type": "string"
+    },
+    "WorkspaceEnvironmentOwnership": {
+      "description": "Product ownership of one row in the canonical workspace inventory.\n\nThis is intentionally distinct from [`WorkspaceOwnerType`]: it describes\nwhich lifecycle controller owns the directory, not which product actor\nrequested it.",
+      "enum": ["main", "manual", "managed", "imported", "permanent"],
+      "type": "string"
+    },
+    "WorkspaceEnvironmentSummary": {
+      "additionalProperties": false,
+      "description": "Canonical inventory row joining Git's worktree porcelain with Registry\nownership. Callers must use `allowed_actions` rather than reimplementing\nlifecycle policy in a UI or transport adapter.",
+      "properties": {
+        "allowedActions": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceEnvironmentAction"
+          },
+          "type": "array"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceBaseSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "head": {
+          "type": ["string", "null"]
+        },
+        "lastUsedAt": {
+          "description": "When the environment was last acquired, same provenance and same reason\nas `size_bytes`. `None` for an unclaimed directory.",
+          "format": "int64",
+          "type": ["integer", "null"]
+        },
+        "lockReason": {
+          "type": ["string", "null"]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "ownerRef": {
+          "type": ["string", "null"]
+        },
+        "ownerType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceOwnerType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownership": {
+          "$ref": "#/$defs/WorkspaceEnvironmentOwnership"
+        },
+        "path": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "description": "Owning Workspace, so the inventory can be scoped to one project instead\nof only ever being shown machine-wide. `None` for a directory found on\ndisk that no project claims.",
+          "type": ["string", "null"]
+        },
+        "prunable": {
+          "type": "boolean"
+        },
+        "pruneReason": {
+          "type": ["string", "null"]
+        },
+        "sizeBytes": {
+          "description": "On-disk size of the environment, when the Registry knows it.\n\nPresent on `WorkspaceRecord` since the registry shipped, and dropped by\nthis projection until now, which left the one surface that lists\nworktrees unable to answer \"what is actually taking up the disk\". `None`\nfor a directory found on disk that no Registry row claims, and for a\nmanaged row whose size has not been measured yet.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "sourceRoot": {
+          "type": "string"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceId": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": [
+        "environmentId",
+        "path",
+        "sourceRoot",
+        "ownership",
+        "locked",
+        "prunable",
+        "pinned",
+        "allowedActions"
+      ],
+      "type": "object"
+    },
+    "WorkspaceLifecyclePolicy": {
+      "additionalProperties": false,
+      "description": "Retention policy inputs. All three knobs are user-adjustable in settings.",
+      "properties": {
+        "activeDirectoryCap": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "blobBudgetBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshotRetentionDays": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["activeDirectoryCap", "blobBudgetBytes", "snapshotRetentionDays"],
+      "type": "object"
+    },
+    "WorkspaceMaintenanceEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "eventId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkspaceMaintenanceEventKind"
+        },
+        "occurredAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "workspaceId": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["detail", "eventId", "kind", "occurredAt", "workspaceId"],
+      "type": "object"
+    },
+    "WorkspaceMaintenanceEventKind": {
+      "enum": ["reconciled", "directoryReclaimed", "snapshotExpired", "failed"],
+      "type": "string"
+    },
+    "WorkspaceMaintenanceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceMaintenanceEvent"
+          },
+          "type": "array"
+        },
+        "expiredSnapshotTaskIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "finishedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "reclaimedBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reclaimedWorkspaceIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reconcile": {
+          "$ref": "#/$defs/ReconcileOutcome"
+        },
+        "removedBlobCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "expiredSnapshotTaskIds",
+        "finishedAt",
+        "reclaimedBytes",
+        "reclaimedWorkspaceIds",
+        "reconcile",
+        "removedBlobCount",
+        "startedAt"
+      ],
+      "type": "object"
+    },
+    "WorkspaceOwnerType": {
+      "description": "Who created this managed workspace. Ownership determines whether the\nRegistry may prune or unlock the workspace during reconciliation.\n\n`Imported` is reserved for worktrees discovered on disk that the Registry\ncannot verify as its own — those rows never participate in auto-prune.",
+      "enum": ["user", "imported", "session", "team", "scheduled"],
+      "type": "string"
+    },
+    "WorkspaceRecord": {
+      "additionalProperties": false,
+      "description": "One row in the Registry. Combines ownership, lifecycle, and the physical\nisolation location.\n\n`execution_root` is the on-disk path handed to executors. For Git\nworkspaces it is the worktree path; for `Shadow` it is the materialized\nscratch directory. Trust is a separate axis and is not encoded here.",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/WorkspaceBaseSpec"
+        },
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "environmentKind": {
+          "$ref": "#/$defs/WorkspaceEnvironmentKind",
+          "default": "managed"
+        },
+        "executionRoot": {
+          "type": "string"
+        },
+        "gitCommonDir": {
+          "type": ["string", "null"]
+        },
+        "head": {
+          "type": ["string", "null"]
+        },
+        "isolationKind": {
+          "$ref": "#/$defs/IsolationKind"
+        },
+        "lastUsedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "lockedBy": {
+          "type": ["string", "null"]
+        },
+        "ownerRef": {
+          "type": ["string", "null"]
+        },
+        "ownerType": {
+          "$ref": "#/$defs/WorkspaceOwnerType"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "description": "Owning Workspace (the frontend `Project.id`), when it is known.\n\nThe crate addresses rows by path and `(owner_type, owner_ref)`, neither\nof which can answer \"which execution slots does this project own\" —\nseveral worktrees of one repository share a `git_common_dir`, and an\nowner ref is a session or a team, never a project. Without it, deleting\na workspace cannot find the directories it produced and the inventory\ncan only be shown machine-wide.\n\nOptional because the frontend owns the Project table: rows created\nbefore this column, or found on disk with no matching project, stay\n`None` and are classified `imported` — never auto-pruned (ADR-0111).",
+          "type": ["string", "null"]
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "snapshotTaskId": {
+          "type": ["string", "null"]
+        },
+        "sourceRoot": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkspaceState"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "ownerType",
+        "state",
+        "sourceRoot",
+        "base",
+        "isolationKind",
+        "executionRoot",
+        "lastUsedAt",
+        "pinned",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "WorkspaceRootLease": {
+      "additionalProperties": false,
+      "description": "One logical root inside a Bundle, resolved to its physical execution\nlocation.\n\n`alias_path` is the path executors see. Multiple leases may point at the\nsame physical worktree when they share a Git common dir — the Bundle\ncomposer collapses roots by `git_common_dir` before creating worktrees.",
+      "properties": {
+        "aliasPath": {
+          "type": "string"
+        },
+        "bundleId": {
+          "type": "string"
+        },
+        "logicalRootId": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/WorkspaceRootRole"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": ["aliasPath", "bundleId", "logicalRootId", "role", "workspaceId"],
+      "type": "object"
+    },
+    "WorkspaceRootRole": {
+      "description": "The role a logical root plays inside a Bundle.\n\nExactly one lease must be `Primary`; the rest are `Additional` (forwarded\nas `additionalDirectories` when the executor spawns).",
+      "enum": ["primary", "additional"],
+      "type": "string"
+    },
+    "WorkspaceState": {
+      "description": "Managed workspace lifecycle state. Transitions outside the Registry's\ncontrolled paths are rejected fail-closed.\n\nLegal transitions (all others error):\n\n- `Provisioning → Active | Removing`\n- `Active → Archived | Conflict | Removing`\n- `Archived → Restorable | Removing`\n- `Restorable → Active | Removing`\n- `Conflict → Active | Removing`   (via `ConflictResolution`)\n- `Removing → Removed`\n\n`Removed` is terminal.",
+      "enum": [
+        "provisioning",
+        "active",
+        "archived",
+        "conflict",
+        "restorable",
+        "removing",
+        "removed"
+      ],
+      "type": "string"
     }
   },
   "commands": {
@@ -8888,16 +10813,16 @@
       "$ref": "#/$defs/NullResult"
     },
     "task_resource_download_open": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/DownloadHandle"
     },
     "task_resource_download_read_chunk": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TransferChunk"
     },
     "task_resource_read_diff": {
       "$ref": "#/$defs/StringResult"
     },
     "task_resource_read_text": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/ResourceRead"
     },
     "task_resource_upload_abort": {
       "$ref": "#/$defs/NullResult"
@@ -8906,351 +10831,234 @@
       "$ref": "#/$defs/StringResult"
     },
     "task_resource_upload_open": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/UploadHandle"
     },
     "task_resource_upload_write_chunk": {
       "$ref": "#/$defs/IntegerResult"
     },
     "task_workspace_apply": {
-      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
+      "$ref": "#/$defs/ApplyOutcome"
     },
     "task_workspace_begin": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/TaskRun"
     },
     "task_workspace_bundle_acquire": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceBundle"
     },
     "task_workspace_bundle_apply": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/BundleHandoffOutcome"
     },
     "task_workspace_bundle_begin": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/TaskRun"
     },
     "task_workspace_bundle_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceBundle"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_bundle_handoff_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BundleHandoffOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_bundle_handoff_retry": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/BundleHandoffOutcome"
     },
     "task_workspace_bundle_handoff_undo": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/BundleHandoffUndoOutcome"
     },
     "task_workspace_bundle_handoff_undo_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BundleHandoffUndoOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_bundle_list": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/WorkspaceBundle"
+      },
+      "type": "array"
     },
     "task_workspace_bundle_turn_abort": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceBundleTurnOutcome"
     },
     "task_workspace_bundle_turn_begin": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceBundleTurnLease"
     },
     "task_workspace_bundle_turn_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceBundleTurnLease"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_bundle_turn_settle": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceBundleTurnOutcome"
     },
     "task_workspace_environment_adopt": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_environment_create_branch": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_environment_list": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/WorkspaceEnvironmentSummary"
+      },
+      "type": "array"
     },
     "task_workspace_export_resource_manifest": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskResourceManifest"
     },
     "task_workspace_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskWorkspace"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_get_patch_set": {
-      "$ref": "#/$defs/LegacyResult"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PatchSet"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_get_resource": {
-      "$ref": "#/$defs/LegacyResult"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResourceChange"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_get_resource_summary": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskResourceSummary"
     },
     "task_workspace_list": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/TaskWorkspace"
+      },
+      "type": "array"
     },
     "task_workspace_list_resource_events": {
-      "$ref": "#/$defs/TaskWorkspaceResourceEventPage"
+      "$ref": "#/$defs/Page_of_ResourceEvent"
     },
     "task_workspace_list_resources": {
-      "$ref": "#/$defs/LegacyResult"
+      "items": {
+        "$ref": "#/$defs/ResourceChange"
+      },
+      "type": "array"
     },
     "task_workspace_list_runs": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/TaskRun"
+      },
+      "type": "array"
     },
     "task_workspace_maintenance_events": {
-      "$ref": "#/$defs/TaskWorkspaceMaintenanceEventPage"
+      "$ref": "#/$defs/Page_of_WorkspaceMaintenanceEvent"
     },
     "task_workspace_maintenance_run": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceMaintenanceResult"
     },
     "task_workspace_managed_adopt": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_managed_archive": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_managed_delete": {
       "$ref": "#/$defs/NullResult"
     },
     "task_workspace_managed_get": {
-      "$ref": "#/$defs/NullableLegacyRecord"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkspaceRecord"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "task_workspace_managed_list": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/WorkspaceRecord"
+      },
+      "type": "array"
     },
     "task_workspace_managed_permanent": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_managed_pin": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_managed_restore": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceRecord"
     },
     "task_workspace_pin": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/TaskWorkspace"
     },
     "task_workspace_policy_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceLifecyclePolicy"
     },
     "task_workspace_policy_set": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/WorkspaceLifecyclePolicy"
     },
     "task_workspace_prune": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/PruneOutcome"
     },
     "task_workspace_reconcile": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/ReconcileOutcome"
     },
     "task_workspace_record_tool_event": {
-      "$ref": "#/$defs/LegacyResult"
+      "$ref": "#/$defs/ResourceEvent"
     },
     "task_workspace_remote_source_ensure": {
-      "type": "object",
-      "required": ["sourceRoot", "mirrorPath"],
-      "properties": {
-        "sourceRoot": {
-          "type": "string",
-          "description": "Non-bare git root a workspace bundle can now be acquired over."
-        },
-        "resolvedRef": {
-          "type": ["string", "null"],
-          "description": "Commit the requested base resolves to, when the base names one."
-        },
-        "mirrorPath": {
-          "type": "string",
-          "description": "Bare mirror the checkout was derived from and still fetches from."
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/$defs/RemoteSourceCheckout"
     },
     "task_workspace_resolve_conflict": {
-      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
+      "$ref": "#/$defs/ApplyOutcome"
     },
     "task_workspace_restore_snapshot": {
-      "type": "object",
-      "required": [
-        "runId",
-        "taskId",
-        "parentRunId",
-        "agentId",
-        "agentKind",
-        "executionRoot",
-        "isolationKind",
-        "isolationRef",
-        "workspaceId",
-        "base",
-        "workspaceKey",
-        "executionRunId",
-        "traceId",
-        "turnId",
-        "attemptId",
-        "providerAttemptId",
-        "surface",
-        "trackingPolicy",
-        "baselineRevision",
-        "state",
-        "createdAt",
-        "settledAt"
-      ],
-      "properties": {
-        "runId": {
-          "type": "string"
-        },
-        "taskId": {
-          "type": "string"
-        },
-        "parentRunId": {
-          "type": ["string", "null"]
-        },
-        "agentId": {
-          "type": "string"
-        },
-        "agentKind": {
-          "type": "string"
-        },
-        "executionRoot": {
-          "type": "string"
-        },
-        "isolationKind": {
-          "type": "string",
-          "enum": ["gitWorktree", "shadow"]
-        },
-        "isolationRef": {
-          "type": ["string", "null"]
-        },
-        "workspaceId": {
-          "type": ["string", "null"]
-        },
-        "base": {
-          "oneOf": [
-            {
-              "type": "object",
-              "required": ["kind"],
-              "properties": {
-                "kind": {
-                  "const": "workingState"
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["kind"],
-              "properties": {
-                "kind": {
-                  "const": "localHead"
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["kind"],
-              "properties": {
-                "kind": {
-                  "const": "remoteDefault"
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["kind", "gitRef"],
-              "properties": {
-                "kind": {
-                  "const": "gitRef"
-                },
-                "gitRef": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": ["kind", "provider", "repo", "number"],
-              "properties": {
-                "kind": {
-                  "const": "pullRequest"
-                },
-                "provider": {
-                  "type": "string"
-                },
-                "repo": {
-                  "type": "string"
-                },
-                "number": {
-                  "type": "integer"
-                },
-                "fetchRef": {
-                  "type": "string"
-                },
-                "headSha": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": false
-            }
-          ]
-        },
-        "workspaceKey": {
-          "type": ["string", "null"]
-        },
-        "executionRunId": {
-          "type": ["string", "null"]
-        },
-        "traceId": {
-          "type": ["string", "null"]
-        },
-        "turnId": {
-          "type": ["string", "null"]
-        },
-        "attemptId": {
-          "type": ["string", "null"]
-        },
-        "providerAttemptId": {
-          "type": ["string", "null"]
-        },
-        "surface": {
-          "type": ["string", "null"]
-        },
-        "trackingPolicy": {
-          "type": "object",
-          "required": ["generatedOutputRoots", "autoDetect"],
-          "properties": {
-            "generatedOutputRoots": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "autoDetect": {
-              "type": "boolean"
-            }
-          },
-          "additionalProperties": false
-        },
-        "baselineRevision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "state": {
-          "type": "string",
-          "enum": ["running", "settling", "ready", "failed", "cancelled"]
-        },
-        "createdAt": {
-          "type": "integer"
-        },
-        "settledAt": {
-          "type": ["integer", "null"]
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/$defs/TaskRun"
     },
     "task_workspace_settle": {
-      "$ref": "#/$defs/LegacyList"
+      "items": {
+        "$ref": "#/$defs/ResourceChange"
+      },
+      "type": "array"
     },
     "task_workspace_status": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/TaskWorkspaceStatus"
     },
     "task_workspace_undo": {
-      "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
+      "$ref": "#/$defs/ApplyOutcome"
     },
     "team_run_pause": {
       "$ref": "#/$defs/LegacyResult"
@@ -9432,6 +11240,48 @@
     },
     "twin_source_update": {
       "$ref": "#/$defs/LegacyRecord"
+    },
+    "workflow_register_trigger": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_unregister_trigger": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_file_watch_ack": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_get_webhook_url": {
+      "$ref": "#/$defs/NullableString"
+    },
+    "workflow_webhook_respond": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "workflow_persist_run_state": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_reload_in_flight_runs": {
+      "$ref": "#/$defs/WorkflowInFlightRunList"
+    },
+    "workflow_ack_completed": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_waitpoint_create": {
+      "$ref": "#/$defs/WorkflowWaitpoint"
+    },
+    "workflow_waitpoint_get": {
+      "$ref": "#/$defs/WorkflowWaitpointOrNull"
+    },
+    "workflow_waitpoint_list_pending": {
+      "$ref": "#/$defs/WorkflowWaitpointList"
+    },
+    "workflow_waitpoint_decide": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "workflow_wait_event_persist": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "workflow_wait_event_prune": {
+      "$ref": "#/$defs/IntegerResult"
     },
     "workflow_approval_list": {
       "$ref": "#/$defs/WorkflowApprovalList"
@@ -9758,13 +11608,22 @@
       "$ref": "#/$defs/MediaTransfer"
     },
     "plugin_media_read_chunk": {
-      "type": "array",
-      "maxItems": 65536,
-      "items": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 255
-      }
+      "anyOf": [
+        {
+          "type": "array",
+          "maxItems": 65536,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        },
+        {
+          "type": "string",
+          "maxLength": 87384,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+        }
+      ]
     },
     "plugin_media_close_transfer": {
       "type": "null"
@@ -9773,6 +11632,12 @@
       "$ref": "#/$defs/RoomSendResult"
     },
     "room_stop": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "claude_session_control": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "agent_session_api": {
       "$ref": "#/$defs/NullResult"
     }
   }

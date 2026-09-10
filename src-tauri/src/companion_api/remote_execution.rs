@@ -289,12 +289,20 @@ fn rate_limited_error(request_id: &str, retry_after: std::time::Duration) -> Pro
     error
 }
 
-/// Which rate-limit bucket a command is charged to.
-///
-/// The manifest's `operation` is the single authority — a `read` cannot change
-/// anything, so a client burst of reads is a throughput question and belongs on
-/// the wide bucket; `write` and `side-effect` stay on the strict one.
+/// Which rate-limit bucket a command is charged to. Chunk transfer quotas
+/// describe throughput, independently of the command's operation: an upload
+/// chunk is still a write for authorization, ordering and idempotency. Opening,
+/// committing or deleting a resource remains on the ordinary strict bucket.
 pub(super) fn rate_limit_class(descriptor: &CommandDescriptor) -> super::rate_limit::RequestClass {
+    if matches!(
+        descriptor.name.as_str(),
+        "plugin_media_read_chunk"
+            | "plugin_media_close_transfer"
+            | "task_resource_download_read_chunk"
+            | "task_resource_upload_write_chunk"
+    ) {
+        return super::rate_limit::RequestClass::MediaTransfer;
+    }
     if descriptor.operation == CommandOperation::Read {
         super::rate_limit::RequestClass::ReadOnly
     } else {
@@ -1222,13 +1230,21 @@ mod tests {
         }
     }
 
-    /// Every command the manifest calls a `read` must be classified as such —
+    /// Every command the manifest calls a `read` must use a read budget —
     /// a guard against the classification silently regressing to `check()`.
     #[test]
     fn manifest_read_operations_all_map_to_the_read_only_class() {
         let mut reads = 0usize;
         for descriptor in super::super::command_manifest::commands() {
-            let expected = if descriptor.operation == CommandOperation::Read {
+            let expected = if matches!(
+                descriptor.name.as_str(),
+                "plugin_media_read_chunk"
+                    | "plugin_media_close_transfer"
+                    | "task_resource_download_read_chunk"
+                    | "task_resource_upload_write_chunk"
+            ) {
+                super::super::rate_limit::RequestClass::MediaTransfer
+            } else if descriptor.operation == CommandOperation::Read {
                 reads += 1;
                 super::super::rate_limit::RequestClass::ReadOnly
             } else {
@@ -1242,6 +1258,40 @@ mod tests {
             );
         }
         assert!(reads > 0, "the manifest must declare read commands");
+    }
+
+    #[test]
+    fn only_bulk_transfer_commands_use_the_transfer_budget() {
+        use super::super::rate_limit::RequestClass;
+        for command in [
+            "plugin_media_read_chunk",
+            "plugin_media_close_transfer",
+            "task_resource_download_read_chunk",
+            "task_resource_upload_write_chunk",
+        ] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::MediaTransfer
+            );
+        }
+        for command in ["video_get_info", "plugin_media_get_video_frame"] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::ReadOnly
+            );
+        }
+        for command in [
+            "video_analyze",
+            "video_trim",
+            "plugin_media_export_video",
+            "task_resource_upload_open",
+            "task_resource_upload_commit",
+        ] {
+            assert_eq!(
+                rate_limit_class(super::super::command_manifest::descriptor(command).unwrap()),
+                RequestClass::Mutating
+            );
+        }
     }
 
     #[test]
@@ -1590,13 +1640,19 @@ mod tests {
                 serde_json::to_value(Vec::<HostSessionInfo>::new()).unwrap(),
             ),
             ("terminal_exec", serde_json::to_value(exec_ok).unwrap()),
-            // Head-word completion: a bare array of executable names, and the
-            // empty array a host with no match returns.
+            // Head-word completion. A page of executable names since ADR-0175
+            // B3 (`{items, nextPageToken}`), including the last page, which
+            // carries no token, and the empty page a host with no match
+            // returns.
             (
                 "terminal_list_path_executables",
-                json!(["git", "git-lfs", "gitk"]),
+                json!({ "items": ["git", "git-lfs", "gitk"], "nextPageToken": "bzoz" }),
             ),
-            ("terminal_list_path_executables", json!([])),
+            (
+                "terminal_list_path_executables",
+                json!({ "items": ["git", "git-lfs", "gitk"] }),
+            ),
+            ("terminal_list_path_executables", json!({ "items": [] })),
             ("terminal_exec", serde_json::to_value(exec_timeout).unwrap()),
             (
                 "terminal_complete_paths",
@@ -1665,14 +1721,16 @@ mod tests {
                 json!({ "stdout": "", "stderr": "", "exitCode": "0", "timedOut": false }),
             ),
             ("terminal_complete_paths", json!([{ "name": "src" }])),
-            // Executable names are a bare string array. An object wrapper and a
-            // non-string element are the two ways a hand-written arm gets this
-            // wrong, and neither fails locally — only here.
+            // Executable names come back inside a page envelope. The bare
+            // array this command answered before ADR-0175 B3, a wrapper under
+            // the wrong key, and a non-string element are the three ways an
+            // arm gets this wrong, and none of them fails locally, only here.
+            ("terminal_list_path_executables", json!(["git"])),
             (
                 "terminal_list_path_executables",
                 json!({ "names": ["git"] }),
             ),
-            ("terminal_list_path_executables", json!([1, 2])),
+            ("terminal_list_path_executables", json!({ "items": [1, 2] })),
             ("terminal_kill_port", json!(["4242"])),
         ];
 

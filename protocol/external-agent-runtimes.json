@@ -41,7 +41,7 @@
     },
     {
       "runtimeId": "codex-acp",
-      "presetIds": ["codex"],
+      "presetIds": ["codex", "codex-acp"],
       "displayName": "Codex ACP adapter",
       "ownership": "system",
       "protocol": "acp",

@@ -615,7 +615,7 @@ const HOST_CATEGORIES = [
     title: "Extensions and providers",
     description: "Plugins, skills, MCP servers, provider catalogs, the gateway plane, and diagnostics.",
     skill: "cognia-host-extensions",
-    pattern: /^(plugin_|skill_|skills_|mcp_|provider_|gateway_)/,
+    pattern: /^(plugin_(?!media_)|skill_|skills_|mcp_|provider_|gateway_)/,
   },
   {
     id: "knowledge",
@@ -627,10 +627,10 @@ const HOST_CATEGORIES = [
   {
     id: "development",
     title: "Development tools",
-    description: "Git, files, terminals, browsers, code-server, and language servers.",
+    description: "Git, files, terminals, browsers, media processing, code-server, and language servers.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|fs_|git_|github_workspace_|plugin_media_|video_|project_environment_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",
@@ -655,6 +655,7 @@ export function classifyHostCommand(name) {
 }
 
 const HOST_RESOURCE_ALIASES = [
+  [/^(?:plugin_media_|video_)/, "media"],
   [/^(?:agent_task_|team_task_)/, "agent-tasks"],
   [/^app_settings_/, "settings"],
   [/^automation_consent_/, "automation-consent"],

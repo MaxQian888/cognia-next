@@ -3,6 +3,19 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
+import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
+
+test("scheduler response contracts admit every persisted task type", () => {
+  const source = readFileSync(new URL("../../types/scheduler/index.ts", import.meta.url), "utf8")
+  const union = source.split("export type ScheduledTaskType =")[1].split(/\nexport /)[0]
+  const types = [...union.matchAll(/^\s*\| "([^"]+)"/gm)].map((match) => match[1])
+  const catalog = JSON.parse(
+    readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"),
+  )
+  assert.deepEqual([...catalog.$defs.ScheduledTaskType.enum].sort(), [...types].sort())
+  const request = buildCompanionRequestSchemaContracts().get("scheduled_task_create")
+  assert.deepEqual([...request.properties.input.properties.type.enum].sort(), [...types].sort())
+})
 
 import {
   buildHeadlessAsyncApi,
@@ -31,6 +44,8 @@ test("classifies host commands into one stable domain", () => {
   assert.equal(classifyHostCommand("memory_search"), "knowledge")
   assert.equal(classifyHostCommand("git_status"), "development")
   assert.equal(classifyHostCommand("host_capabilities"), "system")
+  assert.equal(classifyHostCommand("video_analyze"), "development")
+  assert.equal(classifyHostCommand("plugin_media_export_video"), "development")
   assert.throws(() => classifyHostCommand("unclassified_future_command"), /exactly one/)
 })
 
@@ -42,6 +57,111 @@ test("derives stable resources without copying the RPC tree", () => {
   assert.equal(hostResourceForCommand("fs_list_workspace_dir"), "workspace-files")
   assert.equal(hostResourceForCommand("remote_notification_publish"), "notifications")
   assert.equal(hostResourceForCommand("project_environment_execute"), "project-environments")
+  assert.equal(hostResourceForCommand("video_get_info"), "media")
+  assert.equal(hostResourceForCommand("plugin_media_read_chunk"), "media")
+})
+
+test("media requests preserve the native contract and bound binary transfer chunks", () => {
+  const schemas = buildCompanionRequestSchemaContracts()
+  const ajv = new Ajv2020()
+  const frame = ajv.compile(schemas.get("plugin_media_get_video_frame"))
+  for (const format of [undefined, "rgba", "png"]) {
+    assert.equal(frame({ sourceToken: "source", time: 0, ...(format ? { format } : {}) }), true)
+  }
+  assert.equal(frame({ sourceToken: "source", time: 0, format: "jpeg" }), false)
+  const analysisFrame = ajv.compile(schemas.get("plugin_media_read_analysis_frame"))
+  assert.equal(analysisFrame({ outputDirectory: "/owned/analysis", path: "/owned/analysis/frame.png" }), true)
+  assert.equal(analysisFrame({ path: "/owned/analysis/frame.png" }), false)
+  assert.equal(analysisFrame({ outputDirectory: "/owned/analysis", path: "" }), false)
+  const chunk = ajv.compile(schemas.get("plugin_media_read_chunk"))
+  assert.equal(chunk({ transferId: "owned-transfer", offset: 0 }), true)
+  assert.equal(chunk({ transferId: "owned-transfer", offset: 65_536, length: 65_536 }), true)
+  assert.equal(chunk({ transferId: "owned-transfer", offset: 0, length: 65_536, encoding: "base64" }), true)
+  assert.equal(chunk({ transferId: "owned-transfer", offset: 0, encoding: "hex" }), false)
+  for (const invalid of [
+    { transferId: "", offset: 0 },
+    { transferId: "owned-transfer", offset: -1 },
+    { transferId: "owned-transfer", offset: 0, length: 65_537 },
+    { transferId: "owned-transfer", offset: 0, length: 0 },
+  ]) assert.equal(chunk(invalid), false)
+  const clip = { sourceToken: "source", startTime: 0, endTime: 1, volume: 1, playbackSpeed: 1 }
+  const render = ajv.compile(schemas.get("plugin_media_export_video"))
+  const request = {
+    clips: [clip],
+    options: { format: "mp4", resolution: "720p", fps: 30, quality: "high" },
+    destinationPath: "/workspace/output.mp4",
+    overwrite: false,
+  }
+  assert.equal(render(request), true)
+  assert.equal(render({ ...request, clips: [] }), false)
+  assert.equal(render({ ...request, clips: Array.from({ length: 65 }, () => clip) }), false)
+  assert.equal(render({ ...request, arbitraryPath: "/outside" }), false)
+})
+
+test("media publishes bounded binary handles and chunk responses rather than oversized JSON", () => {
+  const catalog = JSON.parse(readFileSync(
+    new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8",
+  ))
+  const ajv = new Ajv2020()
+  for (const name of ["plugin_media_get_video_frame", "plugin_media_export_video", "plugin_media_read_analysis_frame"]) {
+    const validate = ajv.compile({ ...catalog.commands[name], $defs: catalog.$defs })
+    assert.equal(validate({ transferId: "owned-transfer", byteLength: 128 * 1024 * 1024 }), true)
+    assert.equal(validate({ transferId: "owned-transfer", byteLength: 3, chunkEncoding: "base64" }), true)
+    assert.equal(validate({ transferId: "owned-transfer", byteLength: 128 * 1024 * 1024 + 1 }), false)
+    assert.equal(validate([0, 1, 2]), false)
+  }
+  const chunk = ajv.compile(catalog.commands.plugin_media_read_chunk)
+  assert.equal(chunk([0, 255]), true)
+  assert.equal(chunk([256]), false)
+  assert.equal(chunk(Array(65_537).fill(0)), false)
+  assert.equal(chunk("AQID"), true)
+  assert.equal(chunk("!@#$"), false)
+  assert.equal(chunk(Buffer.alloc(65_537).toString("base64") + "AAAA"), false)
+})
+
+test("media grants distinguish observation from confined processing without administrative leases", () => {
+  const catalog = JSON.parse(readFileSync(
+    new URL("../../protocol/companion-commands.json", import.meta.url), "utf8",
+  ))
+  const writes = new Set([
+    "plugin_media_concatenate_videos", "plugin_media_export_video", "video_analyze",
+    "video_trim", "video_cleanup_analysis",
+  ])
+  const commands = catalog.commands.filter(({ name }) => name.startsWith("plugin_media_") || name.startsWith("video_"))
+  assert.equal(commands.length, 12)
+  for (const command of commands) {
+    assert.equal(command.target, "execution")
+    assert.deepEqual(command.transports, ["http", "websocket", "webrtc"])
+    assert.equal(command.capability, writes.has(command.name) ? "workspace.write" : "host.observe")
+    assert.equal(command.risk, writes.has(command.name) ? "high" : "low")
+    // Rendering only processes authorized tokens and confines destination paths;
+    // it is a workspace operation, not a host-administration step-up.
+    assert.equal(command.approval, "none")
+    assert.equal(command.idempotency, writes.has(command.name) ? "required" : "structural")
+  }
+})
+
+test("generated sync requests and responses preserve optional bounded opaque cursors", () => {
+  const inspected = inspectCommittedContract()
+  const command = inspected.desiredHostCommandCatalog.commands.find((entry) => entry.name === "sync_pull")
+  assert.ok(command)
+  const ajv = new Ajv2020({ validateFormats: false })
+  ajv.addKeyword("x-cognia-wire-source")
+  const request = ajv.compile(command.inputSchema)
+  for (const cursor of [undefined, "", "opaque-position", "x".repeat(4096)]) {
+    assert.equal(request({ table: "messages", since: 0, ...(cursor === undefined ? {} : { cursor }) }), true)
+  }
+  for (const cursor of [null, 42, "x".repeat(4097)]) {
+    assert.equal(request({ table: "messages", since: 0, cursor }), false)
+  }
+  const response = ajv.compile(command.outputSchema)
+  const delta = { rows: [], deleted_ids: [], next_since: 12 }
+  assert.equal(response(delta), true)
+  assert.equal(response({ ...delta, next_cursor: "", has_more: false }), true)
+  assert.equal(response({ ...delta, next_cursor: "x".repeat(4096), has_more: true }), true)
+  for (const next_cursor of [null, 42, "x".repeat(4097)]) {
+    assert.equal(response({ ...delta, next_cursor }), false)
+  }
 })
 
 test("publishes the concrete raw result contract in OpenAPI and the host catalog", () => {

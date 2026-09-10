@@ -16,11 +16,12 @@ import {
   recordHostContract,
 } from "./companion-contract"
 import { type CompanionConfig, companionStorage } from "./companion-storage"
-import type {
-  Transport,
-  TransportBinaryResource,
-  TransportBinaryResponse,
-  TransportCallOptions,
+import {
+  transportCommandTimeoutMs,
+  type Transport,
+  type TransportBinaryResource,
+  type TransportBinaryResponse,
+  type TransportCallOptions,
 } from "./transport-types"
 import { pinnedFetch } from "./pinned-fetch"
 import { parseProblem } from "./companion-problem"
@@ -31,7 +32,7 @@ import {
   type SocketTicketRequest,
 } from "./companion-auth"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
-import { TransportRtc, type TransportRtcOptions } from "./transport-rtc"
+import { RtcCarrierError, TransportRtc, type TransportRtcOptions } from "./transport-rtc"
 
 export type { CompanionConfig } from "./companion-storage"
 
@@ -787,44 +788,83 @@ export class CompanionTransport implements Transport {
       return Promise.reject(new CompanionError(contractIncompatibleError(verdict)))
     }
 
-    // ADR-0021 — route through the WebRTC DataChannel when it is open,
-    // UNLESS we're on a connected LAN (mDNS HTTPS+WS is preferred when
-    // available — WebRTC is consulted only when LAN is unavailable). The
-    // TransportRtc surface returns the same `result` payload the HTTP path
-    // would, so callers see no difference.
-    const descriptor = getCommandDescriptor(name)
-    const isReadOnly = descriptor?.operation === "read"
-    // Mint the idempotency key once and reuse it across the RTC attempt and
-    // the HTTPS fallback. If the DataChannel write reached the server and ran
-    // before the channel hard-failed, the fallback request carrying the same
-    // key lets the server dedupe instead of double-executing the command.
-    const idempotencyKey = isReadOnly ? undefined : (options?.idempotencyKey ?? crypto.randomUUID())
-    if (this.preferRtc()) {
-      try {
-        const params = args ?? {}
-        return await this.rtc!.call<T>(name, params, { idempotencyKey })
-      } catch (err) {
-        // Hard-fail on the data channel → fall back to HTTPS. The data
-        // channel teardown is handled by its own state listener; we just
-        // proceed below and let the existing path run.
-        console.warn("CompanionTransport: WebRTC RPC failed, falling back to HTTPS", err)
+    const timeoutMs = transportCommandTimeoutMs(name)
+    const deadlineAt = Date.now() + timeoutMs
+    const controller = new AbortController()
+    const signal = controller.signal
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        this.setPlaneHealth({ rpc: "unavailable" })
+        reject(
+          new CompanionError({
+            code: "timeout",
+            message: `request timed out after ${timeoutMs}ms (${name})`,
+            retryable: true,
+          })
+        )
+      }, timeoutMs)
+    })
+    const execute = async (): Promise<T> => {
+      // ADR-0021 — route through the WebRTC DataChannel when it is open,
+      // UNLESS we're on a connected LAN (mDNS HTTPS+WS is preferred when
+      // available — WebRTC is consulted only when LAN is unavailable). The
+      // TransportRtc surface returns the same `result` payload the HTTP path
+      // would, so callers see no difference.
+      const descriptor = getCommandDescriptor(name)
+      const isReadOnly = descriptor?.operation === "read"
+      // Mint the idempotency key once and reuse it across the RTC attempt and
+      // the HTTPS fallback. If the DataChannel write reached the server and ran
+      // before the channel hard-failed, the fallback request carrying the same
+      // key lets the server dedupe instead of double-executing the command.
+      const idempotencyKey = isReadOnly
+        ? undefined
+        : (options?.idempotencyKey ?? crypto.randomUUID())
+      const retryable =
+        descriptor?.operation === "read" ||
+        (descriptor?.idempotency === "required" && idempotencyKey !== undefined)
+      if (this.preferRtc()) {
+        try {
+          const params = args ?? {}
+          return await this.rtc!.call<T>(name, params, { idempotencyKey, deadlineAt })
+        } catch (err) {
+          if (!(err instanceof RtcCarrierError) || !retryable) throw err
+          signal.throwIfAborted()
+          // Hard-fail on the data channel → fall back to HTTPS. The data
+          // channel teardown is handled by its own state listener; we just
+          // proceed below and let the existing path run.
+          console.warn("CompanionTransport: WebRTC RPC failed, falling back to HTTPS", err)
+        }
       }
-    }
 
-    const url = `${config.baseUrl}${this.rpcPath}/${encodeURIComponent(name)}`
+      const url = `${config.baseUrl}${this.rpcPath}/${encodeURIComponent(name)}`
 
-    const path = `${this.rpcPath}/${encodeURIComponent(name)}`
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    }
-    if (idempotencyKey) {
-      headers["Idempotency-Key"] = idempotencyKey
-    }
+      const path = `${this.rpcPath}/${encodeURIComponent(name)}`
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      }
+      if (idempotencyKey) {
+        headers["Idempotency-Key"] = idempotencyKey
+      }
 
-    const retryable =
-      descriptor?.operation === "read" ||
-      (descriptor?.idempotency === "required" && idempotencyKey !== undefined)
-    return this.fetchWithRetry<T>(url, config, path, headers, JSON.stringify(args ?? {}), retryable)
+      return this.fetchWithRetry<T>(
+        url,
+        config,
+        path,
+        headers,
+        JSON.stringify(args ?? {}),
+        retryable,
+        timeoutMs,
+        deadlineAt,
+        signal
+      )
+    }
+    try {
+      return await Promise.race([execute(), expired])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /**
@@ -1427,7 +1467,10 @@ export class CompanionTransport implements Transport {
     path: string,
     baseHeaders: Record<string, string>,
     body: string,
-    canRetryRequest: boolean
+    canRetryRequest: boolean,
+    timeoutMs: number,
+    deadlineAt: number,
+    signal: AbortSignal
   ): Promise<T> {
     let lastError: CompanionError | null = null
     let authRetryUsed = false
@@ -1437,10 +1480,12 @@ export class CompanionTransport implements Transport {
       if (attempt > 0) {
         const ceiling = Math.min(HTTP_BACKOFF_CAP_MS, HTTP_BACKOFF_BASE_MS * 2 ** (attempt - 1))
         const delay = retryAfterMs ?? Math.floor(backoffRandom() * ceiling)
+        if (delay >= deadlineAt - Date.now() && lastError) throw lastError
         retryAfterMs = null
-        await sleep(delay)
+        await sleep(delay, signal)
       }
 
+      signal.throwIfAborted()
       // DPoP proofs are single-use replay tokens. Mint authorization headers
       // for every network attempt while keeping the request body and
       // Idempotency-Key stable across the logical call.
@@ -1449,8 +1494,7 @@ export class CompanionTransport implements Transport {
         ...baseHeaders,
       }
 
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS)
+      signal.throwIfAborted()
 
       let response: Response
       try {
@@ -1464,16 +1508,15 @@ export class CompanionTransport implements Transport {
           method: "POST",
           headers,
           body,
-          signal: controller.signal,
+          signal,
           serverFingerprint: initialConfig.serverFingerprint,
         })
       } catch (err: unknown) {
-        clearTimeout(timeoutId)
         if (isAbortError(err)) {
           this.setPlaneHealth({ rpc: "unavailable" })
           lastError = new CompanionError({
             code: "timeout",
-            message: `request timed out after ${CALL_TIMEOUT_MS}ms (${url})`,
+            message: `request timed out after ${timeoutMs}ms (${url})`,
             retryable: true,
           })
           // Timeout is not retried.
@@ -1490,10 +1533,9 @@ export class CompanionTransport implements Transport {
           continue
         }
         throw lastError
-      } finally {
-        clearTimeout(timeoutId)
       }
 
+      signal.throwIfAborted()
       if (response.ok) {
         this.setPlaneHealth({ rpc: "ready" })
         const envelope = (await response.json()) as unknown
@@ -2090,8 +2132,19 @@ export class CompanionTransport implements Transport {
 // Utilities
 // ---------------------------------------------------------------------------
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted()
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 }
 
 function parseRetryAfterMs(value: string | null, nowMs = Date.now()): number | null {

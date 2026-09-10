@@ -515,6 +515,32 @@
       },
       "additionalProperties": false
     },
+    "agent_session_api": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "method"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "description": "Correlates the sidecar's `session_api_response` on `claude://message`. Also accepted as `requestId`."
+        },
+        "method": {
+          "type": "string",
+          "description": "An allowlisted session-level Claude Agent SDK function (listSessions, getSessionInfo, forkSession, ...)."
+        },
+        "params": {
+          "description": "The function's parameters, named after the SDK signature."
+        },
+        "send_options": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Names the SessionStore backend for the call; the host resolves it, a caller never sends a store. Also accepted as `sendOptions`."
+        }
+      },
+      "additionalProperties": false
+    },
     "agent_task_cancel": {
       "type": "object",
       "required": [
@@ -1595,6 +1621,36 @@
               "additionalProperties": true
             }
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "claude_session_control": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "request_id",
+        "method"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "description": "Also accepted as `sessionId`."
+        },
+        "request_id": {
+          "type": "string",
+          "description": "Correlates the sidecar's `control_response` on `claude://message`. Also accepted as `requestId`."
+        },
+        "method": {
+          "type": "string",
+          "description": "An allowlisted Claude Agent SDK `Query` control method (setModel, getContextUsage, mcpServerStatus, ...)."
+        },
+        "params": {
+          "description": "The method's parameters, named after the SDK signature."
+        },
+        "command_id": {
+          "type": "string",
+          "description": "Also accepted as `commandId`."
         }
       },
       "additionalProperties": false
@@ -10812,6 +10868,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "Retrieval content-protocol version the client understands, so the responder can down-convert rows it stores in a newer shape. Read by `validate_content_protocol` in `rpc/data_sync.rs` and sent by every caller (`lib/sync/handlers/base.ts`); the schema omitted it, and with `additionalProperties: false` that made every sync_pull a 422 the moment the command became device-reachable."
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Optional opaque paging cursor for messages, executionRuns, workflowRuns and connectorHeartbeats. An empty string negotiates cursor-aware pagination. Persist next_cursor and return it together with next_since."
         }
       },
       "additionalProperties": false
@@ -12951,6 +13012,19 @@
       },
       "additionalProperties": false
     },
+    "workflow_ack_completed": {
+      "type": "object",
+      "required": [
+        "runId"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "workflow_approval_list": {
       "type": "object",
       "additionalProperties": false
@@ -13008,6 +13082,42 @@
       "properties": {
         "id": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_file_watch_ack": {
+      "type": "object",
+      "required": [
+        "workflowId",
+        "triggerId"
+      ],
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "example": ""
+        },
+        "triggerId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_get_webhook_url": {
+      "type": "object",
+      "required": [
+        "workflowId",
+        "triggerId"
+      ],
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "example": ""
+        },
+        "triggerId": {
+          "type": "string",
+          "example": ""
         }
       },
       "additionalProperties": false
@@ -13113,6 +13223,21 @@
       },
       "additionalProperties": false
     },
+    "workflow_persist_run_state": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "`PersistRunStateInput`: runId, workflowId, status, optional lastStepId and the frozen `snapshot` on the first persist."
+        }
+      },
+      "additionalProperties": false
+    },
     "workflow_placement_probe": {
       "type": "object",
       "required": [
@@ -13129,6 +13254,26 @@
           "minLength": 1
         }
       },
+      "additionalProperties": false
+    },
+    "workflow_register_trigger": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "`RegisterTriggerInput`: triggerId, workflowId, kind, enabled, plus the cron / webhook / file-watch fields the kind needs."
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_reload_in_flight_runs": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "workflow_run_list": {
@@ -13217,6 +13362,24 @@
       },
       "additionalProperties": false
     },
+    "workflow_unregister_trigger": {
+      "type": "object",
+      "required": [
+        "workflowId",
+        "triggerId"
+      ],
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "example": ""
+        },
+        "triggerId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "workflow_update": {
       "type": "object",
       "required": [
@@ -13230,6 +13393,113 @@
         "patch": {
           "type": "object",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_wait_event_persist": {
+      "type": "object",
+      "required": [
+        "event"
+      ],
+      "properties": {
+        "event": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "`WorkflowWaitEventRow`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_wait_event_prune": {
+      "type": "object",
+      "required": [
+        "now"
+      ],
+      "properties": {
+        "now": {
+          "type": "integer",
+          "example": 0,
+          "description": "Unix ms; rows whose expiresAt is at or before it are dropped."
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_waitpoint_create": {
+      "type": "object",
+      "required": [
+        "waitpoint"
+      ],
+      "properties": {
+        "waitpoint": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "`WorkflowWaitpointRow`."
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_waitpoint_decide": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {},
+          "description": "`WorkflowWaitpointDecisionInput`: id, status, resolution, updatedAt."
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_waitpoint_get": {
+      "type": "object",
+      "required": [
+        "waitpointId"
+      ],
+      "properties": {
+        "waitpointId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_waitpoint_list_pending": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "workflow_webhook_respond": {
+      "type": "object",
+      "required": [
+        "correlationId",
+        "status",
+        "body"
+      ],
+      "properties": {
+        "correlationId": {
+          "type": "string",
+          "example": ""
+        },
+        "status": {
+          "type": "integer",
+          "example": 200
+        },
+        "body": {
+          "type": "string",
+          "example": ""
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "example": {}
         }
       },
       "additionalProperties": false

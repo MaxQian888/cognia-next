@@ -164,7 +164,7 @@ test("R3 holds list verbs to page-token pagination and byte-range to read/write"
   assert.ok(failures.some((f) => f.includes("byte-range pagination belongs to read/write")))
 })
 
-test("R4 reports request-schema shape drift without failing before B3", () => {
+test("R4 fails a legacy paging parameter on a page-token command and reports the rest", () => {
   const { failures, reports } = auditContract({
     commands: [
       command({
@@ -186,10 +186,32 @@ test("R4 reports request-schema shape drift without failing before B3", () => {
     },
     dispatchSources: dispatch,
   })
-  assert.deepEqual(failures, [])
-  assert.ok(reports.some((r) => r.includes('"limit" is not a paging parameter')))
+  // Two paging vocabularies on one command is the B3 regression this rule
+  // exists to catch, so it is the one R4 finding that fails.
+  assert.equal(failures.length, 1)
+  assert.ok(failures[0].includes('"limit" is not a paging parameter'))
   assert.ok(reports.some((r) => r.includes('"session_id" is not camelCase')))
   assert.ok(reports.some((r) => r.includes("take pageSize and pageToken")))
+})
+
+test("R4 only reports a legacy paging parameter on a command that does not page yet", () => {
+  const { failures, reports } = auditContract({
+    commands: [command({ name: "session.message.get", verb: "get" })],
+    resources,
+    verbs,
+    renames: {},
+    requestSchemas: {
+      "session.message.get": {
+        type: "object",
+        additionalProperties: false,
+        properties: { limit: {}, cursor: {} },
+      },
+    },
+    dispatchSources: dispatch,
+  })
+  assert.deepEqual(failures, [])
+  assert.ok(reports.some((r) => r.includes('"limit" is not a paging parameter')))
+  assert.ok(reports.some((r) => r.includes('"cursor" is not a paging parameter')))
 })
 
 test("R6 requires a unique arm with a dispatch arm in some rpc source", () => {

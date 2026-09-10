@@ -1607,6 +1607,7 @@ mod tests {
                     7,
                     ACCOUNT_ID.into(),
                     Some(1),
+                    Some("resume-position".into()),
                     Duration::from_secs(5),
                 )
                 .await
@@ -1628,6 +1629,7 @@ mod tests {
                     assert_eq!(v["payload"]["table"], "sessions");
                     assert_eq!(v["payload"]["since"], 7);
                     assert_eq!(v["payload"]["account_id"], ACCOUNT_ID);
+                    assert_eq!(v["payload"]["cursor"], "resume-position");
                     break v["payload"]["request_id"].as_str().unwrap().to_string();
                 }
             }
@@ -2066,6 +2068,7 @@ mod tests {
                 "sessions".into(),
                 0,
                 "account".into(),
+                None,
                 None,
                 Duration::from_secs(30),
             )

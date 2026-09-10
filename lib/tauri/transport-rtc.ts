@@ -48,7 +48,11 @@ import {
   encodeRtcLogicalMessage,
   RtcChunkReassembler,
 } from "@/lib/tauri/datachannel-framing"
-import type { TransportBinaryResource, TransportBinaryResponse } from "@/lib/tauri/transport-types"
+import {
+  transportCommandTimeoutMs,
+  type TransportBinaryResource,
+  type TransportBinaryResponse,
+} from "@/lib/tauri/transport-types"
 import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import {
   DATACHANNEL_LABEL,
@@ -123,8 +127,14 @@ export interface RtcMessage {
   protocolVersion: 2
 }
 
+/** A carrier failure permits retrying the same logical request on HTTPS. */
+export class RtcCarrierError extends Error {
+  override name = "RtcCarrierError"
+}
+
 export interface RtcCallOptions {
   idempotencyKey?: string
+  deadlineAt?: number
 }
 
 export interface RtcResponseOk {
@@ -135,7 +145,7 @@ export interface RtcResponseOk {
 export interface RtcResponseErr {
   id: string
   ok: false
-  error: { code: string; message: string }
+  error: { code: string; message: string; retryable?: boolean; retryAfterMs?: number }
 }
 export type RtcResponse = RtcResponseOk | RtcResponseErr
 
@@ -258,7 +268,12 @@ type Pending = {
   timer: ReturnType<typeof setTimeout> | null
 }
 
+// Eight concurrent 10MiB resources may queue behind the paced relay. Allow
+// their bounded aggregate transfer, then use a 30s idle timeout after metadata.
+const BINARY_RESOURCE_DEADLINE_MS = 120_000
+
 type PendingBinary = {
+  deadlineAt: number
   resolve: (value: TransportBinaryResponse) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout> | null
@@ -757,12 +772,13 @@ export class TransportRtc {
   /** Close pc/dc only (signaling and pending RPCs untouched). */
   private closePeerConnection(): void {
     if (this.dc) {
+      const dc = this.dc
+      this.dc = null
       try {
-        this.dc.close()
+        dc.close()
       } catch {
         /* ignored */
       }
-      this.dc = null
     }
     if (this.terminalDc) {
       try {
@@ -954,7 +970,12 @@ export class TransportRtc {
     options: RtcCallOptions = {}
   ): Promise<T> {
     if (!this.carrierOpen()) {
-      return Promise.reject(new Error("TransportRtc: DataChannel not open and no relay carrier"))
+      return Promise.reject(
+        new RtcCarrierError("TransportRtc: DataChannel not open and no relay carrier")
+      )
+    }
+    if (options.deadlineAt !== undefined && options.deadlineAt <= Date.now()) {
+      return Promise.reject(new Error(`TransportRtc: RPC '${method}' timed out`))
     }
     if (this.pending.size >= MAX_CONCURRENT_RPCS) {
       return Promise.reject(new Error("TransportRtc: too many concurrent RPCs"))
@@ -968,10 +989,16 @@ export class TransportRtc {
       protocolVersion: 2,
     }
     return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`TransportRtc: RPC '${method}' timed out`))
-      }, RPC_TIMEOUT_MS)
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(id)
+          reject(new Error(`TransportRtc: RPC '${method}' timed out`))
+        },
+        Math.max(
+          0,
+          Math.min(transportCommandTimeoutMs(method), (options.deadlineAt ?? Infinity) - Date.now())
+        )
+      )
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -990,7 +1017,9 @@ export class TransportRtc {
   /** Read one authenticated transcript media resource over raw binary frames. */
   readBinary(resource: TransportBinaryResource): Promise<TransportBinaryResponse> {
     if (!this.carrierOpen()) {
-      return Promise.reject(new Error("TransportRtc: DataChannel not open and no relay carrier"))
+      return Promise.reject(
+        new RtcCarrierError("TransportRtc: DataChannel not open and no relay carrier")
+      )
     }
     if (this.pendingBinary.size >= MAX_CONCURRENT_BINARY_RESOURCES) {
       return Promise.reject(new Error("TransportRtc: too many concurrent binary resources"))
@@ -1000,8 +1029,9 @@ export class TransportRtc {
       const timer = setTimeout(() => {
         this.pendingBinary.delete(id)
         reject(new Error("TransportRtc: binary resource timed out"))
-      }, RPC_TIMEOUT_MS)
+      }, BINARY_RESOURCE_DEADLINE_MS)
       this.pendingBinary.set(id, {
+        deadlineAt: Date.now() + BINARY_RESOURCE_DEADLINE_MS,
         resolve,
         reject,
         timer,
@@ -1110,7 +1140,7 @@ export class TransportRtc {
     }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
-      p.reject(new Error("TransportRtc: connection closing"))
+      p.reject(new RtcCarrierError("TransportRtc: connection closing"))
     }
     this.pending.clear()
     if (this.dc) {
@@ -1409,27 +1439,43 @@ export class TransportRtc {
       const frames = encodeRtcLogicalMessage(text)
       for (const frame of frames) {
         if (this.dc !== dc || dc.readyState !== "open") {
-          throw new Error("TransportRtc: DataChannel changed during send")
+          throw new RtcCarrierError("TransportRtc: DataChannel changed during send")
         }
         if (dc.bufferedAmount > BUFFERED_AMOUNT_HIGH_WATER) {
           await this.waitForDataChannelCapacity(dc)
         }
-        dc.send(frame)
+        try {
+          dc.send(frame)
+        } catch (error) {
+          throw new RtcCarrierError(error instanceof Error ? error.message : String(error))
+        }
       }
       return
     }
     const signaling = this.signaling
     if (!this.relayOpen || !signaling) {
-      throw new Error("TransportRtc: DataChannel not open and no relay carrier")
+      throw new RtcCarrierError("TransportRtc: DataChannel not open and no relay carrier")
     }
     // Same chunking as the DataChannel, one frame per `data` envelope, so
     // the Host's single reassembler sees identical input from both paths.
     // `send` awaits the socket write, which is the relay's backpressure.
     for (const frame of encodeRtcLogicalMessage(text)) {
       if (!this.relayOpen || this.signaling !== signaling) {
-        throw new Error("TransportRtc: relay changed during send")
+        throw new RtcCarrierError("TransportRtc: relay changed during send")
       }
-      await signaling.send("data", { text: frame } satisfies DataBody)
+      try {
+        await signaling.send("data", { text: frame } satisfies DataBody)
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "signaling_queue_full"
+        ) {
+          throw error
+        }
+        throw new RtcCarrierError(error instanceof Error ? error.message : String(error))
+      }
     }
   }
 
@@ -1440,7 +1486,7 @@ export class TransportRtc {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         dc.removeEventListener("bufferedamountlow", onLow)
-        reject(new Error("TransportRtc: DataChannel backpressure timed out"))
+        reject(new RtcCarrierError("TransportRtc: DataChannel backpressure timed out"))
       }, 15_000)
       const onLow = () => {
         clearTimeout(timeout)
@@ -1480,21 +1526,22 @@ export class TransportRtc {
     }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
-      p.reject(new Error("TransportRtc: connection reset"))
+      p.reject(new RtcCarrierError("TransportRtc: connection reset"))
     }
     this.pending.clear()
     for (const pending of this.pendingBinary.values()) {
       if (pending.timer) clearTimeout(pending.timer)
-      pending.reject(new Error("TransportRtc: connection reset"))
+      pending.reject(new RtcCarrierError("TransportRtc: connection reset"))
     }
     this.pendingBinary.clear()
     if (this.dc) {
+      const dc = this.dc
+      this.dc = null
       try {
-        this.dc.close()
+        dc.close()
       } catch {
         /* ignored */
       }
-      this.dc = null
     }
     if (this.terminalDc) {
       try {
@@ -1693,7 +1740,7 @@ export class TransportRtc {
       }
       if (typeof start.id !== "string") return
       const pending = this.pendingBinary.get(start.id)
-      if (!pending) return
+      if (!pending || pending.totalBytes !== undefined) return
       if (
         typeof start.mediaType !== "string" ||
         !Number.isSafeInteger(start.totalBytes) ||
@@ -1709,6 +1756,7 @@ export class TransportRtc {
       pending.mediaType = start.mediaType
       pending.totalBytes = start.totalBytes as number
       pending.totalChunks = start.totalChunks as number
+      this.refreshBinaryIdleTimer(start.id, pending)
       return
     }
 
@@ -1745,10 +1793,7 @@ export class TransportRtc {
         if (resp.ok) {
           this.rejectPendingBinary(resp.id, new Error("unexpected binary resource response"))
         } else {
-          this.rejectPendingBinary(
-            resp.id,
-            Object.assign(new Error(resp.error.message), { code: resp.error.code })
-          )
+          this.rejectPendingBinary(resp.id, rtcHostError(resp.error))
         }
         return
       }
@@ -1757,7 +1802,7 @@ export class TransportRtc {
       this.pending.delete(resp.id)
       if (pending.timer) clearTimeout(pending.timer)
       if (resp.ok) pending.resolve(resp.result)
-      else pending.reject(Object.assign(new Error(resp.error.message), { code: resp.error.code }))
+      else pending.reject(rtcHostError(resp.error))
     }
   }
 
@@ -1781,6 +1826,7 @@ export class TransportRtc {
       return
     }
     pending.chunks.set(chunk.index, chunk.bytes)
+    this.refreshBinaryIdleTimer(chunk.requestId, pending)
     if (pending.chunks.size !== pending.totalChunks) return
 
     const bytes = new Uint8Array(pending.totalBytes)
@@ -1801,6 +1847,17 @@ export class TransportRtc {
     this.pendingBinary.delete(chunk.requestId)
     if (pending.timer) clearTimeout(pending.timer)
     pending.resolve({ bytes, mediaType: pending.mediaType })
+  }
+
+  /** Valid progress extends the idle budget, never the bounded transfer lifetime. */
+  private refreshBinaryIdleTimer(requestId: string, pending: PendingBinary): void {
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.timer = setTimeout(
+      () => {
+        this.rejectPendingBinary(requestId, new Error("TransportRtc: binary resource timed out"))
+      },
+      Math.max(0, Math.min(RPC_TIMEOUT_MS, pending.deadlineAt - Date.now()))
+    )
   }
 
   private rejectPendingBinary(requestId: string, error: unknown): void {
@@ -1935,7 +1992,7 @@ export class TransportRtc {
     }
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
-      p.reject(err)
+      p.reject(new RtcCarrierError(err.message))
     }
     this.pending.clear()
     this.pendingRemoteIce = []
@@ -1943,12 +2000,13 @@ export class TransportRtc {
     this.onDcFailResolvers = []
     for (const r of resolvers) r(err)
     if (this.dc) {
+      const dc = this.dc
+      this.dc = null
       try {
-        this.dc.close()
+        dc.close()
       } catch {
         /* ignored */
       }
-      this.dc = null
     }
     if (this.pc) {
       try {
@@ -1976,4 +2034,15 @@ export class TransportRtc {
       }
     }
   }
+}
+
+/** Keep host refusals distinct from transport failures, including legacy backoff metadata. */
+function rtcHostError(error: RtcResponseErr["error"]): Error {
+  const seconds = /retry_after_seconds=(\d+)/.exec(error.message)
+  const retryAfterMs = error.retryAfterMs ?? (seconds ? Number(seconds[1]) * 1_000 : undefined)
+  return Object.assign(new Error(error.message), {
+    code: error.code,
+    ...(error.retryable === undefined ? {} : { retryable: error.retryable }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  })
 }

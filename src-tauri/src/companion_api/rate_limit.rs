@@ -102,6 +102,8 @@ pub enum RequestClass {
     ReadOnly,
     /// Charged to the strict bucket. The default for anything unclassified.
     Mutating,
+    /// Bounded reads of caller-owned media transfers, never FFmpeg jobs.
+    MediaTransfer,
 }
 
 pub struct RateLimiter {
@@ -109,6 +111,7 @@ pub struct RateLimiter {
     read_config: RateLimitConfig,
     buckets: Mutex<HashMap<String, Bucket>>,
     read_buckets: Mutex<HashMap<String, Bucket>>,
+    media_transfer_buckets: Mutex<HashMap<String, Bucket>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +134,7 @@ impl RateLimiter {
             read_config,
             buckets: Mutex::new(HashMap::new()),
             read_buckets: Mutex::new(HashMap::new()),
+            media_transfer_buckets: Mutex::new(HashMap::new()),
         })
     }
 
@@ -165,6 +169,17 @@ impl RateLimiter {
         let (cfg, mut buckets) = match class {
             RequestClass::ReadOnly => (self.read_config, self.read_buckets.lock()),
             RequestClass::Mutating => (self.config, self.buckets.lock()),
+            // Two 128 MiB exports at 64 KiB per chunk fit one burst. Keeping
+            // transfer traffic separate prevents downloads from starving UI
+            // reads. Ownership, per-chunk bounds and transfer memory limits
+            // are still enforced by the media registry before reading bytes.
+            RequestClass::MediaTransfer => (
+                RateLimitConfig {
+                    capacity: 4_096.0,
+                    refill_per_sec: 64.0,
+                },
+                self.media_transfer_buckets.lock(),
+            ),
         };
         let bucket = buckets
             .entry(device_id.to_string())
@@ -396,5 +411,42 @@ mod tests {
             RateLimitDecision::Reject { .. }
         ));
         assert_eq!(limiter.bucket_count(), 2);
+    }
+
+    #[test]
+    fn media_downloads_have_a_bounded_independent_transfer_budget() {
+        let limiter = RateLimiter::with_defaults();
+        let now = Instant::now();
+        for _ in 0..4_096 {
+            assert!(matches!(
+                limiter.check_class_at("media-device", RequestClass::MediaTransfer, now),
+                RateLimitDecision::Accept
+            ));
+        }
+        assert!(matches!(
+            limiter.check_class_at("media-device", RequestClass::MediaTransfer, now),
+            RateLimitDecision::Reject { .. }
+        ));
+        for class in [RequestClass::ReadOnly, RequestClass::Mutating] {
+            assert!(matches!(
+                limiter.check_class_at("media-device", class, now),
+                RateLimitDecision::Accept
+            ));
+        }
+        assert!(matches!(
+            limiter.check_class_at("another-device", RequestClass::MediaTransfer, now),
+            RateLimitDecision::Accept
+        ));
+        let later = now + Duration::from_secs(1);
+        for _ in 0..64 {
+            assert!(matches!(
+                limiter.check_class_at("media-device", RequestClass::MediaTransfer, later),
+                RateLimitDecision::Accept
+            ));
+        }
+        assert!(matches!(
+            limiter.check_class_at("media-device", RequestClass::MediaTransfer, later),
+            RateLimitDecision::Reject { .. }
+        ));
     }
 }

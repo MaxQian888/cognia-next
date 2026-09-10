@@ -184,9 +184,10 @@ fn validate_content_protocol(
 /// Whether a durable-waitpoint command must be answered by the host's TS layer
 /// rather than the local Rust `workflow_waitpoint` mirror.
 ///
-/// True only on headless hosts: the mirror's sole writer is the
-/// `workflow_waitpoint_create` Tauri command, which a Node brain cannot reach,
-/// so its Dexie holds the only copy of a pending approval. On a Tauri host the
+/// True only on headless hosts. The brain's Dexie is the authority for a
+/// pending approval there: it authors every waitpoint, and its mirror write
+/// (`workflow_waitpoint_create` over the service plane, `rpc/service_plane.rs`)
+/// is a best-effort copy that a failed RPC leaves behind. On a Tauri host the
 /// renderer mirrors every waitpoint into SQLite, and answering natively is what
 /// lets a paired device decide while the WebView is asleep.
 fn waitpoint_command_needs_ts_authority(name: &str, headless: bool) -> bool {
@@ -335,6 +336,10 @@ pub(super) async fn dispatch(
             let table: String = required(&args, "table")?;
             let since: i64 = optional::<i64>(&args, "since")?.unwrap_or(0);
             let content_protocol_version = optional::<u64>(&args, "content_protocol_version")?;
+            let cursor = optional::<String>(&args, "cursor")?;
+            if cursor.as_ref().is_some_and(|value| value.len() > 4096) {
+                return Err(RpcError::malformed("sync cursor exceeds 4096 bytes".into()));
+            }
             validate_content_protocol(&table, content_protocol_version)?;
             let account_id = account_id.ok_or_else(|| {
         RpcError::forbidden("sync_pull requires an account-bound device principal")
@@ -368,6 +373,7 @@ pub(super) async fn dispatch(
                     since,
                     account_namespace,
                     content_protocol_version,
+                    cursor,
                     crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
                 )
                 .await

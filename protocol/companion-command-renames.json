@@ -3994,6 +3994,15 @@
     },
     "write_text_file_confined": {
       "to": "fs.text_file.write_confined"
+    },
+    "plugin_media_close_transfer": {
+      "to": "media.transfer.close"
+    },
+    "plugin_media_read_analysis_frame": {
+      "to": "media.analysis_frame.read"
+    },
+    "plugin_media_read_chunk": {
+      "to": "media.read_chunk"
     }
   }
 }

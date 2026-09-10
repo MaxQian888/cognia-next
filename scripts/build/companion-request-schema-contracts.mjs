@@ -133,16 +133,20 @@ const scheduledTaskTypes = [
   "agent-team",
   "goal",
   "plan",
+  "bot",
   "twin",
   "connection:scheduled:digest",
   "connection:outbound:send",
   "connection:housekeeping:clock",
   "connection:housekeeping:outbound-retention",
+  "connection:housekeeping:connector-retention",
   "connection:housekeeping:callback-bindings",
   "connection:housekeeping:execution-runs",
+  "connection:housekeeping:attachment-cache",
   "connection:presence:refresh",
   "wiki-rebuild",
   "wiki-lint",
+  "github-issue-sync",
   "radar-report",
   "provider-diagnostics-refresh",
 ]
@@ -274,7 +278,89 @@ const scheduledTask = createScheduledTaskInput.extend({
   consecutiveFailures: z.number().int().nonnegative().optional(),
 })
 
+const mediaEffect = z.object({
+  id: z.string().min(1),
+  params: z.record(z.string(), z.json()).optional(),
+})
+const mediaTransition = z.object({
+  type: z.string().min(1),
+  duration: z.number().nonnegative(),
+  parameters: z.record(z.string(), z.json()).optional(),
+})
+const mediaClip = z.object({
+  sourceToken: z.string().min(1),
+  startTime: z.number().nonnegative(),
+  endTime: z.number().positive(),
+  volume: z.number().nonnegative(),
+  playbackSpeed: z.number().positive(),
+  effects: z.array(mediaEffect).optional(),
+  transitionOut: mediaTransition.nullable().optional(),
+})
+const mediaClips = z.array(mediaClip).min(1).max(64)
+
 const schemas = {
+  video_get_info: z.object({ filePath: z.string().min(1) }),
+  plugin_media_get_video_frame: z.object({
+    sourceToken: z.string().min(1),
+    time: z.number().nonnegative(),
+    format: z.enum(["rgba", "png"]).optional(),
+  }),
+  plugin_media_concatenate_videos: z.object({ clips: mediaClips }),
+  plugin_media_apply_video_effect: z.object({
+    sourceToken: z.string().min(1),
+    effect: mediaEffect,
+  }),
+  plugin_media_add_transition: z.object({
+    fromClip: mediaClip,
+    toClip: mediaClip,
+    transition: mediaTransition,
+  }),
+  plugin_media_export_video: z.object({
+    clips: mediaClips,
+    options: z.object({
+      format: z.string().min(1),
+      resolution: z.string().min(1),
+      fps: z.number().int().positive(),
+      quality: z.string().min(1),
+      codec: z.string().nullable().optional(),
+      audioBitrate: z.number().int().nonnegative().nullable().optional(),
+      videoBitrate: z.number().int().nonnegative().nullable().optional(),
+    }),
+    destinationPath: z.string().min(1).optional(),
+    overwrite: z.boolean().optional(),
+  }),
+  video_analyze: z.object({
+    options: z.object({
+      sourceToken: z.string().min(1),
+      mode: z.enum(["keyframes", "scene"]).nullable().optional(),
+      startTime: z.number().nonnegative().nullable().optional(),
+      endTime: z.number().positive().nullable().optional(),
+      maxFrames: z.number().int().positive().nullable().optional(),
+      width: z.number().int().positive().nullable().optional(),
+      deduplicate: z.boolean().nullable().optional(),
+      duplicateThreshold: z.number().nonnegative().nullable().optional(),
+    }),
+  }),
+  video_trim: z.object({
+    options: z.object({
+      sourceToken: z.string().min(1),
+      startTime: z.number().nonnegative(),
+      endTime: z.number().positive(),
+      format: z.string().min(1),
+    }),
+  }),
+  video_cleanup_analysis: z.object({ outputDirectory: z.string().min(1) }),
+  plugin_media_read_chunk: z.object({
+    transferId: z.string().min(1),
+    offset: z.number().int().nonnegative(),
+    length: z.number().int().positive().max(65_536).optional(),
+    encoding: z.literal("base64").optional(),
+  }),
+  plugin_media_close_transfer: z.object({ transferId: z.string().min(1) }),
+  plugin_media_read_analysis_frame: z.object({
+    outputDirectory: z.string().min(1),
+    path: z.string().min(1),
+  }),
   background_job_list: z.object({ owner: jobOwner.optional() }),
   background_job_read: z.object({
     jobId: z.string().min(1),

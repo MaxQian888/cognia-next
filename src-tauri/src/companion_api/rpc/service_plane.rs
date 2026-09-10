@@ -25,6 +25,20 @@ pub(super) const COMMANDS: &[&str] = &[
     "github_workspace_stat",
     "integration_ingress_ack",
     "integration_ingress_nack",
+    "workflow_register_trigger",
+    "workflow_unregister_trigger",
+    "workflow_file_watch_ack",
+    "workflow_get_webhook_url",
+    "workflow_webhook_respond",
+    "workflow_persist_run_state",
+    "workflow_reload_in_flight_runs",
+    "workflow_ack_completed",
+    "workflow_waitpoint_create",
+    "workflow_waitpoint_get",
+    "workflow_waitpoint_list_pending",
+    "workflow_waitpoint_decide",
+    "workflow_wait_event_persist",
+    "workflow_wait_event_prune",
     "provider_profiles_list",
     "provider_profiles_import",
     "provider_profiles_version",
@@ -103,6 +117,31 @@ fn map_langfuse_ingest_error(detail: String) -> (StatusCode, Json<RpcError>) {
         return RpcError::service_unavailable(detail);
     }
     RpcError::validation_failed(detail)
+}
+
+/// The workflow state of whichever host is answering: the desktop's managed
+/// `WorkflowState`, or the one `HeadlessServices` opened for cognia-server.
+///
+/// Both hosts run the same cron daemon, webhook router, file-watch daemon and
+/// run-state mirror; what differed was only who could reach them. The desktop
+/// renderer invokes the Tauri commands directly, and the headless brain has no
+/// `invoke`, so until these arms existed its `tauri-bridge.ts` dropped every
+/// call on the floor and cognia-server ran daemons nobody registered with.
+fn workflow_state(
+    host: &super::super::dispatch_host::DispatchHost,
+) -> Result<&crate::workflow::WorkflowState, (StatusCode, Json<RpcError>)> {
+    use tauri::Manager as _;
+    match host {
+        super::super::dispatch_host::DispatchHost::Tauri(app) => app
+            .try_state::<crate::workflow::WorkflowState>()
+            .map(|state| state.inner())
+            .ok_or_else(|| {
+                RpcError::service_unavailable("workflow state is not managed yet".to_string())
+            }),
+        super::super::dispatch_host::DispatchHost::Headless(services) => {
+            Ok(services.workflow.as_ref())
+        }
+    }
 }
 
 pub(super) async fn dispatch(
@@ -333,6 +372,150 @@ pub(super) async fn dispatch(
                 .release_runtime_lease(&owner_id)
                 .map_err(RpcError::validation_failed)?;
             Ok(Value::Bool(released))
+        }
+
+        // ── Workflow mirror, trigger daemons and webhook router ─────────────
+        // The `_for_state` bodies the Tauri commands wrap, served to the
+        // headless brain over the internal plane. Argument names are the
+        // Tauri command's, so `lib/workflow/runtime/tauri-bridge.ts` sends one
+        // payload shape to both hosts.
+        "workflow_register_trigger" => {
+            let input: crate::workflow::types::RegisterTriggerInput = required(&args, "input")?;
+            crate::workflow::commands::workflow_register_trigger_for_state(
+                workflow_state(host)?,
+                input,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_unregister_trigger" => {
+            let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
+            let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
+            crate::workflow::commands::workflow_unregister_trigger_for_state(
+                workflow_state(host)?,
+                workflow_id,
+                trigger_id,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_file_watch_ack" => {
+            let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
+            let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
+            crate::workflow::commands::workflow_file_watch_ack_for_state(
+                workflow_state(host)?,
+                workflow_id,
+                trigger_id,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_get_webhook_url" => {
+            let workflow_id: String = required_aliased(&args, "workflow_id", "workflowId")?;
+            let trigger_id: String = required_aliased(&args, "trigger_id", "triggerId")?;
+            let url = crate::workflow::commands::workflow_get_webhook_url_for_state(
+                workflow_state(host)?,
+                workflow_id,
+                trigger_id,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(url)
+        }
+        "workflow_webhook_respond" => {
+            let correlation_id: String =
+                required_aliased(&args, "correlation_id", "correlationId")?;
+            let status: u16 = required(&args, "status")?;
+            let body: String = required(&args, "body")?;
+            let headers: Option<std::collections::BTreeMap<String, String>> =
+                optional(&args, "headers")?;
+            let answered = crate::workflow::commands::workflow_webhook_respond_for_state(
+                workflow_state(host)?,
+                correlation_id,
+                status,
+                body,
+                headers,
+            )
+            .map_err(RpcError::internal)?;
+            Ok(Value::Bool(answered))
+        }
+        "workflow_persist_run_state" => {
+            let input: crate::workflow::types::PersistRunStateInput = required(&args, "input")?;
+            crate::workflow::commands::workflow_persist_run_state_for_state(
+                workflow_state(host)?,
+                input,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_reload_in_flight_runs" => {
+            let rows = crate::workflow::commands::workflow_reload_in_flight_runs_for_state(
+                workflow_state(host)?,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(rows)
+        }
+        "workflow_ack_completed" => {
+            let run_id: String = required_aliased(&args, "run_id", "runId")?;
+            crate::workflow::commands::workflow_ack_completed_for_state(
+                workflow_state(host)?,
+                run_id,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_waitpoint_create" => {
+            let waitpoint: crate::workflow::types::WorkflowWaitpointRow =
+                required(&args, "waitpoint")?;
+            let row = crate::workflow::commands::workflow_waitpoint_create_for_state(
+                workflow_state(host)?,
+                waitpoint,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(row)
+        }
+        "workflow_waitpoint_get" => {
+            let waitpoint_id: String = required_aliased(&args, "waitpoint_id", "waitpointId")?;
+            let row = crate::workflow::commands::workflow_waitpoint_get_for_state(
+                workflow_state(host)?,
+                waitpoint_id,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(row)
+        }
+        "workflow_waitpoint_list_pending" => {
+            let rows = crate::workflow::commands::workflow_waitpoint_list_pending_for_state(
+                workflow_state(host)?,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(rows)
+        }
+        "workflow_waitpoint_decide" => {
+            let input: crate::workflow::types::WorkflowWaitpointDecisionInput =
+                required(&args, "input")?;
+            let changed = crate::workflow::commands::workflow_waitpoint_decide_for_state(
+                workflow_state(host)?,
+                input,
+            )
+            .map_err(RpcError::internal)?;
+            Ok(Value::Bool(changed))
+        }
+        "workflow_wait_event_persist" => {
+            let event: crate::workflow::types::WorkflowWaitEventRow = required(&args, "event")?;
+            crate::workflow::commands::workflow_wait_event_persist_for_state(
+                workflow_state(host)?,
+                event,
+            )
+            .map(|_| Value::Null)
+            .map_err(RpcError::internal)
+        }
+        "workflow_wait_event_prune" => {
+            let now: i64 = required(&args, "now")?;
+            let pruned = crate::workflow::commands::workflow_wait_event_prune_for_state(
+                workflow_state(host)?,
+                now,
+            )
+            .map_err(RpcError::internal)?;
+            to_json(pruned)
         }
 
         // ── Marketplace Integration ingress + encrypted spool ───────────────

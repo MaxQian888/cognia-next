@@ -448,6 +448,11 @@ const KNOWN_COMMANDS: &[&str] = &[
     "claude_tool_result_decision",
     "claude_protocol_adapter_message",
     "claude_close_session",
+    // Sidecar round-trips (live `Query` control such as setModel, and the
+    // session-level SDK functions). Reclassified from `client` to `execution`:
+    // the state they need is the host's sidecar, which both hosts own.
+    "claude_session_control",
+    "agent_session_api",
     "claude_sidecar_status",
     "claude_set_api_key",
     "claude_has_api_key",
@@ -638,6 +643,25 @@ const KNOWN_COMMANDS: &[&str] = &[
     "integration_ingress_deadletters",
     "integration_ingress_deadletter",
     "integration_ingress_requeue",
+    // The workflow run-state mirror, the cron / file-watch daemons, the
+    // webhook router and the durable waitpoint mirror. Same scheduling-crate
+    // bodies on both hosts; the brain reaches them here because it has no
+    // `invoke`, and a paired device never does (the mirror is the host's own
+    // crash-resume state, and the router holds webhook secrets).
+    "workflow_register_trigger",
+    "workflow_unregister_trigger",
+    "workflow_file_watch_ack",
+    "workflow_get_webhook_url",
+    "workflow_webhook_respond",
+    "workflow_persist_run_state",
+    "workflow_reload_in_flight_runs",
+    "workflow_ack_completed",
+    "workflow_waitpoint_create",
+    "workflow_waitpoint_get",
+    "workflow_waitpoint_list_pending",
+    "workflow_waitpoint_decide",
+    "workflow_wait_event_persist",
+    "workflow_wait_event_prune",
     // Host-owned Issue Loop workspace operations. These carry repository
     // credentials and can write to GitHub, so only the co-located brain may
     // dispatch them on headless hosts.
@@ -2295,6 +2319,20 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "integration_ingress_deadletters",
     "integration_ingress_deadletter",
     "integration_ingress_requeue",
+    "workflow_register_trigger",
+    "workflow_unregister_trigger",
+    "workflow_file_watch_ack",
+    "workflow_get_webhook_url",
+    "workflow_webhook_respond",
+    "workflow_persist_run_state",
+    "workflow_reload_in_flight_runs",
+    "workflow_ack_completed",
+    "workflow_waitpoint_create",
+    "workflow_waitpoint_get",
+    "workflow_waitpoint_list_pending",
+    "workflow_waitpoint_decide",
+    "workflow_wait_event_persist",
+    "workflow_wait_event_prune",
     "github_workspace_clone",
     "github_workspace_commit_and_push",
     "github_workspace_remove",

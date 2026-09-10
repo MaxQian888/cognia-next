@@ -5,6 +5,7 @@
 
 import {
   RECONNECT_BACKOFF_MS,
+  RtcCarrierError,
   TransportRtc,
   type RtcMessage,
   type RtcResponse,
@@ -436,6 +437,163 @@ describe("TransportRtc", () => {
     dc.push({ id: sent.id, ok: true, result: { count: 42 } } satisfies RtcResponse)
     const result = await pending
     expect(result).toEqual({ count: 42 })
+  })
+
+  it.each([
+    ["datachannel", "codeserver_ensure", 300_000],
+    ["relay", "codeserver_ensure", 300_000],
+    ["datachannel", "codeserver_status", 30_000],
+    ["relay", "codeserver_status", 30_000],
+  ])("uses the command deadline over %s for %s", async (carrier, command, timeoutMs) => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    if (carrier === "relay") {
+      sig.emitEnvelope(envelope("hello", { deviceId: "host", relay: true }, 1))
+    } else {
+      sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+      pcs[0].channels[0].open()
+    }
+    await connect
+    jest.useFakeTimers()
+    let settled = false
+    const pending = rtc.call(command, { root: "/host/workspaces/app" }).catch((error) => {
+      settled = true
+      return error
+    })
+    try {
+      await jest.advanceTimersByTimeAsync(timeoutMs - 1)
+      expect(settled).toBe(false)
+      await jest.advanceTimersByTimeAsync(1)
+      await expect(pending).resolves.toThrow(`RPC '${command}' timed out`)
+    } finally {
+      rtc.close()
+      jest.useRealTimers()
+    }
+  })
+
+  it("keeps Host refusals typed and preserves the legacy rate limit wait", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+    const dc = pcs[0].channels[0]
+    const result = rtc.call("ping").catch((error: unknown) => error)
+    const request = dc.sent
+      .map((raw) => JSON.parse(raw) as RtcMessage)
+      .find((frame) => frame.method === "ping")!
+    dc.push({
+      id: request.id,
+      ok: false,
+      error: { code: "rate_limited", message: "retry_after_seconds=2", retryable: true },
+    })
+    await expect(result).resolves.toMatchObject({
+      code: "rate_limited",
+      retryAfterMs: 2_000,
+      retryable: true,
+    })
+    expect(await result).not.toBeInstanceOf(RtcCarrierError)
+    rtc.close()
+  })
+
+  it("preserves local signaling overload without marking the carrier broken", async () => {
+    const { rtc, sig } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("hello", { deviceId: "host", relay: true }, 1))
+    await connect
+    const overload = Object.assign(new Error("signaling: outbound signaling queue is full"), {
+      code: "signaling_queue_full",
+    })
+    sig.sendError = overload
+    await expect(rtc.call("ping")).rejects.toBe(overload)
+    expect(rtc.getState()).toBe("open")
+    rtc.close()
+  })
+
+  it("honors an existing logical deadline and removes the pending RPC", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+    jest.useFakeTimers()
+    try {
+      const result = rtc
+        .call("codeserver_ensure", {}, { deadlineAt: Date.now() + 5_000 })
+        .catch((error: unknown) => error)
+      await jest.advanceTimersByTimeAsync(5_000)
+      await expect(result).resolves.toThrow("timed out")
+      expect((rtc as unknown as { pending: Map<string, unknown> }).pending.size).toBe(0)
+    } finally {
+      rtc.close()
+      jest.useRealTimers()
+    }
+  })
+
+  it("keeps paced binary progress alive beyond 30s but expires a stalled stream", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connect = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "x" } as RtcAnswerBody))
+    pcs[0].channels[0].open()
+    await connect
+    jest.useFakeTimers()
+    try {
+      const dc = pcs[0].channels[0]
+      let settled = false
+      const result = rtc
+        .readBinary({
+          kind: "session-media",
+          sessionId: "s1",
+          hash: "a".repeat(64),
+          variant: "canonical",
+        })
+        .catch((error: unknown) => {
+          settled = true
+          return error
+        })
+      const request = dc.sent
+        .map((raw) => JSON.parse(raw) as { kind?: string; id?: string })
+        .find((frame) => frame.kind === "binary-resource")!
+      await jest.advanceTimersByTimeAsync(25_000)
+      dc.push({
+        kind: "binary-resource-start",
+        id: request.id,
+        mediaType: "image/png",
+        totalBytes: 4,
+        totalChunks: 2,
+      })
+      await jest.advanceTimersByTimeAsync(20_000)
+      expect(settled).toBe(false)
+      const frame = new ArrayBuffer(50)
+      const bytes = new Uint8Array(frame)
+      bytes.set([0x43, 0x47, 0x4d, 0x31])
+      bytes.set(new TextEncoder().encode(request.id!), 4)
+      new DataView(frame).setUint32(40, 0)
+      new DataView(frame).setUint32(44, 2)
+      bytes.set([1, 2], 48)
+      dc.pushBinary(frame)
+      await jest.advanceTimersByTimeAsync(29_000)
+      expect(settled).toBe(false)
+      // Duplicate frames and start metadata do not buy another idle period.
+      dc.pushBinary(frame)
+      dc.push({
+        kind: "binary-resource-start",
+        id: request.id,
+        mediaType: "image/png",
+        totalBytes: 4,
+        totalChunks: 2,
+      })
+      await jest.advanceTimersByTimeAsync(1_000)
+      await expect(result).resolves.toThrow("binary resource timed out")
+    } finally {
+      rtc.close()
+      jest.useRealTimers()
+    }
   })
 
   it("readBinary() reassembles raw resource chunks without JSON/base64", async () => {

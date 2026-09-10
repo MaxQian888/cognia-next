@@ -42,6 +42,7 @@ import {
 } from "./companion-contract"
 import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
+import { RtcCarrierError } from "./transport-rtc"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -1145,7 +1146,7 @@ describe("call() — retries", () => {
 
   it.each([
     ["5", 5_000],
-    [new Date(35_000).toUTCString(), 30_000],
+    [new Date(25_000).toUTCString(), 25_000],
   ])("honors a bounded Retry-After value %s", async (retryAfter, expectedDelay) => {
     jest.useFakeTimers({ now: 0 })
     fetchSpy
@@ -1425,6 +1426,37 @@ describe("call() — retries", () => {
 // ---------------------------------------------------------------------------
 
 describe("call() — timeout", () => {
+  it.each([
+    ["codeserver_ensure", 300_000],
+    ["codeserver_status", 30_000],
+  ])("keeps %s alive until its finite %i ms deadline", async (command, timeoutMs) => {
+    await setConfig()
+    jest.useFakeTimers()
+    let signal: AbortSignal | undefined
+    fetchSpy.mockImplementationOnce((_url: string, init: RequestInit) => {
+      signal = init.signal as AbortSignal
+      return new Promise((_resolve, reject) => {
+        signal!.addEventListener("abort", () => {
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }))
+        })
+      })
+    })
+    transport = new CompanionTransport()
+    const result = transport.call(command, { root: "/host/workspaces/app" }).catch((error) => error)
+    try {
+      await jest.advanceTimersByTimeAsync(timeoutMs - 1)
+      expect(signal?.aborted).toBe(false)
+      await jest.advanceTimersByTimeAsync(1)
+      await expect(result).resolves.toMatchObject({
+        code: "timeout",
+        message: expect.stringContaining(`${timeoutMs}ms`),
+      })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("throws timeout CompanionError when fetch rejects with AbortError", async () => {
     await setConfig()
     const abortErr = new Error("The operation was aborted.")
@@ -2420,6 +2452,71 @@ describe("isOnConnectedLan()", () => {
 })
 
 describe("call() — LAN-first gate", () => {
+  it.each(["rate_limited", "INVALID_PARAMS", "device_revoked"])(
+    "preserves RTC host refusal %s without an HTTPS retry",
+    async (code) => {
+      await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+      transport = new CompanionTransport()
+      const fakeRtc = makeFakeRtc()
+      const refusal = Object.assign(new Error("retry_after_seconds=2"), {
+        code,
+        retryAfterMs: 2_000,
+      })
+      fakeRtc.call.mockRejectedValueOnce(refusal)
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      await expect(transport.call("claude_sidecar_status")).rejects.toBe(refusal)
+      expect(fetchSpy).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not route local RTC overload through HTTPS", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.call.mockRejectedValueOnce(new Error("TransportRtc: too many concurrent RPCs"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    await expect(transport.call("claude_sidecar_status")).rejects.toThrow("concurrent RPCs")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("does not replay an unclassified mutation after a carrier failure", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.call.mockRejectedValueOnce(new RtcCarrierError("channel closed"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    await expect(transport.call("unclassified_mutation")).rejects.toThrow("channel closed")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("shares a single deadline between RTC and the HTTPS fallback", async () => {
+    jest.useFakeTimers()
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.call.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new RtcCarrierError("channel closed")), 20_000)
+        })
+    )
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError"))
+          )
+        })
+    )
+    const result = transport.call("claude_sidecar_status").catch((error: unknown) => error)
+    await jest.advanceTimersByTimeAsync(20_000)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    await jest.advanceTimersByTimeAsync(10_000)
+    await expect(result).resolves.toMatchObject({ code: "timeout" })
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true)
+  })
+
   it("routes through HTTPS (not the DataChannel) while on a connected LAN", async () => {
     await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
     transport = new CompanionTransport()
@@ -2452,7 +2549,7 @@ describe("call() — LAN-first gate", () => {
     await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
     transport = new CompanionTransport()
     const fakeRtc = makeFakeRtc()
-    fakeRtc.call.mockRejectedValueOnce(new Error("channel closed"))
+    fakeRtc.call.mockRejectedValueOnce(new RtcCarrierError("channel closed"))
     ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
     fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
 
