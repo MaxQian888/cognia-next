@@ -389,6 +389,7 @@ interface SyncState {
   lastSyncAt: number | null
   /** Cursor to send on the next pull. */
   since: number
+  cursor?: string
   /** Last failure, retained until the next success. */
   lastError: string | null
 }
@@ -458,6 +459,7 @@ async function ensureHydrated(): Promise<void> {
     for (const [table, row] of persisted) {
       stateMap.set(table, {
         since: row.since,
+        ...(row.cursor === undefined ? {} : { cursor: row.cursor }),
         lastSyncAt: row.lastSyncAt,
         lastError: row.lastError,
       })
@@ -645,8 +647,44 @@ export interface RunSyncDownOptions {
  * the orchestrator is doing. Stage runs (`opts.stages`) bypass it for the
  * same reason: {@link runStagedSyncDown} drives its later stages while the
  * caller is already awaiting the earlier one.
+ * All table pulls serialize per transport and host, with one
+ * trailing pull so invalidations arriving during a snapshot are not lost.
  */
 let inflight: Promise<SyncOutcome[]> | null = null
+
+interface TablePull {
+  promise: Promise<SyncOutcome>
+  queued: boolean
+}
+let tablePulls = new WeakMap<Transport, Map<string, TablePull>>()
+
+/** Keep one active snapshot and one trailing pull for invalidations during it. */
+function scheduleTablePull(
+  transport: Transport,
+  scope: string,
+  run: () => Promise<SyncOutcome>
+): Promise<SyncOutcome> {
+  let scopes = tablePulls.get(transport)
+  if (!scopes) {
+    scopes = new Map()
+    tablePulls.set(transport, scopes)
+  }
+  const previous = scopes.get(scope)
+  if (previous?.queued) return previous.promise
+  const promise = (previous ? previous.promise.catch(() => undefined) : Promise.resolve()).then(
+    () => {
+      entry.queued = false
+      return run()
+    }
+  )
+  const entry: TablePull = { queued: Boolean(previous), promise }
+  scopes.set(scope, entry)
+  const cleanup = () => {
+    if (scopes.get(scope) === entry) scopes.delete(scope)
+  }
+  void entry.promise.then(cleanup, cleanup)
+  return entry.promise
+}
 
 /**
  * Shared read-quota cooldown.
@@ -687,6 +725,7 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
   const isTargeted = opts.only !== undefined || opts.stages !== undefined
   if (inflight && !isTargeted) return inflight
   const t = opts.transport ?? transport
+  const requestedHostKey = currentHostCursorKeys().key
   let handlers: RegisteredHandler[] = opts.handlers
     ? opts.handlers.map((handler) => ({ stage: DEFAULT_HANDLER_STAGE, ...handler }))
     : DEFAULT_HANDLERS
@@ -709,53 +748,74 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
       // run of main-thread work per table; the gap is what lets the shell
       // paint the rows that already landed while the rest are still arriving.
       if (index > 0) await yieldToMain()
-      const state = getState(table)
-      const sinceAtStart = state.since
-      // A refusal recorded by any chain parks every table, including this one,
-      // before it spends a token that is not there.
-      await awaitQuotaCooldown()
-      let outcome = await run(t, { since: sinceAtStart })
-      // A quota refusal says nothing about this table, so retrying it is the
-      // only honest response. Bounded, because a host that keeps refusing has
-      // a problem waiting cannot fix, and a table reported as rate-limited is
-      // still better than a run that never ends.
-      for (
-        let attempt = 0;
-        !outcome.ok &&
-        outcome.failure.reason === "rate_limited" &&
-        attempt < QUOTA_RETRIES_PER_TABLE;
-        attempt++
-      ) {
-        noteQuotaRefusal(outcome.failure)
-        await awaitQuotaCooldown()
-        outcome = await run(t, { since: sinceAtStart })
-      }
-      if (outcome.ok) {
-        // Monotonic cursor guard: a targeted "sync now" run (opts.only) and a
-        // full background pull share `stateMap` entries (see getState), so a
-        // slower outcome can finish after a faster one and would otherwise
-        // regress the cursor on `state.since = outcome.result.nextSince`. We
-        // only advance when the freshly observed nextSince is strictly newer
-        // than whatever else already wrote during our `await run(...)`. ADR-
-        // 0027's "monotonic cursor" invariant.
-        if (outcome.result.nextSince > state.since) {
-          state.since = outcome.result.nextSince
+      const pull = async (): Promise<SyncOutcome> => {
+        const hostChanged = () =>
+          currentHostCursorKeys().key !== requestedHostKey || hydratedServerKey !== requestedHostKey
+        const staleHost: SyncOutcome = {
+          ok: false,
+          failure: { table, reason: "transport", message: "Sync host changed" },
         }
-        state.lastSyncAt = Date.now()
-        state.lastError = null
-      } else {
-        state.lastError = outcome.failure.message
+        if (hostChanged()) return staleHost
+        const state = getState(table)
+        let resumeCursor: SyncCursor = {
+          since: state.since,
+          ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
+        }
+        // A refusal recorded by any chain parks every table, including this one,
+        // before it spends a token that is not there.
+        await awaitQuotaCooldown()
+        if (hostChanged()) return staleHost
+        let outcome = await run(t, resumeCursor)
+        if (hostChanged()) return staleHost
+        // A quota refusal says nothing about this table, so retrying it is the
+        // only honest response. Bounded, because a host that keeps refusing has
+        // a problem waiting cannot fix, and a table reported as rate-limited is
+        // still better than a run that never ends.
+        for (
+          let attempt = 0;
+          !outcome.ok &&
+          outcome.failure.reason === "rate_limited" &&
+          attempt < QUOTA_RETRIES_PER_TABLE;
+          attempt++
+        ) {
+          noteQuotaRefusal(outcome.failure)
+          if (outcome.failure.progress) {
+            resumeCursor = {
+              since: outcome.failure.progress.nextSince,
+              cursor: outcome.failure.progress.nextCursor,
+            }
+            state.since = resumeCursor.since
+            state.cursor = resumeCursor.cursor
+          }
+          await awaitQuotaCooldown()
+          if (hostChanged()) return staleHost
+          outcome = await run(t, resumeCursor)
+          if (hostChanged()) return staleHost
+        }
+        const progress = outcome.ok ? outcome.result : outcome.failure.progress
+        if (progress && progress.nextSince >= state.since) {
+          state.since = progress.nextSince
+          state.cursor = progress.nextCursor
+        }
+        if (outcome.ok) {
+          state.lastSyncAt = Date.now()
+          state.lastError = null
+        } else {
+          state.lastError = outcome.failure.message
+        }
+        // Fire-and-forget Dexie persistence so the next cold start can resume
+        // from this cursor. Failures are swallowed by `cursor-store.saveCursor`.
+        void saveCursor({
+          serverKey: hydratedServerKey ?? "",
+          table,
+          since: state.since,
+          ...(state.cursor === undefined ? {} : { cursor: state.cursor }),
+          lastSyncAt: state.lastSyncAt,
+          lastError: state.lastError,
+        })
+        return outcome
       }
-      // Fire-and-forget Dexie persistence so the next cold start can resume
-      // from this cursor. Failures are swallowed by `cursor-store.saveCursor`.
-      void saveCursor({
-        serverKey: hydratedServerKey ?? "",
-        table,
-        since: state.since,
-        lastSyncAt: state.lastSyncAt,
-        lastError: state.lastError,
-      })
-      results.push(outcome)
+      results.push(await scheduleTablePull(t, `${requestedHostKey}:${table}`, pull))
     }
     return results
   })()
@@ -1092,6 +1152,7 @@ export function __resetSyncStateForTests(): void {
   lastForegroundSync = 0
   stateMap.clear()
   inflight = null
+  tablePulls = new WeakMap()
   stagedInflight = null
   hydratePromise = null
   // Also forget which host we were hydrated for, or the next test's first

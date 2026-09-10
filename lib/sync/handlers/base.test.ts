@@ -293,11 +293,13 @@ describe("runSyncHandler", () => {
       table: "messages",
       since: 1,
       content_protocol_version: 1,
+      cursor: "",
     })
     expect((call.mock.calls[2] as unknown[])[1]).toEqual({
       table: "messages",
       since: 2,
       content_protocol_version: 1,
+      cursor: "",
     })
     expect(out.ok && out.result.applied).toBe(2)
     expect(out.ok && out.result.nextSince).toBe(2)
@@ -386,8 +388,126 @@ describe("runSyncHandler", () => {
       { since: 0 }
     )
     expect(transport.call).toHaveBeenCalledTimes(100)
-    expect(out.ok).toBe(true)
-    expect(warn).toHaveBeenCalled()
+    expect(out.ok).toBe(false)
+    expect(!out.ok && out.failure.progress?.nextSince).toBe(100)
     warn.mockRestore()
+  })
+
+  it("stops a non-advancing page instead of repeatedly applying it and claiming success", async () => {
+    const fake = makeFakeTable()
+    const transport = makeTransport({
+      rows: [{ id: "a", name: "a" }],
+      deleted_ids: [],
+      next_since: 5,
+      has_more: true,
+    })
+    const result = await runSyncHandler(
+      { table: "messages", getTable: () => fake.table },
+      transport,
+      { since: 5 }
+    )
+    expect(result.ok).toBe(false)
+    expect(transport.call).toHaveBeenCalledTimes(1)
+  })
+
+  it("continues across timestamp ties and exposes the last applied cursor after a later failure", async () => {
+    const fake = makeFakeTable()
+    const call = jest
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [{ id: "a", name: "a" }],
+        deleted_ids: [],
+        next_since: 5,
+        next_cursor: "after-a",
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        rows: [{ id: "b", name: "b" }],
+        deleted_ids: [],
+        next_since: 5,
+        next_cursor: "after-b",
+        has_more: true,
+      })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("quota"), { code: "rate_limited", retryAfterMs: 100 })
+      )
+    const result = await runSyncHandler(
+      { table: "messages", getTable: () => fake.table },
+      { call } as unknown as Transport,
+      { since: 5 }
+    )
+    expect(call.mock.calls[1][1].cursor).toBe("after-a")
+    expect(call.mock.calls[2][1].cursor).toBe("after-b")
+    expect(result).toMatchObject({
+      ok: false,
+      failure: {
+        reason: "rate_limited",
+        progress: { nextSince: 5, nextCursor: "after-b", applied: 2 },
+      },
+    })
+  })
+
+  it("negotiates with an older strict host without losing a previously persisted composite cursor", async () => {
+    const fake = makeFakeTable()
+    const rejected = Object.assign(new Error("contract mismatch"), {
+      code: "contract_input_violation",
+    })
+    const call = jest
+      .fn()
+      .mockRejectedValueOnce(rejected)
+      .mockResolvedValueOnce({ rows: [], deleted_ids: [], next_since: 5 })
+    const result = await runSyncHandler(
+      { table: "messages", getTable: () => fake.table },
+      { call } as unknown as Transport,
+      { since: 5 }
+    )
+    expect(result.ok).toBe(true)
+    expect(call.mock.calls[1][1]).not.toHaveProperty("cursor")
+    call.mockReset().mockRejectedValue(rejected)
+    const downgrade = await runSyncHandler(
+      { table: "messages", getTable: () => fake.table },
+      { call } as unknown as Transport,
+      { since: 5, cursor: "saved-position" }
+    )
+    expect(downgrade).toMatchObject({ ok: false, failure: { reason: "upgrade_required" } })
+    expect(call).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([undefined, ""])(
+    "preserves a saved cursor when a permissive older host omits it: %p",
+    async (next_cursor) => {
+      const fake = makeFakeTable()
+      const transport = makeTransport({
+        rows: [{ id: "unsafely-advanced", name: "legacy" }],
+        deleted_ids: [],
+        next_since: 10_000,
+        next_cursor,
+      })
+      const result = await runSyncHandler(
+        { table: "messages", getTable: () => fake.table },
+        transport,
+        { since: 5, cursor: "saved-position" }
+      )
+      expect(result).toMatchObject({ ok: false, failure: { reason: "upgrade_required" } })
+      expect(fake.store.size).toBe(0)
+      expect(transport.call).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each([
+    null,
+    { rows: [], deleted_ids: [], next_since: -1 },
+    { rows: [], deleted_ids: [1], next_since: 5 },
+    { rows: [], deleted_ids: [], next_since: 5, next_cursor: 1 },
+  ])("rejects a malformed delta without applying it: %p", async (delta) => {
+    const fake = makeFakeTable()
+    const transport = { call: jest.fn().mockResolvedValue(delta) } as unknown as Transport
+    const result = await runSyncHandler(
+      { table: "messages", getTable: () => fake.table },
+      transport,
+      { since: 1 }
+    )
+    expect(result).toMatchObject({ ok: false, failure: { reason: "schema" } })
+    expect(fake.store.size).toBe(0)
   })
 })

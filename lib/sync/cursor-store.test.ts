@@ -69,6 +69,18 @@ describe("loadCursors", () => {
 })
 
 describe("saveCursor", () => {
+  it("round-trips the opaque row and deletion position without changing the database schema", async () => {
+    const row: SyncCursorRow = {
+      serverKey: "host-a",
+      table: "messages",
+      since: 1000,
+      cursor: '{"version":1,"table":"messages","at":100,"id":"m","deletedAt":1000}',
+      lastSyncAt: 1,
+      lastError: null,
+    }
+    await saveCursor(row)
+    expect((await loadCursors("host-a")).get("messages")).toEqual(row)
+  })
   it("upserts a row by the [serverKey+table] primary key", async () => {
     await saveCursor({
       serverKey: "host-a",

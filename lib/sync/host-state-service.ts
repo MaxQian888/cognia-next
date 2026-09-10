@@ -205,6 +205,18 @@ export function createAgentRpcHostStateDispatcher(
             ])
             const session = await getSession(sessionId)
             if (!session) throw new Error("host_state_session_not_found")
+            // Only the built-in rail is dispatched here. The chat controller
+            // checks the same thing (`hostStateEligible`) before it enqueues;
+            // an attached client that skipped the controller must be refused
+            // for the same reason, because `buildSendOptions` would otherwise
+            // stamp the host's composer runtime pick (Codex, OpenCode, ...)
+            // onto a built-in `agent_send`, and the sidecar refuses that
+            // adapter by throwing.
+            const { runtimeRefForSession } = await import("@/stores/agent/agent-runtime-store")
+            const runtimeRef = runtimeRefForSession(sessionId)
+            if (runtimeRef.kind !== "builtin") {
+              throw new Error(`host_state_runtime_not_builtin:${runtimeRef.kind}`)
+            }
             const options = await buildSendOptions(session, action.action.text)
             if (receipt) {
               await workSubmissionAdapter.bindHostStateChatTurnContext(action, options)
@@ -354,6 +366,7 @@ export interface HostStateService {
 export interface InstalledHostStateSync {
   status: HostStateStatus
   resync(): Promise<void>
+  hydrateSession(sessionId: string): Promise<void>
   stop(): void
 }
 
@@ -376,6 +389,10 @@ export async function installHostStateSync(options: {
   let applying = Promise.resolve()
   const buffered: HostStateAppliedAction[] = []
   const cuts = new Map<string, number>()
+  const databaseName = getDb().name
+  const assertCurrent = () => {
+    if (stopped || getDb().name !== databaseName) throw new Error("host_state_sync_stopped")
+  }
 
   const unsubscribe = options.transport.subscribe<unknown>(HOST_STATE_ACTION_TOPIC, (event) => {
     if (stopped) return
@@ -406,7 +423,12 @@ export async function installHostStateSync(options: {
   }
 
   const takeSnapshots = async (): Promise<void> => {
+    assertCurrent()
     const channels = [...new Set(await options.channels())]
+    assertCurrent()
+    // A reconnect makes unrequested mirrors stale. Opening one later must
+    // re-cut it, rather than treating an old in-memory cut as synchronized.
+    cuts.clear()
     if (channels.length === 0) return
     const snapshots: HostStateSnapshot[] = []
     for (const channel of channels) {
@@ -418,22 +440,34 @@ export async function installHostStateSync(options: {
   }
 
   const applyEvent = async (event: HostStateAppliedAction): Promise<void> => {
+    assertCurrent()
     if (event.hostGeneration < hostGeneration) return
     if (event.hostGeneration > hostGeneration) throw new Error("host_state_generation_reset")
     if (event.hostSeq <= lastHostSeq) return
     if (event.hostSeq !== lastHostSeq + 1) throw new Error("host_state_sequence_gap")
     lastHostSeq = event.hostSeq
     const cut = cuts.get(event.channel)
-    if (cut === undefined || event.hostSeq <= cut || !event.mutation) return
+    if (!event.mutation) return
+    if (cut === undefined) {
+      if (!event.channel.startsWith(sessionStateChannel(options.runtimeTargetId, ""))) return
+      // Subscribe to the shared stream once, hydrate only channels that
+      // actually change. Subsequent events use that cut without another RPC.
+      await takeChannelSnapshot(event.channel)
+      return
+    }
+    if (event.hostSeq <= cut) return
     const { getDb } = await import("@/lib/db/schema")
     const current = await getDb().hostStateChannels.get(event.channel)
     if (!current) throw new Error("host_state_channel_missing")
+    assertCurrent()
     const state = reduceHostStateMutation(current.state, event.mutation)
     const visibleState = await persistConfirmedState(
       state,
       event.hostId,
       event.hostGeneration,
-      event.hostSeq
+      event.hostSeq,
+      assertCurrent,
+      event.mutation.kind === "session.upserted" ? event.mutation.session.sessionId : undefined
     )
     cuts.set(event.channel, event.hostSeq)
     options.onState?.(visibleState)
@@ -447,19 +481,25 @@ export async function installHostStateSync(options: {
   }
 
   const takeChannelSnapshot = async (channel: string): Promise<HostStateSnapshot> => {
+    assertCurrent()
     const snapshot = await options.transport.call<HostStateSnapshot>("host_state_snapshot", {
       accountId: options.accountId,
       runtimeTargetId: options.runtimeTargetId,
       channel,
     })
-    if (!isHostStateSnapshot(snapshot)) throw new Error("host_state_snapshot_malformed")
-    cuts.set(channel, snapshot.cutHostSeq)
+    assertCurrent()
+    if (!isHostStateSnapshot(snapshot) || snapshot.channel !== channel) {
+      throw new Error("host_state_snapshot_malformed")
+    }
     const visibleState = await persistConfirmedState(
       snapshot.state,
       snapshot.hostId,
       snapshot.hostGeneration,
-      snapshot.cutHostSeq
+      snapshot.cutHostSeq,
+      assertCurrent
     )
+    assertCurrent()
+    cuts.set(channel, snapshot.cutHostSeq)
     options.onState?.(visibleState)
     return snapshot
   }
@@ -468,6 +508,7 @@ export async function installHostStateSync(options: {
   const resyncNow = async (): Promise<void> => {
     ready = false
     await takeSnapshots()
+    assertCurrent()
     ready = true
     const pending = buffered.slice().sort((left, right) => left.hostSeq - right.hostSeq)
     buffered.length = 0
@@ -523,13 +564,22 @@ export async function installHostStateSync(options: {
 
   return {
     status,
-    async resync() {
-      if (stopped) return
-      ready = false
-      // `applying` is rejection-free by construction, so this cannot throw and
-      // cannot strand the caller.
-      await applying
-      await resyncNow()
+    resync() {
+      if (stopped) return Promise.resolve()
+      // Serialize explicit recovery with both live events and on-demand reads.
+      const result = applying.then(resyncNow)
+      applying = result.catch(recoverFromApplyFailure)
+      return result
+    },
+    hydrateSession(sessionId) {
+      if (stopped) return Promise.resolve()
+      const channel = sessionStateChannel(options.runtimeTargetId, sessionId)
+      const result = applying.then(async () => {
+        assertCurrent()
+        if (!cuts.has(channel)) await takeChannelSnapshot(channel)
+      })
+      applying = result.catch(recoverFromApplyFailure)
+      return result
     },
     stop() {
       if (stopped) return
@@ -545,28 +595,75 @@ export async function installHostStateSyncForTarget(options: {
   runtimeTargetId: string
   onState?: (state: HostStateChannelState) => void
 }): Promise<InstalledHostStateSync> {
-  return installHostStateSync({
-    ...options,
-    channels: async () => {
-      const { getDb } = await import("@/lib/db/schema")
-      const sessionIds = await getDb().sessions.toCollection().primaryKeys()
-      return [
-        sessionIndexChannel(options.runtimeTargetId),
-        ...sessionIds.map((sessionId) =>
-          sessionStateChannel(options.runtimeTargetId, String(sessionId))
-        ),
-      ]
-    },
+  const { useChatStore } = await import("@/stores/chat/chat-store")
+  const databaseName = getDb().name
+  let installed: InstalledHostStateSync | undefined
+  const openSessionIds = async (): Promise<string[]> => {
+    if (getDb().name !== databaseName) return []
+    const state = useChatStore.getState()
+    const ids = [
+      ...new Set(
+        [...state.openSessionIds, state.activeSessionId, state.splitSessionId].filter(
+          (id): id is string => Boolean(id)
+        )
+      ),
+    ]
+    // Chat panes can briefly retain the previous target's IDs during a
+    // switch. Only request IDs present in this target's local session index.
+    const rows = await getDb().sessions.bulkGet(ids)
+    return ids.filter((_id, index) => rows[index] !== undefined)
+  }
+  const hydrateOpenSessions = async () => {
+    for (const sessionId of await openSessionIds()) {
+      await installed?.hydrateSession(sessionId)
+    }
+  }
+  const unsubscribe = useChatStore.subscribe((state, previous) => {
+    if (
+      state.activeSessionId === previous.activeSessionId &&
+      state.openSessionIds === previous.openSessionIds &&
+      state.splitSessionId === previous.splitSessionId
+    )
+      return
+    void hydrateOpenSessions().catch((error) => {
+      loggers.sync.warn("[host-state] open session hydration failed", { error: String(error) })
+    })
   })
+  try {
+    installed = await installHostStateSync({
+      ...options,
+      channels: async () => [
+        sessionIndexChannel(options.runtimeTargetId),
+        ...(await openSessionIds()).map((id) => sessionStateChannel(options.runtimeTargetId, id)),
+      ],
+    })
+    // Covers a pane opened while the initial index request was in flight.
+    await hydrateOpenSessions()
+    const sync = installed
+    return {
+      ...sync,
+      stop() {
+        unsubscribe()
+        sync.stop()
+      },
+    }
+  } catch (error) {
+    unsubscribe()
+    installed?.stop()
+    throw error
+  }
 }
 
 async function persistConfirmedState(
   state: HostStateChannelState,
   hostId: string,
   hostGeneration: number,
-  hostSeq: number
+  hostSeq: number,
+  assertCurrent: () => void,
+  changedSessionId?: string
 ): Promise<HostStateChannelState> {
   const { getDb } = await import("@/lib/db/schema")
+  assertCurrent()
   const db = getDb()
   await db.hostStateChannels.put({
     channel: state.channel,
@@ -579,34 +676,48 @@ async function persistConfirmedState(
     updatedAt: Date.now(),
   })
   if (state.kind === "session-index") {
-    for (const summary of state.sessions) {
-      if (summary.tombstone) {
-        await Promise.all([
-          db.sessions.delete(summary.sessionId),
-          db.messages.where("sessionId").equals(summary.sessionId).delete(),
-          db.chatDrafts.delete(summary.sessionId),
-        ])
-        continue
-      }
-      const existing = await db.sessions.get(summary.sessionId)
-      await db.sessions.put({
-        ...(existing ?? {
-          id: summary.sessionId,
-          title: summary.title ?? "New conversation",
-          titleAuto: !summary.title,
-          createdAt: Date.now(),
-        }),
-        ...(summary.title ? { title: summary.title } : {}),
-        transcriptRevision: summary.transcriptRevision,
-        archivedAt:
-          summary.conversation === "archived" ? (existing?.archivedAt ?? Date.now()) : undefined,
-        updatedAt: Date.now(),
-      })
+    const summaries = changedSessionId
+      ? state.sessions.filter((summary) => summary.sessionId === changedSessionId)
+      : state.sessions
+    const deletedIds = summaries
+      .filter((summary) => summary.tombstone)
+      .map((summary) => summary.sessionId)
+    if (deletedIds.length > 0) {
+      await Promise.all([
+        db.sessions.bulkDelete(deletedIds),
+        db.messages.where("sessionId").anyOf(deletedIds).delete(),
+        db.chatDrafts.bulkDelete(deletedIds),
+      ])
+    }
+    const live = summaries.filter((summary) => !summary.tombstone)
+    if (live.length > 0) {
+      const existingRows = await db.sessions.bulkGet(live.map((summary) => summary.sessionId))
+      const now = Date.now()
+      await db.sessions.bulkPut(
+        live.map((summary, index) => {
+          const existing = existingRows[index]
+          return {
+            ...(existing ?? {
+              id: summary.sessionId,
+              title: summary.title ?? "New conversation",
+              titleAuto: !summary.title,
+              createdAt: now,
+            }),
+            ...(summary.title ? { title: summary.title } : {}),
+            transcriptRevision: summary.transcriptRevision,
+            archivedAt:
+              summary.conversation === "archived" ? (existing?.archivedAt ?? now) : undefined,
+            updatedAt: now,
+          }
+        })
+      )
     }
     return state
   }
-  const optimisticState = await projectPendingHostStateActions(state)
+  assertCurrent()
+  const optimisticState = await projectPendingHostStateActions(state, db)
   const existingDraft = await db.chatDrafts.get(state.sessionId)
+  assertCurrent()
   const attachments = optimisticState.draft.attachments.map((reference) => {
     const local = existingDraft?.attachments?.find(
       (candidate) =>
@@ -637,17 +748,20 @@ async function persistConfirmedState(
       ...(existingDraft?.templateBinding ? { templateBinding: existingDraft.templateBinding } : {}),
     }),
   ])
-  await materializeOptimisticMessages(optimisticState)
+  assertCurrent()
+  await materializeOptimisticMessages(optimisticState, db)
   const { useChatStore } = await import("@/stores/chat/chat-store")
+  assertCurrent()
   useChatStore.getState().setSessionStatus(state.sessionId, chatStoreStatusForTurn(optimisticState))
   return optimisticState
 }
 
 async function projectPendingHostStateActions(
-  confirmed: Extract<HostStateChannelState, { kind: "session" }>
+  confirmed: Extract<HostStateChannelState, { kind: "session" }>,
+  db: ReturnType<typeof getDb>
 ): Promise<Extract<HostStateChannelState, { kind: "session" }>> {
-  const rows = await getDb()
-    .mobileOutboundQueue.filter(
+  const rows = await db.mobileOutboundQueue
+    .filter(
       (row) =>
         row.protocol === "host-state" &&
         row.channel === confirmed.channel &&
@@ -665,9 +779,9 @@ async function projectPendingHostStateActions(
 }
 
 async function materializeOptimisticMessages(
-  state: Extract<HostStateChannelState, { kind: "session" }>
+  state: Extract<HostStateChannelState, { kind: "session" }>,
+  db: ReturnType<typeof getDb>
 ): Promise<void> {
-  const db = getDb()
   for (const queued of state.queue) {
     if (await db.messages.get(queued.messageId)) continue
     const session = await db.sessions.get(state.sessionId)

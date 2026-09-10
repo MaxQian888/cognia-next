@@ -44,6 +44,8 @@ pub struct SyncPullRequest {
     pub account_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_protocol_version: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
 }
 
 /// Payload received back from the WebView.
@@ -78,6 +80,7 @@ impl SyncBridge {
     /// Run a sync pull through the bridge.  Emits the request event, waits
     /// up to `timeout` for the WebView to respond, returns the delta or an
     /// error string.
+    #[allow(clippy::too_many_arguments)]
     pub async fn pull(
         self: Arc<Self>,
         transport: &dyn BridgeTransport,
@@ -85,6 +88,7 @@ impl SyncBridge {
         since: i64,
         account_id: String,
         content_protocol_version: Option<u64>,
+        cursor: Option<String>,
         timeout: Duration,
     ) -> Result<Value, String> {
         let mut request_guard = transport.reserve_request()?;
@@ -102,6 +106,7 @@ impl SyncBridge {
             since,
             account_id,
             content_protocol_version,
+            cursor,
         };
 
         // Preserve the wire shape: SyncPullRequest serializes snake_case
@@ -226,6 +231,7 @@ mod tests {
                 7,
                 "local_acct_a".into(),
                 Some(1),
+                Some("page-position".into()),
                 DEFAULT_TIMEOUT,
             )
             .await
@@ -244,6 +250,7 @@ mod tests {
         // Snake_case on the wire — distinct from the camelCase messages/writes payloads.
         assert_eq!(payload["account_id"], "local_acct_a");
         assert_eq!(payload["content_protocol_version"], 1);
+        assert_eq!(payload["cursor"], "page-position");
         let request_id = payload["request_id"].as_str().unwrap().to_string();
 
         bridge.resolve(SyncPullResponse {
@@ -264,6 +271,7 @@ mod tests {
                 "sessions".into(),
                 0,
                 "a".into(),
+                None,
                 None,
                 DEFAULT_TIMEOUT,
             )
@@ -286,6 +294,7 @@ mod tests {
                     "sessions".into(),
                     0,
                     "a".into(),
+                    None,
                     None,
                     DEFAULT_TIMEOUT,
                 )
@@ -313,6 +322,7 @@ mod tests {
             since: 42,
             account_id: "local_acct_a".to_string(),
             content_protocol_version: None,
+            cursor: None,
         };
 
         let value = serde_json::to_value(payload).expect("serialize payload");

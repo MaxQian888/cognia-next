@@ -27,7 +27,15 @@ pub(super) fn bind_authority(
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     let account_id = account_id.ok_or_else(|| RpcError::forbidden("account scope is required"))?;
     let grants = caller_device_grants(account_id, device_id);
-    bind_authority_values(args, account_id, opaque_host_id(state), device_id, grants)
+    let namespace = caller_account_namespace(account_id)?;
+    bind_authority_values(args, &namespace, opaque_host_id(state), device_id, grants)
+}
+
+/// Authentication and grants use tenant IDs; the brain owns a local account
+/// namespace. Resolve only the persisted binding, never a client-supplied ID.
+fn caller_account_namespace(tenant_id: &str) -> Result<String, (StatusCode, Json<RpcError>)> {
+    super::super::host_identity::namespace_for_tenant(tenant_id)
+        .ok_or_else(|| RpcError::forbidden("tenant has no bound host account"))
 }
 
 /// The capabilities `device_id` currently holds in `account_id`. An unreadable
@@ -73,6 +81,32 @@ fn bind_authority_values(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tenant_scope_resolves_only_its_bound_local_account() {
+        use crate::companion_api::security_store::{
+            install_security_store, test_guard, SecurityStore,
+        };
+        let _guard = test_guard();
+        struct Cleanup;
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                install_security_store(None);
+                crate::companion_api::host_identity::unbind_local_account();
+            }
+        }
+        let _cleanup = Cleanup;
+        install_security_store(Some(SecurityStore::in_memory().unwrap()));
+        let binding =
+            crate::companion_api::host_identity::bind_local_account_from_operator("local_acct_a")
+                .unwrap();
+        assert_eq!(
+            caller_account_namespace(&binding.remote_tenant_id).unwrap(),
+            "local_acct_a"
+        );
+        assert!(caller_account_namespace("another-tenant").is_err());
+        assert!(caller_account_namespace("local_acct_a").is_err());
+    }
 
     #[test]
     fn command_family_is_closed() {

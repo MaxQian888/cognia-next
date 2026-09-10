@@ -34,6 +34,7 @@ describe("syncWorkflowRuns", () => {
       table: "workflowRuns",
       since: 99,
       content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+      cursor: "",
     })
     expect(out.ok).toBe(true)
     if (!out.ok) return

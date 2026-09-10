@@ -45,6 +45,7 @@ import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-sta
 import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import Dexie from "dexie"
 
 import { readTombstonesSince } from "./tombstones"
 import type { SyncDelta, SyncableTable } from "./types"
@@ -62,6 +63,7 @@ interface SyncPullRequestEvent {
   since: number
   account_id?: string
   content_protocol_version?: number
+  cursor?: string
 }
 
 interface DesktopSyncContentDeps {
@@ -120,7 +122,13 @@ async function respondToSyncRequest(
   const { request_id, table, since } = request
   try {
     assertRequestAccountMatchesActiveAccount(request)
-    const delta = await readDexieDelta(table, since, request.content_protocol_version)
+    const delta = await readDexieDelta(
+      table,
+      since,
+      request.content_protocol_version,
+      undefined,
+      request.cursor
+    )
     await bridge.invoke(RESPONSE_COMMAND, { requestId: request_id, delta, error: null })
   } catch (err: unknown) {
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -151,10 +159,17 @@ export async function readDexieDelta(
   contentProtocolVersion?: number,
   contentDeps: DesktopSyncContentDeps = {
     getMemoryDek: () => createProfileDekStore().getOrCreate(MEMORY_SYNC_PROFILE_ID),
-  }
+  },
+  cursor?: string
 ): Promise<SyncDelta<unknown>> {
   if (table === "memories" && contentProtocolVersion !== 1) {
     throw new Error("upgrade_required: retrieval content protocol v1 is required")
+  }
+  if (cursor !== undefined) {
+    if (!["messages", "executionRuns", "workflowRuns", "connectorHeartbeats"].includes(table)) {
+      throw new Error("unsupported sync cursor table")
+    }
+    return readCursorDelta(table as SyncableTable, since, cursor)
   }
   switch (table) {
     case "characters":
@@ -273,10 +288,14 @@ async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
 }
 
 async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>> {
-  const rows = (await getDb().sessions.where("updatedAt").above(since).toArray()).map((row) =>
-    row.executionContext
-      ? { ...row, executionContext: portableExecutionContext(row.executionContext) }
-      : row
+  // The client applies this complete delta in slices. Send recent sessions
+  // first so a cold sidebar fills with recent history before older rows.
+  // finalizeDelta still advances the cursor to the maximum across all rows.
+  const rows = (await getDb().sessions.where("updatedAt").above(since).reverse().toArray()).map(
+    (row) =>
+      row.executionContext
+        ? { ...row, executionContext: portableExecutionContext(row.executionContext) }
+        : row
   )
   return finalizeDelta("sessions", rows, since)
 }
@@ -292,17 +311,148 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
     // history on demand.
     const newest = await index.reverse().limit(MESSAGES_PAGE_SIZE).toArray()
     newest.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-    return finalizeDelta("messages", newest, since, false)
+    return finalizeDelta("messages", newest, since, false, (row) => row.createdAt)
   }
 
   // Incremental pulls still drain every newly-created row after the durable
   // cursor, in ascending order, so live/offline changes are never folded away.
   const page = await getDb()
     .messages.where("[createdAt+id]")
-    .above([since, ""])
+    .above([since, Dexie.maxKey])
     .limit(MESSAGES_PAGE_SIZE)
     .toArray()
-  return finalizeDelta("messages", page, since, page.length === MESSAGES_PAGE_SIZE)
+  // A legacy numeric cursor cannot split a timestamp tie. Include its complete
+  // boundary group; cursor-aware clients above retain the bounded 500-row page.
+  let hasMore = false
+  if (page.length === MESSAGES_PAGE_SIZE) {
+    const boundary = page[page.length - 1].createdAt
+    const lastId = page[page.length - 1].id
+    const remainder = await getDb()
+      .messages.where("[createdAt+id]")
+      .between([boundary, lastId], [boundary, Dexie.maxKey], false, true)
+      .toArray()
+    page.push(...remainder)
+    hasMore = Boolean(
+      await getDb().messages.where("[createdAt+id]").above([boundary, Dexie.maxKey]).first()
+    )
+  }
+  return finalizeDelta("messages", page, since, hasMore, (row) => row.createdAt)
+}
+
+interface PagedSyncCursor {
+  version: 1
+  table: string
+  at: number
+  id: string
+  deletedAt: number
+}
+
+function decodeSyncCursor(table: string, since: number, value: string): PagedSyncCursor {
+  if (!Number.isSafeInteger(since) || since < 0) throw new Error("invalid sync cursor")
+  if (!value) return { version: 1, table, at: since, id: "", deletedAt: since }
+  let cursor: PagedSyncCursor
+  try {
+    cursor = JSON.parse(value) as PagedSyncCursor
+  } catch {
+    throw new Error("invalid sync cursor")
+  }
+  if (
+    !cursor ||
+    cursor.version !== 1 ||
+    cursor.table !== table ||
+    !Number.isSafeInteger(cursor.at) ||
+    cursor.at < 0 ||
+    !Number.isSafeInteger(cursor.deletedAt) ||
+    cursor.deletedAt < 0 ||
+    typeof cursor.id !== "string" ||
+    cursor.id.length > 1024 ||
+    value.length > 4096
+  )
+    throw new Error("invalid sync cursor")
+  return cursor
+}
+
+/** Rows and deletions advance independently; a later deletion cannot skip unsent rows. */
+async function readCursorDelta(
+  table: SyncableTable,
+  since: number,
+  token: string
+): Promise<SyncDelta<unknown>> {
+  const cursor = decodeSyncCursor(table, since, token)
+  const db = getDb()
+  let rows: UpdatedAtRow[]
+  let hasMore = false
+  let cursorOf = (row: UpdatedAtRow) => Number(row.updatedAt ?? row.createdAt ?? 0)
+  const after = (row: UpdatedAtRow) =>
+    cursorOf(row) > cursor.at || (cursorOf(row) === cursor.at && row.id > cursor.id)
+
+  if (table === "messages") {
+    cursorOf = (row) => Number(row.createdAt ?? 0)
+    if (!token && since === 0) {
+      rows = await db.messages
+        .orderBy("[createdAt+id]")
+        .reverse()
+        .limit(MESSAGES_PAGE_SIZE)
+        .toArray()
+      rows.reverse()
+    } else {
+      const page = await db.messages
+        .where("[createdAt+id]")
+        .above([cursor.at, cursor.id])
+        .limit(MESSAGES_PAGE_SIZE + 1)
+        .toArray()
+      hasMore = page.length > MESSAGES_PAGE_SIZE
+      rows = page.slice(0, MESSAGES_PAGE_SIZE)
+    }
+  } else if (table === "executionRuns") {
+    const page = await db.executionRuns
+      .where("updatedAt")
+      .aboveOrEqual(cursor.at)
+      .filter(after)
+      .limit(RUN_PAGE_SIZE + 1)
+      .toArray()
+    hasMore = page.length > RUN_PAGE_SIZE
+    rows = page.slice(0, RUN_PAGE_SIZE)
+  } else if (table === "connectorHeartbeats") {
+    cursorOf = (row) => (row as unknown as ConnectorHeartbeatRow).at
+    if (!token && since === 0) cursor.at = Math.max(0, Date.now() - HEARTBEAT_FIRST_SYNC_WINDOW_MS)
+    const page = await db.connectorHeartbeats
+      .where("at")
+      .aboveOrEqual(cursor.at)
+      .filter(after)
+      .limit(HEARTBEAT_PAGE_SIZE + 1)
+      .toArray()
+    hasMore = page.length > HEARTBEAT_PAGE_SIZE
+    rows = page.slice(0, HEARTBEAT_PAGE_SIZE)
+  } else {
+    cursorOf = (row) => runActivityAt(row as unknown as WorkflowRunRow)
+    if (!token && since === 0) cursor.at = Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS)
+    const [started, completed] = await Promise.all([
+      db.workflowRuns.where("startedAt").aboveOrEqual(cursor.at).toArray(),
+      db.workflowRuns.where("completedAt").aboveOrEqual(cursor.at).toArray(),
+    ])
+    const ordered = [...new Map([...started, ...completed].map((row) => [row.id, row])).values()]
+      .filter(after)
+      .sort(
+        (a, b) => runActivityAt(a) - runActivityAt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      )
+    hasMore = ordered.length > RUN_PAGE_SIZE
+    rows = ordered.slice(0, RUN_PAGE_SIZE).map(projectRunForSync)
+  }
+  const deleted = await readTombstonesSince(table, cursor.deletedAt)
+  const last = rows.at(-1)
+  const next: PagedSyncCursor = {
+    ...cursor,
+    ...(last ? { at: cursorOf(last), id: last.id } : {}),
+    deletedAt: deleted.maxDeletedAt,
+  }
+  return {
+    rows,
+    deleted_ids: deleted.ids,
+    next_since: Math.max(since, next.at, next.deletedAt),
+    next_cursor: JSON.stringify(next),
+    has_more: hasMore,
+  }
 }
 
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
@@ -1109,13 +1259,17 @@ async function finalizeDelta<T extends UpdatedAtRow>(
   // `deleted_ids` via `bulkDelete`, so a desktop deletion finally reaches
   // it. `deletedAt` shares the cursor space with `updatedAt` — both feed
   // `next_since` so each upsert and each tombstone crosses the wire once.
-  const { ids: deletedIds, maxDeletedAt } = await readTombstonesSince(table, since)
-
   let highestCursor = since
   for (const row of rows) {
     const candidate = cursorOf(row)
     if (candidate > highestCursor) highestCursor = candidate
   }
+  // Legacy pagination may only acknowledge deletions up to its delivered page.
+  const { ids: deletedIds, maxDeletedAt } = await readTombstonesSince(
+    table,
+    since,
+    hasMore ? highestCursor : undefined
+  )
   if (maxDeletedAt > highestCursor) highestCursor = maxDeletedAt
 
   return {

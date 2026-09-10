@@ -15,9 +15,19 @@ import {
 export const SYNCABLE_TABLE_NAMES = COMPANION_SYNC_PROTOCOL_TABLE_NAMES
 export type SyncableTable = CompanionSyncProtocolTableName
 
+/** Tables whose row pages need a tie-breaker independent of deletion watermarks. */
+export const PAGED_SYNC_TABLES: readonly SyncableTable[] = [
+  "messages",
+  "executionRuns",
+  "workflowRuns",
+  "connectorHeartbeats",
+]
+
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */
   since: number
+  /** Versioned row/tombstone continuation returned by a cursor-aware host. */
+  cursor?: string
 }
 
 export interface SyncDelta<TRow> {
@@ -27,6 +37,8 @@ export interface SyncDelta<TRow> {
   deleted_ids: string[]
   /** Cursor to pass on the next pull. */
   next_since: number
+  /** Persist and send back alongside next_since; it preserves timestamp ties. */
+  next_cursor?: string
   /**
    * Set by paged tables (messages) when this page filled to the page size,
    * i.e. more rows exist past `next_since`. The mobile handler keeps pulling
@@ -42,6 +54,7 @@ export interface SyncResult {
   applied: number
   /** Cursor saved after this run. */
   nextSince: number
+  nextCursor?: string
   /** Server time the snapshot was taken; for diagnostics only. */
   serverTime?: number
 }
@@ -73,6 +86,8 @@ export interface SyncFailure {
    * turning one refusal into one refusal per remaining table.
    */
   retryAfterMs?: number
+  /** Successfully applied pages before a later page failed; safe to resume. */
+  progress?: SyncResult
 }
 
 export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failure: SyncFailure }
@@ -106,6 +121,7 @@ export interface SyncCursorRow {
   table: SyncableTable
   /** Last successful `next_since` cursor returned by the server. */
   since: number
+  cursor?: string
   /** Epoch ms of the last successful pull. `null` until the first success. */
   lastSyncAt: number | null
   /** Last failure message, retained until the next success. */

@@ -182,6 +182,52 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(10)
   })
 
+  it("delivers the newest sessions in the first apply slice without dropping older sessions", async () => {
+    await getDb().sessions.bulkPut(
+      Array.from({ length: 1_000 }, (_, index) => ({
+        id: `s-${String(index + 1).padStart(4, "0")}`,
+        title: `Session ${index + 1}`,
+        createdAt: index + 1,
+        updatedAt: index + 1,
+      }))
+    )
+
+    const delta = await readDexieDelta("sessions", 0)
+    const timestamps = delta.rows.map((row) => (row as { updatedAt: number }).updatedAt)
+    const firstSlice = timestamps.slice(0, 200)
+    expect({
+      rows: timestamps.length,
+      firstSliceMin: Math.min(...firstSlice),
+      firstSliceMax: Math.max(...firstSlice),
+      nextSince: delta.next_since,
+      hasMore: delta.has_more,
+    }).toEqual({
+      rows: 1_000,
+      firstSliceMin: 801,
+      firstSliceMax: 1_000,
+      nextSince: 1_000,
+      hasMore: false,
+    })
+    expect(timestamps).toEqual(Array.from({ length: 1_000 }, (_, index) => 1_000 - index))
+  })
+
+  it("keeps timestamp ties deterministic and advances past session tombstones", async () => {
+    const db = getDb()
+    await db.sessions.bulkPut([
+      { id: "s-a", title: "A", createdAt: 1, updatedAt: 10 },
+      { id: "s-c", title: "C", createdAt: 1, updatedAt: 10 },
+      { id: "s-b", title: "B", createdAt: 1, updatedAt: 10 },
+      { id: "s-old", title: "Old", createdAt: 1, updatedAt: 5 },
+    ])
+    await db.syncTombstones.put({ table: "sessions", id: "s-deleted", deletedAt: 20 })
+
+    const delta = await readDexieDelta("sessions", 5)
+    expect(delta.rows.map((row) => (row as { id: string }).id)).toEqual(["s-c", "s-b", "s-a"])
+    expect(delta.next_since).toBe(20)
+    expect(delta.deleted_ids).toEqual(["s-deleted"])
+    expect((await readDexieDelta("sessions", delta.next_since)).rows).toEqual([])
+  })
+
   it("never syncs a managed workspace's device-local filesystem paths", async () => {
     const db = getDb()
     await db.sessions.put({
@@ -284,6 +330,151 @@ describe("readDexieDelta", () => {
     const delta = await readDexieDelta("messages", 50)
     expect(delta.rows).toHaveLength(500)
     expect(delta.has_more).toBe(true)
+  })
+
+  it("drains timestamp ties in bounded pages and then returns an empty delta", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 600 }, (_, i) => ({
+        id: `tie-${String(i).padStart(4, "0")}`,
+        sessionId: "s",
+        createdAt: 100,
+      })) as never[]
+    )
+    const first = await readDexieDelta("messages", 1, undefined, undefined, "")
+    expect(first.rows).toHaveLength(500)
+    expect(first.has_more).toBe(true)
+    const second = await readDexieDelta(
+      "messages",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    expect(second.rows).toHaveLength(100)
+    expect(second.has_more).toBe(false)
+    expect(
+      new Set([...first.rows, ...second.rows].map((row) => (row as { id: string }).id)).size
+    ).toBe(600)
+    const empty = await readDexieDelta(
+      "messages",
+      second.next_since,
+      undefined,
+      undefined,
+      second.next_cursor
+    )
+    expect(empty.rows).toEqual([])
+  })
+
+  it("keeps a newer deletion watermark from skipping an unsent message page", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 600 }, (_, i) => ({
+        id: `message-${i}`,
+        sessionId: "s",
+        createdAt: 100 + i,
+      })) as never[]
+    )
+    await getDb().syncTombstones.put({ table: "messages", id: "deleted", deletedAt: 10_000 })
+    const first = await readDexieDelta("messages", 1, undefined, undefined, "")
+    const second = await readDexieDelta(
+      "messages",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    expect(first.rows.length + second.rows.length).toBe(600)
+    expect([...first.deleted_ids, ...second.deleted_ids]).toEqual(["deleted"])
+    expect(second.has_more).toBe(false)
+  })
+
+  it.each([
+    ["executionRuns", 200, "updatedAt"],
+    ["workflowRuns", 200, "startedAt"],
+    ["connectorHeartbeats", 500, "at"],
+  ] as const)(
+    "paginates %s timestamp ties independently of newer tombstones",
+    async (table, size, stamp) => {
+      await getDb()
+        .table(table)
+        .bulkPut(
+          Array.from({ length: size + 5 }, (_, i) => ({
+            id: `row-${String(i).padStart(4, "0")}`,
+            [stamp]: 100,
+          }))
+        )
+      await getDb().syncTombstones.put({ table, id: "removed", deletedAt: 1000 })
+      const first = await readDexieDelta(table, 1, undefined, undefined, "")
+      const second = await readDexieDelta(
+        table,
+        first.next_since,
+        undefined,
+        undefined,
+        first.next_cursor
+      )
+      expect(first.rows).toHaveLength(size)
+      expect(second.rows).toHaveLength(5)
+      expect(second.deleted_ids).toEqual([])
+      expect(second.has_more).toBe(false)
+    }
+  )
+
+  it("keeps legacy message clients complete across ties and interleaved deletions", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 600 }, (_, i) => ({
+        id: `legacy-${i}`,
+        sessionId: "s",
+        createdAt: 100,
+      })) as never[]
+    )
+    const tied = await readDexieDelta("messages", 1)
+    expect(tied.rows).toHaveLength(600)
+    expect((await readDexieDelta("messages", tied.next_since)).rows).toEqual([])
+    await getDb().messages.clear()
+    await getDb().messages.bulkPut(
+      Array.from({ length: 600 }, (_, i) => ({
+        id: `legacy-${i}`,
+        sessionId: "s",
+        createdAt: 100 + i,
+      })) as never[]
+    )
+    await getDb().syncTombstones.put({ table: "messages", id: "removed", deletedAt: 1000 })
+    const first = await readDexieDelta("messages", 1)
+    const second = await readDexieDelta("messages", first.next_since)
+    expect(first.rows.length + second.rows.length).toBe(600)
+    expect(first.deleted_ids).toEqual([])
+    expect(second.deleted_ids).toEqual(["removed"])
+  })
+
+  it.each([
+    "not-json",
+    "null",
+    '{"version":2}',
+    '{"version":1,"table":"sessions","at":1,"id":"a","deletedAt":1}',
+  ])("rejects invalid or foreign paging cursors: %s", async (cursor) => {
+    await expect(readDexieDelta("messages", 1, undefined, undefined, cursor)).rejects.toThrow(
+      "invalid sync cursor"
+    )
+  })
+
+  it("returns a durable cursor for the bounded cold-start tail", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 750 }, (_, i) => ({
+        id: `cold-${i}`,
+        sessionId: "s",
+        createdAt: i + 1,
+      })) as never[]
+    )
+    const first = await readDexieDelta("messages", 0, undefined, undefined, "")
+    expect(first.rows).toHaveLength(500)
+    expect(first.has_more).toBe(false)
+    const unchanged = await readDexieDelta(
+      "messages",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    expect(unchanged.rows).toEqual([])
   })
 
   it("surfaces tombstones as deleted_ids and folds deletedAt into next_since", async () => {

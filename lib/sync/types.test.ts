@@ -8,11 +8,16 @@ it("keeps successful and failed sync outcomes safely discriminated", () => {
   const table = "templateDefinitions" satisfies SyncableTable
   const success = {
     ok: true,
-    result: { table, applied: 3, nextSince: 42 },
+    result: { table, applied: 3, nextSince: 42, nextCursor: "page-3" },
   } satisfies SyncOutcome
   const failure = {
     ok: false,
-    failure: { table, reason: "transport", message: "offline" },
+    failure: {
+      table,
+      reason: "transport",
+      message: "offline",
+      progress: { table, applied: 2, nextSince: 41, nextCursor: "page-2" },
+    },
   } satisfies SyncOutcome
 
   expect(appliedRows(success)).toBe(3)

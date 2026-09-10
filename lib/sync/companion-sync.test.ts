@@ -35,6 +35,7 @@ import {
   syncTablesForStage,
 } from "./companion-sync"
 import { SYNCABLE_TABLE_NAMES, type SyncOutcome, type SyncableTable } from "./types"
+import { syncSessions } from "./handlers/sessions"
 
 function makeOkOutcome(table: SyncableTable, applied = 1, nextSince = 1): SyncOutcome {
   return { ok: true, result: { table, applied, nextSince } }
@@ -59,6 +60,46 @@ beforeEach(() => {
   // the client onto another host leaks that host into the next one, which now
   // decides whether the cold-start mirror wipe fires.
   companionConfig = null
+})
+
+describe("resumable table cursors", () => {
+  it("resumes from successfully applied pages after a later page failed", async () => {
+    const t = makeTransport()
+    const run = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        failure: {
+          table: "messages",
+          reason: "transport",
+          message: "page interrupted",
+          progress: { table: "messages", applied: 500, nextSince: 1000, nextCursor: "row-500" },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          table: "messages",
+          applied: 100,
+          nextSince: 1000,
+          nextCursor: "row-600",
+        },
+      })
+    const opts = { transport: t, handlers: [{ table: "messages" as const, run }] }
+    await runSyncDown(opts)
+    expect(getSyncStateFor("messages")).toMatchObject({
+      since: 1000,
+      cursor: "row-500",
+      lastError: "page interrupted",
+    })
+    await runSyncDown(opts)
+    expect(run.mock.calls[1][1]).toEqual({ since: 1000, cursor: "row-500" })
+    expect(getSyncStateFor("messages")).toMatchObject({
+      since: 1000,
+      cursor: "row-600",
+      lastError: null,
+    })
+  })
 })
 
 describe("sync stages", () => {
@@ -381,6 +422,177 @@ describe("runSyncDown", () => {
     await runSyncDown({ transport, handlers, only: ["characters"] })
     // Cursor must stay at 500 — stale outcome ignored by the monotonic guard.
     expect(snapshotSyncStates().characters.since).toBe(500)
+  })
+
+  it("coalesces overlapping session pulls while fetching writes made during the first response", async () => {
+    const rows = Array.from({ length: 1_000 }, (_, index) => ({
+      id: `transfer-${index}`,
+      title: `Session ${index}`,
+      createdAt: index + 1,
+      updatedAt: index + 1,
+      systemPrompt: "x".repeat(1_000),
+    }))
+    const laterRow = { id: "transfer-later", title: "Later", createdAt: 1_001, updatedAt: 1_001 }
+    const initialDelta = { rows, deleted_ids: [], next_since: 1_000 }
+    const laterDelta = { rows: [laterRow], deleted_ids: [], next_since: 1_001 }
+    let releaseFirst!: () => void
+    let started!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const firstResponse = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let responseBytes = 0
+    const transport = makeTransport()
+    ;(transport.call as jest.Mock).mockImplementation(async (_command, args) => {
+      const delta = args.since === 0 ? initialDelta : laterDelta
+      if (args.since === 0) {
+        started()
+        await firstResponse
+      }
+      responseBytes += JSON.stringify(delta).length
+      return delta
+    })
+    const opts = {
+      transport,
+      handlers: [{ table: "sessions" as const, run: syncSessions }],
+      only: ["sessions" as const],
+    }
+    const first = runSyncDown(opts)
+    await firstStarted
+    const second = runSyncDown(opts)
+    const third = runSyncDown(opts)
+    // Let both targeted requests reach the active session pull before release.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    releaseFirst()
+    await Promise.all([first, second, third])
+
+    expect({ calls: (transport.call as jest.Mock).mock.calls.length, responseBytes }).toEqual({
+      calls: 2,
+      responseBytes: JSON.stringify(initialDelta).length + JSON.stringify(laterDelta).length,
+    })
+    expect((transport.call as jest.Mock).mock.calls.map(([, args]) => args.since)).toEqual([
+      0, 1_000,
+    ])
+    expect(await getDb().sessions.get(laterRow.id)).toEqual(laterRow)
+    expect(snapshotSyncStates().sessions.since).toBe(1_001)
+  })
+
+  it("retries queued session pulls after failure and retains invalidations during the trailing pull", async () => {
+    const transport = makeTransport()
+    const releases: Array<(outcome: SyncOutcome) => void> = []
+    const started: Array<() => void> = []
+    const starts = Array.from(
+      { length: 3 },
+      (_, index) =>
+        new Promise<void>((resolve) => {
+          started[index] = resolve
+        })
+    )
+    const handler = jest.fn().mockImplementation(() => {
+      const index = releases.length
+      return new Promise<SyncOutcome>((resolve) => {
+        releases.push(resolve)
+        started[index]()
+      })
+    })
+    const opts = {
+      transport,
+      handlers: [{ table: "sessions" as const, run: handler }],
+      only: ["sessions" as const],
+    }
+    const first = runSyncDown(opts)
+    await starts[0]
+    const second = runSyncDown(opts)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    releases[0](makeFailOutcome("sessions", "transport"))
+    await starts[1]
+    expect(handler.mock.calls[1][1]).toEqual({ since: 0 })
+    const third = runSyncDown(opts)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    releases[1](makeOkOutcome("sessions", 1, 10))
+    await starts[2]
+    expect(handler.mock.calls[2][1]).toEqual({ since: 10 })
+    releases[2](makeOkOutcome("sessions", 1, 20))
+    await Promise.all([first, second, third])
+    expect(handler).toHaveBeenCalledTimes(3)
+    expect(snapshotSyncStates().sessions.since).toBe(20)
+    expect(snapshotSyncStates().sessions.lastError).toBeNull()
+  })
+
+  it("drops queued old-host session pulls and never saves their cursors into the new host", async () => {
+    companionConfig = { deviceId: "queue-a", targetId: "queue-host-a" }
+    const transport = makeTransport()
+    let release!: (outcome: SyncOutcome) => void
+    let started!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const oldHandler = jest.fn().mockImplementation(
+      () =>
+        new Promise<SyncOutcome>((resolve) => {
+          release = resolve
+          started()
+        })
+    )
+    const opts = {
+      transport,
+      handlers: [{ table: "sessions" as const, run: oldHandler }],
+      only: ["sessions" as const],
+    }
+    const first = runSyncDown(opts)
+    await firstStarted
+    const queued = runSyncDown(opts)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    companionConfig = { deviceId: "queue-b", targetId: "queue-host-b" }
+    const newHandler = jest.fn().mockResolvedValue(makeOkOutcome("sessions", 1, 7))
+    await runSyncDown({ ...opts, handlers: [{ table: "sessions", run: newHandler }] })
+    release(makeOkOutcome("sessions", 1, 999))
+    const outcomes = await Promise.all([first, queued])
+    expect(oldHandler).toHaveBeenCalledTimes(1)
+    expect(newHandler).toHaveBeenCalledWith(transport, { since: 0 })
+    expect(outcomes.flat()).toEqual([
+      expect.objectContaining({ ok: false }),
+      expect.objectContaining({ ok: false }),
+    ])
+    expect(snapshotSyncStates().sessions.since).toBe(7)
+    // Cursor persistence is intentionally asynchronous.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const cursors = await getDb().hostSyncCursors.toArray()
+    expect(
+      cursors.filter((row) => row.table === "sessions").every((row) => row.since !== 999)
+    ).toBe(true)
+  })
+
+  it("does not block a sessions pull on a different transport", async () => {
+    let release!: (outcome: SyncOutcome) => void
+    let started!: () => void
+    const firstStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const blocked = jest.fn().mockImplementation(
+      () =>
+        new Promise<SyncOutcome>((resolve) => {
+          release = resolve
+          started()
+        })
+    )
+    const first = runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "sessions", run: blocked }],
+      only: ["sessions"],
+    })
+    await firstStarted
+    const independent = jest.fn().mockResolvedValue(makeOkOutcome("sessions", 1, 10))
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "sessions", run: independent }],
+      only: ["sessions"],
+    })
+    expect(independent).toHaveBeenCalledTimes(1)
+    release(makeOkOutcome("sessions", 1, 1))
+    await first
   })
 
   it("dedupes concurrent calls — second call reuses the inflight promise", async () => {

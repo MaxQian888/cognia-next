@@ -938,6 +938,23 @@ describe("dispatchCommand: workflow_step_result", () => {
   })
 })
 
+describe("dispatchCommand: host_capabilities", () => {
+  it("publishes the headless browser, OCR, and Pro IDE execution surfaces", async () => {
+    const hostGlobal = globalThis as Record<string, unknown>
+    const previous = hostGlobal.__COGNIA_HEADLESS__
+    hostGlobal.__COGNIA_HEADLESS__ = true
+    try {
+      await expect(dispatchCommand("host_capabilities", {})).resolves.toEqual({
+        platform: "headless",
+        capabilities: expect.arrayContaining(["browser", "ocr", "pro-ide"]),
+      })
+    } finally {
+      if (previous === undefined) delete hostGlobal.__COGNIA_HEADLESS__
+      else hostGlobal.__COGNIA_HEADLESS__ = previous
+    }
+  })
+})
+
 describe("dispatchCommand: device_capabilities_report", () => {
   const seedDevice = async (deviceId: string) => {
     await getDb().pairedDevices.put({

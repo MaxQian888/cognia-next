@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
+import { AccountContentCipher, activateAccountContentCipher } from "@/lib/accounts/content-cipher"
 
 import {
   createEmptyHostStateSession,
@@ -16,7 +17,9 @@ import {
   createAgentRpcHostStateDispatcher,
   createHostStateService,
   installHostStateSync,
+  installHostStateSyncForTarget,
 } from "./host-state-service"
+import { useChatStore } from "@/stores/chat/chat-store"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
@@ -132,6 +135,9 @@ describe("HostStateService", () => {
     await getDb().delete()
     __resetDbForTesting()
     activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(scope.accountId, getDb().name)
+    )
     await getDb().sessions.put({
       id: "session-1",
       projectId: "project-1",
@@ -931,6 +937,221 @@ describe("HostStateService", () => {
     await expect(getDb().hostStateActions.count()).resolves.toBe(2)
   })
 
+  it.each([0, 100, 1_000, 10_000])(
+    "bootstraps independently of %i historical sessions and hydrates an opened pane",
+    async (count) => {
+      useChatStore.setState({ activeSessionId: null, openSessionIds: [], splitSessionId: null })
+      const db = getDb()
+      await db.sessions.bulkPut(
+        Array.from({ length: count }, (_, i) => ({
+          id: `historic-${i}`,
+          title: "Cached",
+          titleAuto: false,
+          createdAt: 1,
+          updatedAt: 1,
+        }))
+      )
+      const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+      const calls: string[] = []
+      const transport: Transport = {
+        subscribe: () => () => undefined,
+        call: async (command, payload) => {
+          if (command === "host_state_status") return writableStatus as never
+          const requested = payload!.channel as string
+          calls.push(requested)
+          const state =
+            requested === indexChannel
+              ? { kind: "session-index" as const, channel: indexChannel, revision: 0, sessions: [] }
+              : createEmptyHostStateSession(requested, "opened")
+          return {
+            channel: requested,
+            hostId,
+            hostGeneration: 4,
+            cutHostSeq: 8,
+            revision: 0,
+            digest: hostStateDigest(state),
+            state,
+          } as never
+        },
+      }
+      const sync = await installHostStateSyncForTarget({ transport, ...scope })
+      expect(calls).toEqual([indexChannel])
+      await db.sessions.put({
+        id: "opened",
+        title: "Open",
+        titleAuto: false,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      useChatStore.getState().openSession("opened")
+      await flush()
+      expect(calls).toEqual([indexChannel, sessionStateChannel(scope.runtimeTargetId, "opened")])
+      useChatStore.getState().setActiveSession("opened")
+      await flush()
+      expect(calls).toHaveLength(2)
+      sync.stop()
+      useChatStore.setState({ activeSessionId: null, openSessionIds: [], splitSessionId: null })
+    }
+  )
+
+  it("hydrates a background channel once and keeps applying its later broadcasts", async () => {
+    const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+    let listener: (event: HostStateAppliedAction) => void = () => {}
+    const snapshots: string[] = []
+    const transport: Transport = {
+      subscribe: (_topic, next) => {
+        listener = next as (event: HostStateAppliedAction) => void
+        return () => {}
+      },
+      call: async (command, payload) => {
+        if (command === "host_state_status") return writableStatus as never
+        const requested = payload!.channel as string
+        snapshots.push(requested)
+        const state =
+          requested === indexChannel
+            ? { kind: "session-index" as const, channel: requested, revision: 0, sessions: [] }
+            : createEmptyHostStateSession(requested, "session-1")
+        return {
+          channel: requested,
+          hostId,
+          hostGeneration: 4,
+          cutHostSeq: requested === indexChannel ? 8 : 9,
+          revision: 0,
+          digest: hostStateDigest(state),
+          state,
+        } as never
+      },
+    }
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [indexChannel],
+    })
+    for (let hostSeq = 9; hostSeq <= 11; hostSeq++) {
+      listener({
+        channel,
+        hostId,
+        hostGeneration: 4,
+        hostSeq,
+        outcome: "applied",
+        mutation: { kind: "session.renamed", title: `Title ${hostSeq}`, revision: hostSeq - 8 },
+      })
+    }
+    await flush()
+    expect(snapshots).toEqual([indexChannel, channel])
+    expect((await getDb().sessions.get("session-1"))?.title).toBe("Title 11")
+    sync.stop()
+  })
+
+  it.each(["stop", "target switch"])(
+    "does not persist a hydration response after %s",
+    async (reason) => {
+      const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+      let resolveSnapshot: (value: unknown) => void = () => {}
+      let snapshotStarted: () => void = () => {}
+      const started = new Promise<void>((resolve) => {
+        snapshotStarted = resolve
+      })
+      const onState = jest.fn()
+      const transport: Transport = {
+        subscribe: () => () => {},
+        call: async (command, payload) => {
+          if (command === "host_state_status") return writableStatus as never
+          if (payload!.channel !== indexChannel) {
+            snapshotStarted()
+            return new Promise((resolve) => {
+              resolveSnapshot = resolve
+            }) as never
+          }
+          const state = {
+            kind: "session-index" as const,
+            channel: indexChannel,
+            revision: 0,
+            sessions: [],
+          }
+          return {
+            channel: indexChannel,
+            hostId,
+            hostGeneration: 4,
+            cutHostSeq: 8,
+            revision: 0,
+            digest: hostStateDigest(state),
+            state,
+          } as never
+        },
+      }
+      const sync = await installHostStateSync({
+        transport,
+        ...scope,
+        channels: async () => [indexChannel],
+        onState,
+      })
+      const hydration = sync.hydrateSession("session-1").catch((error: unknown) => error)
+      await started
+      if (reason === "stop") sync.stop()
+      else activateAccountDatabase(scope.accountId, "another-target")
+      const state = createEmptyHostStateSession(channel, "session-1")
+      resolveSnapshot({
+        channel,
+        hostId,
+        hostGeneration: 4,
+        cutHostSeq: 8,
+        revision: 0,
+        digest: hostStateDigest(state),
+        state,
+      })
+      await expect(hydration).resolves.toThrow("host_state_sync_stopped")
+      expect(await getDb().hostStateChannels.get(channel)).toBeUndefined()
+      expect(onState).toHaveBeenCalledTimes(1)
+      sync.stop()
+      await sync.resync()
+      await sync.hydrateSession("session-1")
+      expect(onState).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("invalidates inactive mirror cuts on resync and serializes concurrent recovery", async () => {
+    const indexChannel = sessionIndexChannel(scope.runtimeTargetId)
+    const snapshots: string[] = []
+    let inFlight = 0
+    let peak = 0
+    const transport: Transport = {
+      subscribe: () => () => {},
+      call: async (command, payload) => {
+        if (command === "host_state_status") return writableStatus as never
+        inFlight++
+        peak = Math.max(peak, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 1))
+        const requested = payload!.channel as string
+        snapshots.push(requested)
+        const state =
+          requested === indexChannel
+            ? { kind: "session-index" as const, channel: requested, revision: 0, sessions: [] }
+            : createEmptyHostStateSession(requested, "session-1")
+        inFlight--
+        return {
+          channel: requested,
+          hostId,
+          hostGeneration: 4,
+          cutHostSeq: 8,
+          revision: 0,
+          digest: hostStateDigest(state),
+          state,
+        } as never
+      },
+    }
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [indexChannel],
+    })
+    await sync.hydrateSession("session-1")
+    await Promise.all([sync.resync(), sync.resync(), sync.hydrateSession("session-1")])
+    expect(peak).toBe(1)
+    expect(snapshots).toEqual([indexChannel, channel, indexChannel, indexChannel, channel])
+    sync.stop()
+  })
+
   it("subscribes before snapshot and replays only events after the snapshot cut", async () => {
     const initial = createEmptyHostStateSession(channel, "session-1")
     const snapshot: HostStateSnapshot = {
@@ -1253,6 +1474,9 @@ describe("HostStateService", () => {
 describe("HostState Agent RPC dispatcher", () => {
   beforeEach(async () => {
     activateAccountDatabase(scope.accountId, scope.runtimeTargetId)
+    activateAccountContentCipher(
+      await AccountContentCipher.createForTesting(scope.accountId, getDb().name)
+    )
     await getDb().delete()
     __resetDbForTesting()
     activateAccountDatabase(scope.accountId, scope.runtimeTargetId)

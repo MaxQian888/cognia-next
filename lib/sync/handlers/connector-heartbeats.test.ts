@@ -49,6 +49,7 @@ describe("syncConnectorHeartbeats", () => {
       table: "connectorHeartbeats",
       since: 0,
       content_protocol_version: 1,
+      cursor: "",
     })
     expect(out).toEqual({
       ok: true,

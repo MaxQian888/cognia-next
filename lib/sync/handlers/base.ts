@@ -11,6 +11,7 @@ import type { Table } from "dexie"
 
 import { applyInSlices, yieldToMain } from "../scheduling"
 import type { SyncCursor, SyncDelta, SyncFailure, SyncOutcome, SyncableTable } from "../types"
+import { PAGED_SYNC_TABLES } from "../types"
 
 export interface SyncHandlerOptions<TRow extends { id: string }> {
   table: SyncableTable
@@ -52,9 +53,9 @@ export const RETRIEVAL_CONTENT_PROTOCOL_VERSION = 1
 
 /**
  * Safety cap on the pagination drain loop. Single-shot tables exit after one
- * pull (no `has_more`); paged tables (messages) loop once per page. The cap
- * only fires on a pathological server that keeps signalling `has_more`
- * without advancing the cursor (e.g. >PAGE rows sharing one timestamp).
+ * pull (no `has_more`); paged tables loop once per page. A large backlog
+ * stops with an incomplete outcome and a resumable checkpoint at this cap.
+ * Non-advancing pages fail immediately below.
  */
 const MAX_PAGES = 100
 
@@ -76,18 +77,87 @@ export async function runSyncHandler<TRow extends { id: string }>(
   cursor: SyncCursor
 ): Promise<SyncOutcome> {
   let since = cursor.since
+  let nextCursor = cursor.cursor
+  let useCursor = PAGED_SYNC_TABLES.includes(opts.table)
   let applied = 0
+  const result = () => ({
+    table: opts.table,
+    applied,
+    nextSince: since,
+    ...(nextCursor === undefined ? {} : { nextCursor }),
+  })
+  const failure = (value: SyncFailure): SyncOutcome => ({
+    ok: false,
+    failure: {
+      ...value,
+      ...(since !== cursor.since || nextCursor !== cursor.cursor ? { progress: result() } : {}),
+    },
+  })
 
   for (let page = 0; page < MAX_PAGES; page++) {
     let delta: SyncDelta<TRow>
     try {
-      delta = await transport.call<SyncDelta<TRow>>(SYNC_RPC, {
+      const args = {
         table: opts.table,
         since,
         content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
-      })
+        ...(useCursor ? { cursor: nextCursor ?? "" } : {}),
+      }
+      try {
+        delta = await transport.call<SyncDelta<TRow>>(SYNC_RPC, args)
+      } catch (error) {
+        // Older strict contracts reject the additive cursor argument before
+        // dispatch. Retry this read once without it, never discard a durable
+        // composite cursor after a host downgrade.
+        if (
+          !useCursor ||
+          !(
+            error &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === "contract_input_violation"
+          )
+        )
+          throw error
+        if (nextCursor !== undefined)
+          throw new Error("upgrade_required: host does not support the saved sync cursor")
+        useCursor = false
+        const { cursor: _cursor, ...legacyArgs } = args
+        delta = await transport.call<SyncDelta<TRow>>(SYNC_RPC, legacyArgs)
+      }
     } catch (err: unknown) {
-      return { ok: false, failure: classifyTransportError(opts.table, err) }
+      return failure(classifyTransportError(opts.table, err))
+    }
+
+    if (
+      !delta ||
+      !Array.isArray(delta.rows) ||
+      !Array.isArray(delta.deleted_ids) ||
+      !delta.deleted_ids.every((id) => typeof id === "string") ||
+      !Number.isSafeInteger(delta.next_since) ||
+      delta.next_since < 0 ||
+      (delta.next_cursor !== undefined &&
+        (typeof delta.next_cursor !== "string" || delta.next_cursor.length > 4096))
+    ) {
+      return failure({ table: opts.table, reason: "schema", message: "Invalid sync delta" })
+    }
+    if (nextCursor !== undefined && !delta.next_cursor) {
+      return failure({
+        table: opts.table,
+        reason: "upgrade_required",
+        message: "Host did not preserve the saved sync cursor",
+      })
+    }
+    if (
+      delta.has_more &&
+      delta.next_since <= since &&
+      (delta.next_cursor === undefined || delta.next_cursor === nextCursor)
+    ) {
+      return failure({
+        table: opts.table,
+        reason: "schema",
+        message: "Sync page cursor did not advance",
+      })
     }
 
     const filtered = opts.rowFilter ? delta.rows.filter(opts.rowFilter) : delta.rows
@@ -101,22 +171,20 @@ export async function runSyncHandler<TRow extends { id: string }>(
         await t.bulkDelete(slice as string[])
       })
     } catch (err: unknown) {
-      return {
-        ok: false,
-        failure: {
-          table: opts.table,
-          reason: "schema",
-          message: err instanceof Error ? err.message : String(err),
-        },
-      }
+      return failure({
+        table: opts.table,
+        reason: "schema",
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
 
     applied += filtered.length + delta.deleted_ids.length
     since = delta.next_since
+    nextCursor = delta.next_cursor
 
     // Single-shot table, or the server has no more pages past the cursor.
     if (!delta.has_more) {
-      return { ok: true, result: { table: opts.table, applied, nextSince: since } }
+      return { ok: true, result: result() }
     }
 
     // A paged table drains as fast as the Host answers. Between pages is the
@@ -126,10 +194,12 @@ export async function runSyncHandler<TRow extends { id: string }>(
     await yieldToMain()
   }
 
-  // Drained MAX_PAGES without the server clearing `has_more` — bail out with
-  // what we applied so far rather than loop forever.
-  console.warn(`[sync] ${opts.table}: stopped after ${MAX_PAGES} pages (cursor stuck?)`)
-  return { ok: true, result: { table: opts.table, applied, nextSince: since } }
+  // Keep the applied checkpoint, but never report an unfinished drain as success.
+  return failure({
+    table: opts.table,
+    reason: "transport",
+    message: `Sync is incomplete after ${MAX_PAGES} pages; resume from the saved cursor`,
+  })
 }
 
 /**

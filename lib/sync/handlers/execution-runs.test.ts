@@ -39,6 +39,7 @@ describe("syncExecutionRuns", () => {
       table: "executionRuns",
       since: 3,
       content_protocol_version: RETRIEVAL_CONTENT_PROTOCOL_VERSION,
+      cursor: "",
     })
     expect(outcome).toEqual({
       ok: true,
