@@ -67,7 +67,7 @@ function resultQueueRow(
     accountId: receipt.accountId,
     targetId: receipt.targetId,
     command: "workflow_step_result",
-    payload: chunk,
+    payload: { ...chunk },
     status: "pending",
     attempts: 0,
     createdAt: now,

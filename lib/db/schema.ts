@@ -18,6 +18,11 @@
 // re-exported below so `@/lib/db/schema` stays the stable import surface.
 
 import Dexie, { type Table } from "dexie"
+import {
+  backfillMessageSyncRevision,
+  createMessageSyncRevisionMiddleware,
+  type MessageSyncClock,
+} from "./message-sync-revision"
 import type {
   AppSettings,
   Character,
@@ -403,7 +408,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 225
+export const CURRENT_SCHEMA_VERSION = 226
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -434,7 +439,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   sessions:
     "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], [projectId+createdAt+id], surfaceBindingKey, squadId",
   messages:
-    "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt], turnKey, [sessionId+turnKey]",
+    "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt], turnKey, [sessionId+turnKey], [syncRevision+id]",
+  messageSyncClock: "id",
   settings: "id",
   promptPresets: "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
   mcpServers: "id, name, enabled",
@@ -490,7 +496,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   workflows:
     "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion, folderId",
   workflowRuns:
-    "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt], triggerKind",
+    "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt], triggerKind, [syncActivityAt+id]",
   workflowRunEvents:
     "&id, runId, [runId+ts], [runId+sequence], stepId, [runId+stepId], type, projectId",
   workflowTriggers: "&id, workflowId, kind, enabled, [workflowId+enabled], cron, nextFireAt",
@@ -1463,6 +1469,7 @@ export class CogniaDB extends Dexie {
     if (name.startsWith("cognia-account-")) {
       this.use(createEncryptedContentMiddleware(name))
     }
+    this.use(createMessageSyncRevisionMiddleware())
     this.connectionOwner = connectionOwner
     this.connectionId = `db-${++databaseConnectionSequence}`
     this.connectionCreatedAt = Date.now()
@@ -1473,8 +1480,10 @@ export class CogniaDB extends Dexie {
     })
     this.on("blocked", () => this.logConnectionEvent("blocked"))
 
-    this.version(CURRENT_SCHEMA_VERSION).stores(CURRENT_SCHEMA)
+    this.version(CURRENT_SCHEMA_VERSION).stores(CURRENT_SCHEMA).upgrade(backfillMessageSyncRevision)
   }
+
+  messageSyncClock!: Table<MessageSyncClock, "singleton">
 
   // v212 — user-started history backfill runs (project-context mining).
   projectMiningRuns!: Table<import("@/types/memory/governance").ProjectMiningRun, string>

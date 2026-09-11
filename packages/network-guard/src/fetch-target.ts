@@ -25,12 +25,9 @@ import { isPrivateOrLocalHost, normalizeHost } from "./host"
 /** Why a target was refused, or `"ok"` when it was cleared. */
 export type FetchGuardReason = "ok" | "bad-url" | "bad-scheme" | "private-host"
 
-export interface FetchGuardDecision {
-  allowed: boolean
-  reason: FetchGuardReason
-  /** The parsed hostname (lower-cased, brackets stripped) when the URL parsed. */
-  host?: string
-}
+export type FetchGuardDecision =
+  | { allowed: true; reason: "ok"; host: string }
+  | { allowed: false; reason: Exclude<FetchGuardReason, "ok">; host?: string }
 
 export interface FetchGuardOptions {
   /**

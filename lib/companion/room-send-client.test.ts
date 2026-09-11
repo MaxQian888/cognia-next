@@ -15,6 +15,22 @@ beforeEach(() => {
 })
 
 describe("sendRoomTurn", () => {
+  it("forwards optional template provenance to the host", async () => {
+    const templateRun = {
+      templateId: "review",
+      version: "1",
+      text: "Review {{target}}",
+      params: { target: { kind: "text" as const, value: "workflow" } },
+    }
+    callMock.mockResolvedValue({ accepted: true })
+    await sendRoomTurn({ sessionId: "room-1", content: "review", templateRun })
+    expect(callMock).toHaveBeenCalledWith(ROOM_SEND_COMMAND, {
+      sessionId: "room-1",
+      content: "review",
+      templateRun,
+    })
+  })
+
   it("sends the turn over the routing transport under the bridged command name", async () => {
     callMock.mockResolvedValue({ accepted: true })
     const result = await sendRoomTurn({

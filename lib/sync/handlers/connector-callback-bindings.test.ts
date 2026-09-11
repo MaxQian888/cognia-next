@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
@@ -93,4 +94,48 @@ describe("syncConnectorCallbackBindings", () => {
     await getDb().connectorCallbackBindings.put(binding("live", { expiresAt: 2_000 }))
     expect(await sweepExpiredMirroredBindings(1_500)).toBe(0)
   })
+})
+
+it("cancels before looking up the sweep table after an awaited apply", async () => {
+  const table = getDb().connectorCallbackBindings
+  let current = true
+  const read = jest.spyOn(table, "where")
+  const write = jest.spyOn(table, "bulkPut").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return "cancelled"
+    })
+  )
+  try {
+    await expect(
+      applyConnectorCallbackBindingRows([binding("cancelled")], Date.now(), () => {
+        if (!current) throw new Error("scope cancelled")
+      })
+    ).rejects.toThrow("scope cancelled")
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(read).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
+})
+
+it("fences retention deletion after reading expired victims", async () => {
+  const table = getDb().connectorCallbackBindings
+  const row = binding("cancel-aged", { expiresAt: 0 })
+  await table.put(row)
+  const remove = jest.spyOn(table, "bulkDelete")
+  const assertCurrent = jest.fn(() => {
+    throw new Error("scope cancelled")
+  })
+  try {
+    await expect(sweepExpiredMirroredBindings(Date.now(), assertCurrent)).rejects.toThrow(
+      "scope cancelled"
+    )
+    expect(assertCurrent).toHaveBeenCalledTimes(1)
+    expect(remove).not.toHaveBeenCalled()
+    expect(await table.get(row.id)).toBeDefined()
+  } finally {
+    remove.mockRestore()
+  }
 })

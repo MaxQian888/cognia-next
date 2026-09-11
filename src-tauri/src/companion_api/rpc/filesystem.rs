@@ -78,6 +78,26 @@ pub(super) const COMMANDS: &[&str] = &[
     "fs_copy_workspace_entry",
 ];
 
+// Bound disk work across all paired peers. A permit moves into the blocking
+// closure, so disconnecting a caller cannot free capacity while its I/O runs.
+static TRANSFER_IO_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+async fn run_transfer_io<T: Send + 'static>(
+    operation: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, (StatusCode, Json<RpcError>)> {
+    let permit = TRANSFER_IO_SLOTS
+        .acquire()
+        .await
+        .map_err(|error| RpcError::internal(error.to_string()))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        operation()
+    })
+    .await
+    .map_err(|error| RpcError::internal(error.to_string()))?
+    .map_err(RpcError::internal)
+}
+
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
@@ -714,7 +734,7 @@ pub(super) async fn dispatch(
                 device_id,
                 scope,
             )?;
-            tokio::task::spawn_blocking(move || {
+            run_transfer_io(move || {
                 crate::task_workspace::service()?.open_resource_download(
                     &run_id,
                     &rel_path,
@@ -722,18 +742,17 @@ pub(super) async fn dispatch(
                 )
             })
             .await
-            .map_err(|error| RpcError::internal(error.to_string()))?
-            .map_err(RpcError::internal)
             .and_then(to_json)
         }
         "task_resource_download_read_chunk" => {
             let handle_id: String = required(&args, "handleId")?;
             let offset: u64 = required(&args, "offset")?;
             let length: Option<usize> = optional(&args, "length")?;
-            crate::task_workspace::service()
-                .and_then(|service| service.read_download_chunk(&handle_id, offset, length))
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.read_download_chunk(&handle_id, offset, length)
+            })
+            .await
+            .and_then(to_json)
         }
         "task_resource_download_close" => {
             let handle_id: String = required(&args, "handleId")?;
@@ -748,44 +767,49 @@ pub(super) async fn dispatch(
             let expected_size: u64 = required(&args, "expectedSize")?;
             let expected_hash: String = required(&args, "expectedHash")?;
             let allow_sensitive: Option<bool> = optional(&args, "allowSensitive")?;
-            crate::task_workspace::service()
-                .and_then(|service| {
-                    service.open_resource_upload(
-                        &run_id,
-                        &rel_path,
-                        expected_size,
-                        &expected_hash,
-                        allow_sensitive.unwrap_or(false),
-                    )
-                })
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.open_resource_upload(
+                    &run_id,
+                    &rel_path,
+                    expected_size,
+                    &expected_hash,
+                    allow_sensitive.unwrap_or(false),
+                )
+            })
+            .await
+            .and_then(to_json)
         }
         "task_resource_upload_write_chunk" => {
             let handle_id: String = required(&args, "handleId")?;
             let offset: u64 = required(&args, "offset")?;
             let data_base64: String = required(&args, "dataBase64")?;
             let chunk_hash: String = required(&args, "chunkHash")?;
-            crate::task_workspace::service()
-                .and_then(|service| {
-                    service.write_upload_chunk(&handle_id, offset, &data_base64, &chunk_hash)
-                })
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.write_upload_chunk(
+                    &handle_id,
+                    offset,
+                    &data_base64,
+                    &chunk_hash,
+                )
+            })
+            .await
+            .and_then(to_json)
         }
         "task_resource_upload_commit" => {
             let handle_id: String = required(&args, "handleId")?;
-            crate::task_workspace::service()
-                .and_then(|service| service.commit_resource_upload(&handle_id))
-                .map_err(RpcError::internal)
-                .and_then(to_json)
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.commit_resource_upload(&handle_id)
+            })
+            .await
+            .and_then(to_json)
         }
         "task_resource_upload_abort" => {
             let handle_id: String = required(&args, "handleId")?;
-            crate::task_workspace::service()
-                .and_then(|service| service.abort_resource_upload(&handle_id))
-                .map(|_| Value::Null)
-                .map_err(RpcError::internal)
+            run_transfer_io(move || {
+                crate::task_workspace::service()?.abort_resource_upload(&handle_id)
+            })
+            .await
+            .map(|_| Value::Null)
         }
         "task_workspace_apply" => {
             let run_id: String = required(&args, "runId")?;
@@ -967,6 +991,29 @@ pub(super) async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelled_transfer_io_keeps_its_slot_until_disk_work_finishes() {
+        let reserved = TRANSFER_IO_SLOTS.acquire_many(7).await.unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let call = tokio::spawn(run_transfer_io(move || {
+            let _ = started_tx.send(());
+            release_rx.recv().unwrap();
+            Ok(())
+        }));
+        started_rx.await.unwrap();
+        call.abort();
+        let _ = call.await;
+        let held = TRANSFER_IO_SLOTS.available_permits();
+        release_tx.send(()).unwrap();
+        let last = TRANSFER_IO_SLOTS.acquire().await.unwrap();
+        assert_eq!(
+            held, 0,
+            "cancelling a caller released a still-running disk slot"
+        );
+        drop((last, reserved));
+    }
 
     #[test]
     fn command_family_is_non_empty_and_unique() {

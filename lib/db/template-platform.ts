@@ -202,7 +202,7 @@ export class DexieTemplateRepository implements TemplateRepository {
         }
       }
       await db.templatePackages.put(packageRow(value))
-      await db.templateDefinitions.bulkPut(definitions.map(releaseRow))
+      await db.templateDefinitions.bulkPut(definitions.map((definition) => releaseRow(definition)))
     })
   }
 

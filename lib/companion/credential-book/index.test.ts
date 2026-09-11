@@ -376,3 +376,17 @@ describe("MigratingCompanionStorage", () => {
     expect(await book.list("acct_ambient")).toHaveLength(1)
   })
 })
+
+it("delegates metadata updates without replaying a pairing save", async () => {
+  const book = freshBook()
+  const legacy = legacyStorage(null)
+  const storage = new MigratingCompanionStorage({ book, legacy, accountNamespace: () => "acct_a" })
+  await storage.save(config({ targetId: "host-1" }))
+  const saved = (await storage.load())!
+  const secretSave = jest.spyOn(book, "saveCredential")
+  expect(
+    await storage.updateMetadata({ ...saved, tunnelBaseUrl: "https://new.example" }, () => true)
+  ).toBe(true)
+  expect((await storage.load())?.tunnelBaseUrl).toBe("https://new.example")
+  expect(secretSave).not.toHaveBeenCalled()
+})

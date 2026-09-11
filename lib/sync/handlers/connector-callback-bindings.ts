@@ -34,23 +34,29 @@ export function bindingExpiresAt(
 }
 
 /** Delete mirrored bindings whose expiry has passed. */
-export async function sweepExpiredMirroredBindings(now: number = Date.now()): Promise<number> {
+export async function sweepExpiredMirroredBindings(
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
+): Promise<number> {
   const table = getDb().connectorCallbackBindings
   const victims = await table
     .filter((row) => bindingExpiresAt(row) < now)
     .limit(MIRROR_BINDING_SWEEP_BATCH)
     .primaryKeys()
   if (victims.length === 0) return 0
+  assertCurrent()
   await table.bulkDelete(victims as string[])
   return victims.length
 }
 
 export async function applyConnectorCallbackBindingRows(
   rows: ConnectorCallbackBindingRow[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
 ): Promise<void> {
   if (rows.length > 0) await getDb().connectorCallbackBindings.bulkPut(rows)
-  await sweepExpiredMirroredBindings(now)
+  assertCurrent()
+  await sweepExpiredMirroredBindings(now, assertCurrent)
 }
 
 export function syncConnectorCallbackBindings(
@@ -61,7 +67,8 @@ export function syncConnectorCallbackBindings(
     {
       table: "connectorCallbackBindings",
       getTable: () => getDb().connectorCallbackBindings,
-      applyRows: (rows) => applyConnectorCallbackBindingRows(rows),
+      applyRows: (rows, assertCurrent) =>
+        applyConnectorCallbackBindingRows(rows, Date.now(), assertCurrent),
     },
     transport,
     cursor

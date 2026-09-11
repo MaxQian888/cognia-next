@@ -91,6 +91,28 @@ export function createCredentialBook(opts: CredentialBookOptions): CompanionCred
     })
   }
 
+  const updateMetadata: NonNullable<CompanionCredentialBook["updateMetadata"]> = (
+    expected,
+    patch,
+    isCurrent
+  ) =>
+    serialize(async () => {
+      const storageKey = hostRecordKey(expected)
+      const book = await opts.records.read()
+      const record = book.hosts[storageKey]
+      if (
+        !isCurrent() ||
+        !record ||
+        record.deviceId !== expected.deviceId ||
+        record.deviceKeyThumbprint !== expected.deviceKeyThumbprint ||
+        record.rendezvousId !== expected.rendezvousId
+      )
+        return false
+      book.hosts[storageKey] = { ...record, ...patch, updatedAt: now() }
+      await opts.records.write(book)
+      return true
+    })
+
   async function remove(key: CompanionHostKey): Promise<void> {
     return serialize(async () => {
       const storageKey = hostRecordKey(key)
@@ -215,6 +237,7 @@ export function createCredentialBook(opts: CredentialBookOptions): CompanionCred
     list,
     get,
     upsert,
+    updateMetadata,
     remove,
     getActive,
     setActive,

@@ -167,7 +167,7 @@ import type {
   HostStateSubmitCaller,
   HostStateSubmitRequest,
 } from "@cognia/agent-config-types/host-state"
-import { sessionStateChannel } from "@cognia/agent-config-types/host-state"
+import { canonicalHostStateJson, sessionStateChannel } from "@cognia/agent-config-types/host-state"
 import type { CanonicalSession } from "@cognia/agent-config-types/canonical-session"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
@@ -669,7 +669,7 @@ async function importThreadHandoffSession(
     clientSeq: 1,
     actionId: `thread-handoff:${ticket.ticketId}:import`,
     createdAt: now,
-    action: { kind: "session.import", envelope },
+    action: { kind: "session.import", envelope: JSON.parse(canonicalHostStateJson(envelope)) },
   }
   const response = await service.submit(
     { accountId, runtimeTargetId: active.targetId, actions: [action] },
@@ -1888,7 +1888,8 @@ async function connectorEnqueueOutbound(
   if (typeof idempotencyKey !== "string" || idempotencyKey.length === 0) {
     throw new Error("connector_enqueue_outbound.request.metadata.idempotencyKey is required")
   }
-  const { sendManualReplyLocally } = await import("@/lib/connectors/inbox-writes/local")
+  const { sendManualReplyLocally, parseManualReplyMessageMetadata } =
+    await import("@/lib/connectors/inbox-writes/local")
   return sendManualReplyLocally({
     adapterId,
     conversationKey,
@@ -1899,6 +1900,7 @@ async function connectorEnqueueOutbound(
     clientMessageId: payload.clientMessageId as string | undefined,
     replyTo: request.replyTo,
     threadId: request.threadId,
+    messageMetadata: parseManualReplyMessageMetadata(payload.messageMetadata),
   })
 }
 

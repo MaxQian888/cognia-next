@@ -15,6 +15,7 @@
  */
 
 import Dexie, { type Table } from "dexie"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -177,6 +178,8 @@ export interface EnqueueInput {
    * ignored otherwise.
    */
   sourceWorkflow?: OutboundJobWorkflowSource
+  /** Manual transcript committed atomically with this delivery job. */
+  localMessage?: StoredMessage
 }
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
@@ -210,7 +213,9 @@ export async function enqueueOutboundMany(
     )
     const fallbackProjectId = await resolveScopeProjectId()
 
-    const rows = await db.transaction("rw", db.outboundQueue, () =>
+    const tables: Table[] = [db.outboundQueue]
+    if (inputs.some((input) => input.localMessage)) tables.push(db.messages)
+    const rows = await db.transaction("rw", tables, () =>
       Dexie.Promise.all(
         conversationKeys.map((conversationKey) =>
           db.outboundQueue
@@ -247,7 +252,23 @@ export async function enqueueOutboundMany(
               : {}),
           } satisfies OutboundJobRow
         })
-        return db.outboundQueue.bulkAdd(created).then(() => created)
+        return db.outboundQueue.bulkAdd(created).then(async () => {
+          const messages = inputs.flatMap((input, index) =>
+            input.localMessage
+              ? [
+                  {
+                    ...input.localMessage,
+                    metadata: {
+                      ...input.localMessage.metadata,
+                      outboundJobId: created[index].id,
+                    },
+                  },
+                ]
+              : []
+          )
+          if (messages.length) await db.messages.bulkPut(messages)
+          return created
+        })
       })
     )
 

@@ -13,6 +13,7 @@ import {
   markSending,
   markSent,
   markFailed,
+  markDeliveryUnknown,
   markDeadlettered,
   replayDeadlettered,
   waitForOutboundTerminal,
@@ -1027,4 +1028,148 @@ describe("outbound-jobs", () => {
       expect(term?.reroutedToJobId).toBeUndefined()
     }, 30_000)
   })
+})
+
+describe("atomic manual transcript", () => {
+  it("does not wake the runner or expose a job when the transcript write aborts", async () => {
+    const db = getDb()
+    const wake = jest.fn()
+    const unsubscribe = subscribeOutboundEnqueued(wake)
+    const localMessage = {
+      id: "manual-atomic",
+      sessionId: "s-manual",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "reply" }],
+      createdAt: 1,
+      metadata: { replyTo: { messageId: "parent", preview: "quoted" } },
+    }
+    const input = {
+      adapterId: "adp_1",
+      conversationKey: "manual-conversation",
+      request: makeRequest("atomic-key"),
+      source: "manual" as const,
+      localMessage,
+    }
+    const fail = jest
+      .spyOn(db.messages, "bulkPut")
+      .mockRejectedValueOnce(new Error("mirror failed"))
+    try {
+      await expect(enqueueOutbound(input)).rejects.toThrow("mirror failed")
+      expect(await db.outboundQueue.count()).toBe(0)
+      expect(wake).not.toHaveBeenCalled()
+      fail.mockRestore()
+      const job = await enqueueOutbound(input)
+      expect(await db.messages.get(localMessage.id)).toMatchObject({
+        ...localMessage,
+        metadata: { ...localMessage.metadata, outboundJobId: job.id },
+      })
+      expect(wake).toHaveBeenCalledTimes(1)
+    } finally {
+      fail.mockRestore()
+      unsubscribe()
+    }
+  })
+})
+
+describe("delivery feedback and legacy queue recovery", () => {
+  it("resolves an active waiter when the persisted delivery becomes sent", async () => {
+    const job = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "wait-live",
+      request: makeRequest(),
+    })
+    const waiting = waitForOutboundTerminal(job.id, 1_000)
+    // Give the actual Dexie live query time to subscribe before the runner's ACK.
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    await markSent(job.id, "remote-ack")
+    await expect(waiting).resolves.toMatchObject({
+      id: job.id,
+      status: "sent",
+      platformMessageId: "remote-ack",
+    })
+  })
+
+  it("returns the latest pending status on timeout without retrying or changing the job", async () => {
+    const job = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "wait-timeout",
+      request: makeRequest(),
+    })
+    await expect(waitForOutboundTerminal(job.id, 25)).resolves.toMatchObject({
+      id: job.id,
+      status: "pending",
+    })
+    expect((await getDb().outboundQueue.get(job.id))?.attempts).toBe(0)
+  })
+
+  it("treats an ambiguous ACK as terminal evidence and keeps it off automatic dispatch", async () => {
+    const job = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "ambiguous-ack",
+      request: makeRequest(),
+    })
+    await markDeliveryUnknown(job.id, "timeout_after_send", "acknowledgement lost")
+    await expect(waitForOutboundTerminal(job.id, 25)).resolves.toMatchObject({
+      id: job.id,
+      status: "delivery_unknown",
+      lastErrorCode: "timeout_after_send",
+      lastError: "acknowledgement lost",
+    })
+    expect(await pickNextDue()).toBeUndefined()
+  })
+
+  it.each(["pending", "failed", "sending"] as const)(
+    "orders legacy %s siblings by createdAt and skips terminal rows",
+    async (status) => {
+      const rows = await enqueueOutboundMany(
+        ["head", "active", "tail"].map((key) => ({
+          adapterId: "adp_1",
+          conversationKey: "legacy-fifo",
+          request: makeRequest(key),
+          source: "manual" as const,
+        }))
+      )
+      const legacy = rows.map((row, index) => {
+        const { orderSeq: _orderSeq, ...rest } = row
+        return { ...rest, createdAt: 100 + index, status: index === 1 ? status : ("sent" as const) }
+      })
+      await getDb().outboundQueue.bulkPut(legacy)
+      expect((await findOlderActiveOutboundSibling(legacy[2]))?.id).toBe(legacy[1].id)
+      expect((await findNextActiveOutboundSibling(legacy[0]))?.id).toBe(legacy[1].id)
+      expect(await findOlderActiveOutboundSibling(legacy[0])).toBeUndefined()
+      expect(await findNextActiveOutboundSibling(legacy[2])).toBeUndefined()
+    }
+  )
+})
+
+it("returns a due retry even when a one-row batch allocates no initial failed quota", async () => {
+  const job = await enqueue({
+    adapterId: "adp_1",
+    conversationKey: "single-retry",
+    request: makeRequest(),
+  })
+  await markFailed(job.id, "network", "retry later", 100)
+  expect((await listDueNow({ now: 100, limit: 1 })).map((row) => row.id)).toEqual([job.id])
+})
+
+it("keeps durable acceptance when an enqueue wake subscriber throws", async () => {
+  const diagnostic = jest.spyOn(console, "error").mockImplementation(() => undefined)
+  const unsubscribe = subscribeOutboundEnqueued(() => {
+    throw new Error("subscriber failure")
+  })
+  try {
+    const job = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "failed-notify",
+      request: makeRequest(),
+    })
+    expect(await getDb().outboundQueue.get(job.id)).toMatchObject({ status: "pending" })
+    expect(diagnostic).toHaveBeenCalledWith(
+      "[outbound-jobs] enqueue subscriber threw:",
+      "subscriber failure"
+    )
+  } finally {
+    unsubscribe()
+    diagnostic.mockRestore()
+  }
 })

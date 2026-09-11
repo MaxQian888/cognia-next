@@ -450,7 +450,7 @@ export async function finishMemoryJob(
 
 /** Compatibility wrapper for existing callers; success is now explicit. */
 export async function completeMemoryJob(id: string, now: number = Date.now()): Promise<void> {
-  return finishMemoryJob(id, "succeeded", "completed", now)
+  await finishMemoryJob(id, "succeeded", "completed", now)
 }
 
 export async function heartbeatMemoryJob(

@@ -20,6 +20,7 @@
  * remote write into an anonymous `User:`.
  */
 
+import { readChatTemplateRun } from "@/lib/chat/template/run"
 import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { parseReplyToPayload } from "@/lib/chat/reply-to"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
@@ -128,6 +129,13 @@ export async function roomSend(
     throw new Error("room_send.replyTo must be { messageId, preview } when present")
   }
 
+  const templateRun =
+    payload.templateRun === undefined
+      ? null
+      : readChatTemplateRun({ templateRun: payload.templateRun })
+  if (payload.templateRun !== undefined && !templateRun) {
+    throw new Error("room_send.templateRun must be a valid template run when present")
+  }
   const targetMemberIds = readTargetMemberIds(payload.targetMemberIds)
 
   void runner
@@ -136,6 +144,7 @@ export async function roomSend(
       attachmentManifest,
       webSearchContext,
       author,
+      ...(templateRun ? { templateRun } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(targetMemberIds ? { targetMemberIds } : {}),
     })

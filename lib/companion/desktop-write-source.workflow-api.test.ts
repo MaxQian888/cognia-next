@@ -4,8 +4,13 @@ const dispatchWorkflowApiBridgeCommand = jest.fn(
     data: { runId: "run-1" },
   })
 )
-const probeWorkflowPlacement = jest.fn(async () => ({ compatible: true }))
-const createWorkflowApiRun = jest.fn(async () => ({ runId: "run-remote", status: "pending" }))
+const probeWorkflowPlacement = jest.fn(async (_payload: Record<string, unknown>) => ({
+  compatible: true,
+}))
+const createWorkflowApiRun = jest.fn(async (_payload: Record<string, unknown>) => ({
+  runId: "run-remote",
+  status: "pending",
+}))
 const dispatchPublicWorkflowAppBridgeCommand = jest.fn(
   async (_command: string, _payload: Record<string, unknown>) => ({
     ok: true,

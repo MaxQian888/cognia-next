@@ -8,7 +8,8 @@ const mockGetCurrentPosition = jest.fn(async (..._a: unknown[]): Promise<unknown
   value: { latitude: 1, longitude: 2, accuracy: 3, timestamp: 4 },
 }))
 jest.mock("@/lib/capacitor/geolocation", () => ({
-  getCurrentPosition: (...a: unknown[]) => mockGetCurrentPosition(...a),
+  getCurrentPosition: (...a: Parameters<typeof mockGetCurrentPosition>) =>
+    mockGetCurrentPosition(...a),
 }))
 const mockPickPhoto = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
   kind: "captured",
@@ -16,28 +17,28 @@ const mockPickPhoto = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
   format: "jpeg",
 }))
 jest.mock("@/lib/capacitor/camera", () => ({
-  pickPhoto: (...a: unknown[]) => mockPickPhoto(...a),
+  pickPhoto: (...a: Parameters<typeof mockPickPhoto>) => mockPickPhoto(...a),
 }))
 const mockScan = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
   kind: "scanned",
   raw: "QR-VALUE",
 }))
 jest.mock("@/lib/capacitor/barcode", () => ({
-  scan: (...a: unknown[]) => mockScan(...a),
+  scan: (...a: Parameters<typeof mockScan>) => mockScan(...a),
 }))
 const mockShare = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
   kind: "shared",
   activityType: "copy",
 }))
 jest.mock("@/lib/capacitor/share", () => ({
-  share: (...a: unknown[]) => mockShare(...a),
+  share: (...a: Parameters<typeof mockShare>) => mockShare(...a),
 }))
 const mockSchedule = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({
   kind: "ok",
   value: [17],
 }))
 jest.mock("@/lib/capacitor/local-notifications", () => ({
-  schedule: (...a: unknown[]) => mockSchedule(...a),
+  schedule: (...a: Parameters<typeof mockSchedule>) => mockSchedule(...a),
 }))
 
 import { installRemoteStepServer, MOBILE_STEP_EXECUTORS } from "./remote-step-server"
@@ -52,7 +53,9 @@ function makeHarness(
   options: {
     executors?: Record<string, (params: Record<string, unknown>) => Promise<RemoteStepResult>>
     persistResult?: () => Promise<void>
-    recoverInterrupted?: () => Promise<number>
+    recoverInterrupted?: NonNullable<
+      Parameters<typeof installRemoteStepServer>[0]["receipts"]
+    >["recoverInterrupted"]
   } = {}
 ) {
   const calls: Array<{ name: string; args: Record<string, unknown> }> = []
@@ -82,10 +85,19 @@ function makeHarness(
       options.persistResult ??
         (async (requestId: string, chunks: Array<Record<string, unknown>>) => {
           receiptStatuses.set(requestId, "result-pending")
-          for (const args of chunks) calls.push({ name: "workflow_step_result", args })
+          for (const args of chunks) calls.push({ name: "workflow_step_result", args: { ...args } })
         })
     ),
-    recoverInterrupted: jest.fn(options.recoverInterrupted ?? (async () => 0)),
+    recoverInterrupted: jest.fn(
+      options.recoverInterrupted ??
+        (async (
+          ..._args: Parameters<
+            NonNullable<
+              Parameters<typeof installRemoteStepServer>[0]["receipts"]
+            >["recoverInterrupted"]
+          >
+        ) => 0)
+    ),
     vacuum: jest.fn(async () => 0),
   }
   const off = installRemoteStepServer({
@@ -216,7 +228,7 @@ describe("installRemoteStepServer", () => {
         message: "device restarted",
       })
       receiptStatuses.set("rst-crashed", "result-pending")
-      for (const args of chunks) calls.push({ name: "workflow_step_result", args })
+      for (const args of chunks) calls.push({ name: "workflow_step_result", args: { ...args } })
       return 1
     })
 

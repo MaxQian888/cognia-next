@@ -18,7 +18,10 @@ import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"
 
-export async function applyConnectorDraftRows(rows: ConnectorDraftRow[]): Promise<void> {
+export async function applyConnectorDraftRows(
+  rows: ConnectorDraftRow[],
+  assertCurrent: () => void = () => {}
+): Promise<void> {
   const table = getDb().connectorDrafts
   const existing = await table.bulkGet(rows.map((row) => row.id))
   const toWrite: ConnectorDraftRow[] = []
@@ -32,10 +35,14 @@ export async function applyConnectorDraftRows(rows: ConnectorDraftRow[]): Promis
     }
     toWrite.push(row)
   })
+  assertCurrent()
   if (toWrite.length > 0) await table.bulkPut(toWrite)
 }
 
-export function syncConnectorDrafts(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
+export function syncConnectorDrafts(
+  transport: Transport,
+  cursor: SyncCursor
+): Promise<SyncOutcome> {
   return runSyncHandler<ConnectorDraftRow>(
     {
       table: "connectorDrafts",

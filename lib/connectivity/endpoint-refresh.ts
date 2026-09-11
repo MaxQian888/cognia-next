@@ -28,7 +28,9 @@
 import { transport } from "@/lib/tauri"
 import {
   loadCompanionConfig,
-  saveCompanionConfig,
+  updateCompanionConfigMetadata,
+  isSameCompanionTarget,
+  getCompanionConfigGeneration,
   type CompanionConfig,
 } from "@/lib/tauri/transport-companion"
 
@@ -49,9 +51,13 @@ export interface RefreshEndpointsOptions {
   callImpl?: <T>(name: string, args?: Record<string, unknown>) => Promise<T>
   /** Test seam — defaults to the module-level config cache. */
   loadConfigImpl?: () => CompanionConfig | null
-  /** Test seam — defaults to the real persisting writer. */
+  /** Skip stale controller work after disposal. */
+  isCurrent?: () => boolean
+  /** Test seam — defaults to the guarded metadata writer. */
   saveConfigImpl?: (config: CompanionConfig) => Promise<void>
 }
+
+const refreshGenerations = new WeakMap<() => CompanionConfig | null, number>()
 
 function normalise(url: string | null | undefined): string | undefined {
   if (typeof url !== "string") return undefined
@@ -130,7 +136,13 @@ export async function refreshCompanionEndpoints(
 ): Promise<CompanionConfig | null> {
   const call = options.callImpl ?? ((name, args) => transport.call(name, args))
   const loadConfig = options.loadConfigImpl ?? loadCompanionConfig
-  const saveConfig = options.saveConfigImpl ?? saveCompanionConfig
+  const targetGeneration = getCompanionConfigGeneration()
+  const generation = (refreshGenerations.get(loadConfig) ?? 0) + 1
+  refreshGenerations.set(loadConfig, generation)
+  const isCurrent = () =>
+    refreshGenerations.get(loadConfig) === generation &&
+    getCompanionConfigGeneration() === targetGeneration &&
+    (options.isCurrent?.() ?? true)
 
   const config = loadConfig()
   if (!config) return null
@@ -141,24 +153,36 @@ export async function refreshCompanionEndpoints(
   } catch {
     // Offline, 404 on a desktop older than this arm, or a transport error —
     // keep whatever inventory we already had.
-    return config
+    return loadConfig()
   }
 
   const endpoints = parseEndpoints(raw)
-  if (!endpoints) return config
+  if (!endpoints) return loadConfig()
 
   // Re-read rather than reusing the pre-await snapshot: the LAN re-resolver
   // repoints `baseUrl` on the same triggers that drive this refresh, and
   // writing back a stale snapshot would silently undo it.
-  const current = loadConfig() ?? config
+  const current = loadConfig()
+  if (!current || !isCurrent() || !isSameCompanionTarget(config, current)) return current
   const merged = mergeEndpointsIntoConfig(current, endpoints)
   if (!merged) return current
 
   try {
-    await saveConfig(merged)
+    if (!options.saveConfigImpl) {
+      return await updateCompanionConfigMetadata(
+        current,
+        {
+          lanBaseUrl: merged.lanBaseUrl,
+          tunnelBaseUrl: merged.tunnelBaseUrl,
+          serverFingerprint: merged.serverFingerprint,
+        },
+        isCurrent
+      )
+    }
+    await options.saveConfigImpl(merged)
   } catch {
-    // Keychain / quota failure — the in-memory cache already advanced inside
-    // `saveCompanionConfig`, so the inventory still applies for this session.
+    // A failed secure write must not report an inventory that was never applied.
+    return loadConfig()
   }
   return merged
 }

@@ -409,7 +409,8 @@ describe("hostDispatchQueue", () => {
   it("keeps terminal rows, because a failure is what the reader came for", async () => {
     const job = await enqueueHostDispatch(input())
     await markHostDispatchInflight(job.id)
-    await failHostDispatch(job.id, "device denied the prompt", NOW, { maxAttempts: 1 })
+    await getDb().hostDispatchQueue.update(job.id, { maxAttempts: 1 })
+    await failHostDispatch(job.id, "device denied the prompt", NOW)
 
     const rows = await listHostDispatchForTarget("device:a")
     expect(rows).toHaveLength(1)

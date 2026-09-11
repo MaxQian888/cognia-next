@@ -593,7 +593,7 @@ export async function rebaseCollabConflict(id: string): Promise<MobileOutboundJo
   if (!Number.isSafeInteger(row.currentRevision) || (row.currentRevision ?? 0) < 1) {
     throw new Error("Collaboration conflict has no authoritative revision.")
   }
-  const payload = { ...row.payload, baseRevision: row.currentRevision }
+  const payload: Record<string, unknown> = { ...row.payload, baseRevision: row.currentRevision }
   delete payload.operationId
   const entityType = row.command.includes("_issue_")
     ? "issue"

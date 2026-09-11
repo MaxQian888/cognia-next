@@ -16,6 +16,7 @@ import {
 import {
   __resetCompanionConfigCacheForTests,
   saveCompanionConfig,
+  loadCompanionConfig,
 } from "@/lib/tauri/transport-companion"
 import {
   __setCompanionStorageForTests,
@@ -171,6 +172,16 @@ async function pairCompanion(): Promise<void> {
 }
 
 describe("applySettings", () => {
+  it("does not apply resolved credentials to a different Host", async () => {
+    await pairCompanion()
+    const tx = new FakeTransport()
+    const applying = applySettings(tx as unknown as Tx, settings())
+    // Credential resolution yields even with no configured TURN servers.
+    __resetCompanionConfigCacheForTests()
+    await applying
+    expect(tx.enableCalls).toHaveLength(0)
+  })
+
   it("does not start WebRTC before the companion config is hydrated", async () => {
     const tx = new FakeTransport()
 
@@ -591,6 +602,53 @@ describe("installCompanionSignalingController — LAN re-resolution", () => {
     expect(resolveCount).toBe(0)
     expect(tx.reconnectWsCount).toBe(0)
     uninstall()
+  })
+
+  it("does not save a LAN scan result after the selected pairing changes", async () => {
+    await pairCompanion()
+    const tx = new FakeTransport()
+    let finishScan!: (value: { lanBaseUrl: string }) => void
+    const uninstall = installCompanionSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings(),
+      subscribeNetworkOverride: async () => () => {},
+      subscribeResumeOverride: async () => () => {},
+      resolveLanBaseUrlOverride: () =>
+        new Promise((resolve) => {
+          finishScan = resolve
+        }) as never,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const previous = loadCompanionConfig()!
+    await saveCompanionConfig({
+      ...previous,
+      deviceId: "other-host",
+      baseUrl: "https://other.example",
+    })
+    finishScan({ lanBaseUrl: "https://stale.example" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(loadCompanionConfig()?.baseUrl).toBe("https://other.example")
+    expect(tx.reconnectWsCount).toBe(0)
+    uninstall()
+  })
+
+  it("ignores settings and hydration that finish after uninstall", async () => {
+    await pairCompanion()
+    const tx = new FakeTransport()
+    const scan = jest.fn(async () => ({ lanBaseUrl: null }))
+    const uninstall = installCompanionSignalingController({
+      isCapacitorOverride: true,
+      transportOverride: tx as unknown as Tx,
+      getSettingsOverride: async () => settings(),
+      subscribeNetworkOverride: async () => () => {},
+      subscribeResumeOverride: async () => () => {},
+      resolveLanBaseUrlOverride: scan as never,
+    })
+    uninstall()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(tx.enableCalls).toHaveLength(0)
+    expect(scan).not.toHaveBeenCalled()
   })
 
   it("aborts the in-flight scan on uninstall", async () => {

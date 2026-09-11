@@ -6,8 +6,10 @@ import "fake-indexeddb/auto"
 
 /** Lets a test move the client onto a different host mid-run. */
 let companionConfig: { deviceId: string; targetId?: string; accountId?: string } | null = null
+let companionGeneration = 0
 jest.mock("@/lib/tauri/transport-companion", () => ({
   loadCompanionConfig: () => companionConfig,
+  getCompanionConfigGeneration: () => companionGeneration,
 }))
 
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -30,7 +32,9 @@ import {
   runSyncDown,
   runStagedSyncDown,
   snapshotSyncStates,
+  SYNC_MAX_CONCURRENT_PULLS,
   SYNC_STAGES,
+  SYNC_TABLE_DEPENDENCIES,
   SYNC_TABLE_STAGES,
   syncTablesForStage,
 } from "./companion-sync"
@@ -60,6 +64,7 @@ beforeEach(() => {
   // the client onto another host leaks that host into the next one, which now
   // decides whether the cold-start mirror wipe fires.
   companionConfig = null
+  companionGeneration = 0
 })
 
 describe("resumable table cursors", () => {
@@ -93,7 +98,7 @@ describe("resumable table cursors", () => {
       lastError: "page interrupted",
     })
     await runSyncDown(opts)
-    expect(run.mock.calls[1][1]).toEqual({ since: 1000, cursor: "row-500" })
+    expect(run.mock.calls[1][1]).toMatchObject({ since: 1000, cursor: "row-500" })
     expect(getSyncStateFor("messages")).toMatchObject({
       since: 1000,
       cursor: "row-600",
@@ -249,6 +254,77 @@ describe("SYNC_HANDLER_TABLES registry", () => {
 })
 
 describe("runSyncDown", () => {
+  it("fences a delayed real apply across A to B to A even when the database is unchanged", async () => {
+    await whenSeeded()
+    companionConfig = { deviceId: "identity-a", targetId: "host-a" }
+    const t = makeTransport()
+    let release!: (value: unknown) => void
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    ;(t.call as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+          started()
+        })
+    )
+    const pending = runSyncDown({
+      transport: t,
+      handlers: [{ table: "sessions", run: syncSessions }],
+      only: ["sessions"],
+    })
+    await ready
+    companionConfig = { deviceId: "identity-b", targetId: "host-b" }
+    companionGeneration++
+    companionConfig = { deviceId: "identity-a", targetId: "host-a" }
+    companionGeneration++
+    release({
+      rows: [{ id: "stale-generation", title: "stale", createdAt: 1, updatedAt: 1 }],
+      deleted_ids: [],
+      next_since: 1,
+    })
+    expect((await pending)[0].ok).toBe(false)
+    expect(await getDb().sessions.get("stale-generation")).toBeUndefined()
+  })
+
+  it("does not reuse a previous host's full in-flight run", async () => {
+    companionConfig = { deviceId: "full-a", targetId: "full-a" }
+    const transport = makeTransport()
+    let release!: () => void
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const first = runSyncDown({
+      transport,
+      handlers: [
+        {
+          table: "sessions",
+          run: async () => {
+            started()
+            await new Promise<void>((resolve) => {
+              release = resolve
+            })
+            return makeOkOutcome("sessions")
+          },
+        },
+      ],
+    })
+    await ready
+    companionConfig = { deviceId: "full-b", targetId: "full-b" }
+    companionGeneration++
+    const second = runSyncDown({
+      transport,
+      handlers: [{ table: "sessions", run: async () => makeOkOutcome("sessions", 1, 8) }],
+    })
+    expect(second).not.toBe(first)
+    expect((await second)[0].ok).toBe(true)
+    release()
+    expect((await first)[0].ok).toBe(false)
+  })
+
   it("accepts an empty handler set with the production transport default", async () => {
     await expect(runSyncDown({ handlers: [] })).resolves.toEqual([])
   })
@@ -284,7 +360,7 @@ describe("runSyncDown", () => {
     await runSyncDown({ transport, handlers })
 
     // Second invocation should pass `since: 100` to the handler.
-    expect(handler.mock.calls[1][1]).toEqual({ since: 100 })
+    expect(handler.mock.calls[1][1]).toMatchObject({ since: 100 })
     expect(snapshotSyncStates().characters.since).toBe(200)
     expect(getSyncStateFor("characters")).toMatchObject({ since: 200, lastError: null })
   })
@@ -508,12 +584,12 @@ describe("runSyncDown", () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     releases[0](makeFailOutcome("sessions", "transport"))
     await starts[1]
-    expect(handler.mock.calls[1][1]).toEqual({ since: 0 })
+    expect(handler.mock.calls[1][1]).toMatchObject({ since: 0 })
     const third = runSyncDown(opts)
     await new Promise((resolve) => setTimeout(resolve, 20))
     releases[1](makeOkOutcome("sessions", 1, 10))
     await starts[2]
-    expect(handler.mock.calls[2][1]).toEqual({ since: 10 })
+    expect(handler.mock.calls[2][1]).toMatchObject({ since: 10 })
     releases[2](makeOkOutcome("sessions", 1, 20))
     await Promise.all([first, second, third])
     expect(handler).toHaveBeenCalledTimes(3)
@@ -551,7 +627,7 @@ describe("runSyncDown", () => {
     release(makeOkOutcome("sessions", 1, 999))
     const outcomes = await Promise.all([first, queued])
     expect(oldHandler).toHaveBeenCalledTimes(1)
-    expect(newHandler).toHaveBeenCalledWith(transport, { since: 0 })
+    expect(newHandler).toHaveBeenCalledWith(transport, expect.objectContaining({ since: 0 }))
     expect(outcomes.flat()).toEqual([
       expect.objectContaining({ ok: false }),
       expect.objectContaining({ ok: false }),
@@ -773,7 +849,7 @@ describe("cursor persistence (Wave 4 / ADR-0026)", () => {
 
     await runSyncDown({ transport: makeTransport(), handlers })
 
-    expect(handler.mock.calls[0][1]).toEqual({ since: 777 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 777 })
     expect(snapshotSyncStates().characters.since).toBe(999)
   })
 
@@ -1190,7 +1266,7 @@ describe("host isolation (v130)", () => {
       handlers: [{ table: "characters" as const, run: handler }],
     })
 
-    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 0 })
   })
 
   it("keeps each host's watermark separately", async () => {
@@ -1206,7 +1282,7 @@ describe("host isolation (v130)", () => {
       handlers: [{ table: "characters" as const, run: handler }],
     })
 
-    expect(handler.mock.calls[0][1]).toEqual({ since: 11 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 11 })
     // The other host's row is untouched — switching back must not re-pull.
     expect((await getDb().hostSyncCursors.get(["other-host", "characters"]))?.since).toBe(99)
   })
@@ -1287,7 +1363,7 @@ describe("host isolation (v130)", () => {
     expect(await db.characters.get("from-host-a")).toBeUndefined()
     expect(await db.hostSyncCursors.get(["device-on-host-a", "characters"])).toBeUndefined()
     // ...and host B is asked for everything, not "since host A's watermark".
-    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 0 })
   })
 
   it("leaves the mirror alone while the companion config is still hydrating", async () => {
@@ -1373,7 +1449,7 @@ describe("cursor namespace keying (ADR-0097 D13)", () => {
     })
     await new Promise((r) => setTimeout(r, 5))
 
-    expect(handler.mock.calls[0][1]).toEqual({ since: 500 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 500 })
     expect(await db.characters.get("from-this-host")).toBeDefined()
   })
 
@@ -1393,7 +1469,7 @@ describe("cursor namespace keying (ADR-0097 D13)", () => {
     })
     await new Promise((r) => setTimeout(r, 5))
 
-    expect(handler.mock.calls[0][1]).toEqual({ since: 500 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 500 })
     expect(await db.characters.get("from-this-host")).toBeDefined()
     // …and the legacy row is gone, so the next run does not see it as foreign.
     expect(await db.hostSyncCursors.get(["dev-1", "characters"])).toBeUndefined()
@@ -1420,7 +1496,7 @@ describe("cursor namespace keying (ADR-0097 D13)", () => {
 
     // The namespaced row was written by this build against the key we resume
     // from; the legacy row is a stale duplicate, not a newer watermark.
-    expect(handler.mock.calls[0][1]).toEqual({ since: 10 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 10 })
     expect(await getDb().hostSyncCursors.get(["dev-1", "characters"])).toBeUndefined()
   })
 
@@ -1437,7 +1513,7 @@ describe("cursor namespace keying (ADR-0097 D13)", () => {
 
     // `""` is the unpaired key, not this host's former key — adopting it would
     // hand every unpaired client's watermark to the first host it pairs with.
-    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+    expect(handler.mock.calls[0][1]).toMatchObject({ since: 0 })
   })
 
   it("keeps both hosts' mirrors when each host has its own database", async () => {
@@ -1481,5 +1557,243 @@ describe("cursor namespace keying (ADR-0097 D13)", () => {
 
     expect(await db.characters.get("from-host-a")).toBeUndefined()
     expect(await db.hostSyncCursors.get(["__local__:host-a", "characters"])).toBeUndefined()
+  })
+})
+
+describe("concurrent table pulls", () => {
+  /** Let every queued macrotask (and the `yieldToMain` hops) run. */
+  async function flush(ticks = 12): Promise<void> {
+    for (let i = 0; i < ticks; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  /**
+   * Handlers that announce when they start and finish, and finish only when
+   * the test says so.
+   *
+   * A handler that resolves on its own is useless here: overlap is only
+   * observable while something is still in flight, so every gate stays shut
+   * until the assertion has been made.
+   */
+  function makeGatedHandlers(tables: readonly SyncableTable[]) {
+    const events: string[] = []
+    const gates = new Map<SyncableTable, () => void>()
+    // `releaseAll` has to latch. Under a concurrency ceiling the backlog has
+    // not started yet, so opening only the gates that exist right now leaves
+    // every later handler blocked on a gate nobody will ever open.
+    let open = false
+    const handlers = tables.map((table) => ({
+      table,
+      run: jest.fn(async () => {
+        events.push(`start:${table}`)
+        if (!open) await new Promise<void>((resolve) => gates.set(table, resolve))
+        events.push(`end:${table}`)
+        return makeOkOutcome(table)
+      }),
+    }))
+    const releaseAll = () => {
+      open = true
+      for (const release of [...gates.values()]) release()
+      gates.clear()
+    }
+    return { events, gates, handlers, releaseAll }
+  }
+
+  it("shares its concurrency budget across independent targeted runs", async () => {
+    const tables = SYNC_HANDLER_TABLES.slice(0, SYNC_MAX_CONCURRENT_PULLS + 3)
+    const { events, handlers, releaseAll } = makeGatedHandlers(tables)
+    const transport = makeTransport()
+    const runs = tables.map((table) => runSyncDown({ transport, handlers, only: [table] }))
+    await flush()
+    const count = events.filter((event) => event.startsWith("start:")).length
+    releaseAll()
+    await Promise.all(runs)
+    expect(count).toBe(SYNC_MAX_CONCURRENT_PULLS)
+  })
+
+  it("cancels a queued table without waiting for unrelated active pulls", async () => {
+    const tables = SYNC_HANDLER_TABLES.slice(0, SYNC_MAX_CONCURRENT_PULLS + 1)
+    const { handlers, releaseAll } = makeGatedHandlers(tables)
+    const transport = makeTransport()
+    const active = runSyncDown({
+      transport,
+      handlers: handlers.slice(0, SYNC_MAX_CONCURRENT_PULLS),
+      only: tables,
+    })
+    await flush()
+    const controller = new AbortController()
+    const queued = runSyncDown({
+      transport,
+      handlers: handlers.slice(-1),
+      only: tables,
+      signal: controller.signal,
+    })
+    await flush()
+    controller.abort()
+    const outcome = await queued
+    expect(outcome[0].ok).toBe(false)
+    expect(handlers.at(-1)!.run).not.toHaveBeenCalled()
+    releaseAll()
+    await active
+  })
+
+  it("starts several tables at once instead of one at a time", async () => {
+    const { events, handlers, releaseAll } = makeGatedHandlers(["characters", "skills", "goals"])
+
+    const run = runSyncDown({ transport: makeTransport(), handlers })
+    await flush()
+
+    // The whole point of the change: all three are in flight before any of
+    // them has answered. Sequentially this read `["start:characters"]`.
+    expect(events).toEqual(["start:characters", "start:skills", "start:goals"])
+
+    releaseAll()
+    await expect(run).resolves.toHaveLength(3)
+  })
+
+  it("never exceeds the concurrency ceiling", async () => {
+    const tables = SYNC_HANDLER_TABLES.slice(0, SYNC_MAX_CONCURRENT_PULLS + 3)
+    expect(tables.length).toBeGreaterThan(SYNC_MAX_CONCURRENT_PULLS)
+    const { events, gates, handlers, releaseAll } = makeGatedHandlers(tables)
+
+    const run = runSyncDown({ transport: makeTransport(), handlers })
+    await flush()
+
+    const started = () => events.filter((event) => event.startsWith("start:")).length
+    expect(started()).toBe(SYNC_MAX_CONCURRENT_PULLS)
+
+    // A finished pull admits exactly one more, never the whole backlog.
+    const first = tables[0]
+    gates.get(first)?.()
+    gates.delete(first)
+    await flush()
+    expect(started()).toBe(SYNC_MAX_CONCURRENT_PULLS + 1)
+
+    releaseAll()
+    await expect(run).resolves.toHaveLength(tables.length)
+  })
+
+  it("holds a declared `after` edge even when the dependent is registered first", async () => {
+    const { events, gates, handlers } = makeGatedHandlers(["sessions", "characters"])
+    const withEdge = [{ ...handlers[0], after: ["characters"] as const }, handlers[1]]
+
+    const run = runSyncDown({ transport: makeTransport(), handlers: withEdge })
+    await flush()
+
+    // Registry position says `sessions` runs first. The edge says otherwise,
+    // and the edge is what has to win now that position means nothing.
+    expect(events).toEqual(["start:characters"])
+
+    gates.get("characters")?.()
+    await flush()
+    expect(events).toEqual(["start:characters", "end:characters", "start:sessions"])
+
+    gates.get("sessions")?.()
+    await expect(run).resolves.toHaveLength(2)
+  })
+
+  it("returns outcomes in registry order, not completion order", async () => {
+    const { gates, handlers } = makeGatedHandlers(["characters", "skills"])
+
+    const run = runSyncDown({ transport: makeTransport(), handlers })
+    await flush()
+
+    // Finish them backwards. Callers index these positionally against the
+    // handler list they passed, so completion order must not reach them.
+    gates.get("skills")?.()
+    await flush()
+    gates.get("characters")?.()
+
+    const outcomes = await run
+    expect(outcomes.map((outcome) => (outcome.ok ? outcome.result.table : null))).toEqual([
+      "characters",
+      "skills",
+    ])
+  })
+
+  it("drops an edge naming a table this run excluded", async () => {
+    // `only` / `stages` can filter the dependency out. Waiting for a pull that
+    // will never be started is a deadlock, not an ordering.
+    const { gates, handlers } = makeGatedHandlers(["sessions"])
+    const run = runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ ...handlers[0], after: ["characters"] as const }],
+    })
+    await flush()
+
+    gates.get("sessions")?.()
+    await expect(run).resolves.toEqual([makeOkOutcome("sessions")])
+  })
+
+  it("makes progress instead of hanging when injected edges form a cycle", async () => {
+    const { handlers, releaseAll } = makeGatedHandlers(["sessions", "characters"])
+    const cyclic = [
+      { ...handlers[0], after: ["characters"] as const },
+      { ...handlers[1], after: ["sessions"] as const },
+    ]
+
+    const run = runSyncDown({ transport: makeTransport(), handlers: cyclic })
+    await flush()
+    releaseAll()
+    await flush()
+    releaseAll()
+
+    await expect(run).resolves.toHaveLength(2)
+  })
+})
+
+describe("SYNC_TABLE_DEPENDENCIES", () => {
+  it("names only real handlers, never itself, and never a later stage", () => {
+    let edges = 0
+    for (const [table, deps] of Object.entries(SYNC_TABLE_DEPENDENCIES)) {
+      for (const dep of deps) {
+        edges++
+        expect(SYNC_HANDLER_TABLES).toContain(dep)
+        expect(dep).not.toBe(table)
+        // A stage boundary is already a barrier, so an edge may point back
+        // across one. Pointing forward would be a barrier against something
+        // that has not been scheduled yet, a deadlock the graph runner would
+        // then have to break by guessing.
+        expect(SYNC_STAGES.indexOf(SYNC_TABLE_STAGES[dep])).toBeLessThanOrEqual(
+          SYNC_STAGES.indexOf(SYNC_TABLE_STAGES[table as SyncableTable])
+        )
+      }
+    }
+    // Without this the loop above also passes over an empty registry.
+    expect(edges).toBeGreaterThan(0)
+  })
+
+  it("is acyclic", () => {
+    const visiting = new Set<string>()
+    const done = new Set<string>()
+    const walk = (table: string, trail: string[]): void => {
+      if (done.has(table)) return
+      if (visiting.has(table)) {
+        throw new Error(`cycle in SYNC_TABLE_DEPENDENCIES: ${[...trail, table].join(" -> ")}`)
+      }
+      visiting.add(table)
+      for (const dep of SYNC_TABLE_DEPENDENCIES[table as SyncableTable] ?? []) {
+        walk(dep, [...trail, table])
+      }
+      visiting.delete(table)
+      done.add(table)
+    }
+    expect(() => {
+      for (const table of SYNC_HANDLER_TABLES) walk(table, [])
+    }).not.toThrow()
+    expect(done.size).toBe(SYNC_HANDLER_TABLES.length)
+  })
+
+  it("keeps the orderings the registry comments promise", () => {
+    // These are the ones a wrong order makes visible: a chat row with no
+    // identity, an issue chip painted as a raw id, a teammate with no squad.
+    expect(SYNC_TABLE_DEPENDENCIES.sessions).toContain("characters")
+    expect(SYNC_TABLE_DEPENDENCIES.issueProjects).toContain("labels")
+    expect(SYNC_TABLE_DEPENDENCIES.issues).toContain("issueProjects")
+    expect(SYNC_TABLE_DEPENDENCIES.issueEvents).toContain("issues")
+    expect(SYNC_TABLE_DEPENDENCIES.agentTeammates).toContain("agentTeams")
+    expect(SYNC_TABLE_DEPENDENCIES.agentTeamTasks).toContain("agentTeams")
+    expect(SYNC_TABLE_DEPENDENCIES.platformIdentities).toContain("adapterInstances")
+    expect(SYNC_TABLE_DEPENDENCIES.executionRunBindings).toContain("executionRuns")
+    expect(SYNC_TABLE_DEPENDENCIES.botEventDeliveries).toContain("botInstallations")
   })
 })

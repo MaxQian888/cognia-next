@@ -51,13 +51,52 @@ jest.mock("@/lib/platform/detect", () => {
  *
  * They assert the CURRENT schema: that the store and its indexes exist, and
  * that rows written before the upgrade survive it. They deliberately do NOT
- * assert data transformation — `lib/db/schema.ts` declares one cumulative
- * version and runs no `upgrade()` hooks, so a test asserting a backfill would
- * be testing nothing.
+ * assert historical data transformation. The current cumulative declaration
+ * adds only v226 sync metadata backfill; its dedicated migration test below
+ * covers that transformation, including preservation of existing records.
  */
 function schemaIt(name: string, run: () => Promise<void>, timeout = 30_000): void {
   it(name, run, timeout)
 }
+
+schemaIt("v226 adds message revision metadata and backfills the previous layout", async () => {
+  const name = "message-revision-schema-upgrade"
+  await Dexie.delete(name)
+  const previous = new Dexie(name)
+  const oldSchema = { ...CURRENT_SCHEMA }
+  delete oldSchema.messageSyncClock
+  oldSchema.messages = oldSchema.messages!.replace(", [syncRevision+id]", "")
+  oldSchema.workflowRuns = oldSchema.workflowRuns!.replace(", [syncActivityAt+id]", "")
+  previous.version(225).stores(oldSchema)
+  await previous.table("messages").put({ id: "old", sessionId: "s", createdAt: 7, parts: [] })
+  await previous
+    .table("workflowRuns")
+    .put({ id: "old-run", startedAt: 2, completedAt: 9, workflowSnapshot: {} })
+  previous.close()
+  const upgraded = new CogniaDB(name)
+  try {
+    await upgraded.open()
+    expect(upgraded.verno).toBe(226)
+    expect(
+      await upgraded.workflowRuns.where("[syncActivityAt+id]").above([8, ""]).primaryKeys()
+    ).toEqual(["old-run"])
+    expect(
+      upgraded.messages.schema.indexes.some((index) => index.name === "[syncRevision+id]")
+    ).toBe(true)
+    expect(await upgraded.messages.get("old")).toMatchObject({
+      id: "old",
+      createdAt: 7,
+      syncRevision: 1,
+    })
+    expect(await upgraded.messageSyncClock.get("singleton")).toEqual({
+      id: "singleton",
+      revision: 1,
+    })
+  } finally {
+    upgraded.close()
+    await Dexie.delete(name)
+  }
+})
 
 schemaIt(
   "v225 adds device-local shared run recovery without changing existing transcripts",

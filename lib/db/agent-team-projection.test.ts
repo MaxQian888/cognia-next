@@ -76,7 +76,7 @@ describe("diffSnapshots", () => {
     expect(puts.find((r) => r.id === a.id)).toMatchObject({ title: "a2", updatedAt: 999 })
   })
 
-  it("deleting a team emits its meta-row tombstone", () => {
+  it("deleting a team emits its meta-row tombstone", async () => {
     const state = useAgentTeamStore.getState()
     const team = state.createTeam({ name: "T", task: "t" })
     const prev = {
@@ -84,7 +84,7 @@ describe("diffSnapshots", () => {
       teams: useAgentTeamStore.getState().teams,
       teammates: useAgentTeamStore.getState().teammates,
     }
-    useAgentTeamStore.getState().deleteTeam(team.id)
+    await useAgentTeamStore.getState().deleteTeam(team.id)
     const next = {
       tasks: useAgentTeamStore.getState().tasks,
       teams: useAgentTeamStore.getState().teams,

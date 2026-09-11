@@ -9,7 +9,12 @@ import {
   generateSigningKeyPair,
 } from "@/lib/signaling/crypto"
 
-import { CredentialBookCompanionStorage, toCompanionConfig } from "./adapter"
+import {
+  CredentialBookCompanionStorage,
+  toCompanionConfig,
+  companionHostDraftFromConfig,
+  companionHostCredentialFromConfig,
+} from "./adapter"
 import { createCredentialBook } from "./book"
 import {
   emptyHostBook,
@@ -435,5 +440,100 @@ describe("book contract used by the adapter", () => {
     ] as const) {
       expect(typeof book[method]).toBe("function")
     }
+  })
+})
+
+describe("metadata persistence", () => {
+  it("keeps updates in the captured account after the active account changes", async () => {
+    let account = "acct_a"
+    const { book, storage } = harness(() => account)
+    await storage.save(config({ targetId: "host-a" }))
+    const captured = (await storage.load())!
+    account = "acct_b"
+    await storage.save(config({ targetId: "host-b" }))
+    expect(
+      await storage.updateMetadata(
+        { ...captured, tunnelBaseUrl: "https://new.example" },
+        () => true
+      )
+    ).toBe(true)
+    expect(
+      (await book.get({ hostId: "host-a", accountNamespace: "acct_a" }))?.endpoints.tunnelBaseUrl
+    ).toBe("https://new.example")
+    expect(await book.get({ hostId: "host-a", accountNamespace: "acct_b" })).toBeNull()
+    expect((await book.getActive("acct_b"))?.hostId).toBe("host-b")
+  })
+
+  it("rejects metadata after cancellation without creating an unpaired host", async () => {
+    const { book, storage } = harness()
+    expect(await storage.updateMetadata(config(), () => false)).toBe(false)
+    expect(await book.list()).toEqual([])
+  })
+})
+
+describe("adapter validation and compensation boundaries", () => {
+  it("requires the device identity before writing either half", () => {
+    expect(() =>
+      companionHostDraftFromConfig(config({ deviceKeyThumbprint: undefined }), "acct")
+    ).toThrow("device identity")
+    expect(() =>
+      companionHostCredentialFromConfig(config({ devicePrivateKeyJwk: undefined }))
+    ).toThrow("device identity")
+    expect(() =>
+      companionHostCredentialFromConfig(config({ deviceKeyThumbprint: undefined }))
+    ).toThrow("device identity")
+  })
+
+  it("preserves explicit tenant and per-Host signaling configuration", async () => {
+    const { storage } = harness()
+    const iceServers = [{ urls: "stun:example.test" }]
+    await storage.save(
+      config({ tenantId: "remote-tenant", signalingUrl: "wss://signal.test", iceServers })
+    )
+    expect(await storage.load()).toEqual(
+      expect.objectContaining({
+        tenantId: "remote-tenant",
+        signalingUrl: "wss://signal.test",
+        iceServers,
+      })
+    )
+  })
+
+  it.each([new Error("rollback failed"), "rollback failed"])(
+    "surfaces an incomplete secure-store rollback %p",
+    async (failure) => {
+      const { book } = harness()
+      jest.spyOn(book, "saveCredential").mockRejectedValue(new Error("save failed"))
+      jest.spyOn(book, "remove").mockRejectedValue(failure)
+      const storage = new CredentialBookCompanionStorage({ book, accountNamespace: () => "acct_a" })
+      await expect(storage.save(config())).rejects.toThrow(
+        "rollback was incomplete: rollback failed"
+      )
+    }
+  )
+
+  it("reports unsupported metadata stores without falling back to pairing activation", async () => {
+    const { book } = harness()
+    const storage = new CredentialBookCompanionStorage({
+      book: { ...book, updateMetadata: undefined },
+      accountNamespace: () => null,
+    })
+    await expect(storage.updateMetadata(config(), () => true)).rejects.toThrow(
+      "does not support metadata updates"
+    )
+  })
+
+  it("uses the adapter namespace for legacy metadata and exact removals", async () => {
+    const { storage, book } = harness(() => null)
+    const paired = config()
+    await storage.save(paired)
+    expect(
+      await storage.updateMetadata({ ...paired, serverFingerprint: undefined }, () => true)
+    ).toBe(true)
+    expect(
+      await storage.updateMetadata({ ...paired, deviceKeyThumbprint: undefined }, () => true)
+    ).toBe(false)
+    await storage.remove(paired)
+    expect(await book.list()).toEqual([])
   })
 })

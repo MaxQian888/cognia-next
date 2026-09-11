@@ -11,9 +11,10 @@ export function syncSessions(transport: Transport, cursor: SyncCursor): Promise<
     {
       table: "sessions",
       getTable: () => getDb().sessions,
-      applyRows: async (rows) => {
+      applyRows: async (rows, assertCurrent) => {
         const table = getDb().sessions
         const existing = await table.bulkGet(rows.map((row) => row.id))
+        assertCurrent()
         await table.bulkPut(
           rows.map((row, index) => {
             if (!row.executionContext) return row

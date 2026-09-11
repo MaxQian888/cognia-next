@@ -30,10 +30,16 @@ import {
   updateAgentTeamChildRunIfCurrent,
 } from "./agent-team-runtime"
 
+const mockAgentInvoke = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  agentInvoke: (...args: unknown[]) => mockAgentInvoke(...args),
+}))
+
 describe("durable AgentTeam runtime persistence", () => {
   let disableDbRuntime: (() => void) | undefined
 
   beforeEach(async () => {
+    mockAgentInvoke.mockReset().mockResolvedValue(undefined)
     disableDbRuntime = __enableDbRuntimeForTesting()
     __resetDbForTesting()
     await indexedDB.deleteDatabase(LEGACY_COGNIA_DB_NAME)
@@ -344,6 +350,125 @@ describe("durable AgentTeam runtime persistence", () => {
       status: "pausing",
       updatedAt: 3,
     })
+  })
+
+  it("cleans managed native history before deleting rows and retains all team runs on failure", async () => {
+    for (const suffix of ["a", "b"]) {
+      await createAgentTeamRun({
+        id: `run-${suffix}`,
+        teamId: "managed-team",
+        objective: "Cleanup",
+        decisionVersion: 0,
+        priority: 1,
+        status: "completed",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await createAgentTeamChildRun({
+        id: `child-${suffix}`,
+        runId: `run-${suffix}`,
+        teamId: "managed-team",
+        teammateId: `mate-${suffix}`,
+        taskId: `task-${suffix}`,
+        repositoryId: "primary",
+        attempt: 1,
+        status: "completed",
+        sessionId: `cognia-gateway:gateway-${suffix}:native`,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    }
+    mockAgentInvoke
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("native task is active"))
+    await expect(purgeAgentTeam("managed-team")).rejects.toThrow("native task is active")
+    expect(await listAgentTeamRuns("managed-team")).toHaveLength(2)
+    expect(await getAgentTeamChildRun("child-a")).toBeDefined()
+    expect(await getAgentTeamChildRun("child-b")).toBeDefined()
+    await purgeAgentTeam("managed-team")
+    expect(mockAgentInvoke).toHaveBeenCalledWith("external_agent_delete_gateway_task", {
+      taskId: "gateway-a",
+    })
+    expect(mockAgentInvoke).toHaveBeenCalledWith("external_agent_delete_gateway_task", {
+      taskId: "gateway-b",
+    })
+    expect(await listAgentTeamRuns("managed-team")).toEqual([])
+  })
+
+  it.each(["run", "team"])(
+    "retains changed gateway links during %s deletion for retry",
+    async (scope) => {
+      await createAgentTeamRun({
+        id: "run-race",
+        teamId: "managed-team",
+        objective: "Cleanup",
+        decisionVersion: 0,
+        priority: 1,
+        status: "completed",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await createAgentTeamChildRun({
+        id: "child-race",
+        runId: "run-race",
+        teamId: "managed-team",
+        teammateId: "mate",
+        taskId: "task",
+        repositoryId: "primary",
+        attempt: 1,
+        status: "completed",
+        sessionId: "cognia-gateway:old-task:native",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      const purge = () =>
+        scope === "run" ? purgeAgentTeamRun("run-race") : purgeAgentTeam("managed-team")
+      mockAgentInvoke.mockImplementationOnce(async () => {
+        await getDb().agentTeamChildRuns.update("child-race", {
+          sessionId: "cognia-gateway:new-task:native",
+        })
+      })
+      await expect(purge()).rejects.toThrow("tasks changed")
+      expect(await getAgentTeamRun("run-race")).toBeDefined()
+      expect(await getAgentTeamChildRun("child-race")).toMatchObject({
+        sessionId: "cognia-gateway:new-task:native",
+      })
+      await purge()
+      expect(mockAgentInvoke).toHaveBeenCalledWith("external_agent_delete_gateway_task", {
+        taskId: "new-task",
+      })
+      expect(await getAgentTeamRun("run-race")).toBeUndefined()
+    }
+  )
+
+  it("deduplicates managed task cleanup across resumed child attempts", async () => {
+    await createAgentTeamRun({
+      id: "run-dedup",
+      teamId: "managed-team",
+      objective: "Cleanup",
+      decisionVersion: 0,
+      priority: 1,
+      status: "completed",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    for (const suffix of ["a", "b"])
+      await createAgentTeamChildRun({
+        id: `child-${suffix}`,
+        runId: "run-dedup",
+        teamId: "managed-team",
+        teammateId: "mate",
+        taskId: "task",
+        repositoryId: "primary",
+        attempt: 1,
+        status: "completed",
+        sessionId: "cognia-gateway:shared-task:native",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+    await purgeAgentTeamRun("run-dedup")
+    expect(mockAgentInvoke).toHaveBeenCalledTimes(1)
+    expect(await getAgentTeamRun("run-dedup")).toBeUndefined()
   })
 
   it("purges every durable run for an explicitly deleted team", async () => {

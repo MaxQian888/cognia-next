@@ -26,7 +26,10 @@ function makeTransport(rows: ConversationOverrideRow[] = []): Transport {
   }
 }
 
-function row(conversationKey: string, over: Partial<ConversationOverrideRow> = {}): ConversationOverrideRow {
+function row(
+  conversationKey: string,
+  over: Partial<ConversationOverrideRow> = {}
+): ConversationOverrideRow {
   return {
     id: `cov-${conversationKey}`,
     conversationKey,
@@ -61,7 +64,10 @@ describe("syncConversationOverrides", () => {
     const tx = makeTransport([row("telegram:a:1", { mode: "auto" })])
     const out = await syncConversationOverrides(tx, { since: 0 })
     expect(out.ok).toBe(true)
-    const stored = await getDb().conversationOverrides.where("conversationKey").equals("telegram:a:1").first()
+    const stored = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("telegram:a:1")
+      .first()
     expect(stored?.mode).toBe("auto")
   })
 
@@ -72,14 +78,23 @@ describe("syncConversationOverrides", () => {
       row("telegram:a:1", { mode: "auto" }),
       row("telegram:a:2", { mode: "draft" }),
     ])
-    const kept = await getDb().conversationOverrides.where("conversationKey").equals("telegram:a:1").first()
+    const kept = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("telegram:a:1")
+      .first()
     expect(kept?.mode).toBe("manual")
-    const other = await getDb().conversationOverrides.where("conversationKey").equals("telegram:a:2").first()
+    const other = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("telegram:a:2")
+      .first()
     expect(other?.mode).toBe("draft")
     release()
     // Marker released → the next pull lands the host's row.
     await applyConversationOverrideRows([row("telegram:a:1", { mode: "auto" })])
-    const replaced = await getDb().conversationOverrides.where("conversationKey").equals("telegram:a:1").first()
+    const replaced = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("telegram:a:1")
+      .first()
     expect(replaced?.mode).toBe("auto")
   })
 
@@ -90,7 +105,24 @@ describe("syncConversationOverrides", () => {
       payload: { mutation: { kind: "setPinned", conversationKey: "telegram:a:9", pinned: true } },
     })
     await applyConversationOverrideRows([row("telegram:a:9", { pinned: false })])
-    const kept = await getDb().conversationOverrides.where("conversationKey").equals("telegram:a:9").first()
+    const kept = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("telegram:a:9")
+      .first()
     expect(kept?.pinned).toBe(true)
   })
+})
+
+it("checks cancellation after reading pending override mutations", async () => {
+  const write = jest.spyOn(getDb().conversationOverrides, "bulkPut")
+  try {
+    await expect(
+      applyConversationOverrideRows([row("cancelled")], () => {
+        throw new Error("cancelled")
+      })
+    ).rejects.toThrow("cancelled")
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    write.mockRestore()
+  }
 })

@@ -746,6 +746,7 @@ pub fn run() {
             // ADR-0025 — unified subscription module. Provider-agnostic CRUD,
             // active-pointer management, and provider preset persistence.
             subscription::commands::subscription_init,
+            subscription::commands::subscription_list_provider_ids,
             subscription::commands::subscription_clear_runtime,
             subscription::commands::subscription_list_accounts,
             subscription::commands::subscription_get_account,
@@ -1111,6 +1112,7 @@ pub fn run() {
             external_agent::commands::spawn_external_agent,
             external_agent::commands::send_to_external_agent,
             external_agent::commands::kill_external_agent,
+            external_agent::commands::external_agent_delete_gateway_task,
             external_agent::commands::get_external_agent_status,
             external_agent::commands::list_external_agents,
             external_agent::commands::is_external_agent_running,
@@ -1385,6 +1387,7 @@ pub fn run() {
             gateway::commands::gateway_push_snapshot,
             gateway::commands::gateway_decision_response,
             gateway::commands::gateway_list_cooldowns,
+            gateway::commands::gateway_reset_cooldowns,
             gateway::commands::gateway_probe_upstream,
             workflow::commands::workflow_register_trigger,
             workflow::commands::workflow_unregister_trigger,
@@ -1796,6 +1799,19 @@ pub fn run() {
             perf::commands::perf_open_trace_dir,
         ])
         .setup(|app| {
+            let gateway_state = app.state::<gateway::GatewayState>();
+            app.state::<account_auth::AccountSecuritySession>()
+                .attach_gateway(gateway_state.inner().clone(), app.handle().clone());
+            let gateway_for_vault = gateway_state.inner().clone();
+            let app_for_vault = app.handle().clone();
+            subscription::vault::install_commit_observer(std::sync::Arc::new(move |account_id, provider| {
+                // Registered API-key subscriptions also supply task-scoped gateway leases.
+                // Unrelated OAuth refreshes must not revoke unattended hosting.
+                if matches!(provider, subscription::provider::ProviderId::Opencode | subscription::provider::ProviderId::Commandcode | subscription::provider::ProviderId::Registered(_))
+                    && gateway_for_vault.invalidate_account_snapshot(account_id) {
+                    let _ = app_for_vault.emit("gateway://snapshot-invalidated", ());
+                }
+            }));
             // Startup timing anchor (perf/tauri-startup-unblock). `setup()` runs
             // on the main thread before the event loop starts, so its wall time
             // directly gates window paint. After the lazy-init work

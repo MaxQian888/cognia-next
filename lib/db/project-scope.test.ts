@@ -5,6 +5,17 @@ jest.mock("@/lib/project-knowledge/runtime/build-deps", () => ({
   tryBuildProjectKnowledgeDeps: jest.fn(async () => undefined),
 }))
 
+const mockDeleteExternalSession = jest.fn().mockResolvedValue(undefined)
+const mockAgentInvoke = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: () => ({
+    deleteSession: (...args: unknown[]) => mockDeleteExternalSession(...args),
+  }),
+}))
+jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
+  agentInvoke: (...args: unknown[]) => mockAgentInvoke(...args),
+}))
+
 import Dexie from "dexie"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -29,6 +40,8 @@ describe("project-scope helper", () => {
 
   beforeAll(dbFixture.initialize)
   beforeEach(async () => {
+    mockDeleteExternalSession.mockReset().mockResolvedValue(undefined)
+    mockAgentInvoke.mockReset().mockResolvedValue(undefined)
     await dbFixture.restore()
     // Let the background built-in seed settle before exercising heavy
     // multi-table cascades, so seeding transactions don't race the test.
@@ -107,6 +120,56 @@ describe("project-scope helper", () => {
   })
 
   describe("deleteProjectCascade", () => {
+    it("cleans chat and Squad gateway histories first and retains workspace data on failure", async () => {
+      const db = getDb()
+      await db.sessions.put({
+        id: "managed-chat",
+        projectId: "A",
+        title: "Managed",
+        createdAt: 1,
+        updatedAt: 1,
+        externalAgentSession: { agentId: "agent", sessionId: "cognia-gateway:chat-task:native" },
+      } as never)
+      await db.agentTeamRuns.put({
+        id: "managed-run",
+        teamId: "team",
+        projectId: "A",
+        objective: "Work",
+        decisionVersion: 0,
+        priority: 1,
+        status: "completed",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await db.agentTeamChildRuns.put({
+        id: "managed-child",
+        runId: "managed-run",
+        teamId: "team",
+        teammateId: "mate",
+        taskId: "task",
+        repositoryId: "primary",
+        attempt: 1,
+        status: "completed",
+        sessionId: "cognia-gateway:team-task:native",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockAgentInvoke.mockRejectedValueOnce(new Error("task active"))
+      await expect(deleteProjectCascade("A")).rejects.toThrow("task active")
+      expect(await db.sessions.get("managed-chat")).toBeDefined()
+      expect(await db.agentTeamChildRuns.get("managed-child")).toBeDefined()
+      await deleteProjectCascade("A")
+      expect(mockDeleteExternalSession).toHaveBeenCalledWith(
+        "agent",
+        "cognia-gateway:chat-task:native"
+      )
+      expect(mockAgentInvoke).toHaveBeenCalledWith("external_agent_delete_gateway_task", {
+        taskId: "team-task",
+      })
+      expect(await db.sessions.get("managed-chat")).toBeUndefined()
+      expect(await db.agentTeamChildRuns.get("managed-child")).toBeUndefined()
+    })
+
     it("records deletion markers for project sessions, messages and unread state atomically", async () => {
       await seedProjectMedia()
       const db = getDb()
@@ -170,6 +233,42 @@ describe("project-scope helper", () => {
       } finally {
         intercept.mockRestore()
       }
+    })
+
+    it("retains newly attached gateway sessions until a retry cleans their history", async () => {
+      const db = getDb()
+      const transaction = db.transaction.bind(db)
+      const intercept = jest.spyOn(db, "transaction").mockImplementationOnce((...args: unknown[]) =>
+        Dexie.Promise.resolve(
+          Dexie.ignoreTransaction(async () => {
+            await db.sessions.put({
+              id: "late-managed",
+              projectId: "A",
+              title: "Late",
+              createdAt: 1,
+              updatedAt: 1,
+              externalAgentSession: {
+                agentId: "agent",
+                sessionId: "cognia-gateway:late-task:native",
+              },
+            } as never)
+            return Reflect.apply(transaction, db, args)
+          })
+        )
+      )
+      try {
+        await expect(deleteProjectCascade("A")).rejects.toThrow("sessions changed")
+        expect(await db.sessions.get("late-managed")).toBeDefined()
+        expect(mockDeleteExternalSession).not.toHaveBeenCalled()
+      } finally {
+        intercept.mockRestore()
+      }
+      await deleteProjectCascade("A")
+      expect(mockDeleteExternalSession).toHaveBeenCalledWith(
+        "agent",
+        "cognia-gateway:late-task:native"
+      )
+      expect(await db.sessions.get("late-managed")).toBeUndefined()
     })
 
     async function seedProjectMedia() {

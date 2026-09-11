@@ -35,7 +35,9 @@ import {
   CompanionTransport,
   hydrateCompanionConfig,
   loadCompanionConfig,
-  saveCompanionConfig,
+  updateCompanionConfigMetadata,
+  isSameCompanionTarget,
+  getCompanionConfigGeneration,
 } from "@/lib/tauri/transport-companion"
 import { resolveLanBaseUrl } from "@/lib/connectivity/lan-resolver"
 import { buildCandidates, pickReachable } from "@/lib/connectivity/connection-strategy"
@@ -195,6 +197,7 @@ export function installCompanionSignalingController(
       // The stub is in place — there is nothing to drive yet.
     }
   }
+  let disposed = false
   const tx = candidate
   const readSettings = options.getSettingsOverride ?? getSettings
   const subscribeNetworkFn = options.subscribeNetworkOverride ?? subscribeNetwork
@@ -226,11 +229,12 @@ export function installCompanionSignalingController(
       tx,
       settings,
       providerServers,
-      () => generation === configurationGeneration
+      () => !disposed && generation === configurationGeneration
     )
   }
 
   const manageProvisioner = (settings: AppSettings): void => {
+    if (disposed) return
     lastSettings = settings
     const tp = settings.turnProvider
     const key = tp && tp.kind !== "none" ? JSON.stringify(tp) : ""
@@ -275,10 +279,12 @@ export function installCompanionSignalingController(
   let lastLanResolveMs = Number.NEGATIVE_INFINITY
   let lanAbort: AbortController | null = null
   const maybeRepointTransport = async (): Promise<void> => {
+    if (disposed) return
     const t = now()
     if (t - lastLanResolveMs < LAN_RERESOLVE_MIN_SPACING_MS) return
     lastLanResolveMs = t
     const config = loadCompanionConfig()
+    const targetGeneration = getCompanionConfigGeneration()
     if (!config) return
     // Already healthy on LAN — the best channel is in use, nothing to do.
     if (tx.isOnConnectedLan()) return
@@ -299,11 +305,25 @@ export function installCompanionSignalingController(
     // is not a downgrade: the sweep probes the concrete addresses the host
     // reported through `companion_endpoints`, which is the only way a browser
     // could learn them anyway.
-    if (controller.signal.aborted) return
+    if (
+      disposed ||
+      getCompanionConfigGeneration() !== targetGeneration ||
+      controller.signal.aborted ||
+      !isSameCompanionTarget(config, loadCompanionConfig())
+    )
+      return
     if (lanBaseUrl) {
       if (lanBaseUrl !== config.baseUrl) {
-        await saveCompanionConfig({ ...config, baseUrl: lanBaseUrl })
-        tx.reconnectWs()
+        const next = await updateCompanionConfigMetadata(
+          config,
+          { baseUrl: lanBaseUrl },
+          () =>
+            !disposed &&
+            !controller.signal.aborted &&
+            getCompanionConfigGeneration() === targetGeneration
+        )
+        if (!disposed && !controller.signal.aborted && next?.baseUrl === lanBaseUrl)
+          tx.reconnectWs()
       }
       return
     }
@@ -326,10 +346,24 @@ export function installCompanionSignalingController(
     const winner = await pickReachable(candidates, (candidate) =>
       probeCandidate(candidate.baseUrl, controller.signal)
     )
-    if (controller.signal.aborted) return
+    if (
+      disposed ||
+      getCompanionConfigGeneration() !== targetGeneration ||
+      controller.signal.aborted ||
+      !isSameCompanionTarget(config, loadCompanionConfig())
+    )
+      return
     if (winner && winner.baseUrl !== config.baseUrl) {
-      await saveCompanionConfig({ ...config, baseUrl: winner.baseUrl })
-      tx.reconnectWs()
+      const next = await updateCompanionConfigMetadata(
+        config,
+        { baseUrl: winner.baseUrl },
+        () =>
+          !disposed &&
+          !controller.signal.aborted &&
+          getCompanionConfigGeneration() === targetGeneration
+      )
+      if (!disposed && !controller.signal.aborted && next?.baseUrl === winner.baseUrl)
+        tx.reconnectWs()
     }
   }
 
@@ -351,7 +385,8 @@ export function installCompanionSignalingController(
   // could not carry) needs to reach the phone. Fire-and-forget: the refresher
   // never throws, and nothing downstream waits on it.
   const runEndpointRefresh = (): void => {
-    void refreshEndpoints().catch((err) => {
+    if (disposed) return
+    void refreshEndpoints({ isCurrent: () => !disposed }).catch((err) => {
       console.warn("mobile-signaling-controller: endpoint refresh failed", err)
     })
   }
@@ -370,6 +405,7 @@ export function installCompanionSignalingController(
   // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
   const sub: Subscription = Dexie.liveQuery(() => readSettings()).subscribe({
     next: (settings) => {
+      if (disposed) return
       manageProvisioner(settings)
       void applyCurrentSettings(settings, provisioner?.current() ?? []).catch((err) => {
         console.warn("mobile-signaling-controller: applySettings failed", err)
@@ -391,11 +427,15 @@ export function installCompanionSignalingController(
   // suppresses *subsequent* triggers within the window).
   let lastReupgradeMs = Number.NEGATIVE_INFINITY
   const reupgrade = async (): Promise<void> => {
+    if (disposed) return
     const t = now()
     if (t - lastReupgradeMs < REUPGRADE_MIN_SPACING_MS) return
     lastReupgradeMs = t
     try {
+      const targetConfig = loadCompanionConfig()
       const settings = await readSettings()
+      if (disposed || !targetConfig || !isSameCompanionTarget(targetConfig, loadCompanionConfig()))
+        return
       manageProvisioner(settings)
       await applyCurrentSettings(settings, provisioner?.current() ?? [])
     } catch (err) {
@@ -411,7 +451,6 @@ export function installCompanionSignalingController(
     await reupgrade()
   }
 
-  let disposed = false
   let netUnsub: (() => void) | null = null
   let resumeUnsub: (() => void) | null = null
   void subscribeNetworkFn((status) => {
@@ -477,6 +516,7 @@ export async function applySettings(
   // the relay alone and never touches `RTCPeerConnection`.
   const p2p = settings.webrtcEnabled ?? true
   const targetConfig = loadCompanionConfig()
+  const targetGeneration = getCompanionConfigGeneration()
   if (!targetConfig) {
     // The controller can mount before the async credential-book hydration
     // completes. Starting a tier in that window can only warn "not paired";
@@ -497,7 +537,12 @@ export async function applySettings(
     return
   }
   const resolvedTurn = await resolveTurnServerCredentials(turn)
-  if (!isCurrent()) return
+  if (
+    !isCurrent() ||
+    getCompanionConfigGeneration() !== targetGeneration ||
+    !isSameCompanionTarget(targetConfig, loadCompanionConfig())
+  )
+    return
   // Static STUN/TURN first, then any provider-provisioned ephemeral relays
   // (ADR-0021). The ICE agent tries them all; provider servers are additive.
   const iceServers: RTCIceServer[] = [...ice, ...resolvedTurn, ...providerServers]

@@ -57,15 +57,20 @@ export function normalizeMirroredDelivery(row: BotEventDeliveryRow): BotEventDel
 
 export async function applyBotDeliveryRows(
   rows: BotEventDeliveryRow[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
 ): Promise<void> {
   const table = getDb().botEventDeliveries
   if (rows.length > 0) await table.bulkPut(rows.map(normalizeMirroredDelivery))
-  await sweepAgedMirroredDeliveries(now)
+  assertCurrent()
+  await sweepAgedMirroredDeliveries(now, assertCurrent)
 }
 
 /** Delete mirrored settled projections older than the retention window. */
-export async function sweepAgedMirroredDeliveries(now: number = Date.now()): Promise<number> {
+export async function sweepAgedMirroredDeliveries(
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
+): Promise<number> {
   const table = getDb().botEventDeliveries
   const victims = await table
     .where("receivedAt")
@@ -74,6 +79,7 @@ export async function sweepAgedMirroredDeliveries(now: number = Date.now()): Pro
     .limit(MIRROR_BOT_SWEEP_BATCH)
     .toArray()
   if (victims.length === 0) return 0
+  assertCurrent()
   await table.bulkDelete(victims.map((row) => row.id))
   return victims.length
 }
@@ -86,7 +92,7 @@ export function syncBotEventDeliveries(
     {
       table: "botEventDeliveries",
       getTable: () => getDb().botEventDeliveries,
-      applyRows: (rows) => applyBotDeliveryRows(rows),
+      applyRows: (rows, assertCurrent) => applyBotDeliveryRows(rows, Date.now(), assertCurrent),
     },
     transport,
     cursor

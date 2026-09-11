@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
@@ -11,7 +12,11 @@ import { applyConnectorDraftRows, syncConnectorDrafts } from "./connector-drafts
 
 function makeTransport(rows: ConnectorDraftRow[] = []): Transport {
   return {
-    call: jest.fn(async () => ({ rows, deleted_ids: [], next_since: 21 })) as unknown as Transport["call"],
+    call: jest.fn(async () => ({
+      rows,
+      deleted_ids: [],
+      next_since: 21,
+    })) as unknown as Transport["call"],
     subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
   }
 }
@@ -68,10 +73,40 @@ describe("syncConnectorDrafts", () => {
   it("applies deletions", async () => {
     await getDb().connectorDrafts.put(draft("d4"))
     const tx: Transport = {
-      call: jest.fn(async () => ({ rows: [], deleted_ids: ["d4"], next_since: 3 })) as unknown as Transport["call"],
+      call: jest.fn(async () => ({
+        rows: [],
+        deleted_ids: ["d4"],
+        next_since: 3,
+      })) as unknown as Transport["call"],
       subscribe: jest.fn(() => () => {}) as unknown as Transport["subscribe"],
     }
     await syncConnectorDrafts(tx, { since: 0 })
     expect(await getDb().connectorDrafts.get("d4")).toBeUndefined()
   })
+})
+
+it("rejects cancellation after asynchronous merge preparation", async () => {
+  const table = getDb().connectorDrafts
+  let current = true
+  const read = jest.spyOn(table, "bulkGet").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return []
+    })
+  )
+  const write = jest.spyOn(table, "bulkPut")
+  const assertCurrent = () => {
+    if (!current) throw new Error("scope cancelled")
+  }
+  try {
+    expect(
+      (await syncConnectorDrafts(makeTransport([draft("cancelled")]), { since: 0, assertCurrent }))
+        .ok
+    ).toBe(false)
+    expect(read).toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
 })

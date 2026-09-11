@@ -249,7 +249,7 @@ export async function recordRetrievalFeedback(
   return db.transaction("rw", db.memories, async () => {
     const row = await db.memories.get(id)
     if (!row) return false
-    await db.memories.update(id, applyRetrievalFeedback(row, verdict, now))
+    await db.memories.update(id, { ...applyRetrievalFeedback(row, verdict, now) })
     return true
   })
 }

@@ -27,7 +27,10 @@ export const MIRROR_HEARTBEAT_RETENTION_MS = 48 * 60 * 60 * 1000
 export const MIRROR_HEARTBEAT_SWEEP_BATCH = 1000
 
 /** Delete mirrored heartbeats older than the retention window. */
-export async function sweepAgedMirroredHeartbeats(now: number = Date.now()): Promise<number> {
+export async function sweepAgedMirroredHeartbeats(
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
+): Promise<number> {
   const table = getDb().connectorHeartbeats
   const ids = (await table
     .where("at")
@@ -35,16 +38,19 @@ export async function sweepAgedMirroredHeartbeats(now: number = Date.now()): Pro
     .limit(MIRROR_HEARTBEAT_SWEEP_BATCH)
     .primaryKeys()) as string[]
   if (ids.length === 0) return 0
+  assertCurrent()
   await table.bulkDelete(ids)
   return ids.length
 }
 
 export async function applyConnectorHeartbeatRows(
   rows: ConnectorHeartbeatRow[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
 ): Promise<void> {
   if (rows.length > 0) await getDb().connectorHeartbeats.bulkPut(rows)
-  await sweepAgedMirroredHeartbeats(now)
+  assertCurrent()
+  await sweepAgedMirroredHeartbeats(now, assertCurrent)
 }
 
 export function syncConnectorHeartbeats(
@@ -55,7 +61,8 @@ export function syncConnectorHeartbeats(
     {
       table: "connectorHeartbeats",
       getTable: () => getDb().connectorHeartbeats,
-      applyRows: (rows) => applyConnectorHeartbeatRows(rows),
+      applyRows: (rows, assertCurrent) =>
+        applyConnectorHeartbeatRows(rows, Date.now(), assertCurrent),
     },
     transport,
     cursor

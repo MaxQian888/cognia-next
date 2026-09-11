@@ -226,6 +226,7 @@ export const CORE_TABLE_NAMES = [
   "memoryJobs",
   "messageMedia",
   "messageMediaRefs",
+  "messageSyncClock",
   "messages",
   "mobileOutboundQueue",
   "mobileStepReceipts",
@@ -924,6 +925,7 @@ const GLOBAL_TABLES = new Set<CoreTableName>([
 ])
 
 const RUNTIME_TARGET_TABLES = new Set<CoreTableName>([
+  "messageSyncClock",
   "hostStateActions",
   "hostStateChannels",
   "hostStateMeta",
@@ -1073,6 +1075,11 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  messageSyncClock: {
+    mode: "permanent",
+    enforcement: "explicit-delete",
+    reason: "Monotonic local message sync watermark must survive deletions and restarts.",
+  },
   sharedRunJournals: {
     mode: "permanent",
     enforcement: "explicit-delete",
@@ -1380,6 +1387,7 @@ function retentionFor(name: CoreTableName, role: DataTableRole): DataRetentionPo
  * than inferred.
  */
 const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentProtection>> = {
+  messageSyncClock: "metadata-only",
   sharedRunJournals: "encrypted-content",
   // Bookkeeping for the encryption migration itself: an id, an account id, a
   // status, a table-name list and a timestamp. It matches `/Content/` purely by

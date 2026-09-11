@@ -193,6 +193,15 @@ export interface CompanionCredentialBook {
   get(key: CompanionHostKey): Promise<CompanionHostRecord | null>
   /** Register or update the public half. Never touches credentials. */
   upsert(draft: CompanionHostDraft): Promise<CompanionHostRecord>
+  /** Guarded public metadata update; never creates a pairing or changes selection. */
+  updateMetadata?(
+    expected: Pick<
+      CompanionHostRecord,
+      "hostId" | "accountNamespace" | "deviceId" | "deviceKeyThumbprint" | "rendezvousId"
+    >,
+    patch: Pick<CompanionHostRecord, "endpoints" | "tlsPin">,
+    isCurrent: () => boolean
+  ): Promise<boolean>
   /** Forget a pairing: record, credential, and active pointer. */
   remove(key: CompanionHostKey): Promise<void>
   /** The pairing this account currently talks to. */

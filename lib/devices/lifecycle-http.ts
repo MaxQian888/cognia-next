@@ -87,5 +87,8 @@ export async function applyDeviceLifecycleOverHttp(
   if ("revokedDeviceId" in body && body.revokedDeviceId) {
     return { deviceId: body.revokedDeviceId, state: "revoked", changed: true }
   }
-  return { deviceId, ...(body as DeviceLifecycleOutcome) }
+  return {
+    ...body,
+    deviceId: "deviceId" in body ? body.deviceId : deviceId,
+  } as DeviceLifecycleOutcome
 }

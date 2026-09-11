@@ -334,6 +334,7 @@ export class TransportRtc {
     }
 
   private signaling: SignalingClient | null = null
+  private signalingGeneration = 0
   /**
    * Detaches this connect()'s signaling listeners. Unlike the negotiation
    * timers these live for the whole session: `data` envelopes and ICE
@@ -578,6 +579,23 @@ export class TransportRtc {
       })
 
       const detachErr = signaling.on("error", ({ code, message }) => {
+        // Socket deadlines already close the socket and schedule the signaling
+        // client's capped, jittered retry. Closing it here cancels that recovery.
+        if (
+          [
+            "connect_timeout",
+            "challenge_timeout",
+            "subscribe_timeout",
+            "pong_timeout",
+            "challenge_expired",
+          ].includes(code)
+        ) {
+          return
+        }
+        if (code === "auth_failed" || code === "session_replaced") {
+          this.fail(new Error(`signaling rejected: ${code} ${message}`))
+          return
+        }
         if (this.state === "open") {
           // A live session: the rendezvous dropped one frame (too large,
           // rate limited, ...). The RPC or chunk that frame belonged to
@@ -679,8 +697,10 @@ export class TransportRtc {
     // timers are armed without waiting for the send to settle: the whole
     // pre-open phase has to be bounded from the moment the peer is present,
     // not from whenever the signaling queue drains.
+    const signaling = this.signaling
+    const generation = this.signalingGeneration
     const hello: HelloBody = { deviceId: this.opts.deviceId, relay: true }
-    const sent = this.signaling.send("hello", hello)
+    const sent = signaling.send("hello", hello)
     this.armRelayHandshakeTimer()
     if (this.opts.p2p && !this.pc) {
       void this.beginNegotiation()
@@ -688,6 +708,12 @@ export class TransportRtc {
     try {
       await sent
     } catch (err) {
+      if (
+        this.signaling !== signaling ||
+        this.signalingGeneration !== generation ||
+        !this.helloSent
+      )
+        return
       this.helloSent = false
       this.settleNegotiationFailure(err instanceof Error ? err : new Error(String(err)))
     }
@@ -789,8 +815,10 @@ export class TransportRtc {
       this.terminalDc = null
     }
     if (this.pc) {
+      const pc = this.pc
+      this.pc = null
       try {
-        this.pc.close()
+        pc.close()
       } catch {
         /* ignored */
       }
@@ -872,6 +900,15 @@ export class TransportRtc {
    * DataChannel keeps serving because DTLS does not need the rendezvous.
    */
   private handleSignalingLost(): void {
+    this.signalingGeneration += 1
+    if (this.state === "closing" || this.state === "closed" || this.state === "failed") return
+    if (!this.negotiationSettled) {
+      if (this.negotiationTimer) clearTimeout(this.negotiationTimer)
+      this.negotiationTimer = null
+      this.negotiationKickedOff = false
+      this.setState("signaling-connecting")
+      this.closePeerConnection()
+    }
     this.relayOpen = false
     this.helloSent = false
     if (this.relayHandshakeTimer) {
@@ -1143,6 +1180,15 @@ export class TransportRtc {
       p.reject(new RtcCarrierError("TransportRtc: connection closing"))
     }
     this.pending.clear()
+    for (const pending of this.pendingBinary.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(new RtcCarrierError("TransportRtc: connection closing"))
+    }
+    this.pendingBinary.clear()
+    const waiting = this.onDcFailResolvers.splice(0)
+    this.onDcOpenResolvers = []
+    for (const reject of waiting) reject(new RtcCarrierError("TransportRtc: connection closing"))
+
     if (this.dc) {
       try {
         this.dc.close()
@@ -1208,7 +1254,7 @@ export class TransportRtc {
     this.pc = pc
 
     pc.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
-      if (!event.candidate || !this.signaling) return
+      if (this.pc !== pc || !event.candidate || !this.signaling) return
       const body: RtcIceBody = { candidate: event.candidate.toJSON() }
       void this.signaling.send("rtc:ice", body).catch((error) => {
         console.warn("TransportRtc: failed to queue local ICE candidate", error)
@@ -1262,13 +1308,18 @@ export class TransportRtc {
     this.attachDataChannel(dc)
     this.terminalDc = pc.createDataChannel(TERMINAL_DATACHANNEL_LABEL, { ordered: true })
 
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-    if (!this.signaling) {
-      throw new Error("TransportRtc: signaling closed during negotiation")
+    try {
+      const offer = await pc.createOffer()
+      if (this.pc !== pc) return
+      await pc.setLocalDescription(offer)
+      if (this.pc !== pc) return
+      if (!this.signaling) throw new Error("TransportRtc: signaling closed during negotiation")
+      const body: RtcOfferBody = { sdp: offer.sdp ?? "" }
+      await this.signaling.send("rtc:offer", body)
+    } catch (error) {
+      if (this.pc !== pc) return
+      throw error
     }
-    const body: RtcOfferBody = { sdp: offer.sdp ?? "" }
-    await this.signaling.send("rtc:offer", body)
   }
 
   private async handleSignalingEnvelope(envelope: Envelope): Promise<void> {
@@ -1287,6 +1338,7 @@ export class TransportRtc {
       case "rtc:answer": {
         const body = envelope.body as RtcAnswerBody
         await pc.setRemoteDescription({ type: "answer", sdp: body.sdp })
+        if (this.pc !== pc) return
         await this.flushPendingRemoteIce(pc)
         break
       }
@@ -1995,6 +2047,12 @@ export class TransportRtc {
       p.reject(new RtcCarrierError(err.message))
     }
     this.pending.clear()
+    for (const pending of this.pendingBinary.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.reject(new RtcCarrierError(err.message))
+    }
+    this.pendingBinary.clear()
+
     this.pendingRemoteIce = []
     const resolvers = this.onDcFailResolvers
     this.onDcFailResolvers = []

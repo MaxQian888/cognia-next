@@ -18,7 +18,8 @@ export const MOBILE_MEMORY_CACHE_LIMIT = 1_000
 
 export async function pruneMobileMemoryCache(limit = MOBILE_MEMORY_CACHE_LIMIT): Promise<number> {
   if (!Number.isInteger(limit) || limit < 1) throw new Error("Memory cache limit must be positive")
-  const rows = await getDb().memories.toArray()
+  const table = getDb().memories
+  const rows = await table.toArray()
   if (rows.length <= limit) return 0
   rows.sort(
     (left, right) =>
@@ -28,7 +29,7 @@ export async function pruneMobileMemoryCache(limit = MOBILE_MEMORY_CACHE_LIMIT):
       left.id.localeCompare(right.id)
   )
   const deleteIds = rows.slice(limit).map((row) => row.id)
-  await getDb().memories.bulkDelete(deleteIds)
+  await table.bulkDelete(deleteIds)
   return deleteIds.length
 }
 
@@ -47,9 +48,12 @@ export async function ensurePairedMemoryDek(
   store: Pick<
     ReturnType<typeof createProfileDekStore>,
     "load" | "importPaired"
-  > = createProfileDekStore()
+  > = createProfileDekStore(),
+  assertCurrent: () => void = () => {}
 ): Promise<CryptoKey> {
+  assertCurrent()
   const existing = await store.load(profileId, keyId)
+  assertCurrent()
   if (existing) return existing.key
   const response = await transport.call<ProfileDekPairingResponseV1>(
     "retrieval_profile_dek_export",
@@ -62,6 +66,7 @@ export async function ensurePairedMemoryDek(
   ) {
     throw new ProfileDekProtocolError()
   }
+  assertCurrent()
   const rawKey = decodeBase64(response.rawKey)
   try {
     await store.importPaired(profileId, keyId, rawKey, {
@@ -87,21 +92,25 @@ export function syncMemories(
   deps: {
     loadDek: (profileId: string, keyId: string) => Promise<CryptoKey | null>
   } = {
-    loadDek: (profileId, keyId) => ensurePairedMemoryDek(transport, profileId, keyId),
+    loadDek: (profileId, keyId) =>
+      ensurePairedMemoryDek(transport, profileId, keyId, undefined, cursor.assertCurrent),
   }
 ): Promise<SyncOutcome> {
   return runSyncHandler<EncryptedMemorySyncRowV1>(
     {
       table: "memories",
       getTable: () => getDb().memories as never,
-      applyRows: async (rows) => {
+      applyRows: async (rows, assertCurrent) => {
         const memories: Memory[] = []
         for (const row of rows) {
           const key = await deps.loadDek(row.profileId, row.envelope.keyId)
+          assertCurrent()
           if (!key) throw new ProfileDekProtocolError()
           memories.push(await openMemorySyncRowV1(row, key))
         }
+        assertCurrent()
         await getDb().memories.bulkPut(memories)
+        assertCurrent()
         await pruneMobileMemoryCache()
       },
     },

@@ -417,13 +417,15 @@ export async function publishWorkflowApp(input: {
   }
   const published = await db.transaction(
     "rw",
-    db.workflowApps,
-    db.workflowAppReleases,
-    db.workflowVersions,
-    db.workflowDeployments,
-    db.workflowAnnotationSets,
-    db.workflowAnnotationSetRevisions,
-    db.plugins,
+    [
+      db.workflowApps,
+      db.workflowAppReleases,
+      db.workflowVersions,
+      db.workflowDeployments,
+      db.workflowAnnotationSets,
+      db.workflowAnnotationSetRevisions,
+      db.plugins,
+    ],
     async () => {
       const [app, deployment] = await Promise.all([
         db.workflowApps.get(input.appId),

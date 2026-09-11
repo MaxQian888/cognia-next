@@ -53,7 +53,6 @@ describe("canvas-types row shapes", () => {
         promptDraft: "",
         selectedPresetAction: null,
         attachments: [],
-        pendingReview: null,
         actionHistory: [],
         isInlineCommandOpen: false,
       },

@@ -179,6 +179,7 @@
   "mentionLinks": "metadata-only",
   "messageMedia": "metadata-only",
   "messageMediaRefs": "metadata-only",
+  "messageSyncClock": "metadata-only",
   "messages": "encrypted-content",
   "mobileOutboundQueue": "metadata-only",
   "mobileStepReceipts": "metadata-only",

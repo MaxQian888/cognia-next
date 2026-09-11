@@ -5,6 +5,28 @@ import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
 import { buildCompanionRequestSchemaContracts } from "./companion-request-schema-contracts.mjs"
 
+test("IM relay admits transcript provenance on both protocol planes", () => {
+  const inspected = inspectCommittedContract()
+  const schemas = [
+    JSON.parse(readFileSync(new URL("../../protocol/companion-request-schemas.json", import.meta.url), "utf8")).commands.connector_enqueue_outbound,
+    inspected.desiredHeadlessSpec.paths["/internal/_rpc/connector_enqueue_outbound"].post.requestBody.content["application/json"].schema,
+  ]
+  const body = {
+    adapterId: "adapter", conversationKey: "telegram:adapter:chat", sessionId: "session", clientMessageId: "message",
+    request: { conversationRef: { platform: "telegram", adapterId: "adapter" }, segments: [{ type: "text", text: "reply" }], metadata: { idempotencyKey: "once" } },
+  }
+  const metadata = { replyTo: { messageId: "parent", preview: "earlier", platformMessageId: "remote" }, templateRun: { templateId: "template", version: "1", text: "reply", params: {} } }
+  for (const schema of schemas) {
+    const validate = new Ajv2020({ strict: false }).compile(schema)
+    for (const messageMetadata of [undefined, {}, metadata, { replyTo: metadata.replyTo }, { templateRun: metadata.templateRun }]) {
+      assert.equal(validate({ ...body, ...(messageMetadata ? { messageMetadata } : {}) }), true, JSON.stringify(validate.errors))
+    }
+    for (const messageMetadata of [null, [], { unknown: true }, { replyTo: {} }, { templateRun: {} }]) {
+      assert.equal(validate({ ...body, messageMetadata }), false)
+    }
+  }
+})
+
 test("scheduler response contracts admit every persisted task type", () => {
   const source = readFileSync(new URL("../../types/scheduler/index.ts", import.meta.url), "utf8")
   const union = source.split("export type ScheduledTaskType =")[1].split(/\nexport /)[0]
@@ -1166,4 +1188,27 @@ test("the host catalog and the Rust table carry the manifest's contract version"
     inspected.remoteNames.size,
     inspected.manifest.commands.filter((command) => command.target !== "client").length
   )
+})
+
+
+test("gateway task deletion is granted as agent control and validates task identity on both API planes", () => {
+  const inspected = inspectCommittedContract()
+  const name = "external_agent_delete_gateway_task"
+  const command = inspected.manifest.commands.find((entry) => entry.name === name)
+  assert.equal(command.capability, "process.spawn")
+  assert.equal(command.idempotency, "required")
+  assert.equal(command.target, "execution")
+  assert.ok(inspected.remoteNames.has(name))
+  for (const [spec, prefix] of [[inspected.desiredPublicSpec, "/api/_rpc/"], [inspected.desiredHeadlessSpec, "/internal/_rpc/"]]) {
+    const operation = spec.paths[`${prefix}${name}`].post
+    assert.ok(operation)
+    const validate = new Ajv2020({ strict: false }).compile(operation.requestBody.content["application/json"].schema)
+    assert.equal(validate({ task_id: "task-a_1" }), true, JSON.stringify(validate.errors))
+    assert.equal(validate({ taskId: "task-a_1" }), true, JSON.stringify(validate.errors))
+    for (const body of [{}, { task_id: "../other" }, { task_id: "" }, { task_id: "task", path: "/tmp" }]) {
+      assert.equal(validate(body), false)
+    }
+  }
+  const responses = JSON.parse(readFileSync(new URL("../../protocol/companion-response-schemas.json", import.meta.url), "utf8"))
+  assert.equal(responses.commands[name].$ref, "#/$defs/NullResult")
 })

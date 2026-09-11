@@ -71,6 +71,8 @@ export const USAGE_SURFACES: readonly UsageSurface[] = [
  * the figure never silently changes when a price table is updated.
  */
 export type UsageCostSource =
+  /** Priced by the usage ledger without preserving the resolver layer. */
+  | "derived"
   /** The provider/SDK reported the cost directly — the most authoritative. */
   | "sdk"
   /** Priced locally against the synced models.dev catalog. */

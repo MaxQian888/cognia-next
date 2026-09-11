@@ -119,6 +119,44 @@ describe("roomSend", () => {
     release()
   })
 
+  it("parses template provenance without accepting sender metadata from the client", async () => {
+    const { runner, calls, release } = fakeRunner()
+    const templateRun = {
+      templateId: "review",
+      version: "1",
+      text: "Review {{target}}",
+      params: { target: { kind: "text" as const, value: "workflow" } },
+    }
+    await roomSend(
+      {
+        sessionId: "room-1",
+        callerDeviceId: "dev-1",
+        content: "review",
+        templateRun: { ...templateRun, author: { id: "forged" } },
+      },
+      deps(runner)
+    )
+    expect(calls.send).toHaveBeenCalledWith(
+      "review",
+      expect.objectContaining({
+        templateRun,
+        author: expect.objectContaining({ id: "usr_host" }),
+      })
+    )
+    await expect(
+      roomSend(
+        {
+          sessionId: "room-1",
+          callerDeviceId: "dev-1",
+          content: "review",
+          templateRun: { templateId: "invalid" },
+        },
+        deps(runner)
+      )
+    ).rejects.toThrow(/templateRun/)
+    release()
+  })
+
   it("forwards a reply reference and refuses a malformed one", async () => {
     const { runner, calls, release } = fakeRunner()
     const replyTo = { messageId: "m-1", preview: "the plan" }

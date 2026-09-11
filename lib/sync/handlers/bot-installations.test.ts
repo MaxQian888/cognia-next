@@ -140,3 +140,17 @@ describe("syncBotInstallations", () => {
     expect((await getDb().botInstallations.get("boti_1"))?.config).toEqual({})
   })
 })
+
+it("checks cancellation after pending installation resolution", async () => {
+  const write = jest.spyOn(getDb().botInstallations, "bulkPut")
+  try {
+    await expect(
+      applyBotInstallationRows([installation("stale")], () => {
+        throw new Error("cancelled")
+      })
+    ).rejects.toThrow("cancelled")
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    write.mockRestore()
+  }
+})

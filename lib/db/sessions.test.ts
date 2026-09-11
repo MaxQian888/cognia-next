@@ -82,6 +82,29 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
 
 const dbFixture = createDbTestFixture()
 
+const deleteExternalSessionMock = jest.fn(async (_agentId: string, _sessionId: string) => undefined)
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: () => ({ deleteSession: deleteExternalSessionMock }),
+}))
+
+it("removes retained external gateway state before deleting a conversation", async () => {
+  const link = { agentId: "pi", sessionId: "cognia-gateway:task-1:native-1" }
+  const row = await createSession({ title: "Managed task", externalAgentSession: link })
+  await deleteSession(row.id)
+  expect(deleteExternalSessionMock).toHaveBeenCalledWith(link.agentId, link.sessionId)
+  expect(await getSession(row.id)).toBeUndefined()
+})
+
+it("keeps the conversation link when external task cleanup fails so deletion can retry", async () => {
+  const link = { agentId: "pi", sessionId: "cognia-gateway:task-2:native-2" }
+  const row = await createSession({ title: "Retry deletion", externalAgentSession: link })
+  deleteExternalSessionMock.mockRejectedValueOnce(new Error("Task host unavailable"))
+  await expect(bulkDeleteSessions([row.id])).rejects.toThrow("Task host unavailable")
+  expect((await getSession(row.id))?.externalAgentSession).toEqual(link)
+  await deleteSession(row.id)
+  expect(await getSession(row.id)).toBeUndefined()
+})
+
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()

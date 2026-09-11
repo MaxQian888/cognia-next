@@ -796,6 +796,22 @@ async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> 
   throw lastError
 }
 
+/** Remove external gateway history while its durable session link is still available. */
+export async function cleanupManagedExternalAgentSessions(
+  rows: readonly (Pick<ChatSession, "externalAgentSession"> | undefined)[]
+): Promise<void> {
+  const links = new Map<string, NonNullable<ChatSession["externalAgentSession"]>>()
+  for (const row of rows) {
+    const link = row?.externalAgentSession
+    if (link?.sessionId.startsWith("cognia-gateway:"))
+      links.set(`${link.agentId}:${link.sessionId}`, link)
+  }
+  if (links.size === 0) return
+  const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+  for (const link of links.values())
+    await getExternalAgentManager().deleteSession(link.agentId, link.sessionId)
+}
+
 /**
  * Bulk variant of `deleteSession` for the channel-list batch toolbar.
  * Expands parent-owned attached descendants, then removes their session,
@@ -809,6 +825,13 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
   if (ids.length === 0) return
   const db = getDb()
   const requestedIds = [...new Set(ids)]
+  // Native task state is outside Dexie. Stop/revoke/delete it before dropping
+  // the durable link, so a host failure leaves a retryable conversation row.
+  const cleanupIds = [
+    ...new Set([...requestedIds, ...(await listOwnedAttachedDescendantIds(db, requestedIds))]),
+  ]
+  await assertSessionsWritable(db, cleanupIds, "delete")
+  await cleanupManagedExternalAgentSessions(await db.sessions.bulkGet(cleanupIds))
   let deletedIds: string[] = []
   let scheduledTaskIds: string[] = []
   const orphanCandidates = new Set<string>()

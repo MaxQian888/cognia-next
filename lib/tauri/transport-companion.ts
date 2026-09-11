@@ -67,6 +67,82 @@ function encodeContentContext(context: ManagedIdeContentContext): string {
 // ---------------------------------------------------------------------------
 
 let cachedConfig: CompanionConfig | null = null
+let configGeneration = 0
+let metadataWriteTail: Promise<unknown> = Promise.resolve()
+// Pairing lifecycle mutations must finish their durable/runtime side effects
+// before unpair or a later activation can complete.
+let configLifecycleTail: Promise<unknown> = Promise.resolve()
+function runConfigLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+  const next = configLifecycleTail.then(operation, operation)
+  configLifecycleTail = next.catch(() => {})
+  return next
+}
+
+/** Monotonic pairing activation epoch; endpoint metadata leaves it unchanged. */
+export function getCompanionConfigGeneration(): number {
+  return configGeneration
+}
+
+/** Compare pairing identity while allowing addresses and pins to be refreshed. */
+export function isSameCompanionTarget(
+  left: CompanionConfig,
+  right: CompanionConfig | null
+): boolean {
+  return (
+    right !== null &&
+    left.accountId === right.accountId &&
+    left.targetId === right.targetId &&
+    left.deviceId === right.deviceId &&
+    left.deviceKeyThumbprint === right.deviceKeyThumbprint &&
+    left.rendezvousId === right.rendezvousId &&
+    left.serviceToken === right.serviceToken
+  )
+}
+
+/** Update reachability without reactivating the Host or replacing its live transport. */
+export async function updateCompanionConfigMetadata(
+  expected: CompanionConfig,
+  patch: Partial<
+    Pick<CompanionConfig, "baseUrl" | "lanBaseUrl" | "tunnelBaseUrl" | "serverFingerprint">
+  >,
+  isCurrent: () => boolean = () => true
+): Promise<CompanionConfig | null> {
+  const generation = configGeneration
+  const operation = metadataWriteTail
+    .catch(() => {})
+    .then(async () => {
+      if (
+        generation !== configGeneration ||
+        !isCurrent() ||
+        !isSameCompanionTarget(expected, cachedConfig)
+      ) {
+        return cachedConfig
+      }
+      const next = { ...cachedConfig!, ...patch }
+      const storage = companionStorage()
+      const canApply = () =>
+        generation === configGeneration &&
+        isCurrent() &&
+        isSameCompanionTarget(expected, cachedConfig)
+      if (storage.updateMetadata) {
+        if (!(await storage.updateMetadata(next, canApply))) return cachedConfig
+      } else {
+        await storage.save(next)
+      }
+      if (
+        generation !== configGeneration ||
+        !isCurrent() ||
+        !isSameCompanionTarget(expected, cachedConfig)
+      ) {
+        return cachedConfig
+      }
+      cachedConfig = next
+      return next
+    })
+  metadataWriteTail = operation
+  return operation
+}
+
 let runtimeTargetRegistrarOverride: ((config: CompanionConfig) => Promise<void>) | null = null
 
 /** Synchronous read used on the hot path (every `call()` / WS open). */
@@ -85,57 +161,96 @@ export async function issueCompanionSocketTicket(
 
 /** Read storage and prime the cache. Call once at app boot. Idempotent. */
 export async function hydrateCompanionConfig(): Promise<CompanionConfig | null> {
-  const stored = await companionStorage().load()
-  cachedConfig = stored ? await attachWebRuntimeTarget(stored, true) : null
-  // `pickTransport()` decides at module load, before the Vault is unlocked and
-  // before any runtime target is active, so a browser that IS paired can boot
-  // holding the honest-but-useless `WebStubTransport`. Once a pairing has
-  // actually resolved, upgrade — otherwise every consumer of the hydrated
-  // config dispatches into the stub and the session looks unpaired.
-  //
-  // Deliberately one-way: downgrading to the stub belongs to the explicit
-  // owners (`clearCompanionConfig`, `reloadCompanionConfigForActiveTarget`,
-  // `suspendCompanionTransport`). Mid-session callers re-hydrate for their own
-  // reasons and must not tear down a live transport on a transient null.
-  if (cachedConfig) await ensureWebCompanionTransport()
-  return cachedConfig
+  const generation = configGeneration
+  const scope = getActiveRuntimeTargetContext()
+  const canAttach = () => {
+    const current = getActiveRuntimeTargetContext()
+    return (
+      generation === configGeneration &&
+      scope?.accountId === current?.accountId &&
+      scope?.targetId === current?.targetId
+    )
+  }
+  return runConfigLifecycle(async () => {
+    await metadataWriteTail.catch(() => {})
+    const stored = await companionStorage().load()
+    if (!canAttach()) return cachedConfig
+    let next: CompanionConfig | null
+    try {
+      next = stored
+        ? isSameCompanionTarget(stored, cachedConfig)
+          ? stored
+          : await attachWebRuntimeTarget(stored, true, true, canAttach)
+        : null
+    } catch (error) {
+      if (!canAttach()) return cachedConfig
+      throw error
+    }
+    if (generation !== configGeneration) return cachedConfig
+    if (next ? !isSameCompanionTarget(next, cachedConfig) : cachedConfig !== null)
+      configGeneration += 1
+    cachedConfig = next
+    // `pickTransport()` decides at module load, before the Vault is unlocked and
+    // before any runtime target is active, so a browser that IS paired can boot
+    // holding the honest-but-useless `WebStubTransport`. Once a pairing has
+    // actually resolved, upgrade — otherwise every consumer of the hydrated
+    // config dispatches into the stub and the session looks unpaired.
+    //
+    // Deliberately one-way: downgrading to the stub belongs to the explicit
+    // owners (`clearCompanionConfig`, `reloadCompanionConfigForActiveTarget`,
+    // `suspendCompanionTransport`). Mid-session callers re-hydrate for their own
+    // reasons and must not tear down a live transport on a transient null.
+    const activatedGeneration = configGeneration
+    if (cachedConfig)
+      await ensureWebCompanionTransport(() => activatedGeneration === configGeneration)
+    return cachedConfig
+  })
 }
 
 export async function saveCompanionConfig(config: CompanionConfig): Promise<void> {
-  const storage = companionStorage()
-  const previousStored = isPlainBrowser() ? await storage.load() : null
-  const nextConfig = await attachWebRuntimeTarget(config, false, false)
-  await storage.save(nextConfig)
-  try {
-    await registerWebRuntimeTarget(nextConfig)
-  } catch (error) {
-    // Secure persistence and the runtime target registry live in different
-    // stores. Compensate the first write if the second cannot commit so a
-    // failed pair never appears as a target with unusable runtime state.
-    if (storage.remove) await storage.remove(nextConfig)
-    if (previousStored) await storage.save(previousStored)
-    else if (!storage.remove) await storage.clear()
-    throw error
-  }
-  cachedConfig = nextConfig
-  await activateWebCompanionTransport()
-  notifyCompanionConfigChanged()
+  const generation = ++configGeneration
+  return runConfigLifecycle(async () => {
+    await metadataWriteTail.catch(() => {})
+    const storage = companionStorage()
+    const previousStored = isPlainBrowser() ? await storage.load() : null
+    const nextConfig = await attachWebRuntimeTarget(config, false, false)
+    await storage.save(nextConfig)
+    try {
+      await registerWebRuntimeTarget(nextConfig)
+    } catch (error) {
+      // Secure persistence and the runtime target registry live in different
+      // stores. Compensate the first write if the second cannot commit so a
+      // failed pair never appears as a target with unusable runtime state.
+      if (storage.remove) await storage.remove(nextConfig)
+      if (previousStored) await storage.save(previousStored)
+      else if (!storage.remove) await storage.clear()
+      throw error
+    }
+    if (generation !== configGeneration) return
+    cachedConfig = nextConfig
+    await activateWebCompanionTransport()
+    notifyCompanionConfigChanged()
+  })
 }
 
 export async function clearCompanionConfig(): Promise<void> {
+  configGeneration += 1
   cachedConfig = null
-  await companionStorage().clear()
-  if (isPlainBrowser()) {
-    const [{ detachActiveCompanionRuntimeTarget }, { setTransport }, { WebStubTransport }] =
-      await Promise.all([
-        import("@/lib/runtime/account-runtime-target"),
-        import("./transport-instance"),
-        import("./transport-web"),
-      ])
-    await detachActiveCompanionRuntimeTarget()
-    setTransport(new WebStubTransport())
-  }
-  notifyCompanionConfigChanged()
+  return runConfigLifecycle(async () => {
+    await metadataWriteTail.catch(() => {})
+    await companionStorage().clear()
+    if (isPlainBrowser()) {
+      const [{ detachActiveCompanionRuntimeTarget }, { setTransport }, { WebStubTransport }] =
+        await Promise.all([
+          import("@/lib/runtime/account-runtime-target"),
+          import("./transport-instance"),
+          import("./transport-web"),
+        ])
+      await detachActiveCompanionRuntimeTarget()
+      setTransport(new WebStubTransport())
+    }
+    notifyCompanionConfigChanged()
+  })
 }
 
 /**
@@ -148,20 +263,26 @@ export async function reloadCompanionConfigForActiveTarget(options?: {
   notify?: boolean
 }): Promise<CompanionConfig | null> {
   if (isTauri()) return loadCompanionConfig()
-  cachedConfig = await companionStorage().load()
-  if (isPlainBrowser()) {
-    if (cachedConfig) {
-      await activateWebCompanionTransport()
-    } else {
-      const [{ setTransport }, { WebStubTransport }] = await Promise.all([
-        import("./transport-instance"),
-        import("./transport-web"),
-      ])
-      setTransport(new WebStubTransport())
+  const generation = ++configGeneration
+  return runConfigLifecycle(async () => {
+    await metadataWriteTail.catch(() => {})
+    const next = await companionStorage().load()
+    if (generation !== configGeneration) return cachedConfig
+    cachedConfig = next
+    if (isPlainBrowser()) {
+      if (cachedConfig) {
+        await activateWebCompanionTransport()
+      } else {
+        const [{ setTransport }, { WebStubTransport }] = await Promise.all([
+          import("./transport-instance"),
+          import("./transport-web"),
+        ])
+        setTransport(new WebStubTransport())
+      }
     }
-  }
-  if (options?.notify !== false) notifyCompanionConfigChanged()
-  return cachedConfig
+    if (options?.notify !== false) notifyCompanionConfigChanged()
+    return cachedConfig
+  })
 }
 
 /**
@@ -170,19 +291,23 @@ export async function reloadCompanionConfigForActiveTarget(options?: {
  * later explicit activation succeeds.
  */
 export async function suspendCompanionTransport(): Promise<void> {
+  configGeneration += 1
   cachedConfig = null
-  if (isPlainBrowser()) {
-    const [{ setTransport }, { WebStubTransport }] = await Promise.all([
-      import("./transport-instance"),
-      import("./transport-web"),
-    ])
-    setTransport(new WebStubTransport())
-  }
-  notifyCompanionConfigChanged()
+  return runConfigLifecycle(async () => {
+    if (isPlainBrowser()) {
+      const [{ setTransport }, { WebStubTransport }] = await Promise.all([
+        import("./transport-instance"),
+        import("./transport-web"),
+      ])
+      setTransport(new WebStubTransport())
+    }
+    notifyCompanionConfigChanged()
+  })
 }
 
 /** Test-only — reset the cache between cases. */
 export function __resetCompanionConfigCacheForTests(): void {
+  configGeneration += 1
   cachedConfig = null
 }
 
@@ -201,28 +326,37 @@ export function __setRuntimeTargetRegistrarForTests(
 async function attachWebRuntimeTarget(
   config: CompanionConfig,
   persistAssignedTarget: boolean,
-  registerTarget = true
+  registerTarget = true,
+  isCurrent: () => boolean = () => true
 ): Promise<CompanionConfig> {
   if (!isPlainBrowser() || !getActiveRuntimeTargetContext()) return config
+  const scope = getActiveRuntimeTargetContext()!
   const { deriveCompanionRuntimeTargetId } = await import("@/lib/runtime/account-runtime-target")
+  if (!isCurrent()) throw new Error("Companion hydration cancelled")
   const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
+  if (!isCurrent()) throw new Error("Companion hydration cancelled")
   const nextConfig = {
     ...config,
     targetId,
-    accountId: getActiveRuntimeTargetContext()!.accountId,
+    accountId: scope.accountId,
   }
   if (persistAssignedTarget && config.targetId !== targetId) {
     await companionStorage().save(nextConfig)
   }
-  if (registerTarget) await registerWebRuntimeTarget(nextConfig)
+  if (registerTarget) await registerWebRuntimeTarget(nextConfig, isCurrent)
   return nextConfig
 }
 
-async function registerWebRuntimeTarget(config: CompanionConfig): Promise<void> {
+async function registerWebRuntimeTarget(
+  config: CompanionConfig,
+  isCurrent: () => boolean = () => true
+): Promise<void> {
   if (!isPlainBrowser()) return
+  if (!isCurrent()) throw new Error("Companion hydration cancelled")
   if (runtimeTargetRegistrarOverride) return runtimeTargetRegistrarOverride(config)
   const { registerCompanionRuntimeTarget } = await import("@/lib/runtime/account-runtime-target")
-  await registerCompanionRuntimeTarget(config)
+  const registered = await registerCompanionRuntimeTarget(config, undefined, isCurrent)
+  if (!registered && !isCurrent()) throw new Error("Companion hydration cancelled")
 }
 
 async function activateWebCompanionTransport(): Promise<void> {
@@ -240,9 +374,10 @@ async function activateWebCompanionTransport(): Promise<void> {
  * mid-session (fleet, remote sessions, the signaling controller all re-hydrate),
  * and rebuilding a live transport there would drop its open subscriptions.
  */
-async function ensureWebCompanionTransport(): Promise<void> {
+async function ensureWebCompanionTransport(isCurrent: () => boolean): Promise<void> {
   if (!isPlainBrowser()) return
   const instance = await import("./transport-instance")
+  if (!isCurrent()) return
   if (instance.transport instanceof CompanionTransport) return
   instance.setTransport(new CompanionTransport())
 }

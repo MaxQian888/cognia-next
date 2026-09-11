@@ -73,7 +73,7 @@ async function inFlightSettingKeys(): Promise<Set<string>> {
  * the host's older values — so the UI visibly snapped back to the old setting,
  * then changed again once the queue drained.
  */
-async function applySettingsRows(rows: AppSettings[]): Promise<void> {
+async function applySettingsRows(rows: AppSettings[], assertCurrent: () => void): Promise<void> {
   const incoming = rows[0]
   if (!incoming) return
   const db = getDb()
@@ -89,6 +89,7 @@ async function applySettingsRows(rows: AppSettings[]): Promise<void> {
     if (inFlight.has(key)) continue
     if (incoming[key] !== undefined) merged[key] = incoming[key]
   }
+  assertCurrent()
   await db.settings.put(merged as unknown as AppSettings)
 }
 

@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import type { BotEventDeliveryRow } from "@/lib/db/bot-types"
 import { listDueBotDeliveries } from "@/lib/db/bot-event-deliveries"
@@ -33,6 +34,7 @@ function delivery(id: string, over: Partial<BotEventDeliveryRow> = {}): BotEvent
   return {
     id,
     eventId: `evt_${id}`,
+    dedupKey: `dedup_${id}`,
     installationId: "boti_1",
     triggerId: "cron",
     source: "integration",
@@ -43,7 +45,9 @@ function delivery(id: string, over: Partial<BotEventDeliveryRow> = {}): BotEvent
     updatedAt: NOW,
     nextAttemptAt: 0,
     envelope: {
-      version: 1,
+      installationId: "boti_1",
+      triggerId: "cron",
+      receivedAt: NOW,
       eventId: `evt_${id}`,
       deliveryId: id,
       source: "integration",
@@ -97,7 +101,7 @@ describe("applyBotDeliveryRows", () => {
     // `nextAttemptAt: 0` makes the row MORE due, so the fence is the flag, and
     // the fence lives in the queue module every claim path flows through.
     await applyBotDeliveryRows([delivery("bdl_1", { status: "pending" })], NOW)
-    expect(await listDueBotDeliveries({ now: NOW, limit: 10 })).toEqual([])
+    expect(await listDueBotDeliveries(10, NOW)).toEqual([])
   })
 
   it("stores the row so a console can render it", async () => {
@@ -143,4 +147,48 @@ describe("syncBotEventDeliveries", () => {
     expect(out.ok).toBe(true)
     expect((await getDb().botEventDeliveries.get("bdl_1"))?.syncedFromHost).toBe(true)
   })
+})
+
+it("cancels before looking up the sweep table after an awaited apply", async () => {
+  const table = getDb().botEventDeliveries
+  let current = true
+  const read = jest.spyOn(table, "where")
+  const write = jest.spyOn(table, "bulkPut").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return "cancelled"
+    })
+  )
+  try {
+    await expect(
+      applyBotDeliveryRows([delivery("cancelled")], Date.now(), () => {
+        if (!current) throw new Error("scope cancelled")
+      })
+    ).rejects.toThrow("scope cancelled")
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(read).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
+})
+
+it("fences retention deletion after reading expired victims", async () => {
+  const table = getDb().botEventDeliveries
+  const row = delivery("cancel-aged", { status: "succeeded", syncedFromHost: true, receivedAt: 0 })
+  await table.put(row)
+  const remove = jest.spyOn(table, "bulkDelete")
+  const assertCurrent = jest.fn(() => {
+    throw new Error("scope cancelled")
+  })
+  try {
+    await expect(sweepAgedMirroredDeliveries(Date.now(), assertCurrent)).rejects.toThrow(
+      "scope cancelled"
+    )
+    expect(assertCurrent).toHaveBeenCalledTimes(1)
+    expect(remove).not.toHaveBeenCalled()
+    expect(await table.get(row.id)).toBeDefined()
+  } finally {
+    remove.mockRestore()
+  }
 })

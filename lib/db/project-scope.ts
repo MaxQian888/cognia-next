@@ -216,6 +216,32 @@ export async function detachProjectContents(projectId: string): Promise<string> 
 
 export async function deleteProjectCascade(projectId: string): Promise<void> {
   const db = getDb()
+  // Native histories live outside Dexie. Remove them before the transaction
+  // drops their durable links; a host failure leaves the workspace retryable.
+  const sessionsBeforeCleanup = await scopedWhere(db.sessions, projectId).toArray()
+  const runIds = (await db.agentTeamRuns
+    .where("projectId")
+    .equals(projectId)
+    .primaryKeys()) as string[]
+  const childrenBeforeCleanup = runIds.length
+    ? await db.agentTeamChildRuns.where("runId").anyOf(runIds).toArray()
+    : []
+  if (
+    sessionsBeforeCleanup.some((row) =>
+      row.externalAgentSession?.sessionId.startsWith("cognia-gateway:")
+    )
+  ) {
+    const { cleanupManagedExternalAgentSessions } = await import("./sessions")
+    await cleanupManagedExternalAgentSessions(sessionsBeforeCleanup)
+  }
+  if (childrenBeforeCleanup.some((row) => row.sessionId?.startsWith("cognia-gateway:"))) {
+    const { purgeManagedChildSessions } = await import("./agent-team-runtime")
+    await purgeManagedChildSessions(childrenBeforeCleanup)
+  }
+  const cleanedSessionLinks = new Set(
+    sessionsBeforeCleanup.map((row) => row.externalAgentSession?.sessionId)
+  )
+  const cleanedChildLinks = new Set(childrenBeforeCleanup.map((row) => row.sessionId))
 
   const tableNames = new Set<string>([
     ...PROJECT_SCOPED_TABLES,
@@ -227,6 +253,30 @@ export async function deleteProjectCascade(projectId: string): Promise<void> {
 
   await db.transaction("rw", tables, async () => {
     const projectSessions = await scopedWhere(db.sessions, projectId).toArray()
+    if (
+      projectSessions.some(
+        (row) =>
+          row.externalAgentSession?.sessionId.startsWith("cognia-gateway:") &&
+          !cleanedSessionLinks.has(row.externalAgentSession.sessionId)
+      )
+    ) {
+      throw new Error("Workspace sessions changed during native cleanup; retry deletion")
+    }
+    const currentRuns = (await db.agentTeamRuns
+      .where("projectId")
+      .equals(projectId)
+      .primaryKeys()) as string[]
+    const currentChildren = currentRuns.length
+      ? await db.agentTeamChildRuns.where("runId").anyOf(currentRuns).toArray()
+      : []
+    if (
+      currentChildren.some(
+        (row) =>
+          row.sessionId?.startsWith("cognia-gateway:") && !cleanedChildLinks.has(row.sessionId)
+      )
+    ) {
+      throw new Error("Workspace tasks changed during native cleanup; retry deletion")
+    }
     const sessionIds = projectSessions.map((session) => session.id)
     const overrideConversationKeys = (await scopedWhere(
       db.conversationOverrides,

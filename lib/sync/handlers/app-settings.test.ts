@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
@@ -191,4 +192,38 @@ describe("syncAppSettings", () => {
       expect((await getDb().settings.get("singleton"))?.theme).toBe("light")
     })
   })
+})
+
+it("rejects cancellation after asynchronous merge preparation", async () => {
+  const table = getDb().settings
+  let current = true
+  const read = jest.spyOn(table, "get").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return undefined
+    })
+  )
+  const write = jest.spyOn(table, "put")
+  const assertCurrent = () => {
+    if (!current) throw new Error("scope cancelled")
+  }
+  try {
+    expect(
+      (
+        await syncAppSettings(
+          makeTransport({
+            rows: [{ id: "singleton", theme: "dark" } as never],
+            deleted_ids: [],
+            next_since: 1,
+          }),
+          { since: 0, assertCurrent }
+        )
+      ).ok
+    ).toBe(false)
+    expect(read).toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
 })

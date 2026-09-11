@@ -76,7 +76,7 @@ it("draws the client the caller is actually on", () => {
 // `lint:i18n` cannot see `t(`narration.${state}`)`, so the catalogue is pinned
 // here instead: a state added without copy would otherwise render its own key.
 it.each(STATES)("has scene + narration copy in both locales for %s", (state) => {
-  for (const catalogue of [enPair, zhPair] as Array<Record<string, Record<string, string>>>) {
+  for (const catalogue of [enPair, zhPair]) {
     expect(catalogue.scene[state]).toBeTruthy()
     expect(catalogue.narration[state]).toBeTruthy()
   }

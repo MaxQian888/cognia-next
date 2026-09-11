@@ -481,8 +481,32 @@ export async function putAgentTeamContent(
   return row
 }
 
+/** Delete task-owned agent history before removing its only durable reference. */
+export async function purgeManagedChildSessions(children: AgentTeamChildRun[]): Promise<void> {
+  const sessions = children.flatMap((child) =>
+    child.sessionId?.startsWith("cognia-gateway:") ? [child.sessionId] : []
+  )
+  if (sessions.length === 0) return
+  const [{ parseGatewaySessionId }, { agentInvoke }] = await Promise.all([
+    import("@/lib/ai/agent/external/gateway-task"),
+    import("@/lib/ai/agent/external/agent-transport"),
+  ])
+  const tasks = new Set(sessions.map((sessionId) => parseGatewaySessionId(sessionId)!.taskId))
+  for (const taskId of tasks) await agentInvoke("external_agent_delete_gateway_task", { taskId })
+}
+
 export async function purgeAgentTeamRun(runId: string): Promise<void> {
   const db = getDb()
+  const children = await db.agentTeamChildRuns.where("runId").equals(runId).toArray()
+  await purgeManagedChildSessions(children)
+  await purgeAgentTeamRunRows(runId, db, new Set(children.map((child) => child.sessionId)))
+}
+
+async function purgeAgentTeamRunRows(
+  runId: string,
+  db: ReturnType<typeof getDb>,
+  cleanedSessionLinks: Set<string | undefined>
+): Promise<void> {
   await db.transaction(
     "rw",
     [
@@ -498,6 +522,16 @@ export async function purgeAgentTeamRun(runId: string): Promise<void> {
       db.agentTeamRetrospectives,
     ],
     async () => {
+      const children = await db.agentTeamChildRuns.where("runId").equals(runId).toArray()
+      if (
+        children.some(
+          (child) =>
+            child.sessionId?.startsWith("cognia-gateway:") &&
+            !cleanedSessionLinks.has(child.sessionId)
+        )
+      ) {
+        throw new Error("Team tasks changed during native cleanup; retry deletion")
+      }
       const graphIds = await db.agentTeamDeliveryGraphs.where("runId").equals(runId).primaryKeys()
       await Promise.all([
         db.agentTeamRuns.delete(runId),
@@ -535,6 +569,14 @@ export async function purgeAgentTeamRun(runId: string): Promise<void> {
 }
 
 export async function purgeAgentTeam(teamId: string): Promise<void> {
-  const runIds = (await listAgentTeamRuns(teamId)).map((run) => run.id)
-  for (const runId of runIds) await purgeAgentTeamRun(runId)
+  const db = getDb()
+  const runIds = (await db.agentTeamRuns.where("teamId").equals(teamId).toArray()).map(
+    (run) => run.id
+  )
+  const children = runIds.length
+    ? await db.agentTeamChildRuns.where("runId").anyOf(runIds).toArray()
+    : []
+  await purgeManagedChildSessions(children)
+  const cleanedSessionLinks = new Set(children.map((child) => child.sessionId))
+  for (const runId of runIds) await purgeAgentTeamRunRows(runId, db, cleanedSessionLinks)
 }

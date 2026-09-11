@@ -340,7 +340,7 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
 }
 
 interface PagedSyncCursor {
-  version: 1
+  version: 1 | 2
   table: string
   at: number
   id: string
@@ -358,7 +358,7 @@ function decodeSyncCursor(table: string, since: number, value: string): PagedSyn
   }
   if (
     !cursor ||
-    cursor.version !== 1 ||
+    (cursor.version !== 1 && !(table === "messages" && cursor.version === 2)) ||
     cursor.table !== table ||
     !Number.isSafeInteger(cursor.at) ||
     cursor.at < 0 ||
@@ -380,30 +380,49 @@ async function readCursorDelta(
 ): Promise<SyncDelta<unknown>> {
   const cursor = decodeSyncCursor(table, since, token)
   const db = getDb()
-  let rows: UpdatedAtRow[]
+  let rows: UpdatedAtRow[] = []
   let hasMore = false
   let cursorOf = (row: UpdatedAtRow) => Number(row.updatedAt ?? row.createdAt ?? 0)
   const after = (row: UpdatedAtRow) =>
     cursorOf(row) > cursor.at || (cursorOf(row) === cursor.at && row.id > cursor.id)
 
   if (table === "messages") {
-    cursorOf = (row) => Number(row.createdAt ?? 0)
+    cursorOf = (row) => (row as UpdatedAtRow & { syncRevision: number }).syncRevision
     if (!token && since === 0) {
-      rows = await db.messages
-        .orderBy("[createdAt+id]")
-        .reverse()
-        .limit(MESSAGES_PAGE_SIZE)
-        .toArray()
-      rows.reverse()
+      // Capture the tail and its change-clock cut in one read transaction.
+      // A historical row edited after the cut is included by its revision,
+      // regardless of its immutable creation timestamp.
+      await db.transaction("r", db.messages, db.messageSyncClock, async () => {
+        rows = await db.messages
+          .orderBy("[createdAt+id]")
+          .reverse()
+          .limit(MESSAGES_PAGE_SIZE)
+          .toArray()
+        rows.reverse()
+        cursor.at = (await db.messageSyncClock.get("singleton"))?.revision ?? 0
+      })
+      cursor.id = ""
     } else {
+      // v1 measured creation time. It cannot prove any modification was
+      // delivered, so upgrade it by draining the revision index once.
+      if (cursor.version === 1) {
+        cursor.at = 0
+        cursor.id = ""
+      }
       const page = await db.messages
-        .where("[createdAt+id]")
-        .above([cursor.at, cursor.id])
+        .where("[syncRevision+id]")
+        .above([cursor.at, Dexie.maxKey])
         .limit(MESSAGES_PAGE_SIZE + 1)
         .toArray()
       hasMore = page.length > MESSAGES_PAGE_SIZE
       rows = page.slice(0, MESSAGES_PAGE_SIZE)
+      const last = rows.at(-1)
+      if (last) {
+        cursor.at = cursorOf(last)
+        cursor.id = last.id
+      }
     }
+    cursor.version = 2
   } else if (table === "executionRuns") {
     const page = await db.executionRuns
       .where("updatedAt")
@@ -427,23 +446,19 @@ async function readCursorDelta(
   } else {
     cursorOf = (row) => runActivityAt(row as unknown as WorkflowRunRow)
     if (!token && since === 0) cursor.at = Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS)
-    const [started, completed] = await Promise.all([
-      db.workflowRuns.where("startedAt").aboveOrEqual(cursor.at).toArray(),
-      db.workflowRuns.where("completedAt").aboveOrEqual(cursor.at).toArray(),
-    ])
-    const ordered = [...new Map([...started, ...completed].map((row) => [row.id, row])).values()]
-      .filter(after)
-      .sort(
-        (a, b) => runActivityAt(a) - runActivityAt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-      )
-    hasMore = ordered.length > RUN_PAGE_SIZE
-    rows = ordered.slice(0, RUN_PAGE_SIZE).map(projectRunForSync)
+    const page = await db.workflowRuns
+      .where("[syncActivityAt+id]")
+      .above([cursor.at, cursor.id])
+      .limit(RUN_PAGE_SIZE + 1)
+      .toArray()
+    hasMore = page.length > RUN_PAGE_SIZE
+    rows = page.slice(0, RUN_PAGE_SIZE).map(projectRunForSync)
   }
   const deleted = await readTombstonesSince(table, cursor.deletedAt)
   const last = rows.at(-1)
   const next: PagedSyncCursor = {
     ...cursor,
-    ...(last ? { at: cursorOf(last), id: last.id } : {}),
+    ...(last && table !== "messages" ? { at: cursorOf(last), id: last.id } : {}),
     deletedAt: deleted.maxDeletedAt,
   }
   return {

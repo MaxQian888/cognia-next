@@ -4,6 +4,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "spawn_external_agent",
     "send_to_external_agent",
     "kill_external_agent",
+    "external_agent_delete_gateway_task",
     "get_external_agent_status",
     "connectors_register",
     "connectors_unregister",
@@ -250,6 +251,25 @@ pub(super) async fn dispatch(
                 .await
                 .map(|_| Value::Null)
                 .map_err(RpcError::internal)
+        }
+
+        "external_agent_delete_gateway_task" => {
+            let task_id: String = required_aliased(&args, "task_id", "taskId")?;
+            crate::external_agent::commands::delete_gateway_task_for_backend(
+                &task_id,
+                host.exec_backend().as_ref(),
+            )
+            .await
+            .map_err(RpcError::internal)?;
+            super::super::audit::record_async(
+                "external_agent_gateway_task_deleted",
+                device_id,
+                scope.unwrap_or(""),
+                "allow",
+                serde_json::json!({ "task_id": task_id }),
+            )
+            .await;
+            Ok(Value::Null)
         }
 
         "get_external_agent_status" => {

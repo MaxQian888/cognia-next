@@ -1486,6 +1486,9 @@
     "fs_walk_workspace": {
       "to": "fs.workspace.walk"
     },
+    "external_agent_delete_gateway_task": {
+      "to": "external_agent.gateway_task.delete"
+    },
     "external_agent_detect_runtimes": {
       "to": "external_agent.runtime.detect"
     },
@@ -1536,6 +1539,9 @@
     },
     "gateway_push_snapshot": {
       "to": "gateway.snapshot.push"
+    },
+    "gateway_reset_cooldowns": {
+      "to": "gateway.cooldown.reset"
     },
     "gateway_reset_key_quota": {
       "to": "gateway.key_quota.reset"
@@ -3181,6 +3187,9 @@
     },
     "subscription_init": {
       "to": "subscription.init"
+    },
+    "subscription_list_provider_ids": {
+      "to": "subscription.provider.list"
     },
     "subscription_list_accounts": {
       "to": "subscription.account.list"

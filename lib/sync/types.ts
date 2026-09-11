@@ -26,6 +26,8 @@ export const PAGED_SYNC_TABLES: readonly SyncableTable[] = [
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */
   since: number
+  /** Local cancellation fence. Never serialized into the sync protocol. */
+  assertCurrent?: () => void
   /** Versioned row/tombstone continuation returned by a cursor-aware host. */
   cursor?: string
 }

@@ -623,6 +623,7 @@ const KNOWN_COMMANDS: &[&str] = &[
     "spawn_external_agent",
     "send_to_external_agent",
     "kill_external_agent",
+    "external_agent_delete_gateway_task",
     "get_external_agent_status",
     // ADR-0059 R12 — service-scope management of the public `/connectors`
     // webhook ingress registry on the headless front door.
@@ -2519,6 +2520,7 @@ const AGENT_CONTROL_COMMANDS: &[&str] = &[
     "spawn_external_agent",
     "send_to_external_agent",
     "kill_external_agent",
+    "external_agent_delete_gateway_task",
     "get_external_agent_status",
 ];
 

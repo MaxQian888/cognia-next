@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { ConnectorHeartbeatRow } from "@/lib/db/connector-types"
@@ -74,4 +75,48 @@ describe("syncConnectorHeartbeats", () => {
     await getDb().connectorHeartbeats.put(beat("fresh", now - 1))
     expect(await sweepAgedMirroredHeartbeats(now)).toBe(0)
   })
+})
+
+it("cancels before looking up the sweep table after an awaited apply", async () => {
+  const table = getDb().connectorHeartbeats
+  let current = true
+  const read = jest.spyOn(table, "where")
+  const write = jest.spyOn(table, "bulkPut").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return "cancelled"
+    })
+  )
+  try {
+    await expect(
+      applyConnectorHeartbeatRows([beat("cancelled", Date.now())], Date.now(), () => {
+        if (!current) throw new Error("scope cancelled")
+      })
+    ).rejects.toThrow("scope cancelled")
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(read).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
+})
+
+it("fences retention deletion after reading expired victims", async () => {
+  const table = getDb().connectorHeartbeats
+  const row = beat("cancel-aged", 0)
+  await table.put(row)
+  const remove = jest.spyOn(table, "bulkDelete")
+  const assertCurrent = jest.fn(() => {
+    throw new Error("scope cancelled")
+  })
+  try {
+    await expect(sweepAgedMirroredHeartbeats(Date.now(), assertCurrent)).rejects.toThrow(
+      "scope cancelled"
+    )
+    expect(assertCurrent).toHaveBeenCalledTimes(1)
+    expect(remove).not.toHaveBeenCalled()
+    expect(await table.get(row.id)).toBeDefined()
+  } finally {
+    remove.mockRestore()
+  }
 })

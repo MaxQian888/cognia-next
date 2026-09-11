@@ -31,7 +31,7 @@ export interface SyncHandlerOptions<TRow extends { id: string }> {
    * — every current one is (they write the rows they are handed, plus
    * idempotent housekeeping).
    */
-  applyRows?: (rows: TRow[]) => Promise<void>
+  applyRows?: (rows: TRow[], assertCurrent: () => void) => Promise<void>
   /** Override the write slice size (tests). */
   applySliceSize?: number
 }
@@ -94,9 +94,22 @@ export async function runSyncHandler<TRow extends { id: string }>(
     },
   })
 
+  let target: Table<TRow, string>
+  try {
+    cursor.assertCurrent?.()
+    target = opts.getTable()
+  } catch (error) {
+    return failure(classifyTransportError(opts.table, error))
+  }
+  const assertCurrent = () => {
+    cursor.assertCurrent?.()
+    if (opts.getTable() !== target) throw new Error("Sync scope changed")
+  }
+
   for (let page = 0; page < MAX_PAGES; page++) {
     let delta: SyncDelta<TRow>
     try {
+      assertCurrent()
       const args = {
         table: opts.table,
         since,
@@ -123,10 +136,17 @@ export async function runSyncHandler<TRow extends { id: string }>(
           throw new Error("upgrade_required: host does not support the saved sync cursor")
         useCursor = false
         const { cursor: _cursor, ...legacyArgs } = args
+        assertCurrent()
         delta = await transport.call<SyncDelta<TRow>>(SYNC_RPC, legacyArgs)
       }
     } catch (err: unknown) {
       return failure(classifyTransportError(opts.table, err))
+    }
+
+    try {
+      assertCurrent()
+    } catch (error) {
+      return failure(classifyTransportError(opts.table, error))
     }
 
     if (
@@ -163,14 +183,25 @@ export async function runSyncHandler<TRow extends { id: string }>(
     const filtered = opts.rowFilter ? delta.rows.filter(opts.rowFilter) : delta.rows
 
     try {
-      const t = opts.getTable()
+      const t = target
       const sliceSize = opts.applySliceSize ?? SYNC_APPLY_SLICE_SIZE
       const applySlice = opts.applyRows ?? ((rows: TRow[]) => t.bulkPut(rows).then(() => undefined))
-      await applyInSlices(filtered, sliceSize, (slice) => applySlice(slice as TRow[]))
+      await applyInSlices(filtered, sliceSize, async (slice) => {
+        assertCurrent()
+        await applySlice(slice as TRow[], assertCurrent)
+        assertCurrent()
+      })
       await applyInSlices(delta.deleted_ids, sliceSize, async (slice) => {
+        assertCurrent()
         await t.bulkDelete(slice as string[])
+        assertCurrent()
       })
     } catch (err: unknown) {
+      try {
+        assertCurrent()
+      } catch (error) {
+        return failure(classifyTransportError(opts.table, error))
+      }
       return failure({
         table: opts.table,
         reason: "schema",

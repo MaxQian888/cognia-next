@@ -79,9 +79,27 @@ it("filters and sorts encrypted cursor rows without hanging", async () => {
   await db.open()
   try {
     await db.messages.bulkPut([
-      { id: "cursor_1", sessionId: "cursor", role: "user", content: "keep", createdAt: 200 },
-      { id: "cursor_2", sessionId: "cursor", role: "user", content: "skip", createdAt: 100 },
-      { id: "cursor_3", sessionId: "cursor", role: "user", content: "keep", createdAt: 300 },
+      {
+        id: "cursor_1",
+        sessionId: "cursor",
+        role: "user",
+        parts: [{ type: "text", text: "keep" }],
+        createdAt: 200,
+      },
+      {
+        id: "cursor_2",
+        sessionId: "cursor",
+        role: "user",
+        parts: [{ type: "text", text: "skip" }],
+        createdAt: 100,
+      },
+      {
+        id: "cursor_3",
+        sessionId: "cursor",
+        role: "user",
+        parts: [{ type: "text", text: "keep" }],
+        createdAt: 300,
+      },
     ])
     await expect(
       Promise.all([
@@ -89,12 +107,12 @@ it("filters and sorts encrypted cursor rows without hanging", async () => {
         db.messages
           .where("sessionId")
           .equals("cursor")
-          .filter((row) => row.content === "keep")
+          .filter((row) => row.parts.some((part) => part.type === "text" && part.text === "keep"))
           .count(),
         db.messages
           .where("sessionId")
           .equals("cursor")
-          .filter((row) => row.content === "keep")
+          .filter((row) => row.parts.some((part) => part.type === "text" && part.text === "keep"))
           .sortBy("createdAt"),
       ])
     ).resolves.toMatchObject([3, 2, [{ id: "cursor_1" }, { id: "cursor_3" }]])
@@ -114,7 +132,7 @@ it("rejects a throwing encrypted-row filter instead of leaving its query pending
       id: "filter-error",
       sessionId: "filter-error",
       role: "user",
-      content: "encrypted",
+      parts: [{ type: "text", text: "encrypted" }],
       createdAt: 100,
     })
     await expect(
@@ -149,15 +167,15 @@ it("stores message content as ciphertext while preserving indexed metadata", asy
     id: "msg_1",
     sessionId: "session_1",
     role: "user",
-    content: "plaintext must not survive",
-    createdAt: new Date(100),
+    parts: [{ type: "text", text: "plaintext must not survive" }],
+    createdAt: 100,
   })
 
   await expect(db.messages.get("msg_1")).resolves.toMatchObject({
     id: "msg_1",
     sessionId: "session_1",
     role: "user",
-    content: "plaintext must not survive",
+    parts: [{ type: "text", text: "plaintext must not survive" }],
   })
 
   const raw = new Dexie(DATABASE_NAME)
@@ -165,7 +183,7 @@ it("stores message content as ciphertext while preserving indexed metadata", asy
   const stored = (await raw.table("messages").get("msg_1")) as Record<string, unknown>
   expect(stored.id).toBe("msg_1")
   expect(stored.sessionId).toBe("session_1")
-  expect(stored.content).toBeUndefined()
+  expect(stored.parts).toBeUndefined()
   expect(JSON.stringify(stored)).not.toContain("plaintext must not survive")
   expect(stored.__cogniaEncryptedContent).toBeDefined()
   raw.close()
@@ -182,8 +200,8 @@ it("fails closed when the account key is locked or replaced", async () => {
     id: "msg_1",
     sessionId: "session_1",
     role: "user",
-    content: "secret",
-    createdAt: new Date(100),
+    parts: [{ type: "text", text: "secret" }],
+    createdAt: 100,
   })
 
   __resetAccountContentCipherForTesting()

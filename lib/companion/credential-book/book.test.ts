@@ -407,3 +407,69 @@ describe("updateConnection", () => {
     ).rejects.toThrow(/No companion host ghost is paired/)
   })
 })
+
+describe("updateMetadata", () => {
+  it("changes reachability without changing selection, credentials, or namespaces", async () => {
+    const { book, credentials } = harness()
+    const first = await book.upsert(draft())
+    const second = await book.upsert(draft({ hostId: "host-2" }))
+    await book.setActive(second)
+    const save = jest.spyOn(credentials, "save")
+    expect(
+      await book.updateMetadata!(
+        first,
+        { endpoints: { baseUrl: "https://new.example" }, tlsPin: "aa11" },
+        () => true
+      )
+    ).toBe(true)
+    expect((await book.get(first))?.endpoints.baseUrl).toBe("https://new.example")
+    expect((await book.get(first))?.cursorNamespace).toBe(first.cursorNamespace)
+    expect((await book.getActive("acct_a"))?.hostId).toBe("host-2")
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it.each(["deviceId", "deviceKeyThumbprint", "rendezvousId"] as const)(
+    "rejects a replaced %s",
+    async (field) => {
+      const { book } = harness()
+      const first = await book.upsert(draft())
+      await book.upsert(draft({ [field]: "replacement" }))
+      expect(
+        await book.updateMetadata!(
+          first,
+          { endpoints: { baseUrl: "https://stale.example" }, tlsPin: null },
+          () => true
+        )
+      ).toBe(false)
+      expect((await book.get(first))?.endpoints.baseUrl).toBe(first.endpoints.baseUrl)
+    }
+  )
+
+  it("does not recreate a record removed ahead of the metadata lock", async () => {
+    const { book } = harness()
+    const first = await book.upsert(draft())
+    const removal = book.remove(first)
+    const changed = book.updateMetadata!(
+      first,
+      { endpoints: { baseUrl: "https://stale.example" }, tlsPin: null },
+      () => true
+    )
+    await removal
+    expect(await changed).toBe(false)
+    expect(await book.get(first)).toBeNull()
+  })
+
+  it("checks the caller generation after waiting for the mutation lock", async () => {
+    const { book } = harness()
+    const first = await book.upsert(draft())
+    let current = true
+    const changed = book.updateMetadata!(
+      first,
+      { endpoints: { baseUrl: "https://stale.example" }, tlsPin: null },
+      () => current
+    )
+    current = false
+    expect(await changed).toBe(false)
+    expect((await book.get(first))?.endpoints.baseUrl).toBe(first.endpoints.baseUrl)
+  })
+})

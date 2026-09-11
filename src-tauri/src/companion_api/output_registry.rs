@@ -407,6 +407,7 @@ mod tests {
         ("spawn_external_agent", OutputShape::Scalar(ScalarShape::Text)),
         ("send_to_external_agent", OutputShape::Scalar(ScalarShape::Null)),
         ("kill_external_agent", OutputShape::Scalar(ScalarShape::Null)),
+        ("external_agent_delete_gateway_task", OutputShape::Scalar(ScalarShape::Null)),
         ("get_external_agent_status", OutputShape::Scalar(ScalarShape::Text)),
         ("connectors_register", OutputShape::Scalar(ScalarShape::Null)),
         ("connectors_unregister", OutputShape::Scalar(ScalarShape::Null)),

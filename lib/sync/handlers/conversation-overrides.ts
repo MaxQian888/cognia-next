@@ -14,10 +14,13 @@ import { runSyncHandler } from "./base"
  * set and the host's (newer) row lands on the next pull.
  */
 export async function applyConversationOverrideRows(
-  rows: ConversationOverrideRow[]
+  rows: ConversationOverrideRow[],
+  assertCurrent: () => void = () => {}
 ): Promise<void> {
   const pending = await pendingOverrideConversationKeys()
-  const writable = pending.size === 0 ? rows : rows.filter((row) => !pending.has(row.conversationKey))
+  assertCurrent()
+  const writable =
+    pending.size === 0 ? rows : rows.filter((row) => !pending.has(row.conversationKey))
   if (writable.length > 0) await getDb().conversationOverrides.bulkPut(writable)
 }
 

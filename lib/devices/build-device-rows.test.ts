@@ -459,7 +459,18 @@ describe("ordering and summary", () => {
       input({
         pairedDevices: [phone({ deviceId: "d1" })],
         hostDevices: new Map<string, HostDeviceSummaryInput>([
-          ["d1", { deviceId: "d1", status: "suspended", role: "member", capabilities: [] }],
+          [
+            "d1",
+            {
+              deviceId: "d1",
+              displayName: "Phone",
+              createdAt: 0,
+              updatedAt: 0,
+              status: "suspended",
+              role: "member",
+              capabilities: [],
+            },
+          ],
         ]),
       })
     )

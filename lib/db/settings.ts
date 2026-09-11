@@ -1,3 +1,4 @@
+import { isValidSubscriptionProviderId } from "@/types/subscription/credential"
 import type {
   AppSettings,
   BuiltinToolsConfig,
@@ -565,17 +566,11 @@ export async function saveSettings(
   return next
 }
 
-const SUBSCRIPTION_ACCOUNT_PROVIDERS = new Set<SubscriptionAccountProvider>([
-  "anthropic",
-  "codex",
-  "opencode",
-])
-
 function normalizeLegacySubscriptionProvider(
   provider: AppSettings["defaultProvider"]
 ): SubscriptionAccountProvider | null {
   if (provider === "opencode-go") return "opencode"
-  return provider && SUBSCRIPTION_ACCOUNT_PROVIDERS.has(provider as SubscriptionAccountProvider)
+  return provider && isValidSubscriptionProviderId(provider)
     ? (provider as SubscriptionAccountProvider)
     : null
 }

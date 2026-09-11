@@ -230,7 +230,9 @@ export function useDeviceRelativeTime(): (value: number | undefined) => string {
     // Polling can report a timestamp newer than this display clock. Keep recent
     // activity stable instead of counting seconds or briefly showing a future time.
     if (elapsed < 60_000) return t("justNow")
-    return format.relativeTime(new Date(value), elapsed < 3_600_000 ? { now, unit: "minute" } : now)
+    return elapsed < 3_600_000
+      ? format.relativeTime(new Date(value), { now, unit: "minute" })
+      : format.relativeTime(new Date(value), now)
   }
 }
 

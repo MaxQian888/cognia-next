@@ -109,6 +109,8 @@ export interface CompanionConfig {
 export interface CompanionConfigStorage {
   load(): Promise<CompanionConfig | null>
   save(config: CompanionConfig): Promise<void>
+  /** Change an existing public record without rewriting credentials or selecting it. */
+  updateMetadata?(config: CompanionConfig, isCurrent: () => boolean): Promise<boolean>
   clear(): Promise<void>
   /** Remove one exact pairing without consulting an active-host pointer. */
   remove?(config: CompanionConfig): Promise<void>

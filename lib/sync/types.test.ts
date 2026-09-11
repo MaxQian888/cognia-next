@@ -23,3 +23,12 @@ it("keeps successful and failed sync outcomes safely discriminated", () => {
   expect(appliedRows(success)).toBe(3)
   expect(appliedRows(failure)).toBe(0)
 })
+
+it("keeps cancellation local to a cursor without changing durable fields", () => {
+  const cursor: import("./types").SyncCursor = {
+    since: 9,
+    cursor: "opaque",
+    assertCurrent: () => {},
+  }
+  expect(JSON.parse(JSON.stringify(cursor))).toEqual({ since: 9, cursor: "opaque" })
+})

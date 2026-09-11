@@ -77,7 +77,10 @@ export async function updateServiceConnectionStatus(
 export async function suspendPluginServiceConnections(pluginId: string): Promise<number> {
   const db = getDb()
   const rows = await db.serviceConnections.where("pluginId").equals(pluginId).toArray()
-  const active = rows.filter((row) => row.status !== "suspended")
+  const active = rows.filter(
+    (row): row is ServiceConnection & { status: Exclude<ServiceConnectionStatus, "suspended"> } =>
+      row.status !== "suspended"
+  )
   await db.serviceConnections.bulkPut(
     active.map((row) => ({
       ...row,

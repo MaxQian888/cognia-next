@@ -56,6 +56,38 @@ const BODY_LIMIT_BYTES: usize = 64 * 1024;
 const INTERNAL_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES: usize = 11 * 1024 * 1024;
 
+async fn limit_public_request_body(request: Request, next: Next) -> Response {
+    use tower::{Layer as _, ServiceExt as _};
+    // The one bulk upload RPC carries up to 64 KiB of raw bytes as base64
+    // (~86 KiB JSON). Keep other public requests at their existing 64 KiB cap;
+    // the transfer handler still validates the decoded chunk size and hash.
+    let limit = if request.method() == Method::POST
+        && request.uri().path() == "/api/_rpc/task_resource_upload_write_chunk"
+    {
+        128 * 1024
+    } else {
+        BODY_LIMIT_BYTES
+    };
+    let service = tower::service_fn(
+        move |request: Request<tower_http::body::Limited<axum::body::Body>>| {
+            let next = next.clone();
+            async move {
+                Ok::<_, std::convert::Infallible>(
+                    next.run(request.map(axum::body::Body::new)).await,
+                )
+            }
+        },
+    );
+    match RequestBodyLimitLayer::new(limit)
+        .layer(service)
+        .oneshot(request)
+        .await
+    {
+        Ok(response) => response.map(axum::body::Body::new),
+        Err(never) => match never {},
+    }
+}
+
 async fn harden_internal_response(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response
@@ -811,7 +843,7 @@ fn build_router_for_mode(
     // webhook bodies fit comfortably under 64 KiB). JWT payloads are tiny;
     // the generous limit leaves room for future multipart (M4.6 push-token).
     let router = router
-        .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+        .layer(from_fn(limit_public_request_body))
         .layer(from_fn(reject_mutations_while_draining));
     // Agent requests include assembled system context and tool schemas. The
     // service-only plane needs a larger bounded body than public webhooks.
@@ -1692,6 +1724,63 @@ mod tests {
     #[test]
     fn body_limit_is_64_kib() {
         assert_eq!(BODY_LIMIT_BYTES, 64 * 1024);
+    }
+
+    #[tokio::test]
+    async fn transfer_body_budget_accepts_negotiated_chunks_and_bounds_other_routes() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use tower::ServiceExt as _;
+        let router = Router::new()
+            .route(
+                "/api/_rpc/{name}",
+                post(|axum::Json(_): axum::Json<serde_json::Value>| async { StatusCode::OK }),
+            )
+            .layer(from_fn(limit_public_request_body));
+        let body = serde_json::json!({
+            "handleId": "019a1234-1234-7123-8123-0123456789ab",
+            "offset": 0,
+            "dataBase64": STANDARD.encode(vec![7_u8; 65_536]),
+            "chunkHash": "0".repeat(64),
+        })
+        .to_string();
+        assert!(body.len() > BODY_LIMIT_BYTES);
+        for (command, payload, expected) in [
+            (
+                "task_resource_upload_write_chunk",
+                body.clone(),
+                StatusCode::OK,
+            ),
+            ("write_text_file", body, StatusCode::PAYLOAD_TOO_LARGE),
+            (
+                "task_resource_upload_write_chunk",
+                "x".repeat(128 * 1024 + 1),
+                StatusCode::PAYLOAD_TOO_LARGE,
+            ),
+        ] {
+            for with_length in [true, false] {
+                let mut request = axum::http::Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/_rpc/{command}"))
+                    .header("content-type", "application/json");
+                if with_length {
+                    request = request.header("content-length", payload.len());
+                }
+                let response = router
+                    .clone()
+                    .oneshot(
+                        request
+                            .body(axum::body::Body::from(payload.clone()))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    expected,
+                    "{command}, content-length={with_length}"
+                );
+            }
+        }
     }
 
     #[tokio::test]

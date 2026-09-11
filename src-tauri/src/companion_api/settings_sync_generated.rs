@@ -35,6 +35,9 @@
 //!   Mirroring one device's policy onto another would silently weaken it, or lock out a device
 //!   with no biometric hardware at all.
 //!
+//! `lockScreen` — device-local (never crosses the wire).
+//!   Lock-screen preferences can reference wallpapers stored only on this device.
+//!
 //! `mobileRuntimeMode` — device-local (never crosses the wire).
 //!   Standalone (BYOK) vs paired (companion) is what this handset is doing right now; it has no
 //!   meaning on any other device (ADR-0056).

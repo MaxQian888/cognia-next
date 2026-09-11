@@ -21,6 +21,7 @@ const NOW = Date.now()
 const noopActions: DeviceGrantActions = {
   toggleRemoteControl: async () => {},
   toggleAgentControl: async () => {},
+  toggleSshFiles: async () => {},
   toggleRemoteTerminal: async () => {},
   toggleLockedComputerUse: async () => {},
   pause: async () => {},
@@ -88,10 +89,20 @@ function host(
     capabilities: ["shell", "pty", "keyring"],
     capabilitiesAt: NOW - 45_000,
     featureManifest: {
-      version: 1,
+      schemaVersion: 1,
+      hostBuildId: "1.4.0",
+      platform: "headless",
+      generatedAt: NOW - 45_000,
+      limits: {
+        rpcJsonBodyBytes: 64 * 1024,
+        skillMaxResources: 50,
+        skillMaxResourceBytes: 2 * 1024 * 1024,
+        skillUploadChunkBytes: 32 * 1024,
+        mcpRequestBodyBytes: 1024 * 1024,
+        maxConcurrentProxyCalls: 32,
+      },
       features: {
         "workflow.execution": { version: 1, operations: ["run", "cancel"] },
-        "terminal.session": { version: 2, operations: ["open", "resize", "close"] },
       },
     },
     featureManifestAt: NOW - 45_000,

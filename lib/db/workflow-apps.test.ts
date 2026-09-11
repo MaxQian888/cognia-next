@@ -1,3 +1,4 @@
+import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
 jest.mock("@/lib/db/seed", () => ({ seedBuiltIns: jest.fn().mockResolvedValue(undefined) }))
 
 import { createDbTestFixture } from "./test-fixture"
@@ -38,11 +39,12 @@ function version(id: string, workflowId = "wf_1"): WorkflowVersion {
     workflowId,
     sequence: Number(id.slice(-1)) || 1,
     definition: {
+      schemaVersion: 2,
       id: workflowId,
       name: "Published workflow",
       nodes: [],
       edges: [],
-      settings: { concurrency: 1 },
+      settings: { ...DEFAULT_WORKFLOW_SETTINGS, concurrency: 1 },
       createdAt: 1,
       updatedAt: 1,
     },
@@ -277,7 +279,7 @@ describe("workflow app release control plane", () => {
       patch: { localized: { en: { title: "Changed draft" } } },
       now: 4_000,
     })
-    expect((await getWorkflowAppRelease(published.release.id))?.snapshot.localized.en.title).toBe(
+    expect((await getWorkflowAppRelease(published.release.id))?.snapshot.localized.en?.title).toBe(
       "Release review"
     )
     expect((await resolvePublishedWorkflowApp("account_1", "release-review"))?.release.id).toBe(

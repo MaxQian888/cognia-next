@@ -55,7 +55,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(353)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(354)
     db.close()
   })
 
@@ -424,4 +424,16 @@ describe("desktop pet", () => {
       expect(policyForTable(table)?.accountScope).toBe("account")
     }
   })
+})
+
+it("keeps the message revision clock local, permanent, and metadata-only", () => {
+  expect(policyForTable("messageSyncClock")).toMatchObject({
+    contentProtection: "metadata-only",
+    accountScope: "runtime-target",
+    syncPolicy: { mode: "none" },
+    backupPolicy: { mode: "device-local" },
+    retentionPolicy: { mode: "permanent" },
+  })
+  expect(PORTABLE_BACKUP_TABLES.has("messageSyncClock")).toBe(false)
+  expect(COMPANION_SYNC_TABLES.has("messageSyncClock")).toBe(false)
 })

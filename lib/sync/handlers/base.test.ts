@@ -41,6 +41,63 @@ function makeTransport(response: SyncDelta<FakeRow> | Error): Transport {
 }
 
 describe("runSyncHandler", () => {
+  it("discards a delayed response after the active database changes", async () => {
+    const original = makeFakeTable()
+    const replacement = makeFakeTable()
+    let table = original.table
+    let release!: (delta: SyncDelta<FakeRow>) => void
+    const transport = makeTransport({ rows: [], deleted_ids: [], next_since: 0 })
+    ;(transport.call as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const pending = runSyncHandler({ table: "characters", getTable: () => table }, transport, {
+      since: 0,
+    })
+    table = replacement.table
+    release({ rows: [{ id: "from-old-host", name: "old" }], deleted_ids: ["local"], next_since: 7 })
+    expect(await pending).toMatchObject({ ok: false, failure: { reason: "transport" } })
+    expect(original.table.bulkPut).not.toHaveBeenCalled()
+    expect(replacement.table.bulkPut).not.toHaveBeenCalled()
+    expect(replacement.table.bulkDelete).not.toHaveBeenCalled()
+  })
+
+  it("stops the remaining write slices when its scope is invalidated", async () => {
+    const fake = makeFakeTable()
+    let current = true
+    const transport = makeTransport({
+      rows: [
+        { id: "a", name: "a" },
+        { id: "b", name: "b" },
+      ],
+      deleted_ids: ["c"],
+      next_since: 7,
+    })
+    const outcome = await runSyncHandler(
+      {
+        table: "characters",
+        getTable: () => fake.table,
+        applySliceSize: 1,
+        applyRows: async (rows) => {
+          await fake.table.bulkPut(rows)
+          current = false
+        },
+      },
+      transport,
+      {
+        since: 0,
+        assertCurrent: () => {
+          if (!current) throw new Error("Sync scope changed")
+        },
+      }
+    )
+    expect(outcome).toMatchObject({ ok: false, failure: { reason: "transport" } })
+    expect(fake.table.bulkPut).toHaveBeenCalledTimes(1)
+    expect(fake.table.bulkDelete).not.toHaveBeenCalled()
+  })
+
   it("upserts rows + deletes tombstones on success", async () => {
     const fake = makeFakeTable()
     const transport = makeTransport({
@@ -313,7 +370,7 @@ describe("runSyncHandler", () => {
       makeTransport({ rows: [{ id: "singleton", name: "s" }], deleted_ids: [], next_since: 5 }),
       { since: 0 }
     )
-    expect(applyRows).toHaveBeenCalledWith([{ id: "singleton", name: "s" }])
+    expect(applyRows).toHaveBeenCalledWith([{ id: "singleton", name: "s" }], expect.any(Function))
     expect(fake.table.bulkPut).not.toHaveBeenCalled()
   })
 
@@ -510,4 +567,25 @@ describe("runSyncHandler", () => {
     expect(result).toMatchObject({ ok: false, failure: { reason: "schema" } })
     expect(fake.store.size).toBe(0)
   })
+})
+
+it("does not dispatch legacy fallback after cancellation during contract negotiation", async () => {
+  const fake = makeFakeTable()
+  let current = true
+  const call = jest.fn().mockImplementation(async () => {
+    current = false
+    throw Object.assign(new Error("contract mismatch"), { code: "contract_input_violation" })
+  })
+  const result = await runSyncHandler(
+    { table: "messages", getTable: () => fake.table },
+    { call } as unknown as Transport,
+    {
+      since: 0,
+      assertCurrent: () => {
+        if (!current) throw new Error("scope cancelled")
+      },
+    }
+  )
+  expect(result.ok).toBe(false)
+  expect(call).toHaveBeenCalledTimes(1)
 })

@@ -1361,6 +1361,7 @@ mod tests {
             "spawn_external_agent",
             "send_to_external_agent",
             "kill_external_agent",
+            "external_agent_delete_gateway_task",
         ] {
             let mut request = execution_request("device", Some(vec!["process.spawn".into()]));
             request.command = command.to_string();

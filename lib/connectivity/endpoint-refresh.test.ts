@@ -196,7 +196,7 @@ describe("refreshCompanionEndpoints", () => {
     expect(save.mock.calls[0][0].baseUrl).toBe("https://192.168.1.9:27890")
   })
 
-  it("still reports the merged config when persisting throws", async () => {
+  it("reports the active config when persisting throws", async () => {
     const out = await refreshCompanionEndpoints({
       callImpl: async () => endpoints() as never,
       loadConfigImpl: () => config({ serverFingerprint: "abc123" }),
@@ -204,7 +204,7 @@ describe("refreshCompanionEndpoints", () => {
         throw new Error("keychain locked")
       },
     })
-    expect(out!.tunnelBaseUrl).toBe("https://calm-rock.trycloudflare.com")
+    expect(out!.tunnelBaseUrl).toBeUndefined()
   })
 
   it.each([
@@ -252,7 +252,7 @@ describe("refreshCompanionEndpoints", () => {
     expect("tunnelBaseUrl" in out!).toBe(false)
   })
 
-  it("keeps the pre-await snapshot when the config vanished mid-refresh", async () => {
+  it("does not restore a pairing removed during the request", async () => {
     // Unpairing between the call and its response: fall back to the snapshot
     // rather than dereferencing null.
     let reads = 0
@@ -261,7 +261,48 @@ describe("refreshCompanionEndpoints", () => {
       loadConfigImpl: () => (reads++ === 0 ? config({ serverFingerprint: "abc123" }) : null),
       saveConfigImpl: jest.fn().mockResolvedValue(undefined),
     })
-    expect(out!.tunnelBaseUrl).toBe("https://calm-rock.trycloudflare.com")
+    expect(out).toBeNull()
+  })
+
+  it("discards endpoints returned by a previously selected Host", async () => {
+    const before = config({ targetId: "host-a" })
+    const after = config({ targetId: "host-b" })
+    let reads = 0
+    const save = jest.fn()
+    expect(
+      await refreshCompanionEndpoints({
+        callImpl: async () => endpoints() as never,
+        loadConfigImpl: () => (reads++ === 0 ? before : after),
+        saveConfigImpl: save,
+      })
+    ).toBe(after)
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it("does not let an older refresh overwrite a newer response for the same Host", async () => {
+    let current = config()
+    const load = () => current
+    const save = jest.fn(async (next: CompanionConfig) => {
+      current = next
+    })
+    let resolveOld!: (value: unknown) => void
+    const old = refreshCompanionEndpoints({
+      callImpl: () =>
+        new Promise((resolve) => {
+          resolveOld = resolve
+        }) as never,
+      loadConfigImpl: load,
+      saveConfigImpl: save,
+    })
+    await refreshCompanionEndpoints({
+      callImpl: async () => endpoints({ tunnelBaseUrl: "https://new.example" }) as never,
+      loadConfigImpl: load,
+      saveConfigImpl: save,
+    })
+    resolveOld(endpoints({ tunnelBaseUrl: "https://old.example" }))
+    await old
+    expect(current.tunnelBaseUrl).toBe("https://new.example")
+    expect(save).toHaveBeenCalledTimes(1)
   })
 
   it("reads and writes the real companion config when no storage seams are injected", async () => {
@@ -269,6 +310,19 @@ describe("refreshCompanionEndpoints", () => {
       jest.requireActual<typeof import("@/lib/tauri/transport-companion")>(
         "@/lib/tauri/transport-companion"
       )
+    const { __setCompanionStorageForTests } = jest.requireActual<
+      typeof import("@/lib/tauri/companion-storage")
+    >("@/lib/tauri/companion-storage")
+    let persisted: CompanionConfig | null = null
+    __setCompanionStorageForTests({
+      load: async () => persisted,
+      save: async (next) => {
+        persisted = next
+      },
+      clear: async () => {
+        persisted = null
+      },
+    })
     __resetCompanionConfigCacheForTests()
     localStorage.clear()
     await saveCompanionConfig(config({ serverFingerprint: "abc123" }))
@@ -276,7 +330,20 @@ describe("refreshCompanionEndpoints", () => {
     await refreshCompanionEndpoints({ callImpl: async () => endpoints() as never })
 
     expect(loadCompanionConfig()!.tunnelBaseUrl).toBe("https://calm-rock.trycloudflare.com")
+    let completeOld!: (value: unknown) => void
+    const late = refreshCompanionEndpoints({
+      callImpl: () =>
+        new Promise((resolve) => {
+          completeOld = resolve
+        }) as never,
+    })
+    await saveCompanionConfig(config({ deviceId: "host-b" }))
+    await saveCompanionConfig(config())
+    completeOld(endpoints({ tunnelBaseUrl: "https://stale.example" }))
+    await late
+    expect(loadCompanionConfig()!.tunnelBaseUrl).toBeUndefined()
     __resetCompanionConfigCacheForTests()
+    __setCompanionStorageForTests(null)
     localStorage.clear()
   })
 

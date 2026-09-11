@@ -42,15 +42,20 @@ export function normalizeMirroredOutboundRow(row: OutboundJobRow): OutboundJobRo
 
 export async function applyOutboundQueueRows(
   rows: OutboundJobRow[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
 ): Promise<void> {
   const table = getDb().outboundQueue
   if (rows.length > 0) await table.bulkPut(rows.map(normalizeMirroredOutboundRow))
-  await sweepAgedMirroredRows(now)
+  assertCurrent()
+  await sweepAgedMirroredRows(now, assertCurrent)
 }
 
 /** Delete mirrored terminal projections older than the retention window. */
-export async function sweepAgedMirroredRows(now: number = Date.now()): Promise<number> {
+export async function sweepAgedMirroredRows(
+  now: number = Date.now(),
+  assertCurrent: () => void = () => {}
+): Promise<number> {
   const table = getDb().outboundQueue
   const victims = await table
     .where("createdAt")
@@ -59,6 +64,7 @@ export async function sweepAgedMirroredRows(now: number = Date.now()): Promise<n
     .limit(MIRROR_SWEEP_BATCH)
     .toArray()
   if (victims.length === 0) return 0
+  assertCurrent()
   await table.bulkDelete(victims.map((row) => row.id))
   return victims.length
 }
@@ -68,7 +74,7 @@ export function syncOutboundQueue(transport: Transport, cursor: SyncCursor): Pro
     {
       table: "outboundQueue",
       getTable: () => getDb().outboundQueue,
-      applyRows: (rows) => applyOutboundQueueRows(rows),
+      applyRows: (rows, assertCurrent) => applyOutboundQueueRows(rows, Date.now(), assertCurrent),
     },
     transport,
     cursor

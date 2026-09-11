@@ -40,9 +40,13 @@ export function normalizeMirroredInstallation(row: BotInstallationRow): BotInsta
   return next
 }
 
-export async function applyBotInstallationRows(rows: BotInstallationRow[]): Promise<void> {
+export async function applyBotInstallationRows(
+  rows: BotInstallationRow[],
+  assertCurrent: () => void = () => {}
+): Promise<void> {
   if (rows.length === 0) return
   const pending = await pendingBotInstallationIds()
+  assertCurrent()
   const writable = pending.size === 0 ? rows : rows.filter((row) => !pending.has(row.id))
   if (writable.length > 0) {
     await getDb().botInstallations.bulkPut(writable.map(normalizeMirroredInstallation))

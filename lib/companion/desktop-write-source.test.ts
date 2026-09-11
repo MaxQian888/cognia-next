@@ -2331,3 +2331,35 @@ it("routes the handoff import to its authoritative session channel", async () =>
     )
   }
 })
+
+describe("manual reply metadata boundary", () => {
+  const payload = {
+    adapterId: "adapter-meta",
+    conversationKey: "telegram:adapter-meta:1",
+    sessionId: "metadata-session",
+    clientMessageId: "metadata-message",
+    request: {
+      conversationRef: { platform: "telegram", adapterId: "adapter-meta" },
+      segments: [{ type: "text", text: "hello" }],
+      metadata: { idempotencyKey: "metadata-idem" },
+    },
+  }
+  it("preserves valid metadata on the host message", async () => {
+    const messageMetadata = { replyTo: { messageId: "parent", preview: "quoted" } }
+    await dispatchCommand("connector_enqueue_outbound", { ...payload, messageMetadata })
+    expect((await getDb().messages.get("metadata-message"))?.metadata).toMatchObject(
+      messageMetadata
+    )
+  })
+  it.each([null, [], { replyTo: { messageId: 42 } }, { templateRun: "bad" }, { injected: true }])(
+    "rejects malformed message metadata before queueing",
+    async (messageMetadata) => {
+      await expect(
+        dispatchCommand("connector_enqueue_outbound", { ...payload, messageMetadata })
+      ).rejects.toThrow("invalid messageMetadata")
+      expect(
+        await getDb().outboundQueue.where("idempotencyKey").equals("metadata-idem").count()
+      ).toBe(0)
+    }
+  )
+})

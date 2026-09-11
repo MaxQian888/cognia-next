@@ -11,6 +11,7 @@
  * runs it detached and the companion learns the outcome from the events.
  */
 
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { transport } from "@/lib/tauri"
 import type { MessageReplyTo, SendContent, SendOptions } from "@cognia/agent-config-types"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
@@ -24,6 +25,8 @@ export interface RoomSendRequest {
   content?: SendContent
   webSearchContext?: SendOptions["webSearchContext"]
   attachmentManifest?: readonly AttachmentManifestEntry[]
+  /** Template provenance retained only on the user transcript row. */
+  templateRun?: ChatTemplateRun
   /** Re-issue the room's last user turn instead of sending `content`. */
   regenerate?: boolean
   /** Replace this user message with `content` and re-run the turn below it. */

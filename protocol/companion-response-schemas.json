@@ -9620,6 +9620,9 @@
       },
       "additionalProperties": false
     },
+    "external_agent_delete_gateway_task": {
+      "$ref": "#/$defs/NullResult"
+    },
     "external_agent_detect_runtimes": {
       "$ref": "#/$defs/DetectedRuntimesReport"
     },

@@ -30,6 +30,8 @@ import {
   loadCompanionConfig,
   reloadCompanionConfigForActiveTarget,
   saveCompanionConfig,
+  updateCompanionConfigMetadata,
+  getCompanionConfigGeneration,
   suspendCompanionTransport,
   type CompanionConfig,
   type TransportTier,
@@ -42,7 +44,7 @@ import {
 } from "./companion-contract"
 import { COMPANION_CONTRACT_VERSION } from "./command-descriptors"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
-import { RtcCarrierError } from "./transport-rtc"
+import { RtcCarrierError, TransportRtc } from "./transport-rtc"
 import {
   clearActiveRuntimeTargetContext,
   setActiveRuntimeTargetContext,
@@ -353,6 +355,333 @@ describe("config helpers", () => {
         targetId: "companion-next",
       })
     )
+  })
+
+  it("updates endpoint metadata without re-registering or notifying the live transport", async () => {
+    const registrar = jest.fn(async () => undefined)
+    __setRuntimeTargetRegistrarForTests(registrar)
+    await saveCompanionConfig(MOCK_CONFIG)
+    registrar.mockClear()
+    const changed = jest.fn()
+    window.addEventListener("cognia:companion-config-changed", changed)
+    const current = loadCompanionConfig()!
+    const generation = getCompanionConfigGeneration()
+    try {
+      await updateCompanionConfigMetadata(current, {
+        baseUrl: current.baseUrl,
+        tunnelBaseUrl: "https://new.example",
+      })
+      expect(loadCompanionConfig()?.tunnelBaseUrl).toBe("https://new.example")
+      expect(registrar).not.toHaveBeenCalled()
+      expect(getCompanionConfigGeneration()).toBe(generation)
+      expect(changed).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener("cognia:companion-config-changed", changed)
+    }
+  })
+
+  it("advances the pairing epoch through A to B to A without treating metadata as activation", async () => {
+    await saveCompanionConfig(MOCK_CONFIG)
+    const firstEpoch = getCompanionConfigGeneration()
+    await saveCompanionConfig({ ...MOCK_CONFIG, deviceId: "host-b" })
+    const secondEpoch = getCompanionConfigGeneration()
+    await saveCompanionConfig(MOCK_CONFIG)
+    expect(secondEpoch).toBeGreaterThan(firstEpoch)
+    expect(getCompanionConfigGeneration()).toBeGreaterThan(secondEpoch)
+    const currentEpoch = getCompanionConfigGeneration()
+    await updateCompanionConfigMetadata(loadCompanionConfig()!, {
+      tunnelBaseUrl: "https://new.example",
+    })
+    expect(getCompanionConfigGeneration()).toBe(currentEpoch)
+  })
+
+  it("rejects metadata for a Host that is no longer selected", async () => {
+    await saveCompanionConfig(MOCK_CONFIG)
+    const previous = loadCompanionConfig()!
+    await saveCompanionConfig({ ...MOCK_CONFIG, deviceId: "another-host" })
+    await updateCompanionConfigMetadata(previous, { baseUrl: "https://stale.example" })
+    expect(loadCompanionConfig()?.deviceId).toBe("another-host")
+    expect(loadCompanionConfig()?.baseUrl).toBe(MOCK_CONFIG.baseUrl)
+  })
+
+  it("serializes unpair after a pending metadata write and never restores its cache", async () => {
+    let stored: CompanionConfig | null = MOCK_CONFIG
+    let finishSave!: () => void
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => stored,
+      save: async (next) => {
+        await new Promise<void>((resolve) => {
+          finishSave = resolve
+        })
+        stored = next
+      },
+      clear: async () => {
+        stored = null
+      },
+    })
+    const update = updateCompanionConfigMetadata(MOCK_CONFIG, { baseUrl: "https://new.example" })
+    await Promise.resolve()
+    await Promise.resolve()
+    const clear = clearCompanionConfig()
+    expect(loadCompanionConfig()).toBeNull()
+    finishSave()
+    await Promise.all([update, clear])
+    expect(loadCompanionConfig()).toBeNull()
+    expect(stored).toBeNull()
+  })
+
+  it("does not publish endpoint metadata when secure persistence fails", async () => {
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => MOCK_CONFIG,
+      save: async () => {
+        throw new Error("locked")
+      },
+      clear: async () => undefined,
+    })
+    await expect(
+      updateCompanionConfigMetadata(MOCK_CONFIG, { baseUrl: "https://new.example" })
+    ).rejects.toThrow("locked")
+    expect(loadCompanionConfig()).toBe(MOCK_CONFIG)
+  })
+
+  it("hydrates warm metadata without changing the pairing epoch or registering again", async () => {
+    const next = { ...MOCK_CONFIG, baseUrl: "https://warm.example" }
+    const save = jest.fn(async () => undefined)
+    const registrar = jest.fn(async () => undefined)
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({ load: async () => next, save, clear: async () => undefined })
+    __setRuntimeTargetRegistrarForTests(registrar)
+    const generation = getCompanionConfigGeneration()
+
+    expect(await hydrateCompanionConfig()).toEqual(next)
+    expect(getCompanionConfigGeneration()).toBe(generation)
+    expect(save).not.toHaveBeenCalled()
+    expect(registrar).not.toHaveBeenCalled()
+  })
+
+  it("advances the epoch when hydration changes or clears the selected Host", async () => {
+    let stored: CompanionConfig | null = { ...MOCK_CONFIG, deviceId: "hydrated-host-b" }
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => stored,
+      save: async () => undefined,
+      clear: async () => undefined,
+    })
+    const generation = getCompanionConfigGeneration()
+    expect((await hydrateCompanionConfig())?.deviceId).toBe("hydrated-host-b")
+    expect(getCompanionConfigGeneration()).toBe(generation + 1)
+    stored = null
+    expect(await hydrateCompanionConfig()).toBeNull()
+    expect(getCompanionConfigGeneration()).toBe(generation + 2)
+  })
+
+  it("does not restore a pairing from a storage read that finishes after unpairing", async () => {
+    let finishLoad!: (config: CompanionConfig) => void
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => {
+        markStarted()
+        return new Promise<CompanionConfig>((resolve) => {
+          finishLoad = resolve
+        })
+      },
+      save: async () => undefined,
+      clear: async () => undefined,
+    })
+    const hydration = hydrateCompanionConfig()
+    await started
+    const clearing = clearCompanionConfig()
+    finishLoad(MOCK_CONFIG)
+    expect(await hydration).toBeNull()
+    await clearing
+    expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("does not expose metadata when conditional persistence declines the update", async () => {
+    const save = jest.fn(async () => undefined)
+    const updateMetadata = jest.fn(async (_next: CompanionConfig, canApply: () => boolean) => {
+      expect(canApply()).toBe(true)
+      return false
+    })
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => MOCK_CONFIG,
+      save,
+      clear: async () => undefined,
+      updateMetadata,
+    })
+    expect(
+      await updateCompanionConfigMetadata(MOCK_CONFIG, { baseUrl: "https://declined.example" })
+    ).toBe(MOCK_CONFIG)
+    expect(loadCompanionConfig()).toBe(MOCK_CONFIG)
+    expect(updateMetadata).toHaveBeenCalledTimes(1)
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it("rechecks a metadata write guard before publishing and skips already-stale work", async () => {
+    let current = false
+    const save = jest.fn(async () => undefined)
+    const updateMetadata = jest.fn(async (_next: CompanionConfig, canApply: () => boolean) => {
+      expect(canApply()).toBe(true)
+      current = false
+      expect(canApply()).toBe(false)
+      return false
+    })
+    __setCompanionConfigCacheForTests(MOCK_CONFIG)
+    __setCompanionStorageForTests({
+      load: async () => MOCK_CONFIG,
+      save,
+      clear: async () => undefined,
+      updateMetadata,
+    })
+    await updateCompanionConfigMetadata(
+      MOCK_CONFIG,
+      { baseUrl: "https://stale.example" },
+      () => current
+    )
+    expect(updateMetadata).not.toHaveBeenCalled()
+    current = true
+    await updateCompanionConfigMetadata(
+      MOCK_CONFIG,
+      { baseUrl: "https://stale.example" },
+      () => current
+    )
+    expect(updateMetadata).toHaveBeenCalledTimes(1)
+    expect(loadCompanionConfig()).toBe(MOCK_CONFIG)
+    expect(save).not.toHaveBeenCalled()
+  })
+
+  it.each(["persistence", "registration"])(
+    "unpair waits for an in-flight hydration %s before clearing",
+    async (stage) => {
+      let stored: CompanionConfig | null = { ...MOCK_CONFIG }
+      let release!: () => void
+      let started!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const entered = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      const events: string[] = []
+      setActiveRuntimeTargetContext("acct_transport", "web-standalone")
+      __setCompanionStorageForTests({
+        load: async () => stored,
+        save: async (next) => {
+          if (stage === "persistence") {
+            started()
+            await pending
+          }
+          stored = next
+          events.push("saved")
+        },
+        clear: async () => {
+          stored = null
+          events.push("cleared")
+        },
+      })
+      __setRuntimeTargetRegistrarForTests(async () => {
+        if (stage === "registration") {
+          started()
+          await pending
+        }
+        events.push("registered")
+      })
+      const hydration = hydrateCompanionConfig()
+      await entered
+      // Keep runtime database detachment outside this storage-order fixture.
+      clearActiveRuntimeTargetContext()
+      const clearing = clearCompanionConfig()
+      await Promise.resolve()
+      await Promise.resolve()
+      const clearedBeforeHydrationFinished = events.includes("cleared")
+      release()
+      await Promise.all([hydration, clearing])
+      expect(clearedBeforeHydrationFinished).toBe(false)
+      expect(events.at(-1)).toBe("cleared")
+      expect(stored).toBeNull()
+      expect(loadCompanionConfig()).toBeNull()
+    }
+  )
+
+  it("does not attach a legacy hydration after the runtime scope changes during target derivation", async () => {
+    let finish!: (digest: ArrayBuffer) => void
+    let started!: () => void
+    const entered = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const derive = jest.spyOn(crypto.subtle, "digest").mockImplementation(async () => {
+      started()
+      return new Promise<ArrayBuffer>((resolve) => {
+        finish = resolve
+      })
+    })
+    const save = jest.fn(async () => undefined)
+    const register = jest.fn(async () => undefined)
+    setActiveRuntimeTargetContext("acct_transport", "web-standalone")
+    __setCompanionStorageForTests({
+      load: async () => MOCK_CONFIG,
+      save,
+      clear: async () => undefined,
+    })
+    __setRuntimeTargetRegistrarForTests(register)
+    try {
+      const hydration = hydrateCompanionConfig()
+      await entered
+      setActiveRuntimeTargetContext("acct_transport", "companion-new")
+      finish(new Uint8Array(32).buffer)
+      expect(await hydration).toBeNull()
+      expect(save).not.toHaveBeenCalled()
+      expect(register).not.toHaveBeenCalled()
+    } finally {
+      derive.mockRestore()
+    }
+  })
+
+  it("finishes an old hydration write before saving a newly selected Host", async () => {
+    let stored: CompanionConfig | null = MOCK_CONFIG
+    let finish!: () => void
+    let started!: () => void
+    const entered = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const saves: string[] = []
+    setActiveRuntimeTargetContext("acct_transport", "web-standalone")
+    __setCompanionStorageForTests({
+      load: async () => stored,
+      save: async (next) => {
+        if (next.deviceId === MOCK_CONFIG.deviceId) {
+          started()
+          await new Promise<void>((resolve) => {
+            finish = resolve
+          })
+        }
+        stored = next
+        saves.push(next.deviceId)
+      },
+      clear: async () => {
+        stored = null
+      },
+    })
+    __setRuntimeTargetRegistrarForTests(async () => undefined)
+    const hydration = hydrateCompanionConfig()
+    await entered
+    const switching = saveCompanionConfig({
+      ...MOCK_CONFIG,
+      targetId: "companion-new",
+      deviceId: "new-host",
+    })
+    finish()
+    await Promise.all([hydration, switching])
+    expect(saves).toEqual([MOCK_CONFIG.deviceId, "new-host"])
+    expect(stored?.deviceId).toBe("new-host")
+    expect(loadCompanionConfig()?.deviceId).toBe("new-host")
   })
 
   it("clearCompanionConfig removes the entry", async () => {
@@ -1957,6 +2286,26 @@ describe("WebSocket reconnect", () => {
     __setBackoffRandomForTests(null)
   })
 
+  it.each(["sync", "async"])("recovers after %s event ticket issuance fails", async (mode) => {
+    const issue = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        if (mode === "sync") throw new Error("ticket issuer unavailable")
+        return Promise.reject(new Error("ticket issuer unavailable"))
+      })
+      .mockImplementation(() => ({ ticket: "recovered-ticket", expiresAt: Date.now() + 60_000 }))
+    __setEventSocketTicketIssuerForTests(issue)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", jest.fn())
+    await jest.advanceTimersByTimeAsync(0)
+    expect(MockWebSocket.instances).toHaveLength(0)
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(issue).toHaveBeenCalledTimes(2)
+    expect(MockWebSocket.instances).toHaveLength(1)
+    MockWebSocket.lastInstance!.triggerOpen()
+    expect(transport.getConnectionState()).toBe("connected")
+  })
+
   it("jitters the reconnect delay around the base backoff", async () => {
     // Max jitter (factor 1.15) pushes the first 1s step out past 1000ms.
     __setBackoffRandomForTests(() => 1)
@@ -2877,5 +3226,285 @@ describe("host contract verdict (ADR-0175)", () => {
       retryable: false,
     })
     expect(transport.getPlaneHealth().rpc).toBe("unauthenticated")
+  })
+})
+
+describe("WAN tier activation lifecycle", () => {
+  const wanConfig: CompanionConfig = {
+    ...MOCK_CONFIG,
+    baseUrl: "https://host.example.test",
+    rendezvousId: "room-lifecycle",
+    signalingRoomDescriptor: {
+      v: 2,
+      roomId: "room-lifecycle",
+      roomNonce: "test-nonce",
+      desktopSigningKey: "desktop-test-key",
+      mobileSigningKey: "mobile-test-key",
+      notAfter: Number.MAX_SAFE_INTEGER,
+    },
+    signalingPrivateKey: {} as CryptoKey,
+  }
+  const options = { signalingUrl: "wss://signaling.example.test", configOverride: wanConfig }
+  let stateListener: Parameters<TransportRtc["onStateChange"]>[0]
+  let connect: jest.SpyInstance
+  let update: jest.SpyInstance
+  let close: jest.SpyInstance
+  let subscribe: jest.SpyInstance
+  let terminal: jest.SpyInstance
+  let detachState: jest.Mock
+  let detachSubscription: jest.Mock
+
+  beforeEach(() => {
+    connect = jest.spyOn(TransportRtc.prototype, "connect").mockResolvedValue(undefined)
+    update = jest
+      .spyOn(TransportRtc.prototype, "updateRtcConfiguration")
+      .mockImplementation(() => {})
+    close = jest.spyOn(TransportRtc.prototype, "close").mockImplementation(() => {})
+    detachState = jest.fn()
+    detachSubscription = jest.fn()
+    jest.spyOn(TransportRtc.prototype, "onStateChange").mockImplementation((listener) => {
+      stateListener = listener
+      return detachState
+    })
+    jest.spyOn(TransportRtc.prototype, "getState").mockReturnValue("open")
+    jest.spyOn(TransportRtc.prototype, "getCarrier").mockReturnValue("datachannel")
+    jest.spyOn(TransportRtc.prototype, "getSelectedCandidateKind").mockResolvedValue("host")
+    subscribe = jest.spyOn(TransportRtc.prototype, "subscribe").mockReturnValue(detachSubscription)
+    terminal = jest.spyOn(TransportRtc.prototype, "getTerminalDataChannel").mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    transport.destroy()
+    jest.restoreAllMocks()
+  })
+
+  it("does not attempt WAN signaling without the complete pairing identity", async () => {
+    transport = new CompanionTransport()
+    await transport.enableWebRtcTier({ signalingUrl: options.signalingUrl })
+    for (const configOverride of [
+      MOCK_CONFIG,
+      { ...wanConfig, signalingRoomDescriptor: undefined },
+      { ...wanConfig, signalingPrivateKey: undefined },
+    ]) {
+      await transport.enableWanTier({ ...options, configOverride })
+    }
+    expect(connect).not.toHaveBeenCalled()
+    expect(transport.getTerminalDataChannel()).toBeNull()
+    expect(transport.getTerminalClientId()).toBeNull()
+  })
+
+  it("shares an in-flight handshake, mirrors subscribers, and releases them when the peer closes", async () => {
+    await setConfig(wanConfig)
+    transport = new CompanionTransport()
+    const handler = jest.fn()
+    const unsubscribe = transport.subscribe("task:changed", handler)
+    let finish!: () => void
+    connect.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const channel = { label: "cognia.terminal" } as RTCDataChannel
+    terminal.mockReturnValue(channel)
+    const first = transport.enableWebRtcTier(options)
+    expect(transport.getTerminalDataChannel()).toBe(channel)
+    const rtcConfiguration = { iceServers: [{ urls: "stun:example.test" }] }
+    const second = transport.enableWanTier({ ...options, rtcConfiguration })
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenLastCalledWith(rtcConfiguration)
+    finish()
+    await Promise.all([first, second])
+    expect(subscribe).toHaveBeenCalledWith("task:changed", handler)
+    expect(transport.getTerminalClientId()).toBe(`companion:${wanConfig.deviceId}`)
+    expect(transport.getTerminalDataChannel()).toBe(channel)
+    await transport.enableWanTier({ ...options, rtcConfiguration: {} })
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenLastCalledWith({})
+    stateListener("closed")
+    expect(detachState).toHaveBeenCalledTimes(1)
+    expect(detachSubscription).toHaveBeenCalledTimes(1)
+    expect(transport.getTerminalDataChannel()).toBeNull()
+    unsubscribe()
+    expect(detachSubscription).toHaveBeenCalledTimes(1)
+  })
+
+  it("contains failed upgrades and can rebuild on an explicit retry", async () => {
+    await setConfig(wanConfig)
+    transport = new CompanionTransport()
+    connect.mockRejectedValueOnce(new Error("signaling unavailable"))
+    close.mockImplementationOnce(() => {
+      throw new Error("already closed")
+    })
+    await expect(transport.enableWanTier(options)).resolves.toBeUndefined()
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(detachState).toHaveBeenCalledTimes(1)
+    expect(transport.getTerminalDataChannel()).toBeNull()
+    expect(transport.reconnectRtc()).toBe("ok")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(connect).toHaveBeenCalledTimes(2)
+    transport.disableWebRtcTier()
+    expect(transport.reconnectRtc()).toBe("no-tier")
+  })
+})
+
+describe("remote binary and catalog refusal boundaries", () => {
+  const resource = {
+    kind: "session-media" as const,
+    sessionId: "s1",
+    hash: "a".repeat(64),
+    variant: "original" as const,
+  }
+  const context = {
+    root: "/workspace",
+    generation: 1,
+    pluginId: "demo",
+    providerId: "files",
+    permission: null,
+  }
+
+  it("rejects unpaired catalog and content operations before using the network", async () => {
+    transport = new CompanionTransport()
+    await expect(transport.catalog()).rejects.toMatchObject({ code: "not_paired" })
+    await expect(transport.readBinary(resource)).rejects.toMatchObject({ code: "not_paired" })
+    await expect(transport.uploadManagedIdeContent(context, new Uint8Array())).rejects.toThrow(
+      "not paired"
+    )
+    await expect(transport.redeemManagedIdeContent(context, "opaque")).rejects.toThrow("not paired")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each([new Error("socket lost"), "socket lost"])(
+    "reports a catalog network failure and marks only the RPC plane unavailable",
+    async (reason) => {
+      await setConfig()
+      transport = new CompanionTransport()
+      fetchSpy.mockRejectedValueOnce(reason)
+      await expect(transport.catalog()).rejects.toMatchObject({
+        code: "network",
+        message: "socket lost",
+        retryable: true,
+      })
+      expect(transport.getPlaneHealth()).toEqual({ rpc: "unavailable", events: "idle" })
+    }
+  )
+
+  it("preserves a catalog HTTP failure even when the body is not JSON", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => {
+        throw new Error("html proxy error")
+      },
+    })
+    await expect(transport.catalog()).rejects.toMatchObject({
+      code: "http_503",
+      message: "HTTP 503",
+      retryable: true,
+    })
+  })
+
+  it("surfaces managed content refusal without repeating either a write or one-shot redemption", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    fetchSpy.mockResolvedValue({ ok: false, status: 403, text: async () => "handle expired" })
+    await expect(
+      transport.uploadManagedIdeContent({ ...context, mediaType: "image/png" }, new Uint8Array([1]))
+    ).rejects.toThrow("upload failed (403): handle expired")
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      "Content-Type": "image/png",
+    })
+    await expect(transport.redeemManagedIdeContent(context, "opaque")).rejects.toThrow(
+      "redemption failed (403): handle expired"
+    )
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { kind: "unrecognized" },
+    { sessionId: "" },
+    { sessionId: "s".repeat(513) },
+    { variant: "unrecognized" },
+  ])("rejects malformed binary resource fields before transport: %j", async (override) => {
+    await setConfig()
+    transport = new CompanionTransport()
+    await expect(
+      transport.readBinary({ ...resource, ...override } as Parameters<
+        CompanionTransport["readBinary"]
+      >[0])
+    ).rejects.toMatchObject({ code: "invalid_binary_resource" })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])(
+    "enforces the binary response budget even when declared=%s",
+    async (declared) => {
+      await setConfig()
+      transport = new CompanionTransport()
+      const body = jest.fn(async () => new ArrayBuffer(10 * 1024 * 1024 + 1))
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) =>
+            name === "content-length" && declared ? String(10 * 1024 * 1024 + 1) : null,
+        },
+        arrayBuffer: body,
+      })
+      await expect(transport.readBinary(resource)).rejects.toMatchObject({
+        code: "binary_resource_too_large",
+        retryable: false,
+      })
+      expect(body).toHaveBeenCalledTimes(declared ? 0 : 1)
+    }
+  )
+
+  it("does not retry a timed-out binary operation", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    fetchSpy.mockRejectedValueOnce(Object.assign(new Error("aborted"), { name: "AbortError" }))
+    await expect(transport.readBinary(resource)).rejects.toMatchObject({
+      code: "timeout",
+      retryable: true,
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([401, 403])(
+    "stops binary HTTP %s without assuming it is a connectivity failure",
+    async (status) => {
+      await setConfig()
+      transport = new CompanionTransport()
+      fetchSpy.mockResolvedValueOnce({
+        ok: false,
+        status,
+        json: async () => {
+          throw new Error("not JSON")
+        },
+      })
+      await expect(transport.readBinary(resource)).rejects.toMatchObject({
+        code: `http_${status}`,
+        message: `HTTP ${status}`,
+        retryable: false,
+      })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      expect(transport.getConnectionState()).toBe(status === 401 ? "unauthenticated" : "offline")
+    }
+  )
+
+  it.each(["network", "server_error"])("bounds exhausted binary %s retries", async (code) => {
+    jest.useFakeTimers()
+    await setConfig()
+    transport = new CompanionTransport()
+    if (code === "network") fetchSpy.mockRejectedValue(new Error("disconnected"))
+    else fetchSpy.mockResolvedValue(mockResponse({}, 503))
+    const result = transport.readBinary(resource)
+    const rejected = expect(result).rejects.toMatchObject({ code, retryable: true })
+    await jest.advanceTimersByTimeAsync(2_000)
+    await rejected
+    expect(fetchSpy).toHaveBeenCalledTimes(4)
   })
 })

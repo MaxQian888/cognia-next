@@ -15,7 +15,13 @@ const CONTROL = GRANT_CAPABILITIES.control
 
 function evidence(overrides: Partial<GrantEvidence> = {}): GrantEvidence {
   return {
-    mirror: { control: false, agentControl: false, terminal: false, lockedComputerUse: false },
+    mirror: {
+      control: false,
+      agentControl: false,
+      terminal: false,
+      sshFiles: false,
+      lockedComputerUse: false,
+    },
     revoked: false,
     ...overrides,
   }
@@ -115,7 +121,7 @@ describe("buildGrantRows — raw host capabilities available", () => {
     const rows = buildGrantRows(
       evidence({
         hostCapabilities: ["agent.run"],
-        hostVerdict: { control: false, agentControl: false, terminal: false },
+        hostVerdict: { control: false, agentControl: false, terminal: false, sshFiles: false },
       })
     )
     expect(rowFor(rows, "control").state).toBe("partial")
@@ -125,7 +131,9 @@ describe("buildGrantRows — raw host capabilities available", () => {
 describe("buildGrantRows — degraded evidence", () => {
   it("falls back to the host verdict when the raw set is unavailable", () => {
     const rows = buildGrantRows(
-      evidence({ hostVerdict: { control: true, agentControl: false, terminal: false } })
+      evidence({
+        hostVerdict: { control: true, agentControl: false, terminal: false, sshFiles: false },
+      })
     )
     expect(rowFor(rows, "control").state).toBe("granted")
     expect(rowFor(rows, "control").reasonKey).toBeUndefined()
@@ -171,7 +179,13 @@ describe("Locked Use dormancy", () => {
   it("stays denied and unavailable even when the mirror bit is set", () => {
     const rows = buildGrantRows(
       evidence({
-        mirror: { control: true, agentControl: false, terminal: false, lockedComputerUse: true },
+        mirror: {
+          control: true,
+          agentControl: false,
+          terminal: false,
+          sshFiles: false,
+          lockedComputerUse: true,
+        },
       })
     )
     expect(rowFor(rows, "lockedComputerUse")).toMatchObject({

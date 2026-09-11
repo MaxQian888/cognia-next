@@ -155,6 +155,11 @@ export class MigratingCompanionStorage implements CompanionConfigStorage {
     await this.opts.legacy.clear().catch(() => undefined)
   }
 
+  async updateMetadata(config: CompanionConfig, isCurrent: () => boolean): Promise<boolean> {
+    await this.ensureMigrated()
+    return this.delegate.updateMetadata(config, isCurrent)
+  }
+
   async clear(): Promise<void> {
     await this.markMigrationDone()
     await this.delegate.clear()

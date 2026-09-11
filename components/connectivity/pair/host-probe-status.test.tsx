@@ -68,7 +68,7 @@ it("shows the allowlist block only for a refusal", () => {
 
 // `lint:i18n` cannot see `t(state)`, so the catalogue is pinned here.
 it.each(STATES)("has copy in both locales for %s", (state) => {
-  for (const catalogue of [enPair, zhPair] as Array<Record<string, Record<string, string>>>) {
+  for (const catalogue of [enPair, zhPair]) {
     expect(catalogue.hostProbe[state]).toBeTruthy()
   }
 })

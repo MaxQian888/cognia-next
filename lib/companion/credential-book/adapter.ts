@@ -138,6 +138,31 @@ export class CredentialBookCompanionStorage implements CompanionConfigStorage {
     return toCompanionConfig(record, credential)
   }
 
+  async updateMetadata(config: CompanionConfig, isCurrent: () => boolean): Promise<boolean> {
+    const accountNamespace =
+      config.accountId ?? this.opts.accountNamespace() ?? DEFAULT_ACCOUNT_NAMESPACE
+    if (!this.opts.book.updateMetadata)
+      throw new Error("Credential book does not support metadata updates")
+    return this.opts.book.updateMetadata(
+      {
+        hostId: legacyHostId(config),
+        accountNamespace,
+        deviceId: config.deviceId,
+        deviceKeyThumbprint: config.deviceKeyThumbprint ?? "",
+        rendezvousId: config.rendezvousId,
+      },
+      {
+        endpoints: {
+          baseUrl: config.baseUrl,
+          lanBaseUrl: config.lanBaseUrl,
+          tunnelBaseUrl: config.tunnelBaseUrl,
+        },
+        tlsPin: config.serverFingerprint ?? null,
+      },
+      isCurrent
+    )
+  }
+
   async save(config: CompanionConfig): Promise<void> {
     // Matches the storage this replaced: outside a browser there is nowhere to
     // persist, and the in-memory config cache stays authoritative for the

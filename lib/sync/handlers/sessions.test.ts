@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import Dexie from "dexie"
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { SyncDelta } from "../types"
@@ -87,4 +88,29 @@ describe("syncSessions managed workspace boundary", () => {
       expect.objectContaining({ availability: "available", localRoot: "/local/root" })
     )
   })
+})
+
+it("rejects cancellation after asynchronous merge preparation", async () => {
+  const table = getDb().sessions
+  let current = true
+  const read = jest.spyOn(table, "bulkGet").mockImplementation(() =>
+    Dexie.Promise.resolve().then(() => {
+      current = false
+      return []
+    })
+  )
+  const write = jest.spyOn(table, "bulkPut")
+  const assertCurrent = () => {
+    if (!current) throw new Error("scope cancelled")
+  }
+  try {
+    expect(
+      (await syncSessions(transportFor([{ id: "cancelled" }]), { since: 0, assertCurrent })).ok
+    ).toBe(false)
+    expect(read).toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
+  } finally {
+    read.mockRestore()
+    write.mockRestore()
+  }
 })

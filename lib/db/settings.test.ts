@@ -351,19 +351,22 @@ describe("getSettings", () => {
 })
 
 describe("saveSettings", () => {
-  it("migrates the legacy default account into the matching provider map on write", async () => {
-    await getDb().settings.put({
-      ...DEFAULTS,
-      id: "singleton",
-      defaultProvider: "anthropic",
-      defaultAccountId: "legacy-account",
-    })
+  it.each(["anthropic", "commandcode", "custom-provider", "plugin:provider"] as const)(
+    "migrates the legacy %s account into the provider map",
+    async (provider) => {
+      await getDb().settings.put({
+        ...DEFAULTS,
+        id: "singleton",
+        defaultProvider: provider,
+        defaultAccountId: "legacy-account",
+      })
 
-    const saved = await saveSettings({ reduceMotion: true })
+      const saved = await saveSettings({ reduceMotion: true })
 
-    expect(saved.defaultAccountIds).toEqual({ anthropic: "legacy-account" })
-    expect(saved.defaultAccountId).toBeUndefined()
-  })
+      expect(saved.defaultAccountIds).toEqual({ [provider]: "legacy-account" })
+      expect(saved.defaultAccountId).toBeUndefined()
+    }
+  )
 
   it("keeps a legacy account bound to its original provider when the default provider changes", async () => {
     await getDb().settings.put({

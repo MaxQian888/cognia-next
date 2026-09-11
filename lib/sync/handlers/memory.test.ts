@@ -202,3 +202,19 @@ describe("pruneMobileMemoryCache", () => {
     ])
   })
 })
+
+it("does not import a paired DEK returned after cancellation", async () => {
+  let current = true
+  const store = { load: jest.fn(async () => null), importPaired: jest.fn() }
+  const transport = makeTransport([])
+  ;(transport.call as jest.Mock).mockImplementation(async () => {
+    current = false
+    return { protocolVersion: 1, profileId: "p", keyId: "k", rawKey: "YWJj" }
+  })
+  await expect(
+    ensurePairedMemoryDek(transport, "p", "k", store as never, () => {
+      if (!current) throw new Error("cancelled")
+    })
+  ).rejects.toThrow("cancelled")
+  expect(store.importPaired).not.toHaveBeenCalled()
+})

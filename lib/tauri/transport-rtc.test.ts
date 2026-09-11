@@ -19,6 +19,7 @@ import type {
   SignalingClient,
 } from "@/lib/signaling"
 import { remoteEventResyncCoordinator } from "./resync-coordinator"
+import { encodeRtcLogicalMessage } from "./datachannel-framing"
 
 const ROOM_DESCRIPTOR = {
   v: 2 as const,
@@ -239,14 +240,7 @@ function envelope(kind: Envelope["kind"], body: unknown, seq = 1): Envelope {
   }
 }
 
-function makeRtc(
-  overrides: Partial<
-    Pick<
-      ConstructorParameters<typeof TransportRtc>[0],
-      "peerWaitTimeoutMs" | "negotiationTimeoutMs" | "disconnectedGraceMs"
-    >
-  > = {}
-) {
+function makeRtc(overrides: Partial<ConstructorParameters<typeof TransportRtc>[0]> = {}) {
   const sig = new FakeSignaling()
   const pcs: FakePeerConnection[] = []
   const rtc = new TransportRtc({
@@ -298,7 +292,7 @@ describe("TransportRtc", () => {
   it("handles a rejected fire-and-forget ICE send without an unhandled rejection", async () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
     const { rtc, sig, pcs } = makeRtc()
-    void rtc.connect()
+    void rtc.connect().catch(() => {})
     await new Promise((resolve) => setTimeout(resolve, 5))
     sig.sendError = new Error("queue full")
 
@@ -335,7 +329,7 @@ describe("TransportRtc", () => {
     it("holds in 'awaiting-peer' — no offer — when the room is empty on subscribe", async () => {
       const { rtc, sig, pcs } = makeRtc()
       sig.peersOnSubscribe = [] // desktop not in the rendezvous yet
-      void rtc.connect()
+      void rtc.connect().catch(() => {})
       await new Promise((r) => setTimeout(r, 5))
 
       expect(rtc.getState()).toBe("awaiting-peer")
@@ -370,7 +364,7 @@ describe("TransportRtc", () => {
     it("negotiates immediately when the desktop is already in the room on subscribe", async () => {
       const { rtc, sig } = makeRtc()
       // Default peersOnSubscribe already lists the desktop.
-      void rtc.connect()
+      void rtc.connect().catch(() => {})
       await new Promise((r) => setTimeout(r, 5))
       expect(rtc.getState()).toBe("negotiating")
       expect(sig.sent.some((m) => m.kind === "rtc:offer")).toBe(true)
@@ -412,7 +406,7 @@ describe("TransportRtc", () => {
 
   it("forwards local ICE candidates through signaling", async () => {
     const { rtc, sig, pcs } = makeRtc({ disconnectedGraceMs: 0 })
-    void rtc.connect()
+    void rtc.connect().catch(() => {})
     await new Promise((r) => setTimeout(r, 5))
     pcs[0].fireIceCandidate({ candidate: "candidate:1 1 udp" } as RTCIceCandidateInit)
     expect(sig.sent.some((m) => m.kind === "rtc:ice")).toBe(true)
@@ -748,7 +742,7 @@ describe("TransportRtc", () => {
 
   it("queues remote ICE until the answer has been applied", async () => {
     const { rtc, sig, pcs } = makeRtc()
-    void rtc.connect()
+    void rtc.connect().catch(() => {})
     await new Promise((r) => setTimeout(r, 5))
     const candidate = { candidate: "candidate:remote 1 udp" } as RTCIceCandidateInit
 
@@ -863,7 +857,7 @@ describe("TransportRtc", () => {
 
   it("announces identity with a hello envelope before the offer", async () => {
     const { rtc, sig } = makeRtc()
-    void rtc.connect()
+    void rtc.connect().catch(() => {})
     await new Promise((r) => setTimeout(r, 5))
     const helloIdx = sig.sent.findIndex((m) => m.kind === "hello")
     const offerIdx = sig.sent.findIndex((m) => m.kind === "rtc:offer")
@@ -872,6 +866,54 @@ describe("TransportRtc", () => {
     expect(sig.sent[helloIdx].body).toEqual({ deviceId: "dev-1", relay: true })
     rtc.close()
   })
+
+  it.each(["connect_timeout", "challenge_timeout", "subscribe_timeout", "pong_timeout"])(
+    "allows the signaling client to recover from %s during initial connection",
+    async (code) => {
+      const { rtc, sig } = makeRtc({ p2p: false })
+      const connecting = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      sig.emitError(code)
+      for (const listener of sig.listeners.state) listener("reconnecting")
+      expect(sig.closed).toBe(false)
+      expect(rtc.getState()).not.toBe("failed")
+      for (const listener of sig.listeners.subscribed) listener({ peers: DESKTOP_PRESENT })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      sig.emitEnvelope(envelope("hello", { deviceId: "host", relay: true }))
+      await connecting
+      expect(rtc.getState()).toBe("open")
+      rtc.close()
+    }
+  )
+
+  it("rebuilds an interrupted initial P2P negotiation when signaling recovers", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connecting = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    sig.emitError("subscribe_timeout")
+    for (const listener of sig.listeners.state) listener("reconnecting")
+    expect(sig.closed).toBe(false)
+    for (const listener of sig.listeners.subscribed) listener({ peers: DESKTOP_PRESENT })
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(pcs).toHaveLength(2)
+    pcs[1].channels[0].open()
+    await connecting
+    expect(rtc.getState()).toBe("open")
+    rtc.close()
+  })
+
+  it.each(["auth_failed", "session_replaced"])(
+    "rejects permanent %s without retry",
+    async (code) => {
+      const { rtc, sig } = makeRtc()
+      const connecting = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      sig.emitError(code)
+      await expect(connecting).rejects.toThrow("signaling rejected")
+      expect(sig.closed).toBe(true)
+      expect(rtc.getState()).toBe("failed")
+    }
+  )
 
   it("fails fast on a signaling error during negotiation (no 8s wait)", async () => {
     const { rtc, sig } = makeRtc()
@@ -1175,7 +1217,7 @@ describe("TransportRtc", () => {
 
     it("reconnectNow() during in-flight negotiation returns 'busy' without a no-op restart (F3)", async () => {
       const { rtc, sigs, pcs } = makeReconnectable()
-      void rtc.connect()
+      void rtc.connect().catch(() => {})
       // Wait just past queueMicrotask so state=negotiating.
       await new Promise((r) => setTimeout(r, 5))
       expect(rtc.getState()).toBe("negotiating")
@@ -1194,7 +1236,7 @@ describe("TransportRtc", () => {
 
     it("reconnectNow() 'busy' does not burn the throttle window (F3)", async () => {
       const { rtc, sigs, pcs } = makeReconnectable([10_000])
-      void rtc.connect()
+      void rtc.connect().catch(() => {})
       await new Promise((r) => setTimeout(r, 5))
       expect(rtc.getState()).toBe("negotiating")
       // Click during negotiation → busy, throttle NOT consumed.
@@ -1566,5 +1608,863 @@ describe("TransportRtc", () => {
       expect(served.pcs).toHaveLength(0)
       served.rtc.close()
     })
+  })
+})
+
+describe("TransportRtc resource and recovery boundaries", () => {
+  const resource = {
+    kind: "session-media" as const,
+    sessionId: "s",
+    hash: "a".repeat(64),
+    variant: "canonical" as const,
+  }
+  async function open(p2p = true) {
+    const fixture = makeRtc({ p2p })
+    const connected = fixture.rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (p2p) fixture.pcs[0].channels[0].open()
+    else fixture.sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    return { ...fixture, dc: fixture.pcs[0]?.channels[0] }
+  }
+  function binaryFrame(id: string, index: number, total: number, payload: number[]) {
+    const frame = new ArrayBuffer(48 + payload.length)
+    new Uint8Array(frame).set([0x43, 0x47, 0x4d, 0x31])
+    new Uint8Array(frame).set(new TextEncoder().encode(id), 4)
+    new DataView(frame).setUint32(40, index)
+    new DataView(frame).setUint32(44, total)
+    new Uint8Array(frame).set(payload, 48)
+    return frame
+  }
+  function latestBinary(dc: FakeDataChannel) {
+    return dc.sent
+      .map((raw) => JSON.parse(raw))
+      .filter((frame) => frame.kind === "binary-resource")
+      .at(-1).id as string
+  }
+
+  it.each([
+    { mediaType: 1 },
+    { totalBytes: -1 },
+    { totalBytes: 1.5 },
+    { totalBytes: 11 * 1024 * 1024 },
+    { totalChunks: 0 },
+    { totalChunks: 1.5 },
+    { totalChunks: 513 },
+  ])("rejects invalid binary metadata %p", async (patch) => {
+    const { rtc, dc } = await open()
+    const result = rtc.readBinary(resource)
+    dc.push({
+      kind: "binary-resource-start",
+      id: latestBinary(dc),
+      mediaType: "image/png",
+      totalBytes: 1,
+      totalChunks: 1,
+      ...patch,
+    })
+    await expect(result).rejects.toThrow("invalid binary resource metadata")
+  })
+
+  it.each([
+    { announced: 2, sent: 1, size: 1, bytes: [1], error: "chunk count mismatch" },
+    { announced: 1, sent: 1, size: 1, bytes: [1, 2], error: "length mismatch" },
+    { announced: 1, sent: 1, size: 2, bytes: [1], error: "length mismatch" },
+    { announced: 1, sent: 1, size: 1, bytes: [1], error: "length mismatch", mediaType: "" },
+  ])("rejects inconsistent resource framing %p", async (input) => {
+    const { rtc, dc } = await open()
+    const result = rtc.readBinary(resource)
+    const id = latestBinary(dc)
+    dc.push({
+      kind: "binary-resource-start",
+      id,
+      mediaType: input.mediaType ?? "image/png",
+      totalBytes: input.size,
+      totalChunks: input.announced,
+    })
+    dc.pushBinary(binaryFrame(id, 0, input.sent, input.bytes))
+    await expect(result).rejects.toThrow(input.error)
+  })
+
+  it("ignores malformed and unsolicited binary input and assembles out of order", async () => {
+    const { rtc, dc } = await open()
+    dc.pushBinary(new ArrayBuffer(2))
+    dc.pushBinary(binaryFrame("00000000-0000-0000-0000-000000000000", 0, 1, [9]))
+    dc.push({ kind: "binary-resource-start", id: 7 })
+    dc.push({ kind: "binary-resource-start", id: "unknown" })
+    const result = rtc.readBinary(resource)
+    const id = latestBinary(dc)
+    dc.pushBinary(binaryFrame(id, 0, 2, [9]))
+    dc.push({
+      kind: "binary-resource-start",
+      id,
+      mediaType: "image/png",
+      totalBytes: 2,
+      totalChunks: 2,
+    })
+    dc.pushBinary(binaryFrame(id, 1, 2, [2]))
+    dc.pushBinary(binaryFrame(id, 0, 2, [1]))
+    await expect(result).resolves.toEqual({
+      bytes: Uint8Array.from([1, 2]),
+      mediaType: "image/png",
+    })
+  })
+
+  it.each([true, false])(
+    "handles ordinary RPC responses to a binary request (ok=%s)",
+    async (ok) => {
+      const { rtc, dc } = await open()
+      const result = rtc.readBinary(resource)
+      dc.push({ id: latestBinary(dc), ok, error: { code: "not_found", message: "missing" } })
+      await expect(result).rejects.toThrow(ok ? "unexpected binary resource response" : "missing")
+    }
+  )
+
+  it("enforces concurrent resource limits and bounds a silent Host", async () => {
+    const { rtc, dc } = await open()
+    jest.useFakeTimers()
+    try {
+      const results = Array.from({ length: 8 }, () =>
+        rtc.readBinary(resource).catch((error) => error)
+      )
+      await expect(rtc.readBinary(resource)).rejects.toThrow("too many concurrent binary resources")
+      await jest.advanceTimersByTimeAsync(120_000)
+      for (const result of results) await expect(result).resolves.toThrow("timed out")
+      const next = rtc.readBinary(resource)
+      dc.push({ id: latestBinary(dc), ok: false, error: { code: "missing", message: "missing" } })
+      await expect(next).rejects.toThrow("missing")
+    } finally {
+      rtc.close()
+      jest.useRealTimers()
+    }
+  })
+
+  it("rejects binary reads while offline and releases resources during a reconnect", async () => {
+    const offline = makeRtc()
+    await expect(offline.rtc.readBinary(resource)).rejects.toThrow("not open")
+    const { rtc } = await open()
+    const read = rtc.readBinary(resource)
+    const reconnect = rtc.reconnectNow()
+    await expect(read).rejects.toThrow("reset")
+    rtc.close()
+    void reconnect
+  })
+
+  it("decodes binary resources over the relay and ignores invalid relay envelopes", async () => {
+    const { rtc, sig } = await open(false)
+    sig.emitEnvelope(envelope("data", null))
+    sig.emitEnvelope(envelope("data", {}))
+    sig.emitEnvelope(envelope("data", { b64: "!" }))
+    const result = rtc.readBinary(resource)
+    await Promise.resolve()
+    const request = sig.sent
+      .filter((frame) => frame.kind === "data")
+      .map((frame) => JSON.parse((frame.body as { text: string }).text))
+      .find((frame) => frame.kind === "binary-resource")
+    sig.emitEnvelope(
+      envelope("data", {
+        text: JSON.stringify({
+          kind: "binary-resource-start",
+          id: request.id,
+          mediaType: "image/png",
+          totalBytes: 1,
+          totalChunks: 1,
+        }),
+      })
+    )
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(binaryFrame(request.id, 0, 1, [255]))))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "")
+    sig.emitEnvelope(envelope("data", { b64 }))
+    await expect(result).resolves.toEqual({ bytes: Uint8Array.from([255]), mediaType: "image/png" })
+  })
+
+  it.each([new Error("send failed"), "send failed"])(
+    "preserves send failure for binary resources %p",
+    async (error) => {
+      const { rtc, sig } = await open(false)
+      sig.sendError = error as Error
+      await expect(rtc.readBinary(resource)).rejects.toThrow("send failed")
+      await expect(rtc.call("ping")).rejects.toThrow("send failed")
+    }
+  )
+
+  it("rejects an already elapsed RPC deadline before sending", async () => {
+    const { rtc, dc } = await open()
+    const count = dc.sent.length
+    await expect(rtc.call("ping", {}, { deadlineAt: Date.now() - 1 })).rejects.toThrow("timed out")
+    expect(dc.sent).toHaveLength(count)
+  })
+
+  it("filters malformed event batches and isolates a throwing subscriber", async () => {
+    const { rtc, dc } = await open()
+    const received = jest.fn()
+    rtc.subscribe("topic", () => {
+      throw new Error("subscriber failed")
+    })
+    const detach = rtc.subscribe("topic", received)
+    dc.onmessage?.({ data: "{not-json" } as MessageEvent)
+    dc.push(null)
+    dc.push(5)
+    dc.push({ kind: "event-batch", frames: "invalid" })
+    dc.push({ id: "unknown", ok: true })
+    dc.push({ id: 7 })
+    dc.push({
+      kind: "event-batch",
+      frames: [null, 1, {}, { kind: "event", event: "topic", seq: 1, payload: "ok" }],
+    })
+    expect(received).toHaveBeenCalledWith("ok")
+    detach()
+    detach()
+  })
+
+  it.each([undefined, -1, 1.5])(
+    "fails closed on an authoritative resync without a valid cursor %p",
+    async (cursor) => {
+      const { rtc, dc } = await open()
+      const detach = remoteEventResyncCoordinator.register("*", async () => {})
+      dc.push({ kind: "resync_required", cursor })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(rtc.getState()).toBe("failed")
+      detach()
+    }
+  )
+
+  it("serializes authoritative resync and then drains queued events in order", async () => {
+    const { rtc, dc } = await open()
+    let finish!: () => void
+    const resolver = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const detach = remoteEventResyncCoordinator.register("topic", resolver)
+    const received = jest.fn()
+    rtc.subscribe("topic", received)
+    rtc.subscribe("topic", () => {
+      throw new Error("subscriber failed")
+    })
+    dc.push({ kind: "resync_required", domains: ["topic"], cursor: 3 })
+    dc.push({ kind: "resync_required", domains: ["topic"], cursor: 3 })
+    dc.push({ kind: "event", event: "topic", seq: 5, payload: "fifth" })
+    dc.push({ kind: "event", event: "topic", seq: 4, payload: "fourth" })
+    await Promise.resolve()
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolver).toHaveBeenCalledTimes(1)
+    expect(received.mock.calls.map(([value]) => value)).toEqual([
+      { type: "resync_required", domains: ["topic"] },
+      "fourth",
+      "fifth",
+    ])
+    detach()
+  })
+})
+
+describe("TransportRtc lifecycle and backpressure", () => {
+  async function open() {
+    const fixture = makeRtc({ disconnectedGraceMs: 0 })
+    const connected = fixture.rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fixture.pcs[0].channels[0].open()
+    await connected
+    return { ...fixture, pc: fixture.pcs[0], dc: fixture.pcs[0].channels[0] }
+  }
+  it("settles an initial connection when disposed during signaling recovery", async () => {
+    const { rtc, sig } = makeRtc()
+    const connection = rtc.connect()
+    sig.emitError("connect_timeout")
+    rtc.close()
+    await expect(connection).rejects.toThrow("closing")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(rtc.getState()).toBe("closed")
+  })
+  it.each(["close", "auth_failed"])("releases a pending binary read on %s", async (mode) => {
+    const { rtc, sig } = await open()
+    const pending = rtc.readBinary({
+      kind: "session-media",
+      sessionId: "s",
+      hash: "a".repeat(64),
+      variant: "canonical",
+    })
+    if (mode === "close") rtc.close()
+    else sig.emitError(mode)
+    await expect(pending).rejects.toBeInstanceOf(RtcCarrierError)
+  })
+  it("keeps an open carrier usable after a nonfatal signaling error", async () => {
+    const { rtc, sig } = await open()
+    sig.emitError("rate_limited", "busy")
+    expect(rtc.getState()).toBe("open")
+    await rtc.connect()
+  })
+  it("rejects a concurrent connect attempt", async () => {
+    const { rtc } = makeRtc()
+    const first = rtc.connect().catch((error) => error)
+    await expect(rtc.connect()).rejects.toThrow("already in state")
+    rtc.close()
+    await first
+  })
+  it("refreshes ICE configuration on the existing peer and exposes terminal channel", async () => {
+    const { rtc, pc } = await open()
+    const config = { iceServers: [{ urls: "stun:example.test" }] }
+    rtc.updateRtcConfiguration(config)
+    expect(pc.configuration).toBe(config)
+    expect(rtc.getTerminalDataChannel()).toBe(pc.channels[1])
+    rtc.updateRtcConfiguration(undefined)
+    rtc.close()
+    expect(rtc.getTerminalDataChannel()).toBeNull()
+  })
+  it.each([new Error("socket full"), "socket full"])(
+    "reports a DataChannel send error without leaving the RPC pending",
+    async (error) => {
+      const { rtc, dc } = await open()
+      dc.send = () => {
+        throw error
+      }
+      await expect(rtc.call("ping")).rejects.toThrow("socket full")
+    }
+  )
+  it("paces a saturated DataChannel until bufferedamountlow", async () => {
+    const { rtc, dc } = await open()
+    const channel = dc as unknown as {
+      bufferedAmount: number
+      addEventListener: (name: string, listener: () => void) => void
+      removeEventListener: jest.Mock
+    }
+    let wake!: () => void
+    channel.bufferedAmount = 2 * 1024 * 1024
+    channel.addEventListener = (_name, listener) => {
+      wake = listener
+    }
+    channel.removeEventListener = jest.fn()
+    const pending = rtc.call("ping")
+    expect(dc.sent.some((raw) => JSON.parse(raw).method === "ping")).toBe(false)
+    channel.bufferedAmount = 0
+    wake()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const sent = dc.sent.map((raw) => JSON.parse(raw)).find((frame) => frame.method === "ping")
+    dc.push({ id: sent.id, ok: true, result: "ok" })
+    await expect(pending).resolves.toBe("ok")
+    expect(channel.removeEventListener).toHaveBeenCalled()
+  })
+  it("times out saturated DataChannel capacity without sending more frames", async () => {
+    const { rtc, dc } = await open()
+    const channel = dc as unknown as {
+      bufferedAmount: number
+      addEventListener: jest.Mock
+      removeEventListener: jest.Mock
+    }
+    channel.bufferedAmount = 2 * 1024 * 1024
+    channel.addEventListener = jest.fn()
+    channel.removeEventListener = jest.fn()
+    jest.useFakeTimers()
+    try {
+      const pending = rtc.call("ping").catch((error) => error)
+      await jest.advanceTimersByTimeAsync(15_000)
+      await expect(pending).resolves.toThrow("backpressure timed out")
+      expect(channel.removeEventListener).toHaveBeenCalled()
+    } finally {
+      rtc.close()
+      jest.useRealTimers()
+    }
+  })
+  it("fails a disconnected peer connection before opening and recovers failures after opening", async () => {
+    const initial = makeRtc()
+    const failed = initial.rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    initial.pcs[0].connectionState = "failed"
+    initial.pcs[0].onconnectionstatechange?.()
+    await expect(failed).rejects.toThrow("peer connection failed")
+    const { rtc, pc } = await open()
+    pc.connectionState = "failed"
+    pc.onconnectionstatechange?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pc.offerOptions).toContainEqual({ iceRestart: true })
+    rtc.close()
+  })
+  it("bounds local ICE queue growth and survives an invalid remote candidate", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connecting = rtc.connect().catch((error) => error)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (let i = 0; i < 257; i++)
+      sig.emitEnvelope(envelope("rtc:ice", { candidate: { candidate: `candidate:${i}` } }))
+    pcs[0].addIceCandidate = async () => {
+      throw new Error("bad ICE")
+    }
+    sig.emitEnvelope(envelope("rtc:answer", { sdp: "answer" }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("rtc:ice", { candidate: { candidate: "invalid" } }))
+    sig.emitEnvelope(envelope("rtc:offer", { sdp: "unexpected" }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    rtc.close()
+    await connecting
+  })
+  it("ignores callbacks from a closed peer after signaling reconnect replaces it", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const old = pcs[0]
+    for (const listener of sig.listeners.state) listener("reconnecting")
+    old.fireIceCandidate({ candidate: "old" })
+    old.setIceState("closed")
+    old.connectionState = "failed"
+    old.onconnectionstatechange?.()
+    old.channels[0].onopen?.()
+    old.channels[0].onclose?.()
+    old.channels[0].onerror?.()
+    for (const listener of sig.listeners.subscribed) listener({ peers: DESKTOP_PRESENT })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    pcs[1].channels[0].open()
+    await connected
+    expect(sig.sent.filter((frame) => frame.kind === "rtc:ice")).toHaveLength(0)
+    rtc.close()
+  })
+  it("isolates throwing state observers through relay promotion", async () => {
+    const { rtc, sig } = await open()
+    const detach = rtc.onStateChange(() => {
+      throw new Error("observer failed")
+    })
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    expect(rtc.getState()).toBe("open")
+    rtc.close()
+    detach()
+  })
+  it("keeps the DataChannel alive through peer signaling departure", async () => {
+    const { rtc, sig } = await open()
+    sig.emitPeerLeft("mobile")
+    sig.emitPeerJoined("mobile")
+    sig.emitPeerLeft("desktop")
+    expect(rtc.getState()).toBe("open")
+    for (const listener of sig.listeners.state) listener("reconnecting")
+    expect(rtc.getCarrier()).toBe("datachannel")
+  })
+})
+
+describe("TransportRtc session generation and persisted cursors", () => {
+  it("ignores a rejected hello from the previous signaling session", async () => {
+    const { rtc, sig } = makeRtc({ p2p: false })
+    let rejectHello!: (error: Error) => void
+    const originalSend = sig.send.bind(sig)
+    let first = true
+    sig.send = async (kind, body) => {
+      if (kind === "hello" && first) {
+        first = false
+        await new Promise<void>((_resolve, reject) => {
+          rejectHello = reject
+        })
+      } else await originalSend(kind, body)
+    }
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const listener of sig.listeners.state) listener("reconnecting")
+    for (const listener of sig.listeners.subscribed) listener({ peers: DESKTOP_PRESENT })
+    rejectHello(new Error("old socket closed"))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    expect(rtc.getState()).toBe("open")
+  })
+
+  it.each([new Error("hello rejected"), "hello rejected"])(
+    "fails a current handshake send with %p",
+    async (failure) => {
+      const { rtc, sig } = makeRtc({ p2p: false })
+      sig.sendError = failure as Error
+      await expect(rtc.connect()).rejects.toThrow("hello rejected")
+    }
+  )
+
+  it("rejects an offer generation failure without unhandled async work", async () => {
+    const { rtc } = makeRtc({
+      peerConnectionFactory: () => {
+        const pc = new FakePeerConnection()
+        pc.createOffer = async () => {
+          throw new Error("offer rejected")
+        }
+        return pc as unknown as RTCPeerConnection
+      },
+    })
+    await expect(rtc.connect()).rejects.toThrow("offer rejected")
+  })
+
+  it("abandons a failed initial peer while its relay carrier remains open", async () => {
+    const { rtc, sig, pcs } = makeRtc({ reconnectBackoffMs: [5000] })
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    sig.emitEnvelope(envelope("rtc:close", { reason: "peer restart" }))
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("relay")
+    expect(pcs[0].connectionState).toBe("closed")
+  })
+
+  it("waits for a departed relay peer to rejoin without recreating the signaling socket", async () => {
+    const { rtc, sig } = makeRtc({ p2p: false })
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    sig.emitPeerLeft()
+    expect(rtc.getState()).toBe("reconnecting")
+    sig.emitPeerJoined()
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    expect(rtc.getState()).toBe("open")
+    expect(sig.closed).toBe(false)
+  })
+
+  it("fails closed when the peer explicitly closes a direct connection", async () => {
+    const { rtc, sig, pcs } = makeRtc()
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    pcs[0].channels[0].open()
+    await connected
+    sig.emitEnvelope(envelope("rtc:close", {}))
+    expect(rtc.getState()).toBe("failed")
+  })
+
+  it.each(["7", "-1", "broken"])(
+    "resumes from a validated persistent event cursor %s",
+    async (stored) => {
+      const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+      const storage = { getItem: jest.fn(() => stored), setItem: jest.fn() }
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage })
+      try {
+        const { rtc, pcs } = makeRtc()
+        const connected = rtc.connect()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        const dc = pcs[0].channels[0]
+        dc.open()
+        await connected
+        expect(JSON.parse(dc.sent[0])).toEqual({
+          kind: "event-resume",
+          since: stored === "7" ? 7 : 0,
+        })
+        dc.push({ kind: "event", event: "topic", seq: 10, payload: "ok" })
+        expect(storage.setItem).toHaveBeenCalledWith("cognia:rtc-event-cursor:room-1", "10")
+      } finally {
+        if (previous) Object.defineProperty(globalThis, "localStorage", previous)
+        else Reflect.deleteProperty(globalThis, "localStorage")
+      }
+    }
+  )
+
+  it("keeps event delivery working when persistent cursor storage throws", async () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => {
+          throw new Error("blocked")
+        },
+        setItem: () => {
+          throw new Error("quota")
+        },
+      },
+    })
+    try {
+      const { rtc, pcs } = makeRtc()
+      const connected = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      pcs[0].channels[0].open()
+      await connected
+      const received = jest.fn()
+      rtc.subscribe("topic", received)
+      pcs[0].channels[0].push({ kind: "event", event: "topic", seq: 10, payload: "ok" })
+      expect(received).toHaveBeenCalledWith("ok")
+    } finally {
+      if (previous) Object.defineProperty(globalThis, "localStorage", previous)
+      else Reflect.deleteProperty(globalThis, "localStorage")
+    }
+  })
+})
+
+describe("TransportRtc bounded protocol recovery", () => {
+  async function open(opts: Partial<ConstructorParameters<typeof TransportRtc>[0]> = {}) {
+    const fixture = makeRtc(opts)
+    const pending = fixture.rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (opts.p2p === false) fixture.sig.emitEnvelope(envelope("hello", { relay: true }))
+    else fixture.pcs[0].channels[0].open()
+    await pending
+    return { ...fixture, dc: fixture.pcs[0]?.channels[0] }
+  }
+
+  it("bounds concurrent RPCs and releases subscribers when their final listener leaves", async () => {
+    const { rtc } = await open()
+    const requests = Array.from({ length: 32 }, () => rtc.call("ping").catch((error) => error))
+    await expect(rtc.call("overflow")).rejects.toThrow("too many concurrent RPCs")
+    const detach = rtc.subscribe("only", () => {})
+    detach()
+    detach()
+    rtc.close()
+    for (const request of requests) await expect(request).resolves.toThrow("closing")
+  })
+
+  it("ignores detached signaling callbacks delivered after disposal", async () => {
+    const { rtc, sig } = makeRtc()
+    const pending = rtc.connect().catch((error) => error)
+    const subscribed = [...sig.listeners.subscribed][0]
+    const joined = [...sig.listeners.peerJoined][0]
+    const state = [...sig.listeners.state][0]
+    rtc.close()
+    subscribed({ peers: DESKTOP_PRESENT })
+    joined("desktop")
+    state("reconnecting")
+    await pending
+    expect(rtc.getState()).toBe("closed")
+  })
+
+  it("deduplicates empty-room notifications and clears its wait deadline on peer arrival", async () => {
+    const { rtc, sig, pcs } = makeRtc({ peerWaitTimeoutMs: 1000 })
+    sig.peersOnSubscribe = []
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const listener of sig.listeners.subscribed) listener({ peers: [] })
+    expect(rtc.getState()).toBe("awaiting-peer")
+    sig.emitPeerJoined()
+    sig.emitPeerJoined()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pcs).toHaveLength(1)
+    pcs[0].channels[0].open()
+    await connected
+  })
+
+  it.each(["datachannel-error", "ice-closed"])(
+    "fails an initial %s and rejects pending connect",
+    async (kind) => {
+      const { rtc, pcs } = makeRtc()
+      const connected = rtc.connect()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (kind === "datachannel-error") pcs[0].channels[0].onerror?.()
+      else pcs[0].setIceState("closed")
+      await expect(connected).rejects.toThrow()
+    }
+  )
+
+  it.each(["datachannel-error", "ice-closed"])("reconnects an open %s", async (kind) => {
+    const { rtc, dc, pcs } = await open({ reconnectBackoffMs: [1000], reconnectRandom: () => 0.9 })
+    if (kind === "datachannel-error") dc.onerror?.()
+    else pcs[0].setIceState("closed")
+    expect(rtc.getState()).toBe("reconnecting")
+  })
+
+  it("drops partial P2P negotiation after its deadline while the relay stays usable", async () => {
+    const { rtc, sig } = makeRtc({ negotiationTimeoutMs: 10, reconnectBackoffMs: [1000] })
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("relay")
+  })
+
+  it("does not emit an offer that finishes after its peer was replaced", async () => {
+    let finish!: (value: RTCSessionDescriptionInit) => void
+    let first = true
+    const { rtc, sig } = makeRtc({
+      peerConnectionFactory: () => {
+        const pc = new FakePeerConnection()
+        if (first) {
+          first = false
+          pc.createOffer = () =>
+            new Promise((resolve) => {
+              finish = resolve
+            })
+        }
+        return pc as unknown as RTCPeerConnection
+      },
+    })
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const listener of sig.listeners.state) listener("reconnecting")
+    for (const listener of sig.listeners.subscribed) listener({ peers: DESKTOP_PRESENT })
+    finish({ type: "offer", sdp: "stale" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(
+      sig.sent
+        .filter((frame) => frame.kind === "rtc:offer")
+        .some((frame) => (frame.body as { sdp: string }).sdp === "stale")
+    ).toBe(false)
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+  })
+
+  it("rejects logical sends if the carrier changes between fragments", async () => {
+    const { rtc, sig } = await open({ p2p: false })
+    const original = sig.send.bind(sig)
+    sig.send = async (kind, body) => {
+      await original(kind, body)
+      if (kind === "data") for (const listener of sig.listeners.state) listener("reconnecting")
+    }
+    await expect(rtc.call("large", { text: "x".repeat(100_000) })).rejects.toThrow(
+      "relay changed during send"
+    )
+  })
+
+  it("rejects fragmented DataChannel requests after the channel closes", async () => {
+    const { rtc, dc } = await open({ reconnectBackoffMs: [1000] })
+    const original = dc.send.bind(dc)
+    dc.send = (frame) => {
+      original(frame)
+      dc.close()
+    }
+    await expect(rtc.call("large", { text: "x".repeat(100_000) })).rejects.toThrow("reset")
+  })
+
+  it("survives constructor identity errors without starting a connection", () => {
+    expect(() => makeRtc({ rendezvousId: "wrong" })).toThrow("does not match")
+  })
+
+  it("escalates a rejected ICE restart to the reconnect scheduler", async () => {
+    const { rtc, pcs } = await open({ disconnectedGraceMs: 0, reconnectBackoffMs: [1000] })
+    pcs[0].createOffer = async () => {
+      throw new Error("ICE failed")
+    }
+    pcs[0].setIceState("failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rtc.getState()).toBe("reconnecting")
+  })
+
+  it("resets recovery budgets only after a healthy open interval", async () => {
+    const { rtc, pcs } = await open({ healthyResetMs: 5, disconnectedGraceMs: 0 })
+    pcs[0].setIceState("failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    pcs[0].setIceState("connected")
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    pcs[0].setIceState("failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pcs[0].offerOptions.filter((options) => options?.iceRestart)).toHaveLength(2)
+    expect(rtc.getState()).toBe("open")
+  })
+})
+
+describe("TransportRtc framing and teardown failures", () => {
+  async function open() {
+    const f = makeRtc()
+    const connected = f.rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    f.pcs[0].channels[0].open()
+    await connected
+    return { ...f, dc: f.pcs[0].channels[0] }
+  }
+
+  it("reassembles a fragmented event and acknowledges its logical message", async () => {
+    const { rtc, dc } = await open()
+    const listener = jest.fn()
+    rtc.subscribe("topic", listener)
+    const value = "x".repeat(100_000)
+    const frames = encodeRtcLogicalMessage(
+      JSON.stringify({ kind: "event", event: "topic", seq: 1, payload: value }),
+      "fragmented-event"
+    )
+    for (const frame of frames) dc.onmessage?.({ data: frame } as MessageEvent)
+    expect(listener).toHaveBeenCalledWith(value)
+    expect(dc.sent.map((raw) => JSON.parse(raw))).toContainEqual({
+      kind: "chunk/ack",
+      messageId: "fragmented-event",
+    })
+    dc.push({ kind: "chunk/ack", messageId: "fragmented-event" })
+    dc.push({ kind: "chunk/start", messageId: "bad", totalBytes: -1, totalChunks: 1 })
+    expect(dc.sent.map((raw) => JSON.parse(raw))).toContainEqual(
+      expect.objectContaining({ kind: "chunk/cancel", messageId: "bad" })
+    )
+  })
+
+  it("accepts browser Blob frames and ignores unsupported message payloads", async () => {
+    const { rtc, dc } = await open()
+    dc.onmessage?.({ data: new Blob([new Uint8Array([1, 2])]) } as MessageEvent)
+    dc.onmessage?.({ data: 17 } as MessageEvent)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rtc.getState()).toBe("open")
+  })
+
+  it("finishes close even when browser cleanup APIs throw", async () => {
+    const { rtc, sig, pcs, dc } = await open()
+    dc.close = () => {
+      throw new Error("dc gone")
+    }
+    pcs[0].channels[1].close = () => {
+      throw new Error("terminal gone")
+    }
+    pcs[0].close = () => {
+      throw new Error("pc gone")
+    }
+    sig.close = () => {
+      throw new Error("socket gone")
+    }
+    rtc.close()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(rtc.getState()).toBe("closed")
+  })
+
+  it("preserves relay service when failed P2P cleanup throws", async () => {
+    const { rtc, sig, pcs } = makeRtc({ reconnectBackoffMs: [5000] })
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    for (const dc of pcs[0].channels)
+      dc.close = () => {
+        throw new Error("channel gone")
+      }
+    pcs[0].close = () => {
+      throw new Error("pc gone")
+    }
+    sig.emitEnvelope(envelope("rtc:close", {}))
+    expect(rtc.getState()).toBe("open")
+    expect(rtc.getCarrier()).toBe("relay")
+  })
+
+  it("reconnects even when peer and socket cleanup throw", async () => {
+    const { rtc, dc, sig, pcs } = await open()
+    for (const channel of pcs[0].channels)
+      channel.close = () => {
+        throw new Error("channel gone")
+      }
+    pcs[0].close = () => {
+      throw new Error("pc gone")
+    }
+    sig.close = () => {
+      throw new Error("socket gone")
+    }
+    dc.onerror?.()
+    expect(rtc.getState()).toBe("reconnecting")
+    rtc.close()
+  })
+
+  it("fails a saturated resync event queue instead of silently dropping updates", async () => {
+    const { rtc, dc } = await open()
+    let reject!: (error: unknown) => void
+    const detach = remoteEventResyncCoordinator.register(
+      "topic",
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail
+        })
+    )
+    dc.push({ kind: "resync_required", domains: ["topic"], cursor: 1 })
+    for (let seq = 2; seq < 132; seq++)
+      dc.push({ kind: "event", event: "topic", seq, payload: seq })
+    expect(rtc.getState()).toBe("failed")
+    await Promise.resolve()
+    reject("resync failed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    detach()
+  })
+
+  it("resolves a peer hello while still awaiting occupancy without leaving its wait timer armed", async () => {
+    const { rtc, sig } = makeRtc({ p2p: false, peerWaitTimeoutMs: 10 })
+    sig.peersOnSubscribe = []
+    const connected = rtc.connect()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    sig.emitEnvelope(envelope("hello", { relay: true }))
+    await connected
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    expect(rtc.getState()).toBe("open")
   })
 })

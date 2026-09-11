@@ -657,8 +657,9 @@ describe("setSshFilesAllowed", () => {
 
     await setRemoteTerminalAllowed("dev-sftp", true, {
       hostId: "host-a",
-      endpoint: "unix:///tmp/host.sock",
-      bootstrapSecret: "s",
+      lanUrl: "https://host.local",
+      signingPublicKey: "key",
+      credentialKeyId: "credential-1",
       signature: "sig",
       issuedAt: 1,
     })

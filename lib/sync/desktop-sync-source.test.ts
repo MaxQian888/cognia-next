@@ -332,6 +332,65 @@ describe("readDexieDelta", () => {
     expect(delta.has_more).toBe(true)
   })
 
+  it("syncs an existing message update without changing its createdAt", async () => {
+    const db = getDb()
+    await db.messages.put({
+      id: "edited",
+      sessionId: "s",
+      createdAt: 100,
+      parts: [{ type: "text", text: "partial" }],
+    } as never)
+    const first = await readDexieDelta("messages", 0, undefined, undefined, "")
+    await db.messages.update("edited", { parts: [{ type: "text", text: "complete" }] })
+    const second = await readDexieDelta(
+      "messages",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    expect(second.rows).toMatchObject([
+      { id: "edited", createdAt: 100, parts: [{ text: "complete" }] },
+    ])
+    const empty = await readDexieDelta(
+      "messages",
+      second.next_since,
+      undefined,
+      undefined,
+      second.next_cursor
+    )
+    expect(empty.rows).toEqual([])
+  })
+
+  it("upgrades a creation-time cursor by catching up every existing message once", async () => {
+    await getDb().messages.bulkPut(
+      Array.from({ length: 505 }, (_, i) => ({
+        id: `old-${i}`,
+        sessionId: "s",
+        createdAt: 1,
+      })) as never[]
+    )
+    const legacy = JSON.stringify({
+      version: 1,
+      table: "messages",
+      at: 999,
+      id: "old-z",
+      deletedAt: 999,
+    })
+    const first = await readDexieDelta("messages", 999, undefined, undefined, legacy)
+    expect(first.rows).toHaveLength(500)
+    expect(JSON.parse(first.next_cursor!)).toMatchObject({ version: 2 })
+    const next = await readDexieDelta(
+      "messages",
+      first.next_since,
+      undefined,
+      undefined,
+      first.next_cursor
+    )
+    expect(next.rows).toHaveLength(5)
+    expect(next.has_more).toBe(false)
+  })
+
   it("drains timestamp ties in bounded pages and then returns an empty delta", async () => {
     await getDb().messages.bulkPut(
       Array.from({ length: 600 }, (_, i) => ({

@@ -29,7 +29,7 @@ import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { companionCursorNamespace } from "@/lib/companion/credential-book/legacy-migration"
 import { getDb } from "@/lib/db/schema"
 import { transport } from "@/lib/tauri"
-import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { getCompanionConfigGeneration, loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { RunStatus } from "@/types/workflow/visual"
 
@@ -94,6 +94,23 @@ interface RegisteredHandler {
   table: SyncableTable
   stage: SyncStage
   run: SyncFn
+  /**
+   * Tables that must have finished before this one starts.
+   *
+   * Array position used to be the only thing holding these orderings, because
+   * the run was strictly sequential — so "characters before sessions" was a
+   * comment and a line number, and moving a row was an undetectable
+   * regression. The run is now concurrent ({@link SYNC_MAX_CONCURRENT_PULLS}),
+   * which makes position meaningless and these edges load-bearing.
+   *
+   * An edge is a *rendering* constraint, never an authority one: it says the
+   * client would paint a row with nothing to attach to (an issue whose label
+   * is still a raw id, a teammate whose squad has not arrived), not that the
+   * pull would be wrong. Edges naming a table outside the current run — a
+   * `stages` or `only` filter excluded it — are dropped, because a barrier
+   * against something that is not going to happen is a deadlock.
+   */
+  after?: readonly SyncableTable[]
 }
 
 /** A handler as a caller may supply it — {@link RegisteredHandler} with an optional stage. */
@@ -140,7 +157,7 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // Characters before sessions: a session row names a character, and a chat
   // list that arrives first renders rows with no identity for one frame.
   { table: "characters", stage: "critical", run: syncCharacters },
-  { table: "sessions", stage: "critical", run: syncSessions },
+  { table: "sessions", stage: "critical", run: syncSessions, after: ["characters"] },
   // v49 — Inbox optimization. Mobile reads pinned/archived/unread state
   // from conversationOverrides; without this handler the orchestrator
   // never pulls it and the mobile inbox renders every conversation as
@@ -156,7 +173,12 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // which is exactly why it must not gate the first paint.
   { table: "messages", stage: "interactive", run: syncMessages },
   { table: "agentTasks", stage: "interactive", run: syncAgentTasks },
-  { table: "agentTaskAttempts", stage: "interactive", run: syncAgentTaskAttempts },
+  {
+    table: "agentTaskAttempts",
+    stage: "interactive",
+    run: syncAgentTaskAttempts,
+    after: ["agentTasks"],
+  },
   // ADR-0045 — AgentPlan rows. The companion mounts the approval dock and the
   // step tracker; without this pull they read an empty local table and a
   // plan-mode turn taken through the companion has nothing to approve.
@@ -195,8 +217,18 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // lights up for. Definitions follow in `background`, below, because a name
   // arriving a moment late leaves an orphan row rather than an empty page.
   { table: "botInstallations", stage: "interactive", run: syncBotInstallations },
-  { table: "botEventDeliveries", stage: "interactive", run: syncBotEventDeliveries },
-  { table: "executionRunBindings", stage: "interactive", run: syncExecutionRunBindings },
+  {
+    table: "botEventDeliveries",
+    stage: "interactive",
+    run: syncBotEventDeliveries,
+    after: ["botInstallations"],
+  },
+  {
+    table: "executionRunBindings",
+    stage: "interactive",
+    run: syncExecutionRunBindings,
+    after: ["executionRuns"],
+  },
   { table: "connectorHeartbeats", stage: "interactive", run: syncConnectorHeartbeats },
 
   // ── background ────────────────────────────────────────────────────────
@@ -211,25 +243,40 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // after `twinProfile` for the same reason the squad rows come after their
   // runs: a profile keyed by a twin that has not arrived yet is a row with
   // nothing to attach to.
-  { table: "twins", stage: "background", run: syncTwins },
-  { table: "twinDrafts", stage: "background", run: syncTwinDrafts },
+  { table: "twins", stage: "background", run: syncTwins, after: ["twinProfile"] },
+  { table: "twinDrafts", stage: "background", run: syncTwinDrafts, after: ["twins"] },
   // The issue tracker. Labels first so the board never paints a chip as a raw
   // id, then the containers it groups by, then the issues themselves.
   { table: "labels", stage: "background", run: syncLabels },
-  { table: "issueProjects", stage: "background", run: syncIssueProjects },
-  { table: "issues", stage: "background", run: syncIssues },
+  { table: "issueProjects", stage: "background", run: syncIssueProjects, after: ["labels"] },
+  { table: "issues", stage: "background", run: syncIssues, after: ["issueProjects"] },
   // The detail sheet's two halves, after the issues they hang off: a trail
   // keyed by an issue that has not arrived is a row with nothing to attach to.
-  { table: "issueEvents", stage: "background", run: syncIssueEvents },
-  { table: "issueRuns", stage: "background", run: syncIssueRuns },
-  { table: "issueCycles", stage: "background", run: syncIssueCycles },
+  { table: "issueEvents", stage: "background", run: syncIssueEvents, after: ["issues"] },
+  { table: "issueRuns", stage: "background", run: syncIssueRuns, after: ["issues"] },
+  { table: "issueCycles", stage: "background", run: syncIssueCycles, after: ["issues"] },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // After the adapters they hang off: a contact, a binding or a deployment
   // keyed by an adapter that has not arrived is a row with nothing to attach to.
-  { table: "platformIdentities", stage: "background", run: syncPlatformIdentities },
-  { table: "connectorCallbackBindings", stage: "background", run: syncConnectorCallbackBindings },
-  { table: "workflowDeployments", stage: "background", run: syncWorkflowDeployments },
+  {
+    table: "platformIdentities",
+    stage: "background",
+    run: syncPlatformIdentities,
+    after: ["adapterInstances"],
+  },
+  {
+    table: "connectorCallbackBindings",
+    stage: "background",
+    run: syncConnectorCallbackBindings,
+    after: ["adapterInstances"],
+  },
+  {
+    table: "workflowDeployments",
+    stage: "background",
+    run: syncWorkflowDeployments,
+    after: ["adapterInstances"],
+  },
   // Long-term memory. Decrypts row by row against the profile DEK, so it is
   // the most CPU-expensive apply in the pipeline — last, and interruptible.
   { table: "memories", stage: "background", run: syncMemories },
@@ -248,12 +295,17 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "chatTemplates", stage: "background", run: syncChatTemplates },
   { table: "templateDefinitions", stage: "background", run: syncTemplateDefinitions },
   { table: "templatePackages", stage: "background", run: syncTemplatePackages },
-  { table: "templateInstances", stage: "background", run: syncTemplateInstances },
+  {
+    table: "templateInstances",
+    stage: "background",
+    run: syncTemplateInstances,
+    after: ["templateDefinitions", "templatePackages"],
+  },
   // v215 — Squad definitions. Background, and after the runs they explain: a
   // roster arriving before its squad is a row with nothing to attach to.
   { table: "agentTeams", stage: "background", run: syncAgentTeams },
-  { table: "agentTeammates", stage: "background", run: syncAgentTeammates },
-  { table: "agentTeamTasks", stage: "background", run: syncAgentTeamTasks },
+  { table: "agentTeammates", stage: "background", run: syncAgentTeammates, after: ["agentTeams"] },
+  { table: "agentTeamTasks", stage: "background", run: syncAgentTeamTasks, after: ["agentTeams"] },
   // Locally authored Bot definitions. A plugin's are a registry overlay and
   // never cross, so a mirrored device resolves those from its own plugin state
   // or reads the installation as an orphan, which the console already renders.
@@ -264,6 +316,20 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
 export const SYNC_TABLE_STAGES: Readonly<Record<SyncableTable, SyncStage>> = Object.freeze(
   Object.fromEntries(DEFAULT_HANDLERS.map((h) => [h.table, h.stage]))
 ) as Readonly<Record<SyncableTable, SyncStage>>
+
+/**
+ * The `after` edges each table declares, as a closed record.
+ *
+ * Exported for the same reason {@link SYNC_TABLE_STAGES} is: the registry is
+ * the only place these orderings exist, and a test that has to reach into a
+ * module-private array to check them is a test that stops being written. An
+ * absent edge set is `[]`, never `undefined`, so a caller never has to decide
+ * what a missing key means.
+ */
+export const SYNC_TABLE_DEPENDENCIES: Readonly<Record<SyncableTable, readonly SyncableTable[]>> =
+  Object.freeze(
+    Object.fromEntries(DEFAULT_HANDLERS.map((h) => [h.table, Object.freeze([...(h.after ?? [])])]))
+  ) as Readonly<Record<SyncableTable, readonly SyncableTable[]>>
 
 /** The tables in a stage, in the order the orchestrator runs them. */
 export function syncTablesForStage(stage: SyncStage): readonly SyncableTable[] {
@@ -440,22 +506,44 @@ function currentHostCursorKeys(): HostCursorKeys {
 
 /** The host whose cursors `stateMap` currently holds. */
 let hydratedServerKey: string | null = null
+let hydratedDatabase: ReturnType<typeof getDb> | null = null
+let hydratedGeneration = -1
 
 async function ensureHydrated(): Promise<void> {
   const { key: serverKey, legacy } = currentHostCursorKeys()
+  const database = getDb()
+  const generation = getCompanionConfigGeneration()
+  const assertCurrent = () => {
+    if (
+      getDb() !== database ||
+      getCompanionConfigGeneration() !== generation ||
+      currentHostCursorKeys().key !== serverKey
+    )
+      throw new Error("Sync scope changed")
+  }
   // The host changed under us — a re-pair, or a switch. Everything in memory
   // belongs to the previous one. The mirrored *rows* are reconciled below,
   // from the database rather than from this in-memory comparison.
-  if (hydratedServerKey !== null && hydratedServerKey !== serverKey) {
+  if (
+    hydratedServerKey !== null &&
+    (hydratedServerKey !== serverKey ||
+      hydratedDatabase !== database ||
+      hydratedGeneration !== generation)
+  ) {
     hydratePromise = null
     stateMap.clear()
   }
   if (hydratePromise) return hydratePromise
   hydratedServerKey = serverKey
+  hydratedDatabase = database
+  hydratedGeneration = generation
   hydratePromise = (async () => {
-    await adoptLegacyCursorKeys(serverKey, legacy)
-    await resetMirrorsSharedWithAnotherHost(serverKey)
+    await adoptLegacyCursorKeys(serverKey, legacy, assertCurrent)
+    assertCurrent()
+    await resetMirrorsSharedWithAnotherHost(serverKey, assertCurrent)
+    assertCurrent()
     const persisted = await loadCursors(serverKey)
+    assertCurrent()
     for (const [table, row] of persisted) {
       stateMap.set(table, {
         since: row.since,
@@ -488,20 +576,27 @@ async function ensureHydrated(): Promise<void> {
  */
 async function adoptLegacyCursorKeys(
   serverKey: string,
-  legacyKeys: readonly string[]
+  legacyKeys: readonly string[],
+  assertCurrent: () => void
 ): Promise<void> {
   if (serverKey === "" || legacyKeys.length === 0) return
   const canonical = await loadCursors(serverKey)
+  assertCurrent()
   const { clearCursorsForServer } = await import("./cursor-store")
   for (const legacyKey of legacyKeys) {
+    assertCurrent()
     const rows = await loadCursors(legacyKey)
+    assertCurrent()
     if (rows.size === 0) continue
     for (const [table, row] of rows) {
       if (canonical.has(table)) continue
       const adopted = { ...row, serverKey }
+      assertCurrent()
       await saveCursor(adopted)
+      assertCurrent()
       canonical.set(table, adopted)
     }
+    assertCurrent()
     await clearCursorsForServer(legacyKey)
   }
 }
@@ -520,10 +615,14 @@ async function adoptLegacyCursorKeys(
  * which is what the user had before, whereas throwing here would break sync
  * entirely.
  */
-async function resetMirrorsForHostChange(previousServerKeys: readonly string[]): Promise<void> {
+async function resetMirrorsForHostChange(
+  previousServerKeys: readonly string[],
+  assertCurrent: () => void
+): Promise<void> {
   if (previousServerKeys.length === 0) return
   try {
     const { getDb } = await import("@/lib/db/schema")
+    assertCurrent()
     const db = getDb()
     await Promise.all(
       SYNC_HANDLER_TABLES.map(async (table) => {
@@ -540,6 +639,7 @@ async function resetMirrorsForHostChange(previousServerKeys: readonly string[]):
     )
     const { clearCursorsForServer } = await import("./cursor-store")
     for (const key of previousServerKeys) {
+      assertCurrent()
       await clearCursorsForServer(key)
     }
   } catch {
@@ -579,11 +679,16 @@ async function resetMirrorsForHostChange(previousServerKeys: readonly string[]):
  * hydration would otherwise destroy the mirror of the host it is still paired
  * to.
  */
-async function resetMirrorsSharedWithAnotherHost(serverKey: string): Promise<void> {
+async function resetMirrorsSharedWithAnotherHost(
+  serverKey: string,
+  assertCurrent: () => void
+): Promise<void> {
   if (serverKey === "") return
   const { listCursorServerKeys } = await import("./cursor-store")
+  assertCurrent()
   const foreign = (await listCursorServerKeys()).filter((key) => key !== serverKey)
-  await resetMirrorsForHostChange(foreign)
+  assertCurrent()
+  await resetMirrorsForHostChange(foreign, assertCurrent)
 }
 
 function getState(table: SyncableTable): SyncState {
@@ -608,6 +713,8 @@ export function snapshotSyncStates(): Record<SyncableTable, SyncState> {
 }
 
 export interface RunSyncDownOptions {
+  /** Cancels queued pulls and fences replies/writes already in flight. */
+  signal?: AbortSignal
   /** Override the transport (tests). */
   transport?: Transport
   /**
@@ -636,10 +743,11 @@ export interface RunSyncDownOptions {
 }
 
 /**
- * Pull every registered table sequentially. Returns one outcome per table.
- * Sequential — not parallel — so a slow desktop server doesn't get hit
- * with 25 simultaneous round-trips. Re-entrant: a second call while
- * one is in flight reuses the in-flight promise.
+ * Pull every registered table. Returns one outcome per table, in registry
+ * order. Up to {@link SYNC_MAX_CONCURRENT_PULLS} run at once, honouring the
+ * `after` edges the registry declares; see {@link runHandlerGraph} for why the
+ * old strictly-sequential drain was protecting nothing. Re-entrant: a second
+ * call while one is in flight reuses the in-flight promise.
  *
  * Per-table runs (`opts.only`) bypass the re-entrancy gate so the user
  * can sync one row from the SyncStatusCard even when a full pull is
@@ -650,11 +758,18 @@ export interface RunSyncDownOptions {
  * All table pulls serialize per transport and host, with one
  * trailing pull so invalidations arriving during a snapshot are not lost.
  */
-let inflight: Promise<SyncOutcome[]> | null = null
+let inflight: {
+  promise: Promise<SyncOutcome[]>
+  host: string
+  generation: number
+  database: ReturnType<typeof getDb>
+  signal?: AbortSignal
+} | null = null
 
 interface TablePull {
   promise: Promise<SyncOutcome>
   queued: boolean
+  signal?: AbortSignal
 }
 let tablePulls = new WeakMap<Transport, Map<string, TablePull>>()
 
@@ -662,7 +777,8 @@ let tablePulls = new WeakMap<Transport, Map<string, TablePull>>()
 function scheduleTablePull(
   transport: Transport,
   scope: string,
-  run: () => Promise<SyncOutcome>
+  run: () => Promise<SyncOutcome>,
+  signal?: AbortSignal
 ): Promise<SyncOutcome> {
   let scopes = tablePulls.get(transport)
   if (!scopes) {
@@ -670,14 +786,14 @@ function scheduleTablePull(
     tablePulls.set(transport, scopes)
   }
   const previous = scopes.get(scope)
-  if (previous?.queued) return previous.promise
+  if (previous?.queued && !previous.signal?.aborted) return previous.promise
   const promise = (previous ? previous.promise.catch(() => undefined) : Promise.resolve()).then(
     () => {
       entry.queued = false
       return run()
     }
   )
-  const entry: TablePull = { queued: Boolean(previous), promise }
+  const entry: TablePull = { queued: Boolean(previous), promise, signal }
   scopes.set(scope, entry)
   const cleanup = () => {
     if (scopes.get(scope) === entry) scopes.delete(scope)
@@ -711,9 +827,22 @@ const QUOTA_FALLBACK_WAIT_MS = 1_000
 /** Never park a table longer than this, however long the host asked for. */
 const QUOTA_MAX_WAIT_MS = 30_000
 
-async function awaitQuotaCooldown(): Promise<void> {
+async function awaitQuotaCooldown(signal?: AbortSignal): Promise<void> {
   const remaining = quotaCooldownUntil - Date.now()
-  if (remaining > 0) await sleep(Math.min(remaining, QUOTA_MAX_WAIT_MS))
+  if (remaining <= 0 || signal?.aborted) return
+  if (!signal) {
+    await sleep(Math.min(remaining, QUOTA_MAX_WAIT_MS))
+    return
+  }
+  await new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, Math.min(remaining, QUOTA_MAX_WAIT_MS))
+    signal.addEventListener("abort", finish, { once: true })
+  })
 }
 
 function noteQuotaRefusal(failure: SyncFailure): void {
@@ -721,11 +850,210 @@ function noteQuotaRefusal(failure: SyncFailure): void {
   quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + wait)
 }
 
+/**
+ * How many table pulls are in flight at once.
+ *
+ * The run used to be strictly sequential, justified as "so a slow desktop
+ * server doesn't get hit with 25 simultaneous round-trips". That read the cost
+ * backwards on both sides:
+ *
+ *   • Nothing downstream was being protected. `SyncBridge::pull`
+ *     (`src-tauri/src/companion_api/sync_bridge.rs`) keys pending requests by
+ *     id in a map and admits up to 128 in flight, and the Host answers each
+ *     one in its own fire-and-forget task (`desktop-sync-source.ts` responds
+ *     from the event listener without a queue). The serialisation was entirely
+ *     on this side of the wire.
+ *   • The client paid one whole round-trip per table — {@link
+ *     SYNC_HANDLER_TABLES} is 47 of them — on every cold start, the
+ *     empty-delta case included. That is latency, and no amount of cursor
+ *     persistence removes it: a client with nothing to fetch still had to ask
+ *     47 times to find that out.
+ *
+ * So the ceiling is about *this* process, not the Host: enough chains to hide
+ * the round-trip, few enough that their Dexie applies still interleave on the
+ * one main thread. The Host's read bucket (capacity 120, refilling at 10/s —
+ * `rate_limit.rs:read_only_default`) absorbs a burst this size, and
+ * {@link awaitQuotaCooldown} already parks every chain together when it does
+ * not — a shared cooldown that was written for concurrent chains before there
+ * were any.
+ */
+export const SYNC_MAX_CONCURRENT_PULLS = 6
+
+interface PullBudget {
+  active: number
+  waiting: Array<() => void>
+}
+let pullBudgets = new WeakMap<Transport, Map<string, PullBudget>>()
+
+async function withPullBudget<T>(
+  transport: Transport,
+  host: string,
+  run: () => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> {
+  if (signal?.aborted) return run()
+  let hosts = pullBudgets.get(transport)
+  if (!hosts) {
+    hosts = new Map()
+    pullBudgets.set(transport, hosts)
+  }
+  let budget = hosts.get(host)
+  if (!budget) {
+    budget = { active: 0, waiting: [] }
+    hosts.set(host, budget)
+  }
+  if (budget.active >= SYNC_MAX_CONCURRENT_PULLS) {
+    const admitted = await new Promise<boolean>((resolve) => {
+      const begin = () => {
+        signal?.removeEventListener("abort", cancel)
+        resolve(true)
+      }
+      const cancel = () => {
+        const index = budget.waiting.indexOf(begin)
+        if (index !== -1) budget.waiting.splice(index, 1)
+        resolve(false)
+      }
+      budget.waiting.push(begin)
+      signal?.addEventListener("abort", cancel, { once: true })
+    })
+    if (!admitted) return run()
+  } else {
+    budget.active++
+  }
+  try {
+    return await run()
+  } finally {
+    const next = budget.waiting.shift()
+    if (next) next()
+    else {
+      budget.active--
+      if (budget.active === 0 && hosts.get(host) === budget) hosts.delete(host)
+    }
+  }
+}
+
+/**
+ * Run `handlers` with bounded concurrency, honouring their `after` edges.
+ *
+ * Outcomes come back in **registry order, never completion order**: callers
+ * read them positionally against the handler list they asked for, and going
+ * concurrent must not change what `results[3]` means.
+ *
+ * `start` receives how many pulls were started before this one, so the first
+ * in a run can skip the main-thread yield the rest owe.
+ *
+ * A rejection is propagated after the in-flight chains settle, which keeps
+ * `runStagedSyncDown().critical` rejecting on a pipeline failure the way its
+ * contract promises. Per-table failures are `{ ok: false }` outcomes and are
+ * not this.
+ *
+ * A cycle among the edges would deadlock the loop. The static registry cannot
+ * contain one (pinned by `companion-sync.test.ts`), but `opts.handlers` lets a
+ * caller inject any set, so a stall releases the earliest-registered blocked
+ * handler instead of hanging sync forever.
+ */
+async function runHandlerGraph(
+  handlers: readonly RegisteredHandler[],
+  start: (handler: RegisteredHandler, startedBefore: number) => Promise<SyncOutcome>,
+  limit = SYNC_MAX_CONCURRENT_PULLS
+): Promise<SyncOutcome[]> {
+  const results = new Array<SyncOutcome>(handlers.length)
+  const present = new Set(handlers.map((handler) => handler.table))
+  // Only an edge naming a table in *this* run is a barrier. A `stages` or
+  // `only` filter that dropped the dependency drops the constraint with it —
+  // waiting on a pull that is never going to be started is a deadlock, not an
+  // ordering. A self-edge is discarded for the same reason.
+  const blockedBy = handlers.map(
+    (handler) =>
+      new Set(
+        (handler.after ?? []).filter((table) => table !== handler.table && present.has(table))
+      )
+  )
+  const dependents = new Map<SyncableTable, number[]>()
+  handlers.forEach((_, index) => {
+    for (const table of blockedBy[index]) {
+      const list = dependents.get(table)
+      if (list) list.push(index)
+      else dependents.set(table, [index])
+    }
+  })
+
+  const remaining = new Set(handlers.map((_, index) => index))
+  const ready: number[] = []
+  handlers.forEach((_, index) => {
+    if (blockedBy[index].size === 0) ready.push(index)
+  })
+  const running = new Map<number, Promise<void>>()
+  let started = 0
+  // A one-slot array rather than a nullable local: the only assignment happens
+  // inside a rejection callback, and TypeScript narrows a `let` that a closure
+  // writes to back down to its initial type at every later read.
+  const failures: { error: unknown }[] = []
+
+  const release = (index: number): void => {
+    const list = dependents.get(handlers[index].table)
+    if (!list) return
+    for (const dependent of list) {
+      blockedBy[dependent].delete(handlers[index].table)
+      if (blockedBy[dependent].size === 0 && remaining.has(dependent)) ready.push(dependent)
+    }
+  }
+
+  while (remaining.size > 0 || running.size > 0) {
+    while (running.size < limit && ready.length > 0 && failures.length === 0) {
+      const index = ready.shift() as number
+      remaining.delete(index)
+      const startedBefore = started++
+      // Both branches settle this promise, so nothing here can surface as an
+      // unhandled rejection while a sibling chain is still being awaited.
+      const tracked = start(handlers[index], startedBefore).then(
+        (outcome) => {
+          running.delete(index)
+          results[index] = outcome
+          release(index)
+        },
+        (error: unknown) => {
+          running.delete(index)
+          failures.push({ error })
+        }
+      )
+      running.set(index, tracked)
+    }
+    if (running.size === 0) {
+      if (failures.length > 0) break
+      // Nothing running, nothing ready, work left: the injected edges contain
+      // a cycle. Break it at the earliest-registered blocked handler so the
+      // run makes progress in a defined order rather than stalling.
+      const next = Math.min(...remaining)
+      blockedBy[next].clear()
+      ready.push(next)
+      continue
+    }
+    await Promise.race(running.values())
+  }
+
+  if (failures.length > 0) {
+    await Promise.allSettled(running.values())
+    throw failures[0].error
+  }
+  return results
+}
+
 export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[]> {
   const isTargeted = opts.only !== undefined || opts.stages !== undefined
-  if (inflight && !isTargeted) return inflight
   const t = opts.transport ?? transport
   const requestedHostKey = currentHostCursorKeys().key
+  const requestedGeneration = getCompanionConfigGeneration()
+  const requestedDatabase = getDb()
+  if (
+    inflight &&
+    !inflight.signal?.aborted &&
+    !isTargeted &&
+    inflight.host === requestedHostKey &&
+    inflight.generation === requestedGeneration &&
+    inflight.database === requestedDatabase
+  )
+    return inflight.promise
   let handlers: RegisteredHandler[] = opts.handlers
     ? opts.handlers.map((handler) => ({ stage: DEFAULT_HANDLER_STAGE, ...handler }))
     : DEFAULT_HANDLERS
@@ -740,17 +1068,22 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
 
   const runPromise: Promise<SyncOutcome[]> = (async () => {
     await ensureHydrated()
-    const results: SyncOutcome[] = []
-    for (let index = 0; index < handlers.length; index++) {
-      const { table, run } = handlers[index]
+    return runHandlerGraph(handlers, async (handler, startedBefore) => {
+      const { table, run } = handler
       // Hand the thread back before every table but the first. A pull is
       // request → parse → Dexie write, and back-to-back that is one unbroken
       // run of main-thread work per table; the gap is what lets the shell
       // paint the rows that already landed while the rest are still arriving.
-      if (index > 0) await yieldToMain()
+      // Concurrency does not retire this: the chains share one main thread, so
+      // the yield is what keeps their applies from fusing into a single job.
+      if (startedBefore > 0) await yieldToMain()
       const pull = async (): Promise<SyncOutcome> => {
         const hostChanged = () =>
-          currentHostCursorKeys().key !== requestedHostKey || hydratedServerKey !== requestedHostKey
+          opts.signal?.aborted ||
+          getCompanionConfigGeneration() !== requestedGeneration ||
+          getDb() !== requestedDatabase ||
+          currentHostCursorKeys().key !== requestedHostKey ||
+          hydratedServerKey !== requestedHostKey
         const staleHost: SyncOutcome = {
           ok: false,
           failure: { table, reason: "transport", message: "Sync host changed" },
@@ -763,9 +1096,13 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
         }
         // A refusal recorded by any chain parks every table, including this one,
         // before it spends a token that is not there.
-        await awaitQuotaCooldown()
+        await awaitQuotaCooldown(opts.signal)
         if (hostChanged()) return staleHost
-        let outcome = await run(t, resumeCursor)
+        const assertCurrent = () => {
+          if (hostChanged()) throw new Error("Sync scope changed")
+        }
+        const guardedCursor = () => ({ ...resumeCursor, assertCurrent })
+        let outcome = await run(t, guardedCursor())
         if (hostChanged()) return staleHost
         // A quota refusal says nothing about this table, so retrying it is the
         // only honest response. Bounded, because a host that keeps refusing has
@@ -787,9 +1124,9 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
             state.since = resumeCursor.since
             state.cursor = resumeCursor.cursor
           }
-          await awaitQuotaCooldown()
+          await awaitQuotaCooldown(opts.signal)
           if (hostChanged()) return staleHost
-          outcome = await run(t, resumeCursor)
+          outcome = await run(t, guardedCursor())
           if (hostChanged()) return staleHost
         }
         const progress = outcome.ok ? outcome.result : outcome.failure.progress
@@ -815,16 +1152,27 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
         })
         return outcome
       }
-      results.push(await scheduleTablePull(t, `${requestedHostKey}:${table}`, pull))
-    }
-    return results
+      return scheduleTablePull(
+        t,
+        `${requestedHostKey}:${requestedGeneration}:${table}`,
+        () => withPullBudget(t, requestedHostKey, pull, opts.signal),
+        opts.signal
+      )
+    })
   })()
 
   if (!isTargeted) {
-    inflight = runPromise
-    runPromise.finally(() => {
-      inflight = null
-    })
+    inflight = {
+      promise: runPromise,
+      host: requestedHostKey,
+      generation: requestedGeneration,
+      database: requestedDatabase,
+      signal: opts.signal,
+    }
+    const clear = () => {
+      if (inflight?.promise === runPromise) inflight = null
+    }
+    void runPromise.then(clear, clear)
   }
 
   return runPromise
@@ -873,9 +1221,33 @@ export interface StagedSyncRun {
  * transport.
  */
 let stagedInflight: StagedSyncRun | null = null
+let stagedScope: {
+  signal?: AbortSignal
+  host: string
+  generation: number
+  database: ReturnType<typeof getDb>
+} | null = null
 
 export function runStagedSyncDown(opts: RunSyncDownOptions = {}): StagedSyncRun {
-  if (stagedInflight) return stagedInflight
+  const scope = {
+    signal: opts.signal,
+    host: currentHostCursorKeys().key,
+    generation: getCompanionConfigGeneration(),
+    database: getDb(),
+  }
+  const isCurrent = () =>
+    !opts.signal?.aborted &&
+    currentHostCursorKeys().key === scope.host &&
+    getCompanionConfigGeneration() === scope.generation &&
+    getDb() === scope.database
+  if (
+    stagedInflight &&
+    !stagedScope?.signal?.aborted &&
+    stagedScope?.host === scope.host &&
+    stagedScope.generation === scope.generation &&
+    stagedScope.database === scope.database
+  )
+    return stagedInflight
 
   const critical = runSyncDown({ ...opts, stages: ["critical"] })
 
@@ -895,6 +1267,7 @@ export function runStagedSyncDown(opts: RunSyncDownOptions = {}): StagedSyncRun 
         // on screen yet. The deadline inside `whenIdle` keeps a busy or
         // backgrounded tab from stalling here forever.
         await whenIdle()
+        if (!isCurrent()) return outcomes
         outcomes.push(...(await runSyncDown({ ...opts, stages: [stage] })))
       } catch {
         // Per-table failures are already recorded as outcomes; reaching here
@@ -908,6 +1281,7 @@ export function runStagedSyncDown(opts: RunSyncDownOptions = {}): StagedSyncRun 
 
   const run: StagedSyncRun = { critical, whenComplete }
   stagedInflight = run
+  stagedScope = scope
   void whenComplete.finally(() => {
     if (stagedInflight === run) stagedInflight = null
   })
@@ -1009,7 +1383,9 @@ export function installEventDrivenSync(opts: RunSyncDownOptions = {}): () => voi
     if (key === "*") {
       for (const timer of pending.values()) clearTimeout(timer)
       pending.clear()
-      void runSyncDown(opts)
+      // A broadcast during a full snapshot needs a trailing pull for tables
+      // whose cut was already taken; the manual full-run gate only dedupes.
+      void runSyncDown({ ...opts, only: opts.only ?? SYNC_HANDLER_TABLES })
       return
     }
     const only = opts.only === undefined ? [key] : opts.only.filter((table) => table === key)
@@ -1153,12 +1529,16 @@ export function __resetSyncStateForTests(): void {
   stateMap.clear()
   inflight = null
   tablePulls = new WeakMap()
+  pullBudgets = new WeakMap()
   stagedInflight = null
+  stagedScope = null
   hydratePromise = null
   // Also forget which host we were hydrated for, or the next test's first
   // `ensureHydrated` would see a "host change" and wipe the tables it just
   // seeded.
   hydratedServerKey = null
+  hydratedDatabase = null
+  hydratedGeneration = -1
   quotaCooldownUntil = 0
   void clearCursors()
 }

@@ -22,7 +22,7 @@ const grant = (overrides: Partial<CdpGrant> = {}): CdpGrant => ({
   sessionId: "session-1",
   browserSessionId: "browser-1",
   origin: "http://localhost:3000",
-  capabilities: ["dom", "console"],
+  capabilities: ["dom"],
   grantedAt: 10,
   expiresAt: 20,
   ...overrides,
@@ -72,7 +72,7 @@ describe("browser CDP metadata persistence", () => {
         sessionId: "session-1",
         browserSessionId: "browser-1",
         origin: "http://localhost:3000",
-        capability: "network",
+        capability: "runtime",
         now: 19,
       })
     ).resolves.toBeUndefined()
@@ -94,8 +94,8 @@ describe("browser CDP metadata persistence", () => {
       sessionId: "session-1",
       browserSessionId: "browser-1",
       origin: "https://example.com/private?token=secret",
-      capability: "network",
-      method: "Network.enable",
+      capability: "runtime",
+      method: "Runtime.enable",
       outcome: "used",
       createdAt: 12,
     } satisfies CdpAuditEvent
@@ -105,7 +105,7 @@ describe("browser CDP metadata persistence", () => {
     ).rejects.toBeDefined()
 
     expect(await listCdpAuditEvents("session-1")).toEqual([
-      expect.objectContaining({ origin: "https://example.com", method: "Network.enable" }),
+      expect.objectContaining({ origin: "https://example.com", method: "Runtime.enable" }),
     ])
   })
 
