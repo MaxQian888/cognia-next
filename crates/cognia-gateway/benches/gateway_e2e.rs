@@ -350,6 +350,7 @@ async fn start_gateway(upstream: std::net::SocketAddr, scale: SnapshotScale) -> 
         ..GatewayConfig::default()
     }));
     let keys = Arc::new(RwLock::new(vec![GatewayApiKey {
+        owner_account_id: None,
         id: "benchmark-key".into(),
         name: "Benchmark".into(),
         secret: GATEWAY_SECRET.into(),

@@ -12,6 +12,9 @@
  * constraints, and keeping it injected keeps the builder deterministic).
  */
 
+import type { AppSettings } from "@cognia/agent-config-types"
+import { resolveModelDisplayName, resolveModelMeta } from "@/lib/ai/model-options"
+import { getAllProviders } from "@cognia/provider-types/provider"
 import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
@@ -20,6 +23,7 @@ import {
 import type {
   GatewayAliasSnapshot,
   GatewayProviderSnapshot,
+  GatewayModelMetadata,
   GatewayRotationStrategy,
   GatewayRoutingSnapshot,
 } from "@/types/gateway"
@@ -54,6 +58,45 @@ function extractCustomModels(custom: unknown): string[] {
   return raw
     .map((m) => (typeof m === "string" ? m : ((m as { id?: string }).id ?? "")))
     .filter(Boolean)
+}
+
+/** Project the shared metadata resolver without compatibility defaults. */
+export function gatewayModelMetadata(
+  slice: SnapshotSettingsSlice,
+  providerId: string,
+  modelId: string
+): GatewayModelMetadata {
+  const settings = slice as Pick<AppSettings, "providerSettings" | "customProviders">
+  const meta = resolveModelMeta(
+    providerId,
+    modelId,
+    settings.providerSettings,
+    settings.customProviders
+  )
+  const fields = [
+    "contextLength",
+    "maxInputTokens",
+    "maxOutputTokens",
+    "supportsTools",
+    "supportsReasoning",
+    "supportsVision",
+    "supportsAudio",
+    "supportsVideo",
+    "supportsStreaming",
+    "supportsStructuredOutput",
+  ] as const
+  return {
+    id: modelId,
+    name: resolveModelDisplayName(
+      providerId,
+      modelId,
+      settings.providerSettings,
+      settings.customProviders
+    ),
+    ...Object.fromEntries(
+      fields.flatMap((field) => (meta[field] === undefined ? [] : [[field, meta[field]]]))
+    ),
+  }
 }
 
 /**
@@ -153,6 +196,12 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
   })
   const out: GatewayProviderSnapshot[] = []
   for (const id of providerIdsToPublish(slice)) {
+    if (
+      id.includes(":") &&
+      !getAllProviders()[id] &&
+      !slice.customProviders?.some((provider) => provider.id === id)
+    )
+      continue
     const resolution = resolveFeatureProvider(
       {
         featureId: "gateway",
@@ -164,11 +213,30 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
       snapshot
     )
     if (resolution.kind !== "resolved") {
-      out.push({ id, protocol: "openai", baseUrl: "", enabled: false, models: [] })
+      const configured =
+        slice.customProviders?.find((p) => p.id === id) ?? slice.providerSettings?.[id]
+      out.push({
+        id,
+        protocol: "openai",
+        baseUrl: "",
+        enabled: false,
+        models: [],
+        ...(configured?.enabled === false ? { credentialFallbackAllowed: false } : {}),
+      })
       continue
     }
     const custom = slice.customProviders?.find((p) => p.id === id)
-    const models = custom ? extractCustomModels(custom) : resolution.model ? [resolution.model] : []
+    const models = [
+      ...new Set([
+        ...(custom ? extractCustomModels(custom) : []),
+        ...(getAllProviders()[id]?.models?.map((model) => model.id) ?? []),
+        ...((
+          (slice as AppSettings).customProviders?.find((entry) => entry.id === id)
+            ?.discoveredModels ?? (slice as AppSettings).providerSettings?.[id]?.discoveredModels
+        )?.map((model) => model.id) ?? []),
+        ...(resolution.model ? [resolution.model] : []),
+      ]),
+    ]
     // Attach the upstream multi-account pool so the gateway rotates / fails over
     // across the same accounts the chat pipeline does.
     const pool = extractRotationPool(slice, id)
@@ -177,6 +245,19 @@ function buildProviders(slice: SnapshotSettingsSlice): GatewayProviderSnapshot[]
       // The gateway speaks "openai"/"anthropic"; "google"/"mistral"/"cohere"
       // are listed but not yet executable (skipped by the fallback walk).
       protocol: resolution.protocol,
+      ...(resolution.apiFlavor === "chat" || resolution.apiFlavor === "responses"
+        ? { apiFlavor: resolution.apiFlavor }
+        : {}),
+      modelMetadata: models.map((modelId) => gatewayModelMetadata(slice, id, modelId)),
+      ...(resolution.headers
+        ? {
+            transport: {
+              authScheme:
+                resolution.protocol === "anthropic" ? ("x-api-key" as const) : ("bearer" as const),
+              staticHeaders: Object.entries(resolution.headers),
+            },
+          }
+        : {}),
       baseUrl: resolution.baseURL ?? "",
       ...(resolution.apiKey ? { apiKey: resolution.apiKey } : {}),
       ...(pool
@@ -288,6 +369,7 @@ export function buildGatewaySnapshot(
     return {
       ...provider,
       deploymentId: derived.deploymentId,
+      ...(derived.enabled === false ? { enabled: false, credentialFallbackAllowed: false } : {}),
       ...(derived.transport ? { transport: derived.transport } : {}),
     }
   })
@@ -430,7 +512,13 @@ export async function loadSnapshotProfileMeta(): Promise<SnapshotProfileMeta | u
 /** Resolves a subscription-vault credential for a provider id, or null. */
 export type VaultCredentialResolver = (
   providerId: string
-) => Promise<{ apiKey: string; baseURL: string } | null>
+) => Promise<{
+  apiKey: string
+  baseURL: string
+  headers?: Record<string, string>
+  protocol?: string
+  apiFlavor?: "chat" | "responses"
+} | null>
 
 /**
  * Fill in subscription-vault credentials the plain provider-settings path
@@ -457,33 +545,119 @@ export async function enrichSnapshotWithSubscriptionCreds(
   const toProbe = new Set<string>(subscriptionProviderIds)
   for (const p of providers) if (!p.apiKey) toProbe.add(p.id)
 
+  const credentials = new Map(
+    await Promise.all(
+      [...toProbe].map(async (id) => {
+        const index = indexById.get(id)
+        const previous = index === undefined ? undefined : providers[index]
+        const credential =
+          previous?.credentialFallbackAllowed === false || previous?.apiKey
+            ? null
+            : await resolveVaultCred(id).catch(() => null)
+        return [id, credential] as const
+      })
+    )
+  )
   for (const id of toProbe) {
-    const cred = await resolveVaultCred(id).catch(() => null)
-    if (!cred) continue
     const existing = indexById.get(id)
+    const prev = existing === undefined ? undefined : providers[existing]
+    if (prev?.credentialFallbackAllowed === false || prev?.apiKey) continue
+    const cred = credentials.get(id)
+    if (!cred) {
+      if (existing !== undefined && subscriptionProviderIds.includes(id))
+        providers[existing] = { ...providers[existing], enabled: false }
+      continue
+    }
+    const headers = new Map(
+      (prev?.transport?.staticHeaders ?? []).map(([name, value]) => [name.toLowerCase(), value])
+    )
+    for (const [name, value] of Object.entries(cred.headers ?? {})) {
+      if (!name.toLowerCase().startsWith("x-cognia-")) headers.set(name.toLowerCase(), value)
+    }
+    const transport =
+      headers.size > 0
+        ? {
+            authScheme:
+              (cred.protocol ?? prev?.protocol) === "anthropic"
+                ? ("x-api-key" as const)
+                : ("bearer" as const),
+            ...prev?.transport,
+            staticHeaders: [...headers.entries()],
+          }
+        : prev?.transport
     if (existing !== undefined) {
-      const prev = providers[existing]
-      // Only fill a missing key — never clobber an explicitly configured one.
-      if (prev.apiKey) continue
       providers[existing] = {
-        ...prev,
+        ...providers[existing],
         apiKey: cred.apiKey,
-        baseUrl: cred.baseURL || prev.baseUrl,
+        ...(cred.protocol ? { protocol: cred.protocol } : {}),
+        ...(cred.apiFlavor ? { apiFlavor: cred.apiFlavor } : {}),
+        baseUrl: cred.baseURL || providers[existing].baseUrl,
         enabled: true,
+        ...(transport ? { transport } : {}),
       }
     } else {
       // opencode chat providers speak the OpenAI protocol.
       providers.push({
         id,
-        protocol: "openai",
+        protocol: cred.protocol ?? "openai",
+        ...(cred.apiFlavor ? { apiFlavor: cred.apiFlavor } : {}),
         baseUrl: cred.baseURL,
         apiKey: cred.apiKey,
         enabled: true,
         models: [],
+        ...(transport ? { transport } : {}),
       })
       indexById.set(id, providers.length - 1)
     }
   }
 
   return { ...snapshot, providers }
+}
+
+/** One enrichment path shared by periodic publication and required task minting. */
+export async function buildEnrichedGatewaySnapshot(
+  settings: AppSettings,
+  generatedAtMs: number,
+  profileMeta?: SnapshotProfileMeta
+): Promise<GatewayRoutingSnapshot> {
+  const [
+    { listSubscriptionProviders },
+    { OPENCODE_CHAT_PROVIDER_IDS },
+    { resolveSubscriptionProviderCredential },
+  ] = await Promise.all([
+    import("@/lib/subscription/core/provider-registry"),
+    import("@/types/subscription/opencode"),
+    import("@/lib/claude/provider-attempt-options"),
+  ])
+  const definitions = listSubscriptionProviders(settings.customProviders)
+  const snapshot = await enrichSnapshotWithSubscriptionCreds(
+    buildGatewaySnapshot(settings, generatedAtMs, profileMeta),
+    [
+      ...OPENCODE_CHAT_PROVIDER_IDS,
+      ...definitions
+        .filter((provider) => provider.authMode === "api-key")
+        .map((provider) => provider.id),
+    ],
+    (id) => resolveSubscriptionProviderCredential(id, settings)
+  )
+  return {
+    ...snapshot,
+    providers: snapshot.providers.map((provider) => {
+      const definition = definitions.find((entry) => entry.id === provider.id)
+      const models = [
+        ...new Set([
+          ...provider.models,
+          ...(definition?.models ?? []),
+          ...(settings.providerSettings?.[provider.id]?.discoveredModels?.map(
+            (model) => model.id
+          ) ?? []),
+        ]),
+      ]
+      return {
+        ...provider,
+        models,
+        modelMetadata: models.map((model) => gatewayModelMetadata(settings, provider.id, model)),
+      }
+    }),
+  }
 }

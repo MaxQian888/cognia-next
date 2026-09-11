@@ -10,12 +10,12 @@
 
 import { RoutingNoCandidatesError } from "@cognia/provider-routing/provider-routing-engine"
 import type { ProviderRoutingEngine } from "@cognia/provider-routing/provider-routing-engine"
-import type { GatewaySnapshotEntry } from "@/types/gateway"
+import type { GatewayAccountScope, GatewaySnapshotEntry } from "@/types/gateway"
 import type { RoutingDataPolicy } from "@cognia/provider-types/auto-router"
 
 export const GATEWAY_ROUTING_DEADLINE_MS = 800
 
-export interface GatewayDecideRequest {
+export interface GatewayDecideRequest extends GatewayAccountScope {
   requestId: string
   model: string
   promptText?: string | null

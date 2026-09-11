@@ -21,6 +21,28 @@ pub struct Candidate {
     pub model_id: String,
 }
 
+impl Candidate {
+    pub(crate) fn new(provider: &ProviderSnapshot, model_id: &str) -> Self {
+        let mut provider = provider.clone();
+        if provider.id == "commandcode" {
+            // CommandCode exposes Claude only through Anthropic Messages.
+            provider.protocol = if model_id.split('/').any(|part| part.starts_with("claude-")) {
+                "anthropic"
+            } else {
+                "openai"
+            }
+            .into();
+        }
+        if provider.protocol == "openai" && provider.api_flavor.as_deref() == Some("responses") {
+            provider.protocol = "responses".into();
+        }
+        Self {
+            provider,
+            model_id: model_id.into(),
+        }
+    }
+}
+
 /// In-memory rotation state for one provider's upstream key pool. Process-local
 /// and reset on restart — a fresh cursor after restart is harmless.
 #[derive(Default)]
@@ -192,7 +214,7 @@ pub fn record_key_success(rotation: &KeyRotationMap, candidate: &Candidate) {
 
 /// Protocols the gateway can execute today.
 pub fn is_executable_protocol(protocol: &str) -> bool {
-    matches!(protocol, "openai" | "anthropic")
+    matches!(protocol, "openai" | "anthropic" | "responses")
 }
 
 /// Resolve the inbound `model` field into an ordered candidate list:
@@ -208,10 +230,7 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
         for entry in &alias.entries {
             if let Some(provider) = snapshot.provider(&entry.provider_id) {
                 if is_executable_protocol(&provider.protocol) {
-                    out.push(Candidate {
-                        provider: provider.clone(),
-                        model_id: entry.model_id.clone(),
-                    });
+                    out.push(Candidate::new(provider, &entry.model_id));
                 }
             }
         }
@@ -221,10 +240,7 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
     if let Some((provider_id, model_id)) = model.split_once(':') {
         if let Some(provider) = snapshot.provider(provider_id) {
             if is_executable_protocol(&provider.protocol) && !model_id.is_empty() {
-                out.push(Candidate {
-                    provider: provider.clone(),
-                    model_id: model_id.to_string(),
-                });
+                out.push(Candidate::new(provider, model_id));
                 return out;
             }
         }
@@ -235,10 +251,7 @@ pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candid
             && is_executable_protocol(&provider.protocol)
             && provider.models.iter().any(|m| m == model)
         {
-            out.push(Candidate {
-                provider: provider.clone(),
-                model_id: model.to_string(),
-            });
+            out.push(Candidate::new(provider, model));
         }
     }
     out
@@ -256,10 +269,7 @@ pub fn candidates_from_entries(
     for entry in entries {
         if let Some(provider) = snapshot.provider(&entry.provider_id) {
             if is_executable_protocol(&provider.protocol) {
-                out.push(Candidate {
-                    provider: provider.clone(),
-                    model_id: entry.model_id.clone(),
-                });
+                out.push(Candidate::new(provider, &entry.model_id));
             }
         }
     }
@@ -273,6 +283,7 @@ pub fn upstream_url(protocol: &str, base_url: &str) -> String {
     let base = base_url.trim_end_matches('/');
     match protocol {
         "anthropic" => format!("{base}/messages"),
+        "responses" => format!("{base}/responses"),
         _ => format!("{base}/chat/completions"),
     }
 }
@@ -527,6 +538,11 @@ pub fn strip_request_fields(
         if field.is_empty() {
             continue;
         }
+        // Never turn a client's explicit no-retention request into the
+        // Responses API's default store=true by stripping the false value.
+        if field == "store" && body["store"] == false {
+            continue;
+        }
         let permitted = {
             let scoped = format!("{provider_id}:{field}");
             allow.iter().any(|a| a.trim() == scoped)
@@ -557,6 +573,53 @@ fn remove_path(value: &mut Value, path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commandcode_routes_each_model_family_across_all_candidate_sources() {
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "providers": [{
+                "id": "commandcode", "protocol": "openai", "enabled": true,
+                "baseUrl": "https://api.commandcode.ai/provider/v1", "apiKey": "test-key",
+                "models": ["claude-sonnet-5", "deepseek/deepseek-v4-flash"]
+            }],
+            "aliases": [{ "alias": "smart", "entries": [
+                { "providerId": "commandcode", "modelId": "claude-sonnet-5" }
+            ]}],
+            "generatedAtMs": 1
+        }))
+        .unwrap();
+        for model in [
+            "smart",
+            "claude-sonnet-5",
+            "commandcode:anthropic/claude-sonnet-5",
+        ] {
+            let candidates = resolve_candidates(&snapshot, model);
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].provider.protocol, "anthropic");
+            assert_eq!(
+                upstream_url(
+                    &candidates[0].provider.protocol,
+                    &candidates[0].provider.base_url
+                ),
+                "https://api.commandcode.ai/provider/v1/messages"
+            );
+        }
+        let entries: Vec<SnapshotEntry> = serde_json::from_value(serde_json::json!([
+            { "providerId": "commandcode", "modelId": "claude-sonnet-5" },
+            { "providerId": "commandcode", "modelId": "deepseek/deepseek-v4-flash" }
+        ]))
+        .unwrap();
+        let candidates = candidates_from_entries(&snapshot, &entries);
+        assert_eq!(candidates[0].provider.protocol, "anthropic");
+        assert_eq!(candidates[1].provider.protocol, "openai");
+        assert_eq!(
+            resolve_candidates(&snapshot, "deepseek/deepseek-v4-flash")[0]
+                .provider
+                .protocol,
+            "openai"
+        );
+        assert_eq!(snapshot.providers[0].protocol, "openai");
+    }
 
     fn snapshot() -> RoutingSnapshot {
         serde_json::from_value(serde_json::json!({
@@ -907,6 +970,13 @@ mod tests {
             .filter_map(|c| c.provider.api_key.as_deref())
             .collect();
         assert!(keys2.contains(&"sk-a") && keys2.contains(&"sk-c") && !keys2.contains(&"sk-b"));
+    }
+
+    #[test]
+    fn stripping_retention_toggles_preserves_an_explicit_store_false() {
+        let mut body = serde_json::json!({"store":false});
+        strip_request_fields(&mut body, "fixture", &["store".into()], &[]);
+        assert_eq!(body["store"], false);
     }
 
     #[test]

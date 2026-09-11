@@ -61,6 +61,25 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
         model,
         stream: body.get("stream").and_then(Value::as_bool).unwrap_or(false),
         max_tokens: body.get("max_tokens").and_then(Value::as_u64),
+        parallel_tool_calls: super::ir::optional_bool(
+            body["tool_choice"].get("disable_parallel_tool_use"),
+            "disable_parallel_tool_use",
+        )?
+        .map(|disabled| !disabled),
+        response_format: super::ir::output_format(
+            body["output_config"].get("format"),
+            "anthropic",
+        )?,
+        reasoning_effort: body["output_config"]
+            .get("effort")
+            .filter(|v| !v.is_null())
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| NotTranslatable::new("output_config.effort must be a string"))
+            })
+            .transpose()?,
+        thinking: body.get("thinking").filter(|v| !v.is_null()).cloned(),
         temperature: body.get("temperature").and_then(Value::as_f64),
         top_p: body.get("top_p").and_then(Value::as_f64),
         ..Default::default()
@@ -104,6 +123,7 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                 name,
                 description: s(&t["description"]),
                 input_schema: t.get("input_schema").cloned().unwrap_or_else(|| json!({})),
+                strict: super::ir::optional_bool(t.get("strict"), "tools[].strict")?,
             });
         }
     }
@@ -111,12 +131,17 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
         Some(choice) => match s(&choice["type"]).as_deref() {
             Some("auto") => Some(IrToolChoice::Auto),
             Some("any") => Some(IrToolChoice::Any),
-            Some("tool") => s(&choice["name"]).map(IrToolChoice::Tool),
+            Some("tool") => Some(IrToolChoice::Tool(
+                s(&choice["name"])
+                    .filter(|name| !name.is_empty())
+                    .ok_or_else(|| NotTranslatable::new("tool_choice.name is required"))?,
+            )),
             Some("none") => Some(IrToolChoice::None),
-            _ => None,
+            _ => return Err(NotTranslatable::new("unsupported tool_choice")),
         },
         None => None,
     };
+    ir.validate_tool_choice()?;
 
     let messages = body["messages"]
         .as_array()
@@ -146,11 +171,15 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                             name: s(&block["name"]).unwrap_or_default(),
                             input: block.get("input").cloned().unwrap_or_else(|| json!({})),
                         }),
-                        Some("tool_result") => content.push(IrContent::ToolResult {
-                            tool_use_id: s(&block["tool_use_id"]).unwrap_or_default(),
-                            content: tool_result_text(&block["content"]),
-                            is_error: block["is_error"].as_bool().unwrap_or(false),
-                        }),
+                        Some("tool_result") => content.push(super::ir::tool_result(
+                            s(&block["tool_use_id"])
+                                .filter(|id| !id.is_empty())
+                                .ok_or_else(|| {
+                                    NotTranslatable::new("tool_result.tool_use_id is required")
+                                })?,
+                            tool_result_parts(&block["content"])?,
+                            block["is_error"].as_bool().unwrap_or(false),
+                        )),
                         Some("image") => {
                             content.push(IrContent::Image(parse_anthropic_image(&block["source"])?))
                         }
@@ -179,16 +208,17 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
     Ok(ir)
 }
 
-/// Anthropic `tool_result.content` is a string OR an array of text blocks.
-fn tool_result_text(content: &Value) -> String {
+/// Preserve every text/image block inside a tool result.
+fn tool_result_parts(content: &Value) -> Result<Vec<IrContent>, NotTranslatable> {
     match content {
-        Value::String(text) => text.clone(),
-        Value::Array(blocks) => blocks
-            .iter()
-            .filter_map(|b| b["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
+        Value::String(text) => Ok(vec![IrContent::Text(text.clone())]),
+        Value::Null => Ok(Vec::new()),
+        Value::Array(blocks) => blocks.iter().map(|block|match block["type"].as_str() {
+            Some("text") => Ok(IrContent::Text(s(&block["text"]).ok_or_else(||NotTranslatable::new("tool result text is required"))?)),
+            Some("image") => Ok(IrContent::Image(parse_anthropic_image(&block["source"])?)),
+            _ => Err(NotTranslatable::new("tool result content supports text and images; other block types require a same-protocol upstream")),
+        }).collect(),
+        _ => Err(NotTranslatable::new("invalid tool result content")),
     }
 }
 
@@ -208,6 +238,8 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                     IrContent::ToolUse { id, name, input } => json!({
                         "type": "tool_use", "id": id, "name": name, "input": input
                     }),
+                    IrContent::ToolResultMedia {tool_use_id,content,is_error} => json!({"type":"tool_result","tool_use_id":tool_use_id,"is_error":is_error,
+                        "content":content.iter().map(|part| match part {IrContent::Image(image)=>anthropic_image_block(image),IrContent::Text(text)=>json!({"type":"text","text":text}), _ => unreachable!("tool result parts are text/images")}).collect::<Vec<_>>()}),
                     IrContent::ToolResult {
                         tool_use_id,
                         content,
@@ -243,11 +275,15 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                 ir.tools
                     .iter()
                     .map(|t| {
-                        json!({
+                        let mut tool = json!({
                             "name": t.name,
                             "description": t.description,
                             "input_schema": t.input_schema,
-                        })
+                        });
+                        if let Some(strict) = t.strict {
+                            tool["strict"] = json!(strict);
+                        }
+                        tool
                     })
                     .collect(),
             ),
@@ -270,6 +306,27 @@ pub fn from_ir(ir: &ChatIR) -> Value {
             out.insert("tool_choice".into(), json!({ "type": "none" }));
         }
         None => {}
+    }
+    if let Some(format) = &ir.response_format {
+        out.insert(
+            "output_config".into(),
+            json!({"format":{"type":"json_schema","schema":format["json_schema"]["schema"]}}),
+        );
+    }
+    if let Some(effort) = &ir.reasoning_effort {
+        let output_config = out.entry("output_config").or_insert_with(|| json!({}));
+        output_config["effort"] = json!(effort);
+    }
+    if let Some(thinking) = &ir.thinking {
+        out.insert("thinking".into(), thinking.clone());
+    }
+    if let Some(parallel) = ir.parallel_tool_calls {
+        if ir.tool_choice != Some(IrToolChoice::None) && !ir.tools.is_empty() {
+            let choice = out
+                .entry("tool_choice")
+                .or_insert_with(|| json!({"type":"auto"}));
+            choice["disable_parallel_tool_use"] = json!(!parallel);
+        }
     }
     if let Some(t) = ir.temperature {
         out.insert("temperature".into(), json!(t));
@@ -327,7 +384,9 @@ pub fn response_from_ir(resp: &IrResponse) -> Value {
                 "type": "tool_use", "id": id, "name": name, "input": input
             })),
             // Tool results / images never appear in assistant output.
-            IrContent::ToolResult { .. } | IrContent::Image(_) => None,
+            IrContent::ToolResult { .. }
+            | IrContent::ToolResultMedia { .. }
+            | IrContent::Image(_) => None,
         })
         .collect();
     json!({

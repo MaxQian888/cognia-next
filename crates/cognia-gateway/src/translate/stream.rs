@@ -54,6 +54,8 @@ impl SseOut {
 pub enum Direction {
     OpenAiToAnthropic,
     AnthropicToOpenAi,
+    ResponsesToOpenAi,
+    ResponsesToAnthropic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -113,6 +115,9 @@ impl StreamTranscoder {
         match self.direction {
             Direction::OpenAiToAnthropic => self.push_openai_chunk(data),
             Direction::AnthropicToOpenAi => self.push_anthropic_event(data),
+            Direction::ResponsesToOpenAi | Direction::ResponsesToAnthropic => {
+                self.push_responses_event(data)
+            }
         }
     }
 
@@ -124,7 +129,7 @@ impl StreamTranscoder {
         self.finished = true;
         let mut out = Vec::new();
         match self.direction {
-            Direction::OpenAiToAnthropic => {
+            Direction::OpenAiToAnthropic | Direction::ResponsesToAnthropic => {
                 self.ensure_started_anthropic(&mut out);
                 self.close_open_block(&mut out);
                 let stop = self.stop_reason.unwrap_or(IrStopReason::Stop);
@@ -141,7 +146,7 @@ impl StreamTranscoder {
                     json!({ "type": "message_stop" }),
                 ));
             }
-            Direction::AnthropicToOpenAi => {
+            Direction::AnthropicToOpenAi | Direction::ResponsesToOpenAi => {
                 let stop = self.stop_reason.unwrap_or(IrStopReason::Stop);
                 out.push(SseOut::json(
                     None,
@@ -161,6 +166,67 @@ impl StreamTranscoder {
             }
         }
         out
+    }
+
+    fn push_responses_event(&mut self, data: &Value) -> Vec<SseOut> {
+        if self.finished {
+            return Vec::new();
+        }
+        let mut delta = json!({});
+        let mut stop: Option<&str> = None;
+        match data["type"].as_str().unwrap_or("") {
+            "response.output_text.delta" => delta["content"] = data["delta"].clone(),
+            "response.reasoning_summary_text.delta" => {
+                delta["reasoning_content"] = data["delta"].clone()
+            }
+            "response.output_item.added" if data["item"]["type"] == "function_call" => {
+                delta["tool_calls"] = json!([{"index":data["output_index"],"id":data["item"]["call_id"],"type":"function","function":{"name":data["item"]["name"],"arguments":""}}]);
+            }
+            "response.function_call_arguments.delta" => {
+                delta["tool_calls"] =
+                    json!([{"index":data["output_index"],"function":{"arguments":data["delta"]}}]);
+            }
+            "response.completed" | "response.incomplete" => {
+                self.usage.input_tokens = data["response"]["usage"]["input_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                self.usage.output_tokens = data["response"]["usage"]["output_tokens"]
+                    .as_u64()
+                    .unwrap_or(0);
+                stop = Some(if data["type"] == "response.incomplete" {
+                    "length"
+                } else if data["response"]["output"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item["type"] == "function_call"))
+                {
+                    "tool_calls"
+                } else {
+                    "stop"
+                });
+                self.stop_reason = stop.map(IrStopReason::from_openai);
+            }
+            "response.failed" | "error" => {
+                self.finished = true;
+                return vec![SseOut::json(
+                    Some("error"),
+                    json!({"error":{"type":"api_error","message":"upstream Responses stream failed"}}),
+                )];
+            }
+            _ => return Vec::new(),
+        }
+        let chat = json!({"id":self.message_id,"object":"chat.completion.chunk","model":self.client_model,
+            "choices":[{"index":0,"delta":delta,"finish_reason":stop}],
+            "usage":{"prompt_tokens":self.usage.input_tokens,"completion_tokens":self.usage.output_tokens}});
+        if self.direction == Direction::ResponsesToAnthropic {
+            self.push_openai_chunk(&chat)
+        } else {
+            let mut out = vec![SseOut::json(None, chat)];
+            if stop.is_some() {
+                self.finished = true;
+                out.push(SseOut::done());
+            }
+            out
+        }
     }
 
     // ---- openai upstream → anthropic client --------------------------------
@@ -339,6 +405,11 @@ impl StreamTranscoder {
                 }
             }
             Some("content_block_delta") => match event["delta"]["type"].as_str() {
+                Some("thinking_delta") => {
+                    if let Some(text) = event["delta"]["thinking"].as_str() {
+                        out.push(self.openai_chunk(json!({"reasoning_content":text}), None));
+                    }
+                }
                 Some("text_delta") => {
                     if let Some(text) = event["delta"]["text"].as_str() {
                         out.push(self.openai_chunk(json!({ "content": text }), None));

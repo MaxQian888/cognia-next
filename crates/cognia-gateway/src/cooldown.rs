@@ -6,7 +6,7 @@
 //! failover walk stops re-selecting a key the upstream just refused — which
 //! wastes the failover budget and accelerates upstream risk-control. A key
 //! that is permanently dead (401 / `insufficient_quota` / org disabled) is
-//! disabled outright until the renderer pushes a fresh snapshot.
+//! disabled until credential/transport changes or an explicit recovery action.
 //!
 //! The cooldown window is derived from the upstream's own recovery hint when
 //! present (`Retry-After`, Anthropic `anthropic-ratelimit-unified-reset`), so
@@ -36,6 +36,31 @@ pub struct CooldownState {
 /// with the running server so cooldowns persist across requests. Process-local
 /// and reset on restart (a fresh, empty map after restart is harmless).
 pub type KeyCooldownMap = Mutex<HashMap<(String, String), CooldownState>>;
+
+/// Preserve cooldowns only while the same credential and transport remain.
+/// Periodic identical publications must never revive a rejected credential.
+pub fn reconcile(
+    map: &KeyCooldownMap,
+    previous: Option<&super::snapshot::RoutingSnapshot>,
+    next: &super::snapshot::RoutingSnapshot,
+) {
+    map.lock().retain(|(provider_id, key), _| {
+        let old =
+            previous.and_then(|snapshot| snapshot.providers.iter().find(|p| &p.id == provider_id));
+        let new = next.providers.iter().find(|p| &p.id == provider_id);
+        match (old, new) {
+            (Some(old), Some(new)) => {
+                new.enabled
+                    && old.enabled
+                    && old.base_url == new.base_url
+                    && old.protocol == new.protocol
+                    && old.transport == new.transport
+                    && (new.api_key.as_ref() == Some(key) || new.api_keys.contains(key))
+            }
+            _ => false,
+        }
+    });
+}
 
 /// Compute the cooldown window (ms from now) an upstream response implies, or
 /// `None` when the status carries no account-level cooldown signal. Pure — the
@@ -209,6 +234,31 @@ pub fn key_fingerprint(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_reconciliation_preserves_identical_credentials_and_recovers_transport_changes() {
+        let previous: super::super::snapshot::RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "providers": [{"id":"p", "protocol":"openai", "baseUrl":"https://old.test/v1", "enabled":true, "apiKeys":["same", "removed"]}],
+            "generatedAtMs": 1
+        })).unwrap();
+        let map = KeyCooldownMap::default();
+        record_permanent(&map, "p", "same", "unauthorized");
+        record_permanent(&map, "p", "removed", "unauthorized");
+        reconcile(&map, Some(&previous), &previous);
+        assert_eq!(map.lock().len(), 2);
+        let mut next = previous.clone();
+        next.providers[0].api_keys = vec!["same".into()];
+        reconcile(&map, Some(&previous), &next);
+        assert_eq!(map.lock().len(), 1);
+        next.providers[0].base_url = "https://corrected.test/v1".into();
+        reconcile(&map, Some(&previous), &next);
+        assert!(map.lock().is_empty());
+        record_permanent(&map, "p", "same", "unauthorized");
+        next = previous.clone();
+        next.providers[0].enabled = false;
+        reconcile(&map, Some(&previous), &next);
+        assert!(map.lock().is_empty());
+    }
 
     #[test]
     fn retry_after_seconds_wins_for_any_status() {

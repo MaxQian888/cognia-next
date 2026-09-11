@@ -164,6 +164,15 @@ pub struct ProviderConstraintSnapshot {
     pub circuit_open: bool,
 }
 
+/// Optional facts from the selected account's model catalog. Unknown is absent.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMetadata {
+    pub id: String,
+    #[serde(flatten)]
+    pub fields: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSnapshot {
@@ -172,6 +181,10 @@ pub struct ProviderSnapshot {
     /// by the gateway and are skipped by the fallback walk).
     pub protocol: String,
     pub base_url: String,
+    #[serde(default)]
+    pub api_flavor: Option<String>,
+    #[serde(default)]
+    pub model_metadata: Vec<ModelMetadata>,
     /// The primary / single credential. Always the fallback when no rotation
     /// pool is configured (or rotation is disabled).
     #[serde(default)]
@@ -419,6 +432,40 @@ impl RoutingSnapshot {
             }
         }
         for provider in &self.providers {
+            if provider
+                .api_flavor
+                .as_deref()
+                .is_some_and(|flavor| !matches!(flavor, "chat" | "responses"))
+            {
+                return Err(format!("provider {}: invalid apiFlavor", provider.id));
+            }
+            for metadata in &provider.model_metadata {
+                if metadata.id.is_empty() {
+                    return Err("model metadata id is required".into());
+                }
+                for (field, value) in &metadata.fields {
+                    let valid = match field.as_str() {
+                        "name" => value.is_string(),
+                        "contextLength" | "maxInputTokens" | "maxOutputTokens" => {
+                            value.as_u64().is_some_and(|v| v > 0)
+                        }
+                        "supportsTools"
+                        | "supportsReasoning"
+                        | "supportsVision"
+                        | "supportsAudio"
+                        | "supportsVideo"
+                        | "supportsStreaming"
+                        | "supportsStructuredOutput" => value.is_boolean(),
+                        _ => false,
+                    };
+                    if !valid {
+                        return Err(format!(
+                            "model {}: invalid metadata field {field}",
+                            metadata.id
+                        ));
+                    }
+                }
+            }
             let Some(transport) = &provider.transport else {
                 continue;
             };

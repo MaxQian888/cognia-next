@@ -27,8 +27,8 @@ pub mod api_keys;
 #[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod concurrency;
-pub mod count_tokens;
 pub mod cooldown;
+pub mod count_tokens;
 pub mod credentials;
 pub mod execute;
 pub mod header_policy;
@@ -76,6 +76,8 @@ pub enum SnapshotRejected {
     LegacyOverVersioned { current: u64 },
     #[error("snapshot failed validation: {0}")]
     Invalid(String),
+    #[error("local account context changed or is locked; rebuild the snapshot")]
+    AccountContextChanged,
 }
 use types::{GatewayConfig, GatewayError, GatewayStatus};
 
@@ -84,8 +86,29 @@ use types::{GatewayConfig, GatewayError, GatewayStatus};
 /// resolves it. Entries the renderer never answers are dropped on timeout.
 pub type DecisionRegistry = Mutex<HashMap<String, oneshot::Sender<Vec<SnapshotEntry>>>>;
 
+/// Host-owned account boundary, serialized with snapshot ingest and key mutation.
+#[derive(Debug, Clone, Default)]
+pub struct GatewayAccountContext {
+    pub owner_account_id: Option<String>,
+    pub generation: u64,
+    pub required: bool,
+}
+
+impl GatewayAccountContext {
+    pub fn permits_key(&self, key: &GatewayApiKey) -> bool {
+        if self.required {
+            self.owner_account_id.is_some() && key.owner_account_id == self.owner_account_id
+        } else {
+            key.owner_account_id.is_none()
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct GatewayState {
-    inner: Mutex<GatewayInner>,
+    inner: Arc<Mutex<GatewayInner>>,
+    account: Arc<RwLock<GatewayAccountContext>>,
+    account_changes: Arc<tokio::sync::watch::Sender<u64>>,
     /// Authoritative, hot-shared config. The running server reads request-time
     /// fields (timeouts, retry policy, model exposure) from this on every
     /// request, so an `update_config` takes effect without a restart. Bind-time
@@ -152,11 +175,13 @@ impl GatewayState {
             ..Default::default()
         };
         Self {
-            inner: Mutex::new(GatewayInner {
+            inner: Arc::new(Mutex::new(GatewayInner {
                 status,
                 server: None,
                 config_path: None,
-            }),
+            })),
+            account: Arc::new(RwLock::new(GatewayAccountContext::default())),
+            account_changes: Arc::new(tokio::sync::watch::channel(0).0),
             config: Arc::new(RwLock::new(config)),
             keys: Arc::new(RwLock::new(keys)),
             snapshot: Arc::new(RwLock::new(None)),
@@ -170,6 +195,78 @@ impl GatewayState {
             ))),
             leases: Arc::new(lease::CredentialLeaseMap::default()),
         }
+    }
+
+    /// Desktop binds this before accepting IPC. Headless intentionally keeps
+    /// its independent hosting authority and unowned access keys.
+    pub fn require_local_account(&self) {
+        let mut account = self.account.write();
+        account.required = true;
+        account.owner_account_id = None;
+        self.invalidate_locked(&mut account);
+    }
+
+    pub fn activate_account(&self, account_id: &str) {
+        let mut account = self.account.write();
+        if account.owner_account_id.as_deref() == Some(account_id) {
+            return;
+        }
+        account.required = true;
+        account.owner_account_id = Some(account_id.to_owned());
+        self.invalidate_locked(&mut account);
+    }
+
+    pub fn lock_account(&self) {
+        let mut account = self.account.write();
+        account.owner_account_id = None;
+        self.invalidate_locked(&mut account);
+    }
+
+    pub fn lock_matching_account(&self, account_id: &str) -> bool {
+        let mut account = self.account.write();
+        if account.owner_account_id.as_deref() != Some(account_id) {
+            return false;
+        }
+        account.owner_account_id = None;
+        self.invalidate_locked(&mut account);
+        true
+    }
+
+    /// Called after a committed vault mutation, including with no renderer.
+    pub fn invalidate_account_snapshot(&self, account_id: &str) -> bool {
+        let mut account = self.account.write();
+        if account.owner_account_id.as_deref() != Some(account_id) {
+            return false;
+        }
+        self.invalidate_locked(&mut account);
+        true
+    }
+
+    fn invalidate_locked(&self, account: &mut GatewayAccountContext) {
+        account.generation = account.generation.saturating_add(1);
+        self.account_changes.send_replace(account.generation);
+        *self.snapshot.write() = None;
+        self.decisions.lock().clear();
+        for ticket in self.tickets.list() {
+            self.tickets.revoke(&ticket.ticket_id);
+        }
+        self.leases.clear();
+        self.key_cooldown.lock().clear();
+        let mut inner = self.inner.lock();
+        inner.status.snapshot_generated_at_ms = None;
+        inner.status.snapshot_provider_count = 0;
+        inner.status.snapshot_alias_count = 0;
+        inner.status.routing_policy_revision = None;
+        inner.status.routing_strategy = None;
+        inner.status.routing_strategy_unavailable = None;
+        inner.status.local_routing_enabled = false;
+    }
+
+    pub fn reset_cooldowns(&self, provider_id: Option<&str>) -> usize {
+        let mut map = self.key_cooldown.lock();
+        let before = map.len();
+        map.retain(|(provider, _), _| provider_id.is_some_and(|id| id != provider));
+        before - map.len()
     }
 
     /// Snapshot the current cooling / permanently-disabled upstream keys for the
@@ -278,7 +375,26 @@ impl GatewayState {
     }
 
     pub fn status(&self) -> GatewayStatus {
+        let account = self.account.read();
         let mut status = self.inner.lock().status.clone();
+        status.owner_account_id = account.owner_account_id.clone();
+        status.account_generation = account.generation;
+        status.account_required = account.required;
+        status.legacy_key_count = if account.required {
+            self.keys
+                .read()
+                .iter()
+                .filter(|key| key.owner_account_id.is_none())
+                .count()
+        } else {
+            0
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        status.has_token = self
+            .keys
+            .read()
+            .iter()
+            .any(|key| account.permits_key(key) && key.is_usable(now));
         status.bind_interface = self.config.read().bind_interface;
         status
     }
@@ -303,9 +419,11 @@ impl GatewayState {
     // ---- API key management -------------------------------------------------
 
     pub fn list_keys(&self) -> Vec<RedactedApiKey> {
+        let account = self.account.read();
         self.keys
             .read()
             .iter()
+            .filter(|key| account.permits_key(key))
             .map(GatewayApiKey::redacted)
             .collect()
     }
@@ -324,15 +442,22 @@ impl GatewayState {
         rate_limit_per_min: Option<u32>,
         quota_tokens: Option<i64>,
     ) -> Result<GatewayApiKey, GatewayError> {
+        let account = self.account.read();
+        if account.required && account.owner_account_id.is_none() {
+            return Err(GatewayError::InvalidConfig(
+                "the local account is locked".into(),
+            ));
+        }
         let key = {
             let mut keys = self.keys.write();
-            api_keys::create_key(
+            api_keys::create_owned_key(
                 &mut keys,
                 name,
                 model_allowlist,
                 expires_at_ms,
                 rate_limit_per_min,
                 quota_tokens,
+                account.owner_account_id.clone(),
             )
             .map_err(GatewayError::Keyring)?
         };
@@ -343,6 +468,15 @@ impl GatewayState {
     /// Zero a key's consumed-quota counter (the "reset usage" action) and
     /// persist. Errors if the id is unknown.
     pub fn reset_key_quota(&self, id: &str) -> Result<(), GatewayError> {
+        let account = self.account.read();
+        if !self
+            .keys
+            .read()
+            .iter()
+            .any(|key| key.id == id && account.permits_key(key))
+        {
+            return Err(GatewayError::InvalidConfig(format!("no such key: {id}")));
+        }
         {
             let mut keys = self.keys.write();
             if !api_keys::reset_quota(&mut keys, id) {
@@ -354,6 +488,15 @@ impl GatewayState {
     }
 
     pub fn update_key(&self, id: &str, patch: ApiKeyPatch) -> Result<(), GatewayError> {
+        let account = self.account.read();
+        if !self
+            .keys
+            .read()
+            .iter()
+            .any(|key| key.id == id && account.permits_key(key))
+        {
+            return Err(GatewayError::InvalidConfig(format!("no such key: {id}")));
+        }
         {
             let mut keys = self.keys.write();
             api_keys::apply_patch(&mut keys, id, patch).map_err(GatewayError::InvalidConfig)?;
@@ -365,6 +508,15 @@ impl GatewayState {
     }
 
     pub fn delete_key(&self, id: &str) -> Result<(), GatewayError> {
+        let account = self.account.read();
+        if !self
+            .keys
+            .read()
+            .iter()
+            .any(|key| key.id == id && account.permits_key(key))
+        {
+            return Err(GatewayError::InvalidConfig(format!("no such key: {id}")));
+        }
         {
             let mut keys = self.keys.write();
             if !api_keys::delete_key(&mut keys, id) {
@@ -378,10 +530,11 @@ impl GatewayState {
     }
 
     pub fn reveal_key(&self, id: &str) -> Option<String> {
+        let account = self.account.read();
         self.keys
             .read()
             .iter()
-            .find(|k| k.id == id)
+            .find(|k| k.id == id && account.permits_key(k))
             .map(|k| k.secret.clone())
     }
 
@@ -404,7 +557,14 @@ impl GatewayState {
     /// authority-checked [`Self::try_set_snapshot`] is what publishers call;
     /// this remains only for pre-Phase-2 in-crate tests and is equivalent to
     /// a legacy (unversioned) accept.
+    #[cfg(test)]
     pub fn set_snapshot(&self, snapshot: RoutingSnapshot) {
+        let mut live = self.snapshot.write();
+        self.commit_snapshot(&mut live, snapshot);
+    }
+
+    fn commit_snapshot(&self, live: &mut Option<RoutingSnapshot>, snapshot: RoutingSnapshot) {
+        cooldown::reconcile(&self.key_cooldown, live.as_ref(), &snapshot);
         let provider_count = snapshot.providers.iter().filter(|p| p.enabled).count() as u32;
         let alias_count = snapshot.aliases.len() as u32;
         let generated_at = snapshot.generated_at_ms;
@@ -420,7 +580,7 @@ impl GatewayState {
             .routing_policy
             .as_ref()
             .and_then(|policy| policy.auto.strategy_unavailable.clone());
-        *self.snapshot.write() = Some(snapshot);
+        *live = Some(snapshot);
         let mut inner = self.inner.lock();
         inner.status.snapshot_generated_at_ms = Some(generated_at);
         inner.status.snapshot_provider_count = provider_count;
@@ -446,13 +606,29 @@ impl GatewayState {
         &self,
         snapshot: RoutingSnapshot,
     ) -> Result<SnapshotAccepted, SnapshotRejected> {
+        self.try_set_account_snapshot(snapshot, None, None)
+    }
+
+    pub fn try_set_account_snapshot(
+        &self,
+        snapshot: RoutingSnapshot,
+        owner_account_id: Option<&str>,
+        generation: Option<u64>,
+    ) -> Result<SnapshotAccepted, SnapshotRejected> {
+        let account = self.account.read();
+        if account.required
+            && (account.owner_account_id.is_none()
+                || account.owner_account_id.as_deref() != owner_account_id
+                || generation != Some(account.generation))
+        {
+            return Err(SnapshotRejected::AccountContextChanged);
+        }
         if let Err(reason) = snapshot.validate() {
             return Err(SnapshotRejected::Invalid(reason));
         }
+        let mut live = self.snapshot.write();
         let current = {
-            let guard = self.snapshot.read();
-            guard
-                .as_ref()
+            live.as_ref()
                 .map(|s| (s.profile_version, s.authority))
                 .unwrap_or((None, None))
         };
@@ -474,7 +650,7 @@ impl GatewayState {
         let accepted = SnapshotAccepted {
             profile_version: snapshot.profile_version,
         };
-        self.set_snapshot(snapshot);
+        self.commit_snapshot(&mut live, snapshot);
         Ok(accepted)
     }
 
@@ -492,10 +668,12 @@ impl GatewayState {
         }
 
         let observer: Arc<dyn RequestObserver> = Arc::new(StateObserver {
-            state: SelfPtr(self as *const _),
+            inner: self.inner.clone(),
         });
 
-        let handle = server::spawn_server(
+        let handle = server::spawn_server_with_account(
+            self.account.clone(),
+            self.account_changes.clone(),
             host,
             self.config.clone(),
             self.keys.clone(),
@@ -559,12 +737,26 @@ impl GatewayState {
         &self,
         request: route_ticket::MintRequest,
     ) -> Result<route_ticket::MintedTicket, route_ticket::TicketError> {
+        let account = self.account.read();
         let now = chrono::Utc::now().timestamp_millis();
         let snapshot = self.snapshot.read();
-        self.tickets.mint(request, snapshot.as_ref(), now)
+        self.tickets.mint_owned(
+            request,
+            snapshot.as_ref(),
+            now,
+            account.owner_account_id.clone(),
+        )
     }
 
     pub fn revoke_route_ticket(&self, ticket_id: &str) -> bool {
+        let account = self.account.read();
+        if !self.tickets.list().iter().any(|ticket| {
+            ticket.ticket_id == ticket_id
+                && ticket.owner_account_id == account.owner_account_id
+                && (!account.required || account.owner_account_id.is_some())
+        }) {
+            return false;
+        }
         self.tickets.revoke(ticket_id)
     }
 
@@ -578,15 +770,16 @@ impl GatewayState {
     /// Redacted ticket metadata (no secrets are ever stored).
     pub fn list_route_tickets(&self) -> Vec<route_ticket::RouteTicket> {
         let now = chrono::Utc::now().timestamp_millis();
+        let account = self.account.read();
         self.tickets.sweep_expired(now);
-        self.tickets.list()
-    }
-
-    /// Bump the call counter + last-call timestamp from the request observer.
-    fn observe(&self) {
-        let mut inner = self.inner.lock();
-        inner.status.calls_total = inner.status.calls_total.saturating_add(1);
-        inner.status.last_call_at = Some(chrono::Utc::now().to_rfc3339());
+        self.tickets
+            .list()
+            .into_iter()
+            .filter(|ticket| {
+                ticket.owner_account_id == account.owner_account_id
+                    && (!account.required || account.owner_account_id.is_some())
+            })
+            .collect()
     }
 }
 
@@ -596,27 +789,17 @@ impl Default for GatewayState {
     }
 }
 
-/// Type-erased `&'static GatewayState` handle for the request observer. The
-/// state is owned for the entire process lifetime by Tauri's `manage()` on
-/// desktop, or by `HeadlessServices` (an `Arc` installed process-wide at
-/// boot and never dropped) under `cognia-server` — so holding a raw pointer
-/// for the server task's duration is sound in both hosts. Mirrors
-/// `remote_control::SelfPtr`.
-#[derive(Clone)]
-struct SelfPtr(*const GatewayState);
-unsafe impl Send for SelfPtr {}
-unsafe impl Sync for SelfPtr {}
-
+/// Shared status ownership keeps observer callbacks valid across cloned host
+/// lifecycle handles and asynchronous listener shutdown.
 struct StateObserver {
-    state: SelfPtr,
+    inner: Arc<Mutex<GatewayInner>>,
 }
 
 impl RequestObserver for StateObserver {
     fn on_call(&self, _route: &str, _status: axum::http::StatusCode, _remote_ip: std::net::IpAddr) {
-        // SAFETY: the underlying `GatewayState` is owned by Tauri's managed-
-        // state container for the entire process lifetime.
-        let state: &GatewayState = unsafe { &*self.state.0 };
-        state.observe();
+        let mut inner = self.inner.lock();
+        inner.status.calls_total = inner.status.calls_total.saturating_add(1);
+        inner.status.last_call_at = Some(chrono::Utc::now().to_rfc3339());
     }
 }
 
@@ -850,6 +1033,364 @@ mod tests {
             "aliases": [], "providers": [], "generatedAtMs": generated_at,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn local_account_lifecycle_rejects_stale_publishers_and_resets_versions() {
+        let state = GatewayState::new();
+        state.require_local_account();
+        assert!(state.try_set_snapshot(legacy_snapshot(1)).is_err());
+        state.activate_account("account-a");
+        let a_generation = state.status().account_generation;
+        state
+            .try_set_account_snapshot(
+                versioned_snapshot(10, "renderer", 10),
+                Some("account-a"),
+                Some(a_generation),
+            )
+            .unwrap();
+        state.lock_account();
+        assert!(state.with_snapshot(|snapshot| snapshot.is_none()));
+        assert!(state
+            .try_set_account_snapshot(
+                versioned_snapshot(11, "renderer", 11),
+                Some("account-a"),
+                Some(a_generation)
+            )
+            .is_err());
+        state.activate_account("account-b");
+        let b_generation = state.status().account_generation;
+        assert!(state
+            .try_set_account_snapshot(
+                versioned_snapshot(11, "renderer", 11),
+                Some("account-a"),
+                Some(a_generation)
+            )
+            .is_err());
+        state
+            .try_set_account_snapshot(
+                versioned_snapshot(1, "renderer", 1),
+                Some("account-b"),
+                Some(b_generation),
+            )
+            .unwrap();
+        assert!(!state.invalidate_account_snapshot("account-a"));
+        assert!(state.invalidate_account_snapshot("account-b"));
+        assert!(state
+            .try_set_account_snapshot(
+                versioned_snapshot(2, "renderer", 2),
+                Some("account-b"),
+                Some(b_generation)
+            )
+            .is_err());
+        assert!(state.with_snapshot(|snapshot| snapshot.is_none()));
+        let fresh = state.status().account_generation;
+        state
+            .try_set_account_snapshot(
+                versioned_snapshot(2, "renderer", 2),
+                Some("account-b"),
+                Some(fresh),
+            )
+            .unwrap();
+        assert_eq!(state.status().snapshot_generated_at_ms, Some(2));
+        assert!(!state.lock_matching_account("account-a"));
+        assert!(state.lock_matching_account("account-b"));
+        assert!(state.status().owner_account_id.is_none());
+    }
+
+    #[test]
+    fn account_invalidation_revokes_route_tickets_and_credential_leases() {
+        let state = GatewayState::new();
+        state.activate_account("account-a");
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "providers":[{"id":"p", "deploymentId":"p", "protocol":"openai", "baseUrl":"https://example.test/v1", "apiKey":"synthetic", "enabled":true, "models":["model"]}],
+            "generatedAtMs":1
+        })).unwrap();
+        state
+            .try_set_account_snapshot(
+                snapshot,
+                Some("account-a"),
+                Some(state.status().account_generation),
+            )
+            .unwrap();
+        let request: route_ticket::MintRequest = serde_json::from_value(serde_json::json!({
+            "sessionId":"session-a", "executionFingerprint":"fingerprint", "candidates":[], "model":"model",
+            "credentialAffinity":"session-sticky", "routePolicy":"gateway-required"
+        })).unwrap();
+        let ticket = state.mint_route_ticket(request).unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        assert!(state.tickets.validate(&ticket.secret, now).is_ok());
+        state.leases.acquire("session-a", "p", "fingerprint", now);
+        assert!(state.invalidate_account_snapshot("account-a"));
+        assert!(state.tickets.validate(&ticket.secret, now).is_err());
+        assert!(state.leases.is_empty());
+        assert_eq!(state.list_route_tickets().len(), 1);
+        state.activate_account("account-b");
+        assert!(state.list_route_tickets().is_empty());
+        assert!(!state.revoke_route_ticket(&ticket.ticket.ticket_id));
+    }
+
+    #[test]
+    fn snapshot_cas_is_atomic_under_concurrent_publishers() {
+        let state = Arc::new(GatewayState::new());
+        let barrier = Arc::new(std::sync::Barrier::new(24));
+        std::thread::scope(|scope| {
+            for version in 1..=24 {
+                let state = state.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    let _ = state.try_set_snapshot(versioned_snapshot(
+                        version,
+                        "renderer",
+                        version as i64,
+                    ));
+                });
+            }
+        });
+        assert_eq!(
+            state.with_snapshot(|snapshot| snapshot.unwrap().profile_version),
+            Some(24)
+        );
+        assert_eq!(state.status().snapshot_generated_at_ms, Some(24));
+    }
+
+    #[test]
+    fn account_keys_cannot_be_revealed_or_mutated_by_another_account() {
+        let _guard = api_keys::STORE_TEST_GUARD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let state = GatewayState::new();
+        state.keys.write().clear();
+        state.require_local_account();
+        assert!(state
+            .create_key("locked".into(), vec![], None, None, None)
+            .is_err());
+        state.activate_account("account-a");
+        let key = state
+            .create_key("A".into(), vec![], None, None, None)
+            .unwrap();
+        assert_eq!(key.owner_account_id.as_deref(), Some("account-a"));
+        assert_eq!(state.list_keys().len(), 1);
+        state.activate_account("account-b");
+        assert!(!state.status().has_token);
+        assert!(state.list_keys().is_empty());
+        assert!(state.reveal_key(&key.id).is_none());
+        assert!(state.update_key(&key.id, ApiKeyPatch::default()).is_err());
+        assert!(state.reset_key_quota(&key.id).is_err());
+        assert!(state.delete_key(&key.id).is_err());
+        state.activate_account("account-a");
+        assert_eq!(state.reveal_key(&key.id), Some(key.secret));
+        state.delete_key(&key.id).unwrap();
+    }
+
+    #[test]
+    fn cooldown_reset_can_target_one_provider() {
+        let state = GatewayState::new();
+        cooldown::record_permanent(&state.key_cooldown, "a", "secret-a", "unauthorized");
+        cooldown::record_permanent(&state.key_cooldown, "b", "secret-b", "quota");
+        assert_eq!(state.reset_cooldowns(Some("a")), 1);
+        assert_eq!(state.cooldowns()[0].provider_id, "b");
+        assert_eq!(state.reset_cooldowns(None), 1);
+        assert_eq!(state.reset_cooldowns(None), 0);
+    }
+
+    #[tokio::test]
+    async fn real_listener_refuses_old_keys_after_lock_and_account_switch() {
+        struct NoopObserver;
+        impl RequestObserver for NoopObserver {
+            fn on_call(&self, _: &str, _: axum::http::StatusCode, _: std::net::IpAddr) {}
+        }
+        let state = GatewayState::new();
+        *state.keys.write() = serde_json::from_value(serde_json::json!([
+            { "id":"a", "name":"A", "secret":"synthetic-a", "enabled":true, "createdAtMs":0, "ownerAccountId":"account-a" },
+            { "id":"b", "name":"B", "secret":"synthetic-b", "enabled":true, "createdAtMs":0, "ownerAccountId":"account-b" },
+            { "id":"legacy", "name":"Legacy", "secret":"synthetic-legacy", "enabled":true, "createdAtMs":0 }
+        ])).unwrap();
+        state.config.write().port = 0;
+        state.require_local_account();
+        state.activate_account("account-a");
+        state
+            .try_set_account_snapshot(
+                legacy_snapshot(1),
+                Some("account-a"),
+                Some(state.status().account_generation),
+            )
+            .unwrap();
+        let event_host = Arc::new(host::RecordingGatewayHost::new(false));
+        let handle = server::spawn_server_with_account(
+            state.account.clone(),
+            state.account_changes.clone(),
+            event_host.clone(),
+            state.config.clone(),
+            state.keys.clone(),
+            state.snapshot.clone(),
+            state.decisions.clone(),
+            state.key_rotation.clone(),
+            state.route_planner.clone(),
+            state.key_cooldown.clone(),
+            state.concurrency.clone(),
+            Arc::new(NoopObserver),
+            state.tickets.clone(),
+            state.leases.clone(),
+        )
+        .await
+        .unwrap();
+        let url = format!("http://127.0.0.1:{}/v1/models", handle.bound_port);
+        let client = reqwest::Client::new();
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-legacy")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+        assert_eq!(client.get(&url).send().await.unwrap().status(), 401);
+        assert_eq!(
+            client
+                .get(&url)
+                .header("Host", "invalid.test")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        assert_eq!(
+            client
+                .get(&url)
+                .header("Origin", "https://invalid.test")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+        state
+            .keys
+            .write()
+            .iter_mut()
+            .find(|key| key.id == "a")
+            .unwrap()
+            .quota_tokens = Some(0);
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            429
+        );
+        {
+            let mut keys = state.keys.write();
+            let key = keys.iter_mut().find(|key| key.id == "a").unwrap();
+            key.quota_tokens = None;
+            key.rate_limit_per_min = Some(1);
+        }
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            429
+        );
+        let rejected = event_host
+            .events
+            .lock()
+            .iter()
+            .filter(|(event, payload)| {
+                event == server::REQUEST_LOG_EVENT
+                    && payload["status"].as_u64().is_some_and(|code| code >= 400)
+            })
+            .map(|(_, payload)| payload.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(rejected.len(), 6);
+        for event in rejected {
+            assert_eq!(event["ownerAccountId"], "account-a");
+            assert_eq!(
+                event["accountGeneration"],
+                state.status().account_generation
+            );
+        }
+        state.lock_account();
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+        state.activate_account("account-b");
+        state
+            .try_set_account_snapshot(
+                legacy_snapshot(2),
+                Some("account-b"),
+                Some(state.status().account_generation),
+            )
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-a")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-b")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        state.invalidate_account_snapshot("account-b");
+        assert_eq!(
+            client
+                .get(&url)
+                .bearer_auth("synthetic-b")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            503
+        );
+        let _ = handle.shutdown.send(());
     }
 
     #[test]

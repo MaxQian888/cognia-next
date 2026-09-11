@@ -117,15 +117,17 @@ export async function gatewayRevealKey(id: string): Promise<string | null> {
  * The snapshot carries API keys — they stay in Rust memory only.
  */
 /**
- * Mint a session-scoped route ticket (ADR-0090 Phase 2). Gated behind the
- * `gatewayAgentRouteTickets` feature flag — disabled ⇒ typed error, never a
+ * Mint a session-scoped route ticket (ADR-0090 Phase 2). Legacy optional routes
+ * use the rollout flag; an explicitly required task route always mints or fails.
+ * A disabled legacy flag produces a typed error, never a
  * silent no-op. The returned secret appears ONCE; stamp it into the
  * subprocess env and drop it.
  */
 export async function gatewayMintRouteTicket(
-  request: GatewayMintRouteTicketRequest
+  request: GatewayMintRouteTicketRequest,
+  options?: { required: true }
 ): Promise<GatewayMintedRouteTicket> {
-  if (!isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")) {
+  if (!options?.required && !isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")) {
     throw new Error("gatewayAgentRouteTickets feature flag is disabled")
   }
   return transport.call<GatewayMintedRouteTicket>("gateway_mint_route_ticket", { request })
@@ -147,9 +149,13 @@ export async function gatewayListRouteTickets(): Promise<GatewayRouteTicket[]> {
  * landed.
  */
 export async function gatewayPushSnapshot(
-  snapshot: GatewayRoutingSnapshot
+  snapshot: GatewayRoutingSnapshot,
+  context?: { ownerAccountId: string; accountGeneration?: number }
 ): Promise<GatewayPushSnapshotResult> {
-  return transport.call<GatewayPushSnapshotResult>("gateway_push_snapshot", { snapshot })
+  return transport.call<GatewayPushSnapshotResult>("gateway_push_snapshot", {
+    snapshot,
+    ...context,
+  })
 }
 
 /**
@@ -170,4 +176,9 @@ export async function gatewayDecisionResponse(
  */
 export async function gatewayListCooldowns(): Promise<GatewayKeyCooldown[]> {
   return transport.call<GatewayKeyCooldown[]>("gateway_list_cooldowns")
+}
+
+/** Explicit recovery after restoring an upstream account or correcting its configuration. */
+export async function gatewayResetCooldowns(providerId?: string): Promise<number> {
+  return transport.call<number>("gateway_reset_cooldowns", { providerId: providerId ?? null })
 }

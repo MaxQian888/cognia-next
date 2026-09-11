@@ -36,6 +36,39 @@ pub enum IrContent {
         content: String,
         is_error: bool,
     },
+    /// Multimodal tool results supported by Responses and Anthropic. Chat
+    /// Completions rejects these at the translation boundary, never drops images.
+    ToolResultMedia {
+        tool_use_id: String,
+        content: Vec<IrContent>,
+        is_error: bool,
+    },
+}
+
+pub fn tool_result(tool_use_id: String, parts: Vec<IrContent>, is_error: bool) -> IrContent {
+    if parts.iter().any(|part| matches!(part, IrContent::Image(_))) {
+        IrContent::ToolResultMedia {
+            tool_use_id,
+            content: parts,
+            is_error,
+        }
+    } else {
+        IrContent::ToolResult {
+            tool_use_id,
+            content: parts
+                .into_iter()
+                .filter_map(|part| {
+                    if let IrContent::Text(text) = part {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            is_error,
+        }
+    }
 }
 
 /// Image source — exactly one of `url` / base64(`media_type`,`data`).
@@ -58,6 +91,7 @@ pub struct IrToolDef {
     /// JSON Schema for the tool input (OpenAI `parameters` ≡ Anthropic
     /// `input_schema`).
     pub input_schema: Value,
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +113,13 @@ pub struct ChatIR {
     pub messages: Vec<IrMessage>,
     pub tools: Vec<IrToolDef>,
     pub tool_choice: Option<IrToolChoice>,
+    pub parallel_tool_calls: Option<bool>,
+    /// Canonical Chat response_format shape, with source schema unchanged.
+    pub response_format: Option<Value>,
+    pub reasoning_effort: Option<String>,
+    /// Explicit Anthropic thinking controls cannot silently become a different
+    /// provider's effort setting.
+    pub thinking: Option<Value>,
     pub max_tokens: Option<u64>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
@@ -89,6 +130,104 @@ pub struct ChatIR {
     /// injected into response bodies. Silent drops are forbidden: a
     /// translator that cannot represent a field MUST push a loss.
     pub losses: Vec<TranslationLoss>,
+}
+
+/// Validate optional flags at the wire boundary instead of silently ignoring
+/// malformed controls and changing the caller's requested behavior.
+pub fn optional_bool(
+    value: Option<&Value>,
+    field: &str,
+) -> Result<Option<bool>, super::errors::NotTranslatable> {
+    match value.filter(|v| !v.is_null()) {
+        None => Ok(None),
+        Some(Value::Bool(flag)) => Ok(Some(*flag)),
+        Some(_) => Err(super::errors::NotTranslatable::new(format!(
+            "{field} must be boolean"
+        ))),
+    }
+}
+
+pub fn output_format(
+    value: Option<&Value>,
+    flavor: &str,
+) -> Result<Option<Value>, super::errors::NotTranslatable> {
+    use super::errors::NotTranslatable;
+    use serde_json::json;
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    match value["type"].as_str() {
+        Some("text") => Ok(None),
+        Some("json_object") if flavor != "anthropic" => Ok(Some(json!({"type":"json_object"}))),
+        Some("json_schema") => {
+            let mut schema = if flavor == "openai" {
+                value["json_schema"].clone()
+            } else {
+                value.clone()
+            };
+            if !schema["schema"].is_object() {
+                return Err(NotTranslatable::new(
+                    "JSON Schema output requires an object schema",
+                ));
+            }
+            let strict = optional_bool(schema.get("strict"), "output strict")?;
+            let name = schema
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("response")
+                .to_owned();
+            if name.is_empty()
+                || name.len() > 64
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err(NotTranslatable::new("JSON Schema output name must contain 1-64 letters, digits, underscores or hyphens"));
+            }
+            schema.as_object_mut().unwrap().remove("type");
+            schema["name"] = json!(name);
+            if let Some(strict) = strict {
+                schema["strict"] = json!(strict);
+            }
+            if flavor == "anthropic" {
+                schema["strict"] = json!(true);
+            }
+            Ok(Some(json!({"type":"json_schema","json_schema":schema})))
+        }
+        _ => Err(NotTranslatable::new("unsupported structured output format")),
+    }
+}
+
+impl ChatIR {
+    pub fn validate_tool_choice(&self) -> Result<(), super::errors::NotTranslatable> {
+        use super::errors::NotTranslatable;
+        if self.messages.iter().any(|message| {
+            message.role == IrRole::Assistant
+                && message
+                    .content
+                    .iter()
+                    .any(|part| matches!(part, IrContent::Image(_)))
+        }) {
+            return Err(NotTranslatable::new(
+                "assistant image content has no supported cross-protocol representation",
+            ));
+        }
+        if let Some(IrToolChoice::Tool(name)) = &self.tool_choice {
+            if !self.tools.iter().any(|tool| tool.name == *name) {
+                return Err(NotTranslatable::new("tool_choice names an undeclared tool"));
+            }
+        }
+        if self.tool_choice == Some(IrToolChoice::Any) && self.tools.is_empty() {
+            return Err(NotTranslatable::new(
+                "required tool_choice needs at least one tool",
+            ));
+        }
+        let mut names = std::collections::HashSet::new();
+        if self.tools.iter().any(|tool| !names.insert(&tool.name)) {
+            return Err(NotTranslatable::new("tool names must be unique"));
+        }
+        Ok(())
+    }
 }
 
 /// One recorded semantic loss during cross-protocol translation.

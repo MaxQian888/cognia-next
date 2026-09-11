@@ -67,7 +67,7 @@ fn content_tokens(content: &Value) -> u64 {
 
 fn block_tokens(block: &Value) -> u64 {
     match block.get("type").and_then(Value::as_str) {
-        Some("text") => block
+        Some("text" | "input_text" | "output_text") => block
             .get("text")
             .and_then(Value::as_str)
             .map(estimate_text_tokens)
@@ -101,6 +101,12 @@ pub fn estimate_input_tokens(body: &Value) -> u64 {
     };
     let mut total = 0u64;
 
+    if let Some(input) = obj.get("input") {
+        total += content_tokens(input);
+    }
+    if let Some(instructions) = obj.get("instructions") {
+        total += content_tokens(instructions);
+    }
     if let Some(system) = obj.get("system") {
         total += content_tokens(system);
     }
@@ -111,17 +117,21 @@ pub fn estimate_input_tokens(body: &Value) -> u64 {
             if let Some(content) = message.get("content") {
                 total += content_tokens(content);
             }
+            if let Some(calls) = message.get("tool_calls") {
+                total += estimate_text_tokens(&calls.to_string());
+            }
         }
     }
 
     if let Some(tools) = obj.get("tools").and_then(Value::as_array) {
         for tool in tools {
+            let tool = tool.get("function").unwrap_or(tool);
             for key in ["name", "description"] {
                 if let Some(text) = tool.get(key).and_then(Value::as_str) {
                     total += estimate_text_tokens(text);
                 }
             }
-            if let Some(schema) = tool.get("input_schema") {
+            if let Some(schema) = tool.get("input_schema").or_else(|| tool.get("parameters")) {
                 total += estimate_text_tokens(&schema.to_string());
             }
         }
@@ -134,6 +144,17 @@ pub fn estimate_input_tokens(body: &Value) -> u64 {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn estimates_responses_inputs_and_openai_function_schemas() {
+        assert!(
+            estimate_input_tokens(
+                &serde_json::json!({"instructions":"system instruction","input":"hello"})
+            ) > 0
+        );
+        let tools = serde_json::json!({"tools":[{"type":"function","function":{"name":"reader","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}]});
+        assert!(estimate_input_tokens(&tools) > 10);
+    }
 
     #[test]
     fn empty_and_non_object_bodies_are_zero() {
@@ -182,7 +203,10 @@ mod tests {
         });
         let base = estimate_input_tokens(&without_tools);
         let tooled = estimate_input_tokens(&with_tools);
-        assert!(tooled > base + 10, "tool schema must add tokens: {base} -> {tooled}");
+        assert!(
+            tooled > base + 10,
+            "tool schema must add tokens: {base} -> {tooled}"
+        );
 
         let with_tool_turn = json!({
             "messages": [

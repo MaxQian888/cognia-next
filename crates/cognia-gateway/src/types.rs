@@ -309,6 +309,10 @@ impl GatewayConfig {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayStatus {
+    pub owner_account_id: Option<String>,
+    pub account_generation: u64,
+    pub account_required: bool,
+    pub legacy_key_count: usize,
     pub running: bool,
     pub bound_port: Option<u16>,
     /// Whether at least one API key exists (usable or not — the UI decides).

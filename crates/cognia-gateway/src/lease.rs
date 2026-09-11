@@ -53,6 +53,10 @@ impl CredentialLeaseMap {
         self.inner.lock().remove(session_id);
     }
 
+    pub fn clear(&self) {
+        self.inner.lock().clear();
+    }
+
     pub fn len(&self) -> usize {
         self.inner.lock().len()
     }
@@ -91,5 +95,8 @@ mod tests {
         assert!(leases.get("s1").is_none());
         // Releasing twice is idempotent.
         leases.release("s1");
+        leases.acquire("s2", "dep", "fingerprint", 0);
+        leases.clear();
+        assert!(leases.is_empty());
     }
 }

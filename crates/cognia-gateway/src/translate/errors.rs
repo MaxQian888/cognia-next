@@ -30,6 +30,7 @@ impl std::fmt::Display for NotTranslatable {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InboundFormat {
     OpenAiChat,
+    OpenAiResponses,
     AnthropicMessages,
 }
 
@@ -38,6 +39,7 @@ impl InboundFormat {
     pub fn protocol_name(self) -> &'static str {
         match self {
             Self::OpenAiChat => "openai",
+            Self::OpenAiResponses => "responses",
             Self::AnthropicMessages => "anthropic",
         }
     }
@@ -46,7 +48,7 @@ impl InboundFormat {
 /// Render an error body in the inbound format's native error shape.
 pub fn error_body(format: InboundFormat, error_type: &str, message: &str) -> Value {
     match format {
-        InboundFormat::OpenAiChat => json!({
+        InboundFormat::OpenAiChat | InboundFormat::OpenAiResponses => json!({
             "error": { "message": message, "type": error_type, "param": null, "code": null }
         }),
         InboundFormat::AnthropicMessages => json!({

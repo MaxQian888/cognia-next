@@ -36,6 +36,9 @@ pub(crate) static STORE_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayApiKey {
+    /// Host-assigned local owner. Legacy unowned keys serve headless hosts only.
+    #[serde(default)]
+    pub owner_account_id: Option<String>,
     pub id: String,
     pub name: String,
     /// The bearer secret the external tool sends. Keyring-backed; only ever
@@ -162,6 +165,7 @@ pub fn load_keys() -> Result<Vec<GatewayApiKey>, String> {
     // No keys blob yet — migrate a legacy single token if present.
     if let Some(legacy) = secret_store::get(SERVICE, LEGACY_TOKEN_ACCOUNT)? {
         let migrated = vec![GatewayApiKey {
+            owner_account_id: None,
             id: uuid::Uuid::new_v4().simple().to_string(),
             name: "Default".to_string(),
             secret: legacy,
@@ -197,7 +201,29 @@ pub fn create_key(
     rate_limit_per_min: Option<u32>,
     quota_tokens: Option<i64>,
 ) -> Result<GatewayApiKey, String> {
+    create_owned_key(
+        keys,
+        name,
+        model_allowlist,
+        expires_at_ms,
+        rate_limit_per_min,
+        quota_tokens,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_owned_key(
+    keys: &mut Vec<GatewayApiKey>,
+    name: String,
+    model_allowlist: Vec<String>,
+    expires_at_ms: Option<i64>,
+    rate_limit_per_min: Option<u32>,
+    quota_tokens: Option<i64>,
+    owner_account_id: Option<String>,
+) -> Result<GatewayApiKey, String> {
     let key = GatewayApiKey {
+        owner_account_id,
         id: uuid::Uuid::new_v4().simple().to_string(),
         name,
         secret: generate_secret(),
@@ -327,6 +353,7 @@ mod tests {
 
     fn key(id: &str, secret: &str) -> GatewayApiKey {
         GatewayApiKey {
+            owner_account_id: None,
             id: id.to_string(),
             name: id.to_string(),
             secret: secret.to_string(),
@@ -339,6 +366,25 @@ mod tests {
             created_at_ms: 0,
             last_used_at_ms: None,
         }
+    }
+
+    #[test]
+    fn key_owner_survives_persistence_while_legacy_keys_stay_unowned() {
+        let legacy = key("legacy", "synthetic-secret");
+        let mut owned = legacy.clone();
+        owned.owner_account_id = Some("account-a".into());
+        let restored: GatewayApiKey =
+            serde_json::from_str(&serde_json::to_string(&owned).unwrap()).unwrap();
+        assert_eq!(restored.owner_account_id.as_deref(), Some("account-a"));
+        let mut legacy_json = serde_json::to_value(legacy).unwrap();
+        legacy_json
+            .as_object_mut()
+            .unwrap()
+            .remove("ownerAccountId");
+        assert!(serde_json::from_value::<GatewayApiKey>(legacy_json)
+            .unwrap()
+            .owner_account_id
+            .is_none());
     }
 
     #[test]

@@ -113,8 +113,17 @@ export const DEFAULT_GATEWAY_CONFIG: GatewayConfig = {
   fieldStripAllow: [],
 }
 
+export interface GatewayAccountScope {
+  /** Desktop snapshots are bound to this unlocked local account and generation. */
+  ownerAccountId?: string | null
+  accountGeneration?: number
+}
+
 /** Live status surfaced to the settings UI. */
-export interface GatewayStatus {
+export interface GatewayStatus extends GatewayAccountScope {
+  accountRequired?: boolean
+  /** Unbound keys from older versions cannot authorize an account-scoped gateway. */
+  legacyKeyCount?: number
   running: boolean
   boundPort: number | null
   /** Whether at least one usable API key exists. */
@@ -276,10 +285,28 @@ export interface GatewayTransportSnapshot {
   forwardedSemanticHeaders?: string[]
 }
 
+/** Model facts published to external runtimes; omitted values remain unknown. */
+export interface GatewayModelMetadata {
+  id: string
+  name?: string
+  contextLength?: number
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  supportsTools?: boolean
+  supportsReasoning?: boolean
+  supportsVision?: boolean
+  supportsAudio?: boolean
+  supportsVideo?: boolean
+  supportsStreaming?: boolean
+  supportsStructuredOutput?: boolean
+}
+
 /** A provider the gateway can execute against. Credentials stay Rust-side. */
 export interface GatewayProviderSnapshot {
   id: string
   protocol: string
+  apiFlavor?: "chat" | "responses"
+  modelMetadata?: GatewayModelMetadata[]
   baseUrl: string
   /** Primary / single credential; the fallback when no rotation pool is set. */
   apiKey?: string
@@ -293,6 +320,8 @@ export interface GatewayProviderSnapshot {
   rotationEnabled?: boolean
   enabled: boolean
   models: string[]
+  /** Projection policy: an explicit disable must not be rescued by a vault key. */
+  credentialFallbackAllowed?: boolean
   /** Provider Profile Store deployment this entry projects (ADR-0090). */
   deploymentId?: string
   /** Transport behavior override; absent = legacy protocol defaults. */
@@ -359,6 +388,8 @@ export interface GatewayRouteTicket {
 
 /** Mint request for a route ticket (frozen spec projection). */
 export interface GatewayMintRouteTicketRequest {
+  /** Ephemeral task-specific upstreams; retained only inside the ticket lease. */
+  providerOverrides?: GatewayProviderSnapshot[]
   sessionId: string
   parentSessionId?: string
   executionFingerprint: string
@@ -393,7 +424,7 @@ export interface GatewayMintedRouteTicket {
  * the persisted Dexie shape). Emitted once per request — success, upstream
  * failure, or middleware rejection.
  */
-export interface GatewayRequestLogRow {
+export interface GatewayRequestLogRow extends GatewayAccountScope {
   id: string
   at: string
   route: string
@@ -432,7 +463,7 @@ export interface GatewayRequestLogRow {
 }
 
 /** Per-attempt outcome (from the `gateway://request-outcome` event). */
-export interface GatewayRequestOutcome {
+export interface GatewayRequestOutcome extends GatewayAccountScope {
   providerId: string
   modelId: string
   deploymentId?: string | null
@@ -479,3 +510,4 @@ export interface GatewayUpstreamProbeResult {
 export const GATEWAY_REQUEST_LOG_EVENT = "gateway://request-log"
 export const GATEWAY_REQUEST_OUTCOME_EVENT = "gateway://request-outcome"
 export const GATEWAY_DECIDE_EVENT = "gateway://decide"
+export const GATEWAY_SNAPSHOT_INVALIDATED_EVENT = "gateway://snapshot-invalidated"

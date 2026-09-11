@@ -107,6 +107,8 @@ pub struct TicketReservation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteTicket {
+    #[serde(default)]
+    pub owner_account_id: Option<String>,
     pub ticket_id: String,
     pub route_pin_id: String,
     pub execution_fingerprint: String,
@@ -182,6 +184,9 @@ pub struct MintedTicket {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MintRequest {
+    /// Host-only, ephemeral account credentials. Never persisted in ticket metadata.
+    #[serde(default)]
+    pub provider_overrides: Vec<crate::snapshot::ProviderSnapshot>,
     pub session_id: String,
     #[serde(default)]
     pub parent_session_id: Option<String>,
@@ -287,6 +292,7 @@ struct TicketRecord {
     ticket: RouteTicket,
     /// Present only for tickets minted in THIS process lifetime.
     secret: Option<String>,
+    provider_overrides: Vec<crate::snapshot::ProviderSnapshot>,
 }
 
 /// Everything the accounting needs, behind ONE lock.
@@ -318,6 +324,7 @@ impl RouteTicketRegistry {
             .map(|ticket| TicketRecord {
                 ticket,
                 secret: None,
+                provider_overrides: Vec::new(),
             })
             .collect();
         Self {
@@ -345,6 +352,7 @@ impl RouteTicketRegistry {
                 inner.records.push(TicketRecord {
                     ticket,
                     secret: None,
+                    provider_overrides: Vec::new(),
                 });
             }
         }
@@ -356,6 +364,13 @@ impl RouteTicketRegistry {
     /// when clean; call it from a periodic flush and from shutdown.
     pub fn flush(&self) -> Result<(), TicketError> {
         let mut inner = self.inner.lock();
+        let now = chrono::Utc::now().timestamp_millis();
+        for record in &mut inner.records {
+            if record.ticket.revoked || record.ticket.expires_at_ms <= now {
+                record.secret = None;
+                record.provider_overrides.clear();
+            }
+        }
         if !inner.dirty {
             return Ok(());
         }
@@ -381,7 +396,35 @@ impl RouteTicketRegistry {
         snapshot: Option<&RoutingSnapshot>,
         now_ms: i64,
     ) -> Result<MintedTicket, TicketError> {
-        let snapshot = snapshot.ok_or(TicketError::NoSnapshot)?;
+        self.mint_owned(request, snapshot, now_ms, None)
+    }
+
+    pub fn mint_owned(
+        &self,
+        request: MintRequest,
+        snapshot: Option<&RoutingSnapshot>,
+        now_ms: i64,
+        owner_account_id: Option<String>,
+    ) -> Result<MintedTicket, TicketError> {
+        let mut frozen = snapshot.ok_or(TicketError::NoSnapshot)?.clone();
+        for provider in &request.provider_overrides {
+            let deployment = provider.deployment_id.as_deref().unwrap_or(&provider.id);
+            if !request.candidates.iter().any(|candidate| {
+                candidate.deployment_id == deployment
+                    && provider.models.contains(&candidate.model_id)
+            }) {
+                return Err(TicketError::UnknownCandidate {
+                    deployment_id: deployment.to_string(),
+                    model_id: String::new(),
+                });
+            }
+            frozen
+                .providers
+                .retain(|p| p.id != provider.id && p.deployment_id.as_deref() != Some(deployment));
+            frozen.providers.push(provider.clone());
+        }
+        frozen.validate().map_err(TicketError::Persist)?;
+        let snapshot = &frozen;
         let mut request = request;
         if request.candidates.is_empty() {
             if let Some(model) = request.model.as_deref() {
@@ -432,7 +475,10 @@ impl RouteTicketRegistry {
         if let Some(prior) = inner
             .records
             .iter()
-            .filter(|r| r.ticket.execution_fingerprint == request.execution_fingerprint)
+            .filter(|r| {
+                r.ticket.execution_fingerprint == request.execution_fingerprint
+                    && r.ticket.owner_account_id == owner_account_id
+            })
             .max_by_key(|r| r.ticket.issued_at_ms)
         {
             let prior_set: std::collections::BTreeSet<(&str, &str)> = prior
@@ -489,6 +535,7 @@ impl RouteTicketRegistry {
             uuid::Uuid::new_v4().simple()
         );
         let ticket = RouteTicket {
+            owner_account_id,
             ticket_id: ticket_id.clone(),
             route_pin_id: format!("pin_{}", uuid::Uuid::new_v4().simple()),
             execution_fingerprint: request.execution_fingerprint,
@@ -509,6 +556,7 @@ impl RouteTicketRegistry {
         inner.records.push(TicketRecord {
             ticket: ticket.clone(),
             secret: Some(secret.clone()),
+            provider_overrides: request.provider_overrides,
         });
         self.persist(&inner.records)?;
         Ok(MintedTicket { ticket, secret })
@@ -615,6 +663,48 @@ impl RouteTicketRegistry {
 
     /// Replace a hold with the tokens actually consumed. Idempotent: a
     /// request id with no open reservation is a no-op.
+    /// Re-evaluate the final translated/continued prompt atomically. The
+    /// middleware estimate predates history expansion and model output caps.
+    pub fn reserve_model_output(
+        &self,
+        request_id: &str,
+        input_tokens: u64,
+        requested_output: Option<u64>,
+    ) -> Result<Option<u64>, TicketReject> {
+        let mut inner = self.inner.lock();
+        let Some(reservation) = inner.reservations.get(request_id) else {
+            return Ok(requested_output);
+        };
+        let ticket_id = reservation.ticket_id.clone();
+        let Some(budget) = inner
+            .records
+            .iter()
+            .find(|record| record.ticket.ticket_id == ticket_id)
+            .and_then(|record| record.ticket.budget.as_ref())
+        else {
+            return Ok(requested_output);
+        };
+        let Some(max) = budget.max_tokens else {
+            return Ok(requested_output);
+        };
+        let other_held = inner
+            .reservations
+            .iter()
+            .filter(|(id, r)| id.as_str() != request_id && r.ticket_id == ticket_id)
+            .fold(0u64, |sum, (_, r)| sum.saturating_add(r.tokens_held));
+        let remaining = max
+            .saturating_sub(budget.spent_tokens)
+            .saturating_sub(other_held)
+            .saturating_sub(input_tokens);
+        if remaining == 0 {
+            return Err(TicketReject::BudgetExhausted);
+        }
+        let output = requested_output.unwrap_or(remaining).min(remaining);
+        inner.reservations.get_mut(request_id).unwrap().tokens_held =
+            input_tokens.saturating_add(output);
+        Ok(Some(output))
+    }
+
     pub fn settle_reservation(&self, request_id: &str, actual_tokens: u64) {
         let mut inner = self.inner.lock();
         let Some(reservation) = inner.reservations.remove(request_id) else {
@@ -675,6 +765,32 @@ impl RouteTicketRegistry {
         Ok(ticket.clone())
     }
 
+    /// Clone only this live task's credentials. Global snapshots remain untouched.
+    pub fn provider_overrides(&self, ticket_id: &str) -> Vec<crate::snapshot::ProviderSnapshot> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut inner = self.inner.lock();
+        for record in &mut inner.records {
+            if record.ticket.expires_at_ms <= now || record.ticket.revoked {
+                record.provider_overrides.clear();
+            }
+        }
+        inner
+            .records
+            .iter()
+            .find(|record| record.ticket.ticket_id == ticket_id)
+            .map(|record| record.provider_overrides.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn is_live(&self, ticket_id: &str, now_ms: i64) -> bool {
+        self.inner.lock().records.iter().any(|record| {
+            record.ticket.ticket_id == ticket_id
+                && !record.ticket.revoked
+                && record.ticket.expires_at_ms > now_ms
+                && record.secret.is_some()
+        })
+    }
+
     pub fn revoke(&self, ticket_id: &str) -> bool {
         let mut inner = self.inner.lock();
         let mut hit = false;
@@ -682,6 +798,7 @@ impl RouteTicketRegistry {
             if record.ticket.ticket_id == ticket_id {
                 record.ticket.revoked = true;
                 record.secret = None;
+                record.provider_overrides.clear();
                 hit = true;
             }
         }
@@ -698,6 +815,7 @@ impl RouteTicketRegistry {
             if record.ticket.session_id == session_id && !record.ticket.revoked {
                 record.ticket.revoked = true;
                 record.secret = None;
+                record.provider_overrides.clear();
                 count += 1;
             }
         }
@@ -813,6 +931,24 @@ mod tests {
             "routePolicy": "gateway-required",
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn remint_authority_is_scoped_to_the_local_account_owner() {
+        let reg = registry();
+        let snapshot = snapshot();
+        let mut narrow = mint_request();
+        narrow.candidates.truncate(1);
+        let ticket = reg
+            .mint_owned(narrow, Some(&snapshot), 1, Some("account-a".into()))
+            .unwrap();
+        assert_eq!(ticket.ticket.owner_account_id.as_deref(), Some("account-a"));
+        assert!(reg
+            .mint_owned(mint_request(), Some(&snapshot), 2, Some("account-a".into()))
+            .is_err());
+        assert!(reg
+            .mint_owned(mint_request(), Some(&snapshot), 2, Some("account-b".into()))
+            .is_ok());
     }
 
     #[test]
@@ -1048,8 +1184,14 @@ mod tests {
                 let barrier = std::sync::Arc::clone(&barrier);
                 std::thread::spawn(move || {
                     barrier.wait();
-                    reg.validate_and_reserve(&secret, 1, TicketOperation::Chat, &format!("req-{i}"), 0)
-                        .is_ok()
+                    reg.validate_and_reserve(
+                        &secret,
+                        1,
+                        TicketOperation::Chat,
+                        &format!("req-{i}"),
+                        0,
+                    )
+                    .is_ok()
                 })
             })
             .collect();
@@ -1058,7 +1200,10 @@ mod tests {
             .map(|h| h.join().unwrap())
             .filter(|admitted| *admitted)
             .count();
-        assert_eq!(admitted, 1, "exactly one request may pass a max_requests=1 gate");
+        assert_eq!(
+            admitted, 1,
+            "exactly one request may pass a max_requests=1 gate"
+        );
         assert_eq!(reg.open_reservations().len(), 1);
     }
 
@@ -1079,7 +1224,30 @@ mod tests {
         assert!(reg
             .validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "r3", 0)
             .is_ok());
-        assert_eq!(reg.open_reservations().len(), 1, "refused calls hold nothing");
+        assert_eq!(
+            reg.open_reservations().len(),
+            1,
+            "refused calls hold nothing"
+        );
+    }
+
+    #[test]
+    fn final_model_reservation_accounts_for_expanded_history_and_output_cap() {
+        let reg = registry();
+        let mut request = mint_request();
+        request.budget = Some(TicketBudget {
+            max_tokens: Some(100),
+            ..Default::default()
+        });
+        let minted = reg.mint(request, Some(&snapshot()), 0).unwrap();
+        reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "r", 10)
+            .unwrap();
+        assert_eq!(reg.reserve_model_output("r", 80, Some(40)), Ok(Some(20)));
+        assert_eq!(
+            reg.reserve_model_output("r", 101, None),
+            Err(TicketReject::BudgetExhausted)
+        );
+        reg.release_reservation("r");
     }
 
     #[test]
@@ -1121,9 +1289,23 @@ mod tests {
         reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "c", 0)
             .unwrap();
         reg.settle_reservation("c", 5);
-        assert_eq!(store.load().unwrap()[0].budget.as_ref().unwrap().spent_tokens, 30);
+        assert_eq!(
+            store.load().unwrap()[0]
+                .budget
+                .as_ref()
+                .unwrap()
+                .spent_tokens,
+            30
+        );
         reg.flush().unwrap();
-        assert_eq!(store.load().unwrap()[0].budget.as_ref().unwrap().spent_tokens, 35);
+        assert_eq!(
+            store.load().unwrap()[0]
+                .budget
+                .as_ref()
+                .unwrap()
+                .spent_tokens,
+            35
+        );
     }
 
     #[test]

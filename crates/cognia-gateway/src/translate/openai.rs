@@ -20,7 +20,7 @@ fn s(v: &Value) -> Option<String> {
 }
 
 /// Parse an OpenAI `image_url.url` (a remote URL or a `data:` base64 URI).
-fn parse_openai_image(url: &Value) -> Result<IrImage, NotTranslatable> {
+pub(super) fn parse_openai_image(url: &Value) -> Result<IrImage, NotTranslatable> {
     let url = url
         .as_str()
         .ok_or_else(|| NotTranslatable::new("image_url.url is required"))?;
@@ -29,6 +29,11 @@ fn parse_openai_image(url: &Value) -> Result<IrImage, NotTranslatable> {
         let (meta, data) = rest
             .split_once(',')
             .ok_or_else(|| NotTranslatable::new("malformed data: image URL"))?;
+        if !meta.ends_with(";base64") || data.is_empty() {
+            return Err(NotTranslatable::new(
+                "data image URL must contain a nonempty base64 payload",
+            ));
+        }
         let media_type = meta.split(';').next().unwrap_or("image/png").to_string();
         return Ok(IrImage::Base64 {
             media_type,
@@ -64,6 +69,20 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
         losses: Vec::new(),
         model,
         stream: body.get("stream").and_then(Value::as_bool).unwrap_or(false),
+        parallel_tool_calls: super::ir::optional_bool(
+            body.get("parallel_tool_calls"),
+            "parallel_tool_calls",
+        )?,
+        response_format: super::ir::output_format(body.get("response_format"), "openai")?,
+        reasoning_effort: body
+            .get("reasoning_effort")
+            .filter(|v| !v.is_null())
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| NotTranslatable::new("reasoning_effort must be a string"))
+            })
+            .transpose()?,
         max_tokens: body
             .get("max_tokens")
             .or_else(|| body.get("max_completion_tokens"))
@@ -95,6 +114,7 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
                 name,
                 description: s(&f["description"]),
                 input_schema: f.get("parameters").cloned().unwrap_or_else(|| json!({})),
+                strict: super::ir::optional_bool(f.get("strict"), "tools[].function.strict")?,
             });
         }
     }
@@ -103,11 +123,17 @@ pub fn to_ir(body: &Value) -> Result<ChatIR, NotTranslatable> {
             "auto" => Some(IrToolChoice::Auto),
             "required" => Some(IrToolChoice::Any),
             "none" => Some(IrToolChoice::None),
-            _ => None,
+            _ => return Err(NotTranslatable::new("unknown tool_choice")),
         },
-        Some(Value::Object(o)) => s(&o["function"]["name"]).map(IrToolChoice::Tool),
-        _ => None,
+        Some(Value::Object(o)) if o["type"] == "function" => Some(IrToolChoice::Tool(
+            s(&o["function"]["name"])
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| NotTranslatable::new("tool_choice.function.name is required"))?,
+        )),
+        None | Some(Value::Null) => None,
+        _ => return Err(NotTranslatable::new("unsupported tool_choice")),
     };
+    ir.validate_tool_choice()?;
 
     // Messages.
     let messages = body["messages"]
@@ -224,11 +250,7 @@ fn content_to_text(content: &Value) -> Result<Option<String>, NotTranslatable> {
             for part in parts {
                 match s(&part["type"]).as_deref() {
                     Some("text") => out.push_str(part["text"].as_str().unwrap_or_default()),
-                    // Images on a system/assistant/tool message are unusual but
-                    // not text — ignore here (user-message images are parsed in
-                    // the dedicated branch above).
-                    Some("image_url") => {}
-                    _ => {}
+                    _ => return Err(NotTranslatable::new("non-text content on this Chat message role has no supported cross-protocol representation")),
                 }
             }
             Ok(Some(out))
@@ -240,7 +262,17 @@ fn content_to_text(content: &Value) -> Result<Option<String>, NotTranslatable> {
 
 /// Render an OpenAI chat-completions REQUEST from the IR (toward an
 /// openai-protocol upstream).
-pub fn from_ir(ir: &ChatIR) -> Value {
+pub fn from_ir(ir: &ChatIR) -> Result<Value, NotTranslatable> {
+    if ir.messages.iter().any(|message| {
+        message
+            .content
+            .iter()
+            .any(|part| matches!(part, IrContent::ToolResultMedia { .. }))
+    }) {
+        return Err(NotTranslatable::new(
+            "Chat Completions tool messages cannot carry images; use Responses or Anthropic",
+        ));
+    }
     let mut messages: Vec<Value> = Vec::new();
     if let Some(system) = &ir.system {
         messages.push(json!({ "role": "system", "content": system }));
@@ -284,14 +316,17 @@ pub fn from_ir(ir: &ChatIR) -> Value {
                         messages.push(json!({ "role": "user", "content": texts.join("\n") }));
                     }
                 } else {
-                    // Mixed text+image → the multimodal content-array shape.
-                    let mut parts: Vec<Value> = Vec::new();
-                    if !texts.is_empty() {
-                        parts.push(json!({ "type": "text", "text": texts.join("\n") }));
-                    }
-                    for img in images {
-                        parts.push(openai_image_part(img));
-                    }
+                    // Preserve interleaved text/image order (for example,
+                    // captions before and after distinct image references).
+                    let parts: Vec<Value> = msg
+                        .content
+                        .iter()
+                        .filter_map(|part| match part {
+                            IrContent::Text(text) => Some(json!({"type":"text","text":text})),
+                            IrContent::Image(image) => Some(openai_image_part(image)),
+                            _ => None,
+                        })
+                        .collect();
                     messages.push(json!({ "role": "user", "content": parts }));
                 }
             }
@@ -349,14 +384,18 @@ pub fn from_ir(ir: &ChatIR) -> Value {
             ir.tools
                 .iter()
                 .map(|t| {
-                    json!({
+                    let mut tool = json!({
                         "type": "function",
                         "function": {
                             "name": t.name,
                             "description": t.description,
                             "parameters": t.input_schema,
                         }
-                    })
+                    });
+                    if let Some(strict) = t.strict {
+                        tool["function"]["strict"] = json!(strict);
+                    }
+                    tool
                 })
                 .collect(),
         );
@@ -370,6 +409,15 @@ pub fn from_ir(ir: &ChatIR) -> Value {
         }
         None => {}
     }
+    if let Some(format) = &ir.response_format {
+        out["response_format"] = format.clone();
+    }
+    if let Some(effort) = &ir.reasoning_effort {
+        out["reasoning_effort"] = json!(effort);
+    }
+    if let Some(parallel) = ir.parallel_tool_calls {
+        out["parallel_tool_calls"] = json!(parallel);
+    }
     if let Some(max) = ir.max_tokens {
         out["max_tokens"] = json!(max);
     }
@@ -382,7 +430,7 @@ pub fn from_ir(ir: &ChatIR) -> Value {
     if !ir.stop.is_empty() {
         out["stop"] = json!(ir.stop);
     }
-    out
+    Ok(out)
 }
 
 /// Parse an OpenAI NON-STREAMING response into the canonical response.
@@ -586,7 +634,7 @@ mod tests {
             ]}]
         }))
         .unwrap();
-        let out = from_ir(&ir);
+        let out = from_ir(&ir).unwrap();
         let parts = out["messages"][0]["content"].as_array().unwrap();
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(parts[1]["type"], "image_url");
@@ -608,7 +656,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = from_ir(&ir);
+        let out = from_ir(&ir).unwrap();
         let msgs = out["messages"].as_array().unwrap();
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[1]["role"], "user");
@@ -625,9 +673,12 @@ mod tests {
     #[test]
     fn from_ir_adds_stream_options_when_streaming() {
         let mut ir = to_ir(&json!({ "model": "m", "messages": [], "stream": true })).unwrap();
-        assert_eq!(from_ir(&ir)["stream_options"]["include_usage"], true);
+        assert_eq!(
+            from_ir(&ir).unwrap()["stream_options"]["include_usage"],
+            true
+        );
         ir.stream = false;
-        assert!(from_ir(&ir).get("stream_options").is_none());
+        assert!(from_ir(&ir).unwrap().get("stream_options").is_none());
     }
 
     #[test]

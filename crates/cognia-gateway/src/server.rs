@@ -8,7 +8,7 @@
 //!   - POST /v1/messages              → Anthropic-format chat (Claude Code CLI)
 //!   - POST /v1/messages/count_tokens → Anthropic token count (forwarded, or a local estimate when no Anthropic route)
 //!   - POST /v1/embeddings            → OpenAI-format embeddings
-//!   - POST /v1/responses             → OpenAI Responses API (non-stream)
+//!   - POST /v1/responses             → OpenAI Responses API (stream + non-stream)
 //!
 //! Middleware mirrors `remote_control::server` (the audited reference), with
 //! the gateway's own additions: Host check (skipped for LAN peers when LAN
@@ -50,8 +50,7 @@ use super::concurrency::{ConcurrencyLimiter, InFlightGuard, InFlightTracker, Slo
 use super::cooldown::{self, KeyCooldownMap};
 use super::count_tokens::estimate_input_tokens;
 use super::execute::{
-    candidates_from_entries, count_tokens_url, embeddings_url, expand_for_ticket,
-    expand_key_pools,
+    candidates_from_entries, count_tokens_url, embeddings_url, expand_for_ticket, expand_key_pools,
     is_executable_protocol, record_key_success, resolve_candidates, rewrite_model,
     strip_request_fields, upstream_headers, upstream_url, Candidate, KeyRotationMap, SseDeframer,
 };
@@ -165,7 +164,12 @@ pub struct UpstreamProbe {
 
 impl UpstreamProbe {
     pub async fn run(&self, model: &str) -> UpstreamProbeOutcome {
-        run_upstream_probe(&self.state, model).await
+        let mut changes = self.state.account_changes.subscribe();
+        tokio::select! {
+            biased;
+            _ = changes.changed() => UpstreamProbeOutcome::NoSnapshot,
+            outcome = run_upstream_probe(&self.state, model) => outcome,
+        }
     }
 }
 
@@ -180,6 +184,7 @@ pub trait RequestObserver: Send + Sync + 'static {
 /// request log.
 #[derive(Clone)]
 struct ReqCtx {
+    account_generation: u64,
     /// Per-request id; the key every ticket reservation is settled or
     /// released under.
     request_id: String,
@@ -201,6 +206,8 @@ struct ReqCtx {
 
 #[derive(Clone)]
 struct AppState {
+    account: Arc<RwLock<crate::GatewayAccountContext>>,
+    account_changes: Arc<tokio::sync::watch::Sender<u64>>,
     host: Arc<dyn GatewayHost>,
     keys: Arc<RwLock<Vec<GatewayApiKey>>>,
     /// Request-time config (timeouts, retry policy, model exposure) — read live
@@ -231,6 +238,152 @@ struct AppState {
     leases: Arc<CredentialLeaseMap>,
     /// Upstream HTTP clients, one per live proxy route.
     http: Arc<UpstreamClients>,
+    response_history: Arc<parking_lot::Mutex<ResponseHistory>>,
+}
+
+struct AccountBoundHost {
+    host: Arc<dyn GatewayHost>,
+    account: Arc<RwLock<crate::GatewayAccountContext>>,
+    generation: u64,
+}
+impl GatewayHost for AccountBoundHost {
+    fn emit(&self, event: &str, mut payload: Value) -> bool {
+        let account = self.account.read();
+        if account.generation != self.generation {
+            return false;
+        }
+        if account.required {
+            payload["ownerAccountId"] = json!(account.owner_account_id);
+            payload["accountGeneration"] = json!(account.generation);
+        }
+        self.host.emit(event, payload)
+    }
+    fn supports_live_decisions(&self) -> bool {
+        self.host.supports_live_decisions()
+    }
+}
+impl AppState {
+    fn for_request(mut self, ctx: &ReqCtx) -> Self {
+        if let Some(ticket) = &ctx.ticket {
+            let overrides = self.tickets.provider_overrides(&ticket.ticket_id);
+            if !overrides.is_empty() {
+                let snapshot = self.snapshot.read().clone().map(|mut snapshot| {
+                    for provider in overrides {
+                        snapshot.providers.retain(|p| p.id != provider.id);
+                        snapshot.providers.push(provider);
+                    }
+                    snapshot
+                });
+                self.snapshot = Arc::new(RwLock::new(snapshot));
+            }
+        }
+        self.host = Arc::new(AccountBoundHost {
+            host: self.host.clone(),
+            account: self.account.clone(),
+            generation: ctx.account_generation,
+        });
+        self
+    }
+}
+
+/// Stream pumps are detached from the response future, so they need their own
+/// cancellation boundary; dropping the body alone does not cancel an idle read.
+fn spawn_account_task(
+    mut changes: tokio::sync::watch::Receiver<u64>,
+    generation: u64,
+    task: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    tokio::spawn(async move {
+        if *changes.borrow() != generation {
+            return;
+        }
+        tokio::select! { biased; _ = changes.changed() => {}, _ = task => {} }
+    });
+}
+
+async fn ticket_ended(tickets: Arc<RouteTicketRegistry>, ticket_id: String) {
+    loop {
+        if !tickets.is_live(&ticket_id, chrono::Utc::now().timestamp_millis()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn spawn_request_task(
+    state: &AppState,
+    ctx: &ReqCtx,
+    task: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let ticket = ctx.ticket.as_ref().map(|t| t.ticket_id.clone());
+    let tickets = state.tickets.clone();
+    let request_id = ctx.request_id.clone();
+    spawn_account_task(
+        state.account_changes.subscribe(),
+        ctx.account_generation,
+        async move {
+            struct ReleaseReservation(Arc<RouteTicketRegistry>, String);
+            impl Drop for ReleaseReservation {
+                fn drop(&mut self) {
+                    self.0.release_reservation(&self.1);
+                }
+            }
+            let _reservation = ReleaseReservation(tickets.clone(), request_id);
+            match ticket {
+                Some(id) => {
+                    tokio::select! { biased; _ = ticket_ended(tickets,id) => {}, _ = task => {} }
+                }
+                None => task.await,
+            }
+        },
+    );
+}
+
+async fn run_with_ticket_boundary(
+    next: Next,
+    request: axum::extract::Request,
+    changes: tokio::sync::watch::Receiver<u64>,
+    tickets: Arc<RouteTicketRegistry>,
+    ticket_id: String,
+) -> Response {
+    let response = tokio::select! { biased;
+        _ = ticket_ended(tickets.clone(),ticket_id.clone()) => return (StatusCode::UNAUTHORIZED,Json(json!({"error":{"message":"route ticket expired or revoked"}}))).into_response(),
+        response = run_with_account_boundary(next,request,changes) => response,
+    };
+    let (parts, body) = response.into_parts();
+    let stream = futures_util::stream::unfold(
+        (body.into_data_stream(), tickets, ticket_id),
+        |(mut body, tickets, id)| async move {
+            tokio::select! { biased;
+                _ = ticket_ended(tickets.clone(),id.clone()) => None,
+                chunk = body.next() => chunk.map(|bytes| (bytes,(body,tickets,id))),
+            }
+        },
+    );
+    Response::from_parts(parts, Body::from_stream(stream))
+}
+
+fn body_has_no_leaking_pii(body: &Value) -> bool {
+    fn clean(value: &Value) -> bool {
+        match value {
+            Value::String(text) => cognia_net::outbound_pii::has_no_leaking_pii(text),
+            Value::Array(items) => items.iter().all(clean),
+            Value::Object(fields) => fields.values().all(clean),
+            _ => true,
+        }
+    }
+    [
+        "messages",
+        "input",
+        "instructions",
+        "system",
+        "tools",
+        "response_format",
+    ]
+    .iter()
+    .all(|field| clean(&body[*field]))
+        && clean(&body["text"]["format"])
+        && clean(&body["output_config"]["format"])
 }
 
 /// Upstream HTTP clients bound to the live network-proxy policy.
@@ -337,6 +490,42 @@ pub async fn spawn_server(
     tickets: Arc<RouteTicketRegistry>,
     leases: Arc<CredentialLeaseMap>,
 ) -> Result<ServerHandle, GatewayError> {
+    spawn_server_with_account(
+        Arc::new(RwLock::new(crate::GatewayAccountContext::default())),
+        Arc::new(tokio::sync::watch::channel(0).0),
+        host,
+        config,
+        keys,
+        snapshot,
+        decisions,
+        key_rotation,
+        route_planner,
+        key_cooldown,
+        concurrency,
+        on_request,
+        tickets,
+        leases,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_server_with_account(
+    account: Arc<RwLock<crate::GatewayAccountContext>>,
+    account_changes: Arc<tokio::sync::watch::Sender<u64>>,
+    host: Arc<dyn GatewayHost>,
+    config: Arc<RwLock<GatewayConfig>>,
+    keys: Arc<RwLock<Vec<GatewayApiKey>>>,
+    snapshot: Arc<RwLock<Option<RoutingSnapshot>>>,
+    decisions: Arc<DecisionRegistry>,
+    key_rotation: Arc<KeyRotationMap>,
+    route_planner: Arc<crate::route_planner::RoutePlannerState>,
+    key_cooldown: Arc<KeyCooldownMap>,
+    concurrency: Arc<ConcurrencyLimiter>,
+    on_request: Arc<dyn RequestObserver>,
+    tickets: Arc<RouteTicketRegistry>,
+    leases: Arc<CredentialLeaseMap>,
+) -> Result<ServerHandle, GatewayError> {
     // Snapshot the bind-time config (these apply only on start).
     let (port, bind_interface, allowlist_raw, rate_limit_per_min, connect_timeout_secs) = {
         let cfg = config.read();
@@ -379,6 +568,8 @@ pub async fn spawn_server(
     // original moves into `AppState`.
     let keys_for_flush = keys.clone();
     let state = AppState {
+        account,
+        account_changes,
         host,
         keys,
         config,
@@ -399,6 +590,7 @@ pub async fn spawn_server(
         tickets,
         leases,
         http,
+        response_history: Arc::new(parking_lot::Mutex::new(ResponseHistory::default())),
     };
     // Cloned before the router consumes `state`; both share the same Arcs, so a
     // probe run through this sees the live cooldown / in-flight state.
@@ -406,6 +598,7 @@ pub async fn spawn_server(
 
     let protected = Router::new()
         .route("/v1/models", get(list_models))
+        .route("/v1/models/{model}", get(get_model))
         .route("/v1/chat/completions", post(openai_chat))
         .route("/v1/messages", post(anthropic_messages))
         .route("/v1/messages/count_tokens", post(anthropic_count_tokens))
@@ -719,6 +912,7 @@ fn clean_inbound_headers(headers: &HeaderMap) -> Vec<(String, String)> {
 fn ticket_operation_for_route(route: &str) -> Option<TicketOperation> {
     match route {
         "/v1/models" => Some(TicketOperation::Models),
+        path if path.starts_with("/v1/models/") => Some(TicketOperation::Models),
         "/v1/chat/completions" | "/v1/messages" => Some(TicketOperation::Chat),
         "/v1/messages/count_tokens" => Some(TicketOperation::CountTokens),
         "/v1/embeddings" => Some(TicketOperation::Embeddings),
@@ -728,8 +922,8 @@ fn ticket_operation_for_route(route: &str) -> Option<TicketOperation> {
 }
 
 /// Tokens a request may consume, for a ticket with a token ceiling: the
-/// estimated prompt plus the client's own `max_tokens`. Refined to the real
-/// usage at settlement. The body is buffered once and handed back intact.
+/// estimated prompt. Output is reserved after model caps/history expansion,
+/// then refined to the real usage at settlement. The body is buffered once and handed back intact.
 async fn estimate_request_hold(
     request: axum::extract::Request,
 ) -> Result<(axum::extract::Request, u64), ()> {
@@ -737,8 +931,10 @@ async fn estimate_request_hold(
     let bytes = axum::body::to_bytes(body, BODY_LIMIT_BYTES)
         .await
         .map_err(|_| ())?;
+    // Reserve the input first. The final candidate's published output cap and
+    // any expanded Responses history are reserved atomically at the send boundary.
     let hold = serde_json::from_slice::<Value>(&bytes)
-        .map(|v| estimate_input_tokens(&v).saturating_add(v["max_tokens"].as_u64().unwrap_or(0)))
+        .map(|v| estimate_input_tokens(&v))
         .unwrap_or(0);
     Ok((
         axum::extract::Request::from_parts(parts, Body::from(bytes)),
@@ -756,11 +952,22 @@ async fn middleware(
     let route = request.uri().path().to_string();
     let remote_ip = connect_info.ip();
     let request_id = uuid::Uuid::new_v4().to_string();
+    let (account, account_changes) = {
+        let account = state.account.read();
+        (account.clone(), state.account_changes.subscribe())
+    };
+    // Rejections happen before ReqCtx exists, so bind their event authority
+    // at entry too. Never relabel an earlier request with a later account.
+    let rejection_host = AccountBoundHost {
+        host: state.host.clone(),
+        account: state.account.clone(),
+        generation: account.generation,
+    };
 
     let reject = |status: StatusCode, message: &str, key_id: Option<String>| -> Response {
         state.on_request.on_call(&route, status, remote_ip);
         emit_request_log(
-            state.host.as_ref(),
+            &rejection_host,
             &route,
             &remote_ip.to_string(),
             key_id.as_deref(),
@@ -809,6 +1016,14 @@ async fn middleware(
         return reject(StatusCode::FORBIDDEN, "origin not allowed", None);
     }
 
+    if account.required && account.owner_account_id.is_none() {
+        return reject(
+            StatusCode::UNAUTHORIZED,
+            "the local account is locked",
+            None,
+        );
+    }
+
     // 2. Scoped API-key auth — constant-time, dual header support.
     let Some(supplied) = supplied_token(&headers) else {
         return reject(
@@ -851,28 +1066,29 @@ async fn middleware(
                 }
             }
         }
-        let ticket = match state
-            .tickets
-            .validate_and_reserve(supplied, now_ms, op, &request_id, est_tokens)
-        {
-            Ok(ticket) => ticket,
-            Err(kind) => {
-                let (status, message) = match kind {
-                    TicketReject::Expired => (StatusCode::UNAUTHORIZED, "route ticket expired"),
-                    TicketReject::Revoked => (StatusCode::UNAUTHORIZED, "route ticket revoked"),
-                    TicketReject::Unknown => (StatusCode::UNAUTHORIZED, "unknown route ticket"),
-                    TicketReject::OperationNotAllowed => (
-                        StatusCode::FORBIDDEN,
-                        "route ticket is not scoped for this operation",
-                    ),
-                    TicketReject::BudgetExhausted => (
-                        StatusCode::TOO_MANY_REQUESTS,
-                        "insufficient_quota: route ticket budget exhausted",
-                    ),
-                };
-                return reject(status, message, None);
-            }
-        };
+        let ticket =
+            match state
+                .tickets
+                .validate_and_reserve(supplied, now_ms, op, &request_id, est_tokens)
+            {
+                Ok(ticket) => ticket,
+                Err(kind) => {
+                    let (status, message) = match kind {
+                        TicketReject::Expired => (StatusCode::UNAUTHORIZED, "route ticket expired"),
+                        TicketReject::Revoked => (StatusCode::UNAUTHORIZED, "route ticket revoked"),
+                        TicketReject::Unknown => (StatusCode::UNAUTHORIZED, "unknown route ticket"),
+                        TicketReject::OperationNotAllowed => (
+                            StatusCode::FORBIDDEN,
+                            "route ticket is not scoped for this operation",
+                        ),
+                        TicketReject::BudgetExhausted => (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            "insufficient_quota: route ticket budget exhausted",
+                        ),
+                    };
+                    return reject(status, message, None);
+                }
+            };
         // Per-ticket rate limit (only when the ticket sets one), then global.
         // A rate-limited request was never served: hand the slot back.
         if let Some(limit) = ticket.budget.as_ref().and_then(|b| b.max_requests_per_min) {
@@ -894,7 +1110,9 @@ async fn middleware(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
+        let ticket_id = ticket.ticket_id.clone();
         request.extensions_mut().insert(ReqCtx {
+            account_generation: account.generation,
             request_id: request_id.clone(),
             route: route.clone(),
             remote_ip: remote_ip.to_string(),
@@ -904,7 +1122,14 @@ async fn middleware(
             ticket: Some(ticket),
             inbound_headers: clean_inbound_headers(&headers),
         });
-        let response = next.run(request).await;
+        let response = run_with_ticket_boundary(
+            next,
+            request,
+            account_changes,
+            state.tickets.clone(),
+            ticket_id,
+        )
+        .await;
         // Settlement: a served metered call settles itself in `log_success`
         // (streams do so at stream end). A call that consumes nothing settles
         // here at zero; a failed call releases its slot.
@@ -921,16 +1146,18 @@ async fn middleware(
 
     let matched = {
         let keys = state.keys.read();
-        api_keys::match_index(&keys, supplied, now_ms).map(|i| {
-            let k = &keys[i];
-            (
-                i,
-                k.id.clone(),
-                k.model_allowlist.clone(),
-                k.rate_limit_per_min,
-                k.is_over_quota(),
-            )
-        })
+        api_keys::match_index(&keys, supplied, now_ms)
+            .filter(|i| account.permits_key(&keys[*i]))
+            .map(|i| {
+                let k = &keys[i];
+                (
+                    i,
+                    k.id.clone(),
+                    k.model_allowlist.clone(),
+                    k.rate_limit_per_min,
+                    k.is_over_quota(),
+                )
+            })
     };
     let Some((idx, key_id, key_model_allowlist, key_rate_limit, over_quota)) = matched else {
         return reject(StatusCode::UNAUTHORIZED, "invalid token", None);
@@ -977,6 +1204,7 @@ async fn middleware(
         .unwrap_or("")
         .to_string();
     request.extensions_mut().insert(ReqCtx {
+        account_generation: account.generation,
         request_id,
         route: route.clone(),
         remote_ip: remote_ip.to_string(),
@@ -987,7 +1215,7 @@ async fn middleware(
         inbound_headers: clean_inbound_headers(&headers),
     });
 
-    let response = next.run(request).await;
+    let response = run_with_account_boundary(next, request, account_changes).await;
     state
         .on_request
         .on_call(&route, response.status(), remote_ip);
@@ -996,7 +1224,36 @@ async fn middleware(
 
 // ---- /v1/models -------------------------------------------------------------
 
+/// Cancel pre-response upstream work and streaming bodies on authority change.
+/// A previously authenticated A request cannot observe B's snapshot.
+async fn run_with_account_boundary(
+    next: Next,
+    request: axum::http::Request<Body>,
+    mut changes: tokio::sync::watch::Receiver<u64>,
+) -> Response {
+    let response = tokio::select! {
+        biased;
+        _ = changes.changed() => {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": "gateway account context changed" }))).into_response();
+        }
+        response = next.run(request) => response,
+    };
+    let (parts, body) = response.into_parts();
+    let stream = futures_util::stream::unfold(
+        (body.into_data_stream(), changes),
+        |(mut body, mut changes)| async move {
+            tokio::select! {
+                biased;
+                _ = changes.changed() => None,
+                chunk = body.next() => chunk.map(|chunk| (chunk, (body, changes))),
+            }
+        },
+    );
+    Response::from_parts(parts, Body::from_stream(stream))
+}
+
 async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<ReqCtx>) -> Response {
+    let state = state.for_request(&ctx);
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
         return no_snapshot_error(InboundFormat::OpenAiChat);
@@ -1011,8 +1268,206 @@ async fn list_models(State(state): State<AppState>, Extension(ctx): Extension<Re
     // next /v1/chat/completions call.
     let visible = |model: &str| -> bool { cfg.model_is_exposed(model) && ctx_allows(&ctx, model) };
 
-    let data = listable_models(&snapshot, cfg.hide_raw_provider_models, &visible);
+    let data = if let Some(ticket) = &ctx.ticket {
+        let mut selectors = ticket.model_bindings.keys().cloned().collect::<Vec<_>>();
+        selectors.extend(ticket.candidates.iter().map(|c| c.model_id.clone()));
+        selectors.sort();
+        selectors.dedup();
+        selectors
+            .into_iter()
+            .filter_map(|selector| {
+                let resolved = ticket.resolve_model(&selector)?;
+                let candidates = ticket_base_candidates(&snapshot, ticket, Some(&resolved));
+                candidates.first().map(|candidate| {
+                    model_document(&selector, &candidate.provider, &candidate.model_id)
+                })
+            })
+            .collect()
+    } else {
+        listable_models(&snapshot, cfg.hide_raw_provider_models, &visible)
+    };
     Json(json!({ "object": "list", "data": data })).into_response()
+}
+
+async fn get_model(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<ReqCtx>,
+    axum::extract::Path(model): axum::extract::Path<String>,
+) -> Response {
+    let response = list_models(State(state), Extension(ctx)).await;
+    if !response.status().is_success() {
+        return response;
+    }
+    let bytes = axum::body::to_bytes(response.into_body(), BODY_LIMIT_BYTES)
+        .await
+        .unwrap_or_default();
+    let body: Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    if let Some(item) = body["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|item| item["id"] == model)
+    {
+        return Json(item.clone()).into_response();
+    }
+    (StatusCode::NOT_FOUND,Json(json!({"error":{"type":"not_found_error","message":"model is not available to this task"}}))).into_response()
+}
+
+fn model_document(id: &str, provider: &crate::snapshot::ProviderSnapshot, concrete: &str) -> Value {
+    let mut out = json!({"id":id,"object":"model","owned_by":provider.id,"created":0});
+    if let Some(metadata) = provider
+        .model_metadata
+        .iter()
+        .find(|entry| entry.id == concrete)
+    {
+        for (name, value) in &metadata.fields {
+            out[name] = value.clone();
+        }
+        for (from, to) in [
+            ("name", "display_name"),
+            ("contextLength", "context_length"),
+            ("maxInputTokens", "max_input_tokens"),
+            ("maxOutputTokens", "max_output_tokens"),
+        ] {
+            if let Some(value) = metadata.fields.get(from) {
+                out[to] = value.clone();
+            }
+        }
+        if let Some(value) = metadata.fields.get("maxOutputTokens") {
+            out["max_tokens"] = value.clone();
+        }
+    }
+    out
+}
+
+/// Walk message content, including tool results, but never JSON tool schemas,
+/// function argument objects or arbitrary request metadata.
+fn content_has_type(value: &Value, kinds: &[&str]) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(|item| content_has_type(item, kinds)),
+        Value::Object(object) => {
+            object
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kinds.contains(&kind))
+                || ["content", "output"].iter().any(|key| {
+                    object
+                        .get(*key)
+                        .is_some_and(|part| content_has_type(part, kinds))
+                })
+        }
+        _ => false,
+    }
+}
+
+fn tools_require_strict(tools: &Value) -> bool {
+    tools.as_array().is_some_and(|tools| {
+        tools.iter().any(|tool| {
+            tool["strict"] == true
+                || tool.pointer("/function/strict") == Some(&Value::Bool(true))
+                || tools_require_strict(&tool["tools"])
+        })
+    })
+}
+
+/// Enforce only published model facts; absent limits remain absent. Input
+/// estimates use the same gateway estimator as ticket reservations/count_tokens.
+fn apply_model_limits(body: &mut Value, candidate: &Candidate) -> Result<(), String> {
+    let Some(metadata) = candidate
+        .provider
+        .model_metadata
+        .iter()
+        .find(|m| m.id == candidate.model_id)
+    else {
+        return Ok(());
+    };
+    let positive = |field: &str| {
+        metadata
+            .fields
+            .get(field)
+            .and_then(Value::as_u64)
+            .filter(|n| *n > 0)
+    };
+    if metadata.fields.get("supportsTools") == Some(&Value::Bool(false))
+        && body["tools"].as_array().is_some_and(|t| !t.is_empty())
+    {
+        return Err("selected model does not support tools".into());
+    }
+    if metadata.fields.get("supportsStreaming") == Some(&Value::Bool(false))
+        && body["stream"] == true
+    {
+        return Err("selected model does not support streaming".into());
+    }
+    let structured = body
+        .get("response_format")
+        .is_some_and(|f| !f.is_null() && f["type"] != "text")
+        || body
+            .pointer("/text/format")
+            .is_some_and(|f| !f.is_null() && f["type"] != "text")
+        || body
+            .pointer("/output_config/format")
+            .is_some_and(|f| !f.is_null())
+        || tools_require_strict(&body["tools"]);
+    if metadata.fields.get("supportsStructuredOutput") == Some(&Value::Bool(false)) && structured {
+        return Err("selected model does not support structured output or strict tools".into());
+    }
+    let reasoning = body
+        .get("reasoning_effort")
+        .or(body.pointer("/reasoning/effort"))
+        .or(body.pointer("/output_config/effort"))
+        .is_some_and(|effort| !effort.is_null() && effort != "none")
+        || body
+            .get("thinking")
+            .is_some_and(|thinking| !thinking.is_null() && thinking["type"] != "disabled");
+    if metadata.fields.get("supportsReasoning") == Some(&Value::Bool(false)) && reasoning {
+        return Err("selected model does not support reasoning controls".into());
+    }
+    for (capability, kinds, label) in [
+        (
+            "supportsVision",
+            &["image", "image_url", "input_image"][..],
+            "images",
+        ),
+        ("supportsAudio", &["input_audio", "audio"][..], "audio"),
+        (
+            "supportsVideo",
+            &["video", "video_url", "input_video"][..],
+            "video",
+        ),
+    ] {
+        if metadata.fields.get(capability) == Some(&Value::Bool(false))
+            && ["messages", "input", "system"]
+                .iter()
+                .any(|key| content_has_type(&body[*key], kinds))
+        {
+            return Err(format!("selected model does not support {label}"));
+        }
+    }
+    let input = estimate_input_tokens(body);
+    if positive("maxInputTokens").is_some_and(|limit| input > limit) {
+        return Err("estimated input exceeds the selected model's maximum input tokens".into());
+    }
+    let mut cap = positive("maxOutputTokens");
+    if let Some(context) = positive("contextLength") {
+        if input >= context {
+            return Err("estimated input exhausts the selected model's context window".into());
+        }
+        cap = Some(cap.map_or(context - input, |output| output.min(context - input)));
+    }
+    if let Some(cap) = cap {
+        let field = if body.get("max_completion_tokens").is_some() {
+            "max_completion_tokens"
+        } else if body.get("max_output_tokens").is_some()
+            || candidate.provider.protocol == "responses"
+        {
+            "max_output_tokens"
+        } else {
+            "max_tokens"
+        };
+        let requested = body[field].as_u64().filter(|n| *n > 0).unwrap_or(cap);
+        body[field] = json!(requested.min(cap));
+    }
+    Ok(())
 }
 
 /// The `/v1/models` payload for a caller, given a per-model visibility
@@ -1052,11 +1507,7 @@ fn listable_models(
             }
             for model in &provider.models {
                 if visible(model) {
-                    data.push(json!({
-                        "id": model,
-                        "object": "model",
-                        "owned_by": provider.id,
-                    }));
+                    data.push(model_document(model, provider, model));
                 }
             }
         }
@@ -1111,10 +1562,7 @@ fn ticket_base_candidates(
                         Some(model) if p.models.iter().any(|m| m == model) => model.to_string(),
                         _ => tc.model_id.clone(),
                     };
-                    Candidate {
-                        provider: p.clone(),
-                        model_id,
-                    }
+                    Candidate::new(p, &model_id)
                 })
         })
         .collect()
@@ -1140,8 +1588,20 @@ async fn anthropic_count_tokens(
     Extension(ctx): Extension<ReqCtx>,
     Json(body): Json<Value>,
 ) -> Response {
+    let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.count_tokens");
     let format = InboundFormat::AnthropicMessages;
+    if ctx.ticket.is_some() && !body_has_no_leaking_pii(&body) {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "pii_blocked",
+            "recognized sensitive data must be redacted before sending this task to the model",
+            None,
+        );
+    }
     let cfg = state.config.read().clone();
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
@@ -1362,6 +1822,7 @@ async fn openai_embeddings(
     Extension(ctx): Extension<ReqCtx>,
     Json(body): Json<Value>,
 ) -> Response {
+    let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.embeddings");
     let format = InboundFormat::OpenAiChat;
     let cfg = state.config.read().clone();
@@ -1654,17 +2115,71 @@ async fn openai_embeddings(
 
 // ---- responses handler ------------------------------------------------------
 
+/// Bounded, memory-only continuation state. Scope includes account generation,
+/// authentication authority and model; a response id alone never grants access.
+#[derive(Default)]
+struct ResponseHistory {
+    entries: std::collections::VecDeque<(String, String, i64, Vec<Value>)>,
+}
+impl ResponseHistory {
+    fn get(&mut self, scope: &str, id: &str) -> Option<Vec<Value>> {
+        let now = chrono::Utc::now().timestamp_millis();
+        self.entries.retain(|entry| now - entry.2 < 3_600_000);
+        self.entries
+            .iter()
+            .find(|entry| entry.0 == scope && entry.1 == id)
+            .map(|entry| entry.3.clone())
+    }
+    fn put(&mut self, scope: String, response: &Value, input: &[Value]) {
+        let Some(id) = response["id"].as_str() else {
+            return;
+        };
+        if response["status"] != "completed" && response["status"] != "incomplete" {
+            return;
+        }
+        let mut items = input.to_vec();
+        items.extend(response["output"].as_array().cloned().unwrap_or_default());
+        let bytes = items
+            .iter()
+            .map(|item| item.to_string().len())
+            .sum::<usize>();
+        // Retaining a huge history is optional: clients can resend full input.
+        if bytes > 2 * 1024 * 1024 {
+            return;
+        }
+        while self.entries.len() >= 32 {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((
+            scope,
+            id.into(),
+            chrono::Utc::now().timestamp_millis(),
+            items,
+        ));
+    }
+}
+
 async fn openai_responses(
     State(state): State<AppState>,
     Extension(ctx): Extension<ReqCtx>,
-    Json(body): Json<Value>,
+    Json(mut body): Json<Value>,
 ) -> Response {
-    let _perf = cognia_instrument::guard("gateway.responses");
+    let state = state.for_request(&ctx);
     let format = InboundFormat::OpenAiChat;
-    let cfg = state.config.read().clone();
-
-    if let Some(reason) = responses_translate::unsupported_feature(&body) {
-        let response = logged_error(
+    let native = state.snapshot.read().as_ref().is_some_and(|snapshot| {
+        let model = body["model"].as_str().unwrap_or("");
+        let candidates = if let Some(ticket) = &ctx.ticket {
+            ticket_base_candidates(snapshot, ticket, ticket.resolve_model(model).as_deref())
+        } else {
+            resolve_candidates(snapshot, model)
+        };
+        !candidates.is_empty()
+            && candidates
+                .iter()
+                .all(|c| c.provider.protocol == "responses")
+    });
+    if let Some(reason) = responses_translate::unsupported_feature(&body).filter(|_| !native) {
+        return logged_error(
             &state,
             &ctx,
             format,
@@ -1673,320 +2188,208 @@ async fn openai_responses(
             &reason,
             None,
         );
-        return response;
     }
-
-    let snapshot = state.snapshot.read().clone();
-    let Some(snapshot) = snapshot else {
-        let response = logged_error(
-            &state,
-            &ctx,
-            format,
-            StatusCode::SERVICE_UNAVAILABLE,
-            "overloaded_error",
-            "no routing snapshot yet — open the Cognia window once so it can publish providers",
-            None,
-        );
-        return response;
-    };
-
-    let body = crate::route_planner::apply_parameter_defaults(
-        &snapshot,
-        body.get("model").and_then(Value::as_str).unwrap_or(""),
-        &body,
+    let model = body["model"].as_str().unwrap_or("").to_string();
+    let scope = format!(
+        "{}:{}:{}",
+        ctx.account_generation,
+        ctx.ticket
+            .as_ref()
+            .map(|t| t.ticket_id.as_str())
+            .or(ctx.key_id.as_deref())
+            .unwrap_or(""),
+        model
     );
-
-    let ir = match responses_translate::request_to_ir(&body) {
-        Ok(ir) => ir,
-        Err(err) => {
+    let mut input = match &body["input"] {
+        Value::String(text) => vec![json!({"role":"user","content":text})],
+        Value::Array(items) => items.clone(),
+        _ => Vec::new(),
+    };
+    if let Some(previous) = body["previous_response_id"].as_str() {
+        let history = state.response_history.lock().get(&scope, previous);
+        let Some(mut history) = history else {
+            return logged_error(&state,&ctx,format,StatusCode::BAD_REQUEST,"invalid_request_error",
+                "previous_response_id is unknown, expired, or belongs to another task/model; resend full input",Some(&model));
+        };
+        if !native {
+            history.append(&mut input);
+            input = history;
+        }
+    }
+    body["input"] = json!(input);
+    let stream = body["stream"].as_bool().unwrap_or(false);
+    if !native {
+        if let Err(error) = responses_translate::request_to_ir(&body) {
             return logged_error(
                 &state,
                 &ctx,
                 format,
                 StatusCode::BAD_REQUEST,
                 "invalid_request_error",
-                &err.reason,
-                None,
-            )
-        }
-    };
-    let model = ir.model.clone();
-    if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
-        return resp;
-    }
-
-    // W1.2: gateway-key in-flight cap. `/v1/responses` rejects `stream` up front
-    // (see `responses_translate::unsupported_feature`), so the slot is always
-    // scope-held. Key matches the chat path's — one shared budget.
-    let wait = Duration::from_millis(cfg.concurrency_wait_ms as u64);
-    let _gw_slot = match state
-        .concurrency
-        .acquire(&gw_gate_key(&ctx), cfg.max_concurrent_per_key, wait)
-        .await
-    {
-        Ok(slot) => slot,
-        Err(()) => return concurrency_rejected(&state, &ctx, format, Some(&model)),
-    };
-
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let candidates = expand_key_pools(
-        route_candidates(&state, &snapshot, &cfg, &model, &body, "gateway-responses").await,
-        &state.key_rotation,
-        &state.key_cooldown,
-        now_ms,
-    );
-    if candidates.is_empty() {
-        let status = if crate::route_planner::model_is_known(&snapshot, &model) {
-            StatusCode::SERVICE_UNAVAILABLE
-        } else {
-            StatusCode::NOT_FOUND
-        };
-        let response = logged_error(
-            &state,
-            &ctx,
-            format,
-            status,
-            "invalid_request_error",
-            &format!(
-                "model \"{model}\" matches no alias, provider:model, or enabled provider model"
-            ),
-            Some(&model),
-        );
-        return with_retry_after(
-            response,
-            route_retry_after_ms(&snapshot, &state.key_cooldown, &model, now_ms),
-        );
-    }
-
-    let mut failures: Vec<String> = Vec::new();
-    let attempt_limit = route_attempt_limit(&cfg, &snapshot, candidates.len());
-    let mut retry_wait_remaining_ms = cfg.max_retry_wait_ms;
-    for (attempt_index, candidate) in candidates.iter().take(attempt_limit).enumerate() {
-        let started = Instant::now();
-
-        // W1.2: per-upstream-key cap for THIS attempt.
-        let _up_slot = match state
-            .concurrency
-            .acquire(
-                &up_gate_key(candidate),
-                cfg.max_concurrent_per_upstream_key,
-                wait,
-            )
-            .await
-        {
-            Ok(slot) => slot,
-            Err(()) => {
-                failures.push(format!(
-                    "{}: upstream concurrency limit reached",
-                    candidate.provider.id
-                ));
-                continue;
-            }
-        };
-        let _in_flight = state.in_flight.enter(&candidate.provider.id);
-
-        let mut candidate_ir = ir.clone();
-        candidate_ir.model = candidate.model_id.clone();
-        let mut upstream_body = match request_from_ir(&candidate.provider.protocol, &candidate_ir) {
-            Ok(body) => body,
-            Err(err) => {
-                failures.push(format!("{}: {}", candidate.provider.id, err.reason));
-                continue;
-            }
-        };
-        strip_request_fields(
-            &mut upstream_body,
-            &candidate.provider.id,
-            &cfg.stripped_request_fields,
-            &cfg.field_strip_allow,
-        );
-
-        let url = upstream_url(&candidate.provider.protocol, &candidate.provider.base_url);
-        let mut req = state.http.post(&url).json(&upstream_body);
-        req = apply_timeout(req, &cfg);
-        for (name, value) in upstream_headers(
-            &candidate.provider.protocol,
-            candidate.provider.api_key.as_deref(),
-        ) {
-            req = req.header(name, value);
-        }
-
-        let resp = match req.send().await {
-            Ok(resp) => resp,
-            Err(err) => {
-                let message = format!("connect error: {err}");
-                // The success path already emitted; the failure paths did not,
-                // so a provider failing every Responses call never opened its
-                // breaker. `session_id` stays None (no chat-affinity key here).
-                emit_outcome(
-                    state.host.as_ref(),
-                    candidate,
-                    false,
-                    started,
-                    None,
-                    Some(&message),
-                    None,
-                    None,
-                );
-                wait_before_retry(
-                    &cfg,
-                    attempt_index,
-                    None,
-                    &mut retry_wait_remaining_ms,
-                    attempt_index + 1 < attempt_limit,
-                )
-                .await;
-                failures.push(format!("{}: {message}", candidate.provider.id));
-                continue;
-            }
-        };
-
-        let status = resp.status().as_u16();
-        if status >= 400 {
-            let headers = resp.headers().clone();
-            let retry_after = headers.get("retry-after").and_then(|v| v.to_str().ok());
-            let unified = headers
-                .get("anthropic-ratelimit-unified-reset")
-                .and_then(|v| v.to_str().ok());
-            let text = resp.text().await.unwrap_or_default();
-            let retry_after_ms = record_upstream_cooldown(
-                &state,
-                &cfg,
-                candidate,
-                status,
-                retry_after,
-                unified,
-                &text,
-                now_ms,
-            );
-            let message = format!(
-                "HTTP {status}: {}",
-                text.chars().take(500).collect::<String>()
-            );
-            emit_outcome(
-                state.host.as_ref(),
-                candidate,
-                false,
-                started,
-                None,
-                Some(&message),
-                retry_after_ms,
-                None,
-            );
-            // R4: authentication failures never switch credentials/providers
-            // unless a verified route ticket explicitly allows auth failover.
-            let auth_failure = status == 401 || status == 403;
-            let auth_failover_allowed = ctx
-                .ticket
-                .as_ref()
-                .is_some_and(|ticket| ticket.allow_auth_failover);
-            if cfg.should_retry(status) && (!auth_failure || auth_failover_allowed) {
-                wait_before_retry(
-                    &cfg,
-                    attempt_index,
-                    retry_after_ms,
-                    &mut retry_wait_remaining_ms,
-                    attempt_index + 1 < attempt_limit,
-                )
-                .await;
-                failures.push(format!("{}: {message}", candidate.provider.id));
-                continue;
-            }
-            return logged_error(
-                &state,
-                &ctx,
-                format,
-                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
-                "invalid_request_error",
-                &message,
+                &error.reason,
                 Some(&model),
             );
         }
-
-        let upstream: Value = match resp.json().await {
-            Ok(value) => value,
-            Err(err) => {
-                // Same rule as the chat path: an unserializable 200 is a
-                // provider-health signal, not a client error.
-                let message = format!("invalid upstream JSON: {err}");
-                emit_outcome(
-                    state.host.as_ref(),
-                    candidate,
-                    false,
-                    started,
-                    None,
-                    Some(&message),
-                    None,
-                    None,
-                );
+    }
+    let custom_tools = responses_translate::custom_tool_names(&body);
+    let namespaces = responses_translate::tool_namespaces(&body);
+    let response = handle_chat(
+        state.clone(),
+        ctx.clone(),
+        InboundFormat::OpenAiResponses,
+        body,
+    )
+    .await;
+    if !response.status().is_success() {
+        return response;
+    }
+    let native = response
+        .headers()
+        .get("x-cognia-upstream-responses")
+        .is_some()
+        || (native && !stream);
+    if !stream {
+        let bytes = match axum::body::to_bytes(response.into_body(), BODY_LIMIT_BYTES).await {
+            Ok(bytes) => bytes,
+            Err(_) => {
                 return logged_error(
                     &state,
                     &ctx,
                     format,
                     StatusCode::BAD_GATEWAY,
                     "api_error",
-                    &message,
+                    "invalid upstream response",
                     Some(&model),
-                );
+                )
             }
         };
-        match response_to_ir(&candidate.provider.protocol, &upstream) {
-            Ok(ir_resp) => {
-                emit_outcome(
-                    state.host.as_ref(),
-                    candidate,
-                    true,
-                    started,
-                    Some((
-                        Some(ir_resp.usage.input_tokens),
-                        Some(ir_resp.usage.output_tokens),
-                    )),
-                    None,
-                    None,
-                    // Responses API has no chat-affinity session key.
-                    None,
-                );
-                log_success(
-                    &state,
-                    &ctx,
-                    &model,
-                    candidate,
-                    started.elapsed().as_millis() as u64,
-                    Some(ir_resp.usage.input_tokens),
-                    Some(ir_resp.usage.output_tokens),
-                    false,
-                );
-                let created = chrono::Utc::now().timestamp();
-                return Json(responses_translate::response_from_ir(
-                    &ir_resp, &model, created,
-                ))
-                .into_response();
-            }
-            Err(err) => {
-                // The provider answered 200 with a body we can't read as a
-                // response — a provider-health signal, so it is reported even
-                // though the walk continues to the next candidate. (A
-                // `request_from_ir` failure above is NOT reported: that is the
-                // gateway's own translation limit, not the provider's fault —
-                // the chat path draws the same line.)
-                let message = format!("unreadable upstream response: {}", err.reason);
-                emit_outcome(
-                    state.host.as_ref(),
-                    candidate,
-                    false,
-                    started,
-                    None,
-                    Some(&message),
-                    None,
-                    None,
-                );
-                failures.push(format!("{}: {}", candidate.provider.id, err.reason));
-                continue;
+        if native {
+            let value: Value = match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(_) => {
+                    return logged_error(
+                        &state,
+                        &ctx,
+                        format,
+                        StatusCode::BAD_GATEWAY,
+                        "api_error",
+                        "invalid upstream response",
+                        Some(&model),
+                    )
+                }
+            };
+            state.response_history.lock().put(scope, &value, &input);
+            return Json(value).into_response();
+        }
+        let converted = serde_json::from_slice::<Value>(&bytes).ok();
+        let Some(mut converted) = converted else {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_GATEWAY,
+                "api_error",
+                "invalid upstream response",
+                Some(&model),
+            );
+        };
+        if let Err(reason) =
+            responses_translate::restore_custom_tools(&mut converted, &custom_tools)
+        {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_GATEWAY,
+                "api_error",
+                &reason,
+                Some(&model),
+            );
+        }
+        responses_translate::restore_namespaces(&mut converted, &namespaces);
+        state.response_history.lock().put(scope, &converted, &input);
+        return Json(converted).into_response();
+    }
+    let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(16);
+    spawn_request_task(&state.clone(), &ctx.clone(), async move {
+        let mut upstream = response.into_body().into_data_stream();
+        let mut deframer = SseDeframer::default();
+        let mut encoder = responses_translate::ResponsesStream::new(&model, custom_tools)
+            .with_namespaces(namespaces);
+        if !native {
+            for frame in encoder.start() {
+                if tx.send(Bytes::from(frame)).await.is_err() {
+                    return;
+                }
             }
         }
-    }
-
-    all_failed(&state, &ctx, format, &model, &failures)
+        loop {
+            let next = tokio::select! { biased; _ = tx.closed() => return, next = upstream.next() => next };
+            match next {
+                Some(Ok(bytes)) => {
+                    if native {
+                        for payload in deframer.push(&bytes) {
+                            if let Ok(value) = serde_json::from_str::<Value>(&payload) {
+                                if matches!(
+                                    value["type"].as_str(),
+                                    Some("response.completed" | "response.incomplete")
+                                ) {
+                                    state.response_history.lock().put(
+                                        scope.clone(),
+                                        &value["response"],
+                                        &input,
+                                    );
+                                }
+                            }
+                        }
+                        if tx.send(bytes).await.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
+                    for payload in deframer.push(&bytes) {
+                        for frame in encoder.push(&payload) {
+                            if tx.send(Bytes::from(frame)).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+                Some(Err(_)) => break,
+                None => {
+                    if native {
+                        return;
+                    }
+                    if let Some(payload) = deframer.finish() {
+                        for frame in encoder.push(&payload) {
+                            if tx.send(Bytes::from(frame)).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        if native {
+            return;
+        }
+        for frame in encoder.fail("upstream stream ended before completion") {
+            if tx.send(Bytes::from(frame)).await.is_err() {
+                return;
+            }
+        }
+        state
+            .response_history
+            .lock()
+            .put(scope, &encoder.response, &input);
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|bytes| (Ok::<_, std::io::Error>(bytes), rx))
+    });
+    sse_response(Body::from_stream(stream))
 }
 
 fn no_snapshot_error(format: InboundFormat) -> Response {
@@ -2342,8 +2745,20 @@ async fn live_decision(
 }
 
 async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: Value) -> Response {
+    let state = state.for_request(&ctx);
     let _perf = cognia_instrument::guard("gateway.chat");
     let cfg = state.config.read().clone();
+    if ctx.ticket.is_some() && !body_has_no_leaking_pii(&body) {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "pii_blocked",
+            "recognized sensitive data must be redacted before sending this task to the model",
+            None,
+        );
+    }
     let snapshot = state.snapshot.read().clone();
     let Some(snapshot) = snapshot else {
         let response = logged_error(
@@ -2554,14 +2969,73 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         } else {
             let mut ir = ir.clone().expect("ir computed for translated pairs");
             ir.model = candidate.model_id.clone();
+            if ir.reasoning_effort.is_some()
+                && ((format == InboundFormat::AnthropicMessages)
+                    != (candidate.provider.protocol == "anthropic"))
+            {
+                let _ = state.host.emit("gateway://translation-loss", json!({"model":model,"losses":[
+                    super::translate::ir::TranslationLoss::approximated("reasoning_effort",
+                        "effort preserves relative intensity; Anthropic effort also applies to non-thinking output and is not an exact reasoning-token budget")
+                ]}));
+            }
             match request_from_ir(&candidate.provider.protocol, &ir) {
                 Ok(body) => body,
                 Err(err) => {
+                    if candidates.len() == 1 {
+                        return logged_error(
+                            &state,
+                            &ctx,
+                            format,
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request_error",
+                            &err.reason,
+                            Some(&model),
+                        );
+                    }
                     failures.push(format!("{}: {}", candidate.provider.id, err.reason));
                     continue;
                 }
             }
         };
+        if let Err(reason) = apply_model_limits(&mut upstream_body, candidate) {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &reason,
+                Some(&model),
+            );
+        }
+        if ctx.ticket.is_some() {
+            let field = if upstream_body.get("max_completion_tokens").is_some() {
+                "max_completion_tokens"
+            } else if candidate.provider.protocol == "responses" {
+                "max_output_tokens"
+            } else {
+                "max_tokens"
+            };
+            match state.tickets.reserve_model_output(
+                &ctx.request_id,
+                estimate_input_tokens(&upstream_body),
+                upstream_body[field].as_u64(),
+            ) {
+                Ok(Some(output)) => upstream_body[field] = json!(output),
+                Ok(None) => {}
+                Err(_) => {
+                    return logged_error(
+                        &state,
+                        &ctx,
+                        format,
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "insufficient_quota",
+                        "route ticket token budget exhausted",
+                        Some(&model),
+                    )
+                }
+            }
+        }
         // W3.2: strip client-supplied billing/privacy/behaviour toggles from the
         // outbound body (both passthrough AND translated paths).
         strip_request_fields(
@@ -2767,11 +3241,37 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         }
 
         if stream {
-            return stream_response(
-                state, ctx, format, candidate, resp, started, &model, session_id, gw_slot, up_slot,
+            // The Responses endpoint adds Responses events around the shared
+            // Chat stream. A Chat upstream already supplies that intermediate.
+            let stream_format = if format == InboundFormat::OpenAiResponses
+                && candidate.provider.protocol == "openai"
+            {
+                InboundFormat::OpenAiChat
+            } else {
+                format
+            };
+            let mut response = stream_response(
+                state,
+                ctx,
+                stream_format,
+                candidate,
+                resp,
+                started,
+                &model,
+                session_id,
+                gw_slot,
+                up_slot,
                 in_flight,
             )
             .await;
+            if format == InboundFormat::OpenAiResponses
+                && candidate.provider.protocol == "responses"
+            {
+                response
+                    .headers_mut()
+                    .insert("x-cognia-upstream-responses", HeaderValue::from_static("1"));
+            }
+            return response;
         }
         // Buffered path: `gw_slot` / `up_slot` / `in_flight` carry Drop glue, so
         // they release only when this handler returns — i.e. after the awaited
@@ -2840,7 +3340,7 @@ async fn buffered_response(
                 upstream["usage"]["prompt_tokens"].as_u64(),
                 upstream["usage"]["completion_tokens"].as_u64(),
             ),
-            InboundFormat::AnthropicMessages => (
+            InboundFormat::AnthropicMessages | InboundFormat::OpenAiResponses => (
                 upstream["usage"]["input_tokens"].as_u64(),
                 upstream["usage"]["output_tokens"].as_u64(),
             ),
@@ -2957,7 +3457,7 @@ async fn stream_response(
         let candidate = candidate.clone();
         let ctx = ctx.clone();
         let model = model.to_string();
-        tokio::spawn(async move {
+        spawn_request_task(&state.clone(), &ctx.clone(), async move {
             // Hold the W1.2 concurrency slots + the in-flight tally for the
             // WHOLE stream — they release when this task ends, not at the
             // handler's return.
@@ -2968,7 +3468,8 @@ async fn stream_response(
             let mut upstream = resp.bytes_stream();
             let mut stalled = false;
             'pump: loop {
-                let chunk = match next_chunk_before_idle(&mut upstream, idle_timeout).await {
+                let next = tokio::select! { biased; _ = tx.closed() => return, next = next_chunk_before_idle(&mut upstream, idle_timeout) => next };
+                let chunk = match next {
                     Ok(Some(chunk)) => chunk,
                     Ok(None) => break 'pump, // clean end of stream
                     Err(_) => {
@@ -3025,13 +3526,17 @@ async fn stream_response(
         return sse_response(Body::from_stream(stream));
     }
 
-    let direction = match format {
-        InboundFormat::AnthropicMessages => Direction::OpenAiToAnthropic,
-        InboundFormat::OpenAiChat => Direction::AnthropicToOpenAi,
+    let direction = match (candidate.provider.protocol.as_str(), format) {
+        ("responses", InboundFormat::AnthropicMessages) => Direction::ResponsesToAnthropic,
+        ("responses", _) => Direction::ResponsesToOpenAi,
+        (_, InboundFormat::AnthropicMessages) => Direction::OpenAiToAnthropic,
+        _ => Direction::AnthropicToOpenAi,
     };
     let message_id = match format {
         InboundFormat::AnthropicMessages => format!("msg_{}", uuid::Uuid::new_v4().simple()),
-        InboundFormat::OpenAiChat => format!("chatcmpl-{}", uuid::Uuid::new_v4().simple()),
+        InboundFormat::OpenAiChat | InboundFormat::OpenAiResponses => {
+            format!("chatcmpl-{}", uuid::Uuid::new_v4().simple())
+        }
     };
     let mut transcoder = StreamTranscoder::new(direction, candidate.model_id.clone(), message_id);
 
@@ -3040,7 +3545,7 @@ async fn stream_response(
     let candidate = candidate.clone();
     let ctx = ctx.clone();
     let model = model.to_string();
-    tokio::spawn(async move {
+    spawn_request_task(&state.clone(), &ctx.clone(), async move {
         // Hold the W1.2 concurrency slots + in-flight tally for the WHOLE
         // transcoded stream.
         let _slots = (gw_slot, up_slot, in_flight);
@@ -3048,7 +3553,8 @@ async fn stream_response(
         let mut upstream = resp.bytes_stream();
         let mut stalled = false;
         'pump: loop {
-            let chunk = match next_chunk_before_idle(&mut upstream, idle_timeout).await {
+            let next = tokio::select! { biased; _ = tx.closed() => return, next = next_chunk_before_idle(&mut upstream, idle_timeout) => next };
+            let chunk = match next {
                 Ok(Some(chunk)) => chunk,
                 Ok(None) => break 'pump, // clean end of stream
                 Err(_) => {
@@ -3073,11 +3579,11 @@ async fn stream_response(
         // a silent close — Anthropic clients get `event: error`.
         if stalled {
             let error_frame = match direction {
-                Direction::OpenAiToAnthropic => Some(
+                Direction::OpenAiToAnthropic | Direction::ResponsesToAnthropic => Some(
                     "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream stalled\"}}\n\n"
                         .to_string(),
                 ),
-                Direction::AnthropicToOpenAi => None,
+                Direction::AnthropicToOpenAi | Direction::ResponsesToOpenAi => None,
             };
             if let Some(frame) = error_frame {
                 let _ = tx.send(Ok(Bytes::from(frame))).await;
@@ -3383,6 +3889,14 @@ fn sniff_passthrough_usage(
     output: &mut Option<u64>,
 ) {
     match format {
+        InboundFormat::OpenAiResponses => {
+            if let Some(v) = value["response"]["usage"]["input_tokens"].as_u64() {
+                *input = Some(v);
+            }
+            if let Some(v) = value["response"]["usage"]["output_tokens"].as_u64() {
+                *output = Some(v);
+            }
+        }
         InboundFormat::AnthropicMessages => {
             if let Some(v) = value["message"]["usage"]["input_tokens"].as_u64() {
                 *input = Some(v);
@@ -3438,8 +3952,208 @@ fn emit_request_log_ctx(
 mod tests {
     use super::*;
 
+    #[test]
+    fn request_events_are_owner_tagged_and_stale_generations_are_suppressed() {
+        let recording = Arc::new(crate::host::RecordingGatewayHost::new(false));
+        let account = Arc::new(RwLock::new(crate::GatewayAccountContext {
+            owner_account_id: Some("account-a".into()),
+            generation: 1,
+            required: true,
+        }));
+        let host = AccountBoundHost {
+            host: recording.clone(),
+            account: account.clone(),
+            generation: 1,
+        };
+        assert!(host.emit(REQUEST_LOG_EVENT, json!({"status":200})));
+        assert_eq!(recording.events.lock()[0].1["ownerAccountId"], "account-a");
+        assert_eq!(recording.events.lock()[0].1["accountGeneration"], 1);
+        account.write().generation = 2;
+        assert!(!host.emit(REQUEST_OUTCOME_EVENT, json!({"ok":true})));
+        assert_eq!(recording.events.lock().len(), 1);
+    }
+
+    #[test]
+    fn published_input_context_and_output_limits_are_independent() {
+        let provider = serde_json::from_value(json!({"id":"fixture","protocol":"openai","enabled":true,"baseUrl":"http://127.0.0.1/v1",
+            "modelMetadata":[{"id":"model","contextLength":200,"maxInputTokens":100,"maxOutputTokens":60,"supportsTools":false}]})).unwrap();
+        let candidate = Candidate::new(&provider, "model");
+        let mut request = json!({"messages":[{"role":"user","content":"hi"}],"max_tokens":999});
+        apply_model_limits(&mut request, &candidate).unwrap();
+        assert_eq!(request["max_tokens"], 60);
+        request["max_tokens"] = json!(20);
+        apply_model_limits(&mut request, &candidate).unwrap();
+        assert_eq!(request["max_tokens"], 20);
+        request["messages"][0]["content"] = json!("a".repeat(500));
+        assert!(apply_model_limits(&mut request, &candidate)
+            .unwrap_err()
+            .contains("maximum input"));
+        request = json!({"tools":[{"type":"function"}]});
+        assert!(apply_model_limits(&mut request, &candidate)
+            .unwrap_err()
+            .contains("tools"));
+    }
+
+    #[test]
+    fn published_capability_denials_cover_all_request_formats() {
+        let provider = serde_json::from_value(json!({"id":"fixture","protocol":"openai","enabled":true,"baseUrl":"http://127.0.0.1/v1",
+            "modelMetadata":[{"id":"model","supportsVision":false,"supportsReasoning":false,"supportsStructuredOutput":false}]})).unwrap();
+        let candidate = Candidate::new(&provider, "model");
+        for mut request in [
+            json!({"input":[{"type":"function_call_output","call_id":"c","output":[{"type":"input_image","image_url":"https://example.invalid/img"}]}]}),
+            json!({"messages":[{"role":"user","content":[{"type":"tool_result","content":[{"type":"image","source":{}}]}]}]}),
+            json!({"reasoning":{"effort":"high"}}),
+            json!({"reasoning_effort":"low"}),
+            json!({"thinking":{"type":"adaptive"}}),
+            json!({"text":{"format":{"type":"json_schema"}}}),
+            json!({"response_format":{"type":"json_object"}}),
+            json!({"output_config":{"format":{"type":"json_schema"}}}),
+            json!({"tools":[{"function":{"strict":true}}]}),
+            json!({"tools":[{"type":"namespace","tools":[{"type":"function","strict":true}]}]}),
+        ] {
+            assert!(
+                apply_model_limits(&mut request, &candidate).is_err(),
+                "{request}"
+            );
+        }
+        let mut ordinary = json!({"reasoning_effort":"none","thinking":{"type":"disabled"},"tools":[{"parameters":{"properties":{"type":{"const":"image"}}}}],"metadata":{"type":"input_image"}});
+        apply_model_limits(&mut ordinary, &candidate).unwrap();
+    }
+
+    #[test]
+    fn task_pii_gate_inspects_tool_results_without_scanning_transport_metadata() {
+        assert!(!body_has_no_leaking_pii(
+            &json!({"messages":[{"role":"tool","content":"person@example.com"}]})
+        ));
+        assert!(body_has_no_leaking_pii(
+            &json!({"messages":[{"role":"user","content":"redacted"}],"metadata":{"contact":"person@example.com"}})
+        ));
+        for payload in [
+            json!({"response_format":{"type":"json_schema","json_schema":{"schema":{"description":"person@example.com"}}}}),
+            json!({"text":{"format":{"schema":{"enum":["person@example.com"]}}}}),
+            json!({"output_config":{"format":{"schema":{"const":"person@example.com"}}}}),
+        ] {
+            assert!(!body_has_no_leaking_pii(&payload));
+        }
+    }
+
+    #[tokio::test]
+    async fn account_invalidation_cancels_a_detached_idle_stream_pump() {
+        struct Dropped(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+        let (changes, receiver) = tokio::sync::watch::channel(1);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (dropped, ended) = tokio::sync::oneshot::channel();
+        spawn_account_task(receiver, 1, async move {
+            let _guard = Dropped(Some(dropped));
+            let _ = started.send(());
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+        changes.send_replace(2);
+        tokio::time::timeout(std::time::Duration::from_secs(1), ended)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn account_invalidation_terminates_the_downstream_stream_body() {
+        use tower::ServiceExt;
+        let (changes, _) = tokio::sync::watch::channel(1);
+        let changes = Arc::new(changes);
+        let router = axum::Router::new()
+            .route(
+                "/",
+                axum::routing::get(|| async {
+                    let chunks = futures_util::stream::once(async {
+                        Ok::<_, std::io::Error>(Bytes::from_static(b"first"))
+                    })
+                    .chain(futures_util::stream::pending());
+                    Body::from_stream(chunks)
+                }),
+            )
+            .layer(axum::middleware::from_fn({
+                let changes = changes.clone();
+                move |request: axum::http::Request<Body>, next: Next| {
+                    run_with_account_boundary(next, request, changes.subscribe())
+                }
+            }));
+        let response = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut body = response.into_body().into_data_stream();
+        assert_eq!(
+            body.next().await.unwrap().unwrap(),
+            Bytes::from_static(b"first")
+        );
+        changes.send_replace(2);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), body.next())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn account_invalidation_cancels_waiting_handler_before_fallback() {
+        use tower::ServiceExt;
+        let (changes, _) = tokio::sync::watch::channel(1);
+        let changes = Arc::new(changes);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let started = Arc::new(parking_lot::Mutex::new(Some(started)));
+        let router = axum::Router::new()
+            .route(
+                "/",
+                axum::routing::get(move || {
+                    let started = started.clone();
+                    async move {
+                        let _ = started.lock().take().unwrap().send(());
+                        std::future::pending::<()>().await;
+                        StatusCode::OK
+                    }
+                }),
+            )
+            .layer(axum::middleware::from_fn({
+                let changes = changes.clone();
+                move |request: axum::http::Request<Body>, next: Next| {
+                    run_with_account_boundary(next, request, changes.subscribe())
+                }
+            }));
+        let response = tokio::spawn(
+            router.oneshot(
+                axum::http::Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        );
+        ready.await.unwrap();
+        changes.send_replace(2);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), response)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     fn ctx() -> ReqCtx {
         ReqCtx {
+            account_generation: 0,
             request_id: "req-test".into(),
             route: "/v1/chat/completions".into(),
             remote_ip: "127.0.0.1".into(),

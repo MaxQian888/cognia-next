@@ -124,8 +124,11 @@ pub struct PushSnapshotResult {
 pub async fn gateway_push_snapshot(
     state: State<'_, GatewayState>,
     snapshot: RoutingSnapshot,
+    owner_account_id: Option<String>,
+    account_generation: Option<u64>,
 ) -> Result<PushSnapshotResult, String> {
-    match state.try_set_snapshot(snapshot) {
+    match state.try_set_account_snapshot(snapshot, owner_account_id.as_deref(), account_generation)
+    {
         Ok(accepted) => Ok(PushSnapshotResult {
             accepted: true,
             profile_version: accepted.profile_version,
@@ -188,6 +191,14 @@ pub async fn gateway_list_cooldowns(
     state: State<'_, GatewayState>,
 ) -> Result<Vec<super::cooldown::CooldownRow>, String> {
     Ok(state.cooldowns())
+}
+
+#[tauri::command]
+pub async fn gateway_reset_cooldowns(
+    state: State<'_, GatewayState>,
+    provider_id: Option<String>,
+) -> Result<usize, String> {
+    Ok(state.reset_cooldowns(provider_id.as_deref()))
 }
 
 /// Run the upstream self-check for `model` and return one row per candidate.
