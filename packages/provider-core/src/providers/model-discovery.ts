@@ -23,6 +23,8 @@ export interface DiscoveredProviderModel extends ModelConfig {
   freshness: ProviderModelFreshness
   mergedSources: ProviderModelSource[]
   provider?: string
+  /** Fields supplied by a source before compatibility display defaults were applied. */
+  knownFields?: string[]
 }
 
 export interface ProviderModelDiscoverySnapshot {
@@ -40,15 +42,7 @@ interface CustomProviderModelStateLike extends DiscoveredModelStateLike {
   customModels?: string[]
   customModelMetadata?: Record<
     string,
-    {
-      id?: string
-      name?: string
-      contextLength?: number
-      maxOutputTokens?: number
-      pricing?: {
-        promptPer1M?: number
-        completionPer1M?: number
-      }
+    Partial<ProviderModelCandidate> & {
       capabilities?: {
         vision?: boolean
         functionCalling?: boolean
@@ -63,6 +57,7 @@ function candidateToModelConfig(candidate: ProviderModelCandidate): ModelConfig 
     id: candidate.id,
     name: candidate.name || candidate.id,
     contextLength: candidate.contextLength ?? 0,
+    maxInputTokens: candidate.maxInputTokens,
     maxOutputTokens: candidate.maxOutputTokens,
     supportsTools: candidate.supportsTools ?? true,
     supportsVision: candidate.supportsVision ?? false,
@@ -72,12 +67,13 @@ function candidateToModelConfig(candidate: ProviderModelCandidate): ModelConfig 
     supportsReasoning: candidate.supportsReasoning,
     supportsImageGeneration: candidate.supportsImageGeneration,
     supportsEmbedding: candidate.supportsEmbedding,
+    supportsStructuredOutput: candidate.supportsStructuredOutput,
     pricing:
-      candidate.pricing?.promptPer1M !== undefined ||
+      candidate.pricing?.promptPer1M !== undefined &&
       candidate.pricing?.completionPer1M !== undefined
         ? {
-            promptPer1M: candidate.pricing?.promptPer1M ?? 0,
-            completionPer1M: candidate.pricing?.completionPer1M ?? 0,
+            promptPer1M: candidate.pricing.promptPer1M,
+            completionPer1M: candidate.pricing.completionPer1M,
             cachedInputPer1M: candidate.pricing?.cachedInputPer1M,
             cacheCreationPer1M: candidate.pricing?.cacheCreationPer1M,
             batchInputPer1M: candidate.pricing?.batchInputPer1M,
@@ -98,6 +94,7 @@ export function modelConfigToProviderModelCandidate(
     name: model.name || model.id,
     provider: model.provider,
     contextLength: model.contextLength,
+    maxInputTokens: model.maxInputTokens,
     maxOutputTokens: model.maxOutputTokens,
     supportsTools: model.supportsTools,
     supportsVision: model.supportsVision,
@@ -107,12 +104,10 @@ export function modelConfigToProviderModelCandidate(
     supportsReasoning: model.supportsReasoning,
     supportsImageGeneration: model.supportsImageGeneration,
     supportsEmbedding: model.supportsEmbedding,
+    supportsStructuredOutput: model.supportsStructuredOutput,
     pricing:
       model.pricing?.promptPer1M !== undefined || model.pricing?.completionPer1M !== undefined
-        ? {
-            promptPer1M: model.pricing?.promptPer1M,
-            completionPer1M: model.pricing?.completionPer1M,
-          }
+        ? { ...model.pricing }
         : undefined,
   }
 }
@@ -156,16 +151,11 @@ function getUserCuratedModels(
   return sourceModelIds.map((modelId) => {
     const modelMetadata = metadata[modelId]
     return {
+      ...modelMetadata,
       id: modelId,
-      name: modelMetadata?.name || modelId,
-      contextLength: modelMetadata?.contextLength,
-      maxOutputTokens: modelMetadata?.maxOutputTokens,
-      supportsTools: modelMetadata?.capabilities?.functionCalling ?? true,
-      supportsVision: modelMetadata?.capabilities?.vision ?? false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsStreaming: modelMetadata?.capabilities?.streaming ?? true,
-      pricing: modelMetadata?.pricing,
+      supportsTools: modelMetadata?.supportsTools ?? modelMetadata?.capabilities?.functionCalling,
+      supportsVision: modelMetadata?.supportsVision ?? modelMetadata?.capabilities?.vision,
+      supportsStreaming: modelMetadata?.supportsStreaming ?? modelMetadata?.capabilities?.streaming,
     }
   })
 }
@@ -215,12 +205,12 @@ export function mergePricing(
  * or capabilities models.dev already supplied.
  */
 function mergeModelConfig(
-  existing: ModelConfig,
-  incoming: ModelConfig,
+  existing: ProviderModelCandidate,
+  incoming: ProviderModelCandidate,
   overwrite: boolean
-): ModelConfig {
-  const out: ModelConfig = { ...existing }
-  for (const key of Object.keys(incoming) as (keyof ModelConfig)[]) {
+): ProviderModelCandidate {
+  const out: ProviderModelCandidate = { ...existing }
+  for (const key of Object.keys(incoming) as (keyof ProviderModelCandidate)[]) {
     if (key === "pricing" || key === "id") continue
     const inc = incoming[key]
     if (inc === undefined) continue
@@ -228,7 +218,15 @@ function mergeModelConfig(
       out[key] = inc as never
     }
   }
-  out.pricing = mergePricing(existing.pricing, incoming.pricing, overwrite)
+  if (incoming.pricing) {
+    out.pricing = { ...existing.pricing }
+    for (const key of PRICING_KEYS) {
+      const value = incoming.pricing[key]
+      if (value !== undefined && (overwrite || out.pricing[key] === undefined)) {
+        out.pricing[key] = value as never
+      }
+    }
+  }
   return out
 }
 
@@ -239,8 +237,17 @@ export function buildProviderModelDiscoverySnapshot(input: {
   remoteModels?: ProviderModelCandidate[]
   remoteLastFetchedAt?: number
   userCuratedModels?: ProviderModelCandidate[]
+  /** Subscription APIs return account-specific limits and entitlements. */
+  remoteOverridesCatalog?: boolean
 }): ProviderModelDiscoverySnapshot {
-  const merged = new Map<string, DiscoveredProviderModel>()
+  const merged = new Map<
+    string,
+    ProviderModelCandidate & {
+      source: ProviderModelSource
+      freshness: ProviderModelFreshness
+      mergedSources: ProviderModelSource[]
+    }
+  >()
 
   const applyModels = (
     models: ProviderModelCandidate[] | undefined,
@@ -248,11 +255,10 @@ export function buildProviderModelDiscoverySnapshot(input: {
     overwrite: boolean
   ) => {
     for (const model of models || []) {
-      const normalized = candidateToModelConfig(model)
       const existing = merged.get(model.id)
       if (!existing) {
         merged.set(model.id, {
-          ...normalized,
+          ...model,
           source,
           freshness: sourceFreshness(source, input.remoteLastFetchedAt),
           mergedSources: [source],
@@ -262,7 +268,7 @@ export function buildProviderModelDiscoverySnapshot(input: {
       }
 
       merged.set(model.id, {
-        ...mergeModelConfig(existing, normalized, overwrite),
+        ...mergeModelConfig(existing, model, overwrite),
         // A fill-only pass (overwrite=false, i.e. live /v1/models) may add data
         // to a higher-authority model but must not relabel its provenance —
         // otherwise a models.dev-authoritative model that also appears in the
@@ -282,12 +288,26 @@ export function buildProviderModelDiscoverySnapshot(input: {
   // live /v1/models only fills gaps + adds new ids; user-curated is explicit.
   applyModels(input.catalogModels, "catalog-static", true)
   applyModels(input.modelsDevModels, "models-dev", true)
-  applyModels(input.remoteModels, "remote-discovered", false)
+  applyModels(input.remoteModels, "remote-discovered", input.remoteOverridesCatalog ?? false)
   applyModels(input.userCuratedModels, "user-curated", true)
 
   return {
     providerId: input.providerId,
-    models: Array.from(merged.values()),
+    // Defaults belong at the output boundary: applying them before merging
+    // turns unknown capabilities into false/true and blocks remote metadata.
+    models: Array.from(merged.values(), (model) => ({
+      ...candidateToModelConfig(model),
+      source: model.source,
+      freshness: model.freshness,
+      mergedSources: model.mergedSources,
+      provider: model.provider,
+      knownFields: Object.entries(model)
+        .filter(
+          ([key, value]) =>
+            value !== undefined && !["source", "freshness", "mergedSources"].includes(key)
+        )
+        .map(([key]) => key),
+    })),
     remoteLastFetchedAt: input.remoteLastFetchedAt,
   }
 }
@@ -378,6 +398,7 @@ export async function discoverLocalProviderModels(
 export async function discoverOpenAICompatibleModels(input: {
   baseURL: string
   apiKey?: string
+  signal?: AbortSignal
 }): Promise<ProviderModelCandidate[]> {
   const trimmedBaseURL = input.baseURL.trim().replace(/\/+$/, "")
   const modelsURL = buildOpenAICompatibleModelsURL(trimmedBaseURL)
@@ -392,31 +413,79 @@ export async function discoverOpenAICompatibleModels(input: {
   const response = await proxyFetch(modelsURL, {
     method: "GET",
     headers,
+    ...(input.signal ? { signal: input.signal } : {}),
   })
 
   if (!response.ok) {
     throw new Error(`Failed to fetch models: ${response.statusText}`)
   }
 
-  const payload = (await response.json()) as {
-    data?: Array<{
-      id: string
-      owned_by?: string
-      context_length?: number
-    }>
-  }
+  return parseProviderModelsWire(await response.json())
+}
 
-  return (payload.data || []).map((model) => ({
-    id: model.id,
-    name: model.id,
-    provider: model.owned_by,
-    contextLength: model.context_length,
-    supportsTools: true,
-    supportsVision: false,
-    supportsAudio: false,
-    supportsVideo: false,
-    supportsStreaming: true,
-  }))
+function wireRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+/** Read shared OpenAI/Anthropic model metadata without inventing capabilities. */
+export function parseProviderModelWire(value: unknown): ProviderModelCandidate {
+  if (!wireRecord(value) || typeof value.id !== "string" || !value.id.trim()) {
+    throw new Error("Provider returned an invalid model identifier")
+  }
+  const model: ProviderModelCandidate = { id: value.id }
+  const text = (key: string): string | undefined => {
+    const field = value[key]
+    if (field === undefined || field === null) return undefined
+    if (typeof field !== "string") throw new Error(`Provider returned invalid model ${key}`)
+    return field || undefined
+  }
+  const number = (key: string): number | undefined => {
+    const field = value[key]
+    if (field === undefined || field === null) return undefined
+    if (typeof field !== "number" || !Number.isSafeInteger(field) || field < 0) {
+      throw new Error(`Provider returned invalid model ${key}`)
+    }
+    return field
+  }
+  model.name = text("display_name") ?? text("name")
+  model.provider = text("owned_by")
+  model.maxInputTokens =
+    number("max_input_tokens") ?? number("input_token_limit") ?? number("inputTokenLimit")
+  model.contextLength = number("context_length") ?? model.maxInputTokens
+  model.maxOutputTokens =
+    number("max_output_tokens") ??
+    number("output_token_limit") ??
+    number("outputTokenLimit") ??
+    number("max_tokens")
+  const capabilityFields = {
+    supportsTools: ["supports_tools", "tool_use"],
+    supportsVision: ["supports_vision", "image_input", "supports_image_in"],
+    supportsAudio: ["supports_audio", "audio_input"],
+    supportsVideo: ["supports_video", "video_input", "supports_video_in"],
+    supportsStreaming: ["supports_streaming", "streaming"],
+    supportsReasoning: ["supports_reasoning", "thinking"],
+    supportsImageGeneration: ["supports_image_generation", "image_generation"],
+    supportsEmbedding: ["supports_embedding", "embedding"],
+    supportsStructuredOutput: ["supports_structured_output", "structured_outputs"],
+  } as const
+  for (const [key, [field, capability, alias]] of Object.entries(capabilityFields)) {
+    const nested = wireRecord(value.capabilities) ? value.capabilities[capability] : undefined
+    const flag =
+      value[field] ??
+      (alias ? value[alias] : undefined) ??
+      (wireRecord(nested) ? nested.supported : undefined)
+    if (flag === undefined || flag === null) continue
+    if (typeof flag !== "boolean") throw new Error(`Provider returned invalid model ${field}`)
+    model[key as keyof typeof capabilityFields] = flag
+  }
+  return model
+}
+
+export function parseProviderModelsWire(value: unknown): ProviderModelCandidate[] {
+  if (!wireRecord(value) || !Array.isArray(value.data)) {
+    throw new Error("Provider returned an invalid models list")
+  }
+  return value.data.map(parseProviderModelWire)
 }
 
 function buildOpenAICompatibleModelsURL(trimmedBaseURL: string): string {

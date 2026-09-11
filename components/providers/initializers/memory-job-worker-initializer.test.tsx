@@ -2,9 +2,13 @@
 import { render } from "@testing-library/react"
 
 const stop = jest.fn()
-const startMemoryJobWorker = jest.fn(() => stop)
+const startMemoryJobWorker = jest.fn(
+  (..._args: Parameters<typeof import("@/lib/memory/lifecycle/job-worker").startMemoryJobWorker>) =>
+    stop
+)
 jest.mock("@/lib/memory/lifecycle/job-worker", () => ({
-  startMemoryJobWorker: (...args: unknown[]) => startMemoryJobWorker(...(args as [])),
+  startMemoryJobWorker: (...args: Parameters<typeof startMemoryJobWorker>) =>
+    startMemoryJobWorker(...args),
 }))
 
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"

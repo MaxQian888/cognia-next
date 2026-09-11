@@ -1,0 +1,157 @@
+{
+  "id": "cognia-kimi-subscription",
+  "name": "Kimi Code Subscription Example",
+  "version": "0.2.0",
+  "description": "Installable subscription provider example for Kimi Code memberships, using Cognia's shared account panel.",
+  "type": "frontend",
+  "capabilities": ["subscription-provider"],
+  "permissions": [],
+  "main": "dist/index.js",
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "bundle_include": ["README.md", "README.zh-CN.md"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "dist/index.js"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Subscription accounts require Cognia's desktop credential vault."
+    }
+  },
+  "subscriptionProviders": [
+    {
+      "id": "kimi-code",
+      "name": "Kimi Code",
+      "description": "Kimi Code membership API. Additional models require eligible membership tiers.",
+      "protocol": "openai",
+      "baseUrl": "https://api.kimi.com/coding/v1",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi for Coding",
+          "contextLength": 1048576,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3-256k",
+          "name": "K3 256K",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3",
+          "name": "K3",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "kimi-for-coding-highspeed",
+          "name": "Kimi for Coding HighSpeed",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://www.kimi.com/code/console",
+      "usageUrl": "https://www.kimi.com/code/console",
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+      "apiFlavor": "chat",
+      "modelApi": {
+        "list": true,
+        "retrieve": false
+      }
+    },
+    {
+      "id": "kimi-code-anthropic",
+      "name": "Kimi Code (Anthropic)",
+      "description": "Kimi Code membership API. Additional models require eligible membership tiers.",
+      "protocol": "anthropic",
+      "baseUrl": "https://api.kimi.com/coding/",
+      "models": [
+        {
+          "id": "kimi-for-coding",
+          "name": "Kimi for Coding",
+          "contextLength": 1048576,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3-256k",
+          "name": "K3 256K",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "k3",
+          "name": "K3",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        },
+        {
+          "id": "kimi-for-coding-highspeed",
+          "name": "Kimi for Coding HighSpeed",
+          "contextLength": 262144,
+          "supportsTools": true,
+          "supportsVision": true,
+          "supportsVideo": false,
+          "supportsAudio": false,
+          "supportsReasoning": true,
+          "supportsStreaming": true
+        }
+      ],
+      "apiKeyUrl": "https://www.kimi.com/code/console",
+      "usageUrl": "https://www.kimi.com/code/console",
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+      "modelApi": {
+        "list": true,
+        "retrieve": false
+      }
+    }
+  ]
+}

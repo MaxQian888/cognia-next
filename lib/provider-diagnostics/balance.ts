@@ -322,7 +322,7 @@ export function projectLegacyProviderBalanceRows(input: {
     })
   }
   for (const row of input.limits) {
-    if (row.provider !== input.providerId || !row.accountId) continue
+    if ((row.sourceId ?? row.provider) !== input.providerId || !row.accountId) continue
     const sourceId = `${input.providerId}:account:${row.accountId}:legacy-limits`
     sources.set(sourceId, {
       id: sourceId,

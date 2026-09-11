@@ -5,9 +5,19 @@ import { act, render, waitFor } from "@testing-library/react"
 const startBotDeliveryRunner = jest.fn()
 const getLocalAccountId = jest.fn(async () => "tauri:acct_1")
 const markBotRunnerOwned = jest.fn(() => jest.fn())
-const recoverStaleBotDeliveries = jest.fn(async () => 0)
-const hasCapability = jest.fn(() => true)
-const acquireExclusiveWebLock = jest.fn(async () => true)
+const recoverStaleBotDeliveries = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/db/bot-event-deliveries").recoverStaleBotDeliveries>
+  ) => 0
+)
+const hasCapability = jest.fn(
+  (..._args: Parameters<typeof import("@/lib/platform/capabilities").hasCapability>) => true
+)
+const acquireExclusiveWebLock = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/runtime/exclusive-web-lock").acquireExclusiveWebLock>
+  ) => true
+)
 
 let remoteActive = false
 let remoteListener: ((remote: unknown) => void) | undefined
@@ -20,13 +30,15 @@ jest.mock("@/lib/bot/runtime/runner-owner", () => ({
   markBotRunnerOwned: () => markBotRunnerOwned(),
 }))
 jest.mock("@/lib/db/bot-event-deliveries", () => ({
-  recoverStaleBotDeliveries: (...args: unknown[]) => recoverStaleBotDeliveries(...args),
+  recoverStaleBotDeliveries: (...args: Parameters<typeof recoverStaleBotDeliveries>) =>
+    recoverStaleBotDeliveries(...args),
 }))
 jest.mock("@/lib/platform/capabilities", () => ({
-  hasCapability: (...args: unknown[]) => hasCapability(...args),
+  hasCapability: (...args: Parameters<typeof hasCapability>) => hasCapability(...args),
 }))
 jest.mock("@/lib/runtime/exclusive-web-lock", () => ({
-  acquireExclusiveWebLock: (...args: unknown[]) => acquireExclusiveWebLock(...args),
+  acquireExclusiveWebLock: (...args: Parameters<typeof acquireExclusiveWebLock>) =>
+    acquireExclusiveWebLock(...args),
 }))
 jest.mock("@/lib/tauri/transport-routing", () => ({
   isRemoteHostActive: () => remoteActive,

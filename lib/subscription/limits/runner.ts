@@ -14,6 +14,7 @@ import { accessTokenOf, resolvePresetForAccount } from "@/lib/subscription/balan
 import {
   authedRequest,
   getAccount as defaultGetAccount,
+  getProviderPreset as defaultGetProviderPreset,
   listPresets as defaultListPresets,
 } from "@/lib/subscription/core/transport"
 
@@ -33,6 +34,7 @@ export interface LimitsRunnerDeps {
   authedGet: (url: string, headers?: Record<string, string>) => Promise<string>
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
+  getProviderPreset: (provider: ProviderId) => Promise<ProviderPreset | null>
   now: () => number
   /**
    * Refresh + persist an Anthropic account's OAuth token, returning the new
@@ -65,6 +67,7 @@ const DEFAULT_DEPS: LimitsRunnerDeps = {
   },
   getAccount: defaultGetAccount,
   listPresets: defaultListPresets,
+  getProviderPreset: defaultGetProviderPreset,
   now: () => Date.now(),
   refreshAnthropicToken: async (accountId) => {
     const merged = await refreshAndPersistAnthropicAccount(accountId, { reactivate: false })
@@ -97,6 +100,7 @@ export async function queryAccountLimits(
     authedGet,
     getAccount,
     listPresets,
+    getProviderPreset,
     now,
     refreshAnthropicToken,
     isCredentialFresh,
@@ -161,7 +165,7 @@ export async function queryAccountLimits(
   }
 
   const presets = await listPresets(provider)
-  const preset = resolvePresetForAccount(account, presets)
+  const preset = await resolvePresetForAccount(account, presets, () => getProviderPreset(provider))
 
   const ctx: LimitsSourceContext = {
     provider,
@@ -200,7 +204,15 @@ export async function queryAccountLimits(
       snapshot = null
     }
     if (snapshot && (snapshot.meters.length > 0 || snapshot.error)) {
-      return snapshot
+      // Persistence and account-level consumers key by the vault identity.
+      // Preserve the source separately so relay branding/provenance survives.
+      return {
+        ...snapshot,
+        sourceId: snapshot.sourceId ?? snapshot.provider,
+        provider,
+        accountId,
+        accountLabel: account.label,
+      }
     }
   }
   return null

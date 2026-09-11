@@ -60,6 +60,7 @@ import type {
   TokenResponse,
 } from "@/lib/subscription/core/transport"
 import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
+import { NewAccountPresetSelector } from "../account-preset-selector"
 import {
   reauthenticateManagedCodexAccount,
   replaceAccountCredential,
@@ -99,6 +100,7 @@ export function CodexAddAccountDialog({
 }: CodexAddAccountDialogProps) {
   const t = useTranslations("subscription.codex")
   const tAccountList = useTranslations("subscription.common.accountList")
+  const [presetId, setPresetId] = useState<string | null>(null)
 
   const { discovered, loading: discoveryLoading, reload: reloadDiscovery } = useCodexDiscovery()
 
@@ -112,7 +114,10 @@ export function CodexAddAccountDialog({
   const [prevComputedDefault, setPrevComputedDefault] = useState(computedDefault)
   if (open !== prevOpen) {
     setPrevOpen(open)
-    if (open) setMode(computedDefault)
+    if (open) {
+      setMode(computedDefault)
+      setPresetId(null)
+    }
     setPrevComputedDefault(computedDefault)
   } else if (open && computedDefault !== prevComputedDefault) {
     setPrevComputedDefault(computedDefault)
@@ -134,6 +139,7 @@ export function CodexAddAccountDialog({
     }
     const account: Account = {
       id: uuidv7(now),
+      ...(presetId ? { presetId } : {}),
       credential: tagged,
       createdAtMs: now,
       lastUsedAtMs: now,
@@ -180,6 +186,10 @@ export function CodexAddAccountDialog({
             description={t("login.modes.oauth.description")}
           />
         </RadioGroup>
+
+        {!existingAccount && (
+          <NewAccountPresetSelector provider="codex" value={presetId} onChange={setPresetId} />
+        )}
 
         <Separator />
 

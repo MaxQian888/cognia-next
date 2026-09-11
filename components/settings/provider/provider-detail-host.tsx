@@ -221,8 +221,8 @@ export function ProviderDetailHost({
                 testOutcome
               )
               return deriveStatus(
-                selectedCustom?.apiKey,
-                selectedCustom?.baseURL,
+                (s.readinessCustomProviders?.[selectedId] ?? selectedCustom)?.apiKey,
+                (s.readinessCustomProviders?.[selectedId] ?? selectedCustom)?.baseURL,
                 effectiveTest.ok,
                 effectiveTest.outcome
               )
@@ -235,14 +235,16 @@ export function ProviderDetailHost({
                 test?.outcome
               )
               return deriveStatus(
-                selectedSettings?.apiKey,
-                selectedSettings?.baseURL,
+                (s.readinessProviderSettings?.[selectedId] ?? selectedSettings)?.apiKey,
+                (s.readinessProviderSettings?.[selectedId] ?? selectedSettings)?.baseURL,
                 effectiveTest.ok,
                 effectiveTest.outcome,
                 selectedId === "bedrock" && !!selectedSettings?.bedrock
                   ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
                   : false,
-                selectedSettings?.verificationStatus ?? null
+                selectedReadiness?.verificationStatus ??
+                  selectedSettings?.verificationStatus ??
+                  null
               )
             })()
       }
@@ -280,6 +282,10 @@ export function ProviderDetailHost({
             )}
             <CustomProviderInlineConfig
               cp={selectedCustom}
+              canTestConnection={selectedReadiness?.eligibility.testConnection.allowed}
+              hasSubscriptionCredential={
+                !!s.readinessCustomProviders?.[selectedId]?.apiKey?.startsWith("subscription:")
+              }
               onApiKeyChange={(key) => void s.updateCustomProvider(selectedId, { apiKey: key })}
               onBaseURLChange={(url) => void s.updateCustomProvider(selectedId, { baseURL: url })}
               onDefaultModelChange={(model) =>
@@ -304,6 +310,10 @@ export function ProviderDetailHost({
             )}
             <ProviderConfigTab
               providerId={selectedId}
+              hasSubscriptionCredential={
+                !!s.readinessProviderSettings?.[selectedId]?.apiKey?.startsWith("subscription:")
+              }
+              canTestConnection={selectedReadiness?.eligibility.testConnection.allowed}
               authSlot={
                 <>
                   {/* Both self-gate on the catalog (`supportsOAuth`, and whether

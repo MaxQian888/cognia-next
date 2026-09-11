@@ -285,6 +285,7 @@ export const BUILT_IN_PROVIDER_IDS = [
   // NEW: OpenCode managed subscription plans (ADR-0025)
   "opencode",
   "opencode-go",
+  "commandcode",
   // NEW: Codex (OpenAI) subscription / API-key chat provider (ADR-0025)
   "codex",
   // NEW: cc-switch Anthropic-wire relay presets (subscription provider
@@ -1031,6 +1032,52 @@ const CATALOG_ENTRIES: Record<BuiltInProviderId, BuiltInProviderCatalogEntry> = 
       exchange: { response: { apiKey: "body.key" } },
       scope: "openid profile",
     },
+  },
+  // CommandCode serves Claude via Messages and other models via Chat Completions.
+  commandcode: {
+    id: "commandcode",
+    name: "CommandCode",
+    type: "cloud",
+    protocol: "openai",
+    family: "openai-compatible",
+    adapter: "openai-compatible",
+    apiKeyRequired: true,
+    baseURLRequired: false,
+    defaultModel: "deepseek/deepseek-v4-flash",
+    defaultEnabled: false,
+    defaultBaseURL: "https://api.commandcode.ai/provider/v1",
+    category: "aggregator",
+    description: "CommandCode subscription API (GOAT, Pro, Max, Team and Provider; Go excluded)",
+    website: "https://commandcode.ai",
+    dashboardUrl: "https://commandcode.ai/settings/keys",
+    docsUrl: "https://commandcode.ai/docs/provider",
+    quickAdd: { mode: "shortcut", category: "global" },
+    models: [
+      {
+        id: "deepseek/deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        contextLength: 1000000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        recommendedFor: ["coding"],
+      },
+      {
+        id: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        contextLength: 1000000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsAudio: false,
+        supportsVideo: false,
+        supportsStreaming: true,
+        supportsReasoning: true,
+        recommendedFor: ["coding"],
+      },
+    ],
   },
   // OpenCode managed plans (ADR-0025). Both speak the OpenAI protocol off the
   // same gateway; Go's models live under the /go segment (verified live

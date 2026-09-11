@@ -64,8 +64,10 @@ export interface LimitsMeter {
 
 /** Normalized limits/usage reading for one subscription account at one instant. */
 export interface ProviderLimits {
-  /** `ProviderId` for built-in sources; the balance providerKey for credit meters. */
+  /** Vault provider for account queries; source identity for ad-hoc/custom readings. */
   provider: string
+  /** Original catalog/adapter/plugin identity, separate from the vault provider. */
+  sourceId?: string
   /** Vault account id this snapshot describes (absent for ad-hoc readings). */
   accountId?: string
   /** Account label for display headers, when known. */
@@ -74,6 +76,8 @@ export interface ProviderLimits {
   meters: LimitsMeter[]
   /** Set when the query failed; kept so the UI can surface the error inline. */
   error?: string
+  /** Informational availability message; may accompany native meters. */
+  notice?: string
 }
 
 /** Persisted form — Dexie auto-increment primary key. */

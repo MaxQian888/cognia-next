@@ -254,3 +254,54 @@ describe("provider completeness contract", () => {
     })
   })
 })
+
+it("reads registered subscription defaults and requirements from the dynamic catalog", async () => {
+  const { registerProviderDefinition, unregisterProvider } = await import("./provider-loader")
+  registerProviderDefinition(
+    {
+      id: "example:api",
+      name: "Example",
+      type: "cloud",
+      protocol: "anthropic",
+      defaultBaseURL: "https://example.test/v1",
+      apiKeyRequired: true,
+      baseURLRequired: false,
+      defaultModel: "model-a",
+      defaultEnabled: false,
+      category: "specialized",
+      models: [],
+    },
+    "plugin"
+  )
+  try {
+    expect(getProviderRequirements("example:api")).toMatchObject({ requiresCredential: true })
+    expect(
+      evaluateBuiltInProviderCompleteness("example:api", {
+        providerId: "example:api",
+        enabled: true,
+        apiKey: "subscription:test",
+      }).eligibility.runtime.allowed
+    ).toBe(true)
+  } finally {
+    unregisterProvider("example:api")
+  }
+})
+
+it("invalidates verification on protocol/header changes but ignores header insertion order", () => {
+  const cfg = {
+    apiKey: "key",
+    baseURL: "https://example.test/v1",
+    apiProtocol: "openai",
+    customHeaders: { "X-A": "1", "X-B": "2" },
+  }
+  const fingerprint = buildProviderVerificationFingerprint(cfg)
+  expect(
+    buildProviderVerificationFingerprint({ ...cfg, customHeaders: { "X-B": "2", "X-A": "1" } })
+  ).toBe(fingerprint)
+  expect(buildProviderVerificationFingerprint({ ...cfg, apiProtocol: "anthropic" })).not.toBe(
+    fingerprint
+  )
+  expect(
+    buildProviderVerificationFingerprint({ ...cfg, customHeaders: { "X-A": "other" } })
+  ).not.toBe(fingerprint)
+})

@@ -222,6 +222,8 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
     const startHostBindings = async () => {
       const generation = ++hostGeneration
+      const syncAbort = new AbortController()
+      hostCleanup.push(() => syncAbort.abort())
       const isStale = () => cancelled || generation !== hostGeneration
       const addHostCleanup = (fn: () => void | Promise<void>) => {
         if (isStale()) dispose(fn)
@@ -376,7 +378,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
 
       addHostCleanup(
         remoteEventResyncCoordinator.register("*", async () => {
-          await runSyncDown()
+          await runSyncDown({ signal: syncAbort.signal })
         })
       )
       // The host is linked: that is the outcome the splash waits for. The
@@ -390,10 +392,12 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
         // per-conversation state. Everything else keeps draining behind
         // `whenComplete`, each stage after an idle wait, so a deep message
         // history or a large memory store no longer holds the first screen.
-        await runStagedSyncDown().critical
-        if (!isStale()) updateRuntimeSnapshot({ connectionState: "online" })
+        await runStagedSyncDown({ signal: syncAbort.signal }).critical
+        if (isStale()) return
+        updateRuntimeSnapshot({ connectionState: "online" })
         endMobileBootStage("sync", { detail: "synced" })
       } catch (error) {
+        if (isStale()) return
         endMobileBootStage("sync", { status: "failed", detail: "syncFailed" })
         log.warn("companion: initial sync-down failed", {
           error: error instanceof Error ? error.message : String(error),

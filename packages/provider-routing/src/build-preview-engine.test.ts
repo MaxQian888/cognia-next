@@ -15,6 +15,52 @@ import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-br
 import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
 import type { ModelMapping } from "@cognia/provider-types/model-mapping"
 import type { UserProviderSettings } from "@cognia/provider-types/provider"
+import {
+  getProviderDefinition,
+  registerProviderDefinition,
+  unregisterProvider,
+} from "@cognia/provider-core/providers/provider-loader"
+
+const dynamicProviderId = "routing-example:subscription"
+function registerSubscriptionModel() {
+  registerProviderDefinition(
+    {
+      id: dynamicProviderId,
+      name: "Subscription",
+      type: "cloud",
+      protocol: "anthropic",
+      apiKeyRequired: true,
+      baseURLRequired: false,
+      defaultModel: "account-model",
+      defaultEnabled: false,
+      category: "specialized",
+      models: [
+        {
+          id: "account-model",
+          name: "Account",
+          contextLength: 1000000,
+          maxInputTokens: 950000,
+          maxOutputTokens: 1000,
+          supportsTools: true,
+          supportsVision: true,
+          supportsAudio: false,
+          supportsVideo: false,
+          supportsStreaming: true,
+          knownFields: [
+            "id",
+            "contextLength",
+            "maxInputTokens",
+            "maxOutputTokens",
+            "supportsTools",
+            "supportsVision",
+            "supportsStreaming",
+          ],
+        },
+      ],
+    },
+    "plugin"
+  )
+}
 
 const mapping = (alias: string, providers: ModelMapping["providers"]): ModelMapping => ({
   id: `m-${alias}`,
@@ -105,6 +151,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetProviderRoutingRuntimeAdaptersForTesting()
+  unregisterProvider(dynamicProviderId)
 })
 
 describe("buildRoutingEngine", () => {
@@ -204,6 +251,171 @@ describe("buildRoutingEngine", () => {
 })
 
 describe("buildRoutingEngineDeps", () => {
+  it("uses dynamic subscription context, input and output limits", () => {
+    registerSubscriptionModel()
+    const deps = buildRoutingEngineDeps({
+      providerSettings: { [dynamicProviderId]: ps(dynamicProviderId) },
+    })
+    expect(deps.getContextWindow?.(dynamicProviderId, "account-model")).toBe(950000)
+    expect(deps.getCapabilities?.(dynamicProviderId, "account-model")).toMatchObject({
+      tools: true,
+      vision: true,
+      contextTokens: 1000000,
+    })
+  })
+
+  it("merges smaller account limits and explicit false with remaining declared capabilities", () => {
+    registerSubscriptionModel()
+    const deps = buildRoutingEngineDeps({
+      providerSettings: {
+        [dynamicProviderId]: {
+          ...ps(dynamicProviderId),
+          discoveredModels: [
+            {
+              id: "account-model",
+              contextLength: 128000,
+              maxInputTokens: 120000,
+              maxOutputTokens: 512,
+              supportsTools: false,
+            },
+          ],
+        },
+      },
+    })
+    expect(deps.getContextWindow?.(dynamicProviderId, "account-model")).toBe(120000)
+    expect(deps.getCapabilities?.(dynamicProviderId, "account-model")).toMatchObject({
+      tools: false,
+      vision: true,
+      streaming: true,
+      contextTokens: 128000,
+    })
+    const outputLimited = buildRoutingEngineDeps({
+      providerSettings: {
+        [dynamicProviderId]: {
+          ...ps(dynamicProviderId),
+          discoveredModels: [
+            {
+              id: "account-model",
+              contextLength: 128000,
+              maxInputTokens: 128000,
+              maxOutputTokens: 512,
+            },
+          ],
+        },
+      },
+    })
+    expect(outputLimited.getContextWindow?.(dynamicProviderId, "account-model")).toBe(127488)
+  })
+
+  it("ignores synthesized discovery flags and unknown zero context", () => {
+    registerSubscriptionModel()
+    const deps = buildRoutingEngineDeps({
+      providerSettings: {
+        [dynamicProviderId]: {
+          ...ps(dynamicProviderId),
+          discoveredModels: [
+            {
+              id: "account-model",
+              contextLength: 0,
+              supportsVision: false,
+              supportsStreaming: false,
+              knownFields: ["id"],
+            },
+          ],
+        },
+      },
+    })
+    expect(deps.getCapabilities?.(dynamicProviderId, "account-model")).toMatchObject({
+      vision: true,
+      streaming: true,
+      contextTokens: 1000000,
+    })
+    expect(deps.getCapabilities?.(dynamicProviderId, "account-model")?.audio).toBeUndefined()
+    expect(deps.getContextWindow?.(dynamicProviderId, "account-model")).toBe(950000)
+  })
+
+  it("keeps legacy ID-only subscription models routable without claiming rich capabilities", () => {
+    registerSubscriptionModel()
+    const definition = getProviderDefinition(dynamicProviderId)!
+    registerProviderDefinition(
+      {
+        ...definition,
+        models: definition.models.map((model) => ({ ...model, knownFields: ["id"] })),
+      },
+      "plugin"
+    )
+    const settings = { providerSettings: { [dynamicProviderId]: ps(dynamicProviderId) } }
+    const compatible = buildRoutingEngineDeps(settings).getCapabilities?.(
+      dynamicProviderId,
+      "account-model"
+    )
+    expect(compatible?.streaming).toBe(true)
+    expect(compatible?.tools).toBeUndefined()
+    expect(compatible?.vision).toBeUndefined()
+    expect(compatible?.contextTokens).toBeUndefined()
+    const explicit = buildRoutingEngineDeps({
+      providerSettings: {
+        [dynamicProviderId]: {
+          ...ps(dynamicProviderId),
+          discoveredModels: [
+            {
+              id: "account-model",
+              supportsStreaming: false,
+              knownFields: ["id", "supportsStreaming"],
+            },
+          ],
+        },
+      },
+    })
+    expect(explicit.getCapabilities?.(dynamicProviderId, "account-model")?.streaming).toBe(false)
+  })
+
+  it("keeps manual custom overrides while subscription metadata follows account discovery", () => {
+    const base = {
+      providerSettings: {
+        custom: {
+          ...ps("custom"),
+          discoveredModels: [{ id: "m", contextLength: 64000, supportsVision: false }],
+        },
+      },
+      customProviders: [
+        {
+          id: "custom",
+          defaultModel: "m",
+          customModelMetadata: {
+            m: { contextLength: 128000, maxOutputTokens: 1000, supportsVision: true },
+          },
+        },
+      ],
+    }
+    const manual = buildRoutingEngineDeps(base)
+    expect(manual.getContextWindow?.("custom", "m")).toBe(127000)
+    expect(manual.getCapabilities?.("custom", "m")?.vision).toBe(true)
+    const subscription = buildRoutingEngineDeps({
+      ...base,
+      customProviders: [{ ...base.customProviders[0], subscription: {} }],
+    })
+    expect(subscription.getContextWindow?.("custom", "m")).toBe(63000)
+    expect(subscription.getCapabilities?.("custom", "m")?.vision).toBe(false)
+  })
+
+  it("refreshes the memoized catalog when a plugin is registered or removed", () => {
+    const settings = { providerSettings: { [dynamicProviderId]: ps(dynamicProviderId) } }
+    const absent = getRoutingCatalogSnapshot(settings)
+    registerSubscriptionModel()
+    const active = getRoutingCatalogSnapshot(settings)
+    expect(active).not.toBe(absent)
+    expect(active.candidates).toContainEqual({
+      providerId: dynamicProviderId,
+      modelId: "account-model",
+    })
+    unregisterProvider(dynamicProviderId)
+    expect(getRoutingCatalogSnapshot(settings).candidates).not.toContainEqual({
+      providerId: dynamicProviderId,
+      modelId: "account-model",
+    })
+  })
+
   it("marks uncatalogued custom provider models as streaming-capable", () => {
     const deps = buildRoutingEngineDeps({
       customProviders: [

@@ -45,6 +45,8 @@ export function CustomProviderInlineConfig({
   testResult,
   testMessage,
   isTesting = false,
+  canTestConnection,
+  hasSubscriptionCredential = false,
 }: {
   cp: CustomProviderSettings
   onApiKeyChange: (key: string) => void
@@ -56,6 +58,8 @@ export function CustomProviderInlineConfig({
   /** Human-readable detail of the last test (error text / model count). */
   testMessage?: string | null
   isTesting?: boolean
+  canTestConnection?: boolean
+  hasSubscriptionCredential?: boolean
 }) {
   const t = useTranslations("providers")
   const [showKey, setShowKey] = useState(false)
@@ -120,7 +124,7 @@ export function CustomProviderInlineConfig({
               size="sm"
               className="h-8 gap-1.5 text-xs"
               onClick={onTestConnection}
-              disabled={isTesting}
+              disabled={isTesting || canTestConnection === false}
               data-testid="custom-provider-test"
             >
               {isTesting ? (
@@ -148,7 +152,11 @@ export function CustomProviderInlineConfig({
           stacked
           htmlFor={`custom-${cp.id}-api-key`}
           label={t("configTab.apiKeyLabel")}
-          description={t("configTab.apiKeyDescription")}
+          description={t(
+            hasSubscriptionCredential
+              ? "configTab.subscriptionCredentialDescription"
+              : "configTab.apiKeyDescription"
+          )}
         >
           <div className="relative">
             <Input

@@ -1,5 +1,5 @@
 import {
-  PROVIDERS,
+  getAllProviders,
   isLocalProviderName,
   type CustomProviderSettings,
   type ProviderName,
@@ -15,7 +15,8 @@ import { resolveBuiltInProviderAdapter } from "./provider-adapters"
 function resolveEffectiveBaseURL(providerId: string, settings?: SettingsLike): string | undefined {
   return hasText(settings?.baseURL)
     ? settings?.baseURL?.trim()
-    : getBuiltInProviderSettingsBaseURL(providerId)
+    : (getBuiltInProviderSettingsBaseURL(providerId) ??
+        getAllProviders()[providerId]?.defaultBaseURL)
 }
 
 export type ProviderReadinessState = "unconfigured" | "configured" | "verified"
@@ -94,6 +95,8 @@ export interface CustomProviderCompleteness {
 }
 
 interface SettingsLike {
+  apiProtocol?: string
+  customHeaders?: Record<string, string>
   apiKey?: string
   apiKeys?: string[]
   currentKeyIndex?: number
@@ -223,6 +226,10 @@ export function buildProviderVerificationFingerprint(settings?: SettingsLike): s
     currentKeyIndex: settings?.currentKeyIndex ?? 0,
     baseURL: settings?.baseURL?.trim() || "",
     defaultModel: settings?.defaultModel?.trim() || "",
+    apiProtocol: settings?.apiProtocol ?? "",
+    customHeaders: Object.entries(settings?.customHeaders ?? {}).sort(([a], [b]) =>
+      a.localeCompare(b)
+    ),
   })
 }
 
@@ -284,7 +291,7 @@ export function getProviderRequirements(providerId: string): ProviderRequirement
     }
   }
 
-  const provider = PROVIDERS[providerId]
+  const provider = getAllProviders()[providerId]
   const inferredLocal = isLocalProviderName(providerId as ProviderName)
   if (!provider) {
     return {
@@ -448,7 +455,7 @@ export function evaluateBuiltInProviderCompleteness(
       : "configured"
 
   const defaultModelConfigured =
-    hasText(settings?.defaultModel) || hasText(PROVIDERS[providerId]?.defaultModel)
+    hasText(settings?.defaultModel) || hasText(getAllProviders()[providerId]?.defaultModel)
   const setupChecklist = createSetupChecklist({
     hasCredential: configState.hasCredential,
     hasBaseUrl: configState.hasBaseUrl,

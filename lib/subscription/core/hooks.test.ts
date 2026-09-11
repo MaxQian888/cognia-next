@@ -11,12 +11,21 @@ import type { AccountSummary, ProviderPreset } from "@/types/subscription"
 // ---------------------------------------------------------------------------
 
 const isTauriMock = jest.fn(() => true)
+const localAccount = { unlockedAccountId: "local-a" as string | null }
+const settingsState = { settings: { customProviders: [] } }
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(settingsState),
+}))
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (state: unknown) => unknown) => selector(localAccount),
+}))
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
 }))
 
 const transport = {
   listAccounts: jest.fn<Promise<AccountSummary[]>, [unknown]>(),
+  listSubscriptionProviderIds: jest.fn<Promise<string[]>, []>(),
   getActiveAccount: jest.fn<Promise<{ activeAccountId?: string; env: [] }>, [unknown]>(),
   setActiveAccount: jest.fn<Promise<void>, [unknown, string | null]>(),
   renameAccount: jest.fn<Promise<void>, [unknown, string, string | null]>(),
@@ -34,6 +43,7 @@ jest.mock("./transport", () => ({
   getAccount: jest.fn(),
   getActiveAccount: (...args: [unknown]) => transport.getActiveAccount(...args),
   listAccounts: (...args: [unknown]) => transport.listAccounts(...args),
+  listSubscriptionProviderIds: () => transport.listSubscriptionProviderIds(),
   renameAccount: (...args: [unknown, string, string | null]) => transport.renameAccount(...args),
   setActiveAccount: (...args: [unknown, string | null]) => transport.setActiveAccount(...args),
   setProviderPreset: jest.fn(),
@@ -49,7 +59,7 @@ jest.mock("./account-lifecycle", () => ({
     transport.deleteAccount(provider, accountId as string, replacementAccountId as string | null),
 }))
 
-import { useAccounts, useProviderPresets } from "./hooks"
+import { useAccounts, useProviderPresets, useSubscriptionAccounts } from "./hooks"
 import { notifySubscriptionChanged } from "./subscription-events"
 
 const PRESET_A: ProviderPreset = { id: "a", label: "Bedrock", baseUrl: "https://a.example" }
@@ -58,6 +68,14 @@ const PRESET_B: ProviderPreset = { id: "b", label: "Azure", baseUrl: "https://b.
 beforeEach(() => {
   jest.clearAllMocks()
   isTauriMock.mockReturnValue(true)
+  localAccount.unlockedAccountId = "local-a"
+  transport.listSubscriptionProviderIds.mockResolvedValue([
+    "anthropic",
+    "codex",
+    "opencode",
+    "commandcode",
+    "disabled:provider",
+  ])
   transport.listPresets.mockResolvedValue([PRESET_A, PRESET_B])
   transport.getProviderPreset.mockResolvedValue(PRESET_A)
   transport.saveProviderPreset.mockResolvedValue(undefined)
@@ -234,4 +252,85 @@ describe("useProviderPresets", () => {
     expect(result.current.presets).toEqual([])
     expect(result.current.defaultPresetId).toBeNull()
   })
+})
+
+describe("useSubscriptionAccounts", () => {
+  const account = {
+    id: "saved",
+    provider: "disabled:provider",
+    variant: "api-key",
+    createdAtMs: 1,
+    lastUsedAtMs: 1,
+  } as AccountSummary
+  it("keeps persisted accounts from disabled plugins discoverable without allowing setup", async () => {
+    transport.listAccounts.mockImplementation(async (id) =>
+      id === "disabled:provider" ? [account] : []
+    )
+    const { result } = renderHook(() => useSubscriptionAccounts())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.providers.find((p) => p.id === "disabled:provider")).toMatchObject({
+      available: false,
+      source: "unavailable",
+    })
+    expect(result.current.byProvider["disabled:provider"].accounts).toEqual([account])
+    await act(async () => result.current.byProvider["disabled:provider"].remove("saved"))
+    expect(transport.deleteAccount).toHaveBeenCalledWith("disabled:provider", "saved", null)
+  })
+  it("immediately hides the previous local account while the next inventory is loading", async () => {
+    transport.listAccounts.mockResolvedValue([account])
+    const { result, rerender } = renderHook(() => useSubscriptionAccounts())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const staleAction = result.current.byProvider.anthropic.rename
+    let finish!: (ids: string[]) => void
+    transport.listSubscriptionProviderIds.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    localAccount.unlockedAccountId = "local-b"
+    rerender()
+    expect(result.current.byProvider.anthropic.accounts).toEqual([])
+    expect(result.current.providers.some((p) => p.source === "unavailable")).toBe(false)
+    await expect(staleAction("saved", "wrong scope")).rejects.toThrow("Local account changed")
+    expect(transport.renameAccount).not.toHaveBeenCalled()
+    transport.listAccounts.mockResolvedValue([])
+    await act(async () => finish([]))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.byProvider.anthropic.accounts).toEqual([])
+  })
+  it("isolates provider failures and clears all account rows when locked", async () => {
+    transport.listAccounts.mockImplementation(async (id) => {
+      if (id === "codex") throw new Error("vault unavailable")
+      return [account]
+    })
+    const { result, rerender } = renderHook(() => useSubscriptionAccounts())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.byProvider.codex.error).toBe("vault unavailable")
+    expect(result.current.byProvider.anthropic.accounts).toEqual([account])
+    localAccount.unlockedAccountId = null
+    rerender()
+    expect(result.current.byProvider.anthropic.accounts).toEqual([])
+    await waitFor(() => expect(result.current.loading).toBe(false))
+  })
+  it("surfaces inventory errors and supports retry", async () => {
+    transport.listSubscriptionProviderIds.mockRejectedValueOnce(new Error("inventory unavailable"))
+    const { result } = renderHook(() => useSubscriptionAccounts())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.error).toBe("inventory unavailable")
+    await act(async () => result.current.reload())
+    expect(result.current.error).toBeNull()
+  })
+})
+
+it("refreshes subscription inventory once for a mutation event", async () => {
+  transport.renameAccount.mockImplementation(async () => {
+    notifySubscriptionChanged()
+  })
+  const { result } = renderHook(() => useSubscriptionAccounts())
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(transport.listSubscriptionProviderIds).toHaveBeenCalledTimes(1)
+  await act(async () => result.current.byProvider.anthropic.rename("id", "label"))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(transport.listSubscriptionProviderIds).toHaveBeenCalledTimes(2)
 })

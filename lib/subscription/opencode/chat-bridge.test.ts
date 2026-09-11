@@ -54,6 +54,19 @@ beforeEach(() => {
 })
 
 describe("resolveOpencodeVaultCredential", () => {
+  it("carries relay headers without forwarding internal preset settings", async () => {
+    getAccountMock.mockResolvedValue(fullAccount())
+    getProviderPresetMock.mockResolvedValue({
+      id: "relay",
+      baseUrl: "https://relay.example/v1",
+      extraHeaders: { "X-Tenant": "team", "x-cognia-private": "internal" },
+    })
+    expect(await resolveOpencodeVaultCredential("opencode")).toEqual({
+      apiKey: "sk-zen",
+      baseURL: "https://relay.example/v1",
+      headers: { "X-Tenant": "team" },
+    })
+  })
   it("returns null for non-opencode provider ids", async () => {
     expect(await resolveOpencodeVaultCredential("openai")).toBeNull()
     expect(listAccountsMock).not.toHaveBeenCalled()

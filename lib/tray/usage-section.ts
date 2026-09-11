@@ -106,7 +106,7 @@ function infoRow(id: string, label: string): TrayMenuItem {
 export function buildUsageSection(
   usage: TrayUsageSnapshot,
   now: number = Date.now(),
-  display?: Pick<TrayDisplayPrefs, "usageMetric" | "usagePeriod" | "usageScope">
+  display?: Partial<Pick<TrayDisplayPrefs, "usageMetric" | "usagePeriod" | "usageScope">>
 ): TrayMenuItem[] {
   const rows: TrayMenuItem[] = []
   const { accounts } = usage

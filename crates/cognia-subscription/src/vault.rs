@@ -2,7 +2,7 @@
 //
 // One keyring entry per provider:
 //   service = "com.cognia.subscription/v2"
-//   account = "anthropic" | "codex" | "opencode"
+//   account = "anthropic" | "codex" | "opencode" | "commandcode"
 //   payload = JSON blob shaped as `ProviderVault`
 //
 // `ProviderVault` holds N `Account`s, an optional `activeAccountId` pointer,
@@ -185,6 +185,29 @@ impl OpencodeZenData {
     }
 }
 
+/// CommandCode subscription API key, with no OAuth refresh or expiry.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCodeCredentialData {
+    pub access_token: String,
+    #[serde(default)]
+    pub stored_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+/// Generic API-key credentials retain the registry provider identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyCredentialData {
+    pub provider_id: ProviderId,
+    pub access_token: String,
+    #[serde(default)]
+    pub stored_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
 /// Discriminated union of every provider-specific credential shape. Tag is
 /// `"provider"` for ergonomic JSON: `{"provider":"anthropic","accessToken":...}`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -194,6 +217,8 @@ pub enum ProviderCredential {
     Codex(CodexCredentialData),
     OpencodeDiscovered(OpencodeDiscoveredData),
     OpencodeZen(OpencodeZenData),
+    Commandcode(CommandCodeCredentialData),
+    ApiKey(ApiKeyCredentialData),
 }
 
 impl ProviderCredential {
@@ -202,6 +227,8 @@ impl ProviderCredential {
         match self {
             ProviderCredential::Anthropic(_) => ProviderId::Anthropic,
             ProviderCredential::Codex(_) => ProviderId::Codex,
+            ProviderCredential::Commandcode(_) => ProviderId::Commandcode,
+            ProviderCredential::ApiKey(value) => value.provider_id.clone(),
             ProviderCredential::OpencodeDiscovered(_) | ProviderCredential::OpencodeZen(_) => {
                 ProviderId::Opencode
             }
@@ -383,6 +410,10 @@ impl AccountSummary {
                     "file",
                     true,
                 ),
+                ProviderCredential::ApiKey(_) => (None, None, 0, "api-key", "api_key", "managed", false),
+                ProviderCredential::Commandcode(_) => {
+                    (None, None, 0, "commandcode", "api_key", "managed", false)
+                }
                 ProviderCredential::OpencodeZen(z) => (
                     None,
                     Some(z.effective_plan().to_string()),
@@ -740,6 +771,61 @@ pub fn normalize_account_auth_metadata(account: &mut Account) {
         .get_or_insert(identity);
 }
 
+/// Host-side consumers can revoke copied credentials immediately after a
+/// committed vault write, including writes performed by background refreshers.
+type CommitObserver = std::sync::Arc<dyn Fn(&str, ProviderId) + Send + Sync>;
+static COMMIT_OBSERVER: std::sync::OnceLock<CommitObserver> = std::sync::OnceLock::new();
+
+pub fn install_commit_observer(observer: CommitObserver) {
+    let _ = COMMIT_OBSERVER.set(observer);
+}
+
+fn notify_committed(local_account_id: &str, provider: ProviderId) {
+    if let Some(observer) = COMMIT_OBSERVER.get() {
+        observer(local_account_id, provider);
+    }
+}
+
+/// Ignore presentation and usage bookkeeping while retaining every field
+/// that can change an account-selected credential or effective relay transport.
+fn runtime_projection_changed(previous: &ProviderVault, next: &ProviderVault) -> bool {
+    if previous.active_account_id != next.active_account_id
+        || previous.accounts.len() != next.accounts.len()
+        || previous.default_preset_id != next.default_preset_id
+        || previous.presets.len() != next.presets.len()
+        || next.presets.iter().any(|preset| {
+            previous
+                .presets
+                .iter()
+                .find(|old| old.id == preset.id)
+                .is_none_or(|old| {
+                    old.base_url != preset.base_url
+                        || old.extra_headers != preset.extra_headers
+                        || old.model_mapping != preset.model_mapping
+                })
+        })
+    {
+        return true;
+    }
+    next.accounts.iter().any(|account| {
+        let Some(old) = previous.find_account(&account.id) else {
+            return true;
+        };
+        let credential_unchanged = match (&old.credential, &account.credential) {
+            (ProviderCredential::OpencodeZen(old), ProviderCredential::OpencodeZen(next)) => {
+                old.access_token == next.access_token
+                    && old.base_url == next.base_url
+                    && old.plan == next.plan
+            }
+            (ProviderCredential::Commandcode(old), ProviderCredential::Commandcode(next)) => {
+                old.access_token == next.access_token && old.base_url == next.base_url
+            }
+            (old, next) => old == next,
+        };
+        !credential_unchanged || old.preset_id != account.preset_id
+    })
+}
+
 /// Persist a vault for the given provider. Overwrites the existing keyring
 /// entry. Validates structural invariants (schema version, orphan active
 /// pointer); provider-specific credential validation is the caller's job
@@ -747,6 +833,17 @@ pub fn normalize_account_auth_metadata(account: &mut Account) {
 #[allow(dead_code)]
 pub fn save(provider: ProviderId, vault: &ProviderVault) -> Result<(), String> {
     validate_vault(vault)?;
+    if ProviderId::parse(provider.as_str())? != provider {
+        return Err("noncanonical vault provider identity".into());
+    }
+    for account in &vault.accounts {
+        if account.credential.provider() != provider {
+            return Err("vault credential provider mismatch".into());
+        }
+        if let ProviderCredential::ApiKey(value) = &account.credential {
+            crate::api_key::validate(value)?;
+        }
+    }
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
     cognia_secrets::secret_store::set(SERVICE, provider.as_str(), &blob)
 }
@@ -758,9 +855,32 @@ pub fn save_for_account(
     vault: &ProviderVault,
 ) -> Result<(), String> {
     validate_vault(vault)?;
+    if ProviderId::parse(provider.as_str())? != provider {
+        return Err("noncanonical vault provider identity".into());
+    }
+    for account in &vault.accounts {
+        if account.credential.provider() != provider {
+            return Err("vault credential provider mismatch".into());
+        }
+        if let ProviderCredential::ApiKey(value) = &account.credential {
+            crate::api_key::validate(value)?;
+        }
+    }
     let blob = serde_json::to_string(vault).map_err(|e| format!("vault serialize failed: {e}"))?;
     let service = service_name_for_account(local_account_id)?;
-    cognia_secrets::secret_store::set(&service, provider.as_str(), &blob)
+    // Read directly to avoid legacy adoption recursively saving while comparing.
+    // An unreadable prior value is conservatively treated as a runtime change.
+    let changed = COMMIT_OBSERVER.get().is_some()
+        && cognia_secrets::secret_store::get(&service, provider.as_str())
+            .ok()
+            .flatten()
+            .and_then(|blob| parse_vault_blob(&blob).ok())
+            .is_none_or(|previous| runtime_projection_changed(&previous, vault));
+    cognia_secrets::secret_store::set(&service, provider.as_str(), &blob)?;
+    if changed {
+        notify_committed(local_account_id, provider);
+    }
+    Ok(())
 }
 
 /// Read the vault. Returns `Ok(None)` when no entry exists, surfaces parse
@@ -790,10 +910,10 @@ fn adopt_legacy_vault_for_account(
     local_account_id: &str,
     provider: ProviderId,
 ) -> Result<Option<ProviderVault>, String> {
-    let Some(vault) = load(provider)? else {
+    let Some(vault) = load(provider.clone())? else {
         return Ok(None);
     };
-    save_for_account(local_account_id, provider, &vault)?;
+    save_for_account(local_account_id, provider.clone(), &vault)?;
     clear(provider)?;
     Ok(Some(vault))
 }
@@ -809,7 +929,9 @@ pub fn clear(provider: ProviderId) -> Result<(), String> {
 #[allow(dead_code)]
 pub fn clear_for_account(local_account_id: &str, provider: ProviderId) -> Result<(), String> {
     let service = service_name_for_account(local_account_id)?;
-    cognia_secrets::secret_store::delete(&service, provider.as_str())
+    cognia_secrets::secret_store::delete(&service, provider.as_str())?;
+    notify_committed(local_account_id, provider);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -879,12 +1001,79 @@ mod tests {
     }
 
     #[test]
+    fn runtime_projection_ignores_metadata_but_detects_credential_selection_and_transport_changes()
+    {
+        let mut account = anthropic_account();
+        account.credential = ProviderCredential::OpencodeZen(OpencodeZenData {
+            access_token: "synthetic-key".into(),
+            base_url: None,
+            plan: None,
+            stored_at_ms: 1,
+        });
+        let mut previous = ProviderVault::empty();
+        previous.active_account_id = Some(account.id.clone());
+        previous.accounts.push(account);
+        previous.presets.push(ProviderPreset {
+            id: "relay".into(),
+            label: "Relay".into(),
+            base_url: "https://relay.test/v1".into(),
+            extra_headers: Default::default(),
+            template_id: None,
+            model_mapping: Default::default(),
+        });
+        previous.default_preset_id = Some("relay".into());
+        let mut next = previous.clone();
+        next.accounts[0].label = Some("Renamed".into());
+        next.accounts[0].last_used_at_ms = 42;
+        next.presets[0].label = "Renamed relay".into();
+        if let ProviderCredential::OpencodeZen(credential) = &mut next.accounts[0].credential {
+            credential.stored_at_ms = 99;
+        }
+        assert!(!runtime_projection_changed(&previous, &next));
+        next.active_account_id = None;
+        assert!(runtime_projection_changed(&previous, &next));
+        next = previous.clone();
+        if let ProviderCredential::OpencodeZen(credential) = &mut next.accounts[0].credential {
+            credential.access_token = "rotated".into();
+        }
+        assert!(runtime_projection_changed(&previous, &next));
+        next = previous.clone();
+        next.presets[0]
+            .extra_headers
+            .insert("x-tenant".into(), "changed".into());
+        assert!(runtime_projection_changed(&previous, &next));
+        next = previous.clone();
+        next.accounts.clear();
+        assert!(runtime_projection_changed(&previous, &next));
+    }
+
+    #[test]
+    fn committed_account_vault_writes_notify_host_consumers() {
+        let changes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observer_changes = changes.clone();
+        install_commit_observer(std::sync::Arc::new(move |account_id, _| {
+            if account_id == "gateway-observer-test" {
+                observer_changes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }));
+        let vault = ProviderVault::empty();
+        save_for_account("gateway-observer-test", ProviderId::Opencode, &vault).unwrap();
+        assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        save_for_account("gateway-observer-test", ProviderId::Opencode, &vault).unwrap();
+        assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(save_for_account("", ProviderId::Opencode, &vault).is_err());
+        assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        clear_for_account("gateway-observer-test", ProviderId::Opencode).unwrap();
+        assert_eq!(changes.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[test]
     fn provider_id_round_trip() {
-        for s in ["anthropic", "codex", "opencode"] {
+        for s in ["anthropic", "codex", "opencode", "custom:demo"] {
             let p = ProviderId::parse(s).unwrap();
             assert_eq!(p.as_str(), s);
         }
-        assert!(ProviderId::parse("unknown").is_err());
+        assert!(ProviderId::parse("invalid/provider").is_err());
     }
 
     #[test]
@@ -1218,4 +1407,17 @@ mod tests {
         );
         assert_eq!(AccountSummary::from_account(&zen).variant, "opencode-zen");
     }
+}
+
+/// Builtins cover legacy keyring migration; dynamic ids come only from this
+/// local account's encrypted service, including disabled/uninstalled providers.
+pub fn list_provider_ids(local_account_id: &str) -> Result<Vec<ProviderId>, String> {
+    let service = service_name_for_account(local_account_id)?;
+    let mut ids = ProviderId::builtin_ids();
+    for key in cognia_secrets::secret_store::list_accounts(&service) {
+        let id = ProviderId::parse(&key)?;
+        if id.as_str() != key { return Err("noncanonical stored provider id".into()); }
+        if !ids.contains(&id) { ids.push(id); }
+    }
+    Ok(ids)
 }

@@ -8,76 +8,74 @@ use serde::{Deserialize, Serialize};
 use crate::preset::ProviderPreset;
 use crate::vault::{Account, ProviderCredential};
 
-const ALLOWED_PROVIDER_IDS: &str = "anthropic, codex, opencode";
-const MAX_PROVIDER_ID_ERROR_CHARS: usize = 64;
-const TRUNCATED_PROVIDER_ID_SUFFIX: &str = "...";
-
-/// Stable provider identifier. Used as the keyring `account` field for the
-/// per-provider vault entry and as the discriminator in IPC.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Stable provider identity. Builtin OAuth providers retain their specialized
+/// lifecycle; every other canonical id uses the generic API-key provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderId {
     Anthropic,
     Codex,
     Opencode,
+    Commandcode,
+    Registered(String),
 }
 
 impl ProviderId {
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
-            ProviderId::Anthropic => "anthropic",
-            ProviderId::Codex => "codex",
-            ProviderId::Opencode => "opencode",
+            Self::Anthropic => "anthropic",
+            Self::Codex => "codex",
+            Self::Opencode => "opencode",
+            Self::Commandcode => "commandcode",
+            Self::Registered(id) => id,
         }
     }
 
-    pub fn parse(s: &str) -> Result<Self, String> {
-        let normalized = s.trim();
-        match normalized {
-            "anthropic" => Ok(ProviderId::Anthropic),
-            "codex" => Ok(ProviderId::Codex),
-            "opencode" => Ok(ProviderId::Opencode),
-            other => Err(format!(
-                "unknown subscription provider: {}; allowed: {ALLOWED_PROVIDER_IDS}",
-                sanitize_provider_id_for_error(other)
-            )),
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        if value.is_empty()
+            || value.len() > 128
+            || !value.as_bytes()[0].is_ascii_lowercase()
+            || !value.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'-' | b'_' | b'.' | b':')
+            })
+        {
+            return Err(
+                "subscription provider id must be 1-128 canonical lowercase ASCII characters"
+                    .into(),
+            );
         }
+        Ok(match value {
+            "anthropic" => Self::Anthropic,
+            "codex" => Self::Codex,
+            "opencode" => Self::Opencode,
+            "commandcode" => Self::Commandcode,
+            other => Self::Registered(other.to_owned()),
+        })
+    }
+
+    pub fn builtin_ids() -> Vec<Self> {
+        vec![
+            Self::Anthropic,
+            Self::Codex,
+            Self::Opencode,
+            Self::Commandcode,
+        ]
     }
 }
 
-fn sanitize_provider_id_for_error(value: &str) -> String {
-    let mut normalized = String::new();
-    let mut emitted = 0usize;
-    let mut truncated = false;
-
-    for ch in value.chars() {
-        if emitted >= MAX_PROVIDER_ID_ERROR_CHARS {
-            truncated = true;
-            break;
-        }
-
-        let ch = if ch.is_control() || ch.is_whitespace() {
-            ' '
-        } else {
-            ch
-        };
-
-        if ch == ' ' && (normalized.is_empty() || normalized.ends_with(' ')) {
-            continue;
-        }
-
-        normalized.push(ch);
-        emitted += 1;
+impl Serialize for ProviderId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
+}
 
-    normalized.truncate(normalized.trim_end().len());
-    if normalized.is_empty() {
-        normalized.push_str("<empty>");
+impl<'de> Deserialize<'de> for ProviderId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
     }
-    if truncated {
-        normalized.push_str(TRUNCATED_PROVIDER_ID_SUFFIX);
-    }
-    normalized
 }
 
 /// Provider-specific behavior the vault and active-resolver layers depend on.
@@ -111,9 +109,8 @@ pub trait SubscriptionProvider: Send + Sync {
     /// of `HashMap` so callers can preserve insertion order when merging
     /// with proxy / global env.
     ///
-    /// `preset` is the optional third-party endpoint override. Implementations
-    /// that don't honor a preset (currently OpenCode) ignore the argument;
-    /// the vault enforces `preset.is_none()` for those providers.
+    /// `preset` is the optional third-party endpoint override. Managed API-key
+    /// providers and OAuth providers apply it when building their environment.
     fn env_for_sidecar(
         &self,
         account: &Account,
@@ -128,7 +125,7 @@ pub trait SubscriptionProvider: Send + Sync {
     }
 
     /// Whether this provider supports `ProviderPreset` (third-party relay
-    /// endpoints). Anthropic + Codex return true; OpenCode returns false.
+    /// endpoints). All managed providers currently support relay presets.
     fn supports_preset(&self) -> bool {
         true
     }
@@ -144,6 +141,7 @@ mod tests {
             ProviderId::Anthropic,
             ProviderId::Codex,
             ProviderId::Opencode,
+            ProviderId::Commandcode,
         ] {
             assert_eq!(ProviderId::parse(id.as_str()), Ok(id));
         }
@@ -155,16 +153,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_unknown_provider_lists_allowed_values_and_bounds_echo() {
-        let unknown = format!("{}\n{}", "unknown-provider ".repeat(40), "\tsecret-tail");
-
-        let err = ProviderId::parse(&unknown).expect_err("unknown provider must fail");
-
-        assert!(err.contains("unknown subscription provider"));
-        assert!(err.contains("allowed: anthropic, codex, opencode"));
-        assert!(!err.contains('\n'));
-        assert!(!err.contains('\t'));
-        assert!(err.len() <= 180);
-        assert!(!err.contains("secret-tail"));
+    fn dynamic_ids_roundtrip_and_reject_unsafe_identifiers() {
+        let id = ProviderId::parse("plugin:example.my-provider").unwrap();
+        assert_eq!(id.as_str(), "plugin:example.my-provider");
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(serde_json::from_str::<ProviderId>(&json).unwrap(), id);
+        for invalid in ["", "Bad", "../secret", "a/b", "a\nsecret", "1bad"] {
+            assert!(ProviderId::parse(invalid).is_err());
+        }
+        assert!(ProviderId::parse(&"x".repeat(129)).is_err());
+        assert_eq!(
+            ProviderId::parse("anthropic").unwrap(),
+            ProviderId::Anthropic
+        );
     }
 }

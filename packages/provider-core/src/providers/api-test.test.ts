@@ -774,3 +774,75 @@ describe("detectLocalProviders (batch)", () => {
     expect(results[1]).not.toHaveProperty("models")
   })
 })
+
+describe("subscription transport probes", () => {
+  it("sends OpenCode relay headers through the built-in provider probe", async () => {
+    proxyFetchMock.mockResolvedValue(jsonResponse({}))
+    await testProviderConnection("opencode", "key", "https://relay.test/v1", { "X-Tenant": "team" })
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "https://relay.test/v1/models",
+      expect.objectContaining({ headers: { Authorization: "Bearer key", "X-Tenant": "team" } })
+    )
+  })
+
+  it.each([200, 401])(
+    "probes Codex Responses with account headers and reports status %s accurately",
+    async (status) => {
+      const cancel = jest.fn().mockResolvedValue(undefined)
+      proxyFetchMock.mockResolvedValue({ ...jsonResponse({}, { status }), body: { cancel } })
+      const result = await testProviderConnection("codex", "token", "https://relay.test/codex/", {
+        "ChatGPT-Account-Id": "selected",
+      })
+      expect(result.success).toBe(status === 200)
+      expect(proxyFetchMock).toHaveBeenCalledWith(
+        "https://relay.test/codex/responses",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "ChatGPT-Account-Id": "selected",
+            Authorization: "Bearer token",
+          }),
+        })
+      )
+      expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body)).toMatchObject({
+        store: false,
+        stream: true,
+      })
+      expect(cancel).toHaveBeenCalled()
+    }
+  )
+})
+
+it.each([
+  ["claude-sonnet-5", "messages", 200],
+  ["deepseek/deepseek-v4-flash", "chat/completions", 200],
+  ["deepseek/deepseek-v4-flash", "chat/completions", 403],
+])("probes CommandCode %s with authenticated %s (status %s)", async (model, path, status) => {
+  proxyFetchMock.mockResolvedValue(jsonResponse({}, { status: Number(status) }))
+  const result = await probeProviderConnection({
+    providerId: "commandcode",
+    apiKey: "cmd-test",
+    model: String(model),
+    customHeaders: { "x-cmd-zdr": "1" },
+  })
+  expect(proxyFetchMock).toHaveBeenCalledWith(
+    `https://api.commandcode.ai/provider/v1/${path}`,
+    expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ Authorization: "Bearer cmd-test", "x-cmd-zdr": "1" }),
+    })
+  )
+  expect(result.success).toBe(status === 200)
+  expect(JSON.parse(proxyFetchMock.mock.calls[0][1].body)).toMatchObject({ model, max_tokens: 1 })
+})
+
+it.each([new Error("connection failed"), "connection failed"])(
+  "reports Codex probe transport failures (%s)",
+  async (cause) => {
+    proxyFetchMock.mockRejectedValue(cause)
+    expect(await testProviderConnection("codex", "token")).toMatchObject({
+      success: false,
+      message: "connection failed",
+    })
+  }
+)

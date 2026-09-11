@@ -50,12 +50,12 @@ export interface AccountSummary {
   provider: ProviderId
   /**
    * Variant tag distinguishing OpenCode discovery rows from Zen rows:
-   * "anthropic" | "codex" | "opencode-discovered" | "opencode-zen".
+   * "anthropic" | "codex" | "opencode-discovered" | "opencode-zen" | "commandcode" | "api-key".
    */
   variant: AccountVariant
   email?: string
   plan?: string
-  /** 0 when not applicable (api_key / opencode-zen). */
+  /** 0 when not applicable (API-key credentials). */
   expiresAtMs: number
   createdAtMs: number
   lastUsedAtMs: number

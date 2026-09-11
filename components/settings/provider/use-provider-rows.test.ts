@@ -52,7 +52,7 @@ jest.mock("@cognia/provider-types", () => ({
 }))
 
 jest.mock("./provider-readiness", () => ({
-  getBuiltInProviderReadiness: () => ({ verificationStatus: null }),
+  getBuiltInProviderReadiness: jest.fn(() => ({ verificationStatus: null })),
   getCustomProviderReadiness: () => ({ verificationStatus: null }),
 }))
 
@@ -296,4 +296,31 @@ describe("useProviderRows", () => {
     expect(result.current.rows[0].diagnosticStatus).toBeUndefined()
     expect(result.current.modelDiagnosticBadges).toEqual({})
   })
+})
+
+it("uses the effective subscription projection for provider readiness", () => {
+  const projected = { providerId: "openai", enabled: true, apiKey: "subscription:hash" }
+  render({ settings: makeSettings({ readinessProviderSettings: { openai: projected } }) })
+  expect(jest.requireMock("./provider-readiness").getBuiltInProviderReadiness).toHaveBeenCalledWith(
+    "openai",
+    projected,
+    null
+  )
+})
+
+it("searches dynamic provider metadata without requiring a static catalog row", () => {
+  const settings = makeSettings({
+    filteredProviders: [
+      [
+        "plugin-vendor",
+        { id: "plugin-vendor", name: "New Plugin Vendor", models: [], defaultModel: "model" },
+      ],
+    ] as never,
+  })
+  const { result } = render({ settings, search: "new plugin" })
+  expect(result.current.rows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "plugin-vendor", name: "New Plugin Vendor" }),
+    ])
+  )
 })

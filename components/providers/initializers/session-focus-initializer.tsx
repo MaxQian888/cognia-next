@@ -38,6 +38,7 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { parkIdleArtifactDock } from "@/lib/artifacts/park-idle-dock"
 import { retryTitleIfNeeded } from "@/lib/ai/generation/title-retry"
 import { subscribeResume } from "@/lib/capacitor/app"
+import { migrateLegacyConversationListState } from "@/lib/connectors/session-bindings"
 
 /**
  * Apply the per-switch resets. Exported for the test and for any future caller
@@ -56,6 +57,11 @@ export function applySessionFocusChange(sessionId: string | null): void {
 
 export function SessionFocusInitializer() {
   useEffect(() => {
+    // One startup reconciliation; live session queries refresh after its writes.
+    // Never run a write transaction inside a streaming list's live query.
+    void migrateLegacyConversationListState().catch((error) => {
+      console.error("conversation list state migration failed", error)
+    })
     // Subscribe rather than depend on a rendered `activeSessionId`: the reset
     // must land before the dock re-renders for the new conversation, and an
     // effect keyed on the value would run after it.

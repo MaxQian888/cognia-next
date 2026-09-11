@@ -39,7 +39,7 @@ import type { Account, CodexCredentialData, ProviderPreset } from "@/types/subsc
 export interface CodexVaultCredential {
   apiKey: string
   baseURL: string
-  /** Extra headers required by the ChatGPT-login backend (empty for api_key). */
+  /** Relay headers plus the required ChatGPT-login backend identity headers. */
   headers?: Record<string, string>
 }
 
@@ -96,6 +96,11 @@ export async function resolveCodexVaultCredential(
 
     const preset = await resolvePresetFor(full)
     const presetBase = preset?.baseUrl?.trim()
+    const relayHeaders = Object.fromEntries(
+      Object.entries(preset?.extraHeaders ?? {}).filter(
+        ([name]) => !name.toLowerCase().startsWith("x-cognia-")
+      )
+    )
 
     if (credential.authMode === "chatgpt") {
       const headers: Record<string, string> = {
@@ -106,6 +111,15 @@ export async function resolveCodexVaultCredential(
       }
       const accountId = credential.accountId?.trim()
       if (accountId) headers["ChatGPT-Account-Id"] = accountId
+      // Identity belongs to the selected credential, including when a relay
+      // spells its header with a different case. Presets may add other headers.
+      const reserved = new Set([
+        ...Object.keys(headers).map((name) => name.toLowerCase()),
+        "chatgpt-account-id",
+      ])
+      for (const [name, value] of Object.entries(relayHeaders)) {
+        if (!reserved.has(name.toLowerCase())) headers[name] = value
+      }
       return {
         apiKey,
         baseURL: presetBase || CODEX_CHATGPT_BASE_URL,
@@ -114,7 +128,11 @@ export async function resolveCodexVaultCredential(
     }
 
     // api_key mode: standard OpenAI.
-    return { apiKey, baseURL: presetBase || CODEX_DEFAULT_API_BASE_URL }
+    return {
+      apiKey,
+      baseURL: presetBase || CODEX_DEFAULT_API_BASE_URL,
+      ...(Object.keys(relayHeaders).length ? { headers: relayHeaders } : {}),
+    }
   } catch (cause) {
     if (cause instanceof CodexReauthenticationRequiredError) throw cause
     return null

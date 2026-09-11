@@ -2,6 +2,11 @@ import type { Account, ProviderPreset } from "@/types/subscription"
 
 import { accessTokenOf, queryAccountBalance } from "./runner"
 
+jest.mock("../core/transport", () => ({
+  ...jest.requireActual("../core/transport"),
+  getProviderPreset: jest.fn(async () => null),
+}))
+
 function codexAccount(over: Partial<Account> = {}): Account {
   return {
     id: "acc-1",
@@ -105,14 +110,47 @@ describe("queryAccountBalance", () => {
     expect(snap).toBeNull()
   })
 
-  it("falls back to the first usable preset when the binding dangles", async () => {
+  it.each([undefined, "missing"])("uses the actual default for binding %s", async (presetId) => {
     const authedRequest = jest.fn(async () => ({ status: 200, headers: [], body: DEEPSEEK_BODY }))
     const snap = await queryAccountBalance("codex", "acc-1", {
       authedRequest,
-      getAccount: async () => codexAccount({ presetId: "missing" }),
-      listPresets: async () => [deepseekPreset],
+      getAccount: async () => codexAccount({ presetId }),
+      listPresets: async () => [
+        { ...deepseekPreset, id: "first", baseUrl: "https://wrong.example/v1" },
+        deepseekPreset,
+      ],
+      getProviderPreset: async () => deepseekPreset,
     })
     expect(snap?.remaining).toBe(42)
+    expect(authedRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "https://api.deepseek.com/user/balance",
+      })
+    )
+  })
+
+  it("never sends a token to an arbitrary preset when no default is set", async () => {
+    const authedRequest = jest.fn()
+    expect(
+      await queryAccountBalance("codex", "acc-1", {
+        authedRequest,
+        getAccount: async () => codexAccount({ presetId: undefined }),
+        listPresets: async () => [deepseekPreset],
+        getProviderPreset: async () => null,
+      })
+    ).toBeNull()
+    expect(authedRequest).not.toHaveBeenCalled()
+  })
+
+  it("keeps a bound preset ahead of the default without querying the default", async () => {
+    const getProviderPreset = jest.fn()
+    await queryAccountBalance("codex", "acc-1", {
+      authedRequest: async () => ({ status: 200, headers: [], body: DEEPSEEK_BODY }),
+      getAccount: async () => codexAccount(),
+      listPresets: async () => [deepseekPreset],
+      getProviderPreset,
+    })
+    expect(getProviderPreset).not.toHaveBeenCalled()
   })
 
   it("returns null when no adapter matches the preset", async () => {

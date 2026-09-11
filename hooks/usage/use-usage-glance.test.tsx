@@ -4,11 +4,17 @@
  * disabled hook does nothing at all.
  */
 
-const refreshExternalUsageIndex = jest.fn(async () => ({
-  sources: [],
-  startedAt: 0,
-  finishedAt: 0,
-}))
+const refreshExternalUsageIndex = jest.fn(
+  async (
+    ..._args: Parameters<
+      typeof import("@/lib/usage/external-usage-index").refreshExternalUsageIndex
+    >
+  ) => ({
+    sources: [],
+    startedAt: 0,
+    finishedAt: 0,
+  })
+)
 const resolveScanInput = jest.fn(async () => ({ fs: {}, home: "/h" }))
 let liveRows: unknown[] | undefined = []
 let liveStates: unknown[] = []
@@ -24,7 +30,8 @@ jest.mock("dexie-react-hooks", () => ({
   },
 }))
 jest.mock("@/lib/usage/external-usage-index", () => ({
-  refreshExternalUsageIndex: (...a: unknown[]) => refreshExternalUsageIndex(...(a as [])),
+  refreshExternalUsageIndex: (...a: Parameters<typeof refreshExternalUsageIndex>) =>
+    refreshExternalUsageIndex(...a),
 }))
 jest.mock("@/lib/session-import", () => ({
   resolveScanInput: (...a: unknown[]) => resolveScanInput(...(a as [])),

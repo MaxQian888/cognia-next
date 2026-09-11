@@ -25,7 +25,11 @@ import {
   type SubscriptionEncryptedEnvelope,
   type SubscriptionPackageBody,
 } from "@/lib/subscription/core/encrypted-package"
-import { applyVaults, snapshotVaults } from "@/lib/subscription/core/vault-snapshot"
+import {
+  applyVaults,
+  snapshotVaults,
+  snapshotCustomSubscriptionProviders,
+} from "@/lib/subscription/core/vault-snapshot"
 import { makeWebDavClient } from "@/lib/webdav/config"
 
 import { getLastVaultChangeAtMs } from "./change-tracker"
@@ -97,7 +101,12 @@ export async function runSubscriptionSyncNow(
     onProgress("building")
     const vaults = await snapshotVaults()
     device = await getDeviceMetadata()
-    const body = buildSubscriptionPackage(vaults, Date.now(), device ?? undefined)
+    const body = buildSubscriptionPackage(
+      vaults,
+      Date.now(),
+      device ?? undefined,
+      await snapshotCustomSubscriptionProviders()
+    )
     onProgress("encrypting")
     const envelope = await encryptSubscriptionPackage(body, pass)
     const json = JSON.stringify(envelope)
@@ -271,5 +280,5 @@ export async function restoreSubscriptionFromWebDav(
 export async function applySubscriptionRestore(
   preview: SubscriptionRestorePreview
 ): Promise<{ accountCount: number }> {
-  return applyVaults(preview.body.vaults)
+  return applyVaults(preview.body.vaults, preview.body.customProviders)
 }

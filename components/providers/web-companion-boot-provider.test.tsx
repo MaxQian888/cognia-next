@@ -73,7 +73,7 @@ const installEventDrivenSyncMock = jest.fn(() => eventTeardown)
 const workflowRunStatusTeardown = jest.fn()
 const installWorkflowRunStatusSyncMock = jest.fn(() => workflowRunStatusTeardown)
 const networkTeardown = jest.fn()
-const installNetworkSyncMock = jest.fn(async () => networkTeardown)
+const installNetworkSyncMock = jest.fn(async (): Promise<() => void> => networkTeardown)
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
   // The provider awaits `critical` only. Standing it on the same mock keeps
@@ -595,8 +595,11 @@ describe("WebCompanionBootProvider", () => {
       </WebCompanionBootProvider>
     )
     await waitFor(() => expect(installNetworkSyncMock).toHaveBeenCalled())
+    const signal = runSyncDownMock.mock.calls[0][0].signal as AbortSignal
+    expect(signal.aborted).toBe(false)
 
     view.unmount()
+    expect(signal.aborted).toBe(true)
 
     expect(networkTeardown).toHaveBeenCalledTimes(1)
     expect(connectionUnsubscribeMock).toHaveBeenCalledTimes(1)

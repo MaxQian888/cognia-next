@@ -5,13 +5,21 @@ jest.mock("next/navigation", () => ({ useRouter: () => ({ push }) }))
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => `t:${key}` }))
 
 const dispose = jest.fn()
-const bootSites = jest.fn(async () => dispose)
-jest.mock("@/lib/sites/boot", () => ({ bootSites: (...args: unknown[]) => bootSites(...args) }))
+const bootSites = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/sites/boot").bootSites>) => dispose
+)
+jest.mock("@/lib/sites/boot", () => ({
+  bootSites: (...args: Parameters<typeof bootSites>) => bootSites(...args),
+}))
 
 const unregister = jest.fn()
-const installSiteNotificationCommands = jest.fn(() => unregister)
+const installSiteNotificationCommands = jest.fn(
+  (..._args: Parameters<typeof import("@/lib/sites/notify").installSiteNotificationCommands>) =>
+    unregister
+)
 jest.mock("@/lib/sites/notify", () => ({
-  installSiteNotificationCommands: (...args: unknown[]) => installSiteNotificationCommands(...args),
+  installSiteNotificationCommands: (...args: Parameters<typeof installSiteNotificationCommands>) =>
+    installSiteNotificationCommands(...args),
 }))
 
 let unlockedAccountId: string | null = "owner"

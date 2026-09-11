@@ -23,6 +23,7 @@ use tokio::sync::RwLock;
 
 use crate::anthropic::AnthropicProvider;
 use crate::codex::CodexProvider;
+use crate::commandcode::CommandCodeProvider;
 use crate::opencode::OpencodeProvider;
 use crate::preset::ProviderPreset;
 use crate::provider::{ProviderId, SubscriptionProvider};
@@ -45,7 +46,7 @@ pub struct ActiveSnapshot {
 struct Inner {
     /// Keyed by `ProviderId::as_str()`. Using a string key keeps the type
     /// `Send + 'static` without juggling `Copy` on `ProviderId`.
-    by_provider: HashMap<&'static str, ActiveSnapshot>,
+    by_provider: HashMap<String, ActiveSnapshot>,
 }
 
 #[derive(Clone, Default)]
@@ -62,7 +63,7 @@ impl ActiveAccountState {
     /// to clear (active becomes `None`, env becomes empty).
     pub async fn set(&self, provider: ProviderId, snapshot: ActiveSnapshot) {
         let mut g = self.inner.write().await;
-        g.by_provider.insert(provider.as_str(), snapshot);
+        g.by_provider.insert(provider.as_str().to_owned(), snapshot);
     }
 
     /// Read the snapshot for one provider. Returns the default snapshot when
@@ -182,6 +183,8 @@ fn dispatch_env_for_sidecar(
         ProviderId::Anthropic => AnthropicProvider.env_for_sidecar(account, preset),
         ProviderId::Codex => CodexProvider.env_for_sidecar(account, preset),
         ProviderId::Opencode => OpencodeProvider.env_for_sidecar(account, preset),
+        ProviderId::Commandcode => CommandCodeProvider.env_for_sidecar(account, preset),
+        ProviderId::Registered(_) => Vec::new(),
     }
 }
 
@@ -199,7 +202,7 @@ pub fn env_for_local_account(
     provider: ProviderId,
     account_id: &str,
 ) -> Result<Option<Vec<(String, String)>>, String> {
-    let Some(vault) = vault::load_for_account(local_account_id, provider)? else {
+    let Some(vault) = vault::load_for_account(local_account_id, provider.clone())? else {
         return Ok(None);
     };
     let Some(account) = vault.find_account(account_id) else {
@@ -289,6 +292,45 @@ mod tests {
             Some("c")
         );
         assert_eq!(s.env_for(ProviderId::Opencode).await, vec![]);
+    }
+
+    #[tokio::test]
+    async fn commandcode_env_dispatch_and_activation_are_isolated() {
+        let account = Account {
+            id: "commandcode-active".into(),
+            label: None,
+            credential: crate::vault::ProviderCredential::Commandcode(
+                crate::vault::CommandCodeCredentialData {
+                    access_token: "test-key".into(),
+                    stored_at_ms: 0,
+                    base_url: None,
+                },
+            ),
+            created_at_ms: 0,
+            last_used_at_ms: 0,
+            preset_id: None,
+            auth_metadata: None,
+        };
+        let state = ActiveAccountState::new();
+        let env = dispatch_env_for_sidecar(ProviderId::Commandcode, &account, None);
+        assert!(env.contains(&("COMMAND_CODE_API_KEY".into(), "test-key".into())));
+        state
+            .set(
+                ProviderId::Commandcode,
+                ActiveSnapshot {
+                    active_account_id: Some(account.id),
+                    env: env.clone(),
+                },
+            )
+            .await;
+        assert_eq!(state.env_for(ProviderId::Commandcode).await, env);
+        assert!(state.env_for(ProviderId::Codex).await.is_empty());
+        state.clear_all().await;
+        assert!(state
+            .get(ProviderId::Commandcode)
+            .await
+            .active_account_id
+            .is_none());
     }
 
     #[tokio::test]

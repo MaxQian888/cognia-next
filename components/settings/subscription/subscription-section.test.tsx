@@ -41,6 +41,9 @@ jest.mock("./provider-tab-codex", () => ({
 jest.mock("./provider-tab-opencode", () => ({
   ProviderTabOpencode: () => <div data-testid="opencode-panel">opencode</div>,
 }))
+jest.mock("./provider-tab-commandcode", () => ({
+  ProviderTabCommandcode: () => <div data-testid="commandcode-panel" />,
+}))
 jest.mock("./import-export-buttons", () => ({
   ImportExportButtons: () => <div data-testid="backup-panel">backup</div>,
 }))
@@ -85,6 +88,7 @@ describe("SubscriptionSection", () => {
       "claude",
       "codex",
       "opencode",
+      "commandcode",
       "backup",
       "sync",
     ]) {
@@ -172,3 +176,13 @@ describe("SubscriptionSection", () => {
     })
   })
 })
+
+it("routes the CommandCode settings deep link to its provider panel", () => {
+  renderWith("subTab=commandcode")
+  expect(screen.getByTestId("commandcode-panel")).toBeInTheDocument()
+})
+
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useSubscriptionProviders: () =>
+    jest.requireActual("@/lib/subscription/core/provider-registry").listSubscriptionProviders(),
+}))

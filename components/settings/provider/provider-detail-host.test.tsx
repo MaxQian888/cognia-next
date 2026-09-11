@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import type { UseProviderSettingsResult } from "@/hooks/settings/use-provider-settings"
 
@@ -45,11 +45,20 @@ jest.mock("./provider-config-tab", () => ({
   ProviderConfigTab: ({
     authSlot,
     children,
+    onCustomHeadersChange,
+    onApiFlavorChange,
+    onTestConnection,
   }: {
     authSlot?: React.ReactNode
     children?: React.ReactNode
+    onCustomHeadersChange?: (headers: Record<string, string>) => void
+    onApiFlavorChange?: (flavor: "responses") => void
+    onTestConnection?: () => void
   }) => (
     <div data-testid="config-tab">
+      <button onClick={() => onCustomHeadersChange?.({ "X-Tenant": "team" })}>relay headers</button>
+      <button onClick={() => onApiFlavorChange?.("responses")}>responses transport</button>
+      <button onClick={() => onTestConnection?.()}>verify credentials</button>
       <div data-testid="config-tab-auth-slot">{authSlot}</div>
       <div data-testid="config-tab-extras-slot">{children}</div>
     </div>
@@ -63,13 +72,28 @@ jest.mock("./provider-diagnostics-tab", () => ({
   ProviderDiagnosticsTab: () => <div data-testid="diagnostics-tab" />,
 }))
 jest.mock("./provider-parameters-tab", () => ({
-  ProviderParametersTab: () => <div data-testid="parameters-tab" />,
+  ProviderParametersTab: ({
+    onSettingsChange,
+  }: {
+    onSettingsChange: (patch: { inferenceDefaults: { temperature: number } }) => void
+  }) => (
+    <button
+      data-testid="parameters-tab"
+      onClick={() => onSettingsChange({ inferenceDefaults: { temperature: 0.3 } })}
+    >
+      save inference settings
+    </button>
+  ),
 }))
 jest.mock("./provider-custom-inline-config", () => ({
   CustomProviderInlineConfig: () => <div data-testid="custom-inline-config" />,
 }))
 jest.mock("./provider-setup-checklist", () => ({
-  ProviderSetupChecklist: () => <div data-testid="setup-checklist" />,
+  ProviderSetupChecklist: ({ onVerify }: { onVerify?: () => void }) => (
+    <button data-testid="setup-checklist" onClick={onVerify}>
+      verify setup
+    </button>
+  ),
 }))
 jest.mock("./oauth-login-button", () => ({
   OAuthLoginButton: () => <div data-testid="oauth-login" />,
@@ -351,8 +375,59 @@ describe("ProviderDetailHost", () => {
     renderHost({
       selectedReadiness: {
         setupChecklist: [],
+        eligibility: { testConnection: { allowed: true } },
       } as unknown as ProviderDetailHostProps["selectedReadiness"],
     })
     expect(screen.getByTestId("setup-checklist")).toBeInTheDocument()
   })
+})
+
+it("routes transport edits and credential verification from the Config tab to settings", () => {
+  const { props } = renderHost()
+  fireEvent.click(screen.getByRole("button", { name: "relay headers" }))
+  expect(props.setProviderConfig).toHaveBeenCalledWith("openai", {
+    customHeaders: { "X-Tenant": "team" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "responses transport" }))
+  expect(props.setProviderConfig).toHaveBeenCalledWith("openai", { apiFlavor: "responses" })
+  fireEvent.click(screen.getByRole("button", { name: "verify credentials" }))
+  expect(settings.testProvider).toHaveBeenCalledWith("openai")
+})
+
+it.each([false, true])(
+  "saves inference settings to the selected provider (custom=%s)",
+  (isCustom) => {
+    const { props } = renderHost({
+      isCustom,
+      ...(isCustom
+        ? {
+            selectedCustom: {
+              id: "relay",
+              customName: "Relay",
+              apiKey: "key",
+              baseURL: "https://relay.test",
+            } as never,
+            selectedId: "relay",
+          }
+        : {}),
+    })
+    fireEvent.click(screen.getByRole("button", { name: "save inference settings" }))
+    const patch = { inferenceDefaults: { temperature: 0.3 } }
+    if (isCustom) expect(settings.updateCustomProvider).toHaveBeenCalledWith("relay", patch)
+    else expect(props.setProviderConfig).toHaveBeenCalledWith("openai", patch)
+  }
+)
+
+it("verifies a custom relay from its setup checklist", () => {
+  renderHost({
+    isCustom: true,
+    selectedId: "relay",
+    selectedCustom: { id: "relay", customName: "Relay" } as never,
+    selectedReadiness: {
+      setupChecklist: [],
+      eligibility: { testConnection: { allowed: true } },
+    } as never,
+  })
+  fireEvent.click(screen.getByRole("button", { name: "verify setup" }))
+  expect(settings.testCustomProvider).toHaveBeenCalledWith("relay")
 })

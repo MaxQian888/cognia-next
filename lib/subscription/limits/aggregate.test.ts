@@ -1,4 +1,19 @@
 import { queryAllConfiguredLimits } from "./aggregate"
+import * as transport from "@/lib/subscription/core/transport"
+
+jest.mock("@/lib/subscription/core/transport", () => ({
+  ...jest.requireActual("@/lib/subscription/core/transport"),
+  listAccounts: jest.fn(async () => []),
+  listSubscriptionProviderIds: jest.fn(async () => [
+    "anthropic",
+    "codex",
+    "opencode",
+    "commandcode",
+  ]),
+  getActiveAccount: jest.fn(async () => ({ activeAccountId: undefined, env: [] })),
+  getAccount: jest.fn(async () => null),
+  authedGet: jest.fn(async () => '{"balance":8}'),
+}))
 
 import type {
   AccountSummary,
@@ -27,6 +42,41 @@ function limits(provider: string, accountId: string): ProviderLimits {
 }
 
 describe("queryAllConfiguredLimits", () => {
+  it("uses the default vault and account runner and continues past missing accounts", async () => {
+    jest.mocked(transport.listAccounts).mockResolvedValueOnce([summary("deleted", "anthropic")])
+    expect(await queryAllConfiguredLimits()).toEqual([])
+    expect(transport.getAccount).toHaveBeenCalledWith("anthropic", "deleted")
+  })
+
+  it("queries custom sources with the default transport and clock", async () => {
+    const result = await queryAllConfiguredLimits({
+      listCustomSources: () => [
+        {
+          id: "default-transport",
+          name: "Custom",
+          baseUrl: "https://relay.example.com",
+          token: "test",
+          enabled: true,
+          request: { path: "/balance" },
+          extract: { kind: "balance", remainingPath: "balance" },
+        },
+      ],
+    })
+    expect(result[0].meters[0].remaining).toBe(8)
+    expect(result[0].fetchedAt).toBeGreaterThan(0)
+  })
+
+  it("isolates non-Error rejections and timestamps failures with the default clock", async () => {
+    const result = await queryAllConfiguredLimits({
+      listAccounts: async (provider) =>
+        provider === "anthropic" ? Promise.reject("locked") : [summary("broken", provider)],
+      getActiveAccount: async () => ({ activeAccountId: undefined, env: [] }),
+      runAccount: async () => Promise.reject("failed"),
+    })
+    expect(result.map((row) => row.error)).toEqual(["failed", "failed", "failed", "locked"])
+    expect(result.every((row) => row.fetchedAt > 0)).toBe(true)
+  })
+
   const listAccounts = async (provider: ProviderId): Promise<AccountSummary[]> => {
     if (provider === "anthropic") return [summary("a1", "anthropic"), summary("a2", "anthropic")]
     if (provider === "codex") return [summary("c1", "codex")]
@@ -71,6 +121,62 @@ describe("queryAllConfiguredLimits", () => {
       runAccount: async () => limits("x", "y"),
     })
     expect(out).toEqual([])
+  })
+
+  it("keeps healthy accounts and exposes one failed account", async () => {
+    const out = await queryAllConfiguredLimits({
+      listAccounts,
+      getActiveAccount,
+      now: () => 123,
+      runAccount: async (provider, id) => {
+        if (id === "a1") throw new Error("vault unavailable")
+        return limits(provider, id)
+      },
+    })
+    expect(out.map((r) => r.accountId)).toEqual(["a1", "a2", "c1"])
+    expect(out[0]).toMatchObject({
+      provider: "anthropic",
+      error: "vault unavailable",
+      fetchedAt: 123,
+    })
+  })
+
+  it("keeps enumerated accounts when only the active-account lookup fails", async () => {
+    const out = await queryAllConfiguredLimits({
+      listAccounts,
+      getActiveAccount: async () => {
+        throw new Error("active unavailable")
+      },
+      runAccount: async (provider, id) => limits(provider, id),
+    })
+    expect(out.filter((r) => r.accountId).map((r) => r.accountId)).toEqual(["a1", "a2", "c1"])
+  })
+
+  it("keeps other providers and custom sources when one vault cannot enumerate", async () => {
+    const out = await queryAllConfiguredLimits({
+      listAccounts: async (provider) => {
+        if (provider === "anthropic") throw new Error("vault locked")
+        return listAccounts(provider)
+      },
+      getActiveAccount,
+      runAccount: async (provider, id) => limits(provider, id),
+      listCustomSources: () => [
+        {
+          id: "isolated",
+          name: "Custom",
+          baseUrl: "https://relay.example.com",
+          token: "test",
+          enabled: true,
+          request: { path: "/balance" },
+          extract: { kind: "balance", remainingPath: "balance" },
+        },
+      ],
+      authedGet: async () => '{"balance":5}',
+      now: () => 123,
+    })
+    expect(out.map((r) => r.provider)).toEqual(["codex", "anthropic", "custom:isolated"])
+    expect(out[1]).toMatchObject({ error: "vault locked", meters: [] })
+    expect(out[2].meters[0].remaining).toBe(5)
   })
 
   it("appends custom-source snapshots after the vault accounts", async () => {

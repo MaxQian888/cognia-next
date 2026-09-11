@@ -28,8 +28,8 @@ import {
   UNKNOWN_COST,
   type GlanceSeverity,
 } from "@/lib/usage/usage-glance-format"
-import { PERIOD_LABEL_KEYS, type UsageGlanceMetric } from "@/lib/usage/usage-glance-format"
-import type { UsageGlanceSnapshotV1 } from "@/lib/usage/usage-glance"
+import { PERIOD_LABEL_KEYS } from "@/lib/usage/usage-glance-format"
+import type { UsageGlanceSnapshotV1, UsageGlanceMetric } from "@/lib/usage/usage-glance"
 import { cn } from "@/lib/utils"
 
 /** Meter fill per severity. Same vocabulary as the tray badge colours. */

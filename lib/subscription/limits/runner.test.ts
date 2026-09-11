@@ -6,6 +6,22 @@ import {
 } from "@/lib/plugin/registries/limits-source-registry"
 
 import type { Account, ProviderPreset } from "@/types/subscription"
+import { authedRequest } from "@/lib/subscription/core/transport"
+import { refreshAndPersistAnthropicAccount } from "@/lib/subscription/anthropic/refresh"
+import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
+
+jest.mock("@/lib/subscription/anthropic/refresh", () => ({
+  refreshAndPersistAnthropicAccount: jest.fn(async () => null),
+}))
+jest.mock("@/lib/subscription/codex/refresh", () => ({
+  refreshCodexAccountIfStale: jest.fn(async () => null),
+}))
+
+jest.mock("@/lib/subscription/core/transport", () => ({
+  ...jest.requireActual("@/lib/subscription/core/transport"),
+  getProviderPreset: jest.fn(async () => null),
+  authedRequest: jest.fn(),
+}))
 
 afterEach(() => __resetLimitsSourcesForTesting())
 
@@ -74,6 +90,62 @@ const moonshotPreset: ProviderPreset = {
 }
 
 describe("queryAccountLimits", () => {
+  it.each([200, 401])("uses the native status-preserving transport for HTTP %s", async (status) => {
+    jest.mocked(authedRequest).mockResolvedValueOnce({
+      status,
+      headers: [],
+      body: JSON.stringify({ code: 0, data: { available_balance: 12 } }),
+    })
+    const result = await queryAccountLimits("codex", "acc-2", {
+      getAccount: async () => codexRelayAccount(),
+      listPresets: async () => [moonshotPreset],
+    })
+    expect(result).toMatchObject({ provider: "codex", sourceId: "moonshot" })
+    if (status === 200) expect(result?.meters[0].remaining).toBe(12)
+    else expect(result?.error).toContain("401")
+  })
+
+  it.each([true, false])(
+    "refreshes stale OAuth accounts without activating them (token available: %s)",
+    async (available) => {
+      jest
+        .mocked(refreshAndPersistAnthropicAccount)
+        .mockResolvedValueOnce(available ? ({ accessToken: "fresh" } as never) : null)
+      jest
+        .mocked(refreshCodexAccountIfStale)
+        .mockResolvedValueOnce(available ? ({ accessToken: "fresh" } as never) : null)
+      registerLimitsSource(
+        "stub:oauth",
+        {
+          id: "stub:oauth",
+          key: "oauth",
+          matches: () => true,
+          fetch: async (ctx) => ({
+            provider: ctx.provider,
+            fetchedAt: ctx.now,
+            meters: [],
+            error: ctx.token ?? "empty",
+          }),
+        },
+        { pluginId: "stub" }
+      )
+      const anthropic = await queryAccountLimits("anthropic", "acc-1", {
+        getAccount: async () => anthropicAccount(),
+        listPresets: async () => [],
+        isCredentialFresh: () => false,
+      })
+      const codex = await queryAccountLimits("codex", "acc-3", {
+        getAccount: async () => codexChatgptAccount(),
+        listPresets: async () => [],
+        isCodexFresh: () => false,
+      })
+      expect(anthropic?.error).toBe(available ? "fresh" : "sk-ant")
+      expect(codex?.error).toBe(available ? "fresh" : "sk-stale")
+      expect(refreshAndPersistAnthropicAccount).toHaveBeenCalledWith("acc-1", { reactivate: false })
+      expect(refreshCodexAccountIfStale).toHaveBeenCalledWith("acc-3", { reactivate: false })
+    }
+  )
+
   it("returns null when the account is missing", async () => {
     const snap = await queryAccountLimits("anthropic", "x", {
       getAccount: async () => null,
@@ -121,8 +193,66 @@ describe("queryAccountLimits", () => {
       now: () => 7,
     })
     // codex window source doesn't match a moonshot relay → balance meter.
-    expect(snap?.provider).toBe("moonshot")
+    expect(snap).toMatchObject({ provider: "codex", sourceId: "moonshot", accountId: "acc-2" })
     expect(snap?.meters[0]).toMatchObject({ id: "credit", remaining: 12.5 })
+  })
+
+  it.each([undefined, "missing"])(
+    "resolves the real default for unbound relay %s",
+    async (presetId) => {
+      const authedGet = jest.fn(async () =>
+        JSON.stringify({
+          usage: { remaining: 75, limit: 100 },
+        })
+      )
+      const preset: ProviderPreset = {
+        id: "p-kimi",
+        label: "Kimi Coding",
+        templateId: "kimi-coding",
+        baseUrl: "https://api.kimi.com/coding/",
+      }
+      const result = await queryAccountLimits("codex", "acc-2", {
+        getAccount: async () => ({ ...codexRelayAccount(), presetId }),
+        listPresets: async () => [moonshotPreset, preset],
+        getProviderPreset: async () => preset,
+        authedGet,
+      })
+      expect(authedGet).toHaveBeenCalledWith(
+        "https://api.kimi.com/coding/v1/usages",
+        expect.any(Object)
+      )
+      expect(result).toMatchObject({
+        provider: "codex",
+        sourceId: "kimi-coding",
+        accountId: "acc-2",
+        meters: [expect.objectContaining({ usedPct: 25 })],
+      })
+    }
+  )
+
+  it("keeps account identity for source errors and plugin results", async () => {
+    registerLimitsSource(
+      "stub:relay",
+      {
+        id: "stub:relay",
+        key: "relay",
+        matches: () => true,
+        fetch: async () => ({
+          provider: "relay",
+          accountId: "wrong",
+          fetchedAt: 1,
+          meters: [],
+          error: "401",
+        }),
+      },
+      { pluginId: "stub" }
+    )
+    expect(
+      await queryAccountLimits("codex", "acc-2", {
+        getAccount: async () => codexRelayAccount(),
+        listPresets: async () => [moonshotPreset],
+      })
+    ).toMatchObject({ provider: "codex", sourceId: "relay", accountId: "acc-2", error: "401" })
   })
 
   it("returns null when no source matches", async () => {

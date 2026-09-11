@@ -27,12 +27,9 @@ import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import { Surface } from "@/components/surface/surface"
-import {
-  accountCapabilities,
-  providerDisplayOrder,
-} from "@/lib/subscription/core/account-capabilities"
+import { accountCapabilities } from "@/lib/subscription/core/account-capabilities"
 import { setProviderDefaultAccount } from "@/lib/subscription/core/account-lifecycle"
-import { useAccounts, type UseAccountsResult } from "@/lib/subscription/core/hooks"
+import { useSubscriptionAccounts, type UseAccountsResult } from "@/lib/subscription/core/hooks"
 import { getAccountDetail } from "@/lib/subscription/core/transport"
 import { isTauri } from "@/lib/tauri"
 import { useElementWidth } from "@/hooks/use-element-width"
@@ -42,9 +39,8 @@ import type { AccountDetail, AccountSummary, ProviderId } from "@/types/subscrip
 import { AccountPresetSelector } from "./account-preset-selector"
 import { AccountUsageChips, useAccountUsageIndex, type AccountUsage } from "./account-usage-chips"
 import { RemoveDialog, RenameDialog } from "./account-dialogs"
-import { AnthropicAddAccountDialog } from "./add-account-dialog/anthropic"
-import { CodexAddAccountDialog, type CodexLoginMode } from "./add-account-dialog/codex"
-import { OpencodeAddAccountDialog } from "./add-account-dialog/opencode"
+import { SubscriptionAccountDialog } from "./add-account-dialog/subscription"
+import type { CodexLoginMode } from "./add-account-dialog/codex"
 
 type ProviderFilter = "all" | ProviderId
 
@@ -59,9 +55,8 @@ export function AccountCenter() {
   const accountCenterRef = useRef<HTMLDivElement>(null)
   const accountCenterWidth = useElementWidth(accountCenterRef)
   const stackedDetail = accountCenterWidth < 680
-  const anthropic = useAccounts("anthropic")
-  const codex = useAccounts("codex")
-  const opencode = useAccounts("opencode")
+  const { providers, byProvider: states, error: loadError, reload } = useSubscriptionAccounts()
+  const accountError = loadError ?? Object.values(states).find((state) => state.error)?.error
   const usageIndex = useAccountUsageIndex()
   const settings = useSettingsStore((state) => state.settings)
   const [filter, setFilter] = useState<ProviderFilter>("all")
@@ -75,7 +70,6 @@ export function AccountCenter() {
   const [renameTarget, setRenameTarget] = useState<AccountSummary | null>(null)
   const [removeTarget, setRemoveTarget] = useState<AccountSummary | null>(null)
 
-  const states = useMemo(() => ({ anthropic, codex, opencode }), [anthropic, codex, opencode])
   const accounts = useMemo(
     () =>
       Object.values(states)
@@ -83,10 +77,11 @@ export function AccountCenter() {
         .filter((account) => filter === "all" || account.provider === filter)
         .sort(
           (left, right) =>
-            providerDisplayOrder(left.provider) - providerDisplayOrder(right.provider) ||
+            providers.findIndex((entry) => entry.id === left.provider) -
+              providers.findIndex((entry) => entry.id === right.provider) ||
             right.lastUsedAtMs - left.lastUsedAtMs
         ),
-    [filter, states]
+    [filter, states, providers]
   )
   const selected = accounts.find((account) => accountKey(account) === selectedKey) ?? accounts[0]
   const selectedState = selected ? states[selected.provider] : null
@@ -142,17 +137,35 @@ export function AccountCenter() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {(["anthropic", "codex", "opencode"] as const).map((provider) => (
-              <DropdownMenuItem key={provider} onSelect={() => setDialog({ provider })}>
-                {t(`providers.${provider}`)}
-              </DropdownMenuItem>
-            ))}
+            {providers
+              .filter((entry) => entry.available !== false)
+              .map((provider) => (
+                <DropdownMenuItem
+                  key={provider.id}
+                  onSelect={() => setDialog({ provider: provider.id })}
+                >
+                  {provider.name}
+                </DropdownMenuItem>
+              ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setDialog({ provider: "" })}>
+              {t("customSubscription")}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
+      {accountError && (
+        <div role="alert" className="space-y-2 text-xs text-destructive">
+          <p>{t("loadFailed", { error: accountError })}</p>
+          <Button size="sm" variant="outline" onClick={() => void reload()}>
+            {t("retry")}
+          </Button>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("filterLabel")}>
-        {(["all", "anthropic", "codex", "opencode"] as const).map((provider) => (
+        {["all", ...providers.map((entry) => entry.id)].map((provider) => (
           <Button
             key={provider}
             size="sm"
@@ -160,7 +173,9 @@ export function AccountCenter() {
             onClick={() => setFilter(provider)}
             data-testid={`account-filter-${provider}`}
           >
-            {provider === "all" ? t("filters.all") : t(`providers.${provider}`)}
+            {provider === "all"
+              ? t("filters.all")
+              : (providers.find((entry) => entry.id === provider)?.name ?? provider)}
           </Button>
         ))}
       </div>
@@ -212,8 +227,9 @@ export function AccountCenter() {
                               )}
                             </span>
                             <span className="block truncate text-[11px] text-muted-foreground">
-                              {t(`providers.${account.provider}`)} · {account.authMode} ·{" "}
-                              {account.credentialSource}
+                              {providers.find((entry) => entry.id === account.provider)?.name ??
+                                account.provider}{" "}
+                              · {account.authMode} · {account.credentialSource}
                             </span>
                           </span>
                         </button>
@@ -236,6 +252,12 @@ export function AccountCenter() {
               active={activeAccountId === selected.id}
               isDefault={defaultAccountId === selected.id}
               usage={usageIndex.get(selected.id)}
+              providerName={
+                providers.find((entry) => entry.id === selected.provider)?.name ?? selected.provider
+              }
+              providerAvailable={
+                providers.find((entry) => entry.id === selected.provider)?.available !== false
+              }
               onEdit={(mode) =>
                 setDialog({ provider: selected.provider, account: selected, codexMode: mode })
               }
@@ -262,6 +284,12 @@ export function AccountCenter() {
               active={activeAccountId === selected.id}
               isDefault={defaultAccountId === selected.id}
               usage={usageIndex.get(selected.id)}
+              providerName={
+                providers.find((entry) => entry.id === selected.provider)?.name ?? selected.provider
+              }
+              providerAvailable={
+                providers.find((entry) => entry.id === selected.provider)?.available !== false
+              }
               onEdit={(mode) =>
                 setDialog({ provider: selected.provider, account: selected, codexMode: mode })
               }
@@ -305,6 +333,8 @@ export function AccountCenter() {
 
 function AccountDetailPanel({
   account,
+  providerName,
+  providerAvailable,
   detail,
   detailLoading,
   state,
@@ -316,6 +346,8 @@ function AccountDetailPanel({
   onRemove,
 }: {
   account: AccountSummary
+  providerName: string
+  providerAvailable: boolean
   detail: AccountDetail | null
   detailLoading: boolean
   state: UseAccountsResult
@@ -328,6 +360,7 @@ function AccountDetailPanel({
 }) {
   const t = useTranslations("subscription.accountCenter")
   const capabilities = accountCapabilities(account)
+  const tManagedKey = useTranslations("subscription.managedKey")
   const [actionPending, setActionPending] = useState(false)
   const runAction = async (operation: () => Promise<unknown>) => {
     setActionPending(true)
@@ -344,6 +377,11 @@ function AccountDetailPanel({
   return (
     <Card className="min-w-0" data-testid="account-center-detail">
       <CardContent className="space-y-4 p-4">
+        {!providerAvailable && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {tManagedKey("unavailable")}
+          </p>
+        )}
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -353,7 +391,7 @@ function AccountDetailPanel({
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">
-              {t(`providers.${account.provider}`)} · {account.authMode} · {account.credentialSource}
+              {providerName} · {account.authMode} · {account.credentialSource}
             </p>
           </div>
           <DropdownMenu>
@@ -366,10 +404,10 @@ function AccountDetailPanel({
               {capabilities.rename && (
                 <DropdownMenuItem onSelect={onRename}>{t("actions.rename")}</DropdownMenuItem>
               )}
-              {capabilities.updateCredential && (
+              {providerAvailable && capabilities.updateCredential && (
                 <DropdownMenuItem onSelect={() => onEdit()}>{t("actions.update")}</DropdownMenuItem>
               )}
-              {capabilities.reauthenticate && (
+              {providerAvailable && capabilities.reauthenticate && (
                 <DropdownMenuItem onSelect={() => onEdit("oauth")}>
                   <RefreshCwIcon className="mr-2 size-4" />
                   {t("actions.reauthenticate")}
@@ -445,7 +483,8 @@ function AccountDetailPanel({
                   {t("actions.deactivate")}
                 </Button>
               )
-            : capabilities.activate && (
+            : providerAvailable &&
+              capabilities.activate && (
                 <Button
                   size="sm"
                   onClick={() => void runAction(() => state.setActive(account.id))}
@@ -454,7 +493,7 @@ function AccountDetailPanel({
                   {t("actions.activate")}
                 </Button>
               )}
-          {!isDefault && capabilities.setDefault && (
+          {!isDefault && providerAvailable && capabilities.setDefault && (
             <Button
               variant="secondary"
               size="sm"
@@ -482,14 +521,13 @@ function AccountDialog({ state, onClose }: { state: DialogState | null; onClose:
     onAdded: onClose,
     onUpdated: onClose,
   }
-  switch (state.provider) {
-    case "anthropic":
-      return <AnthropicAddAccountDialog {...common} />
-    case "codex":
-      return <CodexAddAccountDialog {...common} initialMode={state.codexMode} />
-    case "opencode":
-      return <OpencodeAddAccountDialog {...common} />
-  }
+  return (
+    <SubscriptionAccountDialog
+      {...common}
+      providerId={state.provider || undefined}
+      codexMode={state.codexMode}
+    />
+  )
 }
 
 function HealthIcon({ health }: { health: AccountSummary["health"] }) {

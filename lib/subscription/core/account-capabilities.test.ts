@@ -49,19 +49,32 @@ describe("accountCapabilities", () => {
     })
   })
 
-  it("disables presets for managed OpenCode keys", () => {
+  it("allows presets for managed OpenCode keys", () => {
     expect(
       accountCapabilities(
         summary({ provider: "opencode", variant: "opencode-zen", authMode: "api_key" })
       ).bindPreset
-    ).toBe(false)
+    ).toBe(true)
   })
 })
 
 it("keeps the provider order stable", () => {
   expect(
-    ["opencode", "anthropic", "codex"].sort(
+    ["commandcode", "opencode", "anthropic", "codex"].sort(
       (a, b) => providerDisplayOrder(a as never) - providerDisplayOrder(b as never)
     )
-  ).toEqual(["anthropic", "codex", "opencode"])
+  ).toEqual(["anthropic", "codex", "opencode", "commandcode"])
+})
+
+it("supports managed CommandCode lifecycle without OAuth reauthentication", () => {
+  expect(
+    accountCapabilities(
+      summary({ provider: "commandcode", variant: "commandcode", authMode: "api_key" })
+    )
+  ).toMatchObject({
+    activate: true,
+    bindPreset: true,
+    updateCredential: true,
+    reauthenticate: false,
+  })
 })

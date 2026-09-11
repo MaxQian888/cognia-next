@@ -18,6 +18,7 @@ const snapshotVaultsMock = jest.fn()
 const applyVaultsMock = jest.fn()
 jest.mock("@/lib/subscription/core/vault-snapshot", () => ({
   snapshotVaults: (...a: unknown[]) => snapshotVaultsMock(...a),
+  snapshotCustomSubscriptionProviders: async () => [],
   applyVaults: (...a: unknown[]) => applyVaultsMock(...a),
 }))
 
@@ -257,7 +258,7 @@ describe("restoreSubscriptionFromWebDav", () => {
 
     applyVaultsMock.mockResolvedValue({ accountCount: 3 })
     expect(await applySubscriptionRestore(preview)).toEqual({ accountCount: 3 })
-    expect(applyVaultsMock).toHaveBeenCalledWith(preview.body.vaults)
+    expect(applyVaultsMock).toHaveBeenCalledWith(preview.body.vaults, preview.body.customProviders)
   })
 
   it("throws on a wrong passphrase", async () => {

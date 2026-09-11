@@ -47,6 +47,7 @@ const stateByProvider: Record<ProviderId, ReturnType<typeof accountState>> = {
   anthropic: accountState(),
   codex: accountState(),
   opencode: accountState(),
+  commandcode: accountState(),
 }
 
 function accountState() {
@@ -54,7 +55,7 @@ function accountState() {
     accounts: [] as AccountSummary[],
     activeAccountId: null as string | null,
     loading: false,
-    error: null,
+    error: null as string | null,
     pendingAction: null,
     pendingAccountId: null,
     reload: jest.fn(async () => undefined),
@@ -66,6 +67,18 @@ function accountState() {
 
 jest.mock("@/lib/subscription/core/hooks", () => ({
   useAccounts: (provider: ProviderId) => stateByProvider[provider],
+  useSubscriptionAccounts: () => ({
+    providers: Object.keys(stateByProvider).map((id) => ({
+      id,
+      name: id === "commandcode" ? "CommandCode" : id,
+      authMode: "api-key",
+      source: "builtin",
+    })),
+    byProvider: stateByProvider,
+    loading: false,
+    error: null,
+    reload: jest.fn(),
+  }),
 }))
 jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
   setProviderDefaultAccount: jest.fn(async () => undefined),
@@ -91,6 +104,12 @@ jest.mock("./add-account-dialog/anthropic", () => ({ AnthropicAddAccountDialog: 
 jest.mock("./add-account-dialog/codex", () => ({ CodexAddAccountDialog: () => null }))
 jest.mock("./add-account-dialog/opencode", () => ({ OpencodeAddAccountDialog: () => null }))
 
+jest.mock("./add-account-dialog/subscription", () => ({
+  SubscriptionAccountDialog: ({ providerId }: { providerId?: string }) => (
+    <div data-testid={`${providerId ?? "custom"}-dialog`} />
+  ),
+}))
+
 import { AccountCenter } from "./account-center"
 
 beforeEach(() => {
@@ -111,6 +130,8 @@ beforeEach(() => {
     }),
   ]
   stateByProvider.opencode.activeAccountId = null
+  stateByProvider.commandcode.accounts = []
+  stateByProvider.commandcode.activeAccountId = null
   getAccountDetail.mockResolvedValue(null)
 })
 
@@ -148,6 +169,16 @@ describe("AccountCenter", () => {
     await waitFor(() => expect(getAccountDetail).toHaveBeenCalledWith("opencode", "external-1"))
   })
 
+  it("offers preset binding for managed OpenCode accounts but not discovery pointers", async () => {
+    const user = userEvent.setup()
+    stateByProvider.opencode.accounts.push(summary("opencode", "managed-1", { plan: "go" }))
+    render(<AccountCenter />)
+    await user.click(screen.getByTestId("account-center-row-opencode-managed-1"))
+    expect(screen.getByTestId("account-preset-selector")).toBeInTheDocument()
+    await user.click(screen.getByTestId("account-center-row-opencode-external-1"))
+    expect(screen.queryByTestId("account-preset-selector")).not.toBeInTheDocument()
+  })
+
   it("ships container-query list/detail classes for narrow and wide panes", async () => {
     render(<AccountCenter />)
     const center = screen.getByTestId("account-center")
@@ -175,4 +206,52 @@ describe("AccountCenter", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     expect(screen.getByTestId("account-center-detail")).toBeInTheDocument()
   })
+})
+
+it("offers CommandCode in the unified add menu and opens its shared dialog", async () => {
+  render(<AccountCenter />)
+  await userEvent.click(screen.getByRole("button", { name: "add" }))
+  await userEvent.click(screen.getByRole("menuitem", { name: "CommandCode" }))
+  expect(screen.getByTestId("commandcode-dialog")).toBeInTheDocument()
+})
+
+it("loads CommandCode accounts and supports their preset and activation controls", async () => {
+  stateByProvider.commandcode.accounts = [
+    summary("commandcode", "cc-1", { variant: "commandcode", label: "CommandCode work" }),
+  ]
+  render(<AccountCenter />)
+  await userEvent.click(screen.getByTestId("account-filter-commandcode"))
+  await waitFor(() => expect(getAccountDetail).toHaveBeenCalledWith("commandcode", "cc-1"))
+  expect(screen.getByTestId("account-preset-selector")).toBeInTheDocument()
+  await userEvent.click(screen.getByRole("button", { name: "actions.activate" }))
+  expect(stateByProvider.commandcode.setActive).toHaveBeenCalledWith("cc-1")
+})
+
+it("offers custom subscription creation without adding a provider-specific dialog", async () => {
+  render(<AccountCenter />)
+  await userEvent.click(screen.getByRole("button", { name: "add" }))
+  await userEvent.click(screen.getByRole("menuitem", { name: "customSubscription" }))
+  expect(screen.getByTestId("custom-dialog")).toBeInTheDocument()
+})
+
+it("renders registry-provided accounts without a hardcoded provider hook", async () => {
+  stateByProvider["custom-service"] = accountState()
+  stateByProvider["custom-service"].accounts = [
+    summary("custom-service", "dynamic-account", { variant: "api-key", label: "Dynamic account" }),
+  ]
+  render(<AccountCenter />)
+  await userEvent.click(screen.getByTestId("account-filter-custom-service"))
+  expect(
+    screen.getByTestId("account-center-row-custom-service-dynamic-account")
+  ).toBeInTheDocument()
+  delete stateByProvider["custom-service"]
+})
+
+it("surfaces a provider load failure while retaining the other accounts", async () => {
+  stateByProvider.codex.error = "keyring locked"
+  render(<AccountCenter />)
+  expect(screen.getByRole("alert")).toHaveTextContent("keyring locked")
+  expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument()
+  expect(screen.getByTestId("account-center-row-anthropic-claude-1")).toBeInTheDocument()
+  stateByProvider.codex.error = null
 })

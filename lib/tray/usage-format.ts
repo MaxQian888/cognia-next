@@ -62,7 +62,7 @@ export function summarizeLimits(snapshots: ProviderLimits[]): TrayUsageAccount[]
     const meters = snap.meters.map(summarizeMeter)
     return {
       key: trayUsageAccountKey(snap),
-      provider: snap.provider,
+      provider: snap.sourceId ?? snap.provider,
       accountLabel: snap.accountLabel,
       worst: worstMeterOf(meters),
       meters,

@@ -14,6 +14,7 @@ use crate::claude::sidecar::{shutdown_sidecar, SidecarState};
 use crate::subscription::active::{self, ActiveAccountState, ActiveSnapshot};
 use crate::subscription::anthropic::AnthropicProvider;
 use crate::subscription::codex::CodexProvider;
+use crate::subscription::commandcode::CommandCodeProvider;
 use crate::subscription::migration::{self, MigrationOutcome};
 use crate::subscription::opencode::OpencodeProvider;
 use crate::subscription::preset::ProviderPreset;
@@ -33,6 +34,8 @@ fn for_provider<R>(id: ProviderId, f: impl FnOnce(&dyn SubscriptionProvider) -> 
         ProviderId::Anthropic => f(&AnthropicProvider),
         ProviderId::Codex => f(&CodexProvider),
         ProviderId::Opencode => f(&OpencodeProvider),
+        ProviderId::Commandcode => f(&CommandCodeProvider),
+        id @ ProviderId::Registered(_) => f(&crate::subscription::api_key::ApiKeyProvider(id)),
     }
 }
 
@@ -62,17 +65,13 @@ pub async fn subscription_init(
     active_state.clear_all().await;
     api_key_state.set_oauth_bearer(None).await;
     let outcomes = migration::migrate_all_for_account(&local_account_id);
-    for id in [
-        ProviderId::Anthropic,
-        ProviderId::Codex,
-        ProviderId::Opencode,
-    ] {
-        match vault::load_for_account(&local_account_id, id) {
+    for id in vault::list_provider_ids(&local_account_id)? {
+        match vault::load_for_account(&local_account_id, id.clone()) {
             Ok(Some(vault)) => {
-                apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+                apply_active_projection(id.clone(), &vault, &active_state, &api_key_state).await;
             }
             Ok(None) => {
-                clear_active_projection(id, &active_state, &api_key_state).await;
+                clear_active_projection(id.clone(), &active_state, &api_key_state).await;
             }
             Err(err) => {
                 // Never block app boot on a keyring hiccup — the user can
@@ -92,13 +91,18 @@ pub async fn subscription_init(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
+pub fn subscription_list_provider_ids(local_account_id: String) -> Result<Vec<ProviderId>, String> {
+    vault::list_provider_ids(&local_account_id)
+}
+
+#[tauri::command]
 pub async fn subscription_list_accounts(
     provider: String,
     local_account_id: String,
 ) -> Result<Vec<AccountSummary>, String> {
     let id = ProviderId::parse(&provider)?;
     let vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     Ok(vault
         .accounts
         .iter()
@@ -113,7 +117,7 @@ pub async fn subscription_get_account(
     account_id: String,
 ) -> Result<Option<Account>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = match vault::load_for_account(&local_account_id, id)? {
+    let vault = match vault::load_for_account(&local_account_id, id.clone())? {
         Some(v) => v,
         None => return Ok(None),
     };
@@ -130,7 +134,7 @@ pub async fn subscription_get_account_detail(
     account_id: String,
 ) -> Result<Option<AccountDetail>, String> {
     let id = ProviderId::parse(&provider)?;
-    let vault = match vault::load_for_account(&local_account_id, id)? {
+    let vault = match vault::load_for_account(&local_account_id, id.clone())? {
         Some(vault) => vault,
         None => return Ok(None),
     };
@@ -163,15 +167,15 @@ pub async fn subscription_save_account(
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
 
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     let refreshes_active = upsert_account_preserving_active(&mut vault, account);
-    if refreshes_active && for_provider(id, |p| p.requires_sidecar_restart_on_active_switch()) {
+    if refreshes_active && for_provider(id.clone(), |p| p.requires_sidecar_restart_on_active_switch()) {
         shutdown_sidecar(sidecar_state.inner().clone()).await?;
     }
-    vault::save_for_account(&local_account_id, id, &vault)?;
+    vault::save_for_account(&local_account_id, id.clone(), &vault)?;
 
     if refreshes_active {
-        apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+        apply_active_projection(id.clone(), &vault, &active_state, &api_key_state).await;
     }
     Ok(())
 }
@@ -195,7 +199,7 @@ pub async fn subscription_replace_account_credential(
     if credential.provider() != id {
         return Err("replacement credential provider mismatch".into());
     }
-    for_provider(id, |implementation| implementation.validate(&credential))?;
+    for_provider(id.clone(), |implementation| implementation.validate(&credential))?;
     if matches!(credential, ProviderCredential::OpencodeDiscovered(_)) {
         return Err("external OpenCode discovery pointers are read-only".into());
     }
@@ -212,7 +216,7 @@ pub async fn subscription_replace_account_credential(
         None
     };
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
-    let mut provider_vault = vault::load_for_account(&local_account_id, id)?
+    let mut provider_vault = vault::load_for_account(&local_account_id, id.clone())?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
     let account = provider_vault
         .accounts
@@ -244,7 +248,7 @@ pub async fn subscription_replace_account_credential(
         .last_credential_rotation_at_ms = Some(now_ms);
     let refreshes_active = provider_vault.active_account_id.as_deref() == Some(account_id.as_str());
     let restarts_sidecar = refreshes_active
-        && for_provider(id, |value| {
+        && for_provider(id.clone(), |value| {
             value.requires_sidecar_restart_on_active_switch()
         });
     let detail = AccountDetail::from_account(account);
@@ -252,12 +256,12 @@ pub async fn subscription_replace_account_credential(
     // here (locked keychain, a denied prompt), and shutting down first left the
     // user with no agent host and the OLD credential still on disk, with
     // nothing on the error path to bring it back.
-    vault::save_for_account(&local_account_id, id, &provider_vault)?;
+    vault::save_for_account(&local_account_id, id.clone(), &provider_vault)?;
     if restarts_sidecar {
         shutdown_sidecar(sidecar_state.inner().clone()).await?;
     }
     if refreshes_active {
-        apply_active_projection(id, &provider_vault, &active_state, &api_key_state).await;
+        apply_active_projection(id.clone(), &provider_vault, &active_state, &api_key_state).await;
     }
     Ok(detail)
 }
@@ -287,7 +291,7 @@ pub async fn subscription_delete_account(
         None
     };
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
-    let mut vault = match vault::load_for_account(&local_account_id, id)? {
+    let mut vault = match vault::load_for_account(&local_account_id, id.clone())? {
         Some(v) => v,
         None => return Ok(()),
     };
@@ -301,13 +305,13 @@ pub async fn subscription_delete_account(
         return Ok(());
     }
     let clears_runtime = deletion_requires_runtime_clear(changed_active, &vault);
-    if clears_runtime && for_provider(id, |p| p.requires_sidecar_restart_on_active_switch()) {
+    if clears_runtime && for_provider(id.clone(), |p| p.requires_sidecar_restart_on_active_switch()) {
         shutdown_sidecar(sidecar_state.inner().clone()).await?;
     }
-    vault::save_for_account(&local_account_id, id, &vault)?;
+    vault::save_for_account(&local_account_id, id.clone(), &vault)?;
 
     if clears_runtime {
-        apply_active_projection(id, &vault, &active_state, &api_key_state).await;
+        apply_active_projection(id.clone(), &vault, &active_state, &api_key_state).await;
     }
     // ADR-0028 Phase 14 — stop the credential watcher so the deleted
     // account's file watch doesn't leak forever.
@@ -326,6 +330,7 @@ pub async fn subscription_delete_account(
 /// account switch, making that UI boundary a real runtime boundary as well.
 #[tauri::command]
 pub async fn subscription_clear_runtime(
+    app: AppHandle,
     local_account_id: String,
     active_state: State<'_, ActiveAccountState>,
     api_key_state: State<'_, ApiKeyState>,
@@ -334,6 +339,12 @@ pub async fn subscription_clear_runtime(
 ) -> Result<(), String> {
     if local_account_id.trim().is_empty() {
         return Err("local_account_id must not be empty".into());
+    }
+    // Revoke the gateway before async teardown, including teardown failures.
+    let gateway = app.state::<crate::gateway::GatewayState>();
+    if gateway.lock_matching_account(&local_account_id) {
+        use tauri::Emitter;
+        let _ = app.emit("gateway://snapshot-invalidated", ());
     }
     shutdown_sidecar(sidecar_state.inner().clone()).await?;
     active_state.clear_all().await;
@@ -388,7 +399,7 @@ fn validate_account_for_provider(provider: &str, account: &Account) -> Result<Pr
             id
         ));
     }
-    for_provider(id, |p| p.validate(&account.credential))?;
+    for_provider(id.clone(), |p| p.validate(&account.credential))?;
     Ok(id)
 }
 
@@ -449,7 +460,7 @@ pub async fn subscription_rename_account(
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
-    let mut vault = vault::load_for_account(&local_account_id, id)?
+    let mut vault = vault::load_for_account(&local_account_id, id.clone())?
         .ok_or_else(|| format!("no vault exists for provider {provider:?}"))?;
     let account = vault
         .accounts
@@ -459,7 +470,7 @@ pub async fn subscription_rename_account(
     account.label = label
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    vault::save_for_account(&local_account_id, id, &vault)
+    vault::save_for_account(&local_account_id, id.clone(), &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +487,7 @@ fn build_active_projection(
     account_id: &str,
 ) -> Option<(ActiveSnapshot, Option<String>)> {
     let account = vault.find_account(account_id)?;
-    let env = for_provider(id, |p| {
+    let env = for_provider(id.clone(), |p| {
         p.env_for_sidecar(account, vault.resolve_preset(account))
     });
     let bearer = if id == ProviderId::Anthropic {
@@ -507,18 +518,18 @@ async fn apply_active_projection(
     api_key_state: &ApiKeyState,
 ) {
     let Some(account_id) = vault.active_account_id.as_deref() else {
-        clear_active_projection(id, active_state, api_key_state).await;
+        clear_active_projection(id.clone(), active_state, api_key_state).await;
         return;
     };
-    let Some((snapshot, bearer)) = build_active_projection(id, vault, account_id) else {
+    let Some((snapshot, bearer)) = build_active_projection(id.clone(), vault, account_id) else {
         log::warn!(
             "subscription boot rebuild: active account {account_id:?} missing from {} vault; skipping",
             id.as_str()
         );
-        clear_active_projection(id, active_state, api_key_state).await;
+        clear_active_projection(id.clone(), active_state, api_key_state).await;
         return;
     };
-    active_state.set(id, snapshot).await;
+    active_state.set(id.clone(), snapshot).await;
     if id == ProviderId::Anthropic {
         api_key_state.set_oauth_bearer(bearer).await;
     }
@@ -529,7 +540,7 @@ async fn clear_active_projection(
     active_state: &ActiveAccountState,
     api_key_state: &ApiKeyState,
 ) {
-    active_state.set(id, ActiveSnapshot::default()).await;
+    active_state.set(id.clone(), ActiveSnapshot::default()).await;
     if id == ProviderId::Anthropic {
         api_key_state.set_oauth_bearer(None).await;
     }
@@ -555,11 +566,11 @@ pub async fn subscription_set_active(
     let id = ProviderId::parse(&provider)?;
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
 
-    let must_restart_sidecar = for_provider(id, |p| p.requires_sidecar_restart_on_active_switch());
+    let must_restart_sidecar = for_provider(id.clone(), |p| p.requires_sidecar_restart_on_active_switch());
     let (snapshot, anthropic_bearer) = match &account_id {
-        Some(target_id) => build_active_projection(id, &vault, target_id)
+        Some(target_id) => build_active_projection(id.clone(), &vault, target_id)
             .ok_or_else(|| format!("no account {target_id:?} in {provider} vault"))?,
         None => (ActiveSnapshot::default(), None),
     };
@@ -568,8 +579,8 @@ pub async fn subscription_set_active(
     if must_restart_sidecar {
         shutdown_sidecar(sidecar_state.inner().clone()).await?;
     }
-    vault::save_for_account(&local_account_id, id, &vault)?;
-    active_state.set(id, snapshot).await;
+    vault::save_for_account(&local_account_id, id.clone(), &vault)?;
+    active_state.set(id.clone(), snapshot).await;
 
     // Anthropic-only side effects: push the bearer into the in-process
     // ApiKeyState (the contract sidecar.rs:143-155 reads at spawn time) and
@@ -588,13 +599,13 @@ pub async fn subscription_get_active(
     local_account_id: String,
 ) -> Result<ActiveSnapshot, String> {
     let id = ProviderId::parse(&provider)?;
-    let Some(vault) = vault::load_for_account(&local_account_id, id)? else {
+    let Some(vault) = vault::load_for_account(&local_account_id, id.clone())? else {
         return Ok(ActiveSnapshot::default());
     };
     let Some(account_id) = vault.active_account_id.as_deref() else {
         return Ok(ActiveSnapshot::default());
     };
-    let Some((snapshot, _)) = build_active_projection(id, &vault, account_id) else {
+    let Some((snapshot, _)) = build_active_projection(id.clone(), &vault, account_id) else {
         return Ok(ActiveSnapshot::default());
     };
     Ok(snapshot)
@@ -612,7 +623,7 @@ pub async fn subscription_list_presets(
 ) -> Result<Vec<ProviderPreset>, String> {
     let id = ProviderId::parse(&provider)?;
     let vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     Ok(vault.presets.clone())
 }
 
@@ -625,16 +636,16 @@ pub async fn subscription_save_preset(
     preset: ProviderPreset,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let supports = for_provider(id, |p| p.supports_preset());
+    let supports = for_provider(id.clone(), |p| p.supports_preset());
     if !supports {
         return Err(format!("provider {provider:?} does not support presets"));
     }
     preset.validate()?;
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     vault.upsert_preset(preset);
-    vault::save_for_account(&local_account_id, id, &vault)
+    vault::save_for_account(&local_account_id, id.clone(), &vault)
 }
 
 /// Remove a preset by id. The default pointer and any account bindings
@@ -649,9 +660,9 @@ pub async fn subscription_delete_preset(
     let id = ProviderId::parse(&provider)?;
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     vault.remove_preset(&preset_id);
-    vault::save_for_account(&local_account_id, id, &vault)
+    vault::save_for_account(&local_account_id, id.clone(), &vault)
 }
 
 /// Set (or clear) the provider-level default preset id. Passing `None` clears
@@ -665,14 +676,14 @@ pub async fn subscription_set_default_preset(
     let id = ProviderId::parse(&provider)?;
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     if let Some(ref pid) = preset_id {
         if !vault.presets.iter().any(|p| &p.id == pid) {
             return Err(format!("preset id {pid:?} not found in {provider} vault"));
         }
     }
     vault.default_preset_id = preset_id;
-    vault::save_for_account(&local_account_id, id, &vault)
+    vault::save_for_account(&local_account_id, id.clone(), &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +701,7 @@ pub async fn subscription_get_preset(
 ) -> Result<Option<ProviderPreset>, String> {
     let id = ProviderId::parse(&provider)?;
     let vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     // Return the default preset from the v3 library, if one is set.
     let resolved = vault
         .default_preset_id
@@ -707,13 +718,13 @@ pub async fn subscription_set_preset(
     preset: Option<ProviderPreset>,
 ) -> Result<(), String> {
     let id = ProviderId::parse(&provider)?;
-    let supports = for_provider(id, |p| p.supports_preset());
+    let supports = for_provider(id.clone(), |p| p.supports_preset());
     if preset.is_some() && !supports {
         return Err(format!("provider {provider:?} does not support presets"));
     }
     let _mutation_guard = vault::VAULT_MUTATION_LOCK.lock().await;
     let mut vault =
-        vault::load_for_account(&local_account_id, id)?.unwrap_or_else(ProviderVault::empty);
+        vault::load_for_account(&local_account_id, id.clone())?.unwrap_or_else(ProviderVault::empty);
     match preset {
         Some(p) => {
             p.validate()?;
@@ -725,7 +736,7 @@ pub async fn subscription_set_preset(
             vault.default_preset_id = None;
         }
     }
-    vault::save_for_account(&local_account_id, id, &vault)
+    vault::save_for_account(&local_account_id, id.clone(), &vault)
 }
 
 // ---------------------------------------------------------------------------
@@ -938,7 +949,7 @@ pub fn claude_env_for_account(
         .path()
         .app_data_dir()
         .map_err(|e| format!("no app_data_dir: {e}"))?;
-    let entries = active::env_for_local_account(&app_data_dir, &local_account_id, id, &account_id)?;
+    let entries = active::env_for_local_account(&app_data_dir, &local_account_id, id.clone(), &account_id)?;
     // Start the OAuth-refresh watcher only after the account is validated.
     // A stale explicit reference must fail without leaving a watcher behind.
     if entries.is_some() && matches!(id, ProviderId::Anthropic) {
@@ -971,6 +982,52 @@ mod tests {
             value,
             serde_json::json!({ "key": "HTTP_PROXY", "value": "proxy" })
         );
+    }
+
+    #[test]
+    fn registered_api_key_account_uses_generic_crud_without_process_env() {
+        let mut account = sample_anthropic_account();
+        account.credential = ProviderCredential::ApiKey(
+            crate::subscription::vault::ApiKeyCredentialData {
+                provider_id: ProviderId::parse("custom:example").unwrap(),
+                access_token: "generic-test-key".into(),
+                stored_at_ms: 0,
+                base_url: Some("https://example.com/v1".into()),
+            },
+        );
+        let provider = validate_account_for_provider("custom:example", &account).unwrap();
+        assert!(validate_account_for_provider("custom:other", &account).is_err());
+        let mut vault = ProviderVault::empty();
+        vault.accounts.push(account.clone());
+        let (snapshot, bearer) = build_active_projection(provider, &vault, &account.id).unwrap();
+        assert!(snapshot.env.is_empty());
+        assert!(bearer.is_none());
+    }
+
+    #[test]
+    fn commandcode_generic_save_validation_and_projection_are_wired() {
+        let mut account = sample_anthropic_account();
+        account.credential = ProviderCredential::Commandcode(
+            crate::subscription::vault::CommandCodeCredentialData {
+                access_token: "commandcode-test-key".into(),
+                stored_at_ms: 0,
+                base_url: None,
+            },
+        );
+        assert_eq!(
+            validate_account_for_provider("commandcode", &account).unwrap(),
+            ProviderId::Commandcode
+        );
+        assert!(validate_account_for_provider("opencode", &account).is_err());
+        let mut vault = ProviderVault::empty();
+        vault.accounts.push(account.clone());
+        let (snapshot, bearer) =
+            build_active_projection(ProviderId::Commandcode, &vault, &account.id).unwrap();
+        assert!(snapshot.env.contains(&(
+            "COMMAND_CODE_API_KEY".into(),
+            "commandcode-test-key".into()
+        )));
+        assert!(bearer.is_none());
     }
 
     fn sample_anthropic_account() -> Account {
@@ -1229,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn save_rejects_unknown_provider() {
+    fn save_rejects_dynamic_provider_with_mismatched_credential() {
         let err = validate_account_for_provider("bogus", &sample_anthropic_account())
             .expect_err("should reject");
         assert!(err.contains("bogus"));

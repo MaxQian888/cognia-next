@@ -1,3 +1,4 @@
+import type { TrayUsageSnapshot } from "./types"
 import {
   formatAccountLine,
   formatMeterShort,
@@ -61,6 +62,14 @@ describe("worstMeterOf", () => {
 })
 
 describe("summarizeLimits", () => {
+  it("keeps relay branding separate from the stable vault account key", () => {
+    const [summary] = summarizeLimits([
+      { provider: "codex", sourceId: "moonshot", accountId: "relay", fetchedAt: 1, meters: [] },
+    ])
+    expect(summary).toMatchObject({ key: "codex:relay", provider: "moonshot" })
+    expect(formatAccountLine(summary, 1)).toBe("moonshot")
+  })
+
   it("projects ProviderLimits into per-account summaries", () => {
     const snapshots: ProviderLimits[] = [
       {

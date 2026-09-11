@@ -149,3 +149,37 @@ describe("regression: the option universe a picker and the router share", () => 
     expect(ids).toEqual(["obj"])
   })
 })
+
+it("includes registered plugin models and removes stale configured models on unload", async () => {
+  const { registerProviderDefinition, unregisterProvider } =
+    await import("@cognia/provider-core/providers/provider-loader")
+  const id = "models:api"
+  registerProviderDefinition(
+    {
+      id,
+      name: "Example",
+      type: "cloud",
+      protocol: "openai",
+      apiKeyRequired: true,
+      baseURLRequired: false,
+      defaultModel: "plugin-model",
+      defaultEnabled: false,
+      category: "specialized",
+      models: [],
+    },
+    "plugin"
+  )
+  const settings = {
+    [id]: { providerId: id, enabled: true, defaultModel: "plugin-model" },
+  } as never
+  try {
+    expect(
+      collectOptions(settings, []).some(
+        (option) => option.providerId === id && option.modelId === "plugin-model"
+      )
+    ).toBe(true)
+  } finally {
+    unregisterProvider(id)
+  }
+  expect(collectOptions(settings, []).some((option) => option.providerId === id)).toBe(false)
+})

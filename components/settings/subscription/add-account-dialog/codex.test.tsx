@@ -13,7 +13,11 @@ const cancelCodexDeviceCodeMock = jest.fn()
 jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
   persistProviderAccount: (...args: unknown[]) => persistProviderAccountMock(...args),
 }))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/subscription/core/transport", () => ({
+  listPresets: jest.fn(async () => [
+    { id: "relay", label: "My relay", baseUrl: "https://relay.example" },
+  ]),
   reauthenticateManagedCodexAccount: jest.fn(),
   replaceAccountCredential: (...args: unknown[]) => replaceAccountCredentialMock(...args),
 }))
@@ -218,4 +222,14 @@ describe("CodexAddAccountDialog", () => {
     expect(persistProviderAccountMock).not.toHaveBeenCalled()
     jest.useRealTimers()
   })
+})
+
+it("persists the selected endpoint preset when adding a codex account", async () => {
+  render(<CodexAddAccountDialog open onOpenChange={() => {}} />)
+  fireEvent.change(await screen.findByRole("combobox"), { target: { value: "relay" } })
+  await userEvent.click(screen.getByRole("button", { name: /adopt/i }))
+  expect(persistProviderAccountMock).toHaveBeenCalledWith(
+    "codex",
+    expect.objectContaining({ presetId: "relay" })
+  )
 })

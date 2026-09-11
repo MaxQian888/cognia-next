@@ -90,3 +90,29 @@ describe("ADR-0090 Phase 1 — legacy alias stability", () => {
     }
   })
 })
+
+it("offers only CommandCode's official gateway and custom endpoints for its account keys", () => {
+  expect(buildPresetTemplates("commandcode")).toEqual([
+    expect.objectContaining({ templateId: "custom", provider: "commandcode" }),
+    expect.objectContaining({
+      templateId: "commandcode",
+      provider: "commandcode",
+      baseUrl: "https://api.commandcode.ai/provider/v1",
+    }),
+  ])
+})
+
+it("builds a default template for a registry-defined provider without catalog edits", () => {
+  expect(
+    buildPresetTemplates("my-provider", {
+      id: "my-provider",
+      name: "My Provider",
+      authMode: "api-key",
+      source: "custom",
+      baseUrl: "https://provider.example/v1",
+    })
+  ).toEqual([
+    expect.objectContaining({ templateId: "custom" }),
+    expect.objectContaining({ templateId: "my-provider", baseUrl: "https://provider.example/v1" }),
+  ])
+})

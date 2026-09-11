@@ -144,12 +144,14 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
     })
 
     let cancelled = false
+    const syncAbort = new AbortController()
     const cleanup: Array<() => void> = []
     let disposed = false
     const disposeSubscriptions = () => {
       if (disposed) return
       disposed = true
       cancelled = true
+      syncAbort.abort()
       for (const dispose of cleanup) {
         try {
           dispose()
@@ -352,7 +354,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
 
       cleanup.push(
         remoteEventResyncCoordinator.register("*", async () => {
-          await runSyncDown()
+          await runSyncDown({ signal: syncAbort.signal })
           await hostStateSync?.resync()
         })
       )
@@ -405,7 +407,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
           // row unrendered behind that state. `interactive` and `background`
           // keep draining on the returned run, each behind an idle wait, so
           // they interleave with the shell instead of preceding it.
-          const staged = runStagedSyncDown()
+          const staged = runStagedSyncDown({ signal: syncAbort.signal })
           await staged.critical
           if (cancelled || !eventReady) return
           updateRuntimeSnapshot({ connectionState: "online" })

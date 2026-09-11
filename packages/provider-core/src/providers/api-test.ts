@@ -11,6 +11,7 @@ import {
 } from "@cognia/provider-types/built-in-provider-catalog"
 import { LOCAL_PROVIDER_CONFIGS, normalizeBaseUrl } from "./local-providers"
 import { isTauri, proxyFetch } from "./runtime-adapters"
+import { resolveProviderProtocol } from "../../../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
 
 export interface ApiTestResult {
   success: boolean
@@ -572,6 +573,81 @@ export async function probeProviderConnection(
   const localProviderDefaults = LOCAL_PROVIDER_TEST_CONFIGS
 
   switch (providerId) {
+    case "commandcode": {
+      const start = Date.now()
+      const model = input.model || getBuiltInProviderDefaultModel(providerId)
+      const path =
+        resolveProviderProtocol(providerId, model) === "anthropic" ? "messages" : "chat/completions"
+      const url = (baseURL?.trim() || getBuiltInProviderDefaultBaseURL(providerId) || "").replace(
+        /\/+$/,
+        ""
+      )
+      try {
+        // /models is public: only an authenticated request verifies the key and plan.
+        const response = await proxyFetch(`${url}/${path}`, {
+          method: "POST",
+          headers: {
+            ...customHeaders,
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            ...(path === "messages" ? { "anthropic-version": "2023-06-01" } : {}),
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 1,
+            messages: [{ role: "user", content: "Reply OK." }],
+          }),
+        })
+        await response.body?.cancel()
+        return toAuthoritativeResult({
+          success: response.ok,
+          message: response.ok ? "Connected successfully." : `API error: ${response.status}`,
+          latency_ms: Date.now() - start,
+        })
+      } catch (cause) {
+        return toAuthoritativeResult({
+          success: false,
+          message: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    }
+    case "codex": {
+      const start = Date.now()
+      try {
+        // Codex subscription accounts expose Responses, including behind relays.
+        // A models-list probe does not exercise their authenticated transport.
+        const url = (baseURL?.trim() || getBuiltInProviderDefaultBaseURL(providerId) || "").replace(
+          /\/+$/,
+          ""
+        )
+        const response = await proxyFetch(`${url}/responses`, {
+          method: "POST",
+          headers: {
+            ...customHeaders,
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: input.model ?? getBuiltInProviderDefaultModel(providerId),
+            instructions: "Reply briefly.",
+            input: [{ role: "user", content: [{ type: "input_text", text: "Reply OK." }] }],
+            store: false,
+            stream: true,
+          }),
+        })
+        await response.body?.cancel()
+        return toAuthoritativeResult({
+          success: response.ok,
+          message: response.ok ? "Connected successfully." : `API error: ${response.status}`,
+          latency_ms: Date.now() - start,
+        })
+      } catch (cause) {
+        return toAuthoritativeResult({
+          success: false,
+          message: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    }
     case "openai":
       return toAuthoritativeResult(await testOpenAIConnection(apiKey, baseURL))
     case "anthropic":
@@ -621,7 +697,8 @@ export async function probeProviderConnection(
             resolvedBaseURL,
             apiKey,
             protocol,
-            input.model ?? getBuiltInProviderDefaultModel(providerId)
+            input.model ?? getBuiltInProviderDefaultModel(providerId),
+            customHeaders
           )
         )
       }

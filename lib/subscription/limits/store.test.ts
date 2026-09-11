@@ -6,6 +6,7 @@ import "fake-indexeddb/auto"
 
 import { latestLimitsSnapshot, recordLimitsSnapshot } from "./store"
 import type { ProviderLimits } from "@/types/subscription"
+import { queryAccountLimits } from "./runner"
 
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
 
@@ -58,6 +59,47 @@ describe("recordLimitsSnapshot", () => {
 })
 
 describe("latestLimitsSnapshot", () => {
+  it("reads a freshly queried coding-plan snapshot through its vault account key", async () => {
+    const result = await queryAccountLimits("codex", "relay", {
+      getAccount: async () => ({
+        id: "relay",
+        label: "Kimi plan",
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        presetId: "kimi",
+        credential: {
+          provider: "codex",
+          authMode: "api_key",
+          accessToken: "test",
+          refreshToken: "",
+          idTokenRaw: "",
+          expiresAtMs: 0,
+          storedAtMs: 0,
+        },
+      }),
+      listPresets: async () => [
+        {
+          id: "kimi",
+          label: "Kimi",
+          baseUrl: "https://api.kimi.com/coding/",
+          templateId: "kimi-coding",
+        },
+      ],
+      authedGet: async () => '{"usage":{"limit":100,"remaining":75}}',
+      now: () => 500,
+    })
+    expect(result).not.toBeNull()
+    await recordLimitsSnapshot(result!)
+    expect(await latestLimitsSnapshot("codex", "relay")).toMatchObject({
+      provider: "codex",
+      sourceId: "kimi-coding",
+      accountId: "relay",
+      fetchedAt: 500,
+      meters: [expect.objectContaining({ usedPct: 25 })],
+    })
+    expect(await latestLimitsSnapshot("anthropic", "relay")).toBeNull()
+  })
+
   it("returns null when the account has no snapshot", async () => {
     expect(await latestLimitsSnapshot("anthropic", "nope")).toBeNull()
   })

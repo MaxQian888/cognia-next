@@ -119,13 +119,13 @@ const installWorkflowRunStatusSyncMock = jest.fn()
 const installNetworkSyncMock = jest.fn(async () => () => {})
 const installResumeSyncMock = jest.fn(async () => () => {})
 jest.mock("@/lib/sync/companion-sync", () => ({
-  runSyncDown: () => runSyncDownMock(),
+  runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
   // The provider awaits `critical` only. Standing it on the same mock keeps
   // every "how many pulls did the boot do" assertion meaningful, and mirrors
   // the real contract: `critical` rejects on a broken pipeline, `whenComplete`
   // never does.
-  runStagedSyncDown: () => {
-    const critical = Promise.resolve().then(() => runSyncDownMock())
+  runStagedSyncDown: (...args: unknown[]) => {
+    const critical = Promise.resolve().then(() => runSyncDownMock(...args))
     return { critical, whenComplete: critical.catch(() => []) }
   },
   installForegroundSync: () => installForegroundSyncMock(),
@@ -636,6 +636,21 @@ describe("<CompanionBootProvider /> — paired", () => {
     await waitFor(() => expect(registerCompanionRuntimeTargetMock).toHaveBeenCalled())
     expect(transportCallMock).not.toHaveBeenCalledWith("host_feature_manifest", {})
     expect(installHostStateSyncMock).not.toHaveBeenCalled()
+  })
+
+  it("aborts the Host sync lifetime when its bindings unmount", async () => {
+    setMobile()
+    hydrateMock.mockResolvedValueOnce(pairedConfig)
+    const view = render(
+      <CompanionBootProvider>
+        <div />
+      </CompanionBootProvider>
+    )
+    await waitFor(() => expect(runSyncDownMock).toHaveBeenCalled())
+    const signal = runSyncDownMock.mock.calls[0][0].signal as AbortSignal
+    expect(signal.aborted).toBe(false)
+    view.unmount()
+    expect(signal.aborted).toBe(true)
   })
 
   it("triggers sync + installs listeners + registers push when paired", async () => {

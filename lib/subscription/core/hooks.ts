@@ -9,7 +9,14 @@
 //
 // All hooks degrade to no-ops outside Tauri (return empty arrays / null).
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useAccountStore } from "@/stores/account/account-store"
+import {
+  listSubscriptionProviders,
+  subscribeSubscriptionProviders,
+  type SubscriptionProviderDefinition,
+} from "./provider-registry"
 
 import { isTauri } from "@/lib/tauri"
 import { subscribeSubscriptionChanged } from "./subscription-events"
@@ -19,6 +26,7 @@ import {
   getActiveAccount,
   getProviderPreset,
   listAccounts,
+  listSubscriptionProviderIds,
   listPresets,
   renameAccount,
   saveProviderPreset,
@@ -37,6 +45,176 @@ import type {
 // ---------------------------------------------------------------------------
 // useAccounts(provider)
 // ---------------------------------------------------------------------------
+
+export function useSubscriptionProviders(): SubscriptionProviderDefinition[] {
+  const customs = useSettingsStore((state) => state.settings?.customProviders)
+  const [revision, setRevision] = useState(0)
+  useEffect(() => subscribeSubscriptionProviders(() => setRevision((value) => value + 1)), [])
+  // The mutable registry changes independently of the settings snapshot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => listSubscriptionProviders(customs), [customs, revision])
+}
+
+/** One subscription listener regardless of the number of registered suppliers. */
+export function useSubscriptionAccounts() {
+  const registered = useSubscriptionProviders()
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const [storedProviders, setProviders] = useState(registered)
+  const [loadedScope, setLoadedScope] = useState<string | null | undefined>(undefined)
+  const scope = useRef(localAccountId)
+  useLayoutEffect(() => {
+    scope.current = localAccountId
+  }, [localAccountId])
+  const sameScope = loadedScope === localAccountId
+  const providers = sameScope ? storedProviders : registered
+  const [rows, setRows] = useState<
+    Record<string, Pick<UseAccountsResult, "accounts" | "activeAccountId" | "error">>
+  >({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState<
+    Record<string, { action: UseAccountsResult["pendingAction"]; accountId: string }>
+  >({})
+  const generation = useRef(0)
+  const reload = useCallback(async () => {
+    const current = ++generation.current
+    if (!isTauri() || !localAccountId) {
+      setProviders(registered)
+      setRows({})
+      setLoadedScope(localAccountId)
+      setLoading(false)
+      setError(null)
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const inventory = await listSubscriptionProviderIds()
+      const definitions = [...registered]
+      for (const id of inventory) {
+        if (!definitions.some((definition) => definition.id === id)) {
+          definitions.push({
+            id,
+            name: id,
+            authMode: "api-key",
+            source: "unavailable",
+            available: false,
+          })
+        }
+      }
+      const entries = await Promise.all(
+        definitions.map(async (definition) => {
+          try {
+            const [accounts, active] = await Promise.all([
+              listAccounts(definition.id),
+              getActiveAccount(definition.id),
+            ])
+            return [
+              definition.id,
+              { accounts, activeAccountId: active.activeAccountId ?? null, error: null },
+            ] as const
+          } catch (cause) {
+            return [
+              definition.id,
+              { accounts: [], activeAccountId: null, error: errorMessage(cause) },
+            ] as const
+          }
+        })
+      )
+      if (current !== generation.current) return
+      setProviders(definitions)
+      setLoadedScope(localAccountId)
+      setRows(Object.fromEntries(entries))
+    } catch (cause) {
+      if (current === generation.current) {
+        setRows({})
+        setProviders(registered)
+        setLoadedScope(localAccountId)
+        setError(errorMessage(cause))
+      }
+    } finally {
+      if (current === generation.current) setLoading(false)
+    }
+  }, [registered, localAccountId])
+  useEffect(() => {
+    setPending({})
+    void reload()
+    const unsubscribe = subscribeSubscriptionChanged(() => {
+      void reload()
+    })
+    return () => {
+      generation.current += 1
+      unsubscribe()
+    }
+  }, [reload])
+  const byProvider = useMemo(
+    () =>
+      Object.fromEntries(
+        providers.map((provider) => {
+          const run = async (
+            action: NonNullable<UseAccountsResult["pendingAction"]>,
+            accountId: string,
+            operation: () => Promise<unknown>
+          ) => {
+            if (scope.current !== localAccountId || !localAccountId)
+              throw new Error("Local account changed")
+            setPending((value) => ({ ...value, [provider.id]: { action, accountId } }))
+            try {
+              await operation()
+              // Mutating transport calls publish subscriptionChanged; that listener
+              // owns the refresh so one action does not read every vault twice.
+            } catch (cause) {
+              if (scope.current !== localAccountId) throw cause
+              setRows((value) => ({
+                ...value,
+                [provider.id]: {
+                  accounts: value[provider.id]?.accounts ?? [],
+                  activeAccountId: value[provider.id]?.activeAccountId ?? null,
+                  error: errorMessage(cause),
+                },
+              }))
+              throw cause
+            } finally {
+              if (scope.current === localAccountId)
+                setPending((value) => {
+                  const next = { ...value }
+                  delete next[provider.id]
+                  return next
+                })
+            }
+          }
+          const result: UseAccountsResult = {
+            accounts: sameScope ? (rows[provider.id]?.accounts ?? []) : [],
+            activeAccountId: sameScope ? (rows[provider.id]?.activeAccountId ?? null) : null,
+            error: sameScope ? (rows[provider.id]?.error ?? null) : null,
+            loading,
+            pendingAction: pending[provider.id]?.action ?? null,
+            pendingAccountId: pending[provider.id]?.accountId ?? null,
+            reload,
+            setActive: (id) => run("activate", id ?? "", () => setActiveAccount(provider.id, id)),
+            rename: (id, label) => run("rename", id, () => renameAccount(provider.id, id, label)),
+            remove: (id, replacementAccountId = null) =>
+              run("delete", id, () =>
+                deleteProviderAccount({
+                  provider: provider.id,
+                  accountId: id,
+                  replacementAccountId,
+                })
+              ),
+          }
+          return [provider.id, result]
+        })
+      ),
+    [providers, rows, pending, loading, reload, sameScope, localAccountId]
+  )
+  return {
+    providers,
+    byProvider,
+    loading: !sameScope || loading,
+    error: sameScope ? error : null,
+    reload,
+  }
+}
 
 export interface UseAccountsResult {
   /** List of summaries (no secrets). Empty until the first load resolves. */

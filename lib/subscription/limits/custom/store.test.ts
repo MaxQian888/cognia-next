@@ -22,8 +22,10 @@ function src(over: Partial<CustomLimitsSource> = {}): CustomLimitsSource {
 }
 
 describe("newCustomSourceId / emptyCustomSource", () => {
-  it("derives a stable id and a blank balance source", () => {
-    expect(newCustomSourceId(5)).toMatch(/^cls-/)
+  it("creates distinct ids and a blank balance source", () => {
+    const first = newCustomSourceId()
+    expect(first).toMatch(/^cls-/)
+    expect(newCustomSourceId()).not.toBe(first)
     const empty = emptyCustomSource("x")
     expect(empty).toMatchObject({ id: "x", name: "", extract: { kind: "balance" } })
   })

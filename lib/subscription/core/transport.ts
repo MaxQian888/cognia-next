@@ -1,13 +1,15 @@
 // Typed Tauri command wrappers for the ADR-0025 unified subscription module.
 //
-// Routes everything through the module-scope `transport` from `@/lib/tauri`
-// so Capacitor mode (M2.7) can proxy these to the desktop's keyring through
-// the companion API. Eighteen commands total:
+// Routes through the module-scope `transport` from `@/lib/tauri`. The current
+// Companion manifest classifies vault commands as client.local/internal;
+// this wrapper does not authorize remote clients to access the desktop keyring.
+// The command families include:
 //   - 10 shared CRUD + active + preset
 //   - 1 Anthropic (PKCE save hook)
 //   - 5 Codex OAuth (discover + 4 device-code steps)
 //   - 2 OpenCode (discover + save zen key)
 
+import { getSubscriptionProvider } from "./provider-registry"
 import { transport } from "@/lib/tauri"
 import { markSubscriptionVaultChanged } from "@/lib/subscription/sync/change-tracker"
 import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
@@ -35,6 +37,38 @@ import { clearCredentialBlocks } from "@/lib/subscription/retry/failover"
 function vaultMutated(): void {
   markSubscriptionVaultChanged()
   notifySubscriptionChanged()
+}
+
+/** Model discovery is account/endpoint-specific; declared/manual models remain available. */
+async function vaultConnectionMutated(provider: ProviderId, localAccountId: string): Promise<void> {
+  try {
+    const definition = getSubscriptionProvider(provider)
+    if (definition && definition.source !== "plugin") return
+    const { useSettingsStore } = await import("@/stores/settings/settings-store")
+    if (useAccountStore.getState().unlockedAccountId !== localAccountId) return
+    const store = useSettingsStore.getState()
+    if (!definition) {
+      const custom = store.settings?.customProviders?.find(
+        (entry) => entry.id === provider && entry.subscription
+      )
+      if (custom?.discoveredModels?.length || custom?.discoveredModelsLastFetched !== undefined) {
+        await store.updateCustomProvider(provider, {
+          discoveredModels: [],
+          discoveredModelsLastFetched: undefined,
+        })
+      }
+      return
+    }
+    const config = store.settings?.providerSettings?.[provider]
+    if (config?.discoveredModels?.length || config?.discoveredModelsLastFetched !== undefined) {
+      await store.setProviderConfig(provider, {
+        discoveredModels: [],
+        discoveredModelsLastFetched: undefined,
+      })
+    }
+  } finally {
+    vaultMutated()
+  }
 }
 
 function requireLocalAccountId(): string {
@@ -74,6 +108,11 @@ export async function listAccounts(provider: ProviderId): Promise<AccountSummary
   })
 }
 
+/** Includes persisted providers whose declaring plugin is currently disabled. */
+export async function listSubscriptionProviderIds(): Promise<ProviderId[]> {
+  return transport.call<ProviderId[]>("subscription_list_provider_ids", subscriptionScope())
+}
+
 export async function getAccount(provider: ProviderId, accountId: string): Promise<Account | null> {
   const got = await transport.call<Account | null>("subscription_get_account", {
     provider,
@@ -97,8 +136,9 @@ export async function getAccountDetail(
 }
 
 export async function saveAccount(provider: ProviderId, account: Account): Promise<void> {
-  await transport.call("subscription_save_account", { provider, ...subscriptionScope(), account })
-  vaultMutated()
+  const scope = subscriptionScope()
+  await transport.call("subscription_save_account", { provider, ...scope, account })
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 export async function replaceAccountCredential(
@@ -106,9 +146,10 @@ export async function replaceAccountCredential(
   accountId: string,
   credential: ProviderCredential
 ): Promise<AccountDetail> {
+  const scope = subscriptionScope()
   const detail = await transport.call<AccountDetail>("subscription_replace_account_credential", {
     provider,
-    ...subscriptionScope(),
+    ...scope,
     accountId,
     credential,
   })
@@ -117,7 +158,7 @@ export async function replaceAccountCredential(
   // nothing else clears that latch, so without this a re-login would leave the
   // account looking dead until the next restart.
   clearCredentialBlocks(provider, accountId)
-  vaultMutated()
+  await vaultConnectionMutated(provider, scope.localAccountId)
   return detail
 }
 
@@ -126,13 +167,14 @@ export async function deleteAccount(
   accountId: string,
   replacementAccountId: string | null = null
 ): Promise<void> {
+  const scope = subscriptionScope()
   await transport.call("subscription_delete_account", {
     provider,
-    ...subscriptionScope(),
+    ...scope,
     accountId,
     replacementAccountId,
   })
-  vaultMutated()
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 export async function renameAccount(
@@ -165,8 +207,26 @@ export async function setActiveAccount(
   provider: ProviderId,
   accountId: string | null
 ): Promise<void> {
-  await transport.call("subscription_set_active", { provider, ...subscriptionScope(), accountId })
-  vaultMutated()
+  const scope = subscriptionScope()
+  await transport.call("subscription_set_active", { provider, ...scope, accountId })
+  await vaultConnectionMutated(provider, scope.localAccountId)
+  const definition = getSubscriptionProvider(provider)
+  if (accountId && definition?.source === "plugin") {
+    const { useSettingsStore } = await import("@/stores/settings/settings-store")
+    if (useAccountStore.getState().unlockedAccountId !== scope.localAccountId) return
+    const store = useSettingsStore.getState()
+    if (!store.settings?.providerSettings?.[provider]) {
+      // First activation makes the declared models selectable without a second
+      // setup form. Existing settings, including explicit disable, remain authoritative.
+      await store.setProviderConfig(provider, {
+        enabled: true,
+        baseURL: definition.baseUrl,
+        apiProtocol: definition.protocol,
+        ...(definition.apiFlavor ? { apiFlavor: definition.apiFlavor } : {}),
+        defaultModel: definition.models?.[0],
+      })
+    }
+  }
 }
 
 /**
@@ -202,8 +262,9 @@ export async function setProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset | null
 ): Promise<void> {
-  await transport.call("subscription_set_preset", { provider, ...subscriptionScope(), preset })
-  vaultMutated()
+  const scope = subscriptionScope()
+  await transport.call("subscription_set_preset", { provider, ...scope, preset })
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 // ---------------------------------------------------------------------------
@@ -223,18 +284,20 @@ export async function saveProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset
 ): Promise<void> {
-  await transport.call("subscription_save_preset", { provider, ...subscriptionScope(), preset })
-  vaultMutated()
+  const scope = subscriptionScope()
+  await transport.call("subscription_save_preset", { provider, ...scope, preset })
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 /** Remove a preset by id; also clears the default + any account bindings to it. */
 export async function deleteProviderPreset(provider: ProviderId, presetId: string): Promise<void> {
+  const scope = subscriptionScope()
   await transport.call("subscription_delete_preset", {
     provider,
-    ...subscriptionScope(),
+    ...scope,
     presetId,
   })
-  vaultMutated()
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 /** Set or clear the provider-level default preset id. */
@@ -242,12 +305,13 @@ export async function setDefaultPreset(
   provider: ProviderId,
   presetId: string | null
 ): Promise<void> {
+  const scope = subscriptionScope()
   await transport.call("subscription_set_default_preset", {
     provider,
-    ...subscriptionScope(),
+    ...scope,
     presetId,
   })
-  vaultMutated()
+  await vaultConnectionMutated(provider, scope.localAccountId)
 }
 
 // ---------------------------------------------------------------------------

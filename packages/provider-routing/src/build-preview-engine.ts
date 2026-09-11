@@ -15,13 +15,21 @@ import { createMappingRegistry } from "./model-mapping-registry"
 import { ProviderRoutingEngine, type RoutingEngineDeps } from "./provider-routing-engine"
 import { getSessionDeployment, releaseSessionDeployment } from "./session-affinity-store"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
-import { getModelConfig } from "@cognia/provider-types/provider"
+import {
+  getAllProviders,
+  type CustomProviderSettings,
+  type ProviderModelDiscoveryEntry,
+} from "@cognia/provider-types/provider"
 import { isLocalProviderName } from "@cognia/provider-types/local-provider"
 import {
   resolveModelPriceUsdPer1M,
   type PriceLookupSettings,
 } from "@cognia/provider-core/providers/model-pricing"
 import { getCatalogModelMetadata } from "@cognia/provider-core/providers/models-dev-sync"
+import {
+  getProviderDefinition,
+  listProviderDefinitions,
+} from "@cognia/provider-core/providers/provider-loader"
 import {
   getModelContextLimits,
   getModelMaxTokens,
@@ -39,15 +47,17 @@ export interface RoutingEngineSettings extends PriceLookupSettings {
   modelMappings?: ModelMapping[]
   routingConfig?: RoutingConfig
   providerSettings?: PriceLookupSettings["providerSettings"] &
-    Record<string, { enabled?: boolean } | undefined>
+    Record<
+      string,
+      { enabled?: boolean; discoveredModels?: ProviderModelDiscoveryEntry[] } | undefined
+    >
   customProviders?: Array<{
     id: string
     providerId?: string
     enabled?: boolean
     defaultModel?: string
-    customModelMetadata?: NonNullable<
-      PriceLookupSettings["customProviders"]
-    >[number]["customModelMetadata"]
+    customModelMetadata?: Record<string, RoutingModelMetadata | undefined>
+    subscription?: CustomProviderSettings["subscription"]
   }>
 }
 
@@ -56,69 +66,119 @@ export interface RoutingCatalogSnapshot {
   capabilities: ReadonlyMap<string, RoutingCandidateCapabilities | undefined>
 }
 
-const catalogSnapshots = new WeakMap<object, RoutingCatalogSnapshot>()
+const catalogSnapshots = new WeakMap<
+  object,
+  {
+    snapshot: RoutingCatalogSnapshot
+    definitions: ReturnType<typeof listProviderDefinitions>
+  }
+>()
 
 function catalogKey(providerId: string, modelId: string): string {
   return `${providerId}\0${modelId}`
 }
 
-function resolveCandidateCapabilities(
+type RoutingModelMetadata = Partial<ProviderModelDiscoveryEntry> & {
+  capabilities?: { vision?: boolean; functionCalling?: boolean; streaming?: boolean }
+}
+
+function resolveCandidateMetadata(
   appSettings: RoutingEngineSettings,
   id: string,
-  modelId: string
-): RoutingCandidateCapabilities | undefined {
+  modelId: string,
+  providerCatalog = getAllProviders()
+): RoutingModelMetadata | undefined {
   const discovered = appSettings.providerSettings?.[id]?.discoveredModels?.find(
     (model) => model.id === modelId
   )
-  const custom = appSettings.customProviders?.find((provider) => provider.id === id)
-    ?.customModelMetadata?.[modelId]
+  const customProvider = appSettings.customProviders?.find((provider) => provider.id === id)
+  const custom = customProvider?.customModelMetadata?.[modelId]
   const catalog = getCatalogModelMetadata(id, modelId)
-  const builtIn = getModelConfig(id, modelId)
-  const source = discovered ?? custom ?? catalog ?? builtIn
+  const providerModel = providerCatalog[id]?.models.find((model) => model.id === modelId)
+  // Subscription discovery describes this account's real limits. Ordinary
+  // custom provider metadata remains an explicit user override.
+  const sources = (
+    customProvider?.subscription
+      ? [discovered, custom, catalog, providerModel]
+      : [custom, discovered, catalog, providerModel]
+  ).filter((source): source is RoutingModelMetadata => source !== undefined)
+  if (!sources.length) return undefined
+  const output: RoutingModelMetadata = {}
+  const fields = [
+    "supportsTools",
+    "supportsVision",
+    "supportsAudio",
+    "supportsVideo",
+    "supportsReasoning",
+    "supportsStructuredOutput",
+    "supportsStreaming",
+    "contextLength",
+    "maxInputTokens",
+    "maxOutputTokens",
+  ] as const
+  for (const field of fields) {
+    for (const source of sources) {
+      if (source.knownFields && !source.knownFields.includes(field)) continue
+      const alias =
+        field === "supportsTools"
+          ? source.capabilities?.functionCalling
+          : field === "supportsVision"
+            ? source.capabilities?.vision
+            : field === "supportsStreaming"
+              ? source.capabilities?.streaming
+              : undefined
+      const value = source[field] ?? alias
+      if (typeof value === "boolean" && field.startsWith("supports")) {
+        output[field] = value as never
+        break
+      }
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value > 0 &&
+        !field.startsWith("supports")
+      ) {
+        output[field] = value as never
+        break
+      }
+    }
+  }
+  return output
+}
+
+function resolveCandidateCapabilities(
+  appSettings: RoutingEngineSettings,
+  id: string,
+  modelId: string,
+  providerCatalog = getAllProviders()
+): RoutingCandidateCapabilities | undefined {
+  const source = resolveCandidateMetadata(appSettings, id, modelId, providerCatalog)
+  const dynamicProtocol = getProviderDefinition(id)?.protocol
+  const transportStreaming =
+    appSettings.customProviders?.some((provider) => provider.id === id) ||
+    dynamicProtocol === "openai" ||
+    dynamicProtocol === "anthropic"
+      ? true
+      : undefined
   if (!source) {
     // Custom OpenAI-compatible gateways are dispatched through streamText even
     // when the user has not supplied optional per-model metadata. Preserve
     // fail-closed behavior for undeclared rich capabilities, but do not reject
     // an explicitly configured custom provider from the mandatory streaming
     // path solely because its model has no catalog row.
-    return appSettings.customProviders?.some((provider) => provider.id === id)
-      ? { streaming: true }
-      : undefined
+    return transportStreaming ? { streaming: true } : undefined
   }
-  const customCapabilities =
-    "capabilities" in source
-      ? (source.capabilities as
-          | {
-              vision?: boolean
-              functionCalling?: boolean
-              streaming?: boolean
-            }
-          | undefined)
-      : undefined
-  const asBoolean = (value: unknown): boolean | undefined =>
-    typeof value === "boolean" ? value : undefined
   return {
-    tools: asBoolean(
-      ("supportsTools" in source ? source.supportsTools : undefined) ??
-        customCapabilities?.functionCalling
-    ),
-    vision: asBoolean(
-      ("supportsVision" in source ? source.supportsVision : undefined) ?? customCapabilities?.vision
-    ),
-    audio: asBoolean("supportsAudio" in source ? source.supportsAudio : undefined),
-    video: asBoolean("supportsVideo" in source ? source.supportsVideo : undefined),
-    reasoning: asBoolean("supportsReasoning" in source ? source.supportsReasoning : undefined),
-    structuredOutput: asBoolean(
-      "supportsStructuredOutput" in source ? source.supportsStructuredOutput : undefined
-    ),
-    streaming: asBoolean(
-      ("supportsStreaming" in source ? source.supportsStreaming : undefined) ??
-        customCapabilities?.streaming
-    ),
-    contextTokens:
-      "contextLength" in source && typeof source.contextLength === "number"
-        ? source.contextLength
-        : undefined,
+    tools: source.supportsTools,
+    vision: source.supportsVision,
+    audio: source.supportsAudio,
+    video: source.supportsVideo,
+    reasoning: source.supportsReasoning,
+    structuredOutput: source.supportsStructuredOutput,
+    // This is the protocol's existing streamText fallback, not a newly known
+    // model capability. Explicit non-streaming metadata still takes priority.
+    streaming: source.supportsStreaming ?? transportStreaming,
+    contextTokens: source.contextLength,
   }
 }
 
@@ -127,7 +187,13 @@ export function getRoutingCatalogSnapshot(
   appSettings: RoutingEngineSettings
 ): RoutingCatalogSnapshot {
   const existing = catalogSnapshots.get(appSettings)
-  if (existing) return existing
+  const definitions = listProviderDefinitions()
+  if (
+    existing &&
+    definitions.length === existing.definitions.length &&
+    definitions.every((definition, index) => definition === existing.definitions[index])
+  )
+    return existing.snapshot
 
   const seen = new Set<string>()
   const candidates = collectOptions(
@@ -142,14 +208,20 @@ export function getRoutingCatalogSnapshot(
       return true
     })
   const capabilities = new Map<string, RoutingCandidateCapabilities | undefined>()
+  const providerCatalog = getAllProviders()
   for (const candidate of candidates) {
     capabilities.set(
       catalogKey(candidate.providerId, candidate.modelId),
-      resolveCandidateCapabilities(appSettings, candidate.providerId, candidate.modelId)
+      resolveCandidateCapabilities(
+        appSettings,
+        candidate.providerId,
+        candidate.modelId,
+        providerCatalog
+      )
     )
   }
   const snapshot = { candidates, capabilities }
-  catalogSnapshots.set(appSettings, snapshot)
+  catalogSnapshots.set(appSettings, { snapshot, definitions })
   return snapshot
 }
 
@@ -185,7 +257,7 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
     // minus an output/reserve allowance — feeds the engine's LiteLLM-style
     // context-window pre-check.
     getContextWindow: (id, modelId) => {
-      const config = getModelConfig(id, modelId)
+      const config = resolveCandidateMetadata(appSettings, id, modelId)
       const raw = config?.contextLength ?? getModelMaxTokens(modelId)
       const limits = getModelContextLimits(modelId)
       const maxOutput = config?.maxOutputTokens
@@ -193,7 +265,7 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
         limits.reserveTokens,
         typeof maxOutput === "number" && maxOutput > 0 ? maxOutput : Infinity
       )
-      return Math.max(0, raw - reserve)
+      return Math.min(Math.max(0, raw - reserve), config?.maxInputTokens ?? Infinity)
     },
     // Trailing-minute RPM/TPM window (fed by recordProviderOutcome) — the
     // engine deprioritizes providers at their configured rate ceiling.

@@ -1,6 +1,6 @@
 "use client"
 
-// One-click encrypted export / import for the three provider vaults. The
+// One-click encrypted export / import for the registered provider vaults. The
 // encrypted file is a JSON envelope keyed by a user-supplied passphrase
 // (AES-GCM + PBKDF2-SHA256-600k via `lib/subscription/core/encrypted-package`).
 // Import: a passphrase + file unlock step shows a content preview before
@@ -36,7 +36,11 @@ import {
   type SubscriptionEncryptedEnvelope,
   type SubscriptionPackageBody,
 } from "@/lib/subscription/core/encrypted-package"
-import { applyVaults, snapshotVaults } from "@/lib/subscription/core/vault-snapshot"
+import {
+  applyVaults,
+  snapshotVaults,
+  snapshotCustomSubscriptionProviders,
+} from "@/lib/subscription/core/vault-snapshot"
 import type { ProviderId } from "@/types/subscription"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
@@ -134,7 +138,12 @@ function ExportDialog({ open, onClose }: { open: boolean; onClose: () => void })
     setMode("exporting")
     try {
       const vaults = await snapshotVaults()
-      const body = buildSubscriptionPackage(vaults)
+      const body = buildSubscriptionPackage(
+        vaults,
+        Date.now(),
+        undefined,
+        await snapshotCustomSubscriptionProviders()
+      )
       const envelope = await encryptSubscriptionPackage(body, pass)
       finishProgress()
       const filename = `cognia-subscription-${new Date()
@@ -263,7 +272,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
     if (!decrypted) return
     setMode("applying")
     try {
-      const { accountCount } = await applyVaults(decrypted.vaults)
+      const { accountCount } = await applyVaults(decrypted.vaults, decrypted.customProviders)
       toast.success(t("importSuccess", { count: accountCount }))
       reset()
       onClose()
@@ -327,9 +336,9 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
                 <Progress value={decryptProgress} aria-label={t("preview.decrypting")} />
               </div>
             )}
-            {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
         )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
 
         <DialogFooter>
           <Button
@@ -368,16 +377,27 @@ function ImportPreview({ body }: ImportPreviewProps) {
 
   const rows = useMemo(() => {
     const out: Array<{ provider: ProviderId; accounts: string[]; hasPreset: boolean }> = []
-    for (const provider of ALL_PROVIDER_IDS) {
+    const definitions = Array.isArray(body.customProviders) ? body.customProviders : []
+    const providerIds = new Set([
+      ...Object.keys(body.vaults),
+      ...definitions.flatMap((definition) =>
+        typeof definition?.id === "string" ? [definition.id] : []
+      ),
+    ])
+    for (const provider of providerIds) {
       const vault = body.vaults[provider]
-      if (!vault) continue
-      const accounts = vault.accounts.map((a) => a.label || a.id.slice(0, 8))
-      out.push({ provider, accounts, hasPreset: vault.preset !== undefined })
+      const accounts = vault?.accounts.map((a) => a.label || a.id.slice(0, 8)) ?? []
+      out.push({ provider, accounts, hasPreset: !!vault?.preset || !!vault?.presets?.length })
     }
     return out
   }, [body])
 
   const safeProviderName = (p: ProviderId): string => {
+    if (!ALL_PROVIDER_IDS.some((provider) => provider === p)) {
+      const definitions = Array.isArray(body.customProviders) ? body.customProviders : []
+      const name = definitions.find((definition) => definition?.id === p)?.name
+      return typeof name === "string" && name.trim() ? name : p
+    }
     const out = tCommon(`providers.${p}` as never)
     return out === `subscription.providers.${p}` ? p : out
   }

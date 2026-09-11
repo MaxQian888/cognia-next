@@ -1,5 +1,6 @@
 import { render, act } from "@testing-library/react"
 import { GatewayProvider } from "./gateway-provider"
+import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
 
 const mockGetStatus = jest.fn()
 const mockPushSnapshot = jest.fn()
@@ -7,12 +8,23 @@ const mockDecisionResponse = jest.fn()
 const handlers: Record<string, (p: unknown) => void> = {}
 const mockUnsubscribe = jest.fn()
 let tauri = true
+const accountState = { unlockedAccountId: "local-a" as string | null }
+jest.mock("@/lib/runtime/standalone-mode", () => ({ isStandaloneChatMode: () => false }))
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: Object.assign(
+    (selector: (state: typeof accountState) => unknown) => selector(accountState),
+    {
+      getState: () => accountState,
+    }
+  ),
+}))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: {
     subscribe: (event: string, handler: (p: unknown) => void) => {
-      handlers[event] = handler
+      handlers[event] = (payload) =>
+        handler({ ownerAccountId: "local-a", accountGeneration: 1, ...(payload as object) })
       return mockUnsubscribe
     },
   },
@@ -41,8 +53,9 @@ jest.mock("@/lib/gateway/decide", () => ({
 
 // Subscription enrich is a no-op pass-through in these tests (returns the
 // base snapshot); the resolver itself is covered in snapshot-publisher.test.
-jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
-  resolveOpencodeVaultCredential: jest.fn().mockResolvedValue(null),
+const mockVaultCredential = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  resolveSubscriptionProviderCredential: (...args: unknown[]) => mockVaultCredential(...args),
 }))
 
 // The profile-meta join reads Dexie, which never settles under fake timers —
@@ -78,6 +91,8 @@ jest.mock("@cognia/provider-routing/build-preview-engine", () => ({
 /** Drive the decide round-trip and hand back the deps overrides it built. */
 async function decideWith(payload: Record<string, unknown>) {
   await act(async () => {
+    jest.advanceTimersByTime(1500)
+    for (let i = 0; i < 30; i += 1) await Promise.resolve()
     handlers["gateway://decide"](payload)
     await Promise.resolve()
     await Promise.resolve()
@@ -89,6 +104,7 @@ async function decideWith(payload: Record<string, unknown>) {
 const settingsState = {
   settings: {
     defaultProvider: "openai",
+    defaultAccountIds: {} as Record<string, string>,
     providerSettings: { openai: { providerId: "openai", apiKey: "k", enabled: true } },
     customProviders: [],
     modelMappings: [
@@ -116,7 +132,15 @@ describe("GatewayProvider", () => {
   beforeEach(() => {
     jest.useFakeTimers()
     tauri = true
-    mockGetStatus.mockReset().mockResolvedValue({ hasToken: true })
+    accountState.unlockedAccountId = "local-a"
+    settingsState.settings.defaultAccountIds = {}
+    mockVaultCredential.mockReset().mockResolvedValue(null)
+    mockGetStatus.mockReset().mockResolvedValue({
+      hasToken: true,
+      ownerAccountId: "local-a",
+      accountGeneration: 1,
+      accountRequired: true,
+    })
     mockPushSnapshot.mockReset().mockResolvedValue(undefined)
     mockForward.mockReset()
     mockUnsubscribe.mockReset()
@@ -151,18 +175,202 @@ describe("GatewayProvider", () => {
           auto: expect.objectContaining({ strategy: "least-busy" }),
           maxFallbackAttempts: 2,
         }),
-      })
+      }),
+      { ownerAccountId: "local-a", accountGeneration: 1 }
     )
   })
 
-  it("does not push when the gateway has no token", async () => {
+  it("publishes configured upstreams before the first gateway access key exists", async () => {
     mockGetStatus.mockResolvedValue({ hasToken: false })
     render(<GatewayProvider />)
     await act(async () => {
       jest.advanceTimersByTime(1500)
-      await Promise.resolve()
+      for (let i = 0; i < 30; i += 1) await Promise.resolve()
+    })
+    expect(mockPushSnapshot).toHaveBeenCalled()
+  })
+
+  async function flushPublication() {
+    await act(async () => {
+      jest.advanceTimersByTime(1500)
+      for (let i = 0; i < 30; i += 1) await Promise.resolve()
+    })
+  }
+
+  it.each(["opencode", "commandcode"])(
+    "refreshes %s credentials after a subscription change",
+    async (providerId) => {
+      render(<GatewayProvider />)
+      await flushPublication()
+      mockPushSnapshot.mockClear()
+      mockVaultCredential.mockImplementation(async (id: string) =>
+        id === providerId ? { apiKey: "new-account", baseURL: "https://relay.test/v1" } : null
+      )
+      act(() => notifySubscriptionChanged())
+      await flushPublication()
+      expect(mockPushSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providers: expect.arrayContaining([
+            expect.objectContaining({ id: providerId, apiKey: "new-account" }),
+          ]),
+        }),
+        expect.anything()
+      )
+    }
+  )
+
+  it("retains subscription credentials and headers when retrying a rejected snapshot", async () => {
+    mockVaultCredential.mockImplementation(async (id: string) =>
+      id === "opencode"
+        ? { apiKey: "vault-key", baseURL: "https://relay.test/v1", headers: { "X-Tenant": "team" } }
+        : null
+    )
+    mockPushSnapshot
+      .mockResolvedValueOnce({ accepted: false })
+      .mockResolvedValue({ accepted: true })
+    render(<GatewayProvider />)
+    await flushPublication()
+    expect(mockPushSnapshot).toHaveBeenCalledTimes(2)
+    expect(mockPushSnapshot.mock.calls[1][0].providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "opencode",
+          apiKey: "vault-key",
+          transport: { authScheme: "bearer", staticHeaders: [["x-tenant", "team"]] },
+        }),
+      ])
+    )
+  })
+
+  it("does not publish after the local account locks during credential resolution", async () => {
+    let finish!: (value: null) => void
+    mockVaultCredential.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<GatewayProvider />)
+    await flushPublication()
+    accountState.unlockedAccountId = null
+    await act(async () => {
+      finish(null)
+      for (let i = 0; i < 30; i += 1) await Promise.resolve()
     })
     expect(mockPushSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("uses the configured default subscription account when publishing", async () => {
+    settingsState.settings.defaultAccountIds = { opencode: "chosen-account" }
+    render(<GatewayProvider />)
+    await flushPublication()
+    expect(mockVaultCredential).toHaveBeenCalledWith(
+      "opencode",
+      expect.objectContaining({ defaultAccountIds: { opencode: "chosen-account" } })
+    )
+  })
+
+  it("keeps publishing when an unrelated preference changes during vault lookup", async () => {
+    let finish!: (value: null) => void
+    mockVaultCredential.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const original = settingsState.settings
+    render(<GatewayProvider />)
+    await flushPublication()
+    settingsState.settings = { ...original }
+    await act(async () => {
+      finish(null)
+      for (let i = 0; i < 30; i += 1) await Promise.resolve()
+    })
+    expect(mockPushSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects queued logs and outcomes from another account or older generation", async () => {
+    render(<GatewayProvider />)
+    await flushPublication()
+    act(() => {
+      handlers["gateway://request-log"]({ ownerAccountId: "local-b", accountGeneration: 1 })
+      handlers["gateway://request-outcome"]({ ownerAccountId: "local-a", accountGeneration: 0 })
+      handlers["gateway://decide"]({
+        ownerAccountId: "local-b",
+        accountGeneration: 1,
+        requestId: "old",
+        model: "fast",
+      })
+    })
+    expect(mockAppendLog).not.toHaveBeenCalled()
+    expect(mockForward).not.toHaveBeenCalled()
+    expect(mockDecisionResponse).not.toHaveBeenCalled()
+  })
+
+  it("refreshes on host invalidation and rejects events while locked", async () => {
+    render(<GatewayProvider />)
+    await flushPublication()
+    mockPushSnapshot.mockClear()
+    act(() => handlers["gateway://snapshot-invalidated"]({}))
+    await flushPublication()
+    expect(mockPushSnapshot).toHaveBeenCalled()
+    accountState.unlockedAccountId = null
+    act(() => handlers["gateway://request-outcome"]({}))
+    expect(mockForward).not.toHaveBeenCalled()
+  })
+
+  it("does not publish for a different host owner or without an unlocked account", async () => {
+    mockGetStatus.mockResolvedValue({
+      accountRequired: true,
+      ownerAccountId: "local-b",
+      accountGeneration: 1,
+    })
+    const view = render(<GatewayProvider />)
+    await flushPublication()
+    expect(mockPushSnapshot).not.toHaveBeenCalled()
+    accountState.unlockedAccountId = null
+    view.rerender(<GatewayProvider />)
+    act(() => handlers["gateway://request-log"]({}))
+    expect(mockAppendLog).not.toHaveBeenCalled()
+  })
+
+  it("recovers after a host status error on the next invalidation", async () => {
+    mockGetStatus.mockRejectedValueOnce(new Error("host unavailable"))
+    render(<GatewayProvider />)
+    await flushPublication()
+    expect(mockPushSnapshot).not.toHaveBeenCalled()
+    act(() => handlers["gateway://snapshot-invalidated"]({}))
+    await flushPublication()
+    expect(mockPushSnapshot).toHaveBeenCalledTimes(1)
+  })
+
+  it("bounds repeated host rejection to one complete retry", async () => {
+    mockPushSnapshot.mockResolvedValue({ accepted: false, reason: "stale generation" })
+    render(<GatewayProvider />)
+    await flushPublication()
+    expect(mockPushSnapshot).toHaveBeenCalledTimes(2)
+  })
+
+  it("rebuilds when routing settings change during credential resolution", async () => {
+    let finish!: (value: null) => void
+    mockVaultCredential.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<GatewayProvider />)
+    await flushPublication()
+    settingsState.settings = {
+      ...settingsState.settings,
+      routingConfig: { strategy: "least-busy", maxFallbackAttempts: 9 },
+    }
+    await act(async () => {
+      finish(null)
+      for (let i = 0; i < 60; i += 1) await Promise.resolve()
+    })
+    expect(mockPushSnapshot).toHaveBeenCalledTimes(1)
+    expect(mockPushSnapshot.mock.calls[0][0].routingPolicy.maxFallbackAttempts).toBe(9)
   })
 
   it("re-publishes when routing policy settings change", async () => {
@@ -183,12 +391,14 @@ describe("GatewayProvider", () => {
     expect(mockPushSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         routingPolicy: expect.objectContaining({ maxFallbackAttempts: 5 }),
-      })
+      }),
+      { ownerAccountId: "local-a", accountGeneration: 1 }
     )
   })
 
-  it("forwards request-outcome events into telemetry", () => {
+  it("forwards request-outcome events into telemetry", async () => {
     render(<GatewayProvider />)
+    await flushPublication()
     expect(handlers["gateway://request-outcome"]).toBeTruthy()
     act(() => {
       handlers["gateway://request-outcome"]({
@@ -201,8 +411,9 @@ describe("GatewayProvider", () => {
     expect(mockForward).toHaveBeenCalledWith(expect.objectContaining({ providerId: "openai" }))
   })
 
-  it("persists request-log events into Dexie", () => {
+  it("persists request-log events into Dexie", async () => {
     render(<GatewayProvider />)
+    await flushPublication()
     expect(handlers["gateway://request-log"]).toBeTruthy()
     const row = {
       id: "log-1",
@@ -229,6 +440,7 @@ describe("GatewayProvider", () => {
 
   it("answers a gateway://decide request via gatewayDecisionResponse", async () => {
     render(<GatewayProvider />)
+    await flushPublication()
     expect(handlers["gateway://decide"]).toBeTruthy()
     await act(async () => {
       handlers["gateway://decide"]({ requestId: "r1", model: "no-such-alias" })

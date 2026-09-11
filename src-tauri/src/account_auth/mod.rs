@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub mod cloud_deployment;
 
@@ -45,6 +45,7 @@ struct PasswordThrottleRecord {
 /// The renderer can request an unlock, but every sensitive native command
 /// reads the principal from this state rather than trusting an IPC account id.
 pub struct AccountSecuritySession {
+    gateway: parking_lot::Mutex<Option<(crate::gateway::GatewayState, Option<tauri::AppHandle>)>>,
     active: parking_lot::RwLock<Option<ActiveAccountSecuritySession>>,
     throttle: parking_lot::Mutex<HashMap<String, PasswordThrottleRecord>>,
     throttle_path: Option<PathBuf>,
@@ -63,6 +64,7 @@ impl AccountSecuritySession {
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
         Self {
+            gateway: parking_lot::Mutex::new(None),
             active: parking_lot::RwLock::new(None),
             throttle: parking_lot::Mutex::new(throttle),
             throttle_path,
@@ -70,19 +72,40 @@ impl AccountSecuritySession {
         }
     }
 
+    /// Install before IPC or listener startup so password and quick unlock use
+    /// exactly the same native gateway lifecycle boundary.
+    pub fn attach_gateway(&self, gateway: crate::gateway::GatewayState, app: tauri::AppHandle) {
+        gateway.require_local_account();
+        *self.gateway.lock() = Some((gateway, Some(app)));
+    }
+
     fn data_dir(&self) -> Option<&std::path::Path> {
         self.data_dir.as_deref()
     }
 
     fn activate(&self, account_id: &str, verifier_digest: String) {
-        *self.active.write() = Some(ActiveAccountSecuritySession {
+        let mut active = self.active.write();
+        if let Some((gateway, app)) = self.gateway.lock().as_ref() {
+            gateway.activate_account(account_id);
+            if let Some(app) = app {
+                let _ = app.emit("gateway://snapshot-invalidated", ());
+            }
+        }
+        *active = Some(ActiveAccountSecuritySession {
             account_id: account_id.to_owned(),
             verifier_digest,
         });
     }
 
     fn clear(&self) {
-        *self.active.write() = None;
+        let mut active = self.active.write();
+        if let Some((gateway, app)) = self.gateway.lock().as_ref() {
+            gateway.lock_account();
+            if let Some(app) = app {
+                let _ = app.emit("gateway://snapshot-invalidated", ());
+            }
+        }
+        *active = None;
     }
 
     fn require_active(&self) -> Result<ActiveAccountSecuritySession, String> {
@@ -1156,6 +1179,26 @@ mod tests {
             .contains("must be locked"));
         session.clear();
         assert!(session.require_active().unwrap_err().contains("locked"));
+    }
+
+    #[test]
+    fn security_session_activation_and_clear_revoke_gateway_authority() {
+        let session = AccountSecuritySession::new(None);
+        let gateway = crate::gateway::GatewayState::new();
+        gateway.require_local_account();
+        *session.gateway.lock() = Some((gateway.clone(), None));
+        session.activate("account-a", "digest".into());
+        let generation = gateway.status().account_generation;
+        assert_eq!(
+            gateway.status().owner_account_id.as_deref(),
+            Some("account-a")
+        );
+        session.activate("account-a", "rotated-digest".into());
+        assert_eq!(gateway.status().account_generation, generation);
+        session.clear();
+        assert!(gateway.status().owner_account_id.is_none());
+        assert!(gateway.status().account_generation > generation);
+        assert!(session.require_active().is_err());
     }
 
     #[test]

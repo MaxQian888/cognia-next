@@ -39,12 +39,27 @@ jest.mock("@/lib/subscription/anthropic/hooks", () => ({
 }))
 
 jest.mock("@/lib/subscription/anthropic/discovery", () => ({
-  adoptAndActivateDiscoveredAuth: jest.fn(),
   discoveredToCredential: (d: { accessToken: string; refreshToken: string }) =>
     d.accessToken.trim() && d.refreshToken.trim() ? { mode: "subscription" } : null,
 }))
-import { adoptAndActivateDiscoveredAuth } from "@/lib/subscription/anthropic/discovery"
-const adoptMock = adoptAndActivateDiscoveredAuth as jest.Mock
+const activateMock = jest.fn()
+jest.mock("@/lib/subscription/core/transport", () => ({
+  setActiveAccount: (...args: unknown[]) => activateMock(...args),
+}))
+jest.mock("@/components/settings/subscription/add-account-dialog/anthropic", () => ({
+  AnthropicAddAccountDialog: ({
+    open,
+    initialMode,
+    onAdded,
+  }: {
+    open: boolean
+    initialMode: string
+    onAdded: (account: { id: string }) => void
+  }) =>
+    open ? (
+      <button onClick={() => onAdded({ id: "acct-1" })}>{`complete-${initialMode}`}</button>
+    ) : null,
+}))
 
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: ({ point }: { point: string }) => (
@@ -57,7 +72,7 @@ import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-c
 beforeEach(() => {
   replace.mockClear()
   reload.mockClear()
-  adoptMock.mockReset()
+  activateMock.mockReset()
   tauri = true
   hookResult = { credential: null, loading: false }
   discoveredResult = null
@@ -85,7 +100,9 @@ describe("AnthropicSubscriptionReuseCard", () => {
     render(<AnthropicSubscriptionReuseCard />)
     expect(screen.getByText("signedOutTitle")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "signIn" }))
-    expect(replace).toHaveBeenCalledWith("/settings?section=subscription", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/settings?section=subscription&subTab=accounts", {
+      scroll: false,
+    })
   })
 
   it("desktop + active account shows the authenticated state and key-optional note", () => {
@@ -104,7 +121,9 @@ describe("AnthropicSubscriptionReuseCard", () => {
     const user = userEvent.setup()
     render(<AnthropicSubscriptionReuseCard />)
     await user.click(screen.getByRole("button", { name: "manage" }))
-    expect(replace).toHaveBeenCalledWith("/settings?section=subscription", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/settings?section=subscription&subTab=accounts", {
+      scroll: false,
+    })
   })
 
   it("ccswitch hint routes to the ccswitch section on desktop", async () => {
@@ -124,20 +143,23 @@ describe("AnthropicSubscriptionReuseCard", () => {
 
   it("one-click reuse adopts + activates then reloads the credential", async () => {
     discoveredResult = { accessToken: "oat", refreshToken: "ort" }
-    adoptMock.mockResolvedValue({ id: "acct-1" })
+    activateMock.mockResolvedValue({ id: "acct-1" })
     const user = userEvent.setup()
     render(<AnthropicSubscriptionReuseCard />)
     await user.click(screen.getByRole("button", { name: "localLoginAction" }))
-    expect(adoptMock).toHaveBeenCalledWith(discoveredResult)
+    expect(activateMock).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "complete-reuse" }))
+    expect(activateMock).toHaveBeenCalledWith("anthropic", "acct-1")
     expect(reload).toHaveBeenCalled()
   })
 
   it("surfaces an adopt failure inline", async () => {
     discoveredResult = { accessToken: "oat", refreshToken: "ort" }
-    adoptMock.mockRejectedValue(new Error("vault sealed"))
+    activateMock.mockRejectedValue(new Error("vault sealed"))
     const user = userEvent.setup()
     render(<AnthropicSubscriptionReuseCard />)
     await user.click(screen.getByRole("button", { name: "localLoginAction" }))
+    await user.click(screen.getByRole("button", { name: "complete-reuse" }))
     expect(await screen.findByText("vault sealed")).toBeInTheDocument()
     expect(reload).not.toHaveBeenCalled()
   })

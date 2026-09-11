@@ -172,6 +172,40 @@ describe("provider diagnostic balance sources", () => {
     expect(crossedLowBalanceThreshold({ previous: 8, current: 12, threshold: 10 })).toBe(false)
   })
 
+  it("projects account-scoped relay readings by their original source identity", () => {
+    const row = {
+      provider: "codex",
+      sourceId: "moonshot",
+      accountId: "relay-account",
+      fetchedAt: 200,
+      meters: [
+        {
+          id: "credit",
+          kind: "balance" as const,
+          usedPct: null,
+          remaining: 12,
+          unit: "CNY",
+          status: "ok" as const,
+        },
+      ],
+    }
+    const projected = projectLegacyProviderBalanceRows({
+      providerId: "moonshot",
+      balances: [],
+      limits: [row],
+    })
+    expect(projected.snapshots).toHaveLength(1)
+    expect(projected.snapshots[0]).toMatchObject({
+      providerId: "moonshot",
+      accountId: "relay-account",
+      amounts: [{ unit: "CNY", remaining: 12 }],
+    })
+    expect(
+      projectLegacyProviderBalanceRows({ providerId: "codex", balances: [], limits: [row] })
+        .snapshots
+    ).toEqual([])
+  })
+
   it("runs sandbox sources through the native policy boundary", async () => {
     const source = resolveSandboxBalanceSource({
       id: "script-1",
@@ -200,5 +234,162 @@ describe("provider diagnostic balance sources", () => {
       expect.objectContaining({ providerId: "custom" })
     )
     expect(snapshot.amounts).toEqual([{ unit: "credits", remaining: 2 }])
+  })
+
+  it.each([
+    [403, "permission"],
+    [429, "rate-limited"],
+    [503, "transport"],
+    [404, "invalid-response"],
+    [200, "schema"],
+  ])(
+    "preserves HTTP %s failure semantics without accepting an unreadable balance",
+    async (status, code) => {
+      const source = resolveProviderBalanceSource({
+        providerId: "stepfun",
+        baseUrl: "https://api.stepfun.com/v1",
+        token: "test",
+        label: "StepFun",
+      })
+      const [result] = await refreshProviderBalanceSources([source], {
+        authedRequest: async () => ({
+          status: status as number,
+          headers: [{ name: "retry-after", value: "15" }],
+          body: "{}",
+        }),
+      })
+      expect(result.failure?.code).toBe(code)
+      expect(result.amounts).toEqual([])
+      if (status === 429) expect(result.failure?.retryAfterMs).toBe(15_000)
+    }
+  )
+
+  it.each([undefined, "invalid", "2099-01-01T00:00:00Z"])(
+    "handles retry-after %s without inventing a delay",
+    async (value) => {
+      const source = resolveProviderBalanceSource({
+        providerId: "stepfun",
+        baseUrl: "https://api.stepfun.com",
+        token: "test",
+        label: "StepFun",
+      })
+      const [result] = await refreshProviderBalanceSources([source], {
+        authedRequest: async () => ({
+          status: 429,
+          headers: value ? [{ name: "Retry-After", value }] : [],
+          body: "{}",
+        }),
+      })
+      expect(result.failure?.code).toBe("rate-limited")
+      if (value?.startsWith("2099")) expect(result.failure?.retryAfterMs).toBeGreaterThan(0)
+      else expect(result.failure?.retryAfterMs).toBeUndefined()
+    }
+  )
+
+  it.each([new Error("request cancelled"), "network down"])(
+    "persists transport failure %s",
+    async (error) => {
+      const source = resolveProviderBalanceSource({
+        providerId: "stepfun",
+        baseUrl: "https://api.stepfun.com",
+        token: "test",
+        label: "StepFun",
+      })
+      const [result] = await refreshProviderBalanceSources([source], {
+        authedRequest: async () => {
+          throw error
+        },
+      })
+      expect(result.failure?.code).toBe(error instanceof Error ? "aborted" : "transport")
+      expect(result.failure?.message).toBe(error instanceof Error ? error.message : error)
+    }
+  )
+
+  it.each([new Error("domain grant missing"), "invalid output"])(
+    "preserves sandbox rejection %s",
+    async (error) => {
+      const source = resolveSandboxBalanceSource({
+        id: "script",
+        providerId: "custom",
+        label: "Custom",
+        script: "script",
+        sameOrigin: "https://example.com",
+        credentialRef: "script",
+        grants: [],
+        enabled: true,
+      })
+      const [result] = await refreshProviderBalanceSources([source], {
+        runBalanceScript: async () => {
+          throw error
+        },
+      })
+      expect(result.failure?.code).toBe(error instanceof Error ? "script-policy" : "schema")
+      expect(result.amounts).toEqual([])
+    }
+  )
+
+  it("honors an explicit primary source and falls back to enabled sources without combining them", () => {
+    const official = resolveProviderBalanceSource({
+      providerId: "stepfun",
+      baseUrl: "https://api.stepfun.com",
+      label: "StepFun",
+    })
+    const custom = resolveSandboxBalanceSource({
+      id: "custom",
+      providerId: "custom",
+      label: "Custom",
+      script: "script",
+      sameOrigin: "https://example.com",
+      credentialRef: "custom",
+      grants: [],
+      enabled: true,
+    })
+    expect(selectPrimaryBalanceSource([official, custom], custom.id).map((s) => s.primary)).toEqual(
+      [false, true]
+    )
+    expect(selectPrimaryBalanceSource([official, custom]).map((s) => s.primary)).toEqual([
+      true,
+      false,
+    ])
+    expect(selectPrimaryBalanceSource([custom])[0].primary).toBe(true)
+    expect(selectPrimaryBalanceSource([])).toEqual([])
+  })
+
+  it("projects unavailable balances and legacy error readings without manufacturing zero usage", () => {
+    const projected = projectLegacyProviderBalanceRows({
+      providerId: "stepfun",
+      balances: [
+        { providerKey: "other", accountId: "other", kind: "credit", fetchedAt: 1, raw: {} },
+        {
+          providerKey: "stepfun",
+          accountId: "balance",
+          kind: "credit",
+          fetchedAt: 2,
+          raw: {},
+          error: "offline",
+        },
+      ],
+      limits: [
+        { provider: "stepfun", fetchedAt: 1, meters: [] },
+        {
+          provider: "stepfun",
+          accountId: "quota",
+          accountLabel: "Plan",
+          fetchedAt: 3,
+          error: "offline",
+          meters: [
+            { id: "week", unit: "weekly", kind: "window", usedPct: null, status: "unknown" },
+            { id: "credit", kind: "balance", usedPct: null, status: "unknown" },
+          ],
+        },
+      ],
+    })
+    expect(projected.snapshots).toHaveLength(2)
+    expect(projected.snapshots[0].amounts[0]).toMatchObject({
+      unit: "weekly",
+      remaining: undefined,
+      used: undefined,
+    })
+    expect(projected.snapshots.every((s) => s.failure?.message === "offline")).toBe(true)
   })
 })

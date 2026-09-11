@@ -123,6 +123,42 @@ describe("resolveCodexVaultCredential", () => {
     expect(cred?.baseURL).toBe("https://relay.example.com/v1")
   })
 
+  it("carries relay headers without forwarding internal preset settings", async () => {
+    getAccountMock.mockResolvedValue(fullAccount({ authMode: "api_key", accessToken: "sk" }))
+    getProviderPresetMock.mockResolvedValue({
+      id: "relay",
+      baseUrl: "https://relay.example/v1",
+      extraHeaders: { "X-Tenant": "team", "X-Cognia-Volc-Sk": "internal" },
+    })
+    expect(await resolveCodexVaultCredential("codex")).toMatchObject({
+      baseURL: "https://relay.example/v1",
+      headers: { "X-Tenant": "team" },
+    })
+    expect((await resolveCodexVaultCredential("codex"))?.headers).not.toHaveProperty(
+      "X-Cognia-Volc-Sk"
+    )
+  })
+
+  it("keeps the refreshed ChatGPT identity authoritative over case-insensitive preset headers", async () => {
+    getAccountMock.mockResolvedValue(
+      fullAccount({
+        authMode: "chatgpt",
+        accessToken: "token",
+        accountId: "actual",
+        expiresAtMs: 9_999_999_999_999,
+      })
+    )
+    getProviderPresetMock.mockResolvedValue({
+      id: "relay",
+      baseUrl: "https://relay.example/v1",
+      extraHeaders: { "chatgpt-account-id": "wrong", "X-Tenant": "team" },
+    })
+    const result = await resolveCodexVaultCredential("codex")
+    expect(result?.headers?.["ChatGPT-Account-Id"]).toBe("actual")
+    expect(result?.headers).not.toHaveProperty("chatgpt-account-id")
+    expect(result?.headers?.["X-Tenant"]).toBe("team")
+  })
+
   it("prefers the active account over the most-recently-used", async () => {
     getActiveAccountMock.mockResolvedValue({ activeAccountId: "acc-2" })
     listAccountsMock.mockResolvedValue([

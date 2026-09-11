@@ -28,16 +28,22 @@ import {
   ChartColumnIcon,
   UsersIcon,
 } from "lucide-react"
+import {
+  listSubscriptionProviders,
+  type SubscriptionProviderDefinition,
+} from "@/lib/subscription/core/provider-registry"
 import type { ComponentType } from "react"
 
-export type SubscriptionPanelId =
-  "overview" | "usage" | "probes" | "accounts" | "claude" | "codex" | "opencode" | "backup" | "sync"
+export type SubscriptionPanelId = string
 
 export type SubscriptionNavGroupId = "usageGroup" | "providersGroup" | "vaultGroup"
 
 export interface SubscriptionNavItem {
   id: SubscriptionPanelId
   icon: ComponentType<{ className?: string }>
+  label?: string
+  description?: string
+  localize?: boolean
 }
 
 export interface SubscriptionNavGroup {
@@ -47,32 +53,49 @@ export interface SubscriptionNavGroup {
 
 // Group ids are suffixed so `nav.groups.usageGroup` never reads as
 // `nav.items.usage` at a glance.
-export const SUBSCRIPTION_NAV_GROUPS: readonly SubscriptionNavGroup[] = [
-  {
-    id: "usageGroup",
-    items: [
-      { id: "overview", icon: GaugeIcon },
-      { id: "usage", icon: ChartColumnIcon },
-      { id: "probes", icon: RadioIcon },
-    ],
-  },
-  {
-    id: "providersGroup",
-    items: [
-      { id: "accounts", icon: UsersIcon },
-      { id: "claude", icon: SparklesIcon },
-      { id: "codex", icon: TerminalIcon },
-      { id: "opencode", icon: KeyRoundIcon },
-    ],
-  },
-  {
-    id: "vaultGroup",
-    items: [
-      { id: "backup", icon: DatabaseBackupIcon },
-      { id: "sync", icon: CloudIcon },
-    ],
-  },
-]
+export function buildSubscriptionNavGroups(
+  providers: readonly SubscriptionProviderDefinition[]
+): readonly SubscriptionNavGroup[] {
+  return [
+    {
+      id: "usageGroup",
+      items: [
+        { id: "overview", icon: GaugeIcon },
+        { id: "usage", icon: ChartColumnIcon },
+        { id: "probes", icon: RadioIcon },
+      ],
+    },
+    {
+      id: "providersGroup",
+      items: [
+        { id: "accounts", icon: UsersIcon },
+        ...providers
+          .filter((provider) => provider.available !== false)
+          .map((provider) => ({
+            id: provider.authMode === "anthropic-oauth" ? "claude" : provider.id,
+            icon:
+              provider.authMode === "anthropic-oauth"
+                ? SparklesIcon
+                : provider.authMode === "codex-oauth"
+                  ? TerminalIcon
+                  : KeyRoundIcon,
+            label: provider.name,
+            description: provider.description ?? provider.baseUrl ?? "",
+            localize: provider.source === "builtin",
+          })),
+      ],
+    },
+    {
+      id: "vaultGroup",
+      items: [
+        { id: "backup", icon: DatabaseBackupIcon },
+        { id: "sync", icon: CloudIcon },
+      ],
+    },
+  ]
+}
+
+export const SUBSCRIPTION_NAV_GROUPS = buildSubscriptionNavGroups(listSubscriptionProviders())
 
 const PANEL_IDS = new Set<string>(
   SUBSCRIPTION_NAV_GROUPS.flatMap((group) => group.items.map((item) => item.id))
@@ -110,7 +133,8 @@ export const DEFAULT_SUBSCRIPTION_PANEL: SubscriptionPanelId = "overview"
  */
 export function resolveSubscriptionPanel(
   subTab: string | null,
-  innerTab: string | null
+  innerTab: string | null,
+  panelIds: ReadonlySet<string> = PANEL_IDS
 ): SubscriptionPanelId {
   // The legacy nested form: `innerTab` only ever meant anything under Anthropic.
   if (innerTab && (!subTab || subTab === "anthropic")) {
@@ -119,6 +143,6 @@ export function resolveSubscriptionPanel(
     return DEFAULT_SUBSCRIPTION_PANEL
   }
   if (!subTab || subTab === "anthropic") return DEFAULT_SUBSCRIPTION_PANEL
-  if (!PANEL_IDS.has(subTab)) return DEFAULT_SUBSCRIPTION_PANEL
+  if (!panelIds.has(subTab)) return DEFAULT_SUBSCRIPTION_PANEL
   return subTab as SubscriptionPanelId
 }

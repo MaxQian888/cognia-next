@@ -16,24 +16,25 @@
  * No-op outside Tauri (web / mobile have no HTTP listener).
  */
 
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 import { isTauri, transport } from "@/lib/tauri"
 import { gatewayDecisionResponse, gatewayGetStatus, gatewayPushSnapshot } from "@/lib/tauri/gateway"
-import {
-  buildGatewaySnapshot,
-  enrichSnapshotWithSubscriptionCreds,
-} from "@/lib/gateway/snapshot-publisher"
+import { buildEnrichedGatewaySnapshot } from "@/lib/gateway/snapshot-publisher"
 import { forwardGatewayOutcome } from "@/lib/gateway/telemetry-forwarder"
 import { resolveGatewayDecision, type GatewayDecideRequest } from "@/lib/gateway/decide"
-import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
-import { OPENCODE_CHAT_PROVIDER_IDS } from "@/types/subscription/opencode"
+import { subscribeSubscriptionChanged } from "@/lib/subscription/core/subscription-events"
+import { useAccountStore } from "@/stores/account/account-store"
+import { loggers } from "@cognia/logging"
 import { appendGatewayRequestLog } from "@/lib/db/gateway-request-log"
 import { useSettingsStore } from "@/stores/settings"
 import {
   GATEWAY_DECIDE_EVENT,
   GATEWAY_REQUEST_LOG_EVENT,
   GATEWAY_REQUEST_OUTCOME_EVENT,
+  GATEWAY_SNAPSHOT_INVALIDATED_EVENT,
+  type GatewayAccountScope,
   type GatewayRequestLogRow,
   type GatewayRequestOutcome,
 } from "@/types/gateway"
@@ -43,89 +44,104 @@ const PERIODIC_PUSH_MS = 5 * 60 * 1000
 /** Coalesce bursts of settings writes into one push. */
 const DEBOUNCE_MS = 1500
 
-export function GatewayProvider() {
-  const settings = useSettingsStore((s) => s.settings)
-  // Re-publish only when the routing-relevant slice changes (not on every
-  // unrelated settings write). Serialized so the effect dep is a primitive.
-  const sliceKey = JSON.stringify({
+function routingSliceKey(settings: AppSettings | null | undefined): string {
+  return JSON.stringify({
     d: settings?.defaultProvider,
     p: settings?.providerSettings,
     c: settings?.customProviders,
     m: settings?.modelMappings,
     r: settings?.routingConfig,
+    a: settings?.defaultAccountIds,
+    legacyAccount: settings?.defaultAccountId,
   })
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+}
+
+export function GatewayProvider() {
+  const settings = useSettingsStore((s) => s.settings)
+  const unlockedAccountId = useAccountStore((s) => s.unlockedAccountId)
+  const sliceKey = routingSliceKey(settings)
+  const publicationScope = useRef<(GatewayAccountScope & { accountRequired: boolean }) | null>(null)
+  const acceptsEvent = useCallback((event: GatewayAccountScope) => {
+    const scope = publicationScope.current
+    if (!scope || scope.ownerAccountId !== useAccountStore.getState().unlockedAccountId)
+      return false
+    return (
+      !scope.accountRequired ||
+      (event.ownerAccountId === scope.ownerAccountId &&
+        event.accountGeneration === scope.accountGeneration)
+    )
+  }, [])
 
   // Snapshot publishing.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !unlockedAccountId) return
     let cancelled = false
+    let revision = 0
 
     const push = async () => {
-      const live = useSettingsStore.getState().settings
-      if (!live) return
-      // Only push when the gateway actually has a token/listener — avoids
-      // churn on installs that never enabled it.
+      const requestRevision = ++revision
+      const stale = () =>
+        cancelled ||
+        requestRevision !== revision ||
+        useAccountStore.getState().unlockedAccountId !== unlockedAccountId
       try {
-        const status = await gatewayGetStatus()
-        if (!status.hasToken) return
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (stale()) return
+          // Capture host ownership BEFORE reading credentials. Never stamp a
+          // completed projection with a newer account generation.
+          const status = await gatewayGetStatus()
+          if (stale() || (status.accountRequired && status.ownerAccountId !== unlockedAccountId))
+            return
+          const live = useSettingsStore.getState().settings
+          if (!live) return
+          const context = {
+            ownerAccountId: unlockedAccountId,
+            accountGeneration: status.accountGeneration,
+          }
+          publicationScope.current = {
+            ...context,
+            accountRequired: status.accountRequired ?? false,
+          }
+          const projectionKey = routingSliceKey(live)
+          const { loadSnapshotProfileMeta } = await import("@/lib/gateway/snapshot-publisher")
+          const profileMeta = await loadSnapshotProfileMeta()
+          const snapshot = await buildEnrichedGatewaySnapshot(live, Date.now(), profileMeta)
+          if (stale()) return
+          if (routingSliceKey(useSettingsStore.getState().settings) !== projectionKey) {
+            void push()
+            return
+          }
+          const result = await gatewayPushSnapshot(snapshot, context)
+          if (!result || result.accepted) return
+          // A retry rebuilds ALL inputs, including vault credentials, against
+          // freshly captured ownership and profile metadata.
+          if (attempt === 1)
+            loggers.app.warn("Gateway snapshot was rejected", { reason: result.reason })
+        }
       } catch {
-        return // not in a Tauri shell after all / command unavailable
-      }
-      const { loadSnapshotProfileMeta } = await import("@/lib/gateway/snapshot-publisher")
-      const profileMeta = await loadSnapshotProfileMeta().catch(() => undefined)
-      const base = buildGatewaySnapshot(
-        {
-          defaultProvider: live.defaultProvider,
-          providerSettings: live.providerSettings,
-          customProviders: live.customProviders,
-          modelMappings: live.modelMappings,
-          routingConfig: live.routingConfig,
-        },
-        Date.now(),
-        profileMeta
-      )
-      // Fill in subscription-vault creds (opencode Zen/Go) the plain
-      // provider-settings path can't supply, so subscription providers are
-      // executable through the gateway too.
-      const snapshot = await enrichSnapshotWithSubscriptionCreds(
-        base,
-        OPENCODE_CHAT_PROVIDER_IDS,
-        resolveOpencodeVaultCredential
-      ).catch(() => base)
-      if (cancelled) return
-      const result = await gatewayPushSnapshot(snapshot).catch(() => undefined)
-      // R3: a rejected push means another authority moved the profileVersion
-      // — reload the store projection and retry ONCE with fresh metadata.
-      if (result && !result.accepted && !cancelled) {
-        const freshMeta = await loadSnapshotProfileMeta().catch(() => undefined)
-        const retry = buildGatewaySnapshot(
-          {
-            defaultProvider: live.defaultProvider,
-            providerSettings: live.providerSettings,
-            customProviders: live.customProviders,
-            modelMappings: live.modelMappings,
-            routingConfig: live.routingConfig,
-          },
-          Date.now(),
-          freshMeta
-        )
-        await gatewayPushSnapshot(retry).catch(() => {})
+        if (!stale()) loggers.app.warn("Gateway snapshot publication failed")
       }
     }
 
-    // Debounced push on slice change.
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => void push(), DEBOUNCE_MS)
-    // Slow periodic refresh.
+    // Prepublish even before the first access key is created, so starting the
+    // listener does not wait for the periodic refresh to acquire upstreams.
+    const debounce = setTimeout(() => void push(), DEBOUNCE_MS)
     const interval = setInterval(() => void push(), PERIODIC_PUSH_MS)
+    const unsubscribeSubscription = subscribeSubscriptionChanged(() => void push())
+    const unsubscribeInvalidation = transport.subscribe(
+      GATEWAY_SNAPSHOT_INVALIDATED_EVENT,
+      () => void push()
+    )
 
     return () => {
       cancelled = true
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+      publicationScope.current = null
+      clearTimeout(debounce)
       clearInterval(interval)
+      unsubscribeSubscription()
+      unsubscribeInvalidation()
     }
-  }, [sliceKey])
+  }, [sliceKey, unlockedAccountId])
 
   // Telemetry forwarding.
   useEffect(() => {
@@ -133,6 +149,7 @@ export function GatewayProvider() {
     const unsubscribe = transport.subscribe<GatewayRequestOutcome>(
       GATEWAY_REQUEST_OUTCOME_EVENT,
       (payload) => {
+        if (!acceptsEvent(payload)) return
         try {
           forwardGatewayOutcome(payload)
         } catch {
@@ -141,7 +158,7 @@ export function GatewayProvider() {
       }
     )
     return unsubscribe
-  }, [])
+  }, [acceptsEvent])
 
   // Durable request log: persist every gateway request row into Dexie so the
   // Settings "Logs" view survives a restart (the newapi Logs page equivalent).
@@ -150,13 +167,14 @@ export function GatewayProvider() {
     const unsubscribe = transport.subscribe<GatewayRequestLogRow>(
       GATEWAY_REQUEST_LOG_EVENT,
       (row) => {
+        if (!acceptsEvent(row)) return
         void appendGatewayRequestLog(row).catch(() => {
           // A logging failure must never break the gateway.
         })
       }
     )
     return unsubscribe
-  }, [])
+  }, [acceptsEvent])
 
   // Live routing decisions: the gateway asks per-request; run the full engine
   // and reply. The Rust side caps the wait, so a slow/failed reply degrades to
@@ -164,6 +182,7 @@ export function GatewayProvider() {
   useEffect(() => {
     if (!isTauri()) return
     const unsubscribe = transport.subscribe<GatewayDecideRequest>(GATEWAY_DECIDE_EVENT, (req) => {
+      if (!acceptsEvent(req)) return
       void (async () => {
         let entries: { providerId: string; modelId: string }[] = []
         try {
@@ -189,11 +208,11 @@ export function GatewayProvider() {
         } catch {
           entries = [] // any failure → empty = gateway uses its snapshot
         }
-        await gatewayDecisionResponse(req.requestId, entries).catch(() => {})
+        if (acceptsEvent(req)) await gatewayDecisionResponse(req.requestId, entries).catch(() => {})
       })()
     })
     return unsubscribe
-  }, [])
+  }, [acceptsEvent])
 
   return null
 }

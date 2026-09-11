@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import type { CustomLimitsSource } from "@/types/subscription"
@@ -57,6 +57,7 @@ jest.mock("@/components/ui/select", () => {
 })
 
 import { CustomSourcesCard } from "./custom-sources-card"
+import { presetById } from "@/lib/subscription/limits/custom/presets"
 
 function source(over: Partial<CustomLimitsSource> = {}): CustomLimitsSource {
   return {
@@ -396,6 +397,160 @@ describe("CustomSourcesCard", () => {
       payload.customLimitsSources[0].extract as unknown as { windows: Record<string, unknown>[] }
     ).windows[0]
     expect(win).toMatchObject({ usedPath: "data.used", totalPath: "data.total" })
+  })
+
+  it("keeps sources added before and after a settings remount", async () => {
+    const first = render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
+    await fillCommon("First relay")
+    await userEvent.type(screen.getByLabelText("Remaining field path"), "data.balance")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const initial = saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[]
+    storeSettings = { customLimitsSources: initial }
+    first.unmount()
+
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: /Add custom source/i }))
+    await fillCommon("Second relay")
+    await userEvent.type(screen.getByLabelText("Remaining field path"), "data.balance")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saved = saveMock.mock.calls[1][0].customLimitsSources as CustomLimitsSource[]
+    expect(saved.map((entry) => entry.name)).toEqual(["First relay", "Second relay"])
+    expect(new Set(saved.map((entry) => entry.id)).size).toBe(2)
+  })
+
+  it.each(["glm-coding", "minimax-token-plan", "zenmux"])(
+    "preserves all windows and extraction metadata when editing %s",
+    async (preset) => {
+      const original = presetById(preset).apply(source())
+      storeSettings = { customLimitsSources: [original] }
+      render(<CustomSourcesCard />)
+      await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+      const fields = screen.getAllByLabelText("Used-percent path")
+      await userEvent.clear(fields[0])
+      await userEvent.type(fields[0], "updated.percent")
+      await userEvent.click(screen.getByRole("button", { name: "Save" }))
+      const saved = (saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[])[0]
+      expect(saved.extract).toEqual({
+        ...original.extract,
+        windows:
+          original.extract.kind === "window"
+            ? original.extract.windows.map((window, index) =>
+                index === 0 ? { ...window, usedPctPath: "updated.percent" } : window
+              )
+            : [],
+      })
+    }
+  )
+
+  it("preserves Copilot authorization and other required headers when editing a header", async () => {
+    const original = presetById("github-copilot").apply(source())
+    storeSettings = { customLimitsSources: [original] }
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    const header = screen.getAllByLabelText("Extra header (value)")[0]
+    await userEvent.clear(header)
+    await userEvent.type(header, "vscode/1.111.0")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saved = (saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[])[0]
+    expect(saved.request).toEqual({
+      ...original.request,
+      headers: { ...original.request.headers, "Editor-Version": "vscode/1.111.0" },
+    })
+  })
+
+  it("edits, adds and removes windows without changing the retained window", async () => {
+    const original = presetById("glm-coding").apply(source())
+    storeSettings = { customLimitsSources: [original] }
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    const weekly = screen.getByRole("group", { name: "Window 2" })
+    const remaining = within(weekly).getByLabelText("Remaining field path")
+    await userEvent.type(remaining, "weekly.remaining")
+    const reset = within(weekly).getByLabelText("Reset time path")
+    await userEvent.clear(reset)
+    await userEvent.type(reset, "weekly.reset")
+    await userEvent.click(screen.getByRole("button", { name: "Add window" }))
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await userEvent.click(screen.getByRole("button", { name: "Remove window 3" }))
+    await userEvent.click(screen.getByRole("button", { name: "Remove window 1" }))
+    expect(screen.getByRole("button", { name: "Remove window 1" })).toBeDisabled()
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saved = (saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[])[0]
+    expect(saved.extract).toEqual({
+      kind: "window",
+      windows: [
+        {
+          ...(original.extract.kind === "window" ? original.extract.windows[1] : {}),
+          remainingPath: "weekly.remaining",
+          resetAtPath: "weekly.reset",
+        },
+      ],
+    })
+  })
+
+  it("adds headers, prevents duplicates and authorization overrides, and removes only the chosen header", async () => {
+    const original = presetById("github-copilot").apply(source())
+    storeSettings = { customLimitsSources: [original] }
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await userEvent.click(screen.getByRole("button", { name: "Add header" }))
+    const name = screen.getAllByLabelText("Extra header (name)")[2]
+    const value = screen.getAllByLabelText("Extra header (value)")[2]
+    await userEvent.type(value, "my-tenant")
+    await userEvent.type(name, "editor-version")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await userEvent.clear(name)
+    await userEvent.type(name, "Authorization")
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await userEvent.clear(name)
+    await userEvent.type(name, "X-Tenant")
+    await userEvent.click(screen.getByRole("button", { name: "Remove header 1" }))
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saved = (saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[])[0]
+    expect(saved.request.headers).toEqual({
+      Authorization: "token {{token}}",
+      "X-GitHub-Api-Version": original.request.headers?.["X-GitHub-Api-Version"],
+      "X-Tenant": "my-tenant",
+    })
+  })
+
+  it("discards cancelled header edits and reloads the saved configuration", async () => {
+    const original = presetById("github-copilot").apply(source())
+    storeSettings = { customLimitsSources: [original] }
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await userEvent.clear(screen.getAllByLabelText("Extra header (value)")[0])
+    await userEvent.type(screen.getAllByLabelText("Extra header (value)")[0], "unsaved")
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(saveMock).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    expect(screen.getAllByLabelText("Extra header (value)")[0]).toHaveValue(
+      original.request.headers?.["Editor-Version"]
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    const saved = (saveMock.mock.calls[0][0].customLimitsSources as CustomLimitsSource[])[0]
+    expect(saved.request).toEqual(original.request)
+    expect(saved.extract).toEqual(original.extract)
+  })
+
+  it("saves explicitly enabled sources with a bounded refresh interval", async () => {
+    storeSettings = { customLimitsSources: [source()] }
+    render(<CustomSourcesCard />)
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await userEvent.click(screen.getByRole("switch", { name: "Enable after saving" }))
+    fireEvent.change(screen.getByLabelText("Minimum refresh interval (minutes)"), {
+      target: { value: "10000" },
+    })
+    expect(screen.getByLabelText("Minimum refresh interval (minutes)")).toHaveValue(1440)
+    fireEvent.change(screen.getByLabelText("Minimum refresh interval (minutes)"), {
+      target: { value: "" },
+    })
+    expect(screen.getByLabelText("Minimum refresh interval (minutes)")).toHaveValue(5)
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(saveMock).toHaveBeenCalledWith({
+      customLimitsSources: [expect.objectContaining({ enabled: true, refreshIntervalMs: 300000 })],
+    })
   })
 
   it("falls back to the id when a source has no name", () => {

@@ -27,6 +27,7 @@ const meta = {
     ),
   ],
   args: {
+    onSettingsChange: () => {},
     providerId: "openai",
     settings: makeUserProviderSettings({ providerId: "openai" }),
   },

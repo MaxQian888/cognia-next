@@ -73,6 +73,14 @@ export function getProviderModel(opts: ProviderModelOptions): LanguageModel {
   // defaults unless the caller passed an explicit override.
   const baseURL = opts.baseURL
 
+  if (provider === "commandcode" && resolveProviderProtocol(provider, opts.model) === "anthropic") {
+    return createAnthropic({
+      apiKey,
+      baseURL: baseURL ?? getBuiltInProviderDefaultBaseURL(provider),
+      headers: opts.headers,
+    })(opts.model) as LanguageModel
+  }
+
   switch (provider) {
     case "anthropic": {
       // The catalog's own default, never a literal. A hard-coded id here does

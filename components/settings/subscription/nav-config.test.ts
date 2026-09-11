@@ -1,4 +1,5 @@
 import {
+  buildSubscriptionNavGroups,
   DEFAULT_SUBSCRIPTION_PANEL,
   SUBSCRIPTION_NAV_GROUPS,
   resolveSubscriptionPanel,
@@ -26,6 +27,7 @@ describe("resolveSubscriptionPanel", () => {
 
   it("passes a valid panel id through", () => {
     expect(resolveSubscriptionPanel("codex", null)).toBe("codex")
+    expect(resolveSubscriptionPanel("commandcode", null)).toBe("commandcode")
     expect(resolveSubscriptionPanel("accounts", null)).toBe("accounts")
     expect(resolveSubscriptionPanel("backup", null)).toBe("backup")
     expect(resolveSubscriptionPanel("sync", null)).toBe("sync")
@@ -62,4 +64,29 @@ describe("resolveSubscriptionPanel", () => {
       expect(resolveSubscriptionPanel("opencode", "account")).toBe("opencode")
     })
   })
+})
+
+it("builds dynamic provider navigation and excludes unavailable plugin definitions", () => {
+  const groups = buildSubscriptionNavGroups([
+    {
+      id: "my-provider",
+      name: "My Provider",
+      baseUrl: "https://provider.example/v1",
+      authMode: "api-key",
+      source: "custom",
+    },
+    {
+      id: "removed-provider",
+      name: "Removed",
+      authMode: "api-key",
+      source: "unavailable",
+      available: false,
+    },
+  ])
+  const items = groups.flatMap((group) => group.items)
+  expect(items).toContainEqual(expect.objectContaining({ id: "my-provider", label: "My Provider" }))
+  expect(items.some((item) => item.id === "removed-provider")).toBe(false)
+  expect(resolveSubscriptionPanel("my-provider", null, new Set(items.map((item) => item.id)))).toBe(
+    "my-provider"
+  )
 })

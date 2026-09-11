@@ -1,9 +1,9 @@
-// Third-party relay endpoint preset (Anthropic + Codex only).
+// Third-party relay endpoint preset (Anthropic, Codex, managed OpenCode).
 //
 // A `ProviderPreset` overrides the provider's default base URL and optionally
 // adds custom headers. Mirrors `subscription::preset::ProviderPreset` in Rust.
 
-/** Provider preset — Anthropic + Codex only. Rejected for OpenCode. */
+/** Provider preset. External discovery pointers cannot bind a preset. */
 export interface ProviderPreset {
   /** UUIDv7. */
   id: string

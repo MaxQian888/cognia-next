@@ -41,6 +41,8 @@ const mockState: { presets: ProviderPreset[]; defaultPresetId: string | null; lo
 }
 
 jest.mock("@/lib/subscription/core/hooks", () => ({
+  useSubscriptionProviders: () =>
+    jest.requireActual("@/lib/subscription/core/provider-registry").listSubscriptionProviders(),
   useProviderPresets: () => ({
     presets: mockState.presets,
     defaultPresetId: mockState.defaultPresetId,
@@ -232,4 +234,9 @@ describe("PresetPicker library", () => {
     const { container } = render(<PresetPicker provider="anthropic" />)
     expect(container.textContent).toContain("…")
   })
+})
+
+it("renders the shared preset library for CommandCode", () => {
+  render(<PresetPicker provider="commandcode" />)
+  expect(screen.getByText("Bedrock Prod")).toBeInTheDocument()
 })

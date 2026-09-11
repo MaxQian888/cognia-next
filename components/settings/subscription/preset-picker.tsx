@@ -49,10 +49,11 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useProviderPresets } from "@/lib/subscription/core/hooks"
 import { uuidv7 } from "@/lib/subscription/core/uuidv7"
 import type { ProviderId, ProviderPreset } from "@/types/subscription"
+import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
 import { buildPresetTemplates, type PresetTemplate } from "@/types/subscription/preset-templates"
 import { SelectablePresetCard } from "@/components/settings/presets/selectable-preset-card"
 
-type PresetProvider = Extract<ProviderId, "anthropic" | "codex" | "opencode">
+type PresetProvider = ProviderId
 
 interface PresetPickerProps {
   provider: PresetProvider
@@ -70,8 +71,10 @@ export function PresetPicker({ provider }: PresetPickerProps) {
   const [removeTarget, setRemoveTarget] = useState<ProviderPreset | null>(null)
   const [removeBusy, setRemoveBusy] = useState(false)
 
-  const supportsFast = provider === "anthropic"
-  const templates = buildPresetTemplates(provider)
+  const definitions = useSubscriptionProviders()
+  const definition = definitions.find((entry) => entry.id === provider)
+  const supportsFast = definition?.authMode === "anthropic-oauth"
+  const templates = buildPresetTemplates(provider, definition)
 
   const openNewFromTemplate = (template: PresetTemplate) => {
     const draft: ProviderPreset = {

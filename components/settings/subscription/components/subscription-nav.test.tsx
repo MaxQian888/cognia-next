@@ -9,7 +9,7 @@ jest.mock("next-intl", () => ({
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { SubscriptionNav } from "./subscription-nav"
-import { SUBSCRIPTION_NAV_GROUPS } from "../nav-config"
+import { buildSubscriptionNavGroups, SUBSCRIPTION_NAV_GROUPS } from "../nav-config"
 
 describe("SubscriptionNav", () => {
   it("renders a listitem per entry under its group header", () => {
@@ -63,4 +63,24 @@ describe("SubscriptionNav", () => {
       "data-nav-group"
     )
   })
+})
+
+it("uses registry text for custom providers without requiring translation keys", () => {
+  render(
+    <SubscriptionNav
+      groups={buildSubscriptionNavGroups([
+        {
+          id: "custom-service",
+          name: "My Service",
+          description: "Private endpoint",
+          authMode: "api-key",
+          source: "custom",
+        },
+      ])}
+      activeId="custom-service"
+      onSelect={jest.fn()}
+    />
+  )
+  expect(screen.getByText("My Service")).toBeInTheDocument()
+  expect(screen.getByText("Private endpoint")).toBeInTheDocument()
 })

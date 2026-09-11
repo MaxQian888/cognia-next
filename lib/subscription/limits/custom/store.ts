@@ -3,14 +3,16 @@
 // store); these functions just normalize and mutate a list immutably so the
 // store layer and the settings UI share one validated shape.
 
+import { uuidv7 } from "@/lib/subscription/core/uuidv7"
+
 import type { CustomLimitsSource, DescriptorExtract, WindowSpec } from "@/types/subscription"
 
 export const CUSTOM_LIMITS_MIN_REFRESH_MS = 5 * 60_000
 export const CUSTOM_LIMITS_MAX_REFRESH_MS = 24 * 60 * 60_000
 
-/** Stable id generator that doesn't need `crypto` (sufficient for a local list). */
-export function newCustomSourceId(seed: number): string {
-  return `cls-${seed.toString(36)}-${Math.floor(seed % 1000).toString(36)}`
+/** Unique across settings remounts and independently added sources. */
+export function newCustomSourceId(): string {
+  return `cls-${uuidv7()}`
 }
 
 /** A blank balance-kind source the editor form starts from. */

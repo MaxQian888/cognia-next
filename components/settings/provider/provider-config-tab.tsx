@@ -83,6 +83,8 @@ import { DeploymentCertificationPanel } from "./deployment-certification-panel"
 import { ConnectionStatusCard, type TestResult } from "./connection-status-card"
 import { ProtocolSelectContent } from "./protocol-select-content"
 import { AnthropicSubscriptionReuseCard } from "./anthropic-subscription-reuse-card"
+import { getActiveCredential } from "@cognia/provider-core/providers/completeness"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
@@ -90,6 +92,8 @@ import { useSecretReveal } from "@/hooks/use-secret-reveal"
 export interface ProviderConfigTabProps {
   providerId: string
   settings: UserProviderSettings
+  hasSubscriptionCredential?: boolean
+  canTestConnection?: boolean
   providerModels?: Array<{
     id: string
     name: string
@@ -421,6 +425,8 @@ export function ProviderConfigTab({
   onToggleRotation,
   onRotationStrategyChange,
   authSlot,
+  hasSubscriptionCredential = false,
+  canTestConnection,
   children,
 }: ProviderConfigTabProps) {
   const t = useTranslations("providers")
@@ -443,21 +449,33 @@ export function ProviderConfigTab({
   // Catalog-default base URL for this provider (empty for OpenAI/Anthropic/…
   // whose SDKs hard-code the endpoint). Drives both the pre-filled field value
   // and the persist-on-configure effect below.
-  const defaultBaseURL = getBuiltInProviderSettingsBaseURL(providerId)
+  const subscriptionDefinition = getSubscriptionProvider(providerId)
+  const defaultBaseURL =
+    getBuiltInProviderSettingsBaseURL(providerId) ?? subscriptionDefinition?.baseUrl
   const isConfiguringProvider = !!settings.enabled || !!settings.apiKey
+  const mayUseSubscriptionCredential =
+    !!subscriptionDefinition &&
+    subscriptionDefinition.authMode !== "anthropic-oauth" &&
+    !getActiveCredential(settings)
 
   // Protocol override: offered for every built-in EXCEPT the literal
   // "anthropic" id, which always dispatches through the native Claude Agent
   // SDK subprocess regardless of this field (see `sidecar/dispatch/index.mjs`)
   // — showing a selector there would be misleading since it wouldn't apply.
-  const showProtocolSelector = providerId !== "anthropic" && !!onApiProtocolChange
+  // CommandCode's protocol is selected per model and exposes no Responses API.
+  const modelSelectsProtocol = providerId === "commandcode"
+  const showProtocolSelector =
+    providerId !== "anthropic" && !modelSelectsProtocol && !!onApiProtocolChange
   const catalogProtocol = getBuiltInProviderProtocol(providerId)
   const effectiveProtocol = settings.apiProtocol ?? catalogProtocol ?? "openai"
   // The Responses/Chat override only means something on the OpenAI wire
   // protocol (Azure OpenAI, gateways, custom URLs); `anthropic` always
   // dispatches through the native SDK.
   const showFlavorSelector =
-    providerId !== "anthropic" && effectiveProtocol === "openai" && !!onApiFlavorChange
+    providerId !== "anthropic" &&
+    !modelSelectsProtocol &&
+    effectiveProtocol === "openai" &&
+    !!onApiFlavorChange
 
   // Once the user actually starts configuring this provider (enables it or
   // enters an API key), persist its default base URL so the saved settings
@@ -469,10 +487,21 @@ export function ProviderConfigTab({
   // which used to snap straight back to the catalog default.
   const baseURLNeverStored = settings.baseURL === undefined
   useEffect(() => {
-    if (defaultBaseURL && baseURLNeverStored && isConfiguringProvider) {
+    if (
+      defaultBaseURL &&
+      baseURLNeverStored &&
+      isConfiguringProvider &&
+      !mayUseSubscriptionCredential
+    ) {
       onBaseURLChange(defaultBaseURL)
     }
-  }, [defaultBaseURL, baseURLNeverStored, isConfiguringProvider, onBaseURLChange])
+  }, [
+    defaultBaseURL,
+    baseURLNeverStored,
+    isConfiguringProvider,
+    onBaseURLChange,
+    mayUseSubscriptionCredential,
+  ])
 
   // Draft-buffered credential inputs: keystrokes stay local and commit on the
   // trailing edge (idle / blur / Enter) instead of one settings-singleton
@@ -498,9 +527,11 @@ export function ProviderConfigTab({
     (settings.apiFlavor && settings.apiFlavor !== "auto" ? 1 : 0) +
     Object.keys(settings.customHeaders ?? {}).length
 
-  const canTest = isBedrock
-    ? !!settings.bedrock && validateBedrockConnectionSettings(settings.bedrock).valid
-    : !!settings.apiKey
+  const canTest =
+    canTestConnection ??
+    (isBedrock
+      ? !!settings.bedrock && validateBedrockConnectionSettings(settings.bedrock).valid
+      : !!settings.apiKey)
 
   // One verification affordance, always in the same place (the credentials
   // block header) whether or not a result exists — it used to sit bottom-right
@@ -570,7 +601,11 @@ export function ProviderConfigTab({
               stacked
               htmlFor={apiKeyInputId}
               label={t("configTab.apiKeyLabel")}
-              description={t("configTab.apiKeyDescription")}
+              description={t(
+                hasSubscriptionCredential
+                  ? "configTab.subscriptionCredentialDescription"
+                  : "configTab.apiKeyDescription"
+              )}
             >
               <div className="space-y-2">
                 <div className="relative">

@@ -1,6 +1,6 @@
 // Unified subscription / OAuth credential type surface (ADR 0025).
 //
-// Three providers (anthropic, codex, opencode), N accounts per provider, one
+// Four providers (anthropic, codex, opencode, commandcode), N accounts per provider, one
 // `ProviderVault` per provider in the OS keyring. Mirrors the Rust shapes in
 // `src-tauri/src/subscription/vault.rs` field-for-field so the IPC wire format
 // stays stable.
@@ -14,9 +14,19 @@
  * per-provider vault entry and as the discriminator throughout the
  * subscription module.
  */
-export type ProviderId = "anthropic" | "codex" | "opencode"
+export type BuiltInProviderId = "anthropic" | "codex" | "opencode" | "commandcode"
+export type ProviderId = BuiltInProviderId | (string & {})
 
-export const ALL_PROVIDER_IDS: readonly ProviderId[] = ["anthropic", "codex", "opencode"] as const
+export function isValidSubscriptionProviderId(value: string): boolean {
+  return /^[a-z][a-z0-9_.:-]{0,127}$/.test(value)
+}
+
+export const ALL_PROVIDER_IDS: readonly BuiltInProviderId[] = [
+  "anthropic",
+  "codex",
+  "opencode",
+  "commandcode",
+] as const
 
 // ---------------------------------------------------------------------------
 // Provider-specific credential data shapes
@@ -119,6 +129,22 @@ export interface OpencodeZenData {
   storedAtMs: number
 }
 
+/** CommandCode subscription API key. No OAuth refresh or token expiry. */
+export interface CommandCodeCredentialData {
+  accessToken: string
+  storedAtMs: number
+  /** Optional gateway override; an account-bound preset takes precedence. */
+  baseUrl?: string
+}
+
+/** Generic API-key subscription for a registry-defined provider. */
+export interface ApiKeyCredentialData {
+  providerId: ProviderId
+  accessToken: string
+  storedAtMs: number
+  baseUrl?: string
+}
+
 /**
  * Tagged union of every provider-specific credential shape. The discriminator
  * is `provider` — Rust serde uses `tag = "provider"` and `rename_all =
@@ -129,13 +155,20 @@ export type ProviderCredential =
   | ({ provider: "codex" } & CodexCredentialData)
   | ({ provider: "opencode-discovered" } & OpencodeDiscoveredData)
   | ({ provider: "opencode-zen" } & OpencodeZenData)
+  | ({ provider: "commandcode" } & CommandCodeCredentialData)
+  | ({ provider: "api-key" } & ApiKeyCredentialData)
 
-/** Variant tag distinguishing the four credential shapes in projections. */
-export type AccountVariant = "anthropic" | "codex" | "opencode-discovered" | "opencode-zen"
+/** Variant tag distinguishing the credential shapes in projections. */
+export type AccountVariant =
+  "anthropic" | "codex" | "opencode-discovered" | "opencode-zen" | "commandcode" | "api-key"
 
 /** Which `ProviderId` does a `ProviderCredential` belong to? */
 export function providerIdForCredential(c: ProviderCredential): ProviderId {
   switch (c.provider) {
+    case "api-key":
+      return c.providerId
+    case "commandcode":
+      return "commandcode"
     case "anthropic":
       return "anthropic"
     case "codex":
@@ -152,6 +185,10 @@ export function providerIdForCredential(c: ProviderCredential): ProviderId {
  */
 export function variantOf(c: ProviderCredential): AccountVariant {
   switch (c.provider) {
+    case "api-key":
+      return "api-key"
+    case "commandcode":
+      return "commandcode"
     case "anthropic":
       return "anthropic"
     case "codex":

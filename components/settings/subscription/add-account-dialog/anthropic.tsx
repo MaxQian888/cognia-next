@@ -18,6 +18,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import { toast } from "sonner"
 import {
   ExternalLinkIcon,
@@ -56,6 +57,7 @@ import {
   replaceAccountCredential,
 } from "@/lib/subscription/core/transport"
 import { persistProviderAccount } from "@/lib/subscription/core/account-lifecycle"
+import { NewAccountPresetSelector } from "../account-preset-selector"
 import type {
   Account,
   AccountDetail,
@@ -88,6 +90,7 @@ export function AnthropicAddAccountDialog({
 }: AnthropicAddAccountDialogProps) {
   const t = useTranslations("subscription")
   const tAccountList = useTranslations("subscription.common.accountList")
+  const [presetId, setPresetId] = useState<string | null>(null)
 
   const { discovered, loading: discoveryLoading, reload: reloadDiscovery } = useAnthropicDiscovery()
 
@@ -111,6 +114,7 @@ export function AnthropicAddAccountDialog({
     setPrevOpen(open)
     setPrevComputedDefault(computedDefault)
     if (open) {
+      setPresetId(null)
       setMode(computedDefault)
       setStep("choose-mode")
       setAuthorizeUrl(null)
@@ -178,10 +182,10 @@ export function AnthropicAddAccountDialog({
         })
         onUpdated?.(account)
       } else {
-        const account = await persistProviderAccount(
-          "anthropic",
-          await anthropicOauthSavePkceResult(credential, null)
-        )
+        const account = await persistProviderAccount("anthropic", {
+          ...(await anthropicOauthSavePkceResult(credential, null)),
+          ...(presetId ? { presetId } : {}),
+        })
         onAdded?.(account)
       }
       setStep("done")
@@ -206,10 +210,10 @@ export function AnthropicAddAccountDialog({
         })
         onUpdated?.(account)
       } else {
-        const account = await persistProviderAccount(
-          "anthropic",
-          await anthropicOauthSavePkceResult(credential, null)
-        )
+        const account = await persistProviderAccount("anthropic", {
+          ...(await anthropicOauthSavePkceResult(credential, null)),
+          ...(presetId ? { presetId } : {}),
+        })
         onAdded?.(account)
       }
       setStep("done")
@@ -234,6 +238,23 @@ export function AnthropicAddAccountDialog({
 
         {step === "choose-mode" && (
           <div className="space-y-4 py-2">
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              <p>{t("login.apiKeySetupHint")}</p>
+              <Link
+                href="/settings?section=providers"
+                onClick={() => onOpenChange(false)}
+                className="mt-1 inline-block text-primary underline underline-offset-4"
+              >
+                {t("login.apiKeySetupAction")}
+              </Link>
+            </div>
+            {!existingAccount && (
+              <NewAccountPresetSelector
+                provider="anthropic"
+                value={presetId}
+                onChange={setPresetId}
+              />
+            )}
             <RadioGroup
               value={mode}
               onValueChange={(value) => setMode(value as AnthropicLoginMode)}

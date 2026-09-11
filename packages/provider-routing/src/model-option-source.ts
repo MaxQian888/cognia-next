@@ -14,7 +14,7 @@
  */
 
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
-import { PROVIDERS } from "@cognia/provider-types/provider"
+import { getAllProviders } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 
 export interface ModelOption {
@@ -33,8 +33,8 @@ export interface ModelOptionGroup {
  * Curated fallback for an enabled-but-unconfigured provider — the static
  * built-in `PROVIDERS` registry, mirroring `composer/model-picker.tsx`.
  */
-export function catalogModelIds(providerId: string): string[] {
-  const cfg = PROVIDERS[providerId]
+export function catalogModelIds(providerId: string, catalog = getAllProviders()): string[] {
+  const cfg = catalog[providerId]
   if (!cfg) return []
   const ids = new Set<string>()
   if (cfg.defaultModel) ids.add(cfg.defaultModel)
@@ -74,6 +74,7 @@ export function collectOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
   customProviders: CustomProviderSettings[] | undefined
 ): ModelOption[] {
+  const catalog = getAllProviders()
   const out: ModelOption[] = []
   // Anthropic is always considered even without a providerSettings entry:
   // the sidecar runtime authenticates via API key or subscription OAuth and
@@ -84,6 +85,7 @@ export function collectOptions(
   }
   for (const [providerId, settings] of entries) {
     if (settings.enabled === false) continue
+    if (providerId.includes(":") && !catalog[providerId]) continue
     const allowed = new Set<string>(settings.enabledModels ?? [])
     if (settings.defaultModel) allowed.add(settings.defaultModel)
     for (const m of settings.discoveredModels ?? []) {
@@ -96,7 +98,7 @@ export function collectOptions(
       }
     }
     // Nothing configured at all → curated built-in catalog, never an empty group.
-    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
+    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId, catalog)
     for (const modelId of modelIds) {
       out.push({ providerId, providerName: providerId, modelId })
     }

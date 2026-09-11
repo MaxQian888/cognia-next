@@ -73,6 +73,8 @@ export interface ModelConfig {
   id: string
   name: string
   contextLength: number
+  maxInputTokens?: number
+  knownFields?: string[]
   maxOutputTokens?: number
   supportsTools: boolean
   supportsVision: boolean
@@ -80,6 +82,7 @@ export interface ModelConfig {
   supportsVideo: boolean
   supportsStreaming: boolean
   supportsReasoning?: boolean
+  supportsStructuredOutput?: boolean
   supportsImageGeneration?: boolean
   supportsEmbedding?: boolean
   pricing?: ModelPricing
@@ -90,6 +93,9 @@ export interface ProviderModelDiscoveryEntry {
   name?: string
   provider?: string
   contextLength?: number
+  maxInputTokens?: number
+  /** Fields actually supplied by model metadata, before compatibility defaults. */
+  knownFields?: string[]
   maxOutputTokens?: number
   supportsTools?: boolean
   supportsVision?: boolean
@@ -594,7 +600,7 @@ export type ApiFlavor = "auto" | "responses" | "chat"
  * Cognia's `CustomModelMetadata`. Persisted on the parent
  * `CustomProviderSettings.customModelMetadata` map keyed by model id.
  */
-export interface CustomModelMetadata {
+export interface CustomModelMetadata extends ProviderModelDiscoveryEntry {
   id: string
   name?: string
   contextLength?: number
@@ -615,6 +621,14 @@ export interface CustomModelMetadata {
 }
 
 export interface CustomProviderSettings extends UserProviderSettings {
+  /** Credentials live in the subscription vault; this row stores connection metadata only. */
+  subscription?: {
+    apiKeyUrl?: string
+    usageUrl?: string
+    docsUrl?: string
+    description?: string
+    modelApi?: { list: boolean; retrieve?: boolean }
+  }
   /** Stable id (also used as `providerId`). cognia-next stores customs as
    *  an array, so this is the lookup key components and the resolver use. */
   id: string

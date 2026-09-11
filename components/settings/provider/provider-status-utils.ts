@@ -67,7 +67,7 @@ export function providerMatchesCategory(category: string, providerId: string): b
   if (category === "custom") return false
   const categories = CATEGORY_MAP[category as Exclude<ProviderCategoryFilter, "all" | "custom">]
   if (!categories) return false
-  const cfg = PROVIDERS[providerId]
+  const cfg = getAllProviders()[providerId]
   if (!cfg) return false
   return cfg.category !== undefined && categories.includes(cfg.category as BuiltInProviderCategory)
 }
@@ -107,7 +107,7 @@ export function isLocalEngineConfigured(
     | { enabled?: boolean; verificationStatus?: "unverified" | "verified" | "stale" | null }
     | undefined
 ): boolean {
-  if (PROVIDERS[providerId]?.category !== "local") return false
+  if (getAllProviders()[providerId]?.category !== "local") return false
   return Boolean(settings?.enabled) || settings?.verificationStatus === "verified"
 }
 
@@ -170,4 +170,4 @@ export function pickInitialProviderId(
 
 // Imported here so this file stays self-contained for tests; the catalog is
 // used only by `providerMatchesCategory` / `isLocalEngineConfigured` above.
-import { PROVIDERS } from "@cognia/provider-types/provider"
+import { getAllProviders } from "@cognia/provider-types/provider"

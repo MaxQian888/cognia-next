@@ -14,6 +14,14 @@ import React from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ProviderSettings } from "./provider-settings"
 
+const mockSubscriptionDefinition = jest.fn()
+const mockDiscoverSubscriptionModels = jest.fn()
+jest.mock("@/lib/subscription/core/provider-registry", () => ({
+  getSubscriptionProvider: (...args: unknown[]) => mockSubscriptionDefinition(...args),
+}))
+jest.mock("@/lib/subscription/core/model-discovery", () => ({
+  discoverSubscriptionModels: (...args: unknown[]) => mockDiscoverSubscriptionModels(...args),
+}))
 const mockSyncModelsDev = jest.fn(async () => {})
 const mockSyncOpenRouter = jest.fn(async (_apiKey?: string) => {})
 const mockDiscoverySnapshot = jest.fn((..._args: unknown[]) => ({
@@ -36,7 +44,15 @@ let mockHookState: ReturnType<typeof makeHookState>
 
 function makeHookState(overrides?: {
   filteredProviders?: Array<
-    [string, { name: string; defaultModel: string; models?: Array<Record<string, unknown>> }]
+    [
+      string,
+      {
+        name: string
+        defaultModel: string
+        category?: "local" | "cloud"
+        models?: Array<Record<string, unknown>>
+      },
+    ]
   >
   visibleCustomProviderIds?: string[]
   customProviders?: Record<string, Record<string, unknown>>
@@ -54,6 +70,7 @@ function makeHookState(overrides?: {
       typeof import("@/hooks/settings/use-provider-settings").useProviderSettings
     >["filteredProviders"],
     providerSettings: {} as Record<string, Record<string, unknown>>,
+    readinessProviderSettings: undefined as Record<string, Record<string, unknown>> | undefined,
     testResults: {} as Record<string, { success: boolean; latency_ms?: number; message?: string }>,
     testingProviders: {} as Record<string, boolean>,
     testProvider: jest.fn(),
@@ -252,8 +269,10 @@ const mockSettingsState = {
   settings: { defaultProvider: "openai" } as { defaultProvider?: string },
 }
 jest.mock("@/stores/settings", () => ({
-  useSettingsStore: (selector: (state: typeof mockSettingsState) => unknown) =>
-    selector(mockSettingsState),
+  useSettingsStore: Object.assign(
+    (selector: (state: typeof mockSettingsState) => unknown) => selector(mockSettingsState),
+    { getState: () => mockSettingsState }
+  ),
 }))
 
 // Source uses next/dynamic for these — return synchronous test stand-ins so the
@@ -263,11 +282,22 @@ jest.mock("./custom-provider-dialog", () => ({
     open ? <div data-testid="custom-provider-dialog" /> : null,
 }))
 jest.mock("./quick-add-provider-dialog", () => ({
-  QuickAddProviderDialog: ({ open, onAddCustom }: { open: boolean; onAddCustom?: () => void }) =>
+  QuickAddProviderDialog: ({
+    open,
+    onAddCustom,
+    onAdded,
+  }: {
+    open: boolean
+    onAddCustom?: () => void
+    onAdded?: (id: string, name: string) => void
+  }) =>
     open ? (
-      <button data-testid="quick-add-provider-dialog" onClick={onAddCustom}>
-        add-custom
-      </button>
+      <div>
+        <button data-testid="quick-add-provider-dialog" onClick={onAddCustom}>
+          add-custom
+        </button>
+        <button onClick={() => onAdded?.("new-relay", "New Relay")}>finish quick add</button>
+      </div>
     ) : null,
 }))
 jest.mock("./local-provider-settings", () => ({
@@ -378,6 +408,7 @@ jest.mock("./provider-sidebar", () => ({
     onSelect,
     addButton,
     onSearchChange,
+    searchQuery,
     categoryFilter,
     onCategoryChange,
     onCompareClick,
@@ -391,6 +422,7 @@ jest.mock("./provider-sidebar", () => ({
     onSelect: (id: string) => void
     addButton?: React.ReactNode
     onSearchChange: (q: string) => void
+    searchQuery?: string
     categoryFilter?: string
     onCategoryChange?: (c: string) => void
     onCompareClick?: () => void
@@ -403,6 +435,7 @@ jest.mock("./provider-sidebar", () => ({
     <div data-testid="provider-sidebar">
       <input
         data-testid="provider-sidebar-search"
+        value={searchQuery ?? ""}
         onChange={(e) => onSearchChange(e.target.value)}
       />
       <button data-testid="provider-sidebar-category" onClick={() => onCategoryChange?.("ai")}>
@@ -984,7 +1017,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
 
   it("keeps a local provider inside the shared detail shell", async () => {
     mockHookState = makeHookState({
-      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
+      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "", category: "local" }]],
       selectedProviderId: "ollama",
     })
     const { findByTestId } = render(<ProviderSettings />)
@@ -1001,7 +1034,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
 
   it("keeps the local-provider model manager while omitting cloud-only tabs", async () => {
     mockHookState = makeHookState({
-      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
+      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "", category: "local" }]],
       selectedProviderId: "ollama",
     })
     const { findByTestId } = render(<ProviderSettings />)
@@ -1020,7 +1053,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
 
   it("persists a local engine's discovered models only when the set changed", async () => {
     mockHookState = makeHookState({
-      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "" }]],
+      filteredProviders: [["ollama", { name: "Ollama", defaultModel: "", category: "local" }]],
       selectedProviderId: "ollama",
     })
     // First discovery → persisted (with a default model picked).
@@ -1184,6 +1217,21 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     fireEvent.click(screen.getByTestId("mock-toggle-enabled"))
     expect(mockSetProviderConfig).toHaveBeenCalledWith("openai", { enabled: expect.any(Boolean) })
+  })
+
+  it("enables a subscription-only Codex provider using readiness while leaving its manual key empty", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["codex", { name: "Codex", defaultModel: "gpt-5.6-sol" }]],
+      selectedProviderId: "codex",
+    })
+    mockHookState.providerSettings = { codex: { enabled: false, apiKey: "" } }
+    mockHookState.readinessProviderSettings = {
+      codex: { enabled: false, apiKey: "subscription:hash", baseURL: "https://account.test" },
+    }
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-toggle-enabled"))
+    expect(mockSetProviderConfig).toHaveBeenCalledWith("codex", { enabled: true })
+    expect(mockHookState.providerSettings.codex.apiKey).toBe("")
   })
 
   it("toggles a custom provider through the detail panel", () => {
@@ -1757,5 +1805,67 @@ describe("ProviderSettings (cognia-next slim port)", () => {
       "data-provider-id",
       "openrouter"
     )
+  })
+})
+
+it("selects a newly added relay and clears search so the configured provider remains reachable", async () => {
+  mockHookState = makeHookState({
+    filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+    selectedProviderId: "openai",
+  })
+  render(<ProviderSettings />)
+  fireEvent.change(screen.getByTestId("provider-sidebar-search"), {
+    target: { value: "old-provider" },
+  })
+  fireEvent.click(screen.getByTestId("provider-sidebar-add").querySelector("button") as Element)
+  fireEvent.click(await screen.findByRole("button", { name: "finish quick add" }))
+  expect(mockSetSelectedProviderId).toHaveBeenCalledWith("new-relay")
+  expect(screen.getByTestId("provider-sidebar-search")).toHaveValue("")
+})
+
+describe("subscription plugin model refresh", () => {
+  afterEach(() => {
+    mockSubscriptionDefinition.mockReset()
+    mockDiscoverSubscriptionModels.mockReset()
+  })
+  it("refreshes from the subscription API and persists model metadata only", async () => {
+    const definition = { id: "plugin:kimi", source: "plugin", modelApi: { list: true } }
+    mockSubscriptionDefinition.mockReturnValue(definition)
+    const models = [{ id: "kimi", name: "Kimi", contextLength: 256000, supportsTools: true }]
+    mockDiscoverSubscriptionModels.mockResolvedValue({ models, fetchedAt: 123 })
+    mockHookState = makeHookState({
+      filteredProviders: [["plugin:kimi", { name: "Kimi", defaultModel: "kimi" }]],
+      selectedProviderId: "plugin:kimi",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-models-refresh"))
+    await waitFor(() =>
+      expect(mockSetProviderConfig).toHaveBeenCalledWith("plugin:kimi", {
+        discoveredModels: models,
+        discoveredModelsLastFetched: 123,
+      })
+    )
+    expect(mockDiscoverSubscriptionModels).toHaveBeenCalledWith({
+      definition,
+      signal: expect.any(AbortSignal),
+    })
+    expect(mockSyncModelsDev).not.toHaveBeenCalled()
+  })
+
+  it("does not write results after the plugin is unloaded", async () => {
+    const definition = { id: "plugin:kimi", source: "plugin" }
+    mockSubscriptionDefinition.mockReturnValue(definition)
+    mockDiscoverSubscriptionModels.mockImplementation(async () => {
+      mockSubscriptionDefinition.mockReturnValue(undefined)
+      return { models: [{ id: "late" }], fetchedAt: 123 }
+    })
+    mockHookState = makeHookState({
+      filteredProviders: [["plugin:kimi", { name: "Kimi", defaultModel: "kimi" }]],
+      selectedProviderId: "plugin:kimi",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-models-refresh"))
+    await waitFor(() => expect(mockDiscoverSubscriptionModels).toHaveBeenCalled())
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
   })
 })

@@ -15,6 +15,7 @@ import {
   getProviderPreset,
   listPresets,
   listAccounts,
+  listSubscriptionProviderIds,
   opencodeOauthDiscover,
   opencodeSaveZenKey,
   renameAccount,
@@ -29,6 +30,7 @@ import {
   authedRequest,
 } from "./transport"
 import type { Account, AnthropicCredentialData } from "@/types/subscription"
+import type { CustomProviderSettings } from "@cognia/provider-types/provider"
 import { __resetVaultChangeTrackerForTesting } from "@/lib/subscription/sync/change-tracker"
 import { subscribeSubscriptionChanged } from "./subscription-events"
 
@@ -444,5 +446,283 @@ describe("subscription core transport", () => {
       label: null,
       plan: null,
     })
+  })
+})
+
+test("provider inventory forwards the unlocked local account and dynamic ids", async () => {
+  mockedCall.mockResolvedValueOnce(["anthropic", "example:api"])
+  await expect(listSubscriptionProviderIds()).resolves.toEqual(["anthropic", "example:api"])
+  expect(mockedCall).toHaveBeenCalledWith("subscription_list_provider_ids", {
+    localAccountId: "local_acct_a",
+  })
+})
+
+const mockSetPluginConfig = jest.fn().mockResolvedValue(undefined)
+const mockUpdateCustomProvider = jest.fn().mockResolvedValue(undefined)
+const mockPluginSettings = {
+  providerSettings: {} as Record<string, unknown>,
+  customProviders: [] as CustomProviderSettings[],
+}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      settings: mockPluginSettings,
+      setProviderConfig: mockSetPluginConfig,
+      updateCustomProvider: mockUpdateCustomProvider,
+    }),
+  },
+}))
+test("first plugin account activation initializes model metadata without persisting its vault key", async () => {
+  const { registerPluginSubscriptionProvider, unregisterSubscriptionProvidersByPlugin } =
+    await import("./provider-registry")
+  const id = registerPluginSubscriptionProvider(
+    {
+      id: "api",
+      name: "Example",
+      baseUrl: "https://example.test/v1",
+      protocol: "anthropic",
+      models: ["model-a"],
+    },
+    "activation"
+  )
+  try {
+    mockedCall.mockResolvedValue(undefined)
+    await setActiveAccount(id, "account")
+    expect(mockSetPluginConfig).toHaveBeenCalledWith(id, {
+      enabled: true,
+      baseURL: "https://example.test/v1",
+      apiProtocol: "anthropic",
+      defaultModel: "model-a",
+    })
+    mockSetPluginConfig.mockClear()
+    mockPluginSettings.providerSettings[id] = { enabled: false }
+    await setActiveAccount(id, "account")
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+  } finally {
+    unregisterSubscriptionProvidersByPlugin("activation")
+    mockPluginSettings.providerSettings = {}
+  }
+})
+
+describe("plugin subscription discovery invalidation", () => {
+  let providerId: string
+  beforeEach(async () => {
+    const { registerPluginSubscriptionProvider } = await import("./provider-registry")
+    providerId = registerPluginSubscriptionProvider(
+      {
+        id: "api",
+        name: "Discovery",
+        protocol: "openai",
+        baseUrl: "https://discovery.example/v1",
+        models: ["declared-model"],
+      },
+      "discovery-lifecycle"
+    )
+    mockSetPluginConfig.mockClear()
+    mockPluginSettings.providerSettings[providerId] = {
+      enabled: false,
+      defaultModel: "selected-model",
+      customHeaders: { "X-Tenant": "team" },
+      discoveredModels: [{ id: "account-specific-model" }],
+      discoveredModelsLastFetched: 123,
+    }
+    mockedCall.mockResolvedValue(undefined)
+  })
+  afterEach(async () => {
+    const { unregisterSubscriptionProvidersByPlugin } = await import("./provider-registry")
+    unregisterSubscriptionProvidersByPlugin("discovery-lifecycle")
+    mockPluginSettings.providerSettings = {}
+    mockSetPluginConfig.mockClear()
+  })
+
+  const mutations: Array<[string, (id: string) => Promise<unknown>]> = [
+    ["active account", (id) => setActiveAccount(id, "next")],
+    ["clear active account", (id) => setActiveAccount(id, null)],
+    [
+      "replace key",
+      (id) =>
+        replaceAccountCredential(id, "account", {
+          provider: "api-key",
+          providerId: id,
+          accessToken: "test",
+          storedAtMs: 0,
+        }),
+    ],
+    ["delete account", (id) => deleteAccount(id, "account")],
+    [
+      "save account and preset binding",
+      (id) => saveAccount(id, { ...sampleAccount(), presetId: "preset" }),
+    ],
+    [
+      "provider preset",
+      (id) =>
+        setProviderPreset(id, {
+          id: "preset",
+          label: "Relay",
+          baseUrl: "https://relay.example/v1",
+        }),
+    ],
+    [
+      "preset update",
+      (id) =>
+        saveProviderPreset(id, {
+          id: "preset",
+          label: "Relay",
+          baseUrl: "https://relay.example/v1",
+        }),
+    ],
+    ["preset delete", (id) => deleteProviderPreset(id, "preset")],
+    ["default preset", (id) => setDefaultPreset(id, "preset")],
+  ]
+
+  it.each(mutations)("clears only discovered metadata after %s changes", async (_name, mutate) => {
+    await mutate(providerId)
+    expect(mockSetPluginConfig).toHaveBeenCalledTimes(1)
+    expect(mockSetPluginConfig).toHaveBeenCalledWith(providerId, {
+      discoveredModels: [],
+      discoveredModelsLastFetched: undefined,
+    })
+  })
+
+  it("does not invalidate on reads or label-only changes", async () => {
+    await getAccount(providerId, "account")
+    await getActiveAccount(providerId)
+    await getProviderPreset(providerId)
+    await listPresets(providerId)
+    await renameAccount(providerId, "account", "renamed")
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not invalidate after a failed vault mutation", async () => {
+    mockedCall.mockRejectedValueOnce(new Error("vault failed"))
+    await expect(setActiveAccount(providerId, "next")).rejects.toThrow("vault failed")
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not update another local account after the vault call resolves", async () => {
+    mockedCall.mockImplementationOnce(async () => {
+      mockAccountStoreState.unlockedAccountId = "local_acct_b"
+      return undefined
+    })
+    await setActiveAccount(providerId, "next")
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+  })
+})
+
+describe("custom subscription discovery invalidation", () => {
+  const providerId = "custom-subscription"
+  beforeEach(() => {
+    mockedCall.mockResolvedValue(undefined)
+    mockSetPluginConfig.mockClear()
+    mockUpdateCustomProvider.mockClear()
+    mockPluginSettings.customProviders = [
+      {
+        id: providerId,
+        providerId,
+        isCustom: true,
+        name: "Custom",
+        customName: "Custom",
+        enabled: false,
+        defaultModel: "declared",
+        customModels: ["declared"],
+        models: ["declared"],
+        apiProtocol: "openai",
+        baseURL: "https://custom.example/v1",
+        subscription: { modelApi: { list: true } },
+        customModelMetadata: {
+          declared: { id: "declared", maxOutputTokens: 1234, supportsVision: true },
+        },
+        discoveredModels: [{ id: "old-account-only" }],
+        discoveredModelsLastFetched: 123,
+      } as CustomProviderSettings,
+    ]
+  })
+  afterEach(() => {
+    mockPluginSettings.customProviders = []
+    mockSetPluginConfig.mockClear()
+    mockUpdateCustomProvider.mockClear()
+  })
+
+  const mutations: Array<[string, () => Promise<unknown>]> = [
+    ["account switch", () => setActiveAccount(providerId, "next")],
+    ["clear account", () => setActiveAccount(providerId, null)],
+    [
+      "replace key",
+      () =>
+        replaceAccountCredential(providerId, "account", {
+          provider: "api-key",
+          providerId,
+          accessToken: "test",
+          storedAtMs: 0,
+        }),
+    ],
+    ["delete account", () => deleteAccount(providerId, "account")],
+    [
+      "save account/preset binding",
+      () => saveAccount(providerId, { ...sampleAccount(), presetId: "preset" }),
+    ],
+    [
+      "provider preset",
+      () =>
+        setProviderPreset(providerId, {
+          id: "preset",
+          label: "Relay",
+          baseUrl: "https://relay.example/v1",
+        }),
+    ],
+    [
+      "preset update",
+      () =>
+        saveProviderPreset(providerId, {
+          id: "preset",
+          label: "Relay",
+          baseUrl: "https://relay.example/v1",
+        }),
+    ],
+    ["preset deletion", () => deleteProviderPreset(providerId, "preset")],
+    ["default preset", () => setDefaultPreset(providerId, "preset")],
+  ]
+  it.each(mutations)("clears only live model metadata after %s", async (_name, mutate) => {
+    await mutate()
+    expect(mockUpdateCustomProvider).toHaveBeenCalledTimes(1)
+    expect(mockUpdateCustomProvider).toHaveBeenCalledWith(providerId, {
+      discoveredModels: [],
+      discoveredModelsLastFetched: undefined,
+    })
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+    expect(mockPluginSettings.customProviders[0]).toMatchObject({
+      enabled: false,
+      defaultModel: "declared",
+      customModelMetadata: { declared: { maxOutputTokens: 1234, supportsVision: true } },
+    })
+  })
+
+  it("leaves ordinary custom providers and other subscriptions unchanged", async () => {
+    mockPluginSettings.customProviders[0].subscription = undefined
+    mockPluginSettings.customProviders.push({
+      ...mockPluginSettings.customProviders[0],
+      id: "another",
+      subscription: {},
+    })
+    await setActiveAccount(providerId, "next")
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
+    expect(mockSetPluginConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not clear metadata after local account changes during the vault request", async () => {
+    mockedCall.mockImplementationOnce(async () => {
+      mockAccountStoreState.unlockedAccountId = "local_acct_b"
+      return undefined
+    })
+    await setActiveAccount(providerId, "next")
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
+  })
+
+  it("does not clear metadata for reads, labels, or failed mutations", async () => {
+    await getAccount(providerId, "account")
+    await renameAccount(providerId, "account", "Alias")
+    mockedCall.mockRejectedValueOnce(new Error("vault failed"))
+    await expect(setActiveAccount(providerId, "next")).rejects.toThrow("vault failed")
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
   })
 })

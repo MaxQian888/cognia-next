@@ -182,21 +182,24 @@ describe("provider account lifecycle", () => {
     })
   })
 
-  it("preserves a legacy default under its original provider when setting another provider", async () => {
-    await getDb().settings.put({
-      id: "singleton",
-      defaultProvider: "anthropic",
-      defaultAccountId: TARGET,
-      updatedAt: 1,
-    } as never)
+  it.each(["anthropic", "commandcode"] as const)(
+    "preserves a legacy %s default when setting another provider",
+    async (provider) => {
+      await getDb().settings.put({
+        id: "singleton",
+        defaultProvider: provider,
+        defaultAccountId: TARGET,
+        updatedAt: 1,
+      } as never)
 
-    await setProviderDefaultAccount("codex", "codex-account")
+      await setProviderDefaultAccount("codex", "codex-account")
 
-    expect((await getDb().settings.get("singleton"))?.defaultAccountIds).toEqual({
-      anthropic: TARGET,
-      codex: "codex-account",
-    })
-  })
+      expect((await getDb().settings.get("singleton"))?.defaultAccountIds).toEqual({
+        [provider]: TARGET,
+        codex: "codex-account",
+      })
+    }
+  )
 
   it("preserves a legacy OpenCode Go default under the OpenCode provider", async () => {
     await getDb().settings.put({

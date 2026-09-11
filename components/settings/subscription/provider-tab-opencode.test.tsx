@@ -43,9 +43,14 @@ jest.mock("@/lib/subscription/opencode/discovery", () => ({
   useOpencodeDiscovery: () => discoveryState,
 }))
 
-const opencodeAdoptDiscovered = jest.fn(async () => {})
+const opencodeAdoptDiscovered = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/subscription/core/transport").opencodeAdoptDiscovered>
+  ) => {}
+)
 jest.mock("@/lib/subscription/core/transport", () => ({
-  opencodeAdoptDiscovered: (...args: unknown[]) => opencodeAdoptDiscovered(...args),
+  opencodeAdoptDiscovered: (...args: Parameters<typeof opencodeAdoptDiscovered>) =>
+    opencodeAdoptDiscovered(...args),
 }))
 
 jest.mock("@/components/ui/sonner", () => ({

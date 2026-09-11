@@ -1,3 +1,4 @@
+import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 // Encrypted export / import format for the unified subscription module.
 //
 // Uses the same crypto primitives the `lib/data/` Dexie-wide backup does
@@ -21,7 +22,7 @@ export interface SubscriptionPackageManifest {
   /** Provider ids present in this backup. */
   providers: ProviderId[]
   /** Account count per provider. */
-  accountCount: Record<ProviderId, number>
+  accountCount: Partial<Record<ProviderId, number>>
   /**
    * Provenance of the producing device (additive 2026-06-07; older packages
    * lack it). Generic label, never the raw user agent — mirrors
@@ -38,6 +39,8 @@ export interface SubscriptionPackageManifest {
 export interface SubscriptionPackageBody {
   manifest: SubscriptionPackageManifest
   vaults: Partial<Record<ProviderId, ProviderVault>>
+  /** User-created setup metadata, encrypted with the vaults; plugin registrations are excluded. */
+  customProviders?: PluginSubscriptionProviderDefinition[]
 }
 
 export interface SubscriptionEncryptedEnvelope {
@@ -132,13 +135,15 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
 export function buildSubscriptionPackage(
   vaults: Partial<Record<ProviderId, ProviderVault>>,
   nowMs: number = Date.now(),
-  device?: SubscriptionPackageManifest["device"]
+  device?: SubscriptionPackageManifest["device"],
+  customProviders?: PluginSubscriptionProviderDefinition[]
 ): SubscriptionPackageBody {
   const providers = (Object.keys(vaults) as ProviderId[]).sort()
-  const accountCount: Record<ProviderId, number> = {
+  const accountCount: Partial<Record<ProviderId, number>> = {
     anthropic: 0,
     codex: 0,
     opencode: 0,
+    commandcode: 0,
   }
   for (const provider of providers) {
     accountCount[provider] = vaults[provider]?.accounts.length ?? 0
@@ -152,6 +157,7 @@ export function buildSubscriptionPackage(
       ...(device ? { device } : {}),
     },
     vaults,
+    ...(customProviders?.length ? { customProviders } : {}),
   }
 }
 
@@ -274,6 +280,7 @@ export function summariseSubscriptionPackage(body: SubscriptionPackageBody): {
     anthropic: 0,
     codex: 0,
     opencode: 0,
+    commandcode: 0,
   }
   const accountIds: string[] = []
   for (const provider of Object.keys(body.vaults) as ProviderId[]) {

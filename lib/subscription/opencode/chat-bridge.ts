@@ -30,6 +30,7 @@ import {
 export interface OpencodeVaultCredential {
   apiKey: string
   baseURL: string
+  headers?: Record<string, string>
 }
 
 /**
@@ -61,7 +62,12 @@ export async function resolveOpencodeVaultCredential(
     const preset = await resolvePresetFor(full)
     const baseURL =
       preset?.baseUrl?.trim() || full.credential.baseUrl?.trim() || opencodeDefaultBaseUrl(wantPlan)
-    return { apiKey, baseURL }
+    const headers = Object.fromEntries(
+      Object.entries(preset?.extraHeaders ?? {}).filter(
+        ([name]) => !name.toLowerCase().startsWith("x-cognia-")
+      )
+    )
+    return { apiKey, baseURL, ...(Object.keys(headers).length ? { headers } : {}) }
   } catch {
     return null
   }

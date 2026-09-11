@@ -215,6 +215,7 @@ describe("buildUsageSection with glance dimensions", () => {
     const rows = buildUsageSection(usage([account()]), 0, spendDisplay)
     for (const row of rows) {
       if (!row.id.startsWith("tray.usage.scope:")) continue
+      if (row.kind !== "action") throw new Error("Expected command menu item")
       expect(row.payload).toMatchObject({ kind: "command" })
     }
   })

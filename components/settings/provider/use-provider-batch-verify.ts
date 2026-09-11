@@ -69,14 +69,17 @@ export function useProviderBatchVerify(
 ): UseProviderBatchVerifyResult {
   const {
     filteredProviders,
-    providerSettings,
+    providerSettings: storedProviderSettings,
     testResults,
     visibleCustomProviderIds,
-    customProviders,
+    customProviders: storedCustomProviders,
     customTestResults,
     testProvider,
     testCustomProvider,
   } = settings
+
+  const providerSettings = settings.readinessProviderSettings ?? storedProviderSettings
+  const customProviders = settings.readinessCustomProviders ?? storedCustomProviders
 
   const [verification, setVerification] = useState<BatchVerificationState>(IDLE)
   const [operationType, setOperationType] = useState<BatchOperationType>("verify-enabled")

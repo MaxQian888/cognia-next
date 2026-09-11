@@ -2,6 +2,10 @@
  * @jest-environment jsdom
  */
 
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: () => ({ settings: { customProviders: [] } }) },
+}))
+
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -47,6 +51,15 @@ jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: jest.fn(async () => ({ activeAccountId: null })),
   getProviderPreset: jest.fn(async () => null),
   listAccounts: jest.fn(async () => []),
+  listSubscriptionProviderIds: jest.fn(async () => [
+    "anthropic",
+    "codex",
+    "opencode",
+    "commandcode",
+  ]),
+  listPresets: jest.fn(async () => []),
+  saveProviderPreset: jest.fn(),
+  setDefaultPreset: jest.fn(),
   getAccount: jest.fn(async () => null),
   saveAccount: (...args: unknown[]) => applyMocks.saveAccount(...args),
   setActiveAccount: (...args: unknown[]) => applyMocks.setActiveAccount(...args),
@@ -181,6 +194,53 @@ describe("ImportExportButtons import flow", () => {
       expect(screen.getByText("passphraseWrong")).toBeInTheDocument()
     })
     expect(screen.queryByTestId("import-preview")).not.toBeInTheDocument()
+  })
+
+  it("previews dynamic vaults, metadata-only custom providers, and modern presets", async () => {
+    decryptMock.mockResolvedValueOnce({
+      manifest: { exportedAt: 0, schemaVersion: 2 },
+      vaults: {
+        "plugin:api": {
+          schemaVersion: 4,
+          accounts: [{ id: "a1", label: "Plugin account" }],
+          presets: [{ id: "relay" }],
+        },
+      },
+      customProviders: [{ id: "custom-example", name: "Custom Example" }],
+    })
+    render(<ImportExportButtons />)
+    openImportDialog()
+    await selectFile()
+    fireEvent.click(screen.getByText("preview.unlock"))
+    await waitFor(() => expect(screen.getByText("Custom Example")).toBeInTheDocument())
+    expect(screen.getByText("plugin:api")).toBeInTheDocument()
+    expect(screen.getByText(/Plugin account/)).toBeInTheDocument()
+    expect(screen.getByText("preview.hasPreset")).toBeInTheDocument()
+  })
+
+  it("shows metadata validation failures in the preview without writing accounts", async () => {
+    decryptMock.mockResolvedValueOnce({
+      manifest: { exportedAt: 0, schemaVersion: 2 },
+      vaults: { opencode: { schemaVersion: 4, accounts: [{ id: "a1" }], presets: [] } },
+      customProviders: [
+        {
+          id: "openai",
+          name: "Reserved",
+          baseUrl: "https://example.com/v1",
+          protocol: "openai",
+          models: ["model"],
+        },
+      ],
+    })
+    render(<ImportExportButtons />)
+    openImportDialog()
+    await selectFile()
+    fireEvent.click(screen.getByText("preview.unlock"))
+    await waitFor(() => expect(screen.getByText("preview.apply")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("preview.apply"))
+    await waitFor(() => expect(screen.getByText("importFailed")).toBeInTheDocument())
+    expect(applyMocks.saveAccount).not.toHaveBeenCalled()
+    expect(screen.getByTestId("import-preview")).toBeInTheDocument()
   })
 
   it("renders an empty-vault preview when the file has no providers", async () => {

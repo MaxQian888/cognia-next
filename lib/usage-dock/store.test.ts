@@ -6,8 +6,8 @@ const getPrefMock = jest.fn()
 const setPrefMock = jest.fn(async () => {})
 
 jest.mock("@/lib/tauri/store", () => ({
-  getPref: (...a: unknown[]) => getPrefMock(...a),
-  setPref: (...a: unknown[]) => setPrefMock(...a),
+  getPref: (...a: Parameters<typeof getPrefMock>) => getPrefMock(...a),
+  setPref: (...a: Parameters<typeof setPrefMock>) => setPrefMock(...a),
 }))
 
 import { __resetUsageDockStoreForTesting, USAGE_DOCK_PREF, useUsageDockStore } from "./store"

@@ -4,6 +4,7 @@ import { getDb, withDbReopenRetry } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { ProviderId } from "@/types/subscription"
+import { getSubscriptionProvider } from "./provider-registry"
 
 import { deleteAccount, getActiveAccount, listAccounts, saveAccount } from "./transport"
 import type { Account } from "@/types/subscription"
@@ -66,14 +67,10 @@ export async function setProviderDefaultAccount(
 ): Promise<AppSettings> {
   const current = await getSettings()
   const defaultAccountIds = { ...current.defaultAccountIds }
-  const legacyProvider =
-    current.defaultProvider === "opencode-go"
-      ? "opencode"
-      : current.defaultProvider === "anthropic" ||
-          current.defaultProvider === "codex" ||
-          current.defaultProvider === "opencode"
-        ? current.defaultProvider
-        : null
+  const legacyProvider = getSubscriptionProvider(
+    current.defaultProvider ?? "",
+    current.customProviders
+  )?.id
   if (current.defaultAccountId && legacyProvider) {
     defaultAccountIds[legacyProvider] ??= current.defaultAccountId
   }

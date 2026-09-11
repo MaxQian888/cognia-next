@@ -93,4 +93,29 @@ describe("getDynamicProviders", () => {
     const out = getDynamicProviders()
     expect(Object.keys(out).sort()).toEqual(["p1", "p2"])
   })
+
+  it("preserves reasoning, output limits, zero pricing and the OpenAI endpoint flavor", () => {
+    registerProviderDefinition({
+      ...baseDefinition,
+      apiFlavor: "responses",
+      models: [
+        {
+          ...baseDefinition.models[0],
+          supportsReasoning: true,
+          maxOutputTokens: 4096,
+          pricing: { promptPer1M: 0, completionPer1M: 3 },
+        },
+      ],
+    })
+    expect(getDynamicProviders()[baseDefinition.id]).toMatchObject({
+      apiFlavor: "responses",
+      models: [
+        expect.objectContaining({
+          supportsReasoning: true,
+          maxOutputTokens: 4096,
+          pricing: { promptPer1M: 0, completionPer1M: 3 },
+        }),
+      ],
+    })
+  })
 })

@@ -23,22 +23,17 @@ export type ProviderType = "cloud" | "local" | "self-hosted"
 
 export type ProviderProtocol = "openai" | "anthropic" | "google" | "mistral" | "cohere"
 
-export interface ProviderModelDefinition {
-  id: string
-  name: string
-  contextLength: number
-  supportsTools: boolean
-  supportsVision: boolean
-  supportsAudio: boolean
-  supportsVideo: boolean
-  supportsStreaming: boolean
+export type ProviderModelDefinition = Omit<ModelConfig, "pricing"> & {
+  pricing?: Partial<NonNullable<ModelConfig["pricing"]>>
 }
 
 export interface ProviderDefinition {
+  defaultBaseURL?: string
   id: string
   name: string
   type: ProviderType
   protocol: ProviderProtocol
+  apiFlavor?: ProviderConfig["apiFlavor"]
   apiKeyRequired: boolean
   baseURLRequired: boolean
   defaultModel: string
@@ -135,8 +130,10 @@ function adaptDefinitionToConfig(def: ProviderDefinition): ProviderConfig {
     apiKeyRequired: def.apiKeyRequired,
     baseURLRequired: def.baseURLRequired,
     protocol: adaptProtocol(def.protocol),
+    ...(def.apiFlavor ? { apiFlavor: def.apiFlavor } : {}),
     defaultEnabled: def.defaultEnabled,
     defaultModel: def.defaultModel,
+    defaultBaseURL: def.defaultBaseURL,
     description: def.description,
     category: adaptCategory(def.category),
     models: def.models.map(adaptModel),
@@ -159,14 +156,11 @@ function adaptCategory(c: ProviderDefinition["category"]): ProviderConfig["categ
 }
 
 function adaptModel(m: ProviderModelDefinition): ModelConfig {
+  const { pricing, ...model } = m
   return {
-    id: m.id,
-    name: m.name,
-    contextLength: m.contextLength,
-    supportsTools: m.supportsTools,
-    supportsVision: m.supportsVision,
-    supportsAudio: m.supportsAudio,
-    supportsVideo: m.supportsVideo,
-    supportsStreaming: m.supportsStreaming,
+    ...model,
+    ...(pricing?.promptPer1M !== undefined && pricing?.completionPer1M !== undefined
+      ? { pricing: pricing as ModelConfig["pricing"] }
+      : {}),
   }
 }

@@ -1,5 +1,6 @@
 jest.mock("@/lib/subscription/core/transport", () => ({
   listAccounts: jest.fn(),
+  listSubscriptionProviderIds: jest.fn(),
   getAccount: jest.fn(),
   getActiveAccount: jest.fn(),
   getProviderPreset: jest.fn(),
@@ -11,7 +12,7 @@ jest.mock("@/lib/subscription/core/transport", () => ({
   setProviderPreset: jest.fn(),
 }))
 
-import { applyVaults, snapshotVaults } from "./vault-snapshot"
+import { applyVaults, snapshotVaults, snapshotCustomSubscriptionProviders } from "./vault-snapshot"
 import type { ProviderVault } from "@/types/subscription"
 
 const transportMocks = jest.requireMock("@/lib/subscription/core/transport") as Record<
@@ -30,6 +31,13 @@ function account(id: string) {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  transportMocks.listSubscriptionProviderIds.mockResolvedValue([
+    "anthropic",
+    "codex",
+    "opencode",
+    "commandcode",
+    "example:custom",
+  ])
   transportMocks.listAccounts.mockResolvedValue([])
   transportMocks.getActiveAccount.mockResolvedValue({ env: [] })
   transportMocks.listPresets.mockResolvedValue([])
@@ -107,6 +115,116 @@ describe("applyVaults", () => {
     expect(transportMocks.setProviderPreset).toHaveBeenCalledWith(
       "anthropic",
       expect.objectContaining({ id: "legacy" })
+    )
+  })
+})
+
+let customProviders: unknown[] = []
+const upsertCustomProvider = jest.fn(async (provider: { id: string }) => {
+  customProviders = [
+    ...customProviders.filter((item) => (item as { id: string }).id !== provider.id),
+    provider,
+  ]
+})
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: () => ({ settings: { customProviders }, upsertCustomProvider }) },
+}))
+
+describe("custom provider backup metadata", () => {
+  const definition = {
+    id: "custom-example",
+    name: "Example",
+    baseUrl: "https://example.com/v1",
+    protocol: "openai" as const,
+    models: ["model"],
+  }
+  beforeEach(() => {
+    customProviders = []
+    upsertCustomProvider.mockClear()
+  })
+  it("snapshots only declarative fields and restores settings without vault secrets", async () => {
+    customProviders = [
+      {
+        id: definition.id,
+        customName: definition.name,
+        baseURL: definition.baseUrl,
+        apiProtocol: definition.protocol,
+        customModels: definition.models,
+        apiKey: "settings-secret",
+        subscription: {},
+      },
+    ]
+    const metadata = await snapshotCustomSubscriptionProviders()
+    expect(metadata).toEqual([definition])
+    expect(JSON.stringify(metadata)).not.toContain("settings-secret")
+    customProviders = []
+    await applyVaults({}, metadata)
+    expect(upsertCustomProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: definition.id,
+        subscription: expect.any(Object),
+        baseURL: definition.baseUrl,
+      })
+    )
+    expect(upsertCustomProvider.mock.calls[0][0]).not.toHaveProperty("apiKey")
+  })
+  it("preserves rich models and API behavior through custom subscription backup", async () => {
+    const rich = {
+      ...definition,
+      apiFlavor: "responses" as const,
+      modelApi: { list: true, retrieve: true },
+      models: [
+        { id: "reasoner", contextLength: 8192, supportsVision: false, supportsReasoning: true },
+      ],
+    }
+    await applyVaults({}, [rich])
+    const restored = await snapshotCustomSubscriptionProviders()
+    expect(restored).toEqual([rich])
+    expect(upsertCustomProvider.mock.calls[0][0]).toMatchObject({
+      customModels: ["reasoner"],
+      apiFlavor: "responses",
+      customModelMetadata: { reasoner: rich.models[0] },
+    })
+  })
+  it.each([
+    { ...definition, id: "openai" },
+    { ...definition, id: "plugin:example" },
+    { ...definition, apiKey: "secret" },
+  ])("refuses unsafe metadata before restoring accounts: %p", async (invalid) => {
+    await expect(
+      applyVaults({ opencode: { schemaVersion: 4, accounts: [account("a1")], presets: [] } }, [
+        invalid,
+      ])
+    ).rejects.toThrow()
+    expect(transportMocks.saveAccount).not.toHaveBeenCalled()
+    expect(upsertCustomProvider).not.toHaveBeenCalled()
+  })
+  it("rejects a conflicting endpoint without redirecting existing credentials", async () => {
+    customProviders = [
+      {
+        id: definition.id,
+        baseURL: "https://other.example/v1",
+        apiProtocol: "openai",
+        subscription: {},
+      },
+    ]
+    await expect(applyVaults({}, [definition])).rejects.toThrow("conflicts")
+    expect(upsertCustomProvider).not.toHaveBeenCalled()
+  })
+  it("merges matching custom ids while preserving a disabled connection", async () => {
+    customProviders = [
+      {
+        id: definition.id,
+        baseURL: definition.baseUrl,
+        apiProtocol: definition.protocol,
+        enabled: false,
+        apiKey: "existing-key",
+        subscription: {},
+      },
+    ]
+    await applyVaults({}, [definition])
+    expect(upsertCustomProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false, apiKey: "existing-key" })
     )
   })
 })

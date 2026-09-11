@@ -61,6 +61,7 @@ describe("buildSubscriptionPackage", () => {
       anthropic: 1,
       codex: 0,
       opencode: 0,
+      commandcode: 0,
     })
   })
 })
@@ -198,7 +199,45 @@ describe("summariseSubscriptionPackage", () => {
       }),
     })
     const summary = summariseSubscriptionPackage(body)
-    expect(summary.providerCounts).toEqual({ anthropic: 1, codex: 2, opencode: 0 })
+    expect(summary.providerCounts).toEqual({ anthropic: 1, codex: 2, opencode: 0, commandcode: 0 })
     expect(summary.accountIds.sort()).toEqual(["a-1", "c-1", "c-2"])
   })
+})
+
+it("round-trips a CommandCode vault without changing legacy package compatibility", async () => {
+  const body = buildSubscriptionPackage({
+    commandcode: vault({
+      accounts: [
+        {
+          id: "cmd",
+          credential: { provider: "commandcode", accessToken: "test-secret", storedAtMs: 1 },
+          createdAtMs: 1,
+          lastUsedAtMs: 1,
+        },
+      ],
+    }),
+  })
+  const envelope = await encryptSubscriptionPackage(body, "test-passphrase")
+  expect(JSON.stringify(envelope)).not.toContain("test-secret")
+  const restored = await decryptSubscriptionPackage(envelope, "test-passphrase")
+  expect(restored).toEqual(body)
+  expect(summariseSubscriptionPackage(restored).providerCounts.commandcode).toBe(1)
+})
+
+it("encrypts custom provider metadata with the body and preserves legacy packages", async () => {
+  const definition = {
+    id: "custom-example",
+    name: "Example",
+    baseUrl: "https://example.com/v1",
+    protocol: "openai" as const,
+    models: ["model"],
+  }
+  const body = buildSubscriptionPackage({}, 1_700_000_000_000, undefined, [definition])
+  const encrypted = await encryptSubscriptionPackage(body, "test-passphrase")
+  expect(encrypted.manifest).not.toHaveProperty("customProviders")
+  expect(JSON.stringify(encrypted)).not.toContain("https://example.com/v1")
+  expect((await decryptSubscriptionPackage(encrypted, "test-passphrase")).customProviders).toEqual([
+    definition,
+  ])
+  expect(buildSubscriptionPackage({})).not.toHaveProperty("customProviders")
 })

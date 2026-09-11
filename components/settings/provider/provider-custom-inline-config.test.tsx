@@ -204,3 +204,28 @@ describe("CustomProviderInlineConfig", () => {
     expect(screen.queryByRole("combobox", { name: "defaultModel" })).not.toBeInTheDocument()
   })
 })
+
+it("uses vault readiness for testing without putting the readiness digest in the editable key field", () => {
+  render(
+    <CustomProviderInlineConfig
+      cp={{ ...makeProvider(), apiKey: undefined }}
+      {...baseProps}
+      hasSubscriptionCredential
+      canTestConnection
+    />
+  )
+  expect(screen.getByTestId("custom-provider-api-key-input")).toHaveValue("")
+  expect(screen.getByText("configTab.subscriptionCredentialDescription")).toBeInTheDocument()
+  expect(screen.getByTestId("custom-provider-test")).toBeEnabled()
+})
+
+it("disables connection testing when the subscription credential is unavailable", () => {
+  render(
+    <CustomProviderInlineConfig
+      cp={{ ...makeProvider(), apiKey: undefined }}
+      {...baseProps}
+      canTestConnection={false}
+    />
+  )
+  expect(screen.getByTestId("custom-provider-test")).toBeDisabled()
+})

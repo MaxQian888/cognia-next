@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Account, AccountSummary } from "@/types/subscription"
 
@@ -17,7 +17,11 @@ const replaceAccountCredentialMock = jest.fn()
 jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
   persistProviderAccount: (...a: unknown[]) => persistProviderAccountMock(...a),
 }))
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/subscription/core/transport", () => ({
+  listPresets: jest.fn(async () => [
+    { id: "relay", label: "My relay", baseUrl: "https://relay.example" },
+  ]),
   replaceAccountCredential: (...a: unknown[]) => replaceAccountCredentialMock(...a),
 }))
 
@@ -56,6 +60,7 @@ describe("OpencodeAddAccountDialog", () => {
   it("submits the go plan when selected", async () => {
     saveOpencodeZenKeyMock.mockResolvedValueOnce(account())
     render(<OpencodeAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
 
     await userEvent.click(screen.getByRole("radio", { name: /go/i }))
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-go-1")
@@ -68,6 +73,7 @@ describe("OpencodeAddAccountDialog", () => {
 
   it("switches the label placeholder to the Go default", async () => {
     render(<OpencodeAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
     expect(screen.getByPlaceholderText("OpenCode Zen")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("radio", { name: /go/i }))
     expect(screen.getByPlaceholderText("OpenCode Go")).toBeInTheDocument()
@@ -85,8 +91,9 @@ describe("OpencodeAddAccountDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 
-  it("disables save while the key field is empty", () => {
+  it("disables save while the key field is empty", async () => {
     render(<OpencodeAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
   })
 
@@ -131,4 +138,17 @@ describe("OpencodeAddAccountDialog", () => {
     expect(persistProviderAccountMock).not.toHaveBeenCalled()
     expect(onUpdated).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-1" }))
   })
+})
+
+it("persists the selected endpoint preset when adding a opencode account", async () => {
+  saveOpencodeZenKeyMock.mockResolvedValueOnce(account())
+  render(<OpencodeAddAccountDialog open onOpenChange={() => {}} />)
+  await screen.findByRole("combobox")
+  fireEvent.change(await screen.findByRole("combobox"), { target: { value: "relay" } })
+  await userEvent.type(screen.getByLabelText(/api key/i), "sk-relay")
+  await userEvent.click(screen.getByRole("button", { name: /save/i }))
+  expect(persistProviderAccountMock).toHaveBeenCalledWith(
+    "opencode",
+    expect.objectContaining({ presetId: "relay" })
+  )
 })

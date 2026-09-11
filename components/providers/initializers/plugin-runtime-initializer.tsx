@@ -163,7 +163,7 @@ export function PluginRuntimeInitializer({
               await import("@/lib/plugin/distribution/seed-bundled-plugins")
             const seeded = await seedBundledPluginsOnHost()
             if (seeded.seeded.length > 0 || Object.keys(seeded.failed).length > 0) {
-              log.info("plugin-runtime: bundled plugin seed", seeded)
+              log.info("plugin-runtime: bundled plugin seed", { ...seeded })
             }
           } catch (seedError) {
             log.warn("plugin-runtime: bundled plugin seed unavailable", { seedError })

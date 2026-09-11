@@ -8,7 +8,7 @@
 //
 // Storage shape (one keyring entry per provider):
 //   service = "com.cognia.subscription/v2"
-//   account = "anthropic" | "codex" | "opencode"
+//   account = "anthropic" | "codex" | "opencode" | "commandcode"
 //   payload = JSON-encoded `ProviderVault { schemaVersion: 2, accounts: [...],
 //             activeAccountId: Option<UUIDv7>, preset: Option<ProviderPreset> }`
 //
@@ -21,8 +21,10 @@
 // respective CLIs; we discover read-only and copy into our own keyring.
 
 pub mod active;
+pub mod api_key;
 pub mod anthropic;
 pub mod codex;
+pub mod commandcode;
 pub mod migration;
 pub mod opencode;
 pub mod preset;

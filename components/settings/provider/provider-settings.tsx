@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { createPortal } from "react-dom"
 import { Plus, Settings, PlugZap, Route, RotateCcw } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -17,12 +17,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import { discoverSubscriptionModels } from "@/lib/subscription/core/model-discovery"
 import { useProviderSettings } from "@/hooks/settings/use-provider-settings"
 import { useProviderManager } from "@/hooks/ai/use-provider-manager"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
-import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { ProviderUIPreferences } from "@cognia/provider-types/provider"
 import type { LocalModelInfo } from "@cognia/provider-types/local-provider"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
@@ -90,6 +91,7 @@ interface ProviderSettingsProps {
 
 export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps = {}) {
   const t = useTranslations("providers")
+  const tSubscription = useTranslations("subscription.managedKey")
   const s = useProviderSettings()
   const setProviderConfig = useSettingsStore((store) => store.setProviderConfig)
   const setProviderUIPreferences = useSettingsStore((store) => store.setProviderUIPreferences)
@@ -219,7 +221,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   }, [initialProviderId])
 
   const selectedId = s.selectedProviderId
-  const selectedBuiltIn = selectedId ? PROVIDERS[selectedId] : undefined
+  const selectedBuiltIn = selectedId
+    ? s.filteredProviders.find(([id]) => id === selectedId)?.[1]
+    : undefined
   const selectedCustom = selectedId ? s.customProviders[selectedId] : undefined
   const isCustom = !!selectedCustom
   // Local inference engines (Ollama, LM Studio, llama.cpp, …) are keyless and
@@ -229,6 +233,13 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   const isLocalProvider = selectedBuiltIn?.category === "local"
 
   const selectedSettings = selectedId ? s.providerSettings[selectedId] : undefined
+  const modelRefresh = useRef<AbortController | null>(null)
+  useEffect(
+    () => () => {
+      modelRefresh.current?.abort()
+    },
+    [selectedId, selectedSettings]
+  )
   const isEnabled = isCustom
     ? (selectedCustom?.enabled ?? false)
     : (selectedSettings?.enabled ?? false)
@@ -237,13 +248,13 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
     if (selectedCustom) {
       const outcome = s.customTestResults[selectedId]
       return getCustomProviderReadiness(
-        selectedCustom,
+        s.readinessCustomProviders?.[selectedId] ?? selectedCustom,
         outcome === undefined || outcome === null ? undefined : { success: outcome === "success" }
       )
     }
     return getBuiltInProviderReadiness(
       selectedId,
-      selectedSettings,
+      (s.readinessProviderSettings ?? s.providerSettings)[selectedId],
       s.testResults[selectedId]
         ? {
             success: !!s.testResults[selectedId]?.success,
@@ -251,7 +262,15 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
           }
         : undefined
     )
-  }, [selectedCustom, selectedId, selectedSettings, s.customTestResults, s.testResults])
+  }, [
+    selectedCustom,
+    selectedId,
+    s.providerSettings,
+    s.readinessProviderSettings,
+    s.readinessCustomProviders,
+    s.customTestResults,
+    s.testResults,
+  ])
   // What the Config tab's status card shows: this session's test result when
   // there is one, otherwise the PERSISTED verification (status, timestamp,
   // message) — which readiness re-derives, so a key changed since the last
@@ -490,6 +509,7 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
    *   - bedrock     → `testProvider` (its `testAndDiscoverBedrock` branch does
    *                   discover + persist)
    *   - openrouter  → the live `/models` catalog
+   *   - subscription plugins → their declared model API with a vault-owned key
    *   - everything  → the models.dev catalog, which feeds
    *     else          `enrichedBuiltInModels` via
    *                   `buildBuiltInProviderModelDiscoverySnapshot`
@@ -497,18 +517,48 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   const handleRefreshModels = useCallback(async () => {
     if (!selectedId) return
     setTestingConnection((prev) => ({ ...prev, [selectedId]: true }))
+    const subscription = getSubscriptionProvider(selectedId)
+    const controller = new AbortController()
+    modelRefresh.current?.abort()
+    modelRefresh.current = controller
     try {
-      if (selectedId === "bedrock") {
+      if (subscription?.source === "plugin") {
+        const before = useSettingsStore.getState().settings?.providerSettings?.[selectedId]
+        const result = await discoverSubscriptionModels({
+          definition: subscription,
+          signal: controller.signal,
+        })
+        if (
+          controller.signal.aborted ||
+          getSubscriptionProvider(selectedId) !== subscription ||
+          useSettingsStore.getState().settings?.providerSettings?.[selectedId] !== before
+        )
+          return
+        await setProviderConfig(selectedId, {
+          discoveredModels: result.models,
+          discoveredModelsLastFetched: result.fetchedAt,
+        })
+      } else if (selectedId === "bedrock") {
         await s.testProvider(selectedId)
       } else if (selectedId === "openrouter") {
         await syncOpenRouterCatalog(selectedSettings?.apiKey)
       } else {
         await syncModelsDevCatalog()
       }
+    } catch {
+      if (!controller.signal.aborted) toast.error(tSubscription("modelLoadFailed"))
     } finally {
       setTestingConnection((prev) => ({ ...prev, [selectedId]: false }))
     }
-  }, [selectedId, s, selectedSettings?.apiKey, syncOpenRouterCatalog, syncModelsDevCatalog])
+  }, [
+    selectedId,
+    s,
+    selectedSettings,
+    syncOpenRouterCatalog,
+    syncModelsDevCatalog,
+    setProviderConfig,
+    tSubscription,
+  ])
 
   /** Connection test, split out of the refresh button so each says what it does. */
   const handleTestConnection = useCallback(async () => {

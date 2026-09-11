@@ -47,8 +47,8 @@ pub enum MigrationOutcome {
 }
 
 /// Migrate every provider that has a v1 schema in one shot. Returns one entry
-/// per provider — three entries total today (anthropic, codex, opencode).
-/// OpenCode has no v1 schema so it always returns `NoLegacyData`.
+/// per provider — four entries total (anthropic, codex, opencode, commandcode).
+/// OpenCode and CommandCode have no v1 schema so it always returns `NoLegacyData`.
 #[allow(dead_code)]
 pub fn migrate_all() -> Vec<MigrationOutcome> {
     vec![
@@ -60,6 +60,9 @@ pub fn migrate_all() -> Vec<MigrationOutcome> {
         }),
         MigrationOutcome::NoLegacyData {
             provider: "opencode".into(),
+        },
+        MigrationOutcome::NoLegacyData {
+            provider: "commandcode".into(),
         },
     ]
 }
@@ -84,6 +87,9 @@ pub fn migrate_all_for_account(local_account_id: &str) -> Vec<MigrationOutcome> 
         MigrationOutcome::NoLegacyData {
             provider: "opencode".into(),
         },
+        MigrationOutcome::NoLegacyData {
+            provider: "commandcode".into(),
+        },
     ]
 }
 
@@ -94,9 +100,11 @@ pub fn migrate_v1_to_v2(provider: ProviderId) -> Result<MigrationOutcome, String
     match provider {
         ProviderId::Anthropic => migrate_anthropic(),
         ProviderId::Codex => migrate_codex(),
-        ProviderId::Opencode => Ok(MigrationOutcome::NoLegacyData {
-            provider: "opencode".into(),
-        }),
+        ProviderId::Opencode | ProviderId::Commandcode | ProviderId::Registered(_) => {
+            Ok(MigrationOutcome::NoLegacyData {
+                provider: provider.as_str().into(),
+            })
+        }
     }
 }
 
@@ -108,9 +116,11 @@ pub fn migrate_v1_to_v2_for_account(
     match provider {
         ProviderId::Anthropic => migrate_anthropic_for_account(local_account_id),
         ProviderId::Codex => migrate_codex_for_account(local_account_id),
-        ProviderId::Opencode => Ok(MigrationOutcome::NoLegacyData {
-            provider: "opencode".into(),
-        }),
+        ProviderId::Opencode | ProviderId::Commandcode | ProviderId::Registered(_) => {
+            Ok(MigrationOutcome::NoLegacyData {
+                provider: provider.as_str().into(),
+            })
+        }
     }
 }
 
@@ -629,13 +639,14 @@ mod tests {
     }
 
     #[test]
-    fn migrate_all_returns_three_entries() {
+    fn migrate_all_returns_four_entries() {
         // Doesn't write any v1 data — keyring availability irrelevant.
         let outcomes = migrate_all();
-        assert_eq!(outcomes.len(), 3);
+        assert_eq!(outcomes.len(), 4);
         assert_eq!(extract_provider(&outcomes[0]), "anthropic");
         assert_eq!(extract_provider(&outcomes[1]), "codex");
         assert_eq!(extract_provider(&outcomes[2]), "opencode");
+        assert_eq!(extract_provider(&outcomes[3]), "commandcode");
     }
 
     fn extract_provider(o: &MigrationOutcome) -> &str {

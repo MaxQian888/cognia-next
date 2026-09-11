@@ -110,6 +110,34 @@ describe("resolveInferenceParams", () => {
 })
 
 describe("shouldShowParameter", () => {
+  it("preserves conditioned parameters when capability metadata is unknown", () => {
+    const definition: ParameterDefinition = {
+      key: "openai.reasoningEffort",
+      label: "Reasoning",
+      description: "Reasoning effort",
+      type: "select",
+      category: "provider-specific",
+      defaultValue: "medium",
+      condition: { modelCapability: "supportsReasoning" },
+    }
+    expect(
+      shouldShowParameter(definition, { ...reasoningModel, supportsReasoning: undefined })
+    ).toBe(true)
+    expect(
+      shouldShowParameter(definition, {
+        ...reasoningModel,
+        supportsReasoning: false,
+        knownFields: ["contextLength"],
+      })
+    ).toBe(true)
+    expect(
+      shouldShowParameter(definition, {
+        ...reasoningModel,
+        supportsReasoning: false,
+        knownFields: ["supportsReasoning"],
+      })
+    ).toBe(false)
+  })
   it("shows unconditional parameters and defers model checks when model config is unavailable", () => {
     expect(
       shouldShowParameter(

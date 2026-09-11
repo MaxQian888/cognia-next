@@ -69,19 +69,13 @@ function withAuthStyle(src: CustomLimitsSource, style: AuthStyle): CustomLimitsS
   return { ...src, request: { ...src.request, headers } }
 }
 
-function withExtraHeader(src: CustomLimitsSource, name: string, value: string): CustomLimitsSource {
-  const headers = { ...(src.request.headers ?? {}) }
-  // Drop any prior non-Authorization custom header before re-adding. The header
-  // is stored as soon as a name is typed (value may still be empty) so the
-  // controlled inputs accumulate; empty entries are harmless at request time.
-  for (const k of Object.keys(headers)) if (k !== "Authorization") delete headers[k]
-  if (name.trim()) headers[name.trim()] = value
-  return { ...src, request: { ...src.request, headers } }
-}
+type ExtraHeader = { name: string; value: string }
 
-function extraHeaderOf(src: CustomLimitsSource): { name: string; value: string } {
-  const entry = Object.entries(src.request.headers ?? {}).find(([k]) => k !== "Authorization")
-  return entry ? { name: entry[0], value: entry[1] } : { name: "", value: "" }
+function extraHeadersOf(src: CustomLimitsSource): ExtraHeader[] {
+  const headers = Object.entries(src.request.headers ?? {})
+    .filter(([name]) => name.toLowerCase() !== "authorization")
+    .map(([name, value]) => ({ name, value }))
+  return headers.length ? headers : [{ name: "", value: "" }]
 }
 
 function setExtract(
@@ -98,7 +92,6 @@ export function CustomSourcesCard() {
   const save = useSettingsStore((s) => s.save)
 
   const [draft, setDraft] = useState<CustomLimitsSource | null>(null)
-  const [seed, setSeed] = useState(1)
   const [testResult, setTestResult] = useState<ProviderLimits | null>(null)
   const [tested, setTested] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -113,8 +106,7 @@ export function CustomSourcesCard() {
   }
 
   const onAdd = () => {
-    setDraft(emptyCustomSource(newCustomSourceId(seed)))
-    setSeed((n) => n + 1)
+    setDraft(emptyCustomSource(newCustomSourceId()))
     clearTest()
   }
 
@@ -208,6 +200,7 @@ export function CustomSourcesCard() {
 
         {draft ? (
           <SourceForm
+            key={draft.id}
             draft={draft}
             setDraft={setDraft}
             onSave={onSave}
@@ -252,37 +245,42 @@ function SourceForm({
 }) {
   const t = useTranslations("subscription.customSources")
   const [presetId, setPresetId] = useState("custom")
-  const extra = extraHeaderOf(draft)
-  const complete = isCustomSourceComplete(draft)
+  const [extraHeaders, setExtraHeaders] = useState(() => extraHeadersOf(draft))
+  const updateHeaders = (next: ExtraHeader[]) => {
+    setExtraHeaders(next)
+    const headers = Object.fromEntries(
+      Object.entries(draft.request.headers ?? {}).filter(
+        ([name]) => name.toLowerCase() === "authorization"
+      )
+    )
+    for (const { name, value } of next) {
+      if (name.trim() && name.trim().toLowerCase() !== "authorization") {
+        headers[name.trim()] = value
+      }
+    }
+    setDraft({ ...draft, request: { ...draft.request, headers } })
+  }
+  const headerNames = extraHeaders.map(({ name }) => name.trim().toLowerCase()).filter(Boolean)
+  const validHeaders =
+    !headerNames.includes("authorization") && new Set(headerNames).size === headerNames.length
+  const complete = isCustomSourceComplete(draft) && validHeaders
 
   // Apply a preset template onto the draft (preserves name/baseUrl/token).
   const applyPreset = (id: string) => {
     setPresetId(id)
-    setDraft(presetById(id).apply(draft))
+    const next = presetById(id).apply(draft)
+    setExtraHeaders(extraHeadersOf(next))
+    setDraft(next)
   }
 
   const field = (key: keyof CustomLimitsSource, value: string) =>
     setDraft({ ...draft, [key]: value })
 
-  // Window editor operates on the single window the form exposes.
-  const windowSpec = draft.extract.kind === "window" ? draft.extract.windows[0] : undefined
-  const setWindow = (patch: Partial<WindowSpec>) =>
-    setDraft({
-      ...draft,
-      extract: {
-        kind: "window",
-        windows: [
-          {
-            id: "window",
-            labelKey: "window",
-            usedPctPath: "",
-            resetUnit: "unix",
-            ...windowSpec,
-            ...patch,
-          },
-        ],
-      },
-    })
+  const windows = draft.extract.kind === "window" ? draft.extract.windows : []
+  const setWindows = (next: WindowSpec[]) =>
+    setDraft({ ...draft, extract: { ...draft.extract, kind: "window", windows: next } })
+  const setWindow = (index: number, patch: Partial<WindowSpec>) =>
+    setWindows(windows.map((window, i) => (i === index ? { ...window, ...patch } : window)))
 
   return (
     <div className="space-y-3 rounded-md border p-3" data-testid="custom-source-form">
@@ -414,22 +412,55 @@ function SourceForm({
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Field id="cs-hname" label={t("fields.extraHeaderName")}>
-          <Input
-            id="cs-hname"
-            value={extra.name}
-            placeholder="New-Api-User"
-            onChange={(e) => setDraft(withExtraHeader(draft, e.target.value, extra.value))}
-          />
-        </Field>
-        <Field id="cs-hval" label={t("fields.extraHeaderValue")}>
-          <Input
-            id="cs-hval"
-            value={extra.value}
-            onChange={(e) => setDraft(withExtraHeader(draft, extra.name, e.target.value))}
-          />
-        </Field>
+      <div className="space-y-2">
+        {extraHeaders.map((extra, index) => (
+          <div key={index} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+            <Field id={`cs-hname-${index}`} label={t("fields.extraHeaderName")}>
+              <Input
+                id={`cs-hname-${index}`}
+                value={extra.name}
+                // i18n-exempt: HTTP header-name example
+                placeholder="New-Api-User"
+                onChange={(e) =>
+                  updateHeaders(
+                    extraHeaders.map((header, i) =>
+                      i === index ? { ...header, name: e.target.value } : header
+                    )
+                  )
+                }
+              />
+            </Field>
+            <Field id={`cs-hval-${index}`} label={t("fields.extraHeaderValue")}>
+              <Input
+                id={`cs-hval-${index}`}
+                value={extra.value}
+                onChange={(e) =>
+                  updateHeaders(
+                    extraHeaders.map((header, i) =>
+                      i === index ? { ...header, value: e.target.value } : header
+                    )
+                  )
+                }
+              />
+            </Field>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("removeHeader", { index: index + 1 })}
+              onClick={() => updateHeaders(extraHeaders.filter((_, i) => i !== index))}
+            >
+              <TrashIcon className="size-4" />
+            </Button>
+          </div>
+        ))}
+        {!validHeaders && <p className="text-xs text-destructive">{t("invalidHeaders")}</p>}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setExtraHeaders([...extraHeaders, { name: "", value: "" }])}
+        >
+          {t("addHeader")}
+        </Button>
       </div>
 
       {draft.extract.kind === "balance" ? (
@@ -478,55 +509,84 @@ function SourceForm({
           </Field>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
-          <Field id="cs-wlabel" label={t("fields.windowLabel")}>
-            <Input
-              id="cs-wlabel"
-              value={windowSpec?.id ?? ""}
-              onChange={(e) => setWindow({ id: e.target.value, labelKey: e.target.value })}
-            />
-          </Field>
-          <Field id="cs-wpct" label={t("fields.usedPctPath")}>
-            <Input
-              id="cs-wpct"
-              value={windowSpec?.usedPctPath ?? ""}
-              // i18n-exempt: example JSONPath selector into the API response, not UI prose
-              placeholder="rate_limit.primary.used_percent"
-              onChange={(e) => setWindow({ usedPctPath: e.target.value })}
-            />
-          </Field>
-          <Field id="cs-wused" label={t("fields.usedPath")}>
-            <Input
-              id="cs-wused"
-              value={windowSpec?.usedPath ?? ""}
-              // i18n-exempt: example JSONPath selector into the API response, not UI prose
-              placeholder="data.used"
-              onChange={(e) => setWindow({ usedPath: e.target.value })}
-            />
-          </Field>
-          <Field id="cs-wtotal" label={t("fields.totalPath")}>
-            <Input
-              id="cs-wtotal"
-              value={windowSpec?.totalPath ?? ""}
-              // i18n-exempt: example JSONPath selector into the API response, not UI prose
-              placeholder="data.total"
-              onChange={(e) => setWindow({ totalPath: e.target.value })}
-            />
-          </Field>
-          <Field id="cs-wremaining" label={t("fields.remainingPath")}>
-            <Input
-              id="cs-wremaining"
-              value={windowSpec?.remainingPath ?? ""}
-              onChange={(e) => setWindow({ remainingPath: e.target.value })}
-            />
-          </Field>
-          <Field id="cs-wreset" label={t("fields.resetAtPath")}>
-            <Input
-              id="cs-wreset"
-              value={windowSpec?.resetAtPath ?? ""}
-              onChange={(e) => setWindow({ resetAtPath: e.target.value })}
-            />
-          </Field>
+        <div className="space-y-3">
+          {windows.map((windowSpec, index) => (
+            <fieldset key={index} className="space-y-2 rounded-md border p-3">
+              <legend className="px-1 text-xs">{t("windowNumber", { index: index + 1 })}</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <Field id={`cs-wlabel-${index}`} label={t("fields.windowLabel")}>
+                  <Input
+                    id={`cs-wlabel-${index}`}
+                    value={windowSpec.id ?? ""}
+                    onChange={(e) =>
+                      setWindow(index, { id: e.target.value, labelKey: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field id={`cs-wpct-${index}`} label={t("fields.usedPctPath")}>
+                  <Input
+                    id={`cs-wpct-${index}`}
+                    value={windowSpec.usedPctPath ?? ""}
+                    // i18n-exempt: example JSONPath selector into the API response, not UI prose
+                    placeholder="rate_limit.primary.used_percent"
+                    onChange={(e) => setWindow(index, { usedPctPath: e.target.value })}
+                  />
+                </Field>
+                <Field id={`cs-wused-${index}`} label={t("fields.usedPath")}>
+                  <Input
+                    id={`cs-wused-${index}`}
+                    value={windowSpec.usedPath ?? ""}
+                    // i18n-exempt: example JSONPath selector into the API response, not UI prose
+                    placeholder="data.used"
+                    onChange={(e) => setWindow(index, { usedPath: e.target.value })}
+                  />
+                </Field>
+                <Field id={`cs-wtotal-${index}`} label={t("fields.totalPath")}>
+                  <Input
+                    id={`cs-wtotal-${index}`}
+                    value={windowSpec.totalPath ?? ""}
+                    // i18n-exempt: example JSONPath selector into the API response, not UI prose
+                    placeholder="data.total"
+                    onChange={(e) => setWindow(index, { totalPath: e.target.value })}
+                  />
+                </Field>
+                <Field id={`cs-wremaining-${index}`} label={t("fields.remainingPath")}>
+                  <Input
+                    id={`cs-wremaining-${index}`}
+                    value={windowSpec.remainingPath ?? ""}
+                    onChange={(e) => setWindow(index, { remainingPath: e.target.value })}
+                  />
+                </Field>
+                <Field id={`cs-wreset-${index}`} label={t("fields.resetAtPath")}>
+                  <Input
+                    id={`cs-wreset-${index}`}
+                    value={windowSpec.resetAtPath ?? ""}
+                    onChange={(e) => setWindow(index, { resetAtPath: e.target.value })}
+                  />
+                </Field>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={windows.length === 1}
+                onClick={() => setWindows(windows.filter((_, i) => i !== index))}
+              >
+                {t("removeWindow", { index: index + 1 })}
+              </Button>
+            </fieldset>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setWindows([
+                ...windows,
+                { id: newCustomSourceId(), labelKey: "window", usedPctPath: "", resetUnit: "unix" },
+              ])
+            }
+          >
+            {t("addWindow")}
+          </Button>
         </div>
       )}
 

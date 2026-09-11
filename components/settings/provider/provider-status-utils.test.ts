@@ -10,6 +10,7 @@ import {
 import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 
 jest.mock("@cognia/provider-types/provider", () => ({
+  getAllProviders: () => jest.requireMock("@cognia/provider-types/provider").PROVIDERS,
   PROVIDERS: {
     flagship: {
       id: "flagship",

@@ -4,6 +4,7 @@
 import React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { ProviderConfigTab } from "./provider-config-tab"
+import { useLiveQuery } from "dexie-react-hooks"
 import type { UserProviderSettings } from "@cognia/provider-types"
 
 // ── i18n mock ────────────────────────────────────────────────────────────────
@@ -72,42 +73,50 @@ jest.mock("@/components/ui/button", () => ({
 
 jest.mock("@/components/ui/switch")
 
-jest.mock("@/components/ui/select", () => ({
-  Select: ({
-    children,
-    onValueChange,
-    value,
-  }: {
-    children: React.ReactNode
-    onValueChange?: (v: string) => void
-    value?: string
-  }) => (
-    <div data-testid="select" data-value={value}>
-      {React.Children.map(children, (child) => {
-        if (React.isValidElement(child)) {
-          return React.cloneElement(
-            child as React.ReactElement<{ onValueChange?: (v: string) => void }>,
-            {
-              onValueChange,
-            }
-          )
-        }
-        return child
-      })}
-    </div>
-  ),
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="select-trigger">{children}</div>
-  ),
-  SelectValue: ({ placeholder }: { placeholder?: string }) => (
-    <span data-testid="select-value">{placeholder}</span>
-  ),
-  SelectContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="select-content">{children}</div>
-  ),
-  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
-    <div data-testid={`select-item-${value}`}>{children}</div>
-  ),
+jest.mock("@/components/ui/select", () => {
+  const React = jest.requireActual<typeof import("react")>("react")
+  const Selection = React.createContext<((value: string) => void) | undefined>(undefined)
+  return {
+    Select: ({
+      children,
+      onValueChange,
+      value,
+    }: {
+      children: React.ReactNode
+      onValueChange?: (value: string) => void
+      value?: string
+    }) => (
+      <Selection.Provider value={onValueChange}>
+        <div data-testid="select" data-value={value}>
+          {children}
+        </div>
+      </Selection.Provider>
+    ),
+    SelectTrigger: ({ children }: { children: React.ReactNode }) => (
+      <div data-testid="select-trigger">{children}</div>
+    ),
+    SelectValue: ({ placeholder }: { placeholder?: string }) => (
+      <span data-testid="select-value">{placeholder}</span>
+    ),
+    SelectContent: ({ children }: { children: React.ReactNode }) => (
+      <div data-testid="select-content">{children}</div>
+    ),
+    SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => {
+      const select = React.useContext(Selection)
+      return (
+        <button data-testid={`select-item-${value}`} onClick={() => select?.(value)}>
+          {children}
+        </button>
+      )
+    },
+  }
+})
+
+jest.mock("@/hooks/use-secret-reveal", () => ({
+  useSecretReveal: () => async (reveal: () => void) => {
+    reveal()
+    return true
+  },
 }))
 
 jest.mock("@/components/ui/collapsible", () => ({
@@ -135,6 +144,27 @@ jest.mock("@/components/ui/collapsible", () => ({
 jest.mock("@/components/ui/label")
 
 jest.mock("@/components/ui/separator")
+
+jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn(() => false) }))
+jest.mock("./deployment-profile-card", () => ({
+  DeploymentProfileCard: () => <div>deployment profile</div>,
+}))
+jest.mock("./deployment-certification-panel", () => ({
+  DeploymentCertificationPanel: () => <div>deployment certification</div>,
+}))
+jest.mock("./bedrock-settings-fields", () => ({
+  BedrockSettingsFields: ({
+    value,
+    onChange,
+  }: {
+    value: { authMode: string; region: string }
+    onChange: (value: { authMode: "default-chain"; region: string }) => void
+  }) => (
+    <button onClick={() => onChange({ authMode: "default-chain", region: "eu-west-1" })}>
+      Bedrock {value.authMode} {value.region}
+    </button>
+  ),
+}))
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -168,6 +198,26 @@ const defaultProps = {
 describe("ProviderConfigTab", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+  })
+
+  it("tests a subscription account without filling or persisting its secret or default endpoint", () => {
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="opencode"
+        settings={{ providerId: "opencode", enabled: true, apiKey: "", defaultModel: "model" }}
+        hasSubscriptionCredential
+        canTestConnection
+      />
+    )
+    expect(screen.getByRole("button", { name: "detailPanel.testButton" })).toBeEnabled()
+    expect(screen.getByText("configTab.subscriptionCredentialDescription")).toBeInTheDocument()
+    expect(
+      screen.getAllByTestId("input").find((input) => input.getAttribute("type") === "password")
+    ).toHaveValue("")
+    expect(defaultProps.onBaseURLChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "detailPanel.testButton" }))
+    expect(defaultProps.onTestConnection).toHaveBeenCalled()
   })
 
   // 1. API key input renders as password by default
@@ -581,18 +631,23 @@ describe("ProviderConfigTab", () => {
       expect(protocolSelect).toBeTruthy()
     })
 
-    it("never renders for the anthropic provider, even when onApiProtocolChange is provided", () => {
-      render(
-        <ProviderConfigTab
-          {...defaultProps}
-          providerId="anthropic"
-          settings={{ ...mockSettings, providerId: "anthropic" }}
-          onApiProtocolChange={jest.fn()}
-        />
-      )
-      expect(screen.queryByTestId("select-item-anthropic")).not.toBeInTheDocument()
-      expect(screen.queryByTestId("select-item-gemini")).not.toBeInTheDocument()
-    })
+    it.each(["anthropic", "commandcode"])(
+      "does not offer incompatible protocol overrides for %s",
+      (providerId) => {
+        render(
+          <ProviderConfigTab
+            {...defaultProps}
+            providerId={providerId}
+            settings={{ ...mockSettings, providerId }}
+            onApiProtocolChange={jest.fn()}
+            onApiFlavorChange={jest.fn()}
+          />
+        )
+        expect(screen.queryByTestId("select-item-anthropic")).not.toBeInTheDocument()
+        expect(screen.queryByTestId("select-item-gemini")).not.toBeInTheDocument()
+        expect(screen.queryByTestId("select-item-responses")).not.toBeInTheDocument()
+      }
+    )
   })
 
   // ── Key Rotation interactions ───────────────────────────────────────────
@@ -741,4 +796,134 @@ describe("ProviderConfigTab", () => {
       expect(onAddApiKey).not.toHaveBeenCalled()
     })
   })
+})
+
+it("updates transport protocol and endpoint flavor used with an account", () => {
+  const onApiProtocolChange = jest.fn()
+  const onApiFlavorChange = jest.fn()
+  render(
+    <ProviderConfigTab
+      {...defaultProps}
+      settings={{ ...mockSettings, apiProtocol: "openai" }}
+      onApiProtocolChange={onApiProtocolChange}
+      onApiFlavorChange={onApiFlavorChange}
+    />
+  )
+  fireEvent.click(screen.getByTestId("select-item-anthropic"))
+  expect(onApiProtocolChange).toHaveBeenCalledWith("anthropic")
+  fireEvent.click(screen.getByTestId("select-item-responses"))
+  expect(onApiFlavorChange).toHaveBeenCalledWith("responses")
+})
+
+it("allows changing manual credential rotation and moving a key up", () => {
+  const onRotationStrategyChange = jest.fn()
+  const onReorderApiKeys = jest.fn()
+  render(
+    <ProviderConfigTab
+      {...defaultProps}
+      settings={{ ...mockSettings, apiKeys: ["first", "second"], apiKeyRotationEnabled: true }}
+      onToggleRotation={jest.fn()}
+      onRotationStrategyChange={onRotationStrategyChange}
+      onReorderApiKeys={onReorderApiKeys}
+    />
+  )
+  fireEvent.click(screen.getByTestId("select-item-least-used"))
+  expect(onRotationStrategyChange).toHaveBeenCalledWith("least-used")
+  fireEvent.click(screen.getAllByTitle("Move up")[1])
+  expect(onReorderApiKeys).toHaveBeenCalledWith(1, 0)
+})
+
+it.each(["opencode", "commandcode"])(
+  "preserves the %s account relay while subscription readiness is loading",
+  (providerId) => {
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId={providerId}
+        settings={{ providerId, enabled: true, apiKey: "", defaultModel: "" }}
+      />
+    )
+    expect(defaultProps.onBaseURLChange).not.toHaveBeenCalled()
+  }
+)
+
+it("reveals a manual key only after authorization and hides it again", () => {
+  render(<ProviderConfigTab {...defaultProps} />)
+  fireEvent.click(screen.getByRole("button", { name: "Show key" }))
+  expect(screen.getByDisplayValue("sk-test-1234")).toHaveAttribute("type", "text")
+  fireEvent.click(screen.getByRole("button", { name: "Hide key" }))
+  expect(screen.getByDisplayValue("sk-test-1234")).toHaveAttribute("type", "password")
+})
+
+it.each([undefined, { authMode: "default-chain", region: "us-east-1" }])(
+  "guards Bedrock verification against missing connection settings (%s)",
+  (bedrock) => {
+    const onBedrockSettingsChange = jest.fn()
+    render(
+      <ProviderConfigTab
+        {...defaultProps}
+        providerId="bedrock"
+        settings={{ providerId: "bedrock", enabled: true, bedrock } as UserProviderSettings}
+        onBedrockSettingsChange={onBedrockSettingsChange}
+      />
+    )
+    expect(screen.getByTestId("config-test-connection").hasAttribute("disabled")).toBe(!bedrock)
+    expect(screen.queryByPlaceholderText("Enter your API key")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Bedrock default-chain us-east-1" }))
+    expect(onBedrockSettingsChange).toHaveBeenCalledWith({
+      authMode: "default-chain",
+      region: "eu-west-1",
+    })
+  }
+)
+
+it("keeps Bedrock configuration read-only when its settings mutation is unavailable", () => {
+  render(
+    <ProviderConfigTab
+      {...defaultProps}
+      providerId="bedrock"
+      settings={{ providerId: "bedrock", enabled: false }}
+    />
+  )
+  expect(screen.queryByText(/Bedrock default-chain/)).not.toBeInTheDocument()
+  expect(screen.getByTestId("config-test-connection")).toBeDisabled()
+})
+
+it("shows alternate authentication and provider extras beside the manual-key fields", () => {
+  render(
+    <ProviderConfigTab {...defaultProps} authSlot={<button>use account login</button>}>
+      <p>relay plan settings</p>
+    </ProviderConfigTab>
+  )
+  expect(screen.getByTestId("provider-auth-slot")).toContainElement(
+    screen.getByRole("button", { name: "use account login" })
+  )
+  expect(screen.getByText("relay plan settings")).toBeInTheDocument()
+})
+
+it.each([
+  [true, false],
+  [false, true],
+])(
+  "shows the execution block when deployment or certification metadata exists (%s, %s)",
+  (deployment, certification) => {
+    jest.mocked(useLiveQuery).mockReturnValueOnce(deployment).mockReturnValueOnce(certification)
+    render(<ProviderConfigTab {...defaultProps} />)
+    expect(screen.getByTestId("provider-execution-path")).toBeInTheDocument()
+  }
+)
+
+it("keeps an unconfigured provider empty without links or transport assumptions", () => {
+  render(
+    <ProviderConfigTab
+      {...defaultProps}
+      providerId="unknown-provider"
+      settings={{ providerId: "unknown-provider", enabled: false }}
+      providerDashboardUrl={undefined}
+      providerDocsUrl={undefined}
+    />
+  )
+  expect(screen.getByPlaceholderText("Enter your API key")).toHaveValue("")
+  expect(screen.getByTestId("config-test-connection")).toBeDisabled()
+  expect(screen.queryByRole("link")).not.toBeInTheDocument()
 })

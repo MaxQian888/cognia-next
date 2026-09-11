@@ -2,6 +2,11 @@
 
 import { act, render } from "@testing-library/react"
 
+const migrateConversationState = jest.fn(async () => undefined)
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  migrateLegacyConversationListState: () => migrateConversationState(),
+}))
+
 import { useChatStore } from "@/stores/chat"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
@@ -23,6 +28,7 @@ function seedStaleRightRailState(): void {
 }
 
 beforeEach(() => {
+  migrateConversationState.mockClear()
   act(() => {
     useChatStore.getState().clear()
     useArtifactDockLayoutStore.getState().resetLayout()
@@ -88,6 +94,11 @@ describe("applySessionFocusChange — idle dock", () => {
 })
 
 describe("SessionFocusInitializer", () => {
+  it("reconciles legacy Inbox list state once, not on each focus change", () => {
+    render(<SessionFocusInitializer />)
+    act(() => useChatStore.getState().setActiveSession("next"))
+    expect(migrateConversationState).toHaveBeenCalledTimes(1)
+  })
   it("parks an idle dock once at mount, for the conversation restored at start-up", () => {
     // `dockCollapsed` is persisted; a reload lands on the restored conversation
     // without passing through a switch, so the seam checks once on mount.

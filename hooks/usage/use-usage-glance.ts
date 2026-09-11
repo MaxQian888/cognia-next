@@ -98,13 +98,13 @@ export function useUsageGlance(opts: UseUsageGlanceOptions): UseUsageGlanceResul
     [query.period, dayKey]
   )
 
-  const rows = useLiveQuery<SessionUsageRow[] | undefined>(
+  const rows = useLiveQuery<SessionUsageRow[], undefined>(
     async () => (enabled ? readRows(fromMs) : []),
     [enabled, fromMs, scanTick],
     undefined
   )
 
-  const sourceStates = useLiveQuery<UsageSourceStateRow[]>(
+  const sourceStates = useLiveQuery<UsageSourceStateRow[], UsageSourceStateRow[]>(
     async () => (enabled && query.scope === "all-tools" ? getDb().usageSourceStates.toArray() : []),
     [enabled, query.scope, scanTick],
     []

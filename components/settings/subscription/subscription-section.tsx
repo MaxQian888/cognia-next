@@ -39,6 +39,10 @@ import {
 import { CloudSyncCard } from "./cloud-sync-card"
 import { ImportExportButtons } from "./import-export-buttons"
 import { ProviderTabCodex } from "./provider-tab-codex"
+import { ProviderTabCommandcode } from "./provider-tab-commandcode"
+import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
+import { PresetPicker } from "./preset-picker"
+import type { SubscriptionProviderDefinition } from "@/lib/subscription/core/provider-registry"
 import { ProviderTabOpencode } from "./provider-tab-opencode"
 import { ClaudeAccountPanel } from "./panels/claude-account-panel"
 import { SubscriptionNav } from "./components/subscription-nav"
@@ -47,7 +51,7 @@ import { SubscriptionOverviewTab } from "./tabs/overview-tab"
 import { SubscriptionSettingsTab } from "./tabs/settings-tab"
 import { SubscriptionUsageTab } from "./tabs/usage-tab"
 import {
-  SUBSCRIPTION_NAV_GROUPS,
+  buildSubscriptionNavGroups,
   resolveSubscriptionPanel,
   type SubscriptionPanelId,
 } from "./nav-config"
@@ -55,7 +59,11 @@ import {
 const SUBTAB_PARAM = "subTab"
 const INNER_TAB_PARAM = "innerTab"
 
-function renderPanel(panel: SubscriptionPanelId, onRequestAddAccount: () => void) {
+function renderPanel(
+  panel: SubscriptionPanelId,
+  onRequestAddAccount: () => void,
+  providers: SubscriptionProviderDefinition[]
+) {
   switch (panel) {
     case "overview":
       return <SubscriptionOverviewTab onRequestAddAccount={onRequestAddAccount} />
@@ -71,10 +79,24 @@ function renderPanel(panel: SubscriptionPanelId, onRequestAddAccount: () => void
       return <ProviderTabCodex />
     case "opencode":
       return <ProviderTabOpencode />
+    case "commandcode":
+      return <ProviderTabCommandcode />
     case "backup":
       return <ImportExportButtons />
     case "sync":
       return <CloudSyncCard />
+    default: {
+      const provider = providers.find((entry) => entry.id === panel)
+      return provider ? (
+        <div className="space-y-4">
+          <Label>{provider.name}</Label>
+          {provider.description && (
+            <p className="text-xs text-muted-foreground">{provider.description}</p>
+          )}
+          <PresetPicker provider={provider.id} />
+        </div>
+      ) : null
+    }
   }
 }
 
@@ -82,10 +104,14 @@ export function SubscriptionSection() {
   const t = useTranslations("subscription")
   const router = useRouter()
   const searchParams = useSearchParams()
+  const providers = useSubscriptionProviders()
+  const groups = buildSubscriptionNavGroups(providers)
+  const items = groups.flatMap((group) => group.items)
 
   const activePanel = resolveSubscriptionPanel(
     searchParams.get(SUBTAB_PARAM),
-    searchParams.get(INNER_TAB_PARAM)
+    searchParams.get(INNER_TAB_PARAM),
+    new Set(items.map((item) => item.id))
   )
 
   const select = (id: SubscriptionPanelId) => {
@@ -100,9 +126,7 @@ export function SubscriptionSection() {
   // The Overview panel's empty state routes to the unified owner of add flows.
   const goToAccounts = () => select("accounts")
 
-  const navNode = (
-    <SubscriptionNav groups={SUBSCRIPTION_NAV_GROUPS} activeId={activePanel} onSelect={select} />
-  )
+  const navNode = <SubscriptionNav groups={groups} activeId={activePanel} onSelect={select} />
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -121,7 +145,10 @@ export function SubscriptionSection() {
         navTitle={t("nav.title")}
         mobileTriggerLabel={t("nav.mobileTrigger")}
         activeKey={activePanel}
-        activeLabel={t(`nav.items.${activePanel}.label`)}
+        activeLabel={
+          items.find((item) => item.id === activePanel)?.label ??
+          t(`nav.items.${activePanel}.label`)
+        }
         navWidth={280}
         triggerTestId="subscription-mobile-nav-trigger"
       >
@@ -135,7 +162,7 @@ export function SubscriptionSection() {
             data-testid="subscription-panel-body"
           >
             <PanelTransition activeKey={activePanel}>
-              {renderPanel(activePanel, goToAccounts)}
+              {renderPanel(activePanel, goToAccounts, providers)}
             </PanelTransition>
           </div>
         </div>

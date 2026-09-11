@@ -286,3 +286,27 @@ describe("isGenuineOpenAiEndpoint", () => {
     expect(isGenuineOpenAiEndpoint("not a url")).toBe(false)
   })
 })
+
+describe("CommandCode model endpoints", () => {
+  it.each([
+    ["claude-sonnet-5", "anthropic"],
+    ["deepseek/deepseek-v4-flash", "openai.chat"],
+  ])("routes %s through %s and preserves relay headers", (model, provider) => {
+    const result = getProviderModel({
+      provider: "commandcode",
+      model,
+      apiKey: "test-key",
+      baseURL: "https://relay.example/v1",
+      headers: { "x-cmd-zdr": "1" },
+    }) as unknown as ResolvedModel
+    expect(result).toMatchObject({
+      provider,
+      modelId: model,
+      factoryOpts: {
+        apiKey: "test-key",
+        baseURL: "https://relay.example/v1",
+        headers: { "x-cmd-zdr": "1" },
+      },
+    })
+  })
+})

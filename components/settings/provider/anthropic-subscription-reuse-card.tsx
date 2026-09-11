@@ -28,10 +28,10 @@ import {
   useActiveAnthropicCredential,
   useAnthropicDiscovery,
 } from "@/lib/subscription/anthropic/hooks"
-import {
-  adoptAndActivateDiscoveredAuth,
-  discoveredToCredential,
-} from "@/lib/subscription/anthropic/discovery"
+import { discoveredToCredential } from "@/lib/subscription/anthropic/discovery"
+import { setActiveAccount } from "@/lib/subscription/core/transport"
+import { AnthropicAddAccountDialog } from "@/components/settings/subscription/add-account-dialog/anthropic"
+import type { Account } from "@/types/subscription"
 
 export function AnthropicSubscriptionReuseCard() {
   const t = useTranslations("providers.subscriptionReuse")
@@ -44,24 +44,26 @@ export function AnthropicSubscriptionReuseCard() {
   // resolving) avoids a redundant password prompt whose result would be
   // discarded by the `!credential` guards below.
   const { discovered } = useAnthropicDiscovery({ enabled: !loading && !credential })
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [adopting, setAdopting] = useState(false)
   const [adoptError, setAdoptError] = useState<string | null>(null)
 
   const goToSection = (section: "subscription" | "ccswitch") => {
     const next = new URLSearchParams(searchParams.toString())
     next.set("section", section)
+    if (section === "subscription") {
+      next.set("subTab", "accounts")
+      next.delete("innerTab")
+    }
     router.replace(`/settings?${next.toString()}`, { scroll: false })
   }
 
-  // One-click reuse of the local Claude Code CLI login: adopt into the vault
-  // and activate (bearer → sidecar restart), then re-read so the card flips
-  // to the signed-in state.
-  const onReuseLocal = async () => {
-    if (!discovered) return
+  // Creation stays in the shared dialog so endpoint binding is available here too.
+  const onAccountAdded = async (account: Account) => {
     setAdopting(true)
     setAdoptError(null)
     try {
-      await adoptAndActivateDiscoveredAuth(discovered)
+      await setActiveAccount("anthropic", account.id)
       await reload()
     } catch (e) {
       setAdoptError(e instanceof Error ? e.message : String(e))
@@ -75,6 +77,14 @@ export function AnthropicSubscriptionReuseCard() {
 
   return (
     <div className="space-y-3" data-testid="anthropic-subscription-reuse">
+      {showSubscription && dialogOpen && (
+        <AnthropicAddAccountDialog
+          open
+          initialMode="reuse"
+          onOpenChange={setDialogOpen}
+          onAdded={(account) => void onAccountAdded(account)}
+        />
+      )}
       {/* ADR-0026 §5 §B — revived `settings.ai` slot (moved from api-key). */}
       <PluginExtensionSlot point="settings.ai" className="empty:hidden" />
 
@@ -105,7 +115,12 @@ export function AnthropicSubscriptionReuseCard() {
           icon={<DownloadIcon className="size-4" />}
           title={t("localLoginTitle")}
           action={
-            <Button variant="outline" size="sm" disabled={adopting} onClick={onReuseLocal}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={adopting}
+              onClick={() => setDialogOpen(true)}
+            >
               {adopting && <Loader2Icon className="mr-2 size-4 animate-spin" />}
               {t("localLoginAction")}
             </Button>

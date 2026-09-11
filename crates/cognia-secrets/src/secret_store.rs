@@ -493,6 +493,13 @@ pub fn get(service: &str, account: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// List account identifiers within exactly one encrypted service. This reads
+/// metadata only and never enumerates legacy OS-keyring entries or values.
+pub fn list_accounts(service: &str) -> Vec<String> {
+    let prefix = format!("{service}{COMPOSITE_SEP}");
+    global().read().cache.keys().filter_map(|key| key.strip_prefix(&prefix).map(str::to_owned)).collect()
+}
+
 /// Upsert a secret.
 pub fn set(service: &str, account: &str, value: &str) -> Result<(), String> {
     global().write().set(service, account, value)
@@ -578,6 +585,16 @@ mod tests {
     fn open_missing_file_is_empty() {
         let store = SecretStore::open(tmp_path(), [1u8; 32]).unwrap();
         assert!(store.peek("svc", "acct").is_none());
+    }
+
+    #[test]
+    fn enumeration_returns_only_keys_from_the_exact_service() {
+        set("inventory-test", "custom:one", "private-one").unwrap();
+        set("inventory-test/nested", "custom:two", "private-two").unwrap();
+        assert_eq!(list_accounts("inventory-test"), vec!["custom:one"]);
+        assert!(list_accounts("inventory-other").is_empty());
+        delete("inventory-test", "custom:one").unwrap();
+        delete("inventory-test/nested", "custom:two").unwrap();
     }
 
     #[test]

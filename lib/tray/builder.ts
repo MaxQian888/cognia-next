@@ -36,7 +36,8 @@ interface BuilderInput {
    * and tests keep working — absent prefs fall back to "show when usage data
    * exists" (`DEFAULT_TRAY_DISPLAY.showUsageInMenu` is `true`).
    */
-  display?: Pick<TrayDisplayPrefs, "showUsageInMenu">
+  display?: Pick<TrayDisplayPrefs, "showUsageInMenu"> &
+    Partial<Pick<TrayDisplayPrefs, "usageMetric" | "usagePeriod" | "usageScope">>
 }
 
 /** DTO shape mirrored on the Rust side in `src-tauri/src/tray/dto.rs`. */

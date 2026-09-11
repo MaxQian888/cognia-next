@@ -8,7 +8,7 @@ import {
   makeProviderSettingsMap,
   makeCustomProviderSettings,
 } from "@/lib/storybook/fixtures/settings-provider"
-import type { AppSettings } from "@cognia/agent-config-types"
+import { DEFAULT_BUILTIN_TOOLS, type AppSettings } from "@cognia/agent-config-types"
 import type {
   CustomProviderSettings,
   ProviderUIPreferences,
@@ -103,10 +103,13 @@ const meta = {
   beforeEach: () => {
     seedProviderStory(
       {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
         providerSettings: {},
         customProviders: [],
         providerUIPreferences: { selectedProviderId: "openai" },
-      } as AppSettings,
+      } satisfies AppSettings,
       { selectedProviderId: "openai", statusFilter: "all", sortBy: "name" }
     )
   },
@@ -131,10 +134,13 @@ export const Configured: Story = {
   beforeEach: () => {
     seedProviderStory(
       {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
         providerSettings: makeProviderSettingsMap(),
         defaultProvider: "openai",
         providerUIPreferences: { selectedProviderId: "openai" },
-      } as AppSettings,
+      } satisfies AppSettings,
       { selectedProviderId: "openai", statusFilter: "all", sortBy: "name" }
     )
   },
@@ -145,13 +151,16 @@ export const WithCustomProvider: Story = {
   beforeEach: () => {
     seedProviderStory(
       {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
         providerSettings: makeProviderSettingsMap(),
         defaultProvider: "openai",
         customProviders: [
           makeCustomProviderSettings({ id: "my-gateway", customName: "My Gateway" }),
         ],
         providerUIPreferences: { selectedProviderId: "my-gateway" },
-      } as AppSettings,
+      } satisfies AppSettings,
       {
         selectedProviderId: "my-gateway",
         statusFilter: "all",
@@ -165,6 +174,9 @@ export const LocalProvider: Story = {
   beforeEach: () => {
     seedProviderStory(
       {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: DEFAULT_BUILTIN_TOOLS,
         providerSettings: {
           ollama: {
             providerId: "ollama",
@@ -177,7 +189,7 @@ export const LocalProvider: Story = {
         },
         defaultProvider: "ollama",
         providerUIPreferences: { selectedProviderId: "ollama" },
-      } as AppSettings,
+      } satisfies AppSettings,
       { selectedProviderId: "ollama", statusFilter: "all", sortBy: "name" }
     )
   },

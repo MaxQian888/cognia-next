@@ -123,7 +123,8 @@ export function shouldShowParameter(
   const { modelCapability, modelIdPattern, dependsOn } = definition.condition
 
   if (modelCapability && modelConfig) {
-    if (!modelConfig[modelCapability]) return false
+    const declared = !modelConfig.knownFields || modelConfig.knownFields.includes(modelCapability)
+    if (declared && modelConfig[modelCapability] === false) return false
   }
 
   if (modelIdPattern && modelConfig) {

@@ -203,3 +203,19 @@ describe("useProviderBatchVerify", () => {
     })
   })
 })
+
+it("checks batch eligibility against the effective subscription configuration", () => {
+  const projected = { codex: { providerId: "codex", enabled: true, apiKey: "subscription:hash" } }
+  renderHook(() => useProviderBatchVerify(makeSettings({ readinessProviderSettings: projected })))
+  expect(eligibleBuiltIn).toHaveBeenCalledWith([], projected, {})
+  expect(retryBuiltIn).toHaveBeenCalledWith([], projected, {})
+})
+
+it("passes custom subscription readiness projections to batch eligibility checks", () => {
+  const readiness = { "custom-vault": { id: "custom-vault", apiKey: "subscription:digest" } }
+  renderHook(() =>
+    useProviderBatchVerify(makeSettings({ readinessCustomProviders: readiness as never }))
+  )
+  expect(eligibleCustom).toHaveBeenCalledWith(expect.anything(), readiness, expect.anything())
+  expect(retryCustom).toHaveBeenCalledWith(expect.anything(), readiness, expect.anything())
+})

@@ -1,3 +1,4 @@
+import { listSubscriptionProviders } from "./provider-registry"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
 export interface AccountCapabilities {
@@ -43,19 +44,11 @@ export function accountCapabilities(account: AccountSummary): AccountCapabilitie
 
   return {
     ...BASE,
-    bindPreset: account.provider !== "opencode",
-    reauthenticate:
-      account.provider === "codex" && account.authMode === "chatgpt" && !account.isExternal,
+    reauthenticate: account.authMode === "chatgpt" && !account.isExternal,
   }
 }
 
 export function providerDisplayOrder(provider: ProviderId): number {
-  switch (provider) {
-    case "anthropic":
-      return 0
-    case "codex":
-      return 1
-    case "opencode":
-      return 2
-  }
+  const index = listSubscriptionProviders().findIndex((entry) => entry.id === provider)
+  return index < 0 ? Number.MAX_SAFE_INTEGER : index
 }

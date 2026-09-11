@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { Account, AccountSummary } from "@/types/subscription"
 
@@ -43,7 +43,11 @@ jest.mock("@/lib/subscription/anthropic/hooks", () => ({
 
 const savePkceMock = jest.fn()
 const replaceAccountCredentialMock = jest.fn()
+jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
 jest.mock("@/lib/subscription/core/transport", () => ({
+  listPresets: jest.fn(async () => [
+    { id: "relay", label: "My relay", baseUrl: "https://relay.example" },
+  ]),
   anthropicOauthSavePkceResult: (...a: unknown[]) => savePkceMock(...a),
   replaceAccountCredential: (...a: unknown[]) => replaceAccountCredentialMock(...a),
 }))
@@ -86,16 +90,18 @@ beforeEach(() => {
 })
 
 describe("AnthropicAddAccountDialog", () => {
-  it("greys out the reuse mode and defaults to subscription when nothing is discovered", () => {
+  it("greys out the reuse mode and defaults to subscription when nothing is discovered", async () => {
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
     expect(screen.getByRole("radio", { name: /reuse claude code login/i })).toBeDisabled()
     expect(screen.getByRole("radio", { name: /subscription \(pro \/ max\)/i })).toBeChecked()
     expect(screen.getByRole("button", { name: /open authorization page/i })).toBeInTheDocument()
   })
 
-  it("defaults to reuse when a local login is discovered and shows its details", () => {
+  it("defaults to reuse when a local login is discovered and shows its details", async () => {
     discoveredResult = discovered()
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
     expect(screen.getByRole("radio", { name: /reuse claude code login/i })).toBeChecked()
     expect(screen.getByText("/home/u/.claude/.credentials.json")).toBeInTheDocument()
     expect(screen.getByText("max")).toBeInTheDocument()
@@ -127,6 +133,7 @@ describe("AnthropicAddAccountDialog", () => {
     savePkceMock.mockResolvedValueOnce(account())
     persistProviderAccountMock.mockRejectedValueOnce(new Error("vault sealed"))
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
 
     await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
 
@@ -181,6 +188,7 @@ describe("AnthropicAddAccountDialog", () => {
       flowState: { state: "s", verifier: "v", mode: "subscription" },
     })
     render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
+    await screen.findByRole("combobox")
 
     await userEvent.click(screen.getByRole("radio", { name: /subscription \(pro \/ max\)/i }))
     await userEvent.click(screen.getByRole("button", { name: /open authorization page/i }))
@@ -195,4 +203,30 @@ describe("AnthropicAddAccountDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /re-scan/i }))
     expect(reloadDiscovery).toHaveBeenCalled()
   })
+})
+
+it("persists the selected endpoint preset when adding a anthropic account", async () => {
+  discoveredResult = discovered()
+  savePkceMock.mockResolvedValueOnce(account())
+  persistProviderAccountMock.mockImplementation(async (_provider, next) => next)
+  render(<AnthropicAddAccountDialog open onOpenChange={() => {}} />)
+  await screen.findByRole("combobox")
+  fireEvent.change(await screen.findByRole("combobox"), { target: { value: "relay" } })
+  await userEvent.click(screen.getByRole("button", { name: /adopt this login/i }))
+  expect(persistProviderAccountMock).toHaveBeenCalledWith(
+    "anthropic",
+    expect.objectContaining({ presetId: "relay" })
+  )
+})
+
+it("routes third-party API keys to Providers without treating them as Claude OAuth", async () => {
+  const onOpenChange = jest.fn()
+  render(<AnthropicAddAccountDialog open onOpenChange={onOpenChange} />)
+  await screen.findByRole("combobox")
+  const link = screen.getByRole("link", { name: "Set up an API key or Coding Plan" })
+  expect(link).toHaveAttribute("href", "/settings?section=providers")
+  link.addEventListener("click", (event) => event.preventDefault())
+  await userEvent.click(link)
+  expect(onOpenChange).toHaveBeenCalledWith(false)
+  expect(savePkceMock).not.toHaveBeenCalled()
 })

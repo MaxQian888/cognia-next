@@ -11,11 +11,12 @@
 import {
   getBuiltInProviderCatalog,
   type BuiltInProviderCatalogEntry,
-  type BuiltInProviderFamily,
 } from "@cognia/provider-types/built-in-provider-catalog"
 
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+
 /** Subscription providers that offer preset templates. */
-export type PresetTemplateProvider = "anthropic" | "codex" | "opencode"
+export type PresetTemplateProvider = string
 
 /** A preset the user can instantiate with one click (baseUrl pre-filled). */
 export interface PresetTemplate {
@@ -29,23 +30,6 @@ export interface PresetTemplate {
   docsUrl?: string
   /** Which subscription provider this template targets. */
   provider: PresetTemplateProvider
-}
-
-/** Which catalog families map to which subscription provider's templates. */
-const FAMILIES_BY_PROVIDER: Record<PresetTemplateProvider, readonly BuiltInProviderFamily[]> = {
-  anthropic: ["anthropic-native"],
-  codex: ["openai-compatible", "openrouter"],
-  // OpenCode templates are id-pinned (the two official gateways), not
-  // family-wide — every other openai-compatible entry is a different
-  // service, not a relay of the opencode gateway.
-  opencode: [],
-}
-
-/** Catalog ids additionally offered as templates, per provider. */
-const IDS_BY_PROVIDER: Record<PresetTemplateProvider, readonly string[]> = {
-  anthropic: [],
-  codex: [],
-  opencode: ["opencode", "opencode-go"],
 }
 
 /** Concrete endpoint for a catalog entry, if it carries one. */
@@ -66,9 +50,17 @@ function customTemplate(provider: PresetTemplateProvider): PresetTemplate {
  * "Custom" template is always first; the rest are catalog relays in the
  * matching protocol family (or id-pinned set) that carry a concrete base URL.
  */
-export function buildPresetTemplates(provider: PresetTemplateProvider): PresetTemplate[] {
-  const families = FAMILIES_BY_PROVIDER[provider]
-  const ids = IDS_BY_PROVIDER[provider]
+export function buildPresetTemplates(
+  provider: PresetTemplateProvider,
+  definition = getSubscriptionProvider(provider)
+): PresetTemplate[] {
+  const families =
+    definition?.authMode === "anthropic-oauth"
+      ? ["anthropic-native"]
+      : definition?.authMode === "codex-oauth"
+        ? ["openai-compatible", "openrouter"]
+        : []
+  const ids = [provider, ...(definition?.plans?.map((plan) => plan.chatProviderId) ?? [])]
   const fromCatalog = getBuiltInProviderCatalog()
     .filter(
       (e): e is BuiltInProviderCatalogEntry =>
@@ -89,6 +81,15 @@ export function buildPresetTemplates(provider: PresetTemplateProvider): PresetTe
     .filter((t): t is PresetTemplate => t !== undefined)
     .sort((a, b) => a.label.localeCompare(b.label))
 
+  if (definition?.baseUrl && !fromCatalog.some((entry) => entry.templateId === definition.id)) {
+    fromCatalog.unshift({
+      templateId: definition.id,
+      label: definition.name,
+      baseUrl: definition.baseUrl,
+      docsUrl: definition.docsUrl,
+      provider,
+    })
+  }
   return [customTemplate(provider), ...fromCatalog]
 }
 

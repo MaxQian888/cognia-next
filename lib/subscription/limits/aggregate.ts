@@ -8,6 +8,7 @@ import {
   authedGet as defaultAuthedGet,
   getActiveAccount as defaultGetActiveAccount,
   listAccounts as defaultListAccounts,
+  listSubscriptionProviderIds,
 } from "@/lib/subscription/core/transport"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
@@ -23,6 +24,7 @@ import type {
 } from "@/types/subscription"
 
 export interface AggregateDeps extends Partial<LimitsRunnerDeps> {
+  listProviders?: () => Promise<ProviderId[]>
   listAccounts: (provider: ProviderId) => Promise<AccountSummary[]>
   getActiveAccount: (provider: ProviderId) => Promise<ActiveSnapshot>
   /** Currently-active provider (CLI config / desktop selection) — pinned first. */
@@ -37,6 +39,7 @@ interface Target {
   provider: ProviderId
   accountId: string
   active: boolean
+  accountLabel?: string
 }
 
 /**
@@ -55,16 +58,35 @@ export async function queryAllConfiguredLimits(
 
   // Enumerate targets across every provider, tagging the active one.
   const targets: Target[] = []
-  for (const provider of ALL_PROVIDER_IDS) {
-    const [summaries, active] = await Promise.all([
+  const enumerationErrors: ProviderLimits[] = []
+  const providers = deps.listProviders
+    ? await deps.listProviders()
+    : deps.listAccounts
+      ? ALL_PROVIDER_IDS
+      : await listSubscriptionProviderIds()
+  for (const provider of providers) {
+    const [summaries, active] = await Promise.allSettled([
       listAccounts(provider),
       getActiveAccount(provider),
     ])
-    const activeId = active.activeAccountId
-    for (const summary of summaries) {
+    if (summaries.status === "rejected") {
+      enumerationErrors.push({
+        provider,
+        fetchedAt: (deps.now ?? Date.now)(),
+        meters: [],
+        error:
+          summaries.reason instanceof Error ? summaries.reason.message : String(summaries.reason),
+      })
+      continue
+    }
+    // Active-account lookup only controls ordering, not whether an account's
+    // independent reading is available.
+    const activeId = active.status === "fulfilled" ? active.value.activeAccountId : null
+    for (const summary of summaries.value) {
       targets.push({
         provider,
         accountId: summary.id,
+        accountLabel: summary.label,
         active: deps.activeProvider === provider && summary.id === activeId,
       })
     }
@@ -72,7 +94,19 @@ export async function queryAllConfiguredLimits(
 
   const results = await Promise.all(
     targets.map(async (t) => {
-      const snap = await runAccount(t.provider, t.accountId)
+      let snap: ProviderLimits | null
+      try {
+        snap = await runAccount(t.provider, t.accountId)
+      } catch (error) {
+        snap = {
+          provider: t.provider,
+          accountId: t.accountId,
+          accountLabel: t.accountLabel,
+          fetchedAt: (deps.now ?? Date.now)(),
+          meters: [],
+          error: error instanceof Error ? error.message : String(error),
+        }
+      }
       return snap ? { snap, active: t.active } : null
     })
   )
@@ -80,7 +114,7 @@ export async function queryAllConfiguredLimits(
   const usable = results.filter((r): r is { snap: ProviderLimits; active: boolean } => r !== null)
   // Stable sort with the active account first.
   usable.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1))
-  const accountSnaps = usable.map((r) => r.snap)
+  const accountSnaps = [...usable.map((r) => r.snap), ...enumerationErrors]
 
   // Append user-defined custom sources (no vault account; self-contained).
   const customList = deps.listCustomSources?.() ?? []

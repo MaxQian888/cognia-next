@@ -22,7 +22,6 @@ import {
 } from "@/lib/provider-diagnostics/store"
 import type { ProviderDiagnosticSample } from "@cognia/provider-types"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
-import { PROVIDERS } from "@cognia/provider-types/provider"
 
 import { getBuiltInProviderReadiness, getCustomProviderReadiness } from "./provider-readiness"
 import type {
@@ -175,16 +174,14 @@ export function useProviderRows({
   const rows = useMemo<ProviderRow[]>(() => {
     const q = search.trim().toLowerCase()
     const builtIn = s.filteredProviders
-      .filter(([id]) => {
+      .filter(([id, cfg]) => {
         if (categoryFilter === "custom") return false
         if (categoryFilter !== "all" && !providerMatchesCategory(categoryFilter, id)) return false
         if (!q) return true
-        const cfg = PROVIDERS[id]
-        if (!cfg) return false
         return id.toLowerCase().includes(q) || cfg.name.toLowerCase().includes(q)
       })
       .map(([id, cfg]) => {
-        const providerSettings = s.providerSettings[id]
+        const providerSettings = (s.readinessProviderSettings ?? s.providerSettings)[id]
         const test = s.testResults[id]
         const effectiveTest = preferLiveHealth(liveProviderHealth[id], test?.success, test?.outcome)
         // Readiness re-derives the verification status from the persisted
@@ -218,7 +215,7 @@ export function useProviderRows({
 
     const custom: ProviderRow[] = []
     for (const id of s.visibleCustomProviderIds) {
-      const cp = s.customProviders[id]
+      const cp = (s.readinessCustomProviders ?? s.customProviders)[id]
       if (!cp) continue
       if (categoryFilter !== "all" && categoryFilter !== "custom") continue
       if (q && !cp.customName.toLowerCase().includes(q) && !id.toLowerCase().includes(q)) {
@@ -256,9 +253,11 @@ export function useProviderRows({
   }, [
     s.filteredProviders,
     s.providerSettings,
+    s.readinessProviderSettings,
     s.testResults,
     s.visibleCustomProviderIds,
     s.customProviders,
+    s.readinessCustomProviders,
     s.customTestResults,
     liveProviderHealth,
     search,

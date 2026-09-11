@@ -8,6 +8,7 @@
 import {
   authedRequest as defaultAuthedRequest,
   getAccount as defaultGetAccount,
+  getProviderPreset as defaultGetProviderPreset,
   listPresets as defaultListPresets,
 } from "../core/transport"
 import { findBalanceAdapter } from "./registry"
@@ -24,12 +25,14 @@ export interface BalanceRunnerDeps {
   authedRequest: typeof defaultAuthedRequest
   getAccount: (provider: ProviderId, accountId: string) => Promise<Account | null>
   listPresets: (provider: ProviderId) => Promise<ProviderPreset[]>
+  getProviderPreset: (provider: ProviderId) => Promise<ProviderPreset | null>
 }
 
 const DEFAULT_DEPS: BalanceRunnerDeps = {
   authedRequest: defaultAuthedRequest,
   getAccount: defaultGetAccount,
   listPresets: defaultListPresets,
+  getProviderPreset: defaultGetProviderPreset,
 }
 
 /** Pull a usable bearer out of any credential shape that carries one. */
@@ -38,6 +41,8 @@ export function accessTokenOf(credential: ProviderCredential): string | null {
     case "anthropic":
     case "codex":
     case "opencode-zen":
+    case "commandcode":
+    case "api-key":
       return credential.accessToken || null
     case "opencode-discovered":
       return null
@@ -45,18 +50,18 @@ export function accessTokenOf(credential: ProviderCredential): string | null {
 }
 
 /** The preset baseUrl for an account, honoring its binding then the default. */
-export function resolvePresetForAccount(
+export async function resolvePresetForAccount(
   account: Account,
-  presets: ProviderPreset[]
-): ProviderPreset | null {
+  presets: ProviderPreset[],
+  getDefault: () => Promise<ProviderPreset | null>
+): Promise<ProviderPreset | null> {
   if (account.presetId) {
     const bound = presets.find((p) => p.id === account.presetId)
     if (bound) return bound
   }
-  // No per-account binding (or it dangles): fall back to the first preset that
-  // carries a templateId/baseUrl. The provider-level default is the first
-  // listed preset in practice; we just need any preset with a usable baseUrl.
-  return presets.find((p) => p.baseUrl.trim().length > 0) ?? null
+  // The vault's default pointer is independent of preset insertion order.
+  // An absent default must never send this account's token to another preset.
+  return getDefault()
 }
 
 /**
@@ -71,7 +76,7 @@ export async function queryAccountBalance(
   accountId: string,
   deps: Partial<BalanceRunnerDeps> = {}
 ): Promise<BalanceSnapshot | null> {
-  const { authedRequest, getAccount, listPresets } = { ...DEFAULT_DEPS, ...deps }
+  const { authedRequest, getAccount, listPresets, getProviderPreset } = { ...DEFAULT_DEPS, ...deps }
 
   const account = await getAccount(provider, accountId)
   if (!account) return null
@@ -80,7 +85,7 @@ export async function queryAccountBalance(
   if (!token) return null
 
   const presets = await listPresets(provider)
-  const preset = resolvePresetForAccount(account, presets)
+  const preset = await resolvePresetForAccount(account, presets, () => getProviderPreset(provider))
   if (!preset) return null
 
   const providerKey = preset.templateId

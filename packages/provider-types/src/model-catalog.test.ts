@@ -143,6 +143,7 @@ describe("model catalog contracts", () => {
     future.revision.schemaVersion = CATALOG_SCHEMA_VERSION + 1
     const result = parseCatalogSnapshot(future)
     expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("Expected future schema rejection")
     expect(result.errors.some((e) => e.includes("newer than supported"))).toBe(true)
   })
 

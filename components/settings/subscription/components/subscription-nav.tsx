@@ -40,8 +40,16 @@ export function SubscriptionNav({ groups, activeId, onSelect }: SubscriptionNavP
               key={item.id}
               id={item.id}
               icon={item.icon}
-              label={t(`items.${item.id}.label`)}
-              description={t(`items.${item.id}.description`)}
+              label={
+                item.localize && (!t.has || t.has(`items.${item.id}.label`))
+                  ? t(`items.${item.id}.label`)
+                  : (item.label ?? t(`items.${item.id}.label`))
+              }
+              description={
+                item.localize && (!t.has || t.has(`items.${item.id}.description`))
+                  ? t(`items.${item.id}.description`)
+                  : (item.description ?? t(`items.${item.id}.description`))
+              }
               isSelected={item.id === activeId}
               onSelect={onSelect}
             />
