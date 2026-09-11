@@ -81,6 +81,14 @@ export const RAPID_EXIT_THRESHOLD_MS = 5000
 /** Consecutive rapid crashes that trip the breaker and stop autonomous reconnect. */
 export const MAX_RAPID_EXITS = 3
 
+const DEVIN_PERMISSION_MODES: Record<AcpPermissionMode, string> = {
+  default: "ask",
+  acceptEdits: "accept-edits",
+  bypassPermissions: "bypass",
+  plan: "plan",
+  dontAsk: "ask",
+}
+
 function isAbsoluteWorkspacePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\")
 }
@@ -737,8 +745,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       validateInbound: (message) => this.validateInboundEnvelope(message),
       onNotification: (method, params) =>
         this.handleNotification({ jsonrpc: "2.0", method, params }),
-      onServerRequest: (method, params, id, signal) =>
-        this.dispatchAgentRequest(method, params, id, signal),
+      // ACP's empty responses are objects; undefined would omit `result`
+      // during JSON serialization and leave the agent waiting for a reply.
+      onServerRequest: async (method, params, id, signal) =>
+        (await this.dispatchAgentRequest(method, params, id, signal)) ?? {},
       concurrentServerRequests: true,
     })
 
@@ -762,9 +772,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         streaming: true,
         toolExecution: true,
         fileOperations: initResult.agentCapabilities?.promptCapabilities?.embeddedContext,
-        mcpTools:
-          initResult.agentCapabilities?.mcpCapabilities?.http ||
-          initResult.agentCapabilities?.mcpCapabilities?.sse,
+        // Stdio MCP servers are baseline ACP support. The negotiated flags
+        // only describe additional HTTP/SSE server transports.
+        mcpTools: true,
         multiTurn: initResult.agentCapabilities?.loadSession,
       }
       this._tools = []
@@ -1596,7 +1606,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       id: result.sessionId,
       agentId: this._config!.id,
       status: "active",
-      permissionMode: initialMode,
+      permissionMode: this.canonicalPermissionMode(initialMode),
       allowedTools: options?.allowedTools,
       capabilities: this._capabilities,
       tools: this._tools ?? [],
@@ -1851,6 +1861,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
       throw new Error("ACP outbound payload blocked by the PII gate")
     }
+    const promptBlocks = buildAcpPromptBlocks(
+      message,
+      this._agentCapabilities ?? {},
+      options?.files
+    )
 
     // Update session status
     this.updateSession(sessionId, { status: "executing" })
@@ -1884,12 +1899,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     this.addEventListener(sessionId, listener)
 
-    const promptBlocks = buildAcpPromptBlocks(
-      message,
-      this._agentCapabilities ?? {},
-      options?.files
-    )
-
     const promptParams: AcpPromptParams = {
       sessionId,
       prompt: promptBlocks,
@@ -1898,7 +1907,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     try {
       // session/prompt is a REQUEST (not notification) that returns stopReason
       // We send it and handle streaming updates via session/update notifications
-      this.sendPromptRequest(sessionId, promptParams)
+      this.sendPromptRequest(sessionId, promptParams, options?.timeout)
 
       // Yield events as they come
       while (!isDone) {
@@ -2038,7 +2047,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Send a prompt request and handle the response
    * session/prompt is a REQUEST that returns a stopReason
    */
-  private sendPromptRequest(sessionId: string, params: AcpPromptParams): void {
+  private sendPromptRequest(
+    sessionId: string,
+    params: AcpPromptParams,
+    executionTimeout?: number
+  ): void {
     // Start a fresh message id for this turn so all `agent_message_chunk`s
     // share it (they coalesce into one assistant message).
     this.toolCallStates.delete(sessionId)
@@ -2046,7 +2059,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Send as request but handle response asynchronously
     this.sendRequest<AcpPromptResult>(
       "session/prompt",
-      params as unknown as Record<string, unknown>
+      params as unknown as Record<string, unknown>,
+      executionTimeout ?? this._config?.timeout ?? 300000
     )
       .then((result) => {
         // Turn over — retire the per-turn message id.
@@ -2063,7 +2077,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           stopReason: result.stopReason,
         })
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        if (error instanceof Error && error.message === "Request timeout: session/prompt") {
+          // Generic request cancellation does not end an ACP prompt turn.
+          // Stop agent work and resolve pending approvals before reporting the deadline.
+          try {
+            await this.cancel(sessionId)
+          } catch (cancelError) {
+            log.warn("Failed to cancel a timed-out ACP turn", { sessionId, error: cancelError })
+          }
+        }
         this.toolCallStates.delete(sessionId)
         this.turnMessageId.delete(sessionId)
         // Emit error event on failure
@@ -2095,18 +2118,42 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Set session mode
    * @see https://agentclientprotocol.com/protocol/session-modes
    */
+  private isDevinAgent(): boolean {
+    return (
+      this._config?.metadata?.preset === "devin" ||
+      /(?:^|[\\/])devin(?:\.exe)?$/i.test(this._config?.process?.command ?? "")
+    )
+  }
+
+  private canonicalPermissionMode(nativeMode: string, sessionId?: string): AcpPermissionMode {
+    if (!this.isDevinAgent()) return nativeMode as AcpPermissionMode
+    if (nativeMode === "accept-edits") return "acceptEdits"
+    if (nativeMode === "bypass") return "bypassPermissions"
+    if (nativeMode === "plan") return "plan"
+    if (
+      nativeMode === "ask" &&
+      sessionId &&
+      this._sessions.get(sessionId)?.permissionMode === "dontAsk"
+    ) {
+      return "dontAsk"
+    }
+    return "default"
+  }
+
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
+    const nativeMode = this.isDevinAgent() ? (DEVIN_PERMISSION_MODES[modeId] ?? modeId) : modeId
     const modeOption = this.getConfigOptions(sessionId)?.find(
       (option) => option.type === "select" && option.category === "mode"
     )
     if (modeOption) {
-      await this.setConfigOption(sessionId, modeOption.id, modeId)
+      await this.setConfigOption(sessionId, modeOption.id, nativeMode)
+      this.updateSession(sessionId, { permissionMode: modeId })
       return
     }
-    await this.sendRequest("session/set_mode", { sessionId, modeId } as unknown as Record<
-      string,
-      unknown
-    >)
+    await this.sendRequest("session/set_mode", {
+      sessionId,
+      modeId: nativeMode,
+    } as unknown as Record<string, unknown>)
     this.updateSession(sessionId, { permissionMode: modeId })
   }
 
@@ -2249,7 +2296,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Sync mode from config options if applicable
     const modeOpt = updatedOptions.find((opt) => opt.category === "mode")
     if (modeOpt && typeof modeOpt.currentValue === "string") {
-      this.updateSession(sessionId, { permissionMode: modeOpt.currentValue as AcpPermissionMode })
+      this.updateSession(sessionId, {
+        permissionMode: this.canonicalPermissionMode(modeOpt.currentValue, sessionId),
+      })
     }
 
     log.info("Config option changed", { sessionId, configId, value })
@@ -2280,14 +2329,15 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       _meta: this.buildSessionRequestMeta(options),
     }
 
-    await this.sendRequest("session/load", params as unknown as Record<string, unknown>)
-
-    // Session will be restored via session/update notifications
+    // Agents replay session/update and may call host methods before replying.
+    // Install the session first so replay state and workspace confinement work.
+    const previousSession = this._sessions.get(sessionId)
     const session: ExternalAgentSession = {
       id: sessionId,
       agentId: this._config!.id,
       status: "active",
       permissionMode: (options?.permissionMode || "default") as AcpPermissionMode,
+      allowedTools: options?.allowedTools,
       capabilities: this._capabilities,
       tools: this._tools ?? [],
       messages: [],
@@ -2300,8 +2350,36 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
-    this.registerDynamicMcpServers(session.id, mcpServers)
-    return session
+    try {
+      const result = await this.sendRequest<
+        Pick<AcpNewSessionResult, "models" | "modes" | "configOptions">
+      >("session/load", params as unknown as Record<string, unknown>)
+      const restored = this._sessions.get(sessionId) ?? session
+      const metadata = {
+        ...restored.metadata,
+        ...(result?.models ? { models: result.models } : {}),
+        ...(result?.modes ? { modes: result.modes } : {}),
+        ...(result?.configOptions ? { configOptions: result.configOptions } : {}),
+      }
+      const configOptions = metadata.configOptions as AcpConfigOption[] | undefined
+      const modeOption = configOptions?.find(
+        (option) => option.type === "select" && option.category === "mode"
+      )
+      const nativeMode = modeOption?.currentValue ?? result?.modes?.currentModeId
+      this.registerDynamicMcpServers(session.id, mcpServers)
+      return this.updateSession(sessionId, {
+        metadata,
+        ...(typeof nativeMode === "string"
+          ? {
+              permissionMode: this.canonicalPermissionMode(nativeMode, sessionId),
+            }
+          : {}),
+      })!
+    } catch (error) {
+      if (previousSession) this._sessions.set(sessionId, previousSession)
+      else this._sessions.delete(sessionId)
+      throw error
+    }
   }
 
   /**
@@ -2734,10 +2812,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
       )
 
-      if (response.ok) {
-        const data = await response.text()
-        this.peer?.ingest(data)
+      if (!response.ok) {
+        throw new Error(`HTTP error: ${response.status} ${response.statusText}`)
       }
+      const data = await response.text()
+      this.peer?.ingest(data)
     } else if (this._config?.transport === "sse" && this._config.network?.endpoint) {
       const response = await proxyFetch(
         this._rpcEndpoint || `${this._config.network.endpoint}/message`,
@@ -3139,7 +3218,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     // Genuinely side-effecting kinds (execute/terminal/browser/mcp) still
     // require an explicit prompt.
     const isAutoApprovableEdit =
-      kind === "file_write" || kind === "write" || kind === "file_read" || kind === "read"
+      kind === "file_write" ||
+      kind === "write" ||
+      kind === "edit" ||
+      kind === "file_read" ||
+      kind === "read"
     if (session?.permissionMode === "acceptEdits" && isAutoApprovableEdit && allowOption) {
       return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
     }
@@ -3440,7 +3523,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call": {
-        const states = this.toolCallStates.get(sessionId) ?? new Map()
+        const states =
+          this.toolCallStates.get(sessionId) ??
+          new Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>()
         this.toolCallStates.set(sessionId, states)
         states.set(update.toolCallId, { ...update, sessionUpdate: "tool_call_update" })
         if (
@@ -3472,11 +3557,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call_update": {
-        const states = this.toolCallStates.get(sessionId) ?? new Map()
+        const states =
+          this.toolCallStates.get(sessionId) ??
+          new Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>()
         this.toolCallStates.set(sessionId, states)
-        update = { ...states.get(update.toolCallId), ...update }
-        states.set(update.toolCallId, update)
-        const content = update.content ?? []
+        const toolUpdate = { ...states.get(update.toolCallId), ...update }
+        states.set(toolUpdate.toolCallId, toolUpdate)
+        const content = toolUpdate.content ?? []
         const text = content.flatMap((block) =>
           block.type === "content" && block.content.type === "text" ? [block.content.text] : []
         )
@@ -3486,56 +3573,56 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             ? { content }
             : text.length
               ? text.join("\n")
-              : (update.rawOutput ?? "")
+              : (toolUpdate.rawOutput ?? "")
 
         if (
-          update.status === "completed" ||
-          update.status === "error" ||
-          update.status === "failed"
+          toolUpdate.status === "completed" ||
+          toolUpdate.status === "error" ||
+          toolUpdate.status === "failed"
         ) {
-          states.delete(update.toolCallId)
+          states.delete(toolUpdate.toolCallId)
           return {
             type: "tool_result",
             sessionId,
             timestamp,
-            toolUseId: update.toolCallId,
+            toolUseId: toolUpdate.toolCallId,
             result,
-            isError: update.status === "error" || update.status === "failed",
-            toolName: update.title,
-            title: update.title,
-            kind: update.kind,
-            rawInput: update.rawInput,
-            rawOutput: update.rawOutput,
-            locations: update.locations,
-            status: update.status,
+            isError: toolUpdate.status === "error" || toolUpdate.status === "failed",
+            toolName: toolUpdate.title,
+            title: toolUpdate.title,
+            kind: toolUpdate.kind,
+            rawInput: toolUpdate.rawInput,
+            rawOutput: toolUpdate.rawOutput,
+            locations: toolUpdate.locations,
+            status: toolUpdate.status,
             toolMetadata: {
-              ...(update.kind ? { kind: update.kind } : {}),
-              ...(update.locations ? { locations: update.locations } : {}),
+              ...(toolUpdate.kind ? { kind: toolUpdate.kind } : {}),
+              ...(toolUpdate.locations ? { locations: toolUpdate.locations } : {}),
             },
           }
         }
 
         // Emit enhanced tool_call_update event with all fields
         if (
-          update.title ||
-          update.kind ||
-          update.content ||
-          update.locations ||
-          update.rawInput ||
-          update.rawOutput
+          toolUpdate.title ||
+          toolUpdate.kind ||
+          toolUpdate.content ||
+          toolUpdate.locations ||
+          toolUpdate.rawInput ||
+          toolUpdate.rawOutput
         ) {
           return {
             type: "tool_call_update" as const,
             sessionId,
             timestamp,
-            toolCallId: update.toolCallId,
-            status: update.status,
-            title: update.title,
-            kind: update.kind,
-            content: update.content,
-            locations: update.locations,
-            rawInput: update.rawInput,
-            rawOutput: update.rawOutput,
+            toolCallId: toolUpdate.toolCallId,
+            status: toolUpdate.status,
+            title: toolUpdate.title,
+            kind: toolUpdate.kind,
+            content: toolUpdate.content,
+            locations: toolUpdate.locations,
+            rawInput: toolUpdate.rawInput,
+            rawOutput: toolUpdate.rawOutput,
           }
         }
 
@@ -3543,8 +3630,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           type: "tool_use_delta",
           sessionId,
           timestamp,
-          toolUseId: update.toolCallId,
-          delta: update.status || "in_progress",
+          toolUseId: toolUpdate.toolCallId,
+          delta: toolUpdate.status || "in_progress",
         }
       }
 
@@ -3741,7 +3828,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
 
       case "mode_change":
-        this.updateSession(sessionId, { permissionMode: update.modeId })
+        this.updateSession(sessionId, {
+          permissionMode: this.canonicalPermissionMode(update.modeId, sessionId),
+        })
         return null
 
       case "current_mode_update": {
@@ -3749,7 +3838,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         const modeSession = this._sessions.get(sessionId)
         if (modeSession) {
           this.updateSession(sessionId, {
-            permissionMode: update.currentModeId as AcpPermissionMode,
+            permissionMode: this.canonicalPermissionMode(update.currentModeId, sessionId),
           })
           // Also update configOptions if they exist
           const configOpts = modeSession.metadata?.configOptions as AcpConfigOption[] | undefined
@@ -3785,9 +3874,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           const modeOpt = update.configOptions.find(
             (opt) => opt.type === "select" && opt.category === "mode"
           )
-          if (modeOpt) {
+          if (modeOpt && typeof modeOpt.currentValue === "string") {
             this.updateSession(sessionId, {
-              permissionMode: modeOpt.currentValue as AcpPermissionMode,
+              permissionMode: this.canonicalPermissionMode(modeOpt.currentValue, sessionId),
             })
           }
         }

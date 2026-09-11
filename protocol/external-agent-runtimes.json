@@ -9,12 +9,34 @@
   "unpinnedLaunchWaivers": {
     "note": "Presets that still launch through a network-resolving package runner (`npx -y <pkg>`), which re-resolves the package on every start and can change under the user without consent. Each entry is a KNOWN governance hole, not an approved pattern. An entry may only be removed by adding a fully pinned distribution (exact version + approved frozen lock + integrity); the list may only shrink. `pnpm audit:external-agent-runtimes` fails on any unpinned launch that is not listed here.",
     "runtimes": {
-      "codex-acp": "Zed's Codex ACP shim. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @zed-industries/codex-acp` until one is.",
+      "codex-acp": "Maintained Codex ACP app-server adapter. No vetted lock asset has been curated for a pinned version yet; the preset keeps `npx -y @agentclientprotocol/codex-acp` until one is.",
       "gemini-cli": "Google's Gemini CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @google/gemini-cli --acp`.",
       "qwen-code": "Qwen Code CLI. Ships no Cognia-vetted pinned distribution yet; keeps `npx -y @qwen-code/qwen-code --acp`."
     }
   },
   "runtimes": [
+    {
+      "runtimeId": "devin",
+      "presetIds": ["devin"],
+      "displayName": "Devin CLI",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "devin",
+      "launchArgs": ["acp"],
+      "versionProbe": {
+        "args": ["--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 10000
+      },
+      "distributions": [],
+      "sandbox": {
+        "required": true,
+        "windowsExceptionEligible": false
+      },
+      "docsUrl": "https://docs.devin.ai/cli/acp/jetbrains"
+    },
     {
       "runtimeId": "codex-app-server",
       "presetIds": ["codex-app-server"],
@@ -48,9 +70,9 @@
       "transport": "stdio",
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "npx",
-      "launchArgs": ["-y", "@zed-industries/codex-acp"],
+      "launchArgs": ["-y", "@agentclientprotocol/codex-acp"],
       "versionProbe": {
-        "args": ["-y", "@zed-industries/codex-acp", "--version"],
+        "args": ["-y", "@agentclientprotocol/codex-acp", "--version"],
         "parser": "semver-anywhere",
         "timeoutMs": 20000
       },
@@ -59,9 +81,9 @@
         "required": true,
         "windowsExceptionEligible": true
       },
-      "docsUrl": "https://github.com/zed-industries/codex-acp",
+      "docsUrl": "https://github.com/agentclientprotocol/codex-acp",
       "notes": {
-        "certification": "Deliberately uncertified. This runtime launches through `npx -y @zed-industries/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers."
+        "certification": "Deliberately uncertified. This runtime launches through `npx -y @agentclientprotocol/codex-acp`, which re-resolves the package on every start, so a pinned supportedRange would describe a version that is not necessarily what launches. See unpinnedLaunchWaivers."
       }
     },
     {

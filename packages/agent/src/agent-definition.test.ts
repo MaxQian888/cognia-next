@@ -214,12 +214,12 @@ describe("computeDefinitionDigest", () => {
   it("is insensitive to property order", () => {
     const a = computeDefinitionDigest({
       name: "A",
-      composition: { presetId: "coding", authority: "propose" },
+      composition: { presetId: "coding", authority: "plan" },
       toolRefs: [],
     })
     const b = computeDefinitionDigest({
       toolRefs: [],
-      composition: { authority: "propose", presetId: "coding" },
+      composition: { authority: "plan", presetId: "coding" },
       name: "A",
     })
     expect(a).toBe(b)

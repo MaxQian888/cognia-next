@@ -6,6 +6,7 @@
 // a hard dependency on a Node-only package.
 
 import type { UIMessage } from "ai"
+import type { UpdateCenterSettings } from "./updates"
 
 export * from "./collaboration"
 export * from "./room-settings"
@@ -2297,6 +2298,8 @@ export interface ChatSession {
    * conversation survives sidecar restarts and app reloads.
    */
   sdkSessionId?: string
+  /** Nonsecret, agent-scoped native session link for isolated gateway task resume. */
+  externalAgentSession?: { agentId: string; sessionId: string }
   /**
    * When forking, the SDK session id this branch was created from. The next
    * send on a session whose `forkedFromSdkSessionId` is set populates
@@ -2757,6 +2760,8 @@ export type ConversationKindFilter = "all" | "dm" | "team"
  * reading the fields raw.
  */
 export interface ConversationFilters {
+  /** Only conversations connected to an IM platform, independent of membership kind. */
+  im?: boolean
   /** Only conversations carrying unread messages. */
   unread?: boolean
   /** Only pinned conversations. */
@@ -3178,7 +3183,7 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = {
   deployments: [],
 }
 
-export type SubscriptionAccountProvider = "anthropic" | "codex" | "opencode"
+export type SubscriptionAccountProvider = string
 
 export interface AppSettings {
   id: "singleton"
@@ -5101,6 +5106,7 @@ export interface AppSettings {
   routingPresets?: import("@cognia/provider-types/routing-presets").RoutingPresetsState
 
   // ---- Appearance (background, wallpapers, custom CSS, VSCode imports) ----
+  lockScreen?: import("@/types/appearance").LockScreenSettings
   background?: import("@/types/appearance").BackgroundSettings
   wallpapers?: import("@/types/appearance").Wallpaper[]
   customCss?: string
@@ -5705,6 +5711,8 @@ export interface McpServerTrust {
   reviewedAt?: number
 }
 
+export type McpToolRisk = "read" | "write" | "destructive"
+
 export interface McpServer {
   id: string
   name: string
@@ -5742,7 +5750,7 @@ export interface McpServer {
   /** Reviewed risk policy copied from the contributing service package. */
   toolRiskRules?: Array<{
     pattern: string
-    risk: "read" | "write" | "destructive"
+    risk: McpToolRisk
     operationId?: string
     selectors?: Array<{ kind: string; jsonPointer: string }>
   }>

@@ -63,6 +63,7 @@ const BINARY_ALLOWLIST: &[&str] = &[
     "copilot",
     "kiro-cli",
     "droid",
+    "devin",
     // Pi's own binary, driven natively over `pi --mode rpc` (ADR-0119).
     "pi",
 ];
@@ -75,6 +76,7 @@ const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
     "@agentclientprotocol/claude-agent-acp",
     "@zed-industries/claude-code-acp",
     "@zed-industries/codex-acp",
+  "@agentclientprotocol/codex-acp",
     "@anthropic-ai/claude-code",
     "@google/gemini-cli",
     "@qwen-code/qwen-code",
@@ -96,6 +98,10 @@ const ENV_KEY_ALLOWLIST: &[&str] = &[
     // it DSH falls back to ~/.dsh, where a user-writable cordis.patch.yml can
     // inject plugins and arbitrary JS into a certified composition.
     "DSH_HOME",
+  "MODEL_PROVIDER",
+    // Host-consumed task configuration and its one-time gateway lease.
+    "COGNIA_GATEWAY_TASK_CONFIG",
+    "COGNIA_GATEWAY_TOKEN",
 ];
 
 /// Env key prefixes allowed through (provider credentials + agent config).
@@ -115,6 +121,8 @@ const ENV_PREFIX_ALLOWLIST: &[&str] = &[
     "KIRO_",
     "FACTORY_",
     "DROID_",
+    "DEVIN_",
+    "WINDSURF_",
     "ACP_",
     "COGNIA_AGENT_",
     // DeepSeek Harness: the provider credential plus the composition's own
@@ -507,6 +515,7 @@ mod tests {
             "copilot",
             "kiro-cli",
             "droid",
+            "devin",
             "pi",
         ] {
             assert!(p.validate(config(bin, &[])).is_ok(), "{bin} must pass");
@@ -749,6 +758,8 @@ mod tests {
             ("GH_TOKEN".to_string(), "gh".to_string()),
             ("QWEN_API_KEY".to_string(), "qwen".to_string()),
             ("FACTORY_API_KEY".to_string(), "factory".to_string()),
+            ("DEVIN_API_KEY".to_string(), "devin".to_string()),
+            ("WINDSURF_API_KEY".to_string(), "windsurf".to_string()),
             ("HTTPS_PROXY".to_string(), "http://p".to_string()),
             ("LD_PRELOAD".to_string(), "/evil.so".to_string()),
             ("NODE_OPTIONS".to_string(), "--require evil".to_string()),
@@ -764,6 +775,8 @@ mod tests {
         assert!(validated.config.env.contains_key("GH_TOKEN"));
         assert!(validated.config.env.contains_key("QWEN_API_KEY"));
         assert!(validated.config.env.contains_key("FACTORY_API_KEY"));
+        assert!(validated.config.env.contains_key("DEVIN_API_KEY"));
+        assert!(validated.config.env.contains_key("WINDSURF_API_KEY"));
         assert!(validated.config.env.contains_key("HTTPS_PROXY"));
         assert_eq!(
             validated.dropped_env_keys,
@@ -774,7 +787,7 @@ mod tests {
                 "PATH"
             ]
         );
-        assert_eq!(validated.config.env.len(), 6);
+        assert_eq!(validated.config.env.len(), 8);
     }
 
     /// Pi runs as a bare allowlisted binary, never through npx (ADR-0119).

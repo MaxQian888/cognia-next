@@ -37,7 +37,7 @@ const acquireWorkspaceBundle = jest.fn(async () => ({
 }))
 const settleWorkspaceBundle = jest.fn(async () => [])
 const abortWorkspaceBundle = jest.fn(async () => [])
-const openWorkspaceBundleTurnLease = jest.fn(async () => ({
+const workspaceBundleTurnFixture = () => ({
   bundleTurnId: "bundle-turn-1",
   bundleId: "bundle-1",
   run: { runId: "workspace-run-1", executionRoot: "/isolated" },
@@ -46,7 +46,11 @@ const openWorkspaceBundleTurnLease = jest.fn(async () => ({
   additionalAliases: [],
   settle: settleWorkspaceBundle,
   abort: abortWorkspaceBundle,
-}))
+})
+const openWorkspaceBundleTurnLease = jest.fn(
+  async (): Promise<ReturnType<typeof workspaceBundleTurnFixture> | null> =>
+    workspaceBundleTurnFixture()
+)
 
 const resolveActiveCertification = jest.fn<Promise<unknown>, [unknown]>(async () => undefined)
 
@@ -56,11 +60,13 @@ jest.mock("./certification-store", () => ({
 }))
 
 jest.mock("@/lib/task-workspace/run-lease", () => ({
-  openWorkspaceBundleTurnLease: (...args: unknown[]) => openWorkspaceBundleTurnLease(...args),
+  openWorkspaceBundleTurnLease: (...args: Parameters<typeof openWorkspaceBundleTurnLease>) =>
+    openWorkspaceBundleTurnLease(...args),
 }))
 
 jest.mock("@/lib/task-workspace/client", () => ({
-  acquireWorkspaceBundle: (...args: unknown[]) => acquireWorkspaceBundle(...args),
+  acquireWorkspaceBundle: (...args: Parameters<typeof acquireWorkspaceBundle>) =>
+    acquireWorkspaceBundle(...args),
 }))
 
 jest.mock("@/lib/ai/agent/agent-executor", () => ({

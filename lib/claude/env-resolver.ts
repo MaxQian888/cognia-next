@@ -13,6 +13,8 @@ import { transport } from "@/lib/tauri"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
 import { useAccountStore } from "@/stores/account/account-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 import type {
   AppSettings,
   Character,
@@ -21,13 +23,11 @@ import type {
 } from "@cognia/agent-config-types"
 
 export function subscriptionAccountProviderFor(
-  providerId: string
+  providerId: string,
+  customProviders: AppSettings["customProviders"] = useSettingsStore.getState().settings
+    ?.customProviders
 ): SubscriptionAccountProvider | null {
-  if (providerId === "anthropic" || providerId === "codex" || providerId === "opencode") {
-    return providerId
-  }
-  if (providerId === "opencode-go") return "opencode"
-  return null
+  return getSubscriptionProvider(providerId, customProviders)?.id ?? null
 }
 
 export class SubscriptionAccountResolutionError extends Error {
@@ -62,7 +62,7 @@ export function resolveAccountId(
 ): string | null {
   if (session?.accountId) return session.accountId
   if (character?.accountIdOverride) return character.accountIdOverride
-  const scopedProvider = subscriptionAccountProviderFor(providerId)
+  const scopedProvider = subscriptionAccountProviderFor(providerId, settings?.customProviders)
   if (scopedProvider) {
     const scopedDefault = settings?.defaultAccountIds?.[scopedProvider]
     if (scopedDefault) return scopedDefault

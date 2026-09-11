@@ -68,6 +68,21 @@ import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { resolvePlanStrategy, type PlanRunStrategy } from "./strategy"
 import type { SynthesizePlanResult } from "./synthesize-workflow"
 
+export interface PlanChatResumeFailure {
+  prompt: string
+  mode: "default" | "acceptEdits" | "auto"
+}
+
+/** Read only the continuation fields written by the approval dock. */
+export function readPlanChatResumeFailure(plan: AgentPlan): PlanChatResumeFailure | null {
+  const raw = plan.metadata?.chatResumeFailure
+  if (!raw || typeof raw !== "object") return null
+  const value = raw as Record<string, unknown>
+  if (typeof value.prompt !== "string" || !value.prompt.trim()) return null
+  if (value.mode !== "default" && value.mode !== "acceptEdits" && value.mode !== "auto") return null
+  return { prompt: value.prompt, mode: value.mode }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Config resolution
 // ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +218,18 @@ class PlanRuntime {
       payload: { kind: "plan_updated", totalSteps: counts.totalSteps },
     })
     return (await getPlan(planId)) ?? null
+  }
+
+  /** Retain a failed chat handoff without repeating approval or step transitions. */
+  async setChatResumeFailure(planId: string, failure: PlanChatResumeFailure | null): Promise<void> {
+    const current = await getPlan(planId)
+    if (!current || isTerminalPlanStatus(current.status)) return
+    const metadata = { ...current.metadata }
+    if (failure) metadata.chatResumeFailure = failure
+    else delete metadata.chatResumeFailure
+    // Metadata-only: rotating generation here would invalidate an already
+    // prepared in-session step and make its retry skip the original turn.
+    await updatePlan(planId, { metadata })
   }
 
   /**

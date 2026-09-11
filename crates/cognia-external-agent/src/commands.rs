@@ -119,6 +119,31 @@ pub async fn kill_external_agent(
     state.backend().kill(&agent_id).await
 }
 
+/// Delete retained nonsecret conversation state only after every task process stopped.
+#[tauri::command]
+pub async fn external_agent_delete_gateway_task(
+    task_id: String,
+    state: State<'_, ExternalAgentState>,
+) -> Result<(), String> {
+    delete_gateway_task_for_backend(&task_id, state.backend().as_ref()).await
+}
+
+pub async fn delete_gateway_task_for_backend(
+    task_id: &str,
+    backend: &dyn exec_backend::ExecBackend,
+) -> Result<(), String> {
+    if backend.kind() != "local-process" {
+        return Err("Gateway task state deletion requires a local process backend".into());
+    }
+    let prefix = format!("gateway-task-{task_id}");
+    if backend.list().await.iter().any(|id| id == &prefix || id.starts_with(&format!("{prefix}:"))) {
+        return Err("Stop the gateway task before deleting its state".into());
+    }
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        .ok_or("Gateway task requires a host home directory")?;
+    crate::gateway_task::delete_task(task_id, std::path::Path::new(&home))
+}
+
 /// Get status of an external agent process
 #[tauri::command]
 pub async fn get_external_agent_status(

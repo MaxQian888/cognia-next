@@ -45,6 +45,9 @@ import type {
   ApiProtocol,
   BedrockConnectionSettings,
   ResolverProtocol,
+  ProviderModelDiscoveryEntry,
+  CustomModelMetadata,
+  CustomProviderSettings,
 } from "@cognia/provider-types"
 import { validateBedrockConnectionSettings } from "@cognia/provider-types"
 import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
@@ -121,7 +124,8 @@ export interface CustomProviderDefinition {
   defaultModel?: string
   /** Static transport headers (`CustomProviderSettings.customHeaders`). */
   customHeaders?: Record<string, string>
-  models?: Array<{ id: string; name?: string; contextLength?: number }>
+  models?: ProviderModelDiscoveryEntry[]
+  subscription?: CustomProviderSettings["subscription"]
 }
 
 export interface ProviderSettingsSnapshot {
@@ -148,6 +152,22 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
     apiKey: rich.apiKey,
     defaultModel: rich.defaultModel,
     customHeaders: rich.customHeaders,
+    ...(rich.subscription ? { subscription: rich.subscription } : {}),
+    ...((rich.customModels ?? rich.models)
+      ? {
+          models: (rich.customModels ?? rich.models ?? []).map((entry) => {
+            const id = typeof entry === "string" ? entry : entry.id
+            const { capabilities, ...metadata } = rich.customModelMetadata?.[id] ?? { id }
+            const model = { ...(typeof entry === "string" ? { id } : entry), ...metadata }
+            return {
+              ...model,
+              supportsTools: model.supportsTools ?? capabilities?.functionCalling,
+              supportsVision: model.supportsVision ?? capabilities?.vision,
+              supportsStreaming: model.supportsStreaming ?? capabilities?.streaming,
+            }
+          }),
+        }
+      : {}),
   }
 }
 
@@ -160,6 +180,10 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
  */
 export interface RichCustomProviderEntry {
   id: string
+  models?: Array<string | ProviderModelDiscoveryEntry>
+  customModels?: string[]
+  customModelMetadata?: Record<string, CustomModelMetadata>
+  subscription?: CustomProviderSettings["subscription"]
   /** `false` = disabled in Settings; undefined counts as enabled. */
   enabled?: boolean
   /** Either form of the protocol field — converted in `resolveOne`. */
@@ -609,6 +633,15 @@ export function createFeatureProviderModel(
   resolved: ResolvedProvider,
   transport?: { fetch?: typeof globalThis.fetch; headers?: Record<string, string> }
 ) {
+  if (resolved.providerId === "commandcode") {
+    resolved = {
+      ...resolved,
+      protocol: resolveProviderProtocol(
+        "commandcode",
+        resolved.model
+      ) as ResolvedProvider["protocol"],
+    }
+  }
   if (resolved.protocol === "bedrock" && resolved.bedrock?.authMode === "default-chain") {
     const bedrock = resolved.bedrock
     return protectRawAnalysis(

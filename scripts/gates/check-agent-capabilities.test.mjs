@@ -57,6 +57,24 @@ test("registeredProtocols reads the manager's register() calls, not its comments
   assert.deepEqual(registeredProtocols(source), ["acp", "dsh-sdk"])
 })
 
+test("registeredProtocols follows the invoked built-in helper and ignores unrelated registries", () => {
+  const helper = `
+export function registerBuiltinProtocolAdapters(target: ProtocolAdapterRegistry): void {
+  target.register("acp", () => new Adapter())
+  // target.register("ghost", () => new Adapter())
+  target.register(
+    "pi-rpc", () => new Adapter()
+  )
+}
+other.register("unrelated", () => new Adapter())
+`
+  assert.deepEqual(registeredProtocols(helper), [])
+  assert.deepEqual(
+    registeredProtocols(`${helper}\nregisterBuiltinProtocolAdapters(protocolAdapterRegistry)`),
+    ["acp", "pi-rpc"]
+  )
+})
+
 test("specCapabilityIds and externalOnlyCapabilityIds read the frozen lists", () => {
   const execution = `export const AGENT_CAPABILITY_IDS: readonly AgentCapabilityId[] = [\n  "streaming",\n  "mcp",\n]\n`
   const contract = `export const EXTERNAL_ONLY_CAPABILITY_IDS: readonly ExternalOnlyCapabilityId[] = [\n  "mcp.logs",\n]\n`

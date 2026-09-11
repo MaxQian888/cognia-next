@@ -559,6 +559,55 @@ test("maybeCompact: the summary call inherits the turn's providerId (codex relay
   assert.equal(summaryCall.model.provider, "openai.responses")
 })
 
+test("OpenCode compaction preserves the conversation session header", async () => {
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream(
+    [
+      { type: "text-delta", id: "1", text: "SUM" },
+      { type: "finish", finishReason: "stop" },
+    ],
+    { promptTokens: 50_000, completionTokens: 3 }
+  )
+  const session = dispatchAiSdk({
+    provider: "opencode-go",
+    sessionId: "opencode-conversation",
+    firstPrompt: "m0",
+    sendOptions: {
+      model: "kimi-k2.6",
+      providerCredentials: {
+        apiKey: "synthetic",
+        baseURL: "https://opencode.ai/zen/go/v1",
+        protocol: "openai",
+      },
+      compaction: {
+        enabled: true,
+        keepRecent: 2,
+        fraction: 0.1,
+        strategy: "summary",
+        maxSummaryTokens: 64,
+        summaryPrompt: "SUMMARIZE",
+      },
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  const waitForTurns = waitForTurnsFactory(events)
+  try {
+    await waitForTurns(1)
+    session.pushUserMessage("m1")
+    await waitForTurns(2)
+    const summary = calls.find(
+      (args) => args.maxOutputTokens === 64 && args.instructions?.[0]?.content === "SUMMARIZE"
+    )
+    assert.ok(summary)
+    assert.equal(summary.headers?.["x-opencode-session"], "opencode-conversation")
+    assert.equal(calls[0].headers?.["x-opencode-session"], "opencode-conversation")
+  } finally {
+    session.closeInput()
+  }
+})
+
 test("maybeCompact: a DISTINCT summary provider keeps its own id, not the turn's", async () => {
   // The summary may run on a different provider than the turn. Its credentials
   // carry their own providerId; passing the turn's would misidentify it — here a

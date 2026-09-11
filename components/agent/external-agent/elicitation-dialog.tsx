@@ -20,7 +20,7 @@
  * dismissed dialog is the second thing.
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { MessageCircleQuestion } from "lucide-react"
 
@@ -44,8 +44,8 @@ import type { AcpElicitationRequest, AcpElicitationResponse } from "@/types/agen
 export interface ExternalAgentElicitationDialogProps {
   /** The open question, or `null` when nothing is pending. */
   request: AcpElicitationRequest | null
-  /** Answer the question. Always called exactly once per request. */
-  onRespond: (response: AcpElicitationResponse) => void
+  /** Deliver an answer. Reject to keep the question and allow an explicit retry. */
+  onRespond: (response: AcpElicitationResponse) => void | Promise<void>
 }
 
 export function ExternalAgentElicitationDialog({
@@ -62,7 +62,7 @@ function ExternalAgentElicitationForm({
   onRespond,
 }: {
   request: AcpElicitationRequest
-  onRespond: (response: AcpElicitationResponse) => void
+  onRespond: (response: AcpElicitationResponse) => void | Promise<void>
 }) {
   const t = useTranslations("externalAgent.elicitation")
   const properties = request.requestedSchema?.properties ?? {}
@@ -71,12 +71,29 @@ function ExternalAgentElicitationForm({
     initialElicitationValues(properties)
   )
 
-  const respond = (action: AcpElicitationResponse["action"]) =>
-    onRespond({
-      requestId: request.id,
-      action,
-      content: action === "accept" ? values : undefined,
-    })
+  const [submitting, setSubmitting] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const responseInFlight = useRef(false)
+
+  const respond = async (action: AcpElicitationResponse["action"]) => {
+    // The ref closes the same-render double-click/Escape window. A successful
+    // response remains locked until the owner removes this request.
+    if (responseInFlight.current) return
+    responseInFlight.current = true
+    setSubmitting(true)
+    setFailed(false)
+    try {
+      await onRespond({
+        requestId: request.id,
+        action,
+        content: action === "accept" ? values : undefined,
+      })
+    } catch {
+      responseInFlight.current = false
+      setSubmitting(false)
+      setFailed(true)
+    }
+  }
 
   const complete = isElicitationComplete(properties, required, values)
   const title = request.requestedSchema?.title || t("title")
@@ -86,7 +103,7 @@ function ExternalAgentElicitationForm({
       open
       onOpenChange={(open) => {
         // Dismissal is a cancel, not a decline.
-        if (!open) respond("cancel")
+        if (!open) void respond("cancel")
       }}
     >
       <DialogContent className="sm:max-w-lg">
@@ -98,13 +115,20 @@ function ExternalAgentElicitationForm({
           <DialogDescription>{request.message}</DialogDescription>
         </DialogHeader>
 
-        <ElicitationForm request={request} values={values} onValuesChange={setValues} />
+        <fieldset disabled={submitting} className="min-w-0 border-0 p-0">
+          <ElicitationForm request={request} values={values} onValuesChange={setValues} />
+        </fieldset>
+        {failed && (
+          <p role="alert" className="text-sm text-destructive">
+            {t("responseFailed")}
+          </p>
+        )}
 
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" onClick={() => respond("decline")}>
+          <Button disabled={submitting} variant="ghost" onClick={() => void respond("decline")}>
             {t("decline")}
           </Button>
-          <Button disabled={!complete} onClick={() => respond("accept")}>
+          <Button disabled={submitting || !complete} onClick={() => void respond("accept")}>
             {t("submit")}
           </Button>
         </DialogFooter>

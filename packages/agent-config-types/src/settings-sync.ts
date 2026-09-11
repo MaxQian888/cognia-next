@@ -78,6 +78,12 @@ export const SETTINGS_SYNC = {
   selfInvokeTools: { category: "desktop-only" },
   cliBridge: { category: "desktop-only" },
   updates: { category: "desktop-only" },
+  updateCenter: { category: "desktop-only" },
+  sessionPowerPolicy: { category: "desktop-only" },
+  lockScreen: {
+    category: "device-local",
+    rationale: "Lock-screen preferences can reference wallpapers stored only on this device.",
+  },
   mobileRuntimeMode: {
     category: "device-local",
     rationale:

@@ -100,9 +100,23 @@ export function declaredExecutableProtocols(source) {
 
 /** The protocols `manager.ts` actually registers an adapter for. */
 export function registeredProtocols(source) {
-  return [
-    ...stripComments(source).matchAll(/protocolAdapterRegistry\.register\(\s*"([^"]+)"/g),
-  ].map((m) => m[1])
+  const clean = stripComments(source)
+  const registered = [...clean.matchAll(/protocolAdapterRegistry\.register\(\s*"([^"]+)"/g)].map(
+    (m) => m[1]
+  )
+  // Built-ins share a registration helper with plugin bootstrap. Only count it
+  // when the manager actually invokes it with the live protocol registry.
+  const helper = clean.match(
+    /function\s+registerBuiltinProtocolAdapters\s*\(\s*(\w+)\s*:\s*ProtocolAdapterRegistry\s*\)\s*:\s*void\s*\{([\s\S]*?)^\}/m
+  )
+  if (helper && /\bregisterBuiltinProtocolAdapters\(\s*protocolAdapterRegistry\s*\)/.test(clean)) {
+    registered.push(
+      ...[...helper[2].matchAll(new RegExp(`${helper[1]}\\.register\\(\\s*"([^"]+)"`, "g"))].map(
+        (m) => m[1]
+      )
+    )
+  }
+  return [...new Set(registered)]
 }
 
 /** Home-relative roots the Rust launcher grants, as `match → roots`. */

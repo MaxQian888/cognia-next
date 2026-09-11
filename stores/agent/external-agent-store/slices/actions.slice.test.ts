@@ -52,6 +52,26 @@ describe("useExternalAgentStore CRUD", () => {
     expect(useExternalAgentStore.getState().getAgent(id)!.name).toBe("Renamed")
   })
 
+  it("persists a Cognia account binding through edits and clears it explicitly", () => {
+    const cogniaModel = {
+      providerId: "plugin:kimi:subscription",
+      modelId: "kimi-for-coding",
+      accountId: "account-a",
+    }
+    const id = useExternalAgentStore.getState().addAgent({
+      name: "Pi",
+      protocol: "pi-rpc",
+      transport: "stdio",
+      process: { command: "pi", args: ["--mode", "rpc"] },
+      cogniaModel,
+    })
+    expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toEqual(cogniaModel)
+    useExternalAgentStore.getState().updateAgent(id, { name: "Renamed" })
+    expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toEqual(cogniaModel)
+    useExternalAgentStore.getState().updateAgent(id, { cogniaModel: null })
+    expect(useExternalAgentStore.getState().getAgent(id)!.cogniaModel).toBeNull()
+  })
+
   it("removeAgent removes the agent and clears active state if matched", () => {
     const id = useExternalAgentStore.getState().addAgent({
       name: "Doomed",

@@ -320,6 +320,22 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       // server, retry briefly to cover the gap between the "listening" log line
       // and the HTTP server actually accepting requests.
       await this.waitForReady(this.spawnedServerId ? 5000 : 0)
+      if (config.metadata?.cogniaGatewayTask) {
+        const expected = JSON.parse(config.process?.env?.OPENCODE_CONFIG_CONTENT ?? "{}")
+        const effective = (await this.client.config.get()).data
+        const actualProvider = effective?.provider?.cognia
+        if (
+          effective?.model !== expected.model ||
+          effective?.small_model !== expected.small_model ||
+          actualProvider?.options?.baseURL !== expected.provider?.cognia?.options?.baseURL ||
+          !effective?.enabled_providers?.includes("cognia") ||
+          effective.enabled_providers.length !== 1
+        ) {
+          throw new Error(
+            "OpenCode managed configuration overrides this task's Cognia gateway route"
+          )
+        }
+      }
 
       log.info(`Connected to OpenCode server at ${baseUrl}`)
 

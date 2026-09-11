@@ -77,8 +77,10 @@ const mockUpdateCustomProvider = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: {
     getState: () => ({
-      setProviderConfig: (...args: unknown[]) => mockSetProviderConfig(...args),
-      updateCustomProvider: (...args: unknown[]) => mockUpdateCustomProvider(...args),
+      setProviderConfig: (...args: Parameters<typeof mockSetProviderConfig>) =>
+        mockSetProviderConfig(...args),
+      updateCustomProvider: (...args: Parameters<typeof mockUpdateCustomProvider>) =>
+        mockUpdateCustomProvider(...args),
     }),
   },
 }))
@@ -150,7 +152,8 @@ jest.mock("@/lib/claude/env-resolver", () => ({
 
 const mockGetAgentEnvSecret = jest.fn()
 jest.mock("@/lib/agent/agent-env-keyring", () => ({
-  loadAgentEnvSecret: (...args: unknown[]) => mockGetAgentEnvSecret(...args),
+  loadAgentEnvSecret: (...args: Parameters<typeof mockGetAgentEnvSecret>) =>
+    mockGetAgentEnvSecret(...args),
 }))
 
 // Twin runtime is dynamically imported by resolveSendOptions; the mock only
@@ -158,27 +161,42 @@ jest.mock("@/lib/agent/agent-env-keyring", () => ({
 const mApplyTwinContext = jest.fn()
 const mResolveOpencodeVaultCredential = jest.fn()
 jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
-  resolveOpencodeVaultCredential: (...a: unknown[]) => mResolveOpencodeVaultCredential(...a),
+  resolveOpencodeVaultCredential: (...a: Parameters<typeof mResolveOpencodeVaultCredential>) =>
+    mResolveOpencodeVaultCredential(...a),
 }))
 const mResolveCodexVaultCredential = jest.fn()
+const mResolveManagedSubscriptionCredential = jest.fn()
+jest.mock("@/lib/subscription/core/managed-key-credential", () => ({
+  resolveManagedSubscriptionCredential: (...args: unknown[]) =>
+    mResolveManagedSubscriptionCredential(...args),
+}))
+const mResolveCommandcodeVaultCredential = jest.fn()
+jest.mock("@/lib/subscription/commandcode/chat-bridge", () => ({
+  resolveCommandcodeVaultCredential: (
+    ...a: Parameters<typeof mResolveCommandcodeVaultCredential>
+  ) => mResolveCommandcodeVaultCredential(...a),
+}))
 jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
-  resolveCodexVaultCredential: (...a: unknown[]) => mResolveCodexVaultCredential(...a),
+  resolveCodexVaultCredential: (...a: Parameters<typeof mResolveCodexVaultCredential>) =>
+    mResolveCodexVaultCredential(...a),
 }))
 
 jest.mock("@/lib/twin/runtime", () => ({
-  applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
+  applyTwinContext: (...args: Parameters<typeof mApplyTwinContext>) => mApplyTwinContext(...args),
 }))
 
 // Project-scoped RAG (workspace knowledge base) — dynamically imported by
 // resolveSendOptions. Mock so we can drive the injected section deterministically.
 const mApplyProjectKnowledge = jest.fn()
 jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
-  applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
+  applyProjectKnowledgeContext: (...args: Parameters<typeof mApplyProjectKnowledge>) =>
+    mApplyProjectKnowledge(...args),
 }))
 
 const mApplyAgentKnowledge = jest.fn()
 jest.mock("@/lib/knowledge-base/runtime/apply-agent-knowledge-context", () => ({
-  applyAgentKnowledgeContextFromDb: (...args: unknown[]) => mApplyAgentKnowledge(...args),
+  applyAgentKnowledgeContextFromDb: (...args: Parameters<typeof mApplyAgentKnowledge>) =>
+    mApplyAgentKnowledge(...args),
 }))
 
 // skills-bridge is dynamically imported by resolveSendOptions when a character
@@ -188,9 +206,12 @@ const mResolveSkillsForCharacter = jest.fn()
 const mExtractContainerSkillIds = jest.fn()
 const mRenderResolvedSkillsSection = jest.fn()
 jest.mock("@/lib/claude/skills-bridge", () => ({
-  resolveSkillsForCharacter: (...a: unknown[]) => mResolveSkillsForCharacter(...a),
-  extractContainerSkillIds: (...a: unknown[]) => mExtractContainerSkillIds(...a),
-  renderResolvedSkillsSection: (...a: unknown[]) => mRenderResolvedSkillsSection(...a),
+  resolveSkillsForCharacter: (...a: Parameters<typeof mResolveSkillsForCharacter>) =>
+    mResolveSkillsForCharacter(...a),
+  extractContainerSkillIds: (...a: Parameters<typeof mExtractContainerSkillIds>) =>
+    mExtractContainerSkillIds(...a),
+  renderResolvedSkillsSection: (...a: Parameters<typeof mRenderResolvedSkillsSection>) =>
+    mRenderResolvedSkillsSection(...a),
 }))
 
 // Desktop probe. Defaults to `false` — the same value the real `isTauri()`
@@ -211,7 +232,8 @@ jest.mock("@/lib/support-agent/context", () => {
   const actual = jest.requireActual("@/lib/support-agent/context")
   return {
     ...actual,
-    buildSupportAgentContext: (...args: unknown[]) => mockBuildSupportContext(...args),
+    buildSupportAgentContext: (...args: Parameters<typeof mockBuildSupportContext>) =>
+      mockBuildSupportContext(...args),
     isSupportDiagnosticsEnabled: () => true,
   }
 })
@@ -1282,6 +1304,7 @@ describe("resolveSendOptions — compaction config", () => {
     mResolveOpencodeVaultCredential.mockResolvedValue({
       apiKey: "sk-go-vault",
       baseURL: "https://opencode.ai/zen/go/v1",
+      headers: { "X-Tenant": "summary-team" },
     })
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
@@ -1302,6 +1325,123 @@ describe("resolveSendOptions — compaction config", () => {
       credentials: {
         apiKey: "sk-go-vault",
         baseURL: "https://opencode.ai/zen/go/v1",
+        headers: { "X-Tenant": "summary-team" },
+      },
+    })
+  })
+
+  it("resolves panel-created summary providers through their scoped vault and protocol", async () => {
+    mResolveAccountId.mockImplementation((id: string) =>
+      id === "custom-summary" ? "selected-summary" : null
+    )
+    mResolveManagedSubscriptionCredential.mockResolvedValue({
+      apiKey: "custom-summary-key",
+      baseURL: "https://relay.test/v1",
+      headers: { "X-Tenant": "summary" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        defaultAccountIds: { "custom-summary": "selected-summary" },
+        customProviders: [
+          {
+            id: "custom-summary",
+            providerId: "custom-summary",
+            isCustom: true,
+            customName: "Example",
+            apiProtocol: "anthropic",
+            baseURL: "https://example.test/v1",
+            customModels: ["summary-model"],
+            defaultModel: "summary-model",
+            enabled: true,
+            subscription: {},
+          },
+        ],
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "custom-summary", model: "summary-model" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveManagedSubscriptionCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "custom-summary" }),
+      "selected-summary"
+    )
+    expect(opts.compaction?.summary).toMatchObject({
+      providerId: "custom-summary",
+      protocol: "anthropic",
+      credentials: { apiKey: "custom-summary-key", baseURL: "https://relay.test/v1" },
+    })
+  })
+
+  it("uses a subscription plugin's Responses flavor for compaction despite stale chat settings", async () => {
+    const { registerPluginSubscriptionProvider, unregisterSubscriptionProvidersByPlugin } =
+      await import("@/lib/subscription/core/provider-registry")
+    const id = registerPluginSubscriptionProvider(
+      {
+        id: "summary",
+        name: "Summary subscription",
+        baseUrl: "https://summary.test/v1",
+        protocol: "openai",
+        apiFlavor: "responses",
+        models: ["summary-model"],
+      },
+      "summary-plugin"
+    )
+    try {
+      mResolveManagedSubscriptionCredential.mockResolvedValue({
+        apiKey: "vault-key",
+        baseURL: "https://summary.test/v1",
+        apiFlavor: "responses",
+      })
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: {
+          defaultProvider: "anthropic",
+          providerSettings: {
+            [id]: { enabled: true, baseURL: "https://summary.test/v1", apiFlavor: "chat" },
+          },
+          compaction: { enabled: true, compressionModel: { provider: id, model: "summary-model" } },
+        } as unknown as AppSettings,
+      })
+      expect(opts.compaction?.summary).toMatchObject({
+        providerId: id,
+        protocol: "openai",
+        credentials: { apiKey: "vault-key", apiFlavor: "responses" },
+      })
+    } finally {
+      unregisterSubscriptionProvidersByPlugin("summary-plugin")
+    }
+  })
+
+  it("resolves a CommandCode summary provider from its subscription vault", async () => {
+    mResolveCommandcodeVaultCredential.mockResolvedValue({
+      apiKey: "cmd-summary-test",
+      baseURL: "https://api.commandcode.ai/provider/v1",
+      headers: { "x-cmd-zdr": "1" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "commandcode", model: "claude-sonnet-5" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCommandcodeVaultCredential).toHaveBeenCalledWith("commandcode", null)
+    expect(opts.compaction?.summary).toEqual({
+      model: "claude-sonnet-5",
+      protocol: "openai",
+      providerId: "commandcode",
+      credentials: {
+        apiKey: "cmd-summary-test",
+        baseURL: "https://api.commandcode.ai/provider/v1",
+        headers: { "x-cmd-zdr": "1" },
       },
     })
   })
@@ -1343,7 +1483,9 @@ describe("resolveSendOptions — compaction config", () => {
     // 128k floor that would auto-compact at ~107k. The catalog states a round
     // decimal 1_000_000; this used to read 1_048_576 because the inline entry
     // shadowed the catalog and carried the binary value.
-    expect(opts.compaction?.contextWindow).toBe(1_000_000)
+    expect(opts.compaction?.contextWindow).toBe(
+      1_000_000 - (opts.modelParams?.maxOutputTokens ?? 0)
+    )
   })
 
   it("omits contextWindow when compaction is disabled", async () => {
@@ -1356,6 +1498,31 @@ describe("resolveSendOptions — compaction config", () => {
       } as unknown as AppSettings,
     })
     expect(opts.compaction?.contextWindow).toBeUndefined()
+  })
+
+  it("uses account-discovered context limits for compaction", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "account-model" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "test",
+            discoveredModels: [
+              {
+                id: "account-model",
+                contextLength: 64000,
+                maxInputTokens: 32000,
+                maxOutputTokens: 128,
+              },
+            ],
+          },
+        },
+        compaction: { enabled: true },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.contextWindow).toBe(32000)
+    expect(opts.compaction?.maxSummaryTokens).toBe(128)
   })
 
   it("appends the post-compaction recovery snippet only when ctx.postCompaction is set", async () => {
@@ -1514,6 +1681,27 @@ describe("resolveSendOptions — opencode vault auto-fallback", () => {
 })
 
 describe("resolveSendOptions — codex vault auto-fallback", () => {
+  it.each([true, false])(
+    "only explicit session account selection overrides a manual key (explicit=%s)",
+    async (explicit) => {
+      mResolveAccountId.mockReturnValueOnce("selected-account")
+      mResolveCodexVaultCredential.mockResolvedValue({
+        apiKey: "selected-bearer",
+        baseURL: "https://account.test",
+      })
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "codex" }),
+        session: { id: "session", ...(explicit ? { accountId: "selected-account" } : {}) } as never,
+        appSettings: {
+          defaultProvider: "codex",
+          defaultAccountIds: { codex: "selected-account" },
+          providerSettings: { codex: { apiKey: "manual-key", enabled: true } },
+        } as unknown as AppSettings,
+      })
+      expect(opts.providerCredentials?.apiKey).toBe(explicit ? "selected-bearer" : "manual-key")
+    }
+  )
+
   it("draws the ChatGPT-login credential (base URL + headers) from the vault", async () => {
     mResolveCodexVaultCredential.mockResolvedValue({
       apiKey: "chatgpt-bearer",
@@ -3683,7 +3871,12 @@ describe("resolveSendOptions — artifact authoring tools", () => {
     const opts = await resolveSendOptions({
       session: makeSession({
         id: "s1",
-        platformBinding: { adapterId: "lark", conversationKey: "c1" },
+        platformBinding: {
+          adapterId: "lark",
+          platform: "lark",
+          conversationKey: "c1",
+          conversationRef: { platform: "lark", adapterId: "lark", channelId: "c1" },
+        },
       }),
     })
     expect(toolNames(opts)).not.toContain("artifact_create")

@@ -109,7 +109,7 @@ describe("GateModalsHost", () => {
     expect(usePendingGatesStore.getState().gates).toHaveLength(0)
   })
 
-  it("feeds the team's teammates as deadlock reset candidates", () => {
+  it("does not offer teammate reset actions for a plan step gate", () => {
     act(() => {
       useAgentTeamStore.setState({
         teammates: {
@@ -119,36 +119,36 @@ describe("GateModalsHost", () => {
       })
     })
     renderHost()
-    openGate({ key: { scope: "agent-team-deadlock", id: "run-1" }, gateType: "deadlock" })
-    // The per-teammate candidate list shows by default (resetAll starts false).
-    expect(screen.getByLabelText("Scout")).toBeInTheDocument()
+    openGate({ key: { scope: "agent-plan", id: "step-1" }, gateType: "plan_step" })
+    // Durable Squad interruptions do not pass through the legacy gate store.
+    expect(screen.queryByLabelText("Scout")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Other")).not.toBeInTheDocument()
   })
 
   it("renders one dialog per gate when multiple are open", () => {
     renderHost()
     openGate()
-    openGate({ key: { scope: "agent-team-deadlock", id: "run-1" }, gateType: "deadlock" })
+    openGate({ key: { scope: "agent-plan", id: "step-1" }, gateType: "plan_step" })
     expect(screen.getByText(/Token budget critical/i)).toBeInTheDocument()
-    expect(screen.getByText(/All teammates unavailable/i)).toBeInTheDocument()
+    expect(screen.getByText(/Plan step/i)).toBeInTheDocument()
   })
 
-  it("renders a replan gate and approves with no payload", () => {
+  it("renders a plan step gate and approves with no payload", () => {
     renderHost()
     act(() => {
       usePendingGatesStore.getState().open({
-        key: { scope: "agent-team-replan", id: "run-1" },
-        gateType: "replan",
+        key: { scope: "agent-plan", id: "run-1" },
+        gateType: "plan_step",
         title: "Re-plan",
         body: "tighten the scope",
         runId: "run-1",
         teamId: "team-1",
       })
     })
-    expect(screen.getByText(/Re-plan checkpoint/i)).toBeInTheDocument()
+    expect(screen.getByText(/Plan step/i)).toBeInTheDocument()
     expect(screen.getByText("tighten the scope")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
-    expect(approveMock).toHaveBeenCalledWith({ scope: "agent-team-replan", id: "run-1" }, undefined)
+    expect(approveMock).toHaveBeenCalledWith({ scope: "agent-plan", id: "run-1" }, undefined)
   })
 })
 

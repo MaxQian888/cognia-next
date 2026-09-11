@@ -16,6 +16,7 @@
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { ProviderSettingsEntry, RichCustomProviderEntry } from "@/lib/ai/provider-consumption"
 import type { AgentTeammate } from "@/types/agent/agent-team"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 /**
  * The subset of `ExecuteAgentConfig` that selects a provider/model. Declared
@@ -76,17 +77,22 @@ export function buildLeadExecutionConfig(
   }
 
   const provider = lead.config?.provider
+  // The lead runs on a configured provider, so it reads the app-wide pair on
+  // the provider lane: a default chosen from an external agent's own list names
+  // no provider and no provider model (`lib/ai/app-default-model.ts`), and
+  // inheriting it put the team on a model that cannot be dispatched.
+  const appDefault = resolveAppDefaultModel(settings)
   // Only inherit the app default model when the lead is actually running on the
-  // app default provider — see the precedence note above.
-  const inheritsDefaultProvider = !provider || provider === settings?.defaultProvider
-  const model = lead.config?.model ?? (inheritsDefaultProvider ? settings?.defaultModel : undefined)
+  // app default provider, see the precedence note above.
+  const inheritsDefaultProvider = !provider || provider === appDefault.provider
+  const model = lead.config?.model ?? (inheritsDefaultProvider ? appDefault.model : undefined)
 
   return {
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
     ...(providerSettings ? { providerSettings } : {}),
     ...(customProviders ? { customProviders } : {}),
-    ...(settings?.defaultProvider ? { defaultProvider: settings.defaultProvider } : {}),
+    ...(appDefault.provider ? { defaultProvider: appDefault.provider } : {}),
   }
 }
 

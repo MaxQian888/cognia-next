@@ -5,6 +5,11 @@
  * what is pinned.
  */
 
+const purgeAgentTeam = jest.fn(async (_teamId: string) => {})
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  purgeAgentTeam: (id: string) => purgeAgentTeam(id),
+}))
+
 const startSquadRun = jest.fn()
 jest.mock("./team/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => startSquadRun(...args),
@@ -90,9 +95,9 @@ describe("agentTeamManager (definition CRUD)", () => {
     expect(useAgentTeamStore.getState().teams.t1?.name).toBe("Renamed")
   })
 
-  it("delete() removes the team from the store", () => {
+  it("delete() removes the team from the store", async () => {
     agentTeamManager.create(makeTeam())
-    agentTeamManager.delete("t1")
+    await agentTeamManager.delete("t1")
     expect(useAgentTeamStore.getState().teams.t1).toBeUndefined()
   })
 })

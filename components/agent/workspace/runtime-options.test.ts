@@ -21,6 +21,11 @@ describe("runtime-options", () => {
     expect(runtimeLabelKey("claude")).toBe("claude")
   })
 
+  it("offers Devin with a localized runtime label", () => {
+    expect(RUNTIME_OPTIONS).toContain("devin")
+    expect(runtimeLabelKey("devin")).toBe("devin")
+  })
+
   it("maps the OpenCode ACP runtime to its own label", () => {
     expect(runtimeLabelKey("opencode-acp")).toBe("opencodeAcp")
   })

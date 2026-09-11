@@ -36,7 +36,7 @@ export type ExternalAgentReadiness =
  */
 const inFlight = new Map<string, Promise<ExternalAgentReadiness>>()
 
-async function run(agentId: string): Promise<ExternalAgentReadiness> {
+async function run(agentId: string, deferConnect = false): Promise<ExternalAgentReadiness> {
   const store = useExternalAgentStore.getState()
   const config = store.getAgent(agentId)
   if (!config) return { ok: false, reason: "unknown-agent" }
@@ -77,6 +77,8 @@ async function run(agentId: string): Promise<ExternalAgentReadiness> {
   }
 
   const instance = manager.getAgent(agentId)
+  // A task-scoped gateway process must acquire its route before any launch.
+  if (deferConnect || config.cogniaModel) return { ok: true, alreadyConnected: false }
   if (instance?.connectionStatus === "connected") {
     store.setConnectionStatus(agentId, "connected")
     return { ok: true, alreadyConnected: true }
@@ -104,17 +106,21 @@ async function run(agentId: string): Promise<ExternalAgentReadiness> {
  * can render. Anything `run` did not already turn into a reason lands as
  * `failed` with the thrown text.
  */
-export function ensureExternalAgentReady(agentId: string): Promise<ExternalAgentReadiness> {
-  const existing = inFlight.get(agentId)
+export function ensureExternalAgentReady(
+  agentId: string,
+  options?: { deferConnect?: boolean }
+): Promise<ExternalAgentReadiness> {
+  const key = `${agentId}:${options?.deferConnect === true ? "register" : "connect"}`
+  const existing = inFlight.get(key)
   if (existing) return existing
-  const attempt = run(agentId)
+  const attempt = run(agentId, options?.deferConnect)
     .catch((error: unknown): ExternalAgentReadiness => ({
       ok: false,
       reason: "failed",
       detail: error instanceof Error ? error.message : String(error),
     }))
-    .finally(() => inFlight.delete(agentId))
-  inFlight.set(agentId, attempt)
+    .finally(() => inFlight.delete(key))
+  inFlight.set(key, attempt)
   return attempt
 }
 

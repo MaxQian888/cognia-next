@@ -658,7 +658,7 @@ export async function deleteMessage(sessionId: string, messageId: string): Promi
 export async function listSessions(
   opts: PageRequest & { updatedBefore?: number } = {}
 ): Promise<SessionListPage> {
-  return transport.call<SessionListPage>("session_list", opts)
+  return transport.call<SessionListPage>("session_list", { ...opts })
 }
 
 /**

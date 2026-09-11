@@ -76,7 +76,7 @@ async function scanSubagents(
   // `opencodeConfigDir` for every non-Claude, non-Codex, non-Pi vendor, which
   // was correct only because OpenCode happened to be the sole remaining case.
   const rootKey = configRootKeyForMigrationVendor(vendor)
-  const base = rootKey ? ((roots as Record<string, string | undefined>)[rootKey] ?? "") : ""
+  const base = rootKey ? (Object.entries(roots).find(([key]) => key === rootKey)?.[1] ?? "") : ""
   if (!base) return { drafts: [], warnings: ["Source root is unavailable."] }
   const dir = joinPath(base, "agents")
   const fs = realSessionFs()

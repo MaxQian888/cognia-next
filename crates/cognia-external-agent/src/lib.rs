@@ -9,6 +9,7 @@ pub mod commands;
 pub mod container_backend;
 pub mod dsh_runtime;
 pub mod exec_backend;
+pub mod gateway_task;
 pub mod kube_backend;
 pub mod presets;
 pub mod proc_group;

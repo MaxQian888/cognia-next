@@ -277,7 +277,7 @@ impl ExternalAgentProcessManager {
     /// `sink` receives stdout/stderr lines and the exit event as they happen.
     pub async fn spawn(
         &self,
-        config: ExternalAgentSpawnConfig,
+        mut config: ExternalAgentSpawnConfig,
         sink: Arc<dyn ExternalAgentEventSink>,
     ) -> Result<String, String> {
         let id = config.id.clone();
@@ -328,7 +328,16 @@ impl ExternalAgentProcessManager {
         // preset commands like `npx` / `opencode` that live as `.cmd` shims —
         // or a CLI in an install root the app's own PATH omits — actually
         // launch instead of failing with "program not found".
+        let managed_gateway = config.env.contains_key(crate::gateway_task::PAYLOAD_ENV);
+        let task_files = if managed_gateway {
+            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+                .ok_or("Gateway task requires a host home directory")?;
+            crate::gateway_task::prepare(&mut config.env, std::path::Path::new(&home))?
+        } else { None };
         let mut cmd = Command::new(&program);
+        if managed_gateway {
+            cmd.env_clear().envs(crate::gateway_task::runtime_environment());
+        }
         cmd.args(&config.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -349,6 +358,13 @@ impl ExternalAgentProcessManager {
         // Set environment variables
         for (key, value) in &config.env {
             cmd.env(key, value);
+        }
+        if managed_gateway {
+            // get_external_agent_info and retained process config are metadata,
+            // never another retrieval API for the one-time gateway lease.
+            config.env.remove("COGNIA_GATEWAY_TOKEN");
+            config.env.remove("ANTHROPIC_AUTH_TOKEN");
+            config.env.remove("OPENAI_API_KEY");
         }
 
         // Set working directory
@@ -471,6 +487,7 @@ impl ExternalAgentProcessManager {
         let supervisor_process = Arc::downgrade(&process);
         let supervisor_processes = Arc::downgrade(&self.processes);
         tokio::spawn(async move {
+            let _task_files = task_files;
             let (code, signal) = tokio::select! {
                 status = child.wait() => match status {
                     Ok(status) => exit_info_from_status(status),

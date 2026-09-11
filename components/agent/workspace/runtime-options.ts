@@ -21,6 +21,7 @@ export const RUNTIME_OPTIONS: TeammateRuntime[] = ["claude", ...BUILTIN_EXECUTAB
 export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   claude: "claude",
   codex: "codex",
+  "codex-acp": "codexAcp",
   "codex-app-server": "codexAppServer",
   "claude-code": "claudeCode",
   "gemini-cli": "geminiCli",
@@ -28,9 +29,9 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   "copilot-cli": "copilotCli",
   kiro: "kiro",
   "qwen-code": "qwenCode",
-  pi: "pi",
   "pi-rpc": "piRpc",
   droid: "droid",
+  devin: "devin",
   "opencode-acp": "opencodeAcp",
   "opencode-server": "opencodeServer",
   "opencode-remote": "opencodeRemote",

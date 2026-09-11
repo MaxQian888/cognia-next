@@ -96,6 +96,7 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => mockLiveSettingsState },
 }))
 jest.mock("@/lib/claude/provider-attempt-options", () => ({
+  ...jest.requireActual("@/lib/claude/provider-attempt-options"),
   resolveProviderAttemptOptions: (...args: unknown[]) => mockResolveProviderAttemptOptions(...args),
 }))
 jest.mock("@cognia/redact", () => ({
@@ -440,6 +441,34 @@ describe("executeAgent", () => {
       )
     })
 
+    it("applies discovered output limits and provider inference settings on the text rail", async () => {
+      primeTextChannel(["ok"])
+      mockPlanRoute.mockResolvedValue(
+        routingPlan([{ providerId: "openai", modelId: "agent-model" }])
+      )
+      await executeAgent("hi", {
+        model: "agent-model",
+        temperature: 0.2,
+        providerSettings: {
+          openai: {
+            enabled: true,
+            apiKey: "test",
+            inferenceDefaults: { maxTokens: 10000, temperature: 0.8, topP: 0.7 },
+            advancedParams: { "openai.seed": 42 },
+            discoveredModels: [{ id: "agent-model", maxOutputTokens: 2048 }],
+          },
+        } as never,
+      })
+      expect(mockStreamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          maxOutputTokens: 2048,
+          temperature: 0.2,
+          topP: 0.7,
+          seed: 42,
+        })
+      )
+    })
+
     it("replays priorMessages as a message list for text-channel multi-turn", async () => {
       primeTextChannel(["ans"])
       await executeAgent("follow-up", {
@@ -565,11 +594,25 @@ describe("executeAgent", () => {
       ])
       mockGetSettings.mockResolvedValue({
         routingConfig: { maxFallbackAttempts: 1 },
+        providerSettings: {
+          anthropic: {
+            discoveredModels: [
+              {
+                id: "claude-sonnet-4-5",
+                contextLength: 64000,
+                maxInputTokens: 32000,
+                maxOutputTokens: 4096,
+              },
+            ],
+          },
+        },
       } as never)
       mockResolveSendOptions.mockResolvedValue({
         model: "gpt-4o",
         provider: "openai",
         routingPlan: plan,
+        modelParams: { maxOutputTokens: 256 },
+        compaction: { enabled: true, contextWindow: 200000 },
       } as never)
       mockRunAndCapture
         .mockRejectedValueOnce(new Error("upstream unavailable"))
@@ -588,10 +631,15 @@ describe("executeAgent", () => {
         provider: "anthropic",
         model: "claude-sonnet-4-5",
         providerCredentials: { apiKey: "sk-fallback", protocol: "anthropic" },
+        modelParams: { maxOutputTokens: 256 },
+        compaction: { contextWindow: 32000 },
       })
       expect(mockResolveProviderAttemptOptions).toHaveBeenCalledWith(
         "anthropic",
-        expect.any(Object)
+        expect.any(Object),
+        undefined,
+        false,
+        "claude-sonnet-4-5"
       )
     })
 

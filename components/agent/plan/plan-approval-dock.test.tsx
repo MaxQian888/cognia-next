@@ -28,7 +28,9 @@ const refinePlan = jest.fn().mockResolvedValue(null)
 const keepPlanning = jest.fn().mockResolvedValue(null)
 const updatePlanDraft = jest.fn().mockResolvedValue(null)
 const startPlan = jest.fn().mockResolvedValue(null)
+const setChatResumeFailure = jest.fn().mockResolvedValue(null)
 jest.mock("@/lib/agent/plan/runtime", () => ({
+  readPlanChatResumeFailure: (plan: AgentPlan) => plan.metadata?.chatResumeFailure ?? null,
   getPlanRuntime: () => ({
     approvePlan,
     rejectPlan,
@@ -36,6 +38,7 @@ jest.mock("@/lib/agent/plan/runtime", () => ({
     keepPlanning,
     updatePlanDraft,
     startPlan,
+    setChatResumeFailure,
   }),
 }))
 
@@ -129,6 +132,48 @@ describe("PlanApprovalDock", () => {
     await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
     await waitFor(() => expect(approvePlan).toHaveBeenCalledWith("p1"))
     expect(onResume).toHaveBeenCalledWith(PLAN_APPROVED_PROMPT, "acceptEdits")
+  })
+
+  it("keeps a failed continuation retryable after approval without approving or starting again", async () => {
+    let livePlan = plan()
+    mockPlan.mockImplementation(() => livePlan)
+    approvePlan.mockImplementationOnce(async () => {
+      livePlan = { ...livePlan, status: "approved" }
+      return livePlan
+    })
+    const onResume = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("host unavailable"))
+      .mockResolvedValue(undefined)
+    render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+    await userEvent.click(screen.getByTestId("plan-approval-approve-auto"))
+    const retry = await screen.findByRole("button", { name: "tracker.resume" })
+    expect(setChatResumeFailure).toHaveBeenCalledWith("p1", {
+      prompt: PLAN_APPROVED_PROMPT,
+      mode: "acceptEdits",
+    })
+    await userEvent.click(retry)
+    await waitFor(() => expect(onResume).toHaveBeenCalledTimes(2))
+    expect(approvePlan).toHaveBeenCalledTimes(1)
+    expect(startPlan).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "tracker.resume" })).toBeNull()
+  })
+
+  it("restores a persisted failed continuation after gate remount", async () => {
+    mockPlan.mockReturnValue(
+      plan({
+        status: "executing",
+        metadata: {
+          chatResumeFailure: { prompt: "Step 1", mode: "default" },
+        },
+      })
+    )
+    const onResume = jest.fn()
+    render(<PlanApprovalDock sessionId="ses" onResume={onResume} />)
+    await userEvent.click(screen.getByRole("button", { name: "tracker.resume" }))
+    expect(onResume).toHaveBeenCalledWith("Step 1", "default")
+    expect(approvePlan).not.toHaveBeenCalled()
+    expect(startPlan).not.toHaveBeenCalled()
   })
 
   it("review-each approve → resume(default)", async () => {

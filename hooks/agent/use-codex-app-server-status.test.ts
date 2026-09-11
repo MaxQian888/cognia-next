@@ -51,6 +51,11 @@ describe("useCodexAppServerStatus", () => {
     expect(result.current.status.account).toMatchObject({ email: "dev@example.com" })
     expect(fakeAdapter.refreshAccount).toHaveBeenCalled()
     expect(fakeAdapter.onStatusUpdate).toHaveBeenCalled()
+    expect(fakeAdapter.refreshMcpServers).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(fakeAdapter.refreshMcpServers).toHaveBeenCalledTimes(1)
   })
 
   it("applies live status updates pushed through onStatusUpdate", async () => {
@@ -86,5 +91,41 @@ describe("useCodexAppServerStatus", () => {
       await result.current.refresh()
     })
     expect(fakeAdapter.refreshSkills).not.toHaveBeenCalled()
+  })
+
+  it("does not restore a stale snapshot when a refresh finishes after disconnect", async () => {
+    let finish!: () => void
+    fakeAdapter.refreshAccount.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const { result, rerender } = renderHook(
+      ({ connected }) => useCodexAppServerStatus("a1", connected),
+      { initialProps: { connected: true } }
+    )
+    await waitFor(() => expect(result.current.loading).toBe(true))
+    rerender({ connected: false })
+    await act(async () => {
+      finish()
+    })
+    expect(result.current.status).toEqual({ mcpServers: [], skills: [] })
+    expect(result.current.available).toBe(false)
+    expect(result.current.loading).toBe(false)
+  })
+
+  it("clears the previous Codex snapshot when switching to another protocol", async () => {
+    const { result, rerender } = renderHook(
+      ({ agentId }) => useCodexAppServerStatus(agentId, true),
+      { initialProps: { agentId: "a1" } }
+    )
+    await waitFor(() => expect(result.current.available).toBe(true))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    adapterForAgent = null
+    rerender({ agentId: "acp-agent" })
+    await act(async () => {})
+    expect(result.current.status).toEqual({ mcpServers: [], skills: [] })
+    expect(result.current.available).toBe(false)
   })
 })

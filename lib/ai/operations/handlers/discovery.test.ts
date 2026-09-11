@@ -21,6 +21,12 @@ const featureCall = jest.requireMock("@/lib/claude/feature-call") as {
 }
 jest.mock("./http", () => ({ providerRequest: jest.fn() }))
 const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
+jest.mock("@/lib/subscription/core/provider-registry", () => ({
+  getSubscriptionProvider: jest.fn(),
+}))
+const subscriptions = jest.requireMock("@/lib/subscription/core/provider-registry") as {
+  getSubscriptionProvider: jest.Mock
+}
 jest.mock("../persistence", () => ({
   providerOperationPersistence: {
     readInventory: jest.fn(async () => undefined),
@@ -43,6 +49,7 @@ import {
   DISCOVERY_HANDLERS,
   dominantSourceOf,
   listProviderModels,
+  getProviderModel,
   modelsGetHandler,
 } from "./discovery"
 
@@ -68,7 +75,10 @@ const registry = new ProviderOperationHandlerRegistry()
 for (const handler of DISCOVERY_HANDLERS) registry.register(handler)
 
 describe("models.list", () => {
-  beforeEach(() => jest.clearAllMocks())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    subscriptions.getSubscriptionProvider.mockReturnValue(undefined)
+  })
 
   it("layers the live openai-compatible listing over the catalog for a vendor with a models endpoint", async () => {
     discovery.discoverOpenAICompatibleModels.mockResolvedValueOnce([{ id: "live-1", name: "Live" }])
@@ -286,5 +296,389 @@ describe("models.list", () => {
       source: "user-curated",
     })
     await expect(modelsGetHandler.handler(ctx("missing"))).resolves.toMatchObject({ model: null })
+  })
+
+  const pluginDefinition = (modelApi?: { list: boolean; retrieve?: boolean }) => ({
+    id: "example:models",
+    source: "plugin",
+    modelApi,
+    models: ["declared"],
+    modelMetadata: [{ id: "declared", supportsVision: true }],
+  })
+  const pluginProvider = () => resolved("example:models", "openai")
+
+  it.each([undefined, { list: false }])(
+    "uses plugin declarations without speculative requests (%j)",
+    async (modelApi) => {
+      subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition(modelApi))
+      const output = await listProviderModels({
+        provider: pluginProvider(),
+        settings,
+        refresh: true,
+      })
+      expect(output).toMatchObject({
+        freshness: "static",
+        models: [{ id: "declared", supportsVision: true }],
+      })
+      expect(http.providerRequest).not.toHaveBeenCalled()
+      expect(discovery.discoverOpenAICompatibleModels).not.toHaveBeenCalled()
+    }
+  )
+
+  it("fetches plugin models through the authenticated HTTP helper and retains metadata", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition({ list: true }))
+    const signal = new AbortController().signal
+    http.providerRequest.mockResolvedValueOnce({
+      json: {
+        data: [
+          { id: "declared", name: "Real name", context_length: 262144, supports_tools: false },
+          { id: "live", supports_reasoning: true, max_output_tokens: 0 },
+        ],
+      },
+    })
+    const output = await listProviderModels({ provider: pluginProvider(), settings, signal })
+    expect(http.providerRequest).toHaveBeenCalledWith(pluginProvider(), { path: "models", signal })
+    expect(output.models[0]).toMatchObject({
+      name: "Real name",
+      contextLength: 262144,
+      supportsVision: true,
+      supportsTools: false,
+    })
+    expect(output.models[1]).toMatchObject({ supportsReasoning: true, maxOutputTokens: 0 })
+  })
+
+  it("fetches all Anthropic pages and parses documented model capabilities", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition({ list: true }))
+    http.providerRequest
+      .mockResolvedValueOnce({
+        json: {
+          data: [
+            {
+              id: "a/b",
+              display_name: "A",
+              max_input_tokens: 100,
+              max_tokens: 0,
+              capabilities: { image_input: { supported: false }, thinking: { supported: true } },
+            },
+          ],
+          has_more: true,
+          last_id: "a/b",
+        },
+      })
+      .mockResolvedValueOnce({ json: { data: [{ id: "b" }], has_more: false } })
+    const output = await listProviderModels({
+      provider: resolved("example:models", "anthropic"),
+      settings,
+    })
+    expect(http.providerRequest.mock.calls[1][1].path).toBe("models?after_id=a%2Fb")
+    expect(output.models.find((model) => model.id === "a/b")).toMatchObject({
+      contextLength: 100,
+      maxOutputTokens: 0,
+      supportsVision: false,
+      supportsReasoning: true,
+    })
+    expect(output.models.map((model) => model.id)).toContain("b")
+  })
+
+  it.each([
+    { data: [], has_more: true, last_id: "a" },
+    { data: [{ id: "a" }], has_more: "yes", last_id: "a" },
+    { data: [{ id: "a" }], has_more: true },
+    { data: [{ name: "missing-id" }], has_more: false },
+    { data: "invalid" },
+  ])("rejects malformed model pages (%j)", async (json) => {
+    http.providerRequest.mockResolvedValueOnce({ json })
+    await expect(
+      listProviderModels({ provider: resolved("anthropic", "anthropic"), settings })
+    ).rejects.toThrow()
+  })
+
+  it("rejects repeated pagination cursors", async () => {
+    http.providerRequest.mockResolvedValue({
+      json: { data: [{ id: "a" }], has_more: true, last_id: "a" },
+    })
+    await expect(
+      listProviderModels({ provider: resolved("anthropic", "anthropic"), settings })
+    ).rejects.toThrow("pagination")
+    expect(http.providerRequest).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not reuse an inventory after endpoint or protocol changes", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition({ list: true }))
+    http.providerRequest.mockResolvedValue({ json: { data: [{ id: "live" }] } })
+    await listProviderModels({ provider: pluginProvider(), settings, now: 1 })
+    const stored = persistence.writeInventory.mock.calls.at(-1)![0]
+    persistence.readInventory.mockResolvedValueOnce(stored)
+    await listProviderModels({
+      provider: { ...pluginProvider(), baseURL: "https://other.example/v1" },
+      settings,
+      now: 2,
+    })
+    persistence.readInventory.mockResolvedValueOnce(stored)
+    await listProviderModels({
+      provider: { ...pluginProvider(), protocol: "anthropic" },
+      settings,
+      now: 2,
+    })
+    expect(http.providerRequest).toHaveBeenCalledTimes(3)
+  })
+
+  it("discards results from a disabled plugin without writing inventory", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition({ list: true }))
+    http.providerRequest.mockImplementationOnce(async () => {
+      subscriptions.getSubscriptionProvider.mockReturnValue(undefined)
+      return { json: { data: [{ id: "late" }] } }
+    })
+    await expect(listProviderModels({ provider: pluginProvider(), settings })).rejects.toThrow(
+      "no longer active"
+    )
+    expect(persistence.writeInventory).not.toHaveBeenCalled()
+  })
+
+  it("does not reject an unrelated namespaced provider without a subscription contribution", async () => {
+    discovery.discoverOpenAICompatibleModels.mockResolvedValueOnce([{ id: "ordinary" }])
+    const output = await listProviderModels({
+      provider: resolved("ordinary:provider", "openai"),
+      settings,
+    })
+    expect(output.models.map((model) => model.id)).toContain("ordinary")
+  })
+
+  it("propagates cancellation without caching the canceled result", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition({ list: true }))
+    const controller = new AbortController()
+    http.providerRequest.mockImplementationOnce(async () => {
+      controller.abort()
+      return { json: { data: [] } }
+    })
+    await expect(
+      listProviderModels({ provider: pluginProvider(), settings, signal: controller.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(persistence.writeInventory).not.toHaveBeenCalled()
+  })
+
+  it("retrieves a model by escaped identifier when the plugin declares the endpoint", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(
+      pluginDefinition({ list: true, retrieve: true })
+    )
+    http.providerRequest.mockResolvedValueOnce({
+      json: { id: "canonical", name: "Canonical", context_length: 200 },
+    })
+    const output = await modelsGetHandler.handler({
+      descriptor: getProviderOperationDescriptor("models.get")!,
+      provider: pluginProvider(),
+      settings,
+      request: {
+        operationId: "models.get",
+        scopes: ["provider:read"],
+        surface: "sidecar",
+        input: { model: "vendor/model?alias" },
+      },
+    })
+    expect(http.providerRequest.mock.calls[0][1].path).toBe("models/vendor%2Fmodel%3Falias")
+    expect(output).toMatchObject({
+      model: { id: "canonical", contextLength: 200 },
+      freshness: "fresh",
+    })
+  })
+
+  it("derives model details from plugin metadata when retrieval is unavailable", async () => {
+    subscriptions.getSubscriptionProvider.mockReturnValue(pluginDefinition())
+    const output = await modelsGetHandler.handler({
+      descriptor: getProviderOperationDescriptor("models.get")!,
+      provider: pluginProvider(),
+      settings,
+      request: {
+        operationId: "models.get",
+        scopes: ["provider:read"],
+        surface: "sidecar",
+        input: { model: "declared" },
+      },
+    })
+    expect(output).toMatchObject({
+      model: { id: "declared", supportsVision: true },
+      freshness: "static",
+    })
+    expect(http.providerRequest).not.toHaveBeenCalled()
+  })
+
+  it("uses explicitly supplied custom subscription metadata without probing undeclared endpoints", async () => {
+    const provider = resolved("custom-preview", "anthropic", { isCustomProvider: true })
+    const subscription = {
+      id: provider.providerId,
+      name: "Custom",
+      source: "custom" as const,
+      authMode: "api-key" as const,
+      models: ["m"],
+      modelMetadata: [{ id: "m", contextLength: 100, supportsReasoning: true }],
+      modelApi: { list: false },
+    }
+    expect(await listProviderModels({ provider, settings, subscription })).toMatchObject({
+      freshness: "static",
+      models: [{ id: "m", contextLength: 100, supportsReasoning: true }],
+    })
+    expect(await getProviderModel({ provider, settings, subscription, model: "m" })).toMatchObject({
+      freshness: "static",
+      model: { id: "m", contextLength: 100 },
+    })
+    expect(http.providerRequest).not.toHaveBeenCalled()
+  })
+
+  it("uses opted-in custom list and detail endpoints with account-specific metadata priority", async () => {
+    const provider = resolved("custom-preview", "openai", { isCustomProvider: true })
+    const subscription = {
+      id: provider.providerId,
+      name: "Custom",
+      source: "custom" as const,
+      authMode: "api-key" as const,
+      models: ["m"],
+      modelMetadata: [
+        { id: "m", contextLength: 1000000, supportsVision: true, supportsReasoning: true },
+      ],
+      modelApi: { list: true, retrieve: true },
+    }
+    http.providerRequest.mockResolvedValueOnce({
+      json: { data: [{ id: "m", context_length: 256000, supports_vision: false }] },
+    })
+    const listed = await listProviderModels({
+      provider,
+      settings: {
+        ...settings,
+        customProviders: [
+          {
+            id: provider.providerId,
+            name: "Custom",
+            models: [{ id: "m", contextLength: 1000000 }],
+          },
+        ],
+      },
+      subscription,
+      refresh: true,
+    })
+    expect(listed.models[0]).toMatchObject({
+      contextLength: 256000,
+      supportsVision: false,
+      supportsReasoning: true,
+      source: "remote-discovered",
+    })
+    http.providerRequest.mockResolvedValueOnce({
+      json: { id: "m", max_output_tokens: 0, supports_reasoning: false },
+    })
+    expect(await getProviderModel({ provider, settings, subscription, model: "m" })).toMatchObject({
+      freshness: "fresh",
+      model: { maxOutputTokens: 0, supportsReasoning: false },
+    })
+    expect(http.providerRequest.mock.calls[1][1].path).toBe("models/m")
+  })
+
+  it("rejects a mismatched explicit subscription before fetching", async () => {
+    const subscription = {
+      id: "other",
+      name: "Other",
+      source: "custom" as const,
+      authMode: "api-key" as const,
+    }
+    await expect(
+      listProviderModels({ provider: pluginProvider(), settings, subscription })
+    ).rejects.toThrow("does not match")
+    await expect(
+      getProviderModel({ provider: pluginProvider(), settings, subscription, model: "m" })
+    ).rejects.toThrow("does not match")
+    expect(http.providerRequest).not.toHaveBeenCalled()
+  })
+
+  it("rejects a stale explicitly supplied plugin definition", async () => {
+    const subscription = {
+      ...pluginDefinition({ list: true }),
+      name: "Plugin",
+      source: "plugin" as const,
+      authMode: "api-key" as const,
+    }
+    await expect(
+      listProviderModels({ provider: pluginProvider(), settings, subscription })
+    ).rejects.toThrow("no longer active")
+    expect(http.providerRequest).not.toHaveBeenCalled()
+  })
+
+  it("honors stored custom subscription declarations through ordinary model operations", async () => {
+    const provider = resolved("saved-custom", "anthropic", { isCustomProvider: true })
+    const customSettings = {
+      ...settings,
+      customProviders: [
+        {
+          id: provider.providerId,
+          name: "Saved",
+          protocol: "anthropic" as const,
+          models: [{ id: "saved", contextLength: 200000, supportsVision: false }],
+          subscription: { modelApi: { list: false } },
+        },
+      ],
+    }
+    const listed = await listProviderModels({ provider, settings: customSettings })
+    expect(listed).toMatchObject({
+      freshness: "static",
+      models: [{ id: "saved", contextLength: 200000, supportsVision: false }],
+    })
+    expect(http.providerRequest).not.toHaveBeenCalled()
+    const context = {
+      descriptor: getProviderOperationDescriptor("models.get")!,
+      provider,
+      settings: customSettings,
+      request: {
+        operationId: "models.get" as const,
+        scopes: ["provider:read" as const],
+        surface: "sidecar" as const,
+        input: { model: "saved" },
+      },
+    }
+    expect(await modelsGetHandler.handler(context)).toMatchObject({
+      model: { id: "saved", contextLength: 200000 },
+      freshness: "static",
+    })
+    http.providerRequest.mockResolvedValueOnce({
+      json: {
+        id: "saved",
+        max_input_tokens: 100000,
+        capabilities: { image_input: { supported: true } },
+      },
+    })
+    expect(
+      await modelsGetHandler.handler({
+        ...context,
+        settings: {
+          ...customSettings,
+          customProviders: [
+            {
+              ...customSettings.customProviders[0],
+              subscription: { modelApi: { list: true, retrieve: true } },
+            },
+          ],
+        },
+      })
+    ).toMatchObject({
+      model: { id: "saved", contextLength: 100000, supportsVision: true },
+      freshness: "fresh",
+    })
+    expect(http.providerRequest.mock.calls[0][1].path).toBe("models/saved")
+  })
+
+  it("rejects unsupported custom subscription protocols without a speculative request", async () => {
+    await expect(
+      listProviderModels({
+        provider: resolved("custom", "google", { isCustomProvider: true }),
+        settings: {
+          ...settings,
+          customProviders: [
+            {
+              id: "custom",
+              name: "Invalid",
+              protocol: "google",
+              subscription: { modelApi: { list: true } },
+            },
+          ],
+        },
+      })
+    ).rejects.toThrow("invalid model API")
+    expect(http.providerRequest).not.toHaveBeenCalled()
   })
 })

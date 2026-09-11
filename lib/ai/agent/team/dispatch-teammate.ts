@@ -424,9 +424,16 @@ async function runToolEnabled(
         const next = controller?.failAndAdvance() ?? null
         if (!next || !appSettings) throw error
         candidate = next
-        const { resolveProviderAttemptOptions } =
+        const { resolveProviderAttemptOptions, applyProviderAttemptLimits } =
           await import("@/lib/claude/provider-attempt-options")
-        const resolvedAttempt = await resolveProviderAttemptOptions(next.providerId, appSettings)
+        const resolvedAttempt = await resolveProviderAttemptOptions(
+          next.providerId,
+          appSettings,
+          undefined,
+          false,
+          next.modelId
+        )
+        const previousOutputLimit = attemptOptions.modelParams?.maxOutputTokens
         attemptOptions = {
           ...sendOptions,
           provider: next.providerId,
@@ -442,6 +449,10 @@ async function runToolEnabled(
                 resolvedTo: { providerId: next.providerId, modelId: next.modelId },
               }
             : undefined,
+        }
+        attemptOptions = {
+          ...attemptOptions,
+          ...applyProviderAttemptLimits(attemptOptions, appSettings, previousOutputLimit),
         }
         if (plan && spanId) {
           recordEvent(spanId, {
@@ -488,7 +499,9 @@ async function runExternalBacked(
   signal: AbortSignal,
   onCaptureEvent?: (event: CaptureStreamEvent) => void,
   cwdOverride?: string,
-  model?: string
+  model?: string,
+  sessionId?: string,
+  onSessionCreated?: (sessionId: string) => Promise<void | (() => void)>
 ): Promise<{ text: string; usage?: TokenUsage }> {
   const [
     { getExternalAgentManager },
@@ -516,38 +529,74 @@ async function runExternalBacked(
   // (the external CLI keeps its own MCP config in addition to these).
   const mcpServers = await resolveAcpMcpServers(resolvedCaps.mcpServerIds)
 
-  const result = await manager.execute(agentId, prompt, {
-    systemPrompt,
-    // The sidecar and text channels both honour the resolved model; the
-    // external channel used to drop it on the floor, so an external teammate
-    // silently ran on whatever its CLI's own config selected.
-    ...(model ? { model } : {}),
-    ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
-    ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
-    ...((cwdOverride ?? teamCtx.team.config?.workingDir)
-      ? { workingDirectory: cwdOverride ?? teamCtx.team.config?.workingDir }
-      : {}),
-    ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
-    // Live progress: translate the external protocol stream into the same
-    // CaptureStreamEvent frames the sidecar channel emits, so an external
-    // teammate streams tool-calls/text into the activity panel too.
-    ...(onCaptureEvent ? { onEvent: pipeExternalEventsToCapture(onCaptureEvent) } : {}),
-    signal,
-  })
-
-  if (!result.success) {
-    throw new Error(result.error || `external agent ${agentId} returned a failure`)
+  let observedSessionId: string | undefined
+  const liveControl: { release?: () => void } = {}
+  let sessionWrite = Promise.resolve()
+  let sessionWriteError: unknown
+  const observeSession = (id: string | undefined) => {
+    if (!id || id === observedSessionId || !onSessionCreated) return
+    observedSessionId = id
+    sessionWrite = sessionWrite
+      .then(async () => {
+        liveControl.release?.()
+        liveControl.release = (await onSessionCreated(id)) || undefined
+      })
+      .catch((error: unknown) => {
+        sessionWriteError = error
+      })
   }
+  const capture = onCaptureEvent ? pipeExternalEventsToCapture(onCaptureEvent) : undefined
+  try {
+    const result = await manager.execute(agentId, prompt, {
+      // The preset is only the executable. An absent teammate binding selects
+      // native mode; a retained gateway session carries its frozen binding.
+      ...(teammate.config?.cogniaModel !== undefined
+        ? { cogniaModel: teammate.config.cogniaModel }
+        : sessionId
+          ? {}
+          : { cogniaModel: null }),
+      ...(sessionId ? { sessionId } : {}),
+      systemPrompt,
+      // The sidecar and text channels both honour the resolved model; the
+      // external channel used to drop it on the floor, so an external teammate
+      // silently ran on whatever its CLI's own config selected.
+      ...(model ? { model } : {}),
+      ...(merged.permissionMode ? { permissionMode: merged.permissionMode } : {}),
+      ...(merged.allowedTools ? { allowedTools: merged.allowedTools } : {}),
+      ...((cwdOverride ?? teamCtx.team.config?.workingDir)
+        ? { workingDirectory: cwdOverride ?? teamCtx.team.config?.workingDir }
+        : {}),
+      ...(mcpServers.length > 0 ? { context: { custom: { mcpServers } } } : {}),
+      // Live progress: translate the external protocol stream into the same
+      // CaptureStreamEvent frames the sidecar channel emits, so an external
+      // teammate streams tool-calls/text into the activity panel too.
+      onEvent: (event) => {
+        observeSession(event.sessionId)
+        capture?.(event)
+      },
+      signal,
+    })
+    observeSession(result.sessionId)
+    await sessionWrite
+    if (sessionWriteError) throw sessionWriteError
 
-  return {
-    text: result.finalResponse ?? "",
-    usage: result.tokenUsage
-      ? {
-          promptTokens: result.tokenUsage.promptTokens,
-          completionTokens: result.tokenUsage.completionTokens,
-          totalTokens: result.tokenUsage.totalTokens,
-        }
-      : undefined,
+    if (!result.success) {
+      throw new Error(result.error || `external agent ${agentId} returned a failure`)
+    }
+
+    return {
+      text: result.finalResponse ?? "",
+      usage: result.tokenUsage
+        ? {
+            promptTokens: result.tokenUsage.promptTokens,
+            completionTokens: result.tokenUsage.completionTokens,
+            totalTokens: result.tokenUsage.totalTokens,
+          }
+        : undefined,
+    }
+  } finally {
+    await sessionWrite
+    liveControl.release?.()
   }
 }
 
@@ -686,6 +735,8 @@ export async function dispatchTeammate(
     DEFAULT_TEAMMATE_SYSTEM_PROMPT
 
   const modelHint = teamCtx.modelPref.get().modelHint
+  const accountingModel = teammate.config?.cogniaModel?.modelId ?? modelHint
+  const accountingProvider = teammate.config?.cogniaModel?.providerId ?? teammate.config?.provider
   let promptText = typeof args.prompt === "function" ? args.prompt(teammate) : args.prompt
 
   // Resolved agentic step budget: a teammate's own `maxSteps` overrides the
@@ -701,6 +752,16 @@ export async function dispatchTeammate(
   let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
   let externalAgentId: string | null = null
   const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
+  if (teammate.config?.cogniaModel && !wantsExternal) {
+    const failure = new Error(
+      "A Cognia gateway model binding requires an external teammate runtime"
+    )
+    teamCtx.pool.recordFailure(teammate.id, failure)
+    if (args.recordToStore)
+      teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, failure.message)
+    release("failure", failure)
+    throw failure
+  }
   if (wantsExternal) {
     // External-backed teammate: route to the external CLI agent. On web/mobile,
     // with an unknown preset, or with the contributing plugin disabled, this
@@ -823,7 +884,7 @@ export async function dispatchTeammate(
         // runtime reached a resolved external agent, so there is no case left
         // where this would have to be rewritten to "claude".
         runtime,
-        modelId: modelHint ?? teammate.config?.model,
+        modelId: teammate.config?.cogniaModel?.modelId ?? modelHint ?? teammate.config?.model,
         toolsEnabled: args.preferToolEnabled !== false,
       },
       // ADR-0090 external SSOT: the negotiated capability profile is what the
@@ -952,7 +1013,7 @@ export async function dispatchTeammate(
     ...(teamCtx.traceId ? { traceId: teamCtx.traceId } : {}),
     agentId: teammate.id,
     agentName: teammate.name,
-    ...(modelHint ? { requestModel: modelHint } : {}),
+    ...(accountingModel ? { requestModel: accountingModel } : {}),
   })
 
   // ADR-0090 Phase 7: draw this dispatch through the run's budget governor
@@ -1336,15 +1397,15 @@ export async function dispatchTeammate(
       }
       const executionRoot = taskWorkspaceExecutionRoot ?? dispatchWorkingDir
       if (channel === "external" && externalAgentId) {
-        if (durableDispatch) {
-          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
-          const manager = getExternalAgentManager()
-          if (manager.supportsSteering(externalAgentId)) {
-            await durableDispatch.attachControl({
-              steer: (message) => manager.steerSession(externalAgentId, undefined, message),
-            })
-          }
-        }
+        const { getAgentTeamChildRun } = await import("@/lib/db/agent-team-runtime")
+        const { parseGatewaySessionId } = await import("@/lib/ai/agent/external/gateway-task")
+        const retained = durableDispatch
+          ? await getAgentTeamChildRun(durableDispatch.childRunId)
+          : undefined
+        const retainedSessionId =
+          retained?.sessionId && parseGatewaySessionId(retained.sessionId)
+            ? retained.sessionId
+            : undefined
         return runExternalBacked(
           teamCtx,
           teammate,
@@ -1355,7 +1416,22 @@ export async function dispatchTeammate(
           combinedSignal,
           onTurnCapture,
           executionRoot,
-          teammate.config?.model ?? modelHint
+          teammate.config?.model ?? modelHint,
+          retainedSessionId,
+          durableDispatch
+            ? async (sessionId) => {
+                const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+                const manager = getExternalAgentManager()
+                return durableDispatch.attachControl(
+                  {
+                    steer: (message) => manager.steerSession(externalAgentId, sessionId, message),
+                    pause: () => manager.cancel(externalAgentId, sessionId),
+                    terminate: () => manager.cancel(externalAgentId, sessionId),
+                  },
+                  sessionId
+                )
+              }
+            : undefined
         )
       }
       if (channel === "sidecar") {
@@ -1470,7 +1546,7 @@ export async function dispatchTeammate(
 
   endSpan(span.spanId, {
     ...(turn.usage ? { usage: toSpanUsage(turn.usage) } : {}),
-    ...(modelHint ? { responseModel: modelHint } : {}),
+    ...(accountingModel ? { responseModel: accountingModel } : {}),
     outputPreview: (turn.text ?? "").slice(0, 200),
   })
 
@@ -1536,7 +1612,7 @@ export async function dispatchTeammate(
     await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
   }
   const pricedUsage = turn.usage
-    ? priceTokensForModel(teammate.config?.provider, modelHint, {
+    ? priceTokensForModel(accountingProvider, accountingModel, {
         inputTokens: turn.usage.promptTokens,
         outputTokens: turn.usage.completionTokens,
       })
@@ -1568,7 +1644,8 @@ export async function dispatchTeammate(
         usage: {
           inputTokens: turn.usage.promptTokens,
           outputTokens: turn.usage.completionTokens,
-          ...(modelHint ? { model: modelHint } : {}),
+          ...(accountingModel ? { model: accountingModel } : {}),
+          ...(accountingProvider ? { providerId: accountingProvider } : {}),
         },
       })
     )

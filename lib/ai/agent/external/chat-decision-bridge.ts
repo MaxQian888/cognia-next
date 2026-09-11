@@ -284,24 +284,28 @@ export async function resolveExternalElicitation(
  * or on a paired host — and having it in two places is how the two shells
  * would eventually disagree.
  *
- * Best-effort by contract. The dialog clears the question before the answer is
- * in flight (so a second click cannot answer twice), so there is no card left
- * to put an error on, and an agent that has already gone is the ordinary case.
+ * Lifecycle cleanup stays best effort: the agent may already be gone. Explicit
+ * user responses opt into strict delivery so the UI keeps the question and
+ * answer available when transport fails.
  */
 export async function deliverExternalElicitation(
   entry: PendingExternalElicitation,
-  response: AcpElicitationResponse
+  response: AcpElicitationResponse,
+  options: { strict?: boolean } = {}
 ): Promise<void> {
   try {
     if (entry.remoteDecisionId) {
       const { resolveRemoteElicitation } = await import("./remote-run-client")
-      await resolveRemoteElicitation(entry.remoteDecisionId, response)
+      const outcome = await resolveRemoteElicitation(entry.remoteDecisionId, response)
+      if (options.strict && !outcome.resolved) {
+        throw new Error(`External elicitation response was not accepted: ${outcome.reason}`)
+      }
       return
     }
     const { getExternalAgentManager } = await import("./manager")
     await getExternalAgentManager().respondToElicitation(entry.agentId, response)
-  } catch {
-    // See the docstring.
+  } catch (error) {
+    if (options.strict) throw error
   }
 }
 

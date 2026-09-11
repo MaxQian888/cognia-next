@@ -17,6 +17,7 @@ import { readTextFile } from "@/lib/claude/ipc"
 import { BUILTIN_TOOL_CONFIG_KEYS } from "@/lib/settings/builtin-tools"
 
 import { resolveCliHome, writeCliHomeFile } from "./home"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 export const CONFIG_FILE_NAME = "config.json"
 
@@ -77,8 +78,13 @@ export type ConfigSettingsSlice = Partial<
  */
 export function projectAppConfigToCli(settings: ConfigSettingsSlice): CliConfigSubset {
   const out: CliConfigSubset = {}
-  if (settings.defaultProvider) out.provider = settings.defaultProvider
-  if (settings.defaultModel) out.model = settings.defaultModel
+  // The desktop's app-wide default can be a model picked from an external
+  // agent's own list, stamped with the reserved provider marker. Neither half
+  // names anything the CLI can resolve, so the pair is read on the provider
+  // lane before it is written. See `lib/ai/app-default-model.ts`.
+  const appDefault = resolveAppDefaultModel(settings)
+  if (appDefault.provider) out.provider = appDefault.provider
+  if (appDefault.model) out.model = appDefault.model
   if (settings.defaultSystemPrompt?.trim()) out.systemPrompt = settings.defaultSystemPrompt
   if (
     settings.permissionMode &&

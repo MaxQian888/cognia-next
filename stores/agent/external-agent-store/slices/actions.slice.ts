@@ -223,6 +223,7 @@ export const createExternalAgentActionsSlice = (
         autoApprovePatterns: updates.autoApprovePatterns ?? agent.autoApprovePatterns,
         requireApprovalFor: updates.requireApprovalFor ?? agent.requireApprovalFor,
         codexOptions: updates.codexOptions ?? agent.codexOptions,
+        cogniaModel: updates.cogniaModel === undefined ? agent.cogniaModel : updates.cogniaModel,
         timeout: updates.timeout ?? agent.timeout,
         retryConfig: updates.retryConfig
           ? ({

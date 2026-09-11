@@ -14,6 +14,7 @@ import {
   isOpenAiNativeSurface,
   decideOpenAiEndpointFlavor,
   RESPONSES_ONLY_PROVIDERS,
+  resolveProviderProtocol,
 } from "./provider-protocol.mjs"
 import { buildBedrockProviderOptions } from "../bedrock.mjs"
 import { partitionPrompt } from "../prompt-partition.mjs"
@@ -240,7 +241,7 @@ export async function buildModel({
   roleSessionName,
 }) {
   const base = await buildRawModel({
-    protocol,
+    protocol: providerId === "commandcode" ? resolveProviderProtocol(providerId, model) : protocol,
     model,
     apiKey,
     baseURL,
@@ -378,8 +379,10 @@ export function makeAiSdkAdapter(protocol) {
     async start(req) {
       const creds = req.credentials ?? {}
       const providerId = req.providerId
+      const modelProtocol =
+        providerId === "commandcode" ? resolveProviderProtocol(providerId, req.model) : protocol
       const modelInstance = await buildModel({
-        protocol,
+        protocol: modelProtocol,
         model: req.model,
         apiKey: creds.apiKey,
         baseURL: creds.baseURL,
@@ -405,6 +408,16 @@ export function makeAiSdkAdapter(protocol) {
         model: modelInstance,
         ...partitionPrompt(req.messages),
         ...(req.modelParams ?? {}),
+      }
+      // OpenCode Go requires an honest client identity and stable per-conversation
+      // session header, including auxiliary requests (docs checked 2026-09-11).
+      // Use the provider id so the contract survives a configured gateway relay.
+      if (providerId === "opencode" || providerId === "opencode-go") {
+        streamArgs.headers = {
+          ...(streamArgs.headers ?? {}),
+          "User-Agent": "cognia-coding-agent/1.0",
+          ...(req.sessionId ? { "x-opencode-session": req.sessionId } : {}),
+        }
       }
       const telemetryOptions = aiSdkTelemetry({
         sessionId: req.sessionId,
@@ -436,7 +449,7 @@ export function makeAiSdkAdapter(protocol) {
       // (e.g. the anthropic cacheControl breakpoint) so neither clobbers the
       // other.
       const reasoningOptions = buildReasoningProviderOptions(
-        protocol,
+        modelProtocol,
         creds.baseURL,
         req.reasoning,
         { providerId }

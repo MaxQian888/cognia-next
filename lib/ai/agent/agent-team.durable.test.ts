@@ -48,7 +48,10 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
   getAgentTeamChildRun: () => getAgentTeamChildRun(),
 }))
 
-const guardSquadResume = jest.fn(async () => ({ blocked: false, blockers: [] }))
+const guardSquadResume = jest.fn<
+  ReturnType<typeof import("./team/squad-lifecycle-runner").guardSquadResume>,
+  Parameters<typeof import("./team/squad-lifecycle-runner").guardSquadResume>
+>(async () => ({ blocked: false, blockers: [] }))
 jest.mock("./team/squad-lifecycle-runner", () => ({
   runSquadLifecycle: (input: unknown) => runSquadLifecycle(input),
   prepareSquadResume: () => prepareSquadResume(),

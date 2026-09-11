@@ -240,6 +240,9 @@ pub async fn spawn_with_events(
     emitter: Arc<dyn AgentEventEmitter>,
     config: ExternalAgentSpawnConfig,
 ) -> Result<String, String> {
+    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) && backend.kind() != "local-process" {
+        return Err("Cognia gateway tasks require a local process backend; remote gateway transport is not configured".into());
+    }
     let id = config.id.clone();
     let sink: Arc<dyn ExternalAgentEventSink> = EmitterEventSink::new(Arc::clone(&emitter));
 

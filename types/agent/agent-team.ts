@@ -877,6 +877,8 @@ export type TeammateExecutionBinding = TeammateExecutionTargetBinding &
   )
 
 export interface TeammateConfig {
+  /** Task-scoped Cognia model/account for an external runtime; null keeps native model selection. */
+  cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
   /** Custom system prompt */
   systemPrompt?: string
   /**

@@ -12,6 +12,37 @@ import {
 } from "./ai-sdk-adapter.mjs"
 import { createEventAdapter } from "../event-adapter.mjs"
 
+test("CommandCode selects the model protocol for chat and auxiliary requests", async () => {
+  for (const [model, expected] of [
+    ["claude-sonnet-5", "anthropic.messages"],
+    ["anthropic/claude-sonnet-5", "anthropic.messages"],
+    ["deepseek/deepseek-v4-flash", "openai.chat"],
+  ]) {
+    const built = await buildModel({
+      protocol: "openai",
+      providerId: "commandcode",
+      model,
+      baseURL: "https://api.commandcode.ai/provider/v1",
+      apiKey: "test-key",
+    })
+    assert.equal(built.provider, expected)
+  }
+  let captured
+  await makeAiSdkAdapter("openai").start({
+    providerId: "commandcode",
+    model: "claude-sonnet-5",
+    messages: [],
+    credentials: { apiKey: "test-key", baseURL: "https://api.commandcode.ai/provider/v1" },
+    reasoning: { maxThinkingTokens: 6000 },
+    streamTextFn: (args) => {
+      captured = args
+      return { stream: (async function* () {})(), usage: Promise.resolve({}) }
+    },
+  })
+  assert.equal(captured.model.provider, "anthropic.messages")
+  assert.equal(captured.providerOptions.anthropic.thinking.budgetTokens, 6000)
+})
+
 test("buildModel throws on unsupported protocols", async () => {
   await assert.rejects(() => buildModel({ protocol: "smoke-signal", model: "m" }), /unsupported/)
 })
@@ -305,6 +336,28 @@ test("start merges the Codex responses fields with reasoning into one openai blo
       include: ["reasoning.encrypted_content"],
     },
   })
+})
+
+test("OpenCode requests identify Cognia and keep a stable conversation header across turns", async () => {
+  const calls = []
+  const adapter = makeAiSdkAdapter("openai")
+  for (const sessionId of ["conversation-a", "conversation-a", "conversation-b"]) {
+    await adapter.start({
+      model: "kimi-k2.6",
+      messages: [],
+      providerId: "opencode-go",
+      sessionId,
+      credentials: { apiKey: "synthetic", baseURL: "https://relay.example/v1" },
+      streamTextFn: (args) => {
+        calls.push(args)
+        return { stream: (async function* () {})(), usage: Promise.resolve({}) }
+      },
+    })
+  }
+  assert.equal(calls[0].headers?.["User-Agent"], "cognia-coding-agent/1.0")
+  assert.equal(calls[0].headers?.["x-opencode-session"], "conversation-a")
+  assert.equal(calls[1].headers?.["x-opencode-session"], "conversation-a")
+  assert.equal(calls[2].headers?.["x-opencode-session"], "conversation-b")
 })
 
 test("start passes model/messages/params through to streamText verbatim", async () => {

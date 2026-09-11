@@ -1372,6 +1372,40 @@ export interface ExternalAgentRetryConfig {
   retryOnErrors?: string[]
 }
 
+/** A host-resolved model binding. Upstream credentials never enter agent configuration. */
+export interface ExternalAgentCogniaModelBinding {
+  providerId: string
+  modelId: string
+  /** Omit for provider default; a concrete account pins the task; null selects manual API settings. */
+  accountId?: string | null
+}
+
+export function normalizeCogniaModelBinding(
+  value: unknown
+): ExternalAgentCogniaModelBinding | null | undefined {
+  if (value === undefined || value === null) return value
+  if (typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid Cognia model binding")
+  const binding = value as Record<string, unknown>
+  if (
+    Object.keys(binding).some((key) => !["providerId", "modelId", "accountId"].includes(key)) ||
+    typeof binding.providerId !== "string" ||
+    !binding.providerId.trim() ||
+    typeof binding.modelId !== "string" ||
+    !binding.modelId.trim() ||
+    (binding.accountId !== undefined &&
+      binding.accountId !== null &&
+      (typeof binding.accountId !== "string" || !binding.accountId.trim()))
+  ) {
+    throw new Error("Invalid Cognia model binding")
+  }
+  return {
+    providerId: binding.providerId.trim(),
+    modelId: binding.modelId.trim(),
+    ...(binding.accountId !== undefined ? { accountId: binding.accountId as string | null } : {}),
+  }
+}
+
 /**
  * Complete external agent configuration
  */
@@ -1388,6 +1422,8 @@ export interface ExternalAgentConfig {
   transport: ExternalAgentTransport
   /** Whether agent is enabled */
   enabled: boolean
+  /** Use task-scoped Cognia gateway access instead of the runtime's own provider settings. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
 
   /** Process configuration (for stdio transport) */
   process?: ExternalAgentProcessConfig
@@ -1460,6 +1496,7 @@ export interface ExternalAgentConfig {
  */
 export interface CreateExternalAgentInput {
   name: string
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
   description?: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport
@@ -1483,6 +1520,8 @@ export interface CreateExternalAgentInput {
  */
 export interface UpdateExternalAgentInput {
   name?: string
+  /** Null clears the configured binding; omission preserves it. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
   description?: string
   enabled?: boolean
   process?: Partial<ExternalAgentProcessConfig>
@@ -2302,6 +2341,8 @@ export interface ExternalAgentResult {
  * Execution options
  */
 export interface ExternalAgentExecutionOptions {
+  /** Task-specific Cognia model binding. Omit to inherit the configured binding. */
+  cogniaModel?: ExternalAgentCogniaModelBinding | null
   /** Reuse an existing external agent session */
   sessionId?: string
   /**

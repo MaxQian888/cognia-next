@@ -49,6 +49,32 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
   string,
   ExternalAgentEcosystemAdapterDefinition
 > = {
+  devin: {
+    id: "devin",
+    name: "Devin",
+    description: "Cognition Devin CLI over native ACP",
+    docsUrl: "https://docs.devin.ai/cli/acp/jetbrains",
+    tags: ["coding", "cognition", "devin"],
+    surfaces: [
+      {
+        id: "acp-stdio",
+        presetId: "devin",
+        name: "Devin CLI",
+        description:
+          "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Devin 3000.10.21 does not load Cognia-provided MCP servers in live tests.",
+        protocol: "acp",
+        transport: "stdio",
+        supportTier: "executable",
+        executionMode: "direct",
+        defaultPermissionMode: "default",
+        tags: ["coding", "cognition", "devin", "acp"],
+        docsUrl: "https://docs.devin.ai/cli/acp/jetbrains",
+        setupHint:
+          "Install Devin CLI and run `devin auth login` once. Cognia launches `devin acp` and discovers models from the session; use `acp --model swe2` to select SWE-2 at launch. Choose Accept Edits (Code) for file changes. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work.",
+        process: { command: "devin", args: ["acp"] },
+      },
+    ],
+  },
   codex: {
     id: "codex",
     name: "Codex",
@@ -89,14 +115,14 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         executionMode: "direct",
         defaultPermissionMode: "default",
         tags: ["coding", "openai", "codex"],
-        docsUrl: "https://github.com/zed-industries/codex-acp",
+        docsUrl: "https://github.com/agentclientprotocol/codex-acp",
         envVarHint:
           "Supports ChatGPT sign-in or API-key auth through the local adapter route. Common automation setup uses OPENAI_API_KEY or CODEX_API_KEY.",
         setupHint:
-          "Current Cognia executable route uses the ACP adapter (`npx -y @zed-industries/codex-acp`) rather than the native OpenAI Codex runtime directly.",
+          "Current Cognia executable route uses the ACP adapter (`npx -y @agentclientprotocol/codex-acp`) rather than the native OpenAI Codex runtime directly.",
         process: {
           command: "npx",
-          args: ["-y", "@zed-industries/codex-acp"],
+          args: ["-y", "@agentclientprotocol/codex-acp"],
         },
         icon: "openai",
       },

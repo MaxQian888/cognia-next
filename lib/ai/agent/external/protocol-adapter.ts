@@ -334,6 +334,8 @@ export interface ProtocolAdapter {
    * Get all active sessions
    */
   getSessions(): ExternalAgentSession[]
+  /** Clear cached sessions after the backing process exits. */
+  forgetSessions(): void
 
   /**
    * Health check

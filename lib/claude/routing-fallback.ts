@@ -19,7 +19,11 @@ import type { SendOptions } from "@cognia/agent-config-types"
 import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import { recordEvent } from "@cognia/agent-trace/emitter"
 import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
-import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import {
+  applyProviderAttemptLimits,
+  resolveProviderAttemptOptions,
+} from "./provider-attempt-options"
+import { resolveAccountId, subscriptionAccountProviderFor } from "./env-resolver"
 import { switchChatLeaseProvider } from "@/lib/execution/chat-lease"
 import {
   classifyProviderErrorInfo,
@@ -79,7 +83,57 @@ async function issueRetry(
   let attemptOptions: Awaited<ReturnType<typeof resolveProviderAttemptOptions>> = {}
   try {
     if (settings) {
-      attemptOptions = await resolveProviderAttemptOptions(nextEntry.providerId, settings)
+      const nextAccountProvider = subscriptionAccountProviderFor(
+        nextEntry.providerId,
+        settings.customProviders
+      )
+      const sameAccountProvider =
+        nextAccountProvider &&
+        nextAccountProvider ===
+          subscriptionAccountProviderFor(cached.options.provider ?? "", settings.customProviders)
+      if (sameAccountProvider) {
+        const { getSession } = await import("@/lib/db/sessions")
+        const session = await getSession(sessionId)
+        const character = session?.characterId
+          ? await (await import("@/lib/db/characters")).getCharacter(session.characterId)
+          : undefined
+        // After a cross-provider fallback the cache belongs to the new family,
+        // while session/character pins still belong to their configured provider.
+        const selectionProvider =
+          session?.providerOverride ?? character?.providerId ?? settings.defaultProvider
+        const sameSelectionFamily =
+          subscriptionAccountProviderFor(selectionProvider ?? "", settings.customProviders) ===
+          nextAccountProvider
+        const accountId = resolveAccountId(
+          nextEntry.providerId,
+          sameSelectionFamily ? session : null,
+          sameSelectionFamily ? character : null,
+          settings
+        )
+        const explicitAccount =
+          sameSelectionFamily && Boolean(session?.accountId || character?.accountIdOverride)
+        attemptOptions = await resolveProviderAttemptOptions(
+          nextEntry.providerId,
+          settings,
+          accountId,
+          explicitAccount,
+          nextEntry.modelId
+        )
+        if (
+          explicitAccount &&
+          nextAccountProvider !== "anthropic" &&
+          !attemptOptions.providerCredentials
+        )
+          return false
+      } else {
+        attemptOptions = await resolveProviderAttemptOptions(
+          nextEntry.providerId,
+          settings,
+          undefined,
+          false,
+          nextEntry.modelId
+        )
+      }
     }
   } catch (error) {
     console.warn("routing-fallback credential resolution failed", error)
@@ -104,6 +158,14 @@ async function issueRetry(
         }
       : undefined,
   }
+  Object.assign(
+    retryOptions,
+    applyProviderAttemptLimits(
+      retryOptions,
+      settings ?? undefined,
+      cached.options.modelParams?.maxOutputTokens
+    )
+  )
 
   // Bump the cache *before* the IPC so a second consecutive failure
   // increments cleanly and a concurrent read sees the post-bump state.
@@ -226,7 +288,7 @@ export async function attemptRoutingFallback(
     const controller = new RoutingAttemptController(
       cached.options.routingPlan,
       settings?.routingConfig?.maxFallbackAttempts ?? 3,
-      () => Date.now(),
+      undefined,
       {
         phase: cached.routingCommitted ? "committed" : "inFlight",
         candidateIndex: cached.attemptIndex,

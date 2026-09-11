@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -36,6 +36,7 @@ jest.mock("@/lib/claude/agents/subagents", () => ({
   resolveAllSubagents: () => ({}),
 }))
 jest.mock("@/lib/ai/agent/external/presets", () => ({
+  getPresetConfig: jest.requireActual("@/lib/ai/agent/external/presets").getPresetConfig,
   getAvailablePresets: () => [],
   // `ExternalPresetSection` (inside the dialog) builds its picker from this.
   // Omitting it made every render in this file throw "getRunnablePresets is
@@ -47,6 +48,29 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   // reintroduce exactly the drift `runtime-options` exists to prevent.
   BUILTIN_EXECUTABLE_PRESET_IDS: jest.requireActual("@/lib/ai/agent/external/presets")
     .BUILTIN_EXECUTABLE_PRESET_IDS,
+}))
+
+jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
+  CogniaModelPicker: ({
+    value,
+    onChange,
+  }: {
+    value: unknown
+    onChange: (binding: unknown) => void
+  }) => (
+    <div>
+      <output>{JSON.stringify(value)}</output>
+      <button onClick={() => onChange({ providerId: "", modelId: "" })}>
+        Draft Cognia binding
+      </button>
+      <button
+        onClick={() => onChange({ providerId: "kimi", modelId: "coder", accountId: "account-a" })}
+      >
+        Select Cognia binding
+      </button>
+      <button onClick={() => onChange(null)}>Clear Cognia binding</button>
+    </div>
+  ),
 }))
 
 const updateTeammateMock = jest.fn()
@@ -311,5 +335,84 @@ describe("TeammateConfigDialog", () => {
       fireEvent.click(within(screen.getByRole("listbox")).getByText("rosterSection.twinNone"))
       expect(updateTeammateMock).toHaveBeenCalledWith("t1", { config: { twinId: undefined } })
     })
+  })
+})
+
+describe("teammate Cognia model binding", () => {
+  beforeEach(() => updateTeammateMock.mockClear())
+  it("persists complete bindings without saving intermediate empty drafts", () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "pi-rpc", specialization: "review" },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(screen.getByRole("button", { name: "Draft Cognia binding" }))
+    expect(updateTeammateMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Select Cognia binding" }))
+    expect(updateTeammateMock).toHaveBeenCalledWith("t1", {
+      config: {
+        ...member.config,
+        cogniaModel: { providerId: "kimi", modelId: "coder", accountId: "account-a" },
+      },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Clear Cognia binding" }))
+    expect(updateTeammateMock).toHaveBeenLastCalledWith("t1", {
+      config: { ...member.config, cogniaModel: null },
+    })
+  })
+  it("does not offer external gateway configuration for the provider-backed lead", () => {
+    render(
+      <TeammateConfigDialog
+        open
+        onOpenChange={() => {}}
+        teammate={{ ...teammate, role: "lead", config: { runtime: "pi-rpc" } }}
+        team={team}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "Select Cognia binding" })).not.toBeInTheDocument()
+  })
+
+  it("keeps an existing binding clearable when its external backing is no longer present", () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "claude", cogniaModel: { providerId: "kimi", modelId: "coder" } },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(screen.getByRole("button", { name: "Clear Cognia binding" }))
+    expect(updateTeammateMock).toHaveBeenLastCalledWith("t1", {
+      config: { ...member.config, cogniaModel: null },
+    })
+  })
+
+  it("clears the gateway binding when switching back to a builtin runtime without an external preset", () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "pi-rpc", cogniaModel: { providerId: "kimi", modelId: "coder" } },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(
+      within(screen.getByText("rosterSection.runtime").parentElement!).getByRole("combobox")
+    )
+    fireEvent.click(screen.getByRole("option", { name: "claude", exact: true }))
+    expect(updateTeammateMock).toHaveBeenCalledWith("t1", {
+      config: { runtime: "claude", cogniaModel: null },
+    })
+  })
+
+  it("clears a stale builtin gateway binding when saving the member", async () => {
+    const member: AgentTeammate = {
+      ...teammate,
+      config: { runtime: "claude", cogniaModel: { providerId: "kimi", modelId: "coder" } },
+    }
+    render(<TeammateConfigDialog open onOpenChange={() => {}} teammate={member} team={team} />)
+    fireEvent.click(screen.getByRole("button", { name: "save", exact: true }))
+    await waitFor(() =>
+      expect(updateTeammateMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({
+          config: expect.objectContaining({ runtime: "claude", cogniaModel: null }),
+        })
+      )
+    )
   })
 })

@@ -54,7 +54,7 @@ export function hasNoLeakingExternalAgentPromptInput(
     } else if (content.type === "resource" && content.resource.blob !== undefined) {
       encoded = content.resource.blob
       path = content.resource.uri
-      mimeType = content.resource.mimeType
+      mimeType = content.resource.mimeType ?? undefined
     } else if (content.type === "image" && content.source.type === "base64") {
       encoded = content.source.data
       mimeType = content.source.mediaType

@@ -231,12 +231,7 @@ export function __setSkillToolDepsForTesting(
 
 async function resolveSkillToolDeps(): Promise<SkillToolRunDeps> {
   if (skillToolDepsOverride) return skillToolDepsOverride()
-  const { getCatalogSkill } = await import("@/lib/skills/built-in-catalog")
   return {
-    getCatalogSkill: (id: string) => {
-      const e = getCatalogSkill(id)
-      return e ? { id: e.id, name: e.name, content: e.content } : undefined
-    },
     loadCustomSkill: async (key: string) => {
       try {
         const { getSkill, listSkills } = await import("@/lib/db/skills")

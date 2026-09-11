@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream"
 import { client, methods, ndJsonStream } from "@agentclientprotocol/sdk"
 
 const TARGETS = [
+  ["devin", "ACP_DEVIN_COMMAND", "ACP_DEVIN_ENV"],
   ["gemini", "ACP_GEMINI_COMMAND", "ACP_GEMINI_ENV"],
   ["codex", "ACP_CODEX_COMMAND", "ACP_CODEX_ENV"],
   ["claude", "ACP_CLAUDE_COMMAND", "ACP_CLAUDE_ENV"],
@@ -126,7 +127,7 @@ const configured = TARGETS.flatMap(([name, commandVariable, environmentVariable]
 
 if (configured.length === 0) {
   console.log(
-    "ACP live smoke skipped. Set ACP_GEMINI_COMMAND, ACP_CODEX_COMMAND, or ACP_CLAUDE_COMMAND to a JSON argv array."
+    "ACP live smoke skipped. Set ACP_GEMINI_COMMAND, ACP_CODEX_COMMAND, ACP_CLAUDE_COMMAND, or ACP_DEVIN_COMMAND to a JSON argv array."
   )
   process.exit(0)
 }

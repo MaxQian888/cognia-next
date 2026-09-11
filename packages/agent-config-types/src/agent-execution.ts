@@ -324,7 +324,13 @@ export interface AgentExecutionSendSpec {
     /** v2+. Mirrors the resolved spec so the sidecar can fail closed too. */
     support?: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
   }
-  identity: { runId: string; parentRunId?: string; attemptId: string }
+  identity: {
+    sessionId?: string
+    runId: string
+    parentRunId?: string
+    turnId?: string
+    attemptId: string
+  }
   hostRef: string
   /**
    * v2+. The turn's resolved composition axes (ADR-0117).
@@ -819,6 +825,18 @@ export type CanonicalAgentEvent =
       rateLimitType?: string
       /** Epoch seconds, as the provider reports it. */
       resetsAt?: number
+      /** Native subscription utilization, independent of token/cost accounting. */
+      utilization?: number
+      overageStatus?: "allowed" | "allowed_warning" | "rejected"
+      /** Epoch seconds, as the provider reports it. */
+      overageResetsAt?: number
+      overageDisabledReason?: string
+      isUsingOverage?: boolean
+      overageInUse?: boolean
+      surpassedThreshold?: number
+      errorCode?: string
+      canUserPurchaseCredits?: boolean
+      hasChargeableSavedPaymentMethod?: boolean
     }
   | {
       /**

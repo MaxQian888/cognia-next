@@ -113,3 +113,37 @@ describe("evaluation artifact encryption", () => {
     expect(vault.loadSecret).toHaveBeenCalledWith("human-input-artifact-data-key")
   })
 })
+
+it.each(["workflow-knowledge", "workflow-feedback", "workflow-annotation"] as const)(
+  "retains a separate %s key per account on desktop and web",
+  async (domain) => {
+    const values = new Map<string, string>()
+    const store: KeyringStore = {
+      save: jest.fn(async (key, value) => void values.set(key, value)),
+      load: jest.fn(async (key) => values.get(key) ?? null),
+      delete: jest.fn(async (key) => void values.delete(key)),
+    }
+    const deps = { platform: "desktop" as const, keyringStore: store }
+    const key = await loadOrCreateAccountArtifactKey("account-a", domain, deps)
+    expect(await loadOrCreateAccountArtifactKey("account-a", domain, deps)).toEqual(key)
+    expect(store.save).toHaveBeenCalledWith(
+      `account:account-a:${domain}-data-key`,
+      expect.any(String)
+    )
+    expect(await loadOrCreateAccountArtifactKey("account-b", domain, deps)).not.toEqual(key)
+
+    const vault = {
+      accountId: "account-web",
+      loadSecret: jest.fn(async (_name: string): Promise<string | null> => null),
+      storeSecret: jest.fn(async (_name: string, _value: string): Promise<void> => {}),
+    }
+    await loadOrCreateAccountArtifactKey("account-web", domain, {
+      platform: "web",
+      getBrowserVault: () => vault,
+    })
+    expect(vault.storeSecret).toHaveBeenCalledWith(
+      `${domain}-artifact-data-key`,
+      expect.any(String)
+    )
+  }
+)

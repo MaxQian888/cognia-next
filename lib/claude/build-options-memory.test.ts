@@ -320,7 +320,12 @@ describe("resolveSendOptions project-claim injection", () => {
   it("respects an Agent that may not read the workspace scope", async () => {
     const scoped: Character = {
       ...baseCharacter,
-      memoryPolicy: { canRecall: true, readableScopes: ["global"] },
+      memoryPolicy: {
+        operations: { recall: true, create: false, update: false, forget: false },
+        readableScopes: ["global"],
+        writableScopes: [],
+        autoLearn: false,
+      },
     } as Character
     const opts = await resolveSendOptions({
       character: scoped,

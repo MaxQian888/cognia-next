@@ -53,7 +53,7 @@ export interface AgentTeamManager {
   get(id: string): AgentTeam | undefined
   create(config: AgentTeamConfig): AgentTeam
   update(id: string, patch: Partial<AgentTeamConfig>): void
-  delete(id: string): void
+  delete(id: string): Promise<void>
   /**
    * Start the team's next run. Resolves when the run settles (or at once with
    * `detached`). Rejects with a typed refusal message when `startSquadRun`
@@ -117,9 +117,7 @@ export const agentTeamManager: AgentTeamManager = {
   update: (id, patch) => {
     useAgentTeamStore.getState().updateTeam(id, patch)
   },
-  delete: (id) => {
-    useAgentTeamStore.getState().deleteTeam(id)
-  },
+  delete: (id) => useAgentTeamStore.getState().deleteTeam(id),
   start: async (id, opts) => {
     const { startSquadRun } = await import("./team/start-squad-run")
     const origin = opts?.origin ?? "interactive"

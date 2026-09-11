@@ -1,6 +1,19 @@
 // Mock heavyweight adapter modules so requiring manager.ts does not pull in
 // the real ACP/OpenCode adapters.
 let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
+const mockGatewayMint = jest.fn()
+const mockGatewayRevoke = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/gateway/mint-session-ticket", () => ({
+  prepareExternalAgentGatewayRoute: (...args: unknown[]) => mockGatewayMint(...args),
+}))
+jest.mock("@/lib/tauri/gateway", () => ({
+  gatewayRevokeRouteTicket: (...args: unknown[]) => mockGatewayRevoke(...args),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({ settings: { providerSettings: {}, customProviders: [] } }),
+  },
+}))
 const appendCanonicalEnvelopesMock = jest.fn(
   async (_runId: string, _envelopes: Array<{ event: { kind: string } }>) => 1
 )
@@ -70,6 +83,7 @@ import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
 import { detectInstalledRuntimes } from "./installed-runtimes"
 import { __setProcessPlaneDepsForTests } from "./process-plane"
 import { EMPTY_THINKING_SURFACE } from "./session-models"
+import { parseGatewaySessionId } from "./gateway-task"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -318,6 +332,8 @@ beforeEach(() => {
   forgetAgentModelSurface()
   mockProcessExitCb = undefined
   currentMock = new MockAdapter()
+  mockGatewayMint.mockReset()
+  mockGatewayRevoke.mockClear()
 })
 
 afterEach(async () => {
@@ -671,6 +687,183 @@ describe("ExternalAgentManager — singleton + getInstance", () => {
 })
 
 describe("addAgent / removeAgent / connect", () => {
+  describe("Codex connection storm protection", () => {
+    it.each([
+      "401 Unauthorized: connection rejected",
+      "403 Forbidden: network access rejected",
+      "429 Too many requests",
+    ])("does not retry a native connection rejected with %s", async (message) => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          retryConfig: {
+            maxRetries: 3,
+            retryDelay: 0,
+            exponentialBackoff: false,
+            maxRetryDelay: 0,
+            retryOnErrors: ["connection", "requests"],
+          },
+        }),
+        { connect: false }
+      )
+      currentMock.connectImpl.mockRejectedValue(new Error(message))
+      await expect(manager.connect("agent-1")).rejects.toThrow(message)
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("shares simultaneous native connection requests", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server" }), { connect: false })
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      currentMock.connectImpl.mockImplementation(async () => {
+        await pending
+      })
+      const requests = [
+        manager.connect("agent-1"),
+        manager.connect("agent-1"),
+        manager.connect("agent-1"),
+      ]
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      release()
+      await Promise.all(requests)
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("finishes an in-flight native connect before disconnecting it", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server" }), { connect: false })
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      currentMock.connectImpl.mockImplementation(async () => {
+        await pending
+      })
+      const disconnect = jest.spyOn(currentMock, "disconnect")
+      const connecting = manager.connect("agent-1")
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const stopping = manager.disconnect("agent-1")
+      const stoppedEarly = disconnect.mock.calls.length
+      release()
+      await Promise.all([connecting, stopping])
+      expect(stoppedEarly).toBe(0)
+      expect(disconnect).toHaveBeenCalledTimes(1)
+      expect(manager.getAgent("agent-1")?.connectionStatus).toBe("disconnected")
+    })
+
+    it("waits for native teardown before a fresh connection", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server" }))
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const originalDisconnect = currentMock.disconnect.bind(currentMock)
+      jest.spyOn(currentMock, "disconnect").mockImplementationOnce(async () => {
+        await pending
+        await originalDisconnect()
+      })
+      const stopping = manager.disconnect("agent-1")
+      const connecting = manager.connect("agent-1")
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const connectsBeforeTeardown = currentMock.connectImpl.mock.calls.length
+      release()
+      await Promise.all([stopping, connecting])
+      expect(connectsBeforeTeardown).toBe(1)
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+      expect(manager.getAgent("agent-1")?.connectionStatus).toBe("connected")
+    })
+
+    it("does not launch another retry when disconnect was requested during a handshake", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(
+        buildBaseConfig({
+          protocol: "codex-app-server",
+          retryConfig: {
+            maxRetries: 3,
+            retryDelay: 0,
+            exponentialBackoff: false,
+            maxRetryDelay: 0,
+            retryOnErrors: [],
+          },
+        }),
+        { connect: false }
+      )
+      let fail!: (error: Error) => void
+      const pending = new Promise<void>((_resolve, reject) => {
+        fail = reject
+      })
+      currentMock.connectImpl.mockImplementation(() => pending)
+      const connecting = manager.connect("agent-1").catch(() => undefined)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const stopping = manager.disconnect("agent-1")
+      fail(new Error("connection refused"))
+      await Promise.all([connecting, stopping])
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+      expect(manager.getAgent("agent-1")?.connectionStatus).toBe("disconnected")
+    })
+
+    it("lets the native handshake own its timeout instead of starting an overlapping retry", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server", timeout: 5 }), {
+        connect: false,
+      })
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      currentMock.connectImpl.mockImplementation(() => pending)
+      let settled = false
+      const connecting = manager.connect("agent-1").then(
+        () => {
+          settled = true
+          return "connected"
+        },
+        () => {
+          settled = true
+          return "failed"
+        }
+      )
+      await new Promise<void>((resolve) => setTimeout(resolve, 15))
+      const settledBeforeNative = settled
+      release()
+      expect(await connecting).toBe("connected")
+      expect(settledBeforeNative).toBe(false)
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("waits for native connection ownership before removing the agent", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server" }), { connect: false })
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      currentMock.connectImpl.mockImplementation(() => pending)
+      const disconnect = jest.spyOn(currentMock, "disconnect")
+      const connecting = manager.connect("agent-1")
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      const removing = manager.removeAgent("agent-1")
+      const stoppedEarly = disconnect.mock.calls.length
+      release()
+      await Promise.all([connecting, removing])
+      expect(stoppedEarly).toBe(0)
+      expect(disconnect).toHaveBeenCalledTimes(1)
+      expect(manager.getAgent("agent-1")).toBeUndefined()
+    })
+  })
+
   it("adds an agent and connects when enabled", async () => {
     const m = freshManager()
     const config = buildBaseConfig()
@@ -1744,6 +1937,236 @@ describe("session compaction and provider undo routing", () => {
 })
 
 describe("execute / cancel", () => {
+  describe("external account and tool replay protection", () => {
+    const retryConfig = {
+      maxRetries: 2,
+      retryDelay: 0,
+      exponentialBackoff: false,
+      maxRetryDelay: 0,
+      retryOnErrors: ["network", "quota", "authentication", "requests"],
+    }
+
+    it.each([
+      new Error("401 Unauthorized: connection rejected"),
+      new Error("403 Forbidden: network access rejected"),
+      new Error("429 Too many requests"),
+      new Error("temporary insufficient_quota"),
+      new Error("authentication_error: network login required"),
+      Object.assign(new Error("network request rejected"), { statusCode: 429 }),
+      Object.assign(new Error("network request rejected"), { status: 403 }),
+      Object.assign(new Error("network request rejected"), { code: "rate_limit_exceeded" }),
+    ])("does not replay external account failure %s", async (error) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      currentMock.executeImpl = jest.fn(async () => {
+        throw error
+      })
+      await expect(manager.execute("agent-1", "perform work")).rejects.toThrow(error.message)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not let a generic result code hide a quota refusal", async () => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      const result: ExternalAgentResult = {
+        success: false,
+        sessionId: "s_1",
+        finalResponse: "",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+        errorCode: "network_error",
+        error: "usage limit exceeded",
+      }
+      currentMock.executeImpl = jest.fn(async () => result)
+      expect(await manager.execute("agent-1", "perform work")).toMatchObject(result)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not replay a transient failure result containing completed tools", async () => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      const result: ExternalAgentResult = {
+        success: false,
+        sessionId: "s_1",
+        finalResponse: "",
+        messages: [],
+        steps: [],
+        duration: 1,
+        toolCalls: [
+          { id: "edit-1", name: "edit", input: { path: "/work/a" }, status: "completed" },
+        ],
+        error: "network connection reset after tool execution",
+      }
+      currentMock.executeImpl = jest.fn(async () => result)
+      expect(await manager.execute("agent-1", "perform work")).toMatchObject(result)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not replay after a tool was admitted before the transport failed", async () => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      const execute = jest
+        .spyOn(currentMock, "execute")
+        .mockImplementation(async (sessionId, _message, options) => {
+          options?.onEvent?.({
+            type: "tool_use_start",
+            sessionId,
+            timestamp: new Date(),
+            toolUseId: "edit-1",
+            toolName: "edit",
+          })
+          throw new Error("network connection reset")
+        })
+      await expect(manager.execute("agent-1", "perform work")).rejects.toThrow(
+        "network connection reset"
+      )
+      expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not retry other adapter connections after an account refusal", async () => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }), { connect: false })
+      currentMock.connectImpl.mockRejectedValue(new Error("429 Too many requests"))
+      await expect(manager.connect("agent-1")).rejects.toThrow("429")
+      expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it.each<ExternalAgentEvent>([
+      { type: "message_start", timestamp: new Date(), role: "assistant" },
+      {
+        type: "message_delta",
+        timestamp: new Date(),
+        delta: { type: "text", text: "Partial answer" },
+      },
+      { type: "thinking", timestamp: new Date(), thinking: "Working on the answer" },
+      { type: "commentary_delta", timestamp: new Date(), text: "Inspecting the file" },
+      {
+        type: "done",
+        timestamp: new Date(),
+        success: false,
+        tokenUsage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+      },
+    ])("does not replay after $type proves generation started", async (event) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      const execute = jest
+        .spyOn(currentMock, "execute")
+        .mockImplementation(async (sessionId, _message, options) => {
+          options?.onEvent?.({ ...event, sessionId })
+          throw new Error("network connection reset")
+        })
+      await expect(manager.execute("agent-1", "perform work")).rejects.toThrow(
+        "network connection reset"
+      )
+      expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it.each<Partial<ExternalAgentResult>>([
+      { finalResponse: "Partial answer" },
+      {
+        messages: [
+          {
+            id: "answer",
+            role: "assistant",
+            timestamp: new Date(),
+            content: [{ type: "text", text: "Partial answer" }],
+          },
+        ],
+      },
+      { output: { partial: true } },
+      { tokenUsage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 } },
+    ])("does not replay a failed result with output evidence %#", async (evidence) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      const result: ExternalAgentResult = {
+        success: false,
+        sessionId: "s_1",
+        finalResponse: "",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+        error: "network connection reset",
+        ...evidence,
+      }
+      currentMock.executeImpl = jest.fn(async () => result)
+      expect(await manager.execute("agent-1", "perform work")).toMatchObject(result)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe("Codex native turn replay protection", () => {
+    const retryConfig = {
+      maxRetries: 3,
+      retryDelay: 0,
+      exponentialBackoff: false,
+      maxRetryDelay: 0,
+      retryOnErrors: ["cancelled"],
+    }
+
+    it.each([
+      "Request timeout: turn/start",
+      "429 Too many requests",
+      "401 Unauthorized: connection rejected",
+      "403 Forbidden: network access rejected",
+      "Codex app-server process exited with code 9",
+      "External agent execution was cancelled",
+    ])("does not replay a native turn after %s", async (message) => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server", retryConfig }))
+      currentMock.executeImpl = jest.fn(async () => {
+        throw new Error(message)
+      })
+
+      await expect(manager.execute("agent-1", "perform work")).rejects.toThrow(message)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not replay a failed native result after tools have already run", async () => {
+      const manager = freshManager()
+      protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+      await manager.addAgent(buildBaseConfig({ protocol: "codex-app-server", retryConfig }))
+      const failed: ExternalAgentResult = {
+        success: false,
+        sessionId: "s_1",
+        finalResponse: "",
+        error: "Connection reset after tool execution",
+        errorCode: "http_connection_failed",
+        messages: [],
+        steps: [],
+        toolCalls: [
+          { id: "edit-1", name: "edit", input: { path: "/work/a" }, status: "completed" },
+        ],
+        duration: 1,
+      }
+      currentMock.executeImpl = jest.fn(async () => failed)
+
+      expect(await manager.execute("agent-1", "perform work")).toMatchObject(failed)
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(1)
+    })
+
+    it("preserves the configured retry behavior for other adapters", async () => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ retryConfig }))
+      currentMock.executeImpl = jest.fn(async () => ({
+        success: true,
+        sessionId: "s_1",
+        finalResponse: "ok",
+        messages: [],
+        steps: [],
+        toolCalls: [],
+        duration: 1,
+      }))
+      currentMock.executeImpl.mockRejectedValueOnce(new Error("temporary network error"))
+
+      expect(await manager.execute("agent-1", "perform work")).toMatchObject({ success: true })
+      expect(currentMock.executeImpl).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it("execute increments stats and returns the result", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
@@ -1767,6 +2190,42 @@ describe("execute / cancel", () => {
     await m.addAgent(buildBaseConfig({ protocol: "acp" }))
     await m.execute("agent-1", "hi", { permissionMode: "bypassPermissions" })
     expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "bypassPermissions")
+  })
+
+  it.each(["execute", "streaming"])(
+    "%s applies the configured permission default when the caller omits a mode",
+    async (execution) => {
+      const manager = freshManager()
+      await manager.addAgent(buildBaseConfig({ defaultPermissionMode: "plan" }))
+      if (execution === "streaming") {
+        for await (const event of manager.executeStreaming("agent-1", "hi")) void event
+      } else {
+        await manager.execute("agent-1", "hi")
+      }
+      expect(currentMock.lastSessionOptions?.permissionMode).toBe("plan")
+      expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "plan")
+    }
+  )
+
+  it("lets an explicit execution mode override the configured default", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig({ defaultPermissionMode: "plan" }))
+    await manager.execute("agent-1", "hi", { permissionMode: "acceptEdits" })
+    expect(currentMock.lastSessionOptions?.permissionMode).toBe("acceptEdits")
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "acceptEdits")
+  })
+
+  it("applies default approval mode over an agent's native permissive initial mode", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig({ defaultPermissionMode: "default" }))
+    const createSession = currentMock.createSession.bind(currentMock)
+    jest.spyOn(currentMock, "createSession").mockImplementation(async (options) => {
+      const session = await createSession(options)
+      session.permissionMode = "acceptEdits"
+      return session
+    })
+    await manager.execute("agent-1", "hi")
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "default")
   })
 
   it("execute records failure and last error when result.success is false", async () => {
@@ -2092,6 +2551,26 @@ describe("Lifecycle and event listeners", () => {
 })
 
 describe("Health checks", () => {
+  it("does not restart a reconnect budget after health recovery exhausts it", async () => {
+    const manager = freshManager()
+    await manager.addAgent(
+      buildBaseConfig({
+        retryConfig: {
+          maxRetries: 1,
+          retryDelay: 0,
+          exponentialBackoff: false,
+          maxRetryDelay: 0,
+          retryOnErrors: [],
+        },
+      })
+    )
+    jest.spyOn(currentMock, "healthCheck").mockResolvedValue(false)
+    currentMock.connectImpl.mockClear()
+    currentMock.connectImpl.mockRejectedValue(new Error("connection refused"))
+    await manager.performHealthCheck().catch(() => undefined)
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+  })
+
   it("checkAgentHealth flips healthStatus", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
@@ -2322,5 +2801,192 @@ describe("plugin lifecycle — teardown / restore / peekInstance", () => {
     expect(ExternalAgentManager.peekInstance()).toBeNull()
     const m = freshManager()
     expect(ExternalAgentManager.peekInstance()).toBe(m)
+  })
+})
+
+describe("Cognia gateway task lifecycle", () => {
+  const binding = { providerId: "provider", modelId: "model", accountId: "account-one" }
+  const managedConfig = () =>
+    buildBaseConfig({
+      id: "managed",
+      transport: "stdio",
+      protocol: "acp",
+      process: { command: "opencode", cwd: "/workspace" },
+      metadata: { preset: "opencode-acp" },
+      cogniaModel: binding,
+    })
+  function prepare() {
+    jest.mocked(checkExternalAgentCommandExists).mockReset().mockResolvedValue(true)
+    const restorePlane = __setProcessPlaneDepsForTests({ hasLocalProcessTable: () => true })
+    const manager = freshManager()
+    const children: MockAdapter[] = []
+    protocolAdapterRegistry.register("acp", () => {
+      const adapter = new MockAdapter()
+      children.push(adapter)
+      return adapter as never
+    })
+    mockGatewayMint.mockImplementation(async () => ({
+      endpoint: "http://127.0.0.1:9900/v1",
+      secret: "lease-secret",
+      ticketId: `ticket-${mockGatewayMint.mock.calls.length}`,
+      model: "model",
+      binding,
+      modelMetadata: { id: "model", contextLength: 128000, maxOutputTokens: 8000 },
+    }))
+    return { manager, children, restorePlane }
+  }
+
+  it("never connects the saved configuration, isolates a task, revokes its lease and resumes the same native session", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      expect(children[0].connectImpl).not.toHaveBeenCalled()
+      const first = await manager.execute("managed", "first", {
+        context: { custom: { chatSessionId: "chat-one" } },
+      })
+      expect(first.success).toBe(true)
+      const parsed = parseGatewaySessionId(first.sessionId)!
+      expect(parsed.binding).toEqual(binding)
+      expect(mockGatewayRevoke).toHaveBeenCalledWith("ticket-1")
+      expect(children[1].isConnected()).toBe(false)
+      expect(manager.resolveConversationSessionId("managed", "chat-one")).toBe(first.sessionId)
+      const resume = new MockAdapter()
+      resume.resumeSessionImpl = jest.fn(async (id) => {
+        const session = await resume.createSession()
+        resume.sessions.delete(session.id)
+        session.id = id
+        resume.sessions.set(id, session)
+        return session
+      })
+      protocolAdapterRegistry.register("acp", () => resume as never)
+      const second = await manager.execute("managed", "second", { sessionId: first.sessionId })
+      expect(second.sessionId).toBe(first.sessionId)
+      expect(resume.resumeSessionImpl).toHaveBeenCalledWith(parsed.nativeSessionId)
+      expect(mockGatewayMint.mock.calls[1][0]).toMatchObject({
+        sessionId: parsed.taskId,
+        ...binding,
+      })
+      expect(mockGatewayRevoke).toHaveBeenCalledTimes(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("awaits the same teardown when abort and task cleanup race", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const controller = new AbortController()
+      const lease = await (
+        manager as unknown as {
+          prepareGatewayExecution(
+            id: string,
+            options: { signal: AbortSignal }
+          ): Promise<{ release(): Promise<void> }>
+        }
+      ).prepareGatewayExecution("managed", { signal: controller.signal })
+      let finishDisconnect!: () => void
+      const disconnect = jest.spyOn(children[1], "disconnect").mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finishDisconnect = resolve
+          })
+      )
+      controller.abort()
+      let cleaned = false
+      const cleanup = lease.release().then(() => {
+        cleaned = true
+      })
+      for (let i = 0; i < 10 && !finishDisconnect; i++) await Promise.resolve()
+      expect(disconnect).toHaveBeenCalledTimes(1)
+      expect(cleaned).toBe(false)
+      finishDisconnect()
+      await cleanup
+      expect(mockGatewayRevoke).toHaveBeenCalledTimes(1)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("retries failed teardown before allowing task deletion", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const lease = await (
+        manager as unknown as {
+          prepareGatewayExecution(id: string): Promise<{ release(): Promise<void> }>
+        }
+      ).prepareGatewayExecution("managed")
+      const disconnect = jest
+        .spyOn(children[1], "disconnect")
+        .mockRejectedValueOnce(new Error("stop failed"))
+      await expect(lease.release()).rejects.toThrow("stop failed")
+      await lease.release()
+      expect(disconnect).toHaveBeenCalledTimes(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("allows an explicit native-model opt-out for a new task", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      await manager.execute("managed", "native", { cogniaModel: null })
+      expect(children[0].connectImpl).toHaveBeenCalledTimes(1)
+      expect(mockGatewayMint).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("fails closed when minting or native resume fails", async () => {
+    const { manager, children, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      mockGatewayMint.mockRejectedValueOnce(new Error("gateway offline"))
+      await expect(manager.execute("managed", "hello")).rejects.toThrow("gateway offline")
+      expect(children).toHaveLength(1)
+      const first = await manager.execute("managed", "hello")
+      protocolAdapterRegistry.register("acp", () => new MockAdapter() as never)
+      await expect(
+        manager.execute("managed", "resume", { sessionId: first.sessionId })
+      ).rejects.toThrow("could not resume")
+      expect(mockGatewayRevoke).toHaveBeenCalledTimes(2)
+    } finally {
+      restorePlane()
+    }
+  })
+
+  it("reserves a resumed task before awaiting a new lease", async () => {
+    const { manager, restorePlane } = prepare()
+    try {
+      await manager.addAgent(managedConfig())
+      const first = await manager.execute("managed", "hello")
+      let finish!: (value: unknown) => void
+      mockGatewayMint.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+      const resumed = manager.execute("managed", "resume", { sessionId: first.sessionId })
+      await Promise.resolve()
+      await expect(
+        manager.execute("managed", "duplicate", { sessionId: first.sessionId })
+      ).rejects.toThrow("active run")
+      finish({
+        endpoint: "http://127.0.0.1:9900/v1",
+        secret: "new-lease",
+        ticketId: "resumed",
+        model: "model",
+        binding,
+        modelMetadata: { id: "model" },
+      })
+      await expect(resumed).rejects.toThrow("could not resume")
+      expect(mockGatewayRevoke).toHaveBeenCalledWith("resumed")
+    } finally {
+      restorePlane()
+    }
   })
 })

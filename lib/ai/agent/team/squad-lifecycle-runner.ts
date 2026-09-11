@@ -16,7 +16,12 @@
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { stackedDeliveryOn } from "@/lib/stack/team-policy"
-import type { AgentTeammate, SendMessageInput, TeamTaskStatus } from "@/types/agent/agent-team"
+import type {
+  AgentTeam,
+  AgentTeammate,
+  SendMessageInput,
+  TeamTaskStatus,
+} from "@/types/agent/agent-team"
 import type { AgentTeamRunStatus } from "@/types/agent/agent-team-runtime"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import type { AgentPermissionCeiling } from "@/types/agent/permission-ceiling"

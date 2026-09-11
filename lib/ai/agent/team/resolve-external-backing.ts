@@ -67,14 +67,18 @@ export async function resolveTeammateExternalAgent(
   const manager = getExternalAgentManager()
 
   // Reuse a live agent already created from this preset, else spawn one.
-  const existing = manager.getAllAgents().find((inst) => isFromPreset(inst.config) === presetId)
+  // A saved agent's gateway account belongs to that agent, not every team
+  // member using the same executable preset. Task bindings are passed at execute.
+  const existing = manager
+    .getAllAgents()
+    .find((inst) => isFromPreset(inst.config) === presetId && !inst.config.cogniaModel)
   let agentId: string
   if (existing) {
     agentId = existing.config.id
   } else {
     const config = createAgentFromPreset(presetId)
     if (!config) return null
-    await manager.addAgent(config)
+    await manager.addAgent(config, { connect: !teammate.config?.cogniaModel })
     agentId = config.id
   }
 

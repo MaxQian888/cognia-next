@@ -44,6 +44,24 @@ beforeEach(() => {
 })
 
 describe("ensureExternalAgentReady", () => {
+  it("registers a gateway task without launching the shared account environment", async () => {
+    getAgent.mockReturnValue({
+      ...config,
+      cogniaModel: { providerId: "gateway", modelId: "coder" },
+    })
+    await expect(ensureExternalAgentReady("pi-1")).resolves.toEqual({
+      ok: true,
+      alreadyConnected: false,
+    })
+    expect(managerAddAgent).toHaveBeenCalled()
+    expect(managerConnect).not.toHaveBeenCalled()
+  })
+
+  it("defers connection for a task-specific model override", async () => {
+    await ensureExternalAgentReady("pi-1", { deferConnect: true })
+    expect(managerAddAgent).toHaveBeenCalled()
+    expect(managerConnect).not.toHaveBeenCalled()
+  })
   it("registers an agent the manager has never been given, then connects it", async () => {
     // This is the gap that produced `Agent not found: <id>` on the first send:
     // the config was selectable while the manager's adapter map had no entry.

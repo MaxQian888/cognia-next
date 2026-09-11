@@ -131,6 +131,14 @@ describe("derived key lists", () => {
     }
   })
 
+  it("keeps update state, power policy and lock-screen wallpaper references on their host", () => {
+    for (const key of ["updateCenter", "sessionPowerPolicy", "lockScreen"] as const) {
+      expect(CROSS_PLATFORM_SETTING_KEYS).not.toContain(key)
+      expect(MOBILE_WRITABLE_SETTING_KEYS).not.toContain(key)
+    }
+    expect(SETTINGS_SYNC.lockScreen.category).toBe("device-local")
+  })
+
   it("keeps the wallpaper library on the device that holds its bytes", () => {
     // `wallpapers` is an array of *references into one machine's storage*, not
     // of values: `disk` is a path under that Tauri host's own appData and

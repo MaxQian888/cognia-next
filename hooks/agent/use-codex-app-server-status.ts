@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { CodexAppServerStatus } from "@/lib/ai/agent/external/codex-app-server-client"
 
 const EMPTY_STATUS: CodexAppServerStatus = { mcpServers: [], skills: [] }
@@ -25,10 +25,13 @@ export function useCodexAppServerStatus(
   const [status, setStatus] = useState<CodexAppServerStatus>(EMPTY_STATUS)
   const [loading, setLoading] = useState(false)
   const [available, setAvailable] = useState(false)
+  const generation = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!connected) return
+    const requestGeneration = generation.current
     const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+    if (generation.current !== requestGeneration) return
     const adapter = getExternalAgentManager().getCodexAppServerAdapter(agentId)
     if (!adapter) return
     setLoading(true)
@@ -40,24 +43,25 @@ export function useCodexAppServerStatus(
         adapter.refreshSkills(),
         adapter.refreshAccount(),
       ])
-      setStatus(adapter.getStatus())
+      if (generation.current === requestGeneration) setStatus(adapter.getStatus())
     } finally {
-      setLoading(false)
+      if (generation.current === requestGeneration) setLoading(false)
     }
   }, [agentId, connected])
 
   useEffect(() => {
+    generation.current += 1
     let active = true
     let unsubscribe: (() => void) | undefined
     void (async () => {
+      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+      if (!active) return
+      setStatus(EMPTY_STATUS)
+      setAvailable(false)
+      setLoading(false)
       if (!connected) {
-        if (active) {
-          setStatus(EMPTY_STATUS)
-          setAvailable(false)
-        }
         return
       }
-      const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
       const adapter = getExternalAgentManager().getCodexAppServerAdapter(agentId)
       if (!adapter || !active) return
       setAvailable(true)
@@ -65,9 +69,19 @@ export function useCodexAppServerStatus(
       unsubscribe = adapter.onStatusUpdate((next) => {
         if (active) setStatus(next)
       })
-      void refresh()
+      // MCP inventory discovery launches processes in Codex. Mounting a status
+      // card must only subscribe to those already reported by the server;
+      // discovering tools remains an explicit refresh action.
+      setLoading(true)
+      try {
+        await Promise.all([adapter.refreshAccount(), adapter.refreshSkills()])
+        if (active) setStatus(adapter.getStatus())
+      } finally {
+        if (active) setLoading(false)
+      }
     })()
     return () => {
+      generation.current += 1
       active = false
       unsubscribe?.()
     }

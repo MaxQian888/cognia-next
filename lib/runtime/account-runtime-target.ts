@@ -242,24 +242,31 @@ export async function registerCompanionRuntimeTarget(
     getContext: getActiveRuntimeTargetContext,
     activateDatabase: activateAccountDatabase,
     setContext: setActiveRuntimeTargetContext,
-  }
+  },
+  isCurrent?: () => boolean
 ): Promise<RuntimeTargetRecord | null> {
   const scope = dependencies.getContext()
   const accountId = config.accountId ?? scope?.accountId
   if (!accountId) return null
   const targetId = config.targetId ?? (await deriveCompanionRuntimeTargetId(config))
+  if (isCurrent && !isCurrent()) return null
   const hostname = new URL(config.baseUrl).hostname
-  const activated = await dependencies.registry.upsertAndActivateCompanionTarget({
+  const input = {
     accountId,
     id: targetId,
     label: hostname,
-    hostKind: classifyWsHost(config.baseUrl) === "ws-lan" ? "desktop" : "cloud",
+    hostKind:
+      classifyWsHost(config.baseUrl) === "ws-lan" ? ("desktop" as const) : ("cloud" as const),
     baseUrl: config.baseUrl,
     deviceId: config.deviceId,
     serverVersion: config.serverVersion,
     serverFingerprint: config.serverFingerprint,
     credentialRef: `companion-host:${encodeURIComponent(accountId)}:${encodeURIComponent(targetId)}:device-private-jwk`,
-  })
+  }
+  const activated = isCurrent
+    ? await dependencies.registry.upsertAndActivateCompanionTarget(input, isCurrent)
+    : await dependencies.registry.upsertAndActivateCompanionTarget(input)
+  if (isCurrent && !isCurrent()) return null
   dependencies.activateDatabase(accountId, activated.id)
   dependencies.setContext(accountId, activated.id)
   return activated

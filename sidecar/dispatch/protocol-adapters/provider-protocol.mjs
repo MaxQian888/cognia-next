@@ -70,6 +70,7 @@ export const PROVIDER_PROTOCOL = Object.freeze({
   openai: "openai",
   openrouter: "openai",
   opencode: "openai",
+  commandcode: "openai",
   "opencode-go": "openai",
   codex: "openai",
   deepseek: "openai",
@@ -97,7 +98,11 @@ export const PROVIDER_PROTOCOL = Object.freeze({
  * an unknown id — the caller must then rely on an explicit
  * `providerCredentials.protocol` (custom providers always carry one).
  */
-export function resolveProviderProtocol(providerId) {
+export function resolveProviderProtocol(providerId, modelId) {
+  // CommandCode's documented endpoints reject the wrong model family.
+  if (providerId === "commandcode" && typeof modelId === "string") {
+    return /(^|\/)claude-/.test(modelId) ? "anthropic" : "openai"
+  }
   return PROVIDER_PROTOCOL[providerId] ?? null
 }
 
@@ -199,6 +204,7 @@ export function isOpenAiNativeSurface({ providerId, baseURL } = {}) {
  * renderer (`provider-core/client.ts:getProviderModel`) so they never disagree.
  *
  * Precedence:
+ *   0. CommandCode's OpenAI surface only supports Chat Completions.
  *   1. An explicit user `apiFlavor` ("responses" | "chat") always wins — this is
  *      what unlocks the Responses API on Azure OpenAI, on compatible gateways
  *      that proxy /responses, and on custom base URLs (the host heuristic alone
@@ -212,6 +218,7 @@ export function isOpenAiNativeSurface({ providerId, baseURL } = {}) {
  * @returns {"responses"|"chat"}
  */
 export function decideOpenAiEndpointFlavor({ apiFlavor, baseURL, providerId } = {}) {
+  if (providerId === "commandcode") return "chat"
   if (apiFlavor === "responses") return "responses"
   if (apiFlavor === "chat") return "chat"
   if (providerId && RESPONSES_ONLY_PROVIDERS.has(providerId)) return "responses"

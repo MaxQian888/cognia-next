@@ -1,4 +1,4 @@
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "@cognia/agent-trace"
 import type { AgentTraceSpanEvent, ClaudeEvent } from "@cognia/agent-config-types"
 
 const listeners: Array<(evt: ClaudeEvent) => void> = []

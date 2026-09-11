@@ -226,3 +226,84 @@ it("atomically upserts and activates a completed Companion pairing", async () =>
   })
   await expect(registry.getActiveTarget(ACCOUNT_ID)).resolves.toEqual(target)
 })
+
+it("rolls back hydration activation when its guard expires inside the transaction", async () => {
+  const registry = new RuntimeTargetRegistry()
+  const previous = await registry.ensureDefaultActiveTarget(ACCOUNT_ID, 5)
+  let checks = 0
+  await expect(
+    registry.upsertAndActivateCompanionTarget(
+      {
+        accountId: ACCOUNT_ID,
+        id: "companion-cancelled",
+        label: "cancelled",
+        hostKind: "desktop",
+        baseUrl: "https://cancelled.example",
+        deviceId: "cancelled-device",
+        serverVersion: "2.0.0",
+        credentialRef: "cancelled-credential",
+      },
+      () => ++checks < 2
+    )
+  ).rejects.toThrow("activation cancelled")
+  expect(checks).toBe(2)
+  expect(await registry.getActiveTarget(ACCOUNT_ID)).toEqual(previous)
+  expect((await registry.listTargets(ACCOUNT_ID)).map((target) => target.id)).toEqual([previous.id])
+})
+
+it("keeps the active target when revisiting defaults and deleting an inactive Host", async () => {
+  const registry = new RuntimeTargetRegistry()
+  const current = await registry.ensureDefaultActiveTarget(ACCOUNT_ID, 1)
+  expect(await registry.ensureStandaloneTarget(ACCOUNT_ID, 2)).toEqual(current)
+  expect(await registry.ensureDefaultActiveTarget(ACCOUNT_ID, 3)).toEqual(current)
+  await registry.addTarget({
+    accountId: ACCOUNT_ID,
+    id: "host-old",
+    kind: "companion",
+    hostKind: "desktop",
+    label: " Old Host ",
+  })
+  await registry.deleteTarget(ACCOUNT_ID, "host-old")
+  await expect(registry.activateTarget(ACCOUNT_ID, "host-missing")).rejects.toThrow(
+    "does not exist"
+  )
+  expect(await registry.getActiveTarget(ACCOUNT_ID)).toEqual(current)
+  expect(await registry.listTargets(ACCOUNT_ID)).toEqual([current])
+  registry.close()
+})
+
+it.each([
+  { id: "../invalid", kind: "standalone" as const, label: "Valid" },
+  { id: "target-valid", kind: "standalone" as const, label: "   " },
+  { id: "target-valid", kind: "standalone" as const, label: "Valid", hostKind: "desktop" as const },
+])("refuses invalid target creation without persisting rows: %p", async (input) => {
+  const registry = new RuntimeTargetRegistry()
+  await expect(registry.addTarget({ accountId: ACCOUNT_ID, ...input })).rejects.toThrow()
+  expect(await registry.listTargets(ACCOUNT_ID)).toEqual([])
+  registry.close()
+})
+
+it("refreshes a paired Host without changing its creation time and refuses cancelled reactivation", async () => {
+  const registry = new RuntimeTargetRegistry()
+  const input = {
+    accountId: ACCOUNT_ID,
+    id: "host-update",
+    label: "Host",
+    hostKind: "cloud" as const,
+    baseUrl: "https://host.example",
+    deviceId: "host-device",
+    serverVersion: "2.0.0",
+    credentialRef: "credential-ref",
+    now: 10,
+  }
+  await registry.upsertAndActivateCompanionTarget(input)
+  const updated = await registry.upsertCompanionTarget({ ...input, label: "Updated", now: 20 })
+  expect(updated).toMatchObject({ createdAt: 10, lastUsedAt: 10, updatedAt: 20 })
+  const active = await registry.upsertAndActivateCompanionTarget({ ...input, now: 30 }, () => true)
+  expect(active).toMatchObject({ createdAt: 10, lastUsedAt: 30 })
+  await expect(
+    registry.upsertAndActivateCompanionTarget({ ...input, label: "Stale", now: 40 }, () => false)
+  ).rejects.toThrow("cancelled")
+  expect(await registry.getActiveTarget(ACCOUNT_ID)).toEqual(active)
+  registry.close()
+})

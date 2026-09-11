@@ -1,6 +1,7 @@
 import { buildLeadExecutionConfig, LeadProviderConfigurationError } from "./lead-execution"
 import type { AppSettings } from "@cognia/agent-config-types"
 import type { AgentTeammate } from "@/types/agent/agent-team"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 function makeLead(config: AgentTeammate["config"] = {}): Pick<AgentTeammate, "config"> {
   return { config }
@@ -35,6 +36,22 @@ describe("buildLeadExecutionConfig", () => {
     expect(cfg.provider).toBeUndefined()
     expect(cfg.defaultProvider).toBe("anthropic")
     expect(cfg.model).toBe("claude-opus-4-8")
+  })
+
+  it("does not inherit an app default that belongs to an external agent", () => {
+    // The composer writes an agent's own model into the app default when a
+    // model is picked on a chat with no row yet. It names no provider model, so
+    // inheriting it here put the team lead on an id nothing can dispatch.
+    const cfg = buildLeadExecutionConfig({
+      lead: makeLead(),
+      settings: makeSettings({
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: externalAgentProviderId("pi-rpc"),
+      }),
+    })
+
+    expect(cfg.model).toBeUndefined()
+    expect(cfg.defaultProvider).toBeUndefined()
   })
 
   it("prefers an explicit lead provider and model over the application defaults", () => {

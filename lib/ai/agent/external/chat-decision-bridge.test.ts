@@ -6,6 +6,7 @@ import type {
 } from "@/types/agent/external-agent"
 
 import {
+  deliverExternalElicitation,
   EXTERNAL_AGENT_APPROVAL_PREFIX,
   __resetExternalApprovalsForTests,
   externalApprovalRequestId,
@@ -357,3 +358,121 @@ describe("elicitationCancelResponse", () => {
     ).toEqual({ requestId: "q1", action: "cancel" })
   })
 })
+
+const mockLocalElicitation = jest.fn()
+const mockRemoteElicitation = jest.fn()
+jest.mock("./manager", () => ({
+  getExternalAgentManager: () => ({ respondToElicitation: mockLocalElicitation }),
+}))
+jest.mock("./remote-run-client", () => ({
+  resolveRemoteElicitation: (...args: unknown[]) => mockRemoteElicitation(...args),
+}))
+
+describe("elicitation delivery failures", () => {
+  const entry = {
+    chatSessionId: "chat",
+    agentId: "agent",
+    request: { id: "q", mode: "form" as const, message: "Continue?", raw: {} },
+  }
+  const response = { requestId: "q", action: "accept" as const, content: { ok: true } }
+  beforeEach(() => {
+    mockLocalElicitation.mockReset()
+    mockRemoteElicitation.mockReset().mockResolvedValue({ resolved: true })
+  })
+  it.each([false, true])("propagates explicit response failure on remote=%s", async (remote) => {
+    const send = remote ? mockRemoteElicitation : mockLocalElicitation
+    send.mockRejectedValueOnce(new Error("offline"))
+    await expect(
+      deliverExternalElicitation(
+        { ...entry, ...(remote ? { remoteDecisionId: "decision" } : {}) },
+        response,
+        { strict: true }
+      )
+    ).rejects.toThrow("offline")
+  })
+  it.each([false, true])("keeps lifecycle cleanup best effort on remote=%s", async (remote) => {
+    const send = remote ? mockRemoteElicitation : mockLocalElicitation
+    send.mockRejectedValueOnce(new Error("gone"))
+    await expect(
+      deliverExternalElicitation(
+        { ...entry, ...(remote ? { remoteDecisionId: "decision" } : {}) },
+        { requestId: "q", action: "cancel" }
+      )
+    ).resolves.toBeUndefined()
+  })
+  it.each([false, true])("delivers a strict response on remote=%s", async (remote) => {
+    await deliverExternalElicitation(
+      { ...entry, ...(remote ? { remoteDecisionId: "decision" } : {}) },
+      response,
+      { strict: true }
+    )
+    expect(remote ? mockRemoteElicitation : mockLocalElicitation).toHaveBeenCalledWith(
+      remote ? "decision" : "agent",
+      response
+    )
+  })
+})
+
+it("keeps remote decision provenance and tolerates missing optional tool/session data", () => {
+  const approval = registerExternalApproval({
+    agentId: "remote",
+    chatSessionId: "chat",
+    event: event(
+      { toolInfo: undefined, rawInput: undefined, toolCallId: "tool-call", sessionId: undefined },
+      ""
+    ),
+    remoteDecisionId: "host-question",
+  })!
+  expect(approval).toMatchObject({ toolUseID: "tool-call", toolName: "unknown", input: {} })
+  expect(getExternalApprovalTarget(approval.requestId)).toMatchObject({
+    externalSessionId: "chat",
+    remoteDecisionId: "host-question",
+  })
+  const pending = registerExternalElicitation({
+    agentId: "remote",
+    chatSessionId: "chat",
+    event: {
+      type: "elicitation_request",
+      timestamp: new Date(),
+      sessionId: "external",
+      request: { id: "question", mode: "form", message: "?", raw: {} },
+    },
+    remoteDecisionId: "host-elicitation",
+  })
+  expect(pending?.remoteDecisionId).toBe("host-elicitation")
+})
+
+it("uses tool parameters when raw input is absent and falls back to allow-always if required", () => {
+  const approval = registerExternalApproval({
+    agentId: "a",
+    chatSessionId: "chat",
+    event: event({
+      rawInput: undefined,
+      toolInfo: { id: "tool", name: "Read", parameters: { path: "file" } },
+    }),
+  })
+  expect(approval?.input).toEqual({ path: "file" })
+  expect(
+    pickPermissionOptionId("allow", [{ optionId: "always", name: "Always", kind: "allow_always" }])
+  ).toBe("always")
+})
+
+it.each(["wrong-device", "unknown"])(
+  "treats a host refusal (%s) as failed explicit delivery",
+  async (reason) => {
+    const entry = {
+      chatSessionId: "chat",
+      agentId: "agent",
+      remoteDecisionId: "decision",
+      request: { id: "q", mode: "form" as const, message: "?", raw: {} },
+    }
+    mockRemoteElicitation.mockResolvedValueOnce({ resolved: false, reason })
+    await expect(
+      deliverExternalElicitation(entry, { requestId: "q", action: "accept" }, { strict: true })
+    ).rejects.toThrow("was not accepted")
+    mockRemoteElicitation.mockResolvedValueOnce({ resolved: false, reason })
+    await expect(
+      deliverExternalElicitation(entry, { requestId: "q", action: "cancel" })
+    ).resolves.toBeUndefined()
+  }
+)

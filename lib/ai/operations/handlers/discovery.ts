@@ -27,11 +27,15 @@ import {
   discoverLocalProviderModels,
   discoverOpenAICompatibleModels,
   discoverOpenRouterModels,
+  parseProviderModelWire,
+  parseProviderModelsWire,
   type DiscoveredProviderModel,
 } from "@cognia/provider-core/providers/model-discovery"
 import { getCatalogModelsForProvider } from "@cognia/provider-core/providers/models-dev-sync"
 import { discoverBedrockModelsViaSidecar } from "@/lib/claude/feature-call"
 import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import type { SubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
 
 import { credentialAffinityOf } from "../credential-affinity"
 import { ProviderOperationFailureError } from "../failure"
@@ -80,10 +84,6 @@ function requireBaseURL(provider: ResolvedProvider): string {
   return provider.baseURL
 }
 
-interface AnthropicModelsWire {
-  data?: Array<{ id: string; display_name?: string }>
-}
-
 interface GoogleModelsWire {
   models?: Array<{
     name: string
@@ -95,13 +95,28 @@ interface GoogleModelsWire {
 }
 
 const anthropicLister: RemoteLister = async (provider, signal) => {
-  const { json } = await providerRequest<AnthropicModelsWire>(provider, { path: "models", signal })
-  return (json.data ?? []).map((model) => ({
-    id: model.id,
-    name: model.display_name ?? model.id,
-    supportsTools: true,
-    supportsStreaming: true,
-  }))
+  const models = new Map<string, ProviderModelCandidate>()
+  const cursors = new Set<string>()
+  let path = "models"
+  for (let page = 0; page < 100; page++) {
+    signal?.throwIfAborted()
+    const { json } = await providerRequest<Record<string, unknown>>(provider, { path, signal })
+    const entries = parseProviderModelsWire(json)
+    for (const model of entries) models.set(model.id, model)
+    if (json.has_more === undefined || json.has_more === false) return [...models.values()]
+    if (
+      json.has_more !== true ||
+      !entries.length ||
+      typeof json.last_id !== "string" ||
+      !json.last_id ||
+      cursors.has(json.last_id)
+    ) {
+      throw new Error("Provider returned invalid models pagination")
+    }
+    cursors.add(json.last_id)
+    path = `models?after_id=${encodeURIComponent(json.last_id)}`
+  }
+  throw new Error("Provider models pagination exceeded 100 pages")
 }
 
 const googleLister: RemoteLister = async (provider, signal) => {
@@ -115,14 +130,24 @@ const googleLister: RemoteLister = async (provider, signal) => {
       id: model.name.replace(/^models\//, ""),
       name: model.displayName ?? model.name,
       contextLength: model.inputTokenLimit,
+      maxInputTokens: model.inputTokenLimit,
       maxOutputTokens: model.outputTokenLimit,
       supportsTools: true,
       supportsStreaming: true,
     }))
 }
 
-const openAiCompatibleLister: RemoteLister = (provider) =>
-  discoverOpenAICompatibleModels({ baseURL: requireBaseURL(provider), apiKey: provider.apiKey })
+const openAiCompatibleLister: RemoteLister = (provider, signal) =>
+  discoverOpenAICompatibleModels({
+    baseURL: requireBaseURL(provider),
+    apiKey: provider.apiKey,
+    ...(signal ? { signal } : {}),
+  })
+
+const subscriptionOpenAiLister: RemoteLister = async (provider, signal) => {
+  const { json } = await providerRequest(provider, { path: "models", signal })
+  return parseProviderModelsWire(json)
+}
 
 const bedrockLister: RemoteLister = (provider, signal) =>
   discoverBedrockModelsViaSidecar(
@@ -183,7 +208,14 @@ export const REMOTE_LISTERS_BY_PROTOCOL: ReadonlyMap<ResolvedProvider["protocol"
     ["openai", openAiCompatibleLister],
   ])
 
-function remoteListerFor(provider: ResolvedProvider): RemoteLister | undefined {
+function remoteListerFor(
+  provider: ResolvedProvider,
+  subscription?: SubscriptionProviderDefinition
+): RemoteLister | undefined {
+  if (subscription?.source === "plugin" || subscription?.source === "custom") {
+    if (!subscription.modelApi?.list) return undefined
+    return provider.protocol === "anthropic" ? anthropicLister : subscriptionOpenAiLister
+  }
   const entry = getBuiltInProviderCatalogEntry(provider.providerId)
   if (entry && !builtInProviderSurfaceFacts(entry).modelsEndpoint) return undefined
   return (
@@ -192,8 +224,78 @@ function remoteListerFor(provider: ResolvedProvider): RemoteLister | undefined {
   )
 }
 
-function catalogModelsOf(providerId: string): ProviderModelCandidate[] | undefined {
+function catalogModelsOf(
+  providerId: string,
+  subscription?: SubscriptionProviderDefinition
+): ProviderModelCandidate[] | undefined {
+  if (subscription?.source === "plugin" || subscription?.source === "custom") {
+    return subscription.modelMetadata ?? subscription.models?.map((id) => ({ id }))
+  }
   return getBuiltInProviderCatalogEntry(providerId)?.models?.map((model) => ({ ...model }))
+}
+
+function subscriptionDefinitionOf(
+  provider: ResolvedProvider,
+  settings: ProviderSettingsSnapshot,
+  subscription?: SubscriptionProviderDefinition
+): SubscriptionProviderDefinition | undefined {
+  const providerId = provider.providerId
+  if (subscription && subscription.id !== providerId) {
+    throw new ProviderOperationFailureError({
+      code: "schema",
+      retryable: false,
+      message: "Subscription definition does not match the requested provider",
+    })
+  }
+  const registered = subscription ?? getSubscriptionProvider(providerId)
+  if (registered) return registered
+  const custom = settings.customProviders.find((entry) => entry.id === providerId)
+  if (!custom?.subscription) return undefined
+  const protocol = custom.protocol ?? provider.protocol
+  const modelApi = custom.subscription.modelApi
+  if (
+    (protocol !== "openai" && protocol !== "anthropic") ||
+    (modelApi !== undefined &&
+      (!modelApi ||
+        typeof modelApi !== "object" ||
+        Array.isArray(modelApi) ||
+        typeof modelApi.list !== "boolean" ||
+        (modelApi.retrieve !== undefined && typeof modelApi.retrieve !== "boolean") ||
+        Object.keys(modelApi).some((key) => key !== "list" && key !== "retrieve")))
+  ) {
+    throw new ProviderOperationFailureError({
+      code: "schema",
+      retryable: false,
+      message: "Custom subscription has an invalid model API declaration",
+    })
+  }
+  return {
+    id: providerId,
+    name: custom.name,
+    authMode: "api-key",
+    source: "custom",
+    protocol: protocol === "anthropic" ? "anthropic" : "openai",
+    baseUrl: custom.baseURL ?? provider.baseURL,
+    models: custom.models?.map((model) => model.id),
+    modelMetadata: custom.models?.map((model) => ({ ...model })),
+    modelApi,
+    ...(custom.apiFlavor === "chat" || custom.apiFlavor === "responses"
+      ? { apiFlavor: custom.apiFlavor }
+      : {}),
+  }
+}
+
+function assertSubscriptionActive(
+  providerId: string,
+  subscription?: SubscriptionProviderDefinition
+) {
+  if (subscription?.source === "plugin" && getSubscriptionProvider(providerId) !== subscription) {
+    throw new ProviderOperationFailureError({
+      code: "capability-unsupported",
+      retryable: false,
+      message: "Subscription plugin is no longer active",
+    })
+  }
 }
 
 function curatedModelsOf(
@@ -202,29 +304,37 @@ function curatedModelsOf(
 ): ProviderModelCandidate[] | undefined {
   if (!provider.isCustomProvider) return undefined
   const definition = settings.customProviders.find((custom) => custom.id === provider.providerId)
-  return definition?.models?.map((model) => ({
-    id: model.id,
-    name: model.name,
-    contextLength: model.contextLength,
-  }))
+  return definition?.models?.map((model) => ({ ...model }))
 }
 
 export async function listProviderModels(input: {
   provider: ResolvedProvider
   settings: ProviderSettingsSnapshot
+  /** Host-owned definition for an unsaved/custom subscription preview. */
+  subscription?: SubscriptionProviderDefinition
   deploymentRef?: string
   /** `true` forces a live vendor listing, absent reuses a fresh stored one. */
   refresh?: boolean
   signal?: AbortSignal
   now?: number
-  persistence?: ProviderOperationPersistence
+  persistence?: Pick<ProviderOperationPersistence, "readInventory" | "writeInventory">
 }): Promise<ModelsListOutput> {
   const { provider, settings } = input
   const persistence = input.persistence ?? providerOperationPersistence
   const now = input.now ?? Date.now()
   const deploymentRef = input.deploymentRef ?? provider.providerId
-  const accountRef = credentialAffinityOf(provider.apiKey)
-  const lister = remoteListerFor(provider)
+  const subscription = subscriptionDefinitionOf(provider, settings, input.subscription)
+  assertSubscriptionActive(provider.providerId, subscription)
+  input.signal?.throwIfAborted()
+  const accountRef = credentialAffinityOf(
+    JSON.stringify([
+      provider.apiKey,
+      provider.baseURL?.replace(/\/+$/, ""),
+      provider.protocol,
+      provider.headers,
+    ])
+  )
+  const lister = remoteListerFor(provider, subscription)
 
   let remoteModels: ProviderModelCandidate[] | undefined
   let freshness: ModelsListOutput["freshness"] = "static"
@@ -247,7 +357,11 @@ export async function listProviderModels(input: {
   if (lister && !remoteModels) {
     try {
       remoteModels = await lister(provider, input.signal)
+      input.signal?.throwIfAborted()
+      assertSubscriptionActive(provider.providerId, subscription)
     } catch (error) {
+      input.signal?.throwIfAborted()
+      assertSubscriptionActive(provider.providerId, subscription)
       await persistence.writeInventory({
         id: `deployment:${deploymentRef}`,
         deploymentRef,
@@ -276,13 +390,17 @@ export async function listProviderModels(input: {
       expiresAt: now + INVENTORY_TTL_MS,
     })
   }
+  input.signal?.throwIfAborted()
+  assertSubscriptionActive(provider.providerId, subscription)
   const snapshot = buildProviderModelDiscoverySnapshot({
     providerId: provider.providerId,
-    catalogModels: catalogModelsOf(provider.providerId),
+    catalogModels: catalogModelsOf(provider.providerId, subscription),
     modelsDevModels: getCatalogModelsForProvider(provider.providerId),
     remoteModels,
     remoteLastFetchedAt,
-    userCuratedModels: curatedModelsOf(provider, settings),
+    userCuratedModels:
+      subscription?.source === "custom" ? undefined : curatedModelsOf(provider, settings),
+    remoteOverridesCatalog: subscription?.source === "plugin" || subscription?.source === "custom",
   })
   return {
     models: snapshot.models,
@@ -323,6 +441,59 @@ function modelsListHandler(
   }
 }
 
+export async function getProviderModel(input: {
+  provider: ResolvedProvider
+  settings: ProviderSettingsSnapshot
+  subscription?: SubscriptionProviderDefinition
+  model: string
+  deploymentRef?: string
+  signal?: AbortSignal
+  persistence?: Pick<ProviderOperationPersistence, "readInventory" | "writeInventory">
+}): Promise<ModelsGetOutput> {
+  const { provider, settings, signal, model: modelId } = input
+  const subscription = subscriptionDefinitionOf(provider, settings, input.subscription)
+  assertSubscriptionActive(provider.providerId, subscription)
+  if (
+    subscription?.modelApi?.retrieve ||
+    (provider.providerId === "anthropic" && provider.protocol === "anthropic")
+  ) {
+    signal?.throwIfAborted()
+    const { json } = await providerRequest(provider, {
+      path: `models/${encodeURIComponent(modelId)}`,
+      signal,
+    })
+    signal?.throwIfAborted()
+    assertSubscriptionActive(provider.providerId, subscription)
+    const retrieved = parseProviderModelWire(json)
+    const snapshot = buildProviderModelDiscoverySnapshot({
+      providerId: provider.providerId,
+      catalogModels: catalogModelsOf(provider.providerId, subscription),
+      modelsDevModels: getCatalogModelsForProvider(provider.providerId),
+      remoteModels: [retrieved],
+      remoteLastFetchedAt: Date.now(),
+      userCuratedModels:
+        subscription?.source === "custom" ? undefined : curatedModelsOf(provider, settings),
+      remoteOverridesCatalog:
+        subscription?.source === "plugin" || subscription?.source === "custom",
+    })
+    return {
+      model: snapshot.models.find((model) => model.id === retrieved.id) ?? null,
+      source: "remote-discovered",
+      freshness: "fresh",
+    }
+  }
+  const listed = await listProviderModels({
+    provider,
+    settings,
+    subscription: input.subscription,
+    deploymentRef: input.deploymentRef,
+    signal,
+    persistence: input.persistence,
+  })
+  const model = listed.models.find((candidate) => candidate.id === modelId) ?? null
+  return { model, source: listed.source, freshness: listed.freshness }
+}
+
 export const modelsGetHandler: ProviderOperationHandlerRegistration<
   ModelsGetInput,
   ModelsGetOutput
@@ -330,16 +501,14 @@ export const modelsGetHandler: ProviderOperationHandlerRegistration<
   operationId: "models.get",
   providerMatch: { kind: "any" },
   support: "derived",
-  async handler({ provider, settings, request, signal }) {
-    const listed = await listProviderModels({
+  handler: ({ provider, settings, request, signal }) =>
+    getProviderModel({
       provider,
       settings,
+      model: request.input.model,
       deploymentRef: request.deploymentRef,
       signal,
-    })
-    const model = listed.models.find((candidate) => candidate.id === request.input.model) ?? null
-    return { model, source: listed.source, freshness: listed.freshness }
-  },
+    }),
 }
 
 export const DISCOVERY_HANDLERS: ProviderOperationHandlerRegistration[] = [

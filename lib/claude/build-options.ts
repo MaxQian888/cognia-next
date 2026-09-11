@@ -1,3 +1,4 @@
+import { getAllProviders } from "@cognia/provider-types/provider"
 // Pure helper that resolves the final SendOptions for a turn by merging:
 //   1. App-wide defaults (settings store)
 //   2. Character config (if session.characterId is set)
@@ -19,6 +20,7 @@ import {
   externalAgentIdFromProviderId,
   isExternalAgentProviderId,
 } from "@/lib/ai/agent/external/session-models"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { detectHostProfile } from "@/lib/platform/capabilities"
@@ -121,6 +123,9 @@ import {
 import { isLocalProvider } from "@cognia/provider-core/providers/local-providers"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { isUltracodeLevel, resolveThinkingLevel } from "@/lib/ai/thinking-level"
+import { resolveCommandcodeVaultCredential } from "@/lib/subscription/commandcode/chat-bridge"
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
+import { resolveManagedSubscriptionCredential } from "@/lib/subscription/core/managed-key-credential"
 import { resolveOpencodeVaultCredential } from "@/lib/subscription/opencode/chat-bridge"
 import { resolveCodexVaultCredential } from "@/lib/subscription/codex/chat-bridge"
 import {
@@ -129,7 +134,11 @@ import {
   isOpencodeChatProviderId,
 } from "@/types/subscription"
 import { getBuiltInProviderDefaultModel } from "@cognia/provider-types/built-in-provider-catalog"
-import { getModelConfig } from "@cognia/provider-types/provider"
+import {
+  resolveModelContextLength,
+  resolveModelMaxOutputTokens,
+  resolveModelMeta,
+} from "@/lib/ai/model-options"
 import { getModelContextWindow } from "@/lib/claude/usage"
 import { processPromptTemplateVariables } from "@/stores/agent/custom-mode-store/helpers"
 import {
@@ -212,14 +221,24 @@ function buildProtocolAdapterSpec(
 async function resolveSubscriptionBackedSummaryCredentials(
   providerId: string,
   resolved?: { apiKey?: string; baseURL?: string },
-  accountId?: string | null
+  accountId?: string | null,
+  appSettings?: AppSettings
 ): Promise<SummaryCredentials | null> {
+  const definition = getSubscriptionProvider(providerId, appSettings?.customProviders)
+  if (!resolved?.apiKey && definition?.authMode === "api-key" && !definition.legacyCredentialKind) {
+    return resolveManagedSubscriptionCredential(definition, accountId)
+  }
+  if (providerId === "commandcode" && !resolved?.apiKey) {
+    return resolveCommandcodeVaultCredential(providerId, accountId)
+  }
+
   if (isOpencodeChatProviderId(providerId) && !resolved?.apiKey) {
     const vaultCred = await resolveOpencodeVaultCredential(providerId, accountId)
     if (!vaultCred) return null
     return {
       apiKey: vaultCred.apiKey,
       baseURL: resolved?.baseURL ?? vaultCred.baseURL,
+      ...(vaultCred.headers ? { headers: vaultCred.headers } : {}),
     }
   }
 
@@ -253,6 +272,12 @@ async function resolveSummaryProviderForCompaction(args: {
   summaryModel?: string
   appSettings: AppSettings
 }): Promise<SummaryProviderResolution | null> {
+  if (
+    args.providerId.includes(":") &&
+    !getAllProviders()[args.providerId] &&
+    !args.appSettings.customProviders?.some((provider) => provider.id === args.providerId)
+  )
+    return null
   const accountId = resolveAccountId(args.providerId, null, null, args.appSettings)
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: args.appSettings.defaultProvider,
@@ -276,12 +301,15 @@ async function resolveSummaryProviderForCompaction(args: {
     const vaultCredentials = await resolveSubscriptionBackedSummaryCredentials(
       args.providerId,
       { apiKey: r.apiKey, baseURL: r.baseURL },
-      accountId
+      accountId,
+      args.appSettings
     )
     const credentials: SummaryCredentials = vaultCredentials ?? {
       apiKey: r.apiKey,
       baseURL: r.baseURL,
     }
+    const definition = getSubscriptionProvider(args.providerId, args.appSettings.customProviders)
+    if (definition?.authMode === "api-key" && !credentials.apiKey) return null
     // A summary credential with no API key is only legitimate for a genuinely
     // keyless provider: a local inference engine (Ollama / LM Studio / …) or a
     // user-configured custom provider (self-hosted, base URL typed by hand). For
@@ -292,11 +320,16 @@ async function resolveSummaryProviderForCompaction(args: {
     const keylessAllowed = isLocalProvider(args.providerId) || r.isCustomProvider
     if (!credentials.apiKey && !keylessAllowed) return null
     if (!credentials.apiKey && !credentials.baseURL) return null
-    if (r.apiFlavor) credentials.apiFlavor = r.apiFlavor
-    const protocolAdapterSpec = await buildProtocolAdapterSpec(r.protocol)
+    if (definition?.source === "plugin" && definition.protocol === "openai") {
+      credentials.apiFlavor = definition.apiFlavor ?? "chat"
+    } else if (!credentials.apiFlavor && r.apiFlavor) {
+      credentials.apiFlavor = r.apiFlavor
+    }
+    const protocol = definition?.source === "plugin" ? definition.protocol! : r.protocol
+    const protocolAdapterSpec = await buildProtocolAdapterSpec(protocol)
     return {
-      model: args.summaryModel ?? r.model,
-      protocol: r.protocol,
+      model: args.summaryModel ?? r.model ?? definition?.models?.[0],
+      protocol,
       providerId: args.providerId,
       credentials,
       ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
@@ -305,17 +338,23 @@ async function resolveSummaryProviderForCompaction(args: {
 
   if (r.nextAction === "enable_provider") return null
 
-  if (isOpencodeChatProviderId(args.providerId) || isCodexChatProviderId(args.providerId)) {
+  const definition = getSubscriptionProvider(args.providerId, args.appSettings.customProviders)
+  if (definition && definition.authMode !== "anthropic-oauth") {
     const credentials = await resolveSubscriptionBackedSummaryCredentials(
       args.providerId,
       undefined,
-      accountId
+      accountId,
+      args.appSettings
     )
     if (!credentials) return null
-    const protocolAdapterSpec = await buildProtocolAdapterSpec("openai")
+    const protocol = definition.protocol ?? "openai"
+    const protocolAdapterSpec = await buildProtocolAdapterSpec(protocol)
     return {
-      model: args.summaryModel ?? getBuiltInProviderDefaultModel(args.providerId),
-      protocol: "openai",
+      model:
+        args.summaryModel ??
+        definition.models?.[0] ??
+        getBuiltInProviderDefaultModel(args.providerId),
+      protocol,
       providerId: args.providerId,
       credentials,
       ...(protocolAdapterSpec ? { protocolAdapterSpec } : {}),
@@ -1226,15 +1265,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // persona declares one (D1). Explicit `/model` and per-session choices
   // still win. Alias-valued defaults resolve through the alias engine below
   // like every other source.
-  const defaultModelBelongsToAgent = isExternalAgentProviderId(appSettings?.defaultProvider)
-  const defaultModelMatchesAgent =
-    externalAgentIdFromProviderId(appSettings?.defaultProvider) === ctx.externalRuntimeId &&
-    Boolean(ctx.externalRuntimeId)
-  const agentModel = resolveAgentModel(
-    ctx.modelRole ?? "execute",
-    character,
-    defaultModelBelongsToAgent && !defaultModelMatchesAgent ? undefined : appSettings?.defaultModel
-  )
+  // One rule, shared with every other reader of the app-wide pair: an agent's
+  // own model id is invisible to the provider lane, and the reserved marker is
+  // never handed on as a provider. See `lib/ai/app-default-model.ts`.
+  const appDefault = resolveAppDefaultModel(appSettings, {
+    forExternalAgentId: ctx.externalRuntimeId,
+  })
+  const agentModel = resolveAgentModel(ctx.modelRole ?? "execute", character, appDefault.model)
   // A model picked from an external agent's OWN list is stamped with the
   // reserved provider id, because it is the agent's vocabulary rather than any
   // provider's. The row is kept so the agent replays the choice on its next
@@ -1269,7 +1306,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     sessionProviderOverride ??
     imDefaultProvider ??
     character?.providerId ??
-    (defaultModelBelongsToAgent ? undefined : appSettings?.defaultProvider) ??
+    appDefault.provider ??
     "anthropic"
   const requestedEffort =
     imOverrideRow?.reasoningOverride ??
@@ -1451,7 +1488,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (providerId) {
     opts.provider = providerId
     if (appSettings) {
-      const attemptOptions = await resolveProviderAttemptOptions(providerId, appSettings, accountId)
+      const attemptOptions = await resolveProviderAttemptOptions(
+        providerId,
+        appSettings,
+        accountId,
+        Boolean(session?.accountId || character?.accountIdOverride),
+        opts.model
+      )
       opts.providerCredentials = attemptOptions.providerCredentials
       opts.protocolAdapterSpec = attemptOptions.protocolAdapterSpec
       opts.modelParams = attemptOptions.modelParams
@@ -3651,18 +3694,42 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       }
     }
 
-    // Pin the AUTHORITATIVE window so the sidecar's generic compaction trigger
-    // stops re-deriving it from its conservative regex table (which floors every
-    // `deepseek*` id at 128k — auto-compacting a real 1M deepseek-v4 at ~107k).
-    // Catalog `contextLength` first (covers deepseek-v4 = 1M), regex table as the
-    // floor for ids the catalog doesn't carry.
+    if (resolved.enabled && resolved.maxSummaryTokens !== undefined) {
+      const summaryOutputLimit = resolveModelMaxOutputTokens(
+        resolved.summary?.model ?? opts.model,
+        resolved.summary?.providerId ?? providerId,
+        appSettings?.providerSettings,
+        appSettings?.customProviders
+      )
+      if (summaryOutputLimit !== undefined) {
+        resolved.maxSummaryTokens = Math.min(resolved.maxSummaryTokens, summaryOutputLimit)
+      }
+    }
+
+    // Derive the compaction input budget from account-specific metadata before
+    // the regex fallback. Reserve output space and respect a separately declared
+    // input ceiling; the model picker's total context metadata stays unchanged.
     if (resolved.enabled && opts.model) {
-      const catalogWindow = getModelConfig(providerId, opts.model)?.contextLength
+      const catalogWindow = resolveModelContextLength(
+        opts.model,
+        providerId,
+        appSettings?.providerSettings,
+        appSettings?.customProviders
+      )
       const window =
         typeof catalogWindow === "number" && catalogWindow > 0
           ? catalogWindow
           : getModelContextWindow(opts.model)
-      if (window > 0) resolved.contextWindow = window
+      if (window > 0) {
+        const maxInput = resolveModelMeta(
+          providerId,
+          opts.model,
+          appSettings?.providerSettings,
+          appSettings?.customProviders
+        ).maxInputTokens
+        const outputReserve = Math.max(0, opts.modelParams?.maxOutputTokens ?? 0)
+        resolved.contextWindow = Math.max(1, Math.min(window - outputReserve, maxInput ?? window))
+      }
     }
 
     opts.compaction = resolved

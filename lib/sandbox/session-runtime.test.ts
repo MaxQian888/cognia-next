@@ -953,7 +953,11 @@ describe("the production OS-tier route", () => {
   })
 
   it("prefers a registered host executor over the Tauri transport", async () => {
-    const execute = jest.fn(async () => okResult)
+    const execute = jest.fn(
+      async (
+        ..._args: Parameters<NonNullable<Parameters<typeof setOsSandboxExec>[0]>["execute"]>
+      ) => okResult
+    )
     setOsSandboxExec({ execute, probe: async () => ({ confined: true, backend: "t", detail: "" }) })
     await expect(
       sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
@@ -966,7 +970,11 @@ describe("the production OS-tier route", () => {
     // The Rust `SandboxCommand.stdin` is `Option<Vec<u8>>`, so the string the
     // plugin carries has to become a byte array on both routes or the desktop
     // and the CLI would disagree about what the child reads.
-    const execute = jest.fn(async () => okResult)
+    const execute = jest.fn(
+      async (
+        ..._args: Parameters<NonNullable<Parameters<typeof setOsSandboxExec>[0]>["execute"]>
+      ) => okResult
+    )
     setOsSandboxExec({ execute, probe: async () => ({ confined: true, backend: "t", detail: "" }) })
     await sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, {
       ...payload,

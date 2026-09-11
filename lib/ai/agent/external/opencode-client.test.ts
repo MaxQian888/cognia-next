@@ -241,6 +241,26 @@ describe("OpenCodeClientAdapter — basic state", () => {
 // ---------------------------------------------------------------------------
 
 describe("OpenCodeClientAdapter — connect", () => {
+  it("refuses a managed configuration that replaces the task gateway", async () => {
+    const client = makeFakeClient()
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const a = new OpenCodeClientAdapter()
+    const expected = {
+      model: "cognia/model",
+      small_model: "cognia/model",
+      enabled_providers: ["cognia"],
+      provider: { cognia: { options: { baseURL: "http://127.0.0.1:9000/v1" } } },
+    }
+    const config = buildConfig({
+      network: { endpoint: "http://example:9999" },
+      metadata: { cogniaGatewayTask: "task" },
+      process: { command: "opencode", env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(expected) } },
+    })
+    await expect(a.connect(config)).rejects.toThrow("overrides this task")
+    client.config.get.mockResolvedValue({ data: expected })
+    await expect(a.connect(config)).resolves.toBeUndefined()
+    await a.disconnect()
+  })
   it("connects using the explicit endpoint and probes via config.get (not SSE)", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)

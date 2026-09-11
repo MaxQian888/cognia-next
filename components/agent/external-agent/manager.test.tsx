@@ -20,6 +20,23 @@ import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 
 const mockUseExternalAgent = jest.fn()
 
+jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
+  CogniaModelPicker: ({ onChange }: { onChange: (binding: unknown) => void }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onChange({
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-b",
+        })
+      }
+    >
+      Select Cognia fixture
+    </button>
+  ),
+}))
+
 jest.mock("@/hooks/agent", () => ({
   useExternalAgent: () => mockUseExternalAgent(),
 }))
@@ -811,6 +828,49 @@ describe("ExternalAgentManager", () => {
         protocol: "opencode",
         process: expect.objectContaining({ command: "opencode" }),
         metadata: expect.objectContaining({ autoSpawnServer: true }),
+      })
+    )
+  })
+
+  it("adds Devin through its native ACP preset and displays login guidance", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /Devin CLI/i }))
+    expect(screen.getByText(en.externalAgent.manager.devinSetupHint)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "acp",
+        transport: "stdio",
+        process: expect.objectContaining({ command: "devin", args: ["acp"] }),
+        metadata: expect.objectContaining({ preset: "devin" }),
+      })
+    )
+  })
+
+  it("saves the shared Cognia model binding from the chat agent manager", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(auto-spawn\)/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Select Cognia fixture" }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: en.externalAgent.settings.addAgent }))
+    })
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cogniaModel: {
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-b",
+        },
       })
     )
   })

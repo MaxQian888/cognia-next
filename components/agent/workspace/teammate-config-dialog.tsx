@@ -17,7 +17,7 @@
  *     specialization / temperature) render inline inside `extraSections`.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -62,6 +62,9 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useSettingsStore } from "@/stores/settings"
 import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
 import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
+import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import { getPresetConfig } from "@/lib/ai/agent/external/presets"
+import type { ExternalAgentCogniaModelBinding } from "@/types/agent/external-agent"
 
 export interface TeammateConfigDialogProps {
   open: boolean
@@ -78,6 +81,35 @@ const PROVIDER_DEFAULT_VALUE = "__default__"
 
 /** Sentinel for the "no twin" Select option (Radix reserves the empty string). */
 const TWIN_NONE_VALUE = "__none__"
+
+/** Keep an incomplete picker draft out of a teammate that may be running. */
+function TeammateGatewayField({
+  presetId,
+  value,
+  onChange,
+}: {
+  presetId?: string
+  value?: ExternalAgentCogniaModelBinding | null
+  onChange: (binding: ExternalAgentCogniaModelBinding | null) => void
+}) {
+  const [draft, setDraft] = useState(value ?? null)
+  const preset = presetId ? getPresetConfig(presetId) : undefined
+  if (!preset && !draft) return null
+  return (
+    <CogniaModelPicker
+      config={
+        preset
+          ? { ...preset, metadata: { ...preset.metadata, preset: presetId } }
+          : { protocol: "acp", transport: "stdio" }
+      }
+      value={draft}
+      onChange={(binding) => {
+        setDraft(binding)
+        if (!binding || (binding.providerId && binding.modelId)) onChange(binding)
+      }}
+    />
+  )
+}
 
 export function TeammateConfigDialog({
   open,
@@ -168,6 +200,13 @@ export function TeammateConfigDialog({
                 subagentIds: output.subagentIds,
               }
               const nextConfig = presetStateToTeammateConfig(state, teammate.config, team)
+              if (
+                nextConfig.cogniaModel &&
+                (nextConfig.runtime ?? "claude") === "claude" &&
+                !state.externalAgentPresetId
+              ) {
+                nextConfig.cogniaModel = null
+              }
               updateTeammate(teammate.id, {
                 name: output.name,
                 description: output.description ?? teammate.description,
@@ -191,6 +230,11 @@ export function TeammateConfigDialog({
                             config: {
                               ...teammate.config,
                               runtime: v as TeammateRuntime,
+                              ...(v === "claude" &&
+                              !state.externalAgentPresetId &&
+                              teammate.config.cogniaModel
+                                ? { cogniaModel: null }
+                                : {}),
                             },
                           })
                         }}
@@ -254,6 +298,20 @@ export function TeammateConfigDialog({
                       />
                     </div>
                   </div>
+                  {teammate.role !== "lead" && (
+                    <TeammateGatewayField
+                      key={`${teammate.id}:${teammate.config.runtime}:${state.externalAgentPresetId}:${JSON.stringify(teammate.config.cogniaModel)}`}
+                      presetId={
+                        teammate.config.runtime && teammate.config.runtime !== "claude"
+                          ? teammate.config.runtime
+                          : state.externalAgentPresetId
+                      }
+                      value={teammate.config.cogniaModel}
+                      onChange={(cogniaModel) =>
+                        updateTeammate(teammate.id, { config: { ...teammate.config, cogniaModel } })
+                      }
+                    />
+                  )}
                   <div className="space-y-1">
                     <Label className="text-xs">{t("rosterSection.twin")}</Label>
                     <Select

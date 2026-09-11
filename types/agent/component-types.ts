@@ -116,6 +116,8 @@ export interface ReplayEvent {
  * Form data for adding a new external agent
  */
 export interface AddAgentFormData {
+  preset?: string
+  cogniaModel?: import("./external-agent").ExternalAgentCogniaModelBinding | null
   name: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport

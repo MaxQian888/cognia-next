@@ -35,7 +35,7 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     expect(EXTERNAL_AGENT_PRESETS["copilot-cli"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.kiro).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["qwen-code"]).not.toBeNull()
-    expect(EXTERNAL_AGENT_PRESETS.pi).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS).not.toHaveProperty("pi")
     expect(EXTERNAL_AGENT_PRESETS["pi-rpc"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.droid).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["opencode-acp"]).not.toBeNull()
@@ -52,7 +52,7 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     // `pi-rpc` is the only Pi route left. The `pi` preset was the community
     // ACP bridge; it was removed with its runtime, and re-adding it would
     // reintroduce an unpinned `npx` launch. Pin its absence.
-    expect(EXTERNAL_AGENT_PRESETS.pi).toBeUndefined()
+    expect(EXTERNAL_AGENT_PRESETS).not.toHaveProperty("pi")
   })
 
   it("offers native Pi as an executable backend", () => {
@@ -257,7 +257,7 @@ describe("createAgentFromPreset", () => {
 })
 
 describe("new ACP presets", () => {
-  it.each(["copilot-cli", "kiro", "qwen-code", "droid"])(
+  it.each(["copilot-cli", "kiro", "qwen-code", "droid", "devin"])(
     "materializes an executable ACP stdio agent from %s",
     (presetId) => {
       const preset = getPresetConfig(presetId)!

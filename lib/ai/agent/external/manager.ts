@@ -56,6 +56,13 @@ import type {
   AcpConfigOption,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
+import {
+  buildGatewayTaskConfig,
+  cogniaGatewayRuntime,
+  gatewaySessionId,
+  normalizeCogniaModelBinding,
+  parseGatewaySessionId,
+} from "./gateway-task"
 import { loggers } from "@cognia/logging"
 import {
   type ProtocolAdapter,
@@ -348,6 +355,227 @@ export class ExternalAgentManager {
   private lifecycleListeners: Set<(event: ExternalAgentLifecycleEvent) => void> = new Set()
   private processExitUnlisten?: Promise<() => void>
   private intentionalProcessStops = new Set<string>()
+  private codexConnections = new Map<string, Promise<void>>()
+  private codexDisconnections = new Map<string, Promise<void>>()
+  private gatewayTasks = new Map<
+    string,
+    { parentId: string; taskId: string; release: () => Promise<void> }
+  >()
+  private gatewayPreparing = new Set<string>()
+
+  private gatewaySessionTarget(
+    agentId: string,
+    sessionId: string
+  ): { agentId: string; sessionId: string } {
+    const parsed = parseGatewaySessionId(sessionId)
+    if (!parsed) return { agentId, sessionId }
+    const childId = `gateway-task-${parsed.taskId}`
+    if (this.gatewayTasks.get(childId)?.parentId !== agentId)
+      throw new Error("Gateway task is not active")
+    return { agentId: childId, sessionId: parsed.nativeSessionId }
+  }
+
+  private async prepareGatewayExecution(agentId: string, options?: ExternalAgentExecutionOptions) {
+    const source = this.instances.get(agentId)
+    if (!source) throw new Error(`Agent not found: ${agentId}`)
+    let binding = normalizeCogniaModelBinding(
+      options?.cogniaModel === undefined
+        ? (source.config.cogniaModel ?? parseGatewaySessionId(options?.sessionId)?.binding)
+        : options.cogniaModel
+    )
+    if (!binding) {
+      if (parseGatewaySessionId(options?.sessionId))
+        throw new Error("A gateway task must resume with its Cognia model binding")
+      return undefined
+    }
+    const runtime = cogniaGatewayRuntime(source.config)
+    if (!runtime)
+      throw new Error("This external agent does not support isolated Cognia gateway tasks")
+    const plane = externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
+    if (!plane.ok || plane.via !== "local")
+      throw new Error("Cognia gateway tasks require a local process host")
+    if (options?.signal?.aborted) throw new Error("External agent execution was aborted")
+    const custom = options?.context?.custom
+    const previousId =
+      options?.sessionId ??
+      (typeof custom?.sessionId === "string" ? custom.sessionId : undefined) ??
+      (typeof custom?.chatSessionId === "string"
+        ? (this.resolveConversationSessionId(agentId, custom.chatSessionId) ?? undefined)
+        : undefined)
+    const previous = parseGatewaySessionId(previousId)
+    if (previous?.binding) {
+      if (
+        binding.providerId !== previous.binding.providerId ||
+        binding.modelId !== previous.binding.modelId ||
+        (binding.accountId !== undefined && binding.accountId !== previous.binding.accountId)
+      ) {
+        throw new Error("This task is bound to a different model or account; start a new task")
+      }
+      binding = previous.binding
+    }
+    if (previousId && !previous)
+      throw new Error(
+        "Start a new task to switch an existing external session to the Cognia gateway"
+      )
+    const taskId = previous?.taskId ?? crypto.randomUUID()
+    const childId = `gateway-task-${taskId}`
+    const reservationKey =
+      typeof custom?.chatSessionId === "string"
+        ? `${agentId}:chat:${custom.chatSessionId}`
+        : childId
+    if (this.gatewayTasks.has(childId) || this.gatewayPreparing.has(reservationKey))
+      throw new Error("This gateway task already has an active run")
+    this.gatewayPreparing.add(reservationKey)
+    let lease: Awaited<
+      ReturnType<
+        typeof import("@/lib/gateway/mint-session-ticket").prepareExternalAgentGatewayRoute
+      >
+    >
+    let gatewayRevokeRouteTicket: typeof import("@/lib/tauri/gateway").gatewayRevokeRouteTicket
+    try {
+      const { prepareExternalAgentGatewayRoute } = await import("@/lib/gateway/mint-session-ticket")
+      ;({ gatewayRevokeRouteTicket } = await import("@/lib/tauri/gateway"))
+      lease = await prepareExternalAgentGatewayRoute({
+        ...binding,
+        sessionId: taskId,
+        ingressProtocol:
+          runtime === "codex"
+            ? "openai-responses"
+            : runtime === "claude"
+              ? "anthropic"
+              : "openai-chat",
+        signal: options?.signal,
+      })
+    } catch (error) {
+      this.gatewayPreparing.delete(reservationKey)
+      throw error
+    }
+    binding = lease.binding
+    let releasePromise: Promise<void> | undefined
+    let childAdapter: ProtocolAdapter | undefined
+    const release = (): Promise<void> =>
+      (releasePromise ??= (async () => {
+        // Revoke first, so even a stuck child cannot keep spending while teardown runs.
+        await gatewayRevokeRouteTicket(lease.ticketId).catch((error) =>
+          externalAgentManagerLogger.warn("Gateway task ticket revocation failed", {
+            ticketId: lease.ticketId,
+            error: this.normalizeErrorMessage(error),
+          })
+        )
+        const child = this.instances.get(childId)
+        for (const session of child?.sessions.values() ?? []) {
+          const publicId = gatewaySessionId(taskId, session.id, binding ?? undefined)
+          source.sessions.set(publicId, {
+            ...session,
+            id: publicId,
+            metadata: { ...session.metadata, cogniaModel: binding, cogniaGatewayTask: taskId },
+          })
+        }
+        await this.removeAgent(childId)
+        this.gatewayTasks.delete(childId)
+        this.gatewayPreparing.delete(reservationKey)
+      })().catch((error) => {
+        // Retain ownership and allow a later stop/delete to retry failed teardown.
+        releasePromise = undefined
+        throw error
+      }))
+    this.gatewayTasks.set(childId, { parentId: agentId, taskId, release })
+    try {
+      if (this.instances.get(agentId) !== source)
+        throw new Error("External agent was removed during task preparation")
+      const { useSettingsStore } = await import("@/stores/settings")
+      const settings = useSettingsStore.getState().settings
+      if (!settings) throw new Error("Settings are not loaded")
+      const prepared = buildGatewayTaskConfig({ config: source.config, taskId, ...lease, settings })
+      const cwd = this.buildSessionOptions(source, options).cwd
+      if (cwd) prepared.config.process!.cwd = cwd
+      await this.addAgent(prepared.config, { connect: false })
+      childAdapter = this.adapters.get(childId)
+      const mapEvent = (event: ExternalAgentEvent): ExternalAgentEvent => {
+        let mapped = event.sessionId
+          ? { ...event, sessionId: gatewaySessionId(taskId, event.sessionId, binding ?? undefined) }
+          : event
+        if (mapped.type === "elicitation_request") {
+          mapped = {
+            ...mapped,
+            request: {
+              ...mapped.request,
+              id: gatewaySessionId(taskId, String(mapped.request.id)),
+              ...(mapped.request.sessionId
+                ? {
+                    sessionId: gatewaySessionId(
+                      taskId,
+                      mapped.request.sessionId,
+                      binding ?? undefined
+                    ),
+                  }
+                : {}),
+            },
+          }
+        } else if (mapped.type === "permission_request" && mapped.request.sessionId) {
+          mapped = {
+            ...mapped,
+            request: {
+              ...mapped.request,
+              sessionId: gatewaySessionId(taskId, mapped.request.sessionId, binding ?? undefined),
+            },
+          }
+        }
+        if (event.sessionId) {
+          const session = childAdapter?.getSession?.(event.sessionId)
+          if (session)
+            source.sessions.set(mapped.sessionId!, {
+              ...session,
+              id: mapped.sessionId!,
+              metadata: { ...session.metadata, cogniaModel: binding },
+            })
+        }
+        this.emitEvent(agentId, mapped)
+        return mapped
+      }
+      const abort = () => {
+        void release().catch((error) =>
+          externalAgentManagerLogger.warn("Gateway task abort cleanup failed", {
+            error: this.normalizeErrorMessage(error),
+          })
+        )
+      }
+      options?.signal?.addEventListener("abort", abort, { once: true })
+      if (options?.signal?.aborted) {
+        await release()
+        throw new Error("External agent execution was aborted")
+      }
+      return {
+        agentId: childId,
+        taskId,
+        binding,
+        mapEvent,
+        options: {
+          ...options,
+          cogniaModel: null,
+          sessionId: previous?.nativeSessionId,
+          model: prepared.model,
+          context: {
+            ...options?.context,
+            custom: { ...custom, sessionId: previous?.nativeSessionId },
+          },
+          onEvent: options?.onEvent
+            ? (event: ExternalAgentEvent) => options.onEvent?.(mapEvent(event))
+            : undefined,
+        } as ExternalAgentExecutionOptions,
+        release: async () => {
+          options?.signal?.removeEventListener("abort", abort)
+          await release()
+          // A connection that was already pending when abort removed the child
+          // may complete afterwards. Close that captured adapter as well.
+          if (childAdapter?.isConnected()) await childAdapter.disconnect()
+        },
+      }
+    } catch (error) {
+      await release()
+      throw error
+    }
+  }
 
   private constructor(config: ExternalAgentManagerConfig = {}) {
     this.config = { ...DEFAULT_MANAGER_CONFIG, ...config }
@@ -435,6 +663,7 @@ export class ExternalAgentManager {
     sessionId: string,
     response: AcpPermissionResponse
   ): Promise<void> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter) {
       throw new Error(`Agent not found: ${agentId}`)
@@ -447,6 +676,7 @@ export class ExternalAgentManager {
     sessionId: string,
     modeId: AcpPermissionMode
   ): Promise<void> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setSessionMode) {
       throw new Error("Agent does not support session mode changes")
@@ -460,6 +690,7 @@ export class ExternalAgentManager {
    * turn is active — callers fall back to their queue-and-replay path.
    */
   async steerSession(agentId: string, sessionId: string | undefined, text: string): Promise<void> {
+    if (sessionId) ({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.steerTurn) {
       throw new Error("Agent does not support steering an active turn")
@@ -483,6 +714,7 @@ export class ExternalAgentManager {
     agentId: string,
     sessionId: string
   ): Promise<ExternalAgentCompactionCapability> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.getCompactionCapability) {
       return { status: "unsupported", routes: [], reason: "adapter_unsupported" }
@@ -495,6 +727,7 @@ export class ExternalAgentManager {
     sessionId: string,
     options?: ExternalAgentCompactionOptions
   ): Promise<void> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.compactSession) {
       throw new Error("Agent does not support context compaction")
@@ -506,6 +739,7 @@ export class ExternalAgentManager {
     agentId: string,
     sessionId: string
   ): Promise<ExternalAgentProviderUndoCapability> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.getProviderUndoCapability) {
       return { status: "unsupported", reason: "adapter_unsupported" }
@@ -514,6 +748,7 @@ export class ExternalAgentManager {
   }
 
   async undoLastProviderChange(agentId: string, sessionId: string): Promise<void> {
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.undoLastProviderChange) {
       throw new Error("Agent does not support provider undo")
@@ -560,6 +795,8 @@ export class ExternalAgentManager {
   }
 
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
+    if (parseGatewaySessionId(sessionId))
+      throw new Error("A gateway task's model binding is immutable; start a new task")
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setSessionModel) {
       throw new Error("Agent does not support model selection")
@@ -773,9 +1010,18 @@ export class ExternalAgentManager {
     configId: string,
     value: string | boolean
   ): Promise<AcpConfigOption[]> {
+    const managed = parseGatewaySessionId(sessionId)
+    ;({ agentId, sessionId } = this.gatewaySessionTarget(agentId, sessionId))
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setConfigOption) {
       throw new Error("Agent does not support config options")
+    }
+    if (managed) {
+      const option = (await adapter.getConfigOptions?.(sessionId))?.find(
+        (entry) => entry.id === configId
+      )
+      if (!option || option.category === "model")
+        throw new Error("A gateway task's model binding is immutable; start a new task")
     }
     const updated = await adapter.setConfigOption(sessionId, configId, value)
     // Both writes land here or in `selectSessionModel`, and both change what a
@@ -787,6 +1033,11 @@ export class ExternalAgentManager {
   }
 
   async respondToElicitation(agentId: string, response: AcpElicitationResponse): Promise<void> {
+    if (parseGatewaySessionId(response.requestId)) {
+      const target = this.gatewaySessionTarget(agentId, response.requestId)
+      agentId = target.agentId
+      response = { ...response, requestId: target.sessionId }
+    }
     const adapter = this.adapters.get(agentId)
     if (!adapter?.respondToElicitation) {
       throw new Error("Agent does not support elicitation")
@@ -1222,6 +1473,17 @@ export class ExternalAgentManager {
    * Falls back to a local close when the adapter cannot delete.
    */
   async deleteSession(agentId: string, sessionId: string): Promise<void> {
+    const gateway = parseGatewaySessionId(sessionId)
+    if (gateway) {
+      const active = this.gatewayTasks.get(`gateway-task-${gateway.taskId}`)
+      if (active && active.parentId !== agentId)
+        throw new Error("Gateway task belongs to another agent")
+      await active?.release()
+      const { agentInvoke } = await import("./agent-transport")
+      await agentInvoke("external_agent_delete_gateway_task", { taskId: gateway.taskId })
+      this.instances.get(agentId)?.sessions.delete(sessionId)
+      return
+    }
     const adapter = this.adapters.get(agentId)
     if (adapter?.deleteSession) {
       await adapter.deleteSession(sessionId)
@@ -1320,6 +1582,24 @@ export class ExternalAgentManager {
       return false
     }
 
+    // Account refusals need user action or provider-managed backoff. Never
+    // replay a whole external turn just because its message also says network
+    // or a user-configured retry pattern matches it.
+    const details =
+      error && typeof error === "object"
+        ? (error as { code?: unknown; status?: unknown; statusCode?: unknown })
+        : {}
+    const failure = [message, details.code, details.status, details.statusCode]
+      .filter((value) => typeof value === "string" || typeof value === "number")
+      .join(" ")
+    if (
+      /\b(?:401|402|403|429)\b|unauthori[sz]ed|forbidden|authentication[ _-]?(?:error|failed|required)|invalid[ _-]?(?:api[ _-]?)?key|too many requests|rate[ _-]?limit|usage[ _-]?limit|quota|insufficient[ _-]?(?:credits|balance)|credit[ _-]?balance/i.test(
+        failure
+      )
+    ) {
+      return false
+    }
+
     if (retryOnErrors.some((pattern) => message.includes(pattern))) {
       return true
     }
@@ -1352,8 +1632,6 @@ export class ExternalAgentManager {
       "503",
       "502",
       "504",
-      "429",
-      "too many requests",
       "unavailable",
       "reset by peer",
       "closed",
@@ -1815,11 +2093,18 @@ export class ExternalAgentManager {
    * Remove an external agent
    */
   async removeAgent(agentId: string): Promise<void> {
+    for (const task of [...this.gatewayTasks.values()]) {
+      if (task.parentId === agentId) await task.release()
+    }
     const adapter = this.adapters.get(agentId)
     if (adapter) {
       this.intentionalProcessStops.add(agentId)
       try {
-        await adapter.disconnect()
+        if (this.instances.get(agentId)?.config.protocol === "codex-app-server") {
+          await this.disconnect(agentId)
+        } else {
+          await adapter.disconnect()
+        }
       } finally {
         this.intentionalProcessStops.delete(agentId)
       }
@@ -1959,6 +2244,28 @@ export class ExternalAgentManager {
    * Connect to an external agent
    */
   async connect(agentId: string): Promise<void> {
+    // Provider credentials are task-scoped. Settings/preflight may register this
+    // agent, but only execution can mint a lease and launch its isolated child.
+    if (this.instances.get(agentId)?.config.cogniaModel) return
+    if (this.instances.get(agentId)?.config.protocol !== "codex-app-server") {
+      return this.connectAdapter(agentId)
+    }
+    // A reconnect must finish teardown first, and simultaneous callers must
+    // share one native process/handshake and one bounded retry budget.
+    const disconnecting = this.codexDisconnections.get(agentId)
+    if (disconnecting) await disconnecting
+    const existing = this.codexConnections.get(agentId)
+    if (existing) return existing
+    const connecting = this.connectAdapter(agentId)
+    this.codexConnections.set(agentId, connecting)
+    try {
+      await connecting
+    } finally {
+      if (this.codexConnections.get(agentId) === connecting) this.codexConnections.delete(agentId)
+    }
+  }
+
+  private async connectAdapter(agentId: string): Promise<void> {
     const instance = this.instances.get(agentId)
     const adapter = this.adapters.get(agentId)
 
@@ -2006,6 +2313,9 @@ export class ExternalAgentManager {
     let lastError: unknown
 
     for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+      if (this.codexDisconnections.has(agentId)) {
+        throw new Error("Codex connection cancelled by disconnect")
+      }
       instance.connectionAttempts++
       instance.lastConnectionAttempt = new Date()
 
@@ -2017,11 +2327,18 @@ export class ExternalAgentManager {
 
       try {
         const connectTimeout = this.resolveExecutionTimeoutMs(instance)
-        await this.withTimeout(
-          adapter.connect(instance.config),
-          connectTimeout,
-          `Connection timed out after ${connectTimeout}ms`
-        )
+        if (instance.config.protocol === "codex-app-server") {
+          // Native connect times out its handshake and tears down the child
+          // before rejecting. Racing an outer timeout would abandon that
+          // owner and start a retry while its process was still initializing.
+          await adapter.connect(instance.config)
+        } else {
+          await this.withTimeout(
+            adapter.connect(instance.config),
+            connectTimeout,
+            `Connection timed out after ${connectTimeout}ms`
+          )
+        }
         this.updateInstanceState(agentId, instance, {
           connectionStatus: "connected",
           status: "ready",
@@ -2085,6 +2402,7 @@ export class ExternalAgentManager {
 
         const shouldRetry =
           attempt < retryConfig.maxRetries &&
+          !this.codexDisconnections.has(agentId) &&
           this.isRetryableError(error, retryConfig.retryOnErrors)
 
         if (!shouldRetry) {
@@ -2141,6 +2459,32 @@ export class ExternalAgentManager {
    * Disconnect from an external agent
    */
   async disconnect(agentId: string): Promise<void> {
+    for (const task of [...this.gatewayTasks.values()]) {
+      if (task.parentId === agentId) await task.release()
+    }
+    if (this.instances.get(agentId)?.config.protocol !== "codex-app-server") {
+      return this.disconnectAdapter(agentId)
+    }
+    const existing = this.codexDisconnections.get(agentId)
+    if (existing) return existing
+    const connecting = this.codexConnections.get(agentId)
+    const disconnecting = (async () => {
+      // An unresolved connect still owns the process it is spawning. Do not
+      // tear down early and then let that old handshake resurrect the link.
+      if (connecting) await connecting.catch(() => undefined)
+      await this.disconnectAdapter(agentId)
+    })()
+    this.codexDisconnections.set(agentId, disconnecting)
+    try {
+      await disconnecting
+    } finally {
+      if (this.codexDisconnections.get(agentId) === disconnecting) {
+        this.codexDisconnections.delete(agentId)
+      }
+    }
+  }
+
+  private async disconnectAdapter(agentId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     this.nesSessions.delete(agentId)
@@ -2252,8 +2596,8 @@ export class ExternalAgentManager {
 
   /**
    * Clamp a requested permission mode to what the agent's backend can actually
-   * enforce (e.g. Codex has no `dontAsk`). Returns `undefined` when no mode was
-   * requested so the adapter keeps its own default. Keeping this on the manager
+   * enforce (e.g. Codex has no `dontAsk`). An omitted execution override uses
+   * the agent's configured permission default. Keeping this on the manager
    * means the mode persisted on the session — and surfaced to the UI — always
    * matches the mode the backend runs under.
    */
@@ -2261,8 +2605,9 @@ export class ExternalAgentManager {
     instance: ExternalAgentInstance,
     requested: AcpPermissionMode | undefined
   ): AcpPermissionMode | undefined {
-    if (!requested) return undefined
-    return adaptPermissionMode(requested, instance.config.protocol).mode
+    const mode = requested ?? instance.config.defaultPermissionMode
+    if (!mode) return undefined
+    return adaptPermissionMode(mode, instance.config.protocol).mode
   }
 
   private async resolveExecutionSession(
@@ -2325,7 +2670,7 @@ export class ExternalAgentManager {
         })
       } else {
         try {
-          session = await resumeSession(preferredSessionId, sessionOptions)
+          session = await resumeSession.call(adapter, preferredSessionId, sessionOptions)
         } catch (error) {
           if (
             isExternalAgentMethodNotFoundError(error) ||
@@ -2370,6 +2715,11 @@ export class ExternalAgentManager {
     }
 
     if (!session) {
+      if (preferredSessionId && instance.config.metadata?.cogniaGatewayTask) {
+        throw new Error(
+          "The isolated gateway task could not resume its saved session; no new session was created"
+        )
+      }
       session = await adapter.createSession(sessionOptions)
       if (preferredSessionId) {
         const latestReasonCode = instance.validity?.lastBranchReasonCode
@@ -2679,6 +3029,13 @@ export class ExternalAgentManager {
    * Close a session
    */
   async closeSession(agentId: string, sessionId: string): Promise<void> {
+    const gateway = parseGatewaySessionId(sessionId)
+    if (gateway) {
+      const active = this.gatewayTasks.get(`gateway-task-${gateway.taskId}`)
+      if (active?.parentId === agentId) await active.release()
+      this.instances.get(agentId)?.sessions.delete(sessionId)
+      return
+    }
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
 
@@ -2701,7 +3058,10 @@ export class ExternalAgentManager {
    * {@link resolveLiveSessionId} does.
    */
   liveSessions(agentId: string): ExternalAgentSession[] {
-    return this.adapters.get(agentId)?.getSessions() ?? []
+    const gateway = [...(this.instances.get(agentId)?.sessions.values() ?? [])].filter((session) =>
+      session.id.startsWith("cognia-gateway:")
+    )
+    return [...(this.adapters.get(agentId)?.getSessions() ?? []), ...gateway]
   }
 
   /**
@@ -2738,6 +3098,8 @@ export class ExternalAgentManager {
    * Get a session by ID
    */
   getSession(agentId: string, sessionId: string): ExternalAgentSession | undefined {
+    if (parseGatewaySessionId(sessionId))
+      return this.instances.get(agentId)?.sessions.get(sessionId)
     const adapter = this.adapters.get(agentId)
     return adapter?.getSession(sessionId)
   }
@@ -2754,6 +3116,24 @@ export class ExternalAgentManager {
     prompt: string,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
+    const gateway = await this.prepareGatewayExecution(agentId, options)
+    if (gateway) {
+      try {
+        // The inner manager path retains tool approvals, PII gating, hooks,
+        // timeout handling and the protocol's normal tool-call loop.
+        for await (const event of this.executeStreaming(gateway.agentId, prompt, {
+          ...gateway.options,
+          onEvent: undefined,
+        })) {
+          const mapped = gateway.mapEvent(event)
+          options?.onEvent?.(mapped)
+          yield mapped
+        }
+      } finally {
+        await gateway.release()
+      }
+      return
+    }
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
 
@@ -2762,7 +3142,9 @@ export class ExternalAgentManager {
     }
 
     if (!adapter.isConnected()) {
-      await this.connect(agentId)
+      if (options?.cogniaModel === null && instance.config.cogniaModel)
+        await this.connectAdapter(agentId)
+      else await this.connect(agentId)
     }
 
     this.updateInstanceState(agentId, instance, { status: "executing" })
@@ -3041,6 +3423,18 @@ export class ExternalAgentManager {
     prompt: string,
     options?: ExternalAgentExecutionOptions
   ): Promise<ExternalAgentResult> {
+    const gateway = await this.prepareGatewayExecution(agentId, options)
+    if (gateway) {
+      try {
+        const result = await this.execute(gateway.agentId, prompt, gateway.options)
+        return {
+          ...result,
+          sessionId: gatewaySessionId(gateway.taskId, result.sessionId, gateway.binding),
+        }
+      } finally {
+        await gateway.release()
+      }
+    }
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
 
@@ -3049,7 +3443,9 @@ export class ExternalAgentManager {
     }
 
     if (!adapter.isConnected()) {
-      await this.connect(agentId)
+      if (options?.cogniaModel === null && instance.config.cogniaModel)
+        await this.connectAdapter(agentId)
+      else await this.connect(agentId)
     }
 
     this.updateInstanceState(agentId, instance, { status: "executing" })
@@ -3096,6 +3492,11 @@ export class ExternalAgentManager {
 
     const retryConfig = this.resolveRetryConfig(instance)
     const executionTimeoutMs = this.resolveExecutionTimeoutMs(instance, options)
+    // Codex owns response retries inside its native turn. A timeout or failed
+    // response does not prove the turn was rejected or that its tools never
+    // ran, so replaying execute() could duplicate accepted work and requests.
+    const maxExecutionRetries =
+      instance.config.protocol === "codex-app-server" ? 0 : retryConfig.maxRetries
     const hookCtx: AgentHookContext = {
       agentId,
       agentKind: "external",
@@ -3108,11 +3509,12 @@ export class ExternalAgentManager {
       let result: ExternalAgentResult | null = null
       let lastError: unknown
 
-      for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+      for (let attempt = 0; attempt <= maxExecutionRetries; attempt++) {
         if (options?.signal?.aborted) {
           throw new Error("External agent execution was aborted")
         }
 
+        let sawExecutionActivity = false
         try {
           if (!adapter.isConnected()) {
             await this.connect(agentId)
@@ -3132,6 +3534,21 @@ export class ExternalAgentManager {
           const wrappedOptions: ExternalAgentExecutionOptions = {
             ...options,
             onEvent: (event) => {
+              if (
+                event.type === "tool_use_start" ||
+                event.type === "tool_use_end" ||
+                event.type === "tool_result" ||
+                (event.type === "message_start" && event.role !== "user") ||
+                (event.type === "message_delta" && event.delta.text.length > 0) ||
+                (event.type === "thinking" && event.thinking.length > 0) ||
+                (event.type === "commentary_delta" && event.text.length > 0) ||
+                ((event.type === "done" || event.type === "message_end") &&
+                  (event.tokenUsage?.totalTokens ?? 0) > 0)
+              ) {
+                // Generation or tool activity proves the turn was accepted;
+                // replay would duplicate work even if its transport now fails.
+                sawExecutionActivity = true
+              }
               // Headless path: hooks fire-and-forget. A blocking PreToolUse hook
               // still denies the tool via respondToPermission; there is no
               // permission UI to suppress on this path. A consequential fire is
@@ -3179,9 +3596,16 @@ export class ExternalAgentManager {
 
           if (
             !attemptResult.success &&
-            attempt < retryConfig.maxRetries &&
+            attempt < maxExecutionRetries &&
+            !sawExecutionActivity &&
+            !attemptResult.toolCalls?.length &&
+            !attemptResult.messages?.some((message) => message.role === "assistant") &&
+            !attemptResult.finalResponse &&
+            attemptResult.output == null &&
+            !(attemptResult.tokenUsage?.totalTokens ?? 0) &&
             this.isRetryableError(
-              attemptResult.errorCode || attemptResult.error || "External agent execution failed",
+              [attemptResult.errorCode, attemptResult.error].filter(Boolean).join(" ") ||
+                "External agent execution failed",
               retryConfig.retryOnErrors
             )
           ) {
@@ -3206,7 +3630,8 @@ export class ExternalAgentManager {
         } catch (error) {
           lastError = error
           const shouldRetry =
-            attempt < retryConfig.maxRetries &&
+            attempt < maxExecutionRetries &&
+            !sawExecutionActivity &&
             this.isRetryableError(error, retryConfig.retryOnErrors) &&
             !(options?.signal?.aborted ?? false)
 
@@ -3343,6 +3768,12 @@ export class ExternalAgentManager {
    * Cancel an ongoing execution
    */
   async cancel(agentId: string, sessionId: string): Promise<void> {
+    const parsed = parseGatewaySessionId(sessionId)
+    if (parsed) {
+      const task = this.gatewayTasks.get(`gateway-task-${parsed.taskId}`)
+      if (task?.parentId === agentId) await task.release()
+      return
+    }
     const adapter = this.adapters.get(agentId)
     if (adapter) {
       await adapter.cancel(sessionId)
@@ -3865,6 +4296,7 @@ export class ExternalAgentManager {
       const instance = this.instances.get(agentId)
       if (!instance || instance.connectionStatus !== "connected") continue
 
+      let attemptedReconnect = false
       try {
         const healthy = await adapter.healthCheck()
         this.updateInstanceState(agentId, instance, {
@@ -3886,6 +4318,7 @@ export class ExternalAgentManager {
           externalAgentManagerLogger.warn("External agent unhealthy, reconnecting", {
             agentId,
           })
+          attemptedReconnect = true
           await this.reconnect(agentId)
         }
       } catch (error) {
@@ -3905,7 +4338,7 @@ export class ExternalAgentManager {
           branchReasonCode: "health_check_failed",
           branchReason: this.normalizeErrorMessage(error),
         })
-        if (this.config.autoReconnect) {
+        if (this.config.autoReconnect && !attemptedReconnect) {
           await this.reconnect(agentId)
         }
       }
@@ -4016,6 +4449,7 @@ export class ExternalAgentManager {
    * Dispose of the manager
    */
   async dispose(): Promise<void> {
+    for (const task of [...this.gatewayTasks.values()]) await task.release()
     this.stopHealthCheck()
 
     // Disconnect all agents

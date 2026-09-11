@@ -157,6 +157,11 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     if base == "pi" {
         roots.push(home.join(".pi"));
     }
+    if base == "devin" {
+        roots.push(home.join(".config").join("devin"));
+        roots.push(home.join(".local").join("share").join("devin"));
+        roots.push(home.join(".cache").join("devin"));
+    }
     if target.contains("copilot") {
         roots.push(home.join(".copilot"));
         roots.push(home.join(".cache").join("copilot"));
@@ -378,7 +383,9 @@ pub fn wrap_with_sandbox(
     }
     let launcher = find_sandbox_launcher(host)
         .ok_or_else(|| SandboxError::LauncherUnavailable(config.command.clone()))?;
-    let home = host.home().ok_or(SandboxError::MissingHome)?;
+    let host_home = host.home().ok_or(SandboxError::MissingHome)?;
+    let home = crate::gateway_task::task_home(&config.env, &host_home)
+        .map_err(|_| SandboxError::MissingHome)?.unwrap_or_else(|| host_home.clone());
     let cwd = config
         .cwd
         .clone()
@@ -395,8 +402,16 @@ pub fn wrap_with_sandbox(
     }
     host.ensure_dir(&tool_host_dir);
 
-    let args =
+    let mut args =
         build_sandbox_launcher_args(&config.command, &config.args, &cwd, &home, &tool_host_dir);
+    if config.env.contains_key(crate::gateway_task::PAYLOAD_ENV) {
+        // All runtime state lives under this task root, not the user's roots.
+        args.splice(0..0, ["--writable".to_string(), home.to_string_lossy().into_owned()]);
+        args.splice(0..0, ["--readable".to_string(), host_home.to_string_lossy().into_owned()]);
+        for relative in [".codex", ".claude", ".claude.json", ".pi", ".qwen", ".config/opencode", ".local/share/opencode", ".local/share/cognia-agent-tasks"] {
+            args.splice(0..0, ["--deny-readable".to_string(), host_home.join(relative).to_string_lossy().into_owned()]);
+        }
+    }
 
     Ok(ExternalAgentSpawnConfig {
         command: launcher.to_string_lossy().into_owned(),
@@ -495,6 +510,26 @@ mod tests {
     fn pi_gets_its_session_store_as_a_writable_root() {
         let roots = agent_state_writable_roots("pi", &[], Path::new("/home/dev"));
         assert_eq!(roots, vec![PathBuf::from("/home/dev/.pi")]);
+    }
+
+    #[test]
+    fn devin_gets_its_config_sessions_and_cache_without_matching_other_commands() {
+        assert_eq!(
+            agent_state_writable_roots("devin", &["acp".into()], Path::new("/home/dev")),
+            vec![
+                PathBuf::from("/home/dev/.config/devin"),
+                PathBuf::from("/home/dev/.local/share/devin"),
+                PathBuf::from("/home/dev/.cache/devin"),
+            ]
+        );
+        assert_eq!(
+            agent_state_writable_roots(
+                "npx",
+                &["-y".into(), "devin-adapter".into()],
+                Path::new("/home/dev"),
+            ),
+            vec![PathBuf::from("/home/dev/.npm")]
+        );
     }
 
     #[test]

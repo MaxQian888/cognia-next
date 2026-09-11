@@ -112,39 +112,50 @@ describe("useAgentTeamStore deleteTeam", () => {
     reset()
   })
 
-  it("removes the team and its lead teammate", () => {
+  it("removes the team and its lead teammate", async () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "Doomed", task: "t" })
-    useAgentTeamStore.getState().deleteTeam(team.id)
+    await useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
     expect(useAgentTeamStore.getState().teammates[team.leadId]).toBeUndefined()
   })
 
-  it("is a no-op for unknown team ids", () => {
+  it("is a no-op for unknown team ids", async () => {
     const before = useAgentTeamStore.getState()
-    useAgentTeamStore.getState().deleteTeam("missing")
+    await useAgentTeamStore.getState().deleteTeam("missing")
     expect(useAgentTeamStore.getState().teams).toEqual(before.teams)
   })
 
-  it("shuts down active teammates before cleanup", () => {
+  it("shuts down active teammates before cleanup", async () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "Active", task: "t" })
     const tm = useAgentTeamStore.getState().addTeammate({
       teamId: team.id,
       name: "Worker",
     })
     useAgentTeamStore.getState().updateTeammate(tm.id, { status: "executing" })
-    useAgentTeamStore.getState().deleteTeam(team.id)
+    await useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
     expect(useAgentTeamStore.getState().teammates[tm.id]).toBeUndefined()
+  })
+
+  it("retains team and session references when runtime cleanup fails so deletion can retry", async () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "Retry", task: "t" })
+    purgeAgentTeamMock.mockRejectedValueOnce(new Error("active gateway task"))
+    await expect(useAgentTeamStore.getState().deleteTeam(team.id)).rejects.toThrow(
+      "active gateway task"
+    )
+    expect(useAgentTeamStore.getState().teams[team.id]).toBeDefined()
+    expect(useAgentTeamStore.getState().teammates[team.leadId]).toBeDefined()
+    await useAgentTeamStore.getState().deleteTeam(team.id)
+    expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
   })
 
   it("purges device-local durable runtime rows when deleting a durable team", async () => {
     const team = useAgentTeamStore.getState().createTeam({
       name: "Durable",
       task: "t",
-      config: { runtimeVersion: "durable-v2" },
     })
 
-    useAgentTeamStore.getState().deleteTeam(team.id)
+    await useAgentTeamStore.getState().deleteTeam(team.id)
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(purgeAgentTeamMock).toHaveBeenCalledWith(team.id)
@@ -158,12 +169,12 @@ describe("useAgentTeamStore editorSession", () => {
     expect(useAgentTeamStore.getState()).not.toHaveProperty("setEditorSession")
   })
 
-  it("deleteTeam drops the deleted team's editor session", () => {
+  it("deleteTeam drops the deleted team's editor session", async () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "E", task: "t" })
     useAgentTeamStore.setState({
       editorSession: { [team.id]: { rootKey: "/proj", openPaths: [], activePath: null } },
     })
-    useAgentTeamStore.getState().deleteTeam(team.id)
+    await useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().editorSession[team.id]).toBeUndefined()
   })
 
@@ -189,7 +200,7 @@ describe("useAgentTeamStore updateTeam", () => {
     expect(useAgentTeamStore.getState().teams[team.id].description).toBe("new desc")
   })
 
-  it("is a no-op for unknown team ids", () => {
+  it("is a no-op for unknown team ids", async () => {
     useAgentTeamStore.getState().updateTeam("nope", { description: "x" })
     expect(useAgentTeamStore.getState().teams["nope"]).toBeUndefined()
   })
@@ -260,7 +271,7 @@ describe("useAgentTeamStore setTeamStatus", () => {
     expect(t.totalDuration!).toBeGreaterThanOrEqual(0)
   })
 
-  it("is a no-op for unknown team ids", () => {
+  it("is a no-op for unknown team ids", async () => {
     useAgentTeamStore.getState().setTeamStatus("missing", "executing")
     expect(useAgentTeamStore.getState().teams["missing"]).toBeUndefined()
   })
@@ -1503,6 +1514,7 @@ describe("duplicateSquad", () => {
     const task = useAgentTeamStore.getState().createTask({
       teamId: team.id,
       title: "Review it",
+      description: "Review the changes",
       assignedTo: mate.id,
     })
     return { team, mate, task }

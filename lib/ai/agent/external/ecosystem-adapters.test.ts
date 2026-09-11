@@ -10,12 +10,13 @@ import {
 } from "./ecosystem-adapters"
 
 describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
-  it("registers the nine expected adapters", () => {
+  it("registers the expected adapters", () => {
     expect(Object.keys(EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS).sort()).toEqual([
       "claude-code",
       "codex",
       "copilot-cli",
       "cursor",
+      "devin",
       "droid",
       "gemini-cli",
       "kiro",
@@ -79,6 +80,7 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
 
 describe("new ACP agent surfaces", () => {
   const cases: Array<{ presetId: string; command: string; args: string[] }> = [
+    { presetId: "devin", command: "devin", args: ["acp"] },
     // The Claude Code / Gemini / Cursor ACP entrypoints are easy to get wrong
     // (a bare `--stdio` drops Gemini into interactive mode and hangs; Claude
     // Code has no native ACP flag and must run through the Zed adapter). Lock
@@ -145,6 +147,7 @@ describe("listExternalAgentEcosystemAdapters", () => {
       "codex",
       "copilot-cli",
       "cursor",
+      "devin",
       "droid",
       "gemini-cli",
       "kiro",

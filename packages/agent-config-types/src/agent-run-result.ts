@@ -180,6 +180,8 @@ export interface AgentRunResultV1 {
 
   /** Final assistant text. Empty string when the run produced none. */
   text: string
+  /** Schema-validated output returned by the runtime when requested. */
+  structuredOutput?: unknown
   usage?: AgentRunUsage
 
   // ---- What actually ran ----

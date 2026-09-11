@@ -12,6 +12,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { runtimeRefForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 /**
  * The same answer, for a caller that has a session row but no React.
@@ -30,6 +31,7 @@ export function effortSurfaceForSession(
   session: Pick<ChatSession, "id" | "model" | "providerOverride"> | null | undefined
 ): EffortSurface {
   const settings = useSettingsStore.getState().settings
+  const appDefault = resolveAppDefaultModel(settings)
   // The lane belongs to THIS session, so a runtime chosen in another
   // conversation must not decide whether this one shows a thinking dial.
   const runtimeRef = runtimeRefForSession(session?.id)
@@ -37,8 +39,12 @@ export function effortSurfaceForSession(
     runtime: runtimeRef.kind === "builtin" ? "claude-sdk" : "external",
     sessionModel: session?.model,
     sessionProvider: session?.providerOverride,
-    defaultModel: settings?.defaultModel,
-    defaultProvider: settings?.defaultProvider,
+    // The app-wide pair can hold an external agent's own model plus the
+    // reserved marker. The ladder behind an unpinned session is the one the
+    // lane above would actually run, so it reads the resolved pair rather than
+    // deriving tiers from an id no provider offers.
+    defaultModel: appDefault.model,
+    defaultProvider: appDefault.provider,
     hiddenTiers: settings?.composerBehavior?.hiddenEffortTiers,
   })
 }
@@ -66,9 +72,12 @@ export function subscribeEffortSurface(
 ): () => void {
   const signature = (): string => {
     const settings = useSettingsStore.getState().settings
+    // Signed on the RESOLVED pair, the same one the snapshot reads: an
+    // agent-owned default that this lane ignores must not wake a listener.
+    const appDefault = resolveAppDefaultModel(settings)
     return JSON.stringify([
-      settings?.defaultModel,
-      settings?.defaultProvider,
+      appDefault.model,
+      appDefault.provider,
       settings?.composerBehavior?.hiddenEffortTiers,
       runtimeRefForSession(sessionId).kind,
     ])

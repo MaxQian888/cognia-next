@@ -34,6 +34,7 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 }))
 
 import { effortSurfaceForSession, subscribeEffortSurface } from "./effort-surface-session"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 beforeEach(() => {
   settingsState.settings = {}
@@ -168,5 +169,47 @@ describe("subscribeEffortSurface", () => {
     notify(runtimeListeners)
 
     expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe("the app default that belongs to an external agent", () => {
+  it("does not derive the built-in lane's ladder from an agent-owned model", () => {
+    // The composer writes an agent's own model to the app default when a chat
+    // has no row yet. The built-in lane never runs it, so the ladder behind an
+    // unpinned session must come from the anthropic fallback, not from an id
+    // no provider offers.
+    settingsState.settings = {
+      defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+    }
+
+    const surface = effortSurfaceForSession({
+      id: "s1",
+      model: undefined,
+      providerOverride: undefined,
+    })
+
+    expect(surface.providerId).not.toContain("cognia:external-agent")
+    expect(surface.modelId).not.toBe("commandcode/meta/muse-spark-1.3-contributor")
+  })
+
+  it("does not wake a subscriber when only the agent-owned half changes", () => {
+    // The signature is taken on the resolved pair, so a write this lane
+    // ignores must not re-render a dial whose ladder cannot have changed.
+    settingsState.settings = {
+      defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+    }
+    const listener = jest.fn()
+    const stop = subscribeEffortSurface("s1", listener)
+
+    settingsState.settings = {
+      defaultModel: "commandcode/z-ai/glm-5.3-flash",
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+    }
+    notify(settingsListeners)
+
+    expect(listener).not.toHaveBeenCalled()
+    stop()
   })
 })

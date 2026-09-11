@@ -110,7 +110,7 @@ function createDependencies(
 }
 
 const payload = {
-  schemaVersion: 1,
+  schemaVersion: 1 as const,
   sessionId: "550e8400-e29b-41d4-a716-446655440000",
   attempt: 2,
   pluginId: "demo.plugin",
@@ -298,7 +298,7 @@ describe("pluginDevReload", () => {
       actual: "dirty",
       dirty: {
         runtime: "frontend",
-        reason: "cleanup-failed",
+        reason: "error",
         at: 2,
         message: "worker survived unload",
         labels: ["worker"],

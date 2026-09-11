@@ -1,7 +1,11 @@
 import { resolveTeamMemoryRuntime } from "./memory-context"
 
 const getSettings = jest.fn(async () => ({ memory: { enabled: true } }))
-const tryBuildMemoryDeps = jest.fn(async () => ({ loadCandidates: jest.fn() }))
+const tryBuildMemoryDeps = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/memory/runtime/build-deps").tryBuildMemoryDeps>
+  ) => ({ loadCandidates: jest.fn() })
+)
 const storeSettings = { memory: { enabled: true, source: "store" } }
 
 jest.mock("@/lib/db/settings", () => ({
@@ -11,7 +15,7 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ settings: storeSettings }) },
 }))
 jest.mock("@/lib/memory/runtime/build-deps", () => ({
-  tryBuildMemoryDeps: (...a: unknown[]) => tryBuildMemoryDeps(...(a as [])),
+  tryBuildMemoryDeps: (...a: Parameters<typeof tryBuildMemoryDeps>) => tryBuildMemoryDeps(...a),
 }))
 
 describe("resolveTeamMemoryRuntime", () => {

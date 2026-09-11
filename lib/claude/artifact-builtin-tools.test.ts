@@ -76,6 +76,18 @@ describe("tool surface", () => {
 })
 
 describe("artifact_create", () => {
+  it("rejects an unsupported chart type before persisting an artifact", async () => {
+    const before = Object.keys(useArtifactStore.getState().artifacts).length
+    const result = await runArtifactBuiltinTool(
+      "artifact_create",
+      { type: "chart", title: "Invalid", content: "[]", chartType: "unsupported" },
+      deps(),
+      ctx
+    )
+    expect(result).toMatchObject({ ok: false, code: "invalid_arguments" })
+    expect(Object.keys(useArtifactStore.getState().artifacts)).toHaveLength(before)
+  })
+
   it("returns the id the HOST minted, not one the model supplied", async () => {
     // A `tool_use` block is seen before the row exists, which is why the part
     // is emitted from this result rather than from the model's input.

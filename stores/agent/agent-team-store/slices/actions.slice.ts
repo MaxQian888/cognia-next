@@ -373,7 +373,7 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
-  deleteTeam: (teamId) => {
+  deleteTeam: async (teamId) => {
     const team = get().teams[teamId]
     if (!team) return
     // Guard: check all non-lead teammates are idle/shutdown/completed/failed (OCC pattern)
@@ -386,12 +386,11 @@ export const createAgentTeamActionsSlice = (
       // Shutdown active teammates first, then cleanup
       set((current) => shutDownTeammates(current, teamId))
     }
+    // Keep the rows and gateway session references if native history cleanup
+    // fails, so the user can stop an active runtime and retry deletion.
+    const { purgeAgentTeam } = await import("@/lib/db/agent-team-runtime")
+    await purgeAgentTeam(teamId)
     set((current) => cleanUpTeam(current, teamId))
-    // Every Squad has durable run tables (ADR-0169), so the purge is
-    // unconditional. `purgeAgentTeam` is a no-op for a Squad that never ran.
-    void import("@/lib/db/agent-team-runtime")
-      .then(({ purgeAgentTeam }) => purgeAgentTeam(teamId))
-      .catch(() => undefined)
   },
 
   purgeProject: (projectId) => {

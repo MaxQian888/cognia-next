@@ -66,6 +66,7 @@ export type SpanSurface =
   | "retrieval"
   | "embedding"
   | "plugin"
+  | "agent-rpc"
 
 /**
  * OTel span kind. Every span was `INTERNAL` before v172, which meant no backend

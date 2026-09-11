@@ -4,6 +4,7 @@ import {
   pushConfigToCli,
   type ConfigSettingsSlice,
 } from "./push-config"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 const FULL: ConfigSettingsSlice = {
   defaultProvider: "anthropic",
@@ -144,5 +145,24 @@ describe("pushConfigToCli", () => {
     expect(ok).toBe(true)
     const parsed = JSON.parse(write.mock.calls[0][1])
     expect(parsed.model).toBe("claude-opus-4-8")
+  })
+})
+
+describe("projectAppConfigToCli and the external-agent app default", () => {
+  it("writes neither half of an agent-owned pair into the CLI config", () => {
+    // `cliConfigFileSchema` is strict and the CLI resolves against real
+    // providers: `cognia:external-agent:pi-rpc` names none, and the model id
+    // beside it belongs to that agent's vocabulary alone.
+    const out = projectAppConfigToCli({
+      defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+    })
+    expect(out.provider).toBeUndefined()
+    expect(out.model).toBeUndefined()
+  })
+
+  it("still projects an ordinary provider default", () => {
+    const out = projectAppConfigToCli({ defaultModel: "gpt-4.1", defaultProvider: "openai" })
+    expect(out).toMatchObject({ provider: "openai", model: "gpt-4.1" })
   })
 })

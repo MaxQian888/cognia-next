@@ -65,7 +65,8 @@ const TOOL_RESULT_REVIEW_TIMEOUT_MS = 30_000
 // The id→protocol table is the single source of truth in `provider-protocol.mjs`;
 // the renderer's resolver forwards `providerCredentials.protocol` for every turn,
 // so this id-based path is the fallback for callers that don't (CLI, older code).
-function resolveProtocol(provider, credentials) {
+function resolveProtocol(provider, credentials, model) {
+  if (provider === "commandcode") return resolveProviderProtocol(provider, model)
   if (credentials?.protocol) return normalizeProtocol(credentials.protocol)
   return resolveProviderProtocol(provider)
 }
@@ -336,7 +337,7 @@ export function dispatchAiSdk({
   // resolves `protocol_adapter_*` against this Map (per-session, like
   // pendingPluginToolCalls).
   const pendingProtocolExecs = new Map()
-  const protocol = resolveProtocol(provider, sendOptions.providerCredentials)
+  const protocol = resolveProtocol(provider, sendOptions.providerCredentials, sendOptions.model)
 
   // `@agent` single-turn routing on the ai-sdk path. The SDK-native `agent`
   // field (Anthropic path) has no equivalent here, so we synthesize the
@@ -874,6 +875,7 @@ export function dispatchAiSdk({
         }
         const summaryParams = { ...modelParams, maxOutputTokens: summaryCap }
         const run = await summaryAdapter.start({
+          sessionId,
           model: summaryModel,
           messages: [
             { role: "system", content: systemPrompt },

@@ -331,8 +331,6 @@ fn push_base_policy(out: &mut String) {
         out.push_str(&format!("  (subpath \"{p}\")\n"));
     }
     out.push_str(")\n");
-    // /dev/null is the one device that must also be writable.
-    out.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
     // Interactive shells / build tools that allocate a pty.
     out.push_str("(allow pseudo-tty)\n");
     out.push_str("(allow file-read* file-write* file-ioctl (literal \"/dev/ptmx\"))\n");

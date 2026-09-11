@@ -1972,7 +1972,8 @@ describe("CodexAppServerAdapter", () => {
           .getConfigOptions(session.id)
           ?.find((entry) => entry.id === "sandboxMode")
         expect(option).toMatchObject({ currentValue, options: values.map((value) => ({ value })) })
-        expect(option?.options).toHaveLength(values.length)
+        if (!option || !("options" in option)) throw new Error("Expected select config option")
+        expect(option.options).toHaveLength(values.length)
         await adapter.disconnect()
       }
     )
@@ -2025,7 +2026,12 @@ describe("CodexAppServerAdapter", () => {
         const event = (await next).value
         expect(event?.type).toBe("config_options_update")
         if (event?.type === "config_options_update") {
-          expect(event.configOptions.find((entry) => entry.id === "sandboxMode")).toMatchObject({
+          expect(
+            event.configOptions.find(
+              (entry: import("@/types/agent/external-agent").AcpConfigOption) =>
+                entry.id === "sandboxMode"
+            )
+          ).toMatchObject({
             currentValue,
             options: values.map((value) => ({ value })),
           })
@@ -2035,6 +2041,238 @@ describe("CodexAppServerAdapter", () => {
       feed("turn/completed", { threadId: session.id, turn: { id: "turn_1", status: "completed" } })
       let result = await next
       while (!result.done) result = await it.next()
+      await adapter.disconnect()
+    })
+  })
+
+  describe("native 0.154.0 event regressions", () => {
+    jest.mock("@/lib/task-workspace/tool-evidence", () => ({
+      recordToolFileChanges: jest.fn(async () => {}),
+    }))
+
+    it("keeps the prompt alive while the server retries a disconnected response", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("retry this turn"))
+      const first = it.next()
+      feed("error", {
+        threadId: session.id,
+        turnId: "turn_1",
+        willRetry: true,
+        error: { message: "response stream disconnected", codexErrorInfo: "serverOverloaded" },
+      })
+      expect((await first).value).toMatchObject({ type: "error", recoverable: true })
+
+      // Resume the generator before the server's retry arrives. Sending the
+      // completion synchronously with the error hides premature termination.
+      const recovered = it.next().catch((error: Error) => ({ error }))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      feed("item/agentMessage/delta", {
+        threadId: session.id,
+        turnId: "turn_1",
+        itemId: "recovered-message",
+        delta: "Recovered answer",
+      })
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "turn_1", status: "completed" },
+      })
+      expect(await recovered).toMatchObject({
+        done: false,
+        value: { type: "message_delta", delta: { text: "Recovered answer" } },
+      })
+      expect((await it.next()).value).toMatchObject({ type: "done", success: true })
+      expect((await it.next()).done).toBe(true)
+      await adapter.disconnect()
+    })
+
+    it("terminates an active prompt when its app-server process exits", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("wait for process"))
+      const first = it.next()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      exitCb?.({ agentId: "proc-1", code: 9 })
+      expect((await first).value).toMatchObject({
+        type: "error",
+        error: expect.stringContaining("process exited"),
+      })
+      await expect(it.next()).rejects.toThrow("process exited")
+      expect(adapter.isConnected()).toBe(false)
+    })
+
+    it.each(["failed", "declined"])(
+      "marks a %s command without an exit code as an error",
+      async (status) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession()
+        const it = iterator(adapter, session.id, userMessage("run command"))
+        const first = it.next()
+        feed("item/completed", {
+          threadId: session.id,
+          turnId: "turn_1",
+          item: {
+            id: "command-status",
+            type: "commandExecution",
+            command: "echo hello",
+            cwd: "/work",
+            status,
+            exitCode: null,
+            aggregatedOutput: null,
+          },
+        })
+        feed("turn/completed", {
+          threadId: session.id,
+          turn: { id: "turn_1", status: "completed" },
+        })
+        expect((await first).value?.type).toBe("tool_use_end")
+        expect((await it.next()).value).toMatchObject({ type: "tool_result", isError: true })
+        while (!(await it.next()).done) {}
+        await adapter.disconnect()
+      }
+    )
+
+    it.each(["failed", "declined"])(
+      "does not record a %s file change as an applied edit",
+      async (status) => {
+        const evidence = jest.requireMock("@/lib/task-workspace/tool-evidence") as {
+          recordToolFileChanges: jest.Mock
+        }
+        evidence.recordToolFileChanges.mockClear()
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession()
+        const it = iterator(adapter, session.id, userMessage("edit file"))
+        const first = it.next()
+        feed("item/completed", {
+          threadId: session.id,
+          turnId: "turn_1",
+          item: {
+            id: "file-status",
+            type: "fileChange",
+            status,
+            changes: [{ path: "/work/file.txt", kind: { type: "add" }, diff: "+hello" }],
+          },
+        })
+        feed("turn/completed", {
+          threadId: session.id,
+          turn: { id: "turn_1", status: "completed" },
+        })
+        expect((await first).value?.type).toBe("tool_use_end")
+        expect((await it.next()).value).toMatchObject({ type: "tool_result", isError: true })
+        while (!(await it.next()).done) {}
+        expect(evidence.recordToolFileChanges).not.toHaveBeenCalled()
+        await adapter.disconnect()
+      }
+    )
+
+    it.each([
+      {
+        type: "dynamicToolCall",
+        status: "failed",
+        success: false,
+        contentItems: [{ type: "inputText", text: "tool failed" }],
+        expected: { contentItems: [{ type: "inputText", text: "tool failed" }] },
+      },
+      {
+        type: "collabAgentToolCall",
+        status: "failed",
+        agentsStates: { child: { status: "errored", message: "child failed" } },
+        expected: { agentsStates: { child: { status: "errored", message: "child failed" } } },
+      },
+      {
+        type: "collabAgentToolCall",
+        status: "completed",
+        agentsStates: { child: { status: "errored", message: "child failed" } },
+        expected: { agentsStates: { child: { status: "errored", message: "child failed" } } },
+      },
+    ])("preserves $type output and failure state ($status)", async ({ expected, ...item }) => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("call tool"))
+      const first = it.next()
+      feed("item/completed", {
+        threadId: session.id,
+        turnId: "turn_1",
+        item: { id: "native-output", tool: "test_tool", ...item },
+      })
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "turn_1", status: "completed" },
+      })
+      expect((await first).value?.type).toBe("tool_use_end")
+      expect((await it.next()).value).toMatchObject({
+        type: "tool_result",
+        result: expected,
+        isError: true,
+      })
+      while (!(await it.next()).done) {}
+      await adapter.disconnect()
+    })
+
+    it("merges sparse quota updates without erasing previous windows or account metadata", async () => {
+      responders["account/rateLimits/read"] = () => ({
+        rateLimits: {
+          planType: "pro",
+          primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1750010000 },
+          secondary: { usedPercent: 50, windowDurationMins: 10080, resetsAt: 1750100000 },
+        },
+      })
+      const adapter = await connectedAdapter()
+      await adapter.refreshAccount()
+      feed("account/rateLimits/updated", {
+        rateLimits: {
+          planType: null,
+          primary: { usedPercent: 21, windowDurationMins: 300, resetsAt: 1750010000 },
+          secondary: null,
+        },
+      })
+      expect(adapter.getStatus().rateLimits).toMatchObject({
+        planType: "pro",
+        primary: { usedPercent: 21 },
+        secondary: { usedPercent: 50, windowDurationMins: 10080, resetsAt: 1750100000 },
+      })
+      await adapter.disconnect()
+    })
+
+    it("accepts the native openaiForm MCP elicitation alias", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("answer form"))
+      const first = it.next()
+      feedServerRequest(1540, "mcpServer/elicitation/request", {
+        threadId: session.id,
+        turnId: "turn_1",
+        serverName: "deploy",
+        mode: "openaiForm",
+        message: "Choose environment",
+        requestedSchema: {
+          type: "object",
+          required: ["environment"],
+          properties: { environment: { type: "string", enum: ["staging", "production"] } },
+        },
+      })
+      // A terminal event makes an unsupported alias fail promptly rather than
+      // leaving this regression waiting indefinitely for a missing question.
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "turn_1", status: "completed" },
+      })
+      const event = (await first).value
+      expect(event).toMatchObject({ type: "permission_request" })
+      if (event?.type !== "permission_request") return
+      await adapter.respondToPermission(session.id, {
+        requestId: event.request.requestId!,
+        granted: true,
+        answers: { environment: ["staging"] },
+      })
+      // Drain the stream so the async server-request handler and JSON-RPC
+      // response writer finish after the permission resolver is released.
+      while (!(await it.next()).done) {}
+      expect(lastWritten((message) => message.id === 1540)?.result).toEqual({
+        action: "accept",
+        content: { environment: "staging" },
+        _meta: null,
+      })
       await adapter.disconnect()
     })
   })
@@ -2619,6 +2857,93 @@ describe("CodexAppServerAdapter", () => {
       expect(seen.length).toBeGreaterThan(0)
     })
 
+    it("merges native MCP startup events without starting another discovery pass", async () => {
+      const adapter = await connectedAdapter()
+      responders["mcpServerStatus/list"] = () => ({
+        data: [{ name: "github", tools: { search: { name: "search" } } }],
+        nextCursor: null,
+      })
+      await adapter.refreshMcpServers(true, "thr_1")
+      const before = writes.filter(
+        (line) => JSON.parse(line).method === "mcpServerStatus/list"
+      ).length
+      for (let i = 0; i < 20; i++) {
+        feed("mcpServer/startupStatus/updated", {
+          threadId: "thr_1",
+          name: "github",
+          status: "starting",
+          error: null,
+        })
+      }
+      feed("mcpServer/startupStatus/updated", {
+        threadId: "thr_1",
+        name: "github",
+        status: "ready",
+        error: null,
+      })
+      await Promise.resolve()
+      expect(
+        writes.filter((line) => JSON.parse(line).method === "mcpServerStatus/list")
+      ).toHaveLength(before)
+      expect(adapter.getStatus().mcpServers).toEqual([
+        expect.objectContaining({
+          name: "github",
+          runtimeStatus: "connected",
+          tools: { search: { name: "search" } },
+        }),
+      ])
+      await adapter.disconnect()
+    })
+
+    it("reads the real paginated MCP inventory shape and supports tool maps", async () => {
+      const adapter = await connectedAdapter()
+      responders["mcpServerStatus/list"] = (msg) =>
+        (msg.params as { cursor?: string })?.cursor
+          ? { data: [{ name: "second", tools: {} }], nextCursor: null }
+          : {
+              data: [{ name: "first", tools: { search: { name: "search" } } }],
+              nextCursor: "page-2",
+            }
+      expect(await adapter.refreshMcpServers(true, "thread-mcp")).toEqual([
+        { name: "first", tools: { search: { name: "search" } } },
+        { name: "second", tools: {} },
+      ])
+      expect(lastWritten((m) => m.method === "mcpServerStatus/list")?.params).toMatchObject({
+        threadId: "thread-mcp",
+        cursor: "page-2",
+      })
+    })
+
+    it("strict MCP refresh rejects malformed telemetry instead of returning stale status", async () => {
+      const adapter = await connectedAdapter()
+      await adapter.refreshMcpServers()
+      responders["mcpServerStatus/list"] = () => ({ unexpected: [] })
+      await expect(adapter.refreshMcpServers(true)).rejects.toThrow(
+        "Invalid MCP inventory response"
+      )
+    })
+
+    it("shares concurrent inventory reads and queries the already loaded MCP runtime", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const before = writes.filter(
+        (line) => JSON.parse(line).method === "mcpServerStatus/list"
+      ).length
+      const results = await Promise.all([
+        adapter.refreshMcpServers(),
+        adapter.refreshMcpServers(true),
+        adapter.refreshMcpServers(),
+      ])
+      expect(results[0]).toEqual(results[1])
+      expect(
+        writes.filter((line) => JSON.parse(line).method === "mcpServerStatus/list")
+      ).toHaveLength(before + 1)
+      expect(lastWritten((m) => m.method === "mcpServerStatus/list")?.params).toEqual({
+        threadId: session.id,
+      })
+      await adapter.disconnect()
+    })
+
     it("refreshes skills when a skills/changed notification arrives", async () => {
       const adapter = await connectedAdapter()
       feed("skills/changed", {})
@@ -3078,6 +3403,190 @@ describe("CodexAppServerAdapter", () => {
   })
 
   describe("account + rate limits", () => {
+    it("preserves native credit and spend-control availability without inventing a balance", async () => {
+      responders["account/rateLimits/read"] = () => ({
+        rateLimits: {
+          limitId: "codex",
+          normalModelSlug: "gpt-6-astra",
+          credits: { hasCredits: true, unlimited: true, balance: null },
+          individualLimit: { limit: "100", used: "25", remainingPercent: 75, resetsAt: 1750010000 },
+          spendControlReached: true,
+        },
+      })
+      const adapter = await connectedAdapter()
+      await adapter.refreshAccount()
+      expect(adapter.getStatus().rateLimits).toMatchObject({
+        normalModelSlug: "gpt-6-astra",
+        credits: { hasCredits: true, unlimited: true, balance: null },
+        individualLimit: { remainingPercent: 75 },
+        spendControlReached: true,
+      })
+      feed("account/rateLimits/updated", {
+        rateLimits: { limitId: "codex", spendControlReached: null, credits: null },
+      })
+      expect(adapter.getStatus().rateLimits).toMatchObject({
+        credits: null,
+        spendControlReached: null,
+      })
+      await adapter.disconnect()
+    })
+
+    it.each([401, 403, 429])(
+      "coalesces account reads and cools down %s without automatic retries",
+      async (code) => {
+        const clock = jest.spyOn(Date, "now").mockReturnValue(100_000)
+        responders["account/rateLimits/read"] = () => ({
+          __error: { code, message: "Account request rejected" },
+        })
+        const adapter = await connectedAdapter()
+        try {
+          await Promise.all(Array.from({ length: 40 }, () => adapter.refreshAccount()))
+          const count = (method: string) =>
+            writes.filter((w) => JSON.parse(w).method === method).length
+          expect(count("account/read")).toBe(1)
+          expect(count("account/rateLimits/read")).toBe(1)
+          expect(adapter.getStatus().rateLimitsError).toContain("Account request rejected")
+          clock.mockReturnValue(129_999)
+          await adapter.refreshAccount()
+          expect(count("account/rateLimits/read")).toBe(1)
+          clock.mockReturnValue(130_000)
+          await adapter.refreshAccount()
+          expect(count("account/rateLimits/read")).toBe(2)
+        } finally {
+          await adapter.disconnect()
+          clock.mockRestore()
+        }
+      }
+    )
+
+    it("does not let an older quota read overwrite a pushed limit update", async () => {
+      responders["account/rateLimits/read"] = () => {
+        feed("account/rateLimits/updated", { rateLimits: { primary: { usedPercent: 91 } } })
+        return {
+          ordinaryUsageAllowed: true,
+          rateLimits: {
+            limitId: "codex",
+            primary: { usedPercent: 10, resetsAt: 1750010000, windowDurationMins: 300 },
+            secondary: { usedPercent: 22 },
+          },
+          rateLimitsByLimitId: { spark: { limitId: "spark", primary: { usedPercent: 30 } } },
+        }
+      }
+      const adapter = await connectedAdapter()
+      await adapter.refreshAccount()
+      expect(adapter.getStatus().rateLimits?.primary?.usedPercent).toBe(91)
+      expect(adapter.getStatus().rateLimits?.primary?.resetsAt).toBe(1750010000)
+      expect(adapter.getStatus().rateLimits?.primary?.windowDurationMins).toBe(300)
+      expect(adapter.getStatus().rateLimits?.secondary?.usedPercent).toBe(22)
+      expect(adapter.getStatus().rateLimitsByLimitId?.spark.primary?.usedPercent).toBe(30)
+      expect(adapter.getStatus().ordinaryUsageAllowed).toBe(true)
+      await adapter.disconnect()
+      expect(adapter.getStatus().rateLimits).toBeUndefined()
+    })
+
+    it("does not continue a disconnected account read on the replacement connection", async () => {
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+        writes.push(message)
+        if (JSON.parse(message).method !== "account/read") autoRespond(agentId, message)
+      })
+      const adapter = await connectedAdapter()
+      try {
+        const oldRead = adapter.refreshAccount()
+        await adapter.disconnect()
+        native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+          writes.push(message)
+          autoRespond(agentId, message)
+        })
+        responders["account/read"] = () => ({
+          account: { type: "chatgpt", email: "new@example.com" },
+        })
+        await adapter.connect(config)
+        await Promise.all([oldRead, adapter.refreshAccount()])
+        expect(adapter.getStatus().account?.email).toBe("new@example.com")
+        expect(adapter.getStatus().accountError).toBeUndefined()
+        expect(
+          writes.filter((w) => JSON.parse(w).method === "account/rateLimits/read")
+        ).toHaveLength(1)
+      } finally {
+        await adapter.disconnect()
+        native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+          writes.push(message)
+          autoRespond(agentId, message)
+        })
+      }
+    })
+
+    it("invalidates account changes immediately and bounds notification-triggered reads", async () => {
+      jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+      responders["account/read"] = () => ({
+        account: { type: "chatgpt", email: "old@example.com" },
+      })
+      responders["account/rateLimits/read"] = () => ({
+        rateLimits: { primary: { usedPercent: 70 } },
+      })
+      const adapter = await connectedAdapter()
+      try {
+        await adapter.refreshAccount()
+        for (let i = 0; i < 40; i++) feed("account/updated", { authMode: "chatgpt" })
+        expect(adapter.getStatus().account).toBeUndefined()
+        expect(adapter.getStatus().rateLimits).toBeUndefined()
+        responders["account/read"] = () => ({
+          account: { type: "chatgpt", email: "new@example.com" },
+        })
+        await jest.advanceTimersByTimeAsync(30_000)
+        await adapter.refreshAccount()
+        expect(adapter.getStatus().account?.email).toBe("new@example.com")
+        expect(writes.filter((w) => JSON.parse(w).method === "account/read")).toHaveLength(2)
+        feed("account/updated", {})
+        await adapter.disconnect()
+        await jest.advanceTimersByTimeAsync(60_000)
+        expect(writes.filter((w) => JSON.parse(w).method === "account/read")).toHaveLength(2)
+      } finally {
+        await adapter.disconnect()
+        jest.useRealTimers()
+      }
+    })
+
+    it("refreshes the latest identity when the notification timer precedes the old reply", async () => {
+      jest.useFakeTimers({ doNotFake: ["queueMicrotask"] })
+      jest.setSystemTime(100_000)
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      let release!: () => void
+      let held = false
+      native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+        writes.push(message)
+        if (!held && JSON.parse(message).method === "account/read") {
+          held = true
+          release = () => autoRespond(agentId, message)
+        } else autoRespond(agentId, message)
+      })
+      const adapter = await connectedAdapter()
+      try {
+        jest.setSystemTime(130_000)
+        feed("account/updated", { authMode: "chatgpt" })
+        await jest.advanceTimersByTimeAsync(0)
+        responders["account/read"] = () => ({
+          account: { type: "chatgpt", email: "new@example.com" },
+        })
+        release()
+        await jest.advanceTimersByTimeAsync(0)
+        expect(adapter.getStatus().account?.email).toBe("new@example.com")
+        expect(writes.filter((w) => JSON.parse(w).method === "account/read")).toHaveLength(2)
+      } finally {
+        await adapter.disconnect()
+        native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+          writes.push(message)
+          autoRespond(agentId, message)
+        })
+        jest.useRealTimers()
+      }
+    })
+
     it("fetches account and rate limits on connect and exposes them via status", async () => {
       responders["account/read"] = () => ({
         account: { type: "chatgpt", email: "dev@example.com", planType: "pro" },
@@ -3278,3 +3787,365 @@ describe("CodexAppServerAdapter — stderr forwarding", () => {
     }
   })
 })
+
+describe("native 0.154.0 request regressions", () => {
+  it("uses the authoritative model, effort and cwd returned by thread/start", async () => {
+    responders["thread/start"] = () => ({
+      thread: { id: "configured" },
+      model: "gpt-6-astra",
+      reasoningEffort: "ultra",
+      cwd: "/resolved/work",
+    })
+    const adapter = await connectedAdapter()
+    try {
+      const session = await adapter.createSession()
+      expect(session.metadata).toEqual(
+        expect.objectContaining({
+          selectedModel: "gpt-6-astra",
+          reasoningEffort: "ultra",
+          cwd: "/resolved/work",
+        })
+      )
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("hydrates forked history and runtime settings when the source is not locally loaded", async () => {
+    responders["thread/fork"] = () => ({
+      thread: {
+        id: "forked",
+        turns: [
+          {
+            items: [
+              {
+                id: "user1",
+                type: "userMessage",
+                content: [{ type: "text", text: "Persisted question" }],
+              },
+              { id: "agent1", type: "agentMessage", text: "Persisted answer" },
+            ],
+          },
+        ],
+      },
+      model: "gpt-6-astra",
+      reasoningEffort: "high",
+      cwd: "/stored/work",
+    })
+    const adapter = await connectedAdapter()
+    try {
+      const forked = await adapter.forkSession("stored-source")
+      expect(forked.messages).toEqual([
+        expect.objectContaining({
+          role: "user",
+          content: [{ type: "text", text: "Persisted question" }],
+        }),
+        expect.objectContaining({
+          role: "assistant",
+          content: [{ type: "text", text: "Persisted answer" }],
+        }),
+      ])
+      expect(forked.metadata).toEqual(
+        expect.objectContaining({
+          selectedModel: "gpt-6-astra",
+          reasoningEffort: "high",
+          cwd: "/stored/work",
+          forkedFrom: "stored-source",
+        })
+      )
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("replaces local history with the updated thread returned by rollback", async () => {
+    const adapter = await connectedAdapter()
+    try {
+      const session = await adapter.createSession()
+      ;(session.messages ??= []).push(userMessage("Dropped question"))
+      responders["thread/rollback"] = () => ({
+        thread: {
+          id: session.id,
+          turns: [{ items: [{ id: "kept", type: "agentMessage", text: "Kept answer" }] }],
+        },
+      })
+      await adapter.rollbackSession(session.id, 1)
+      expect(adapter.getSession(session.id)?.messages).toEqual([
+        expect.objectContaining({ id: "kept", content: [{ type: "text", text: "Kept answer" }] }),
+      ])
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("flattens cwd-grouped skills and deduplicates shared paths", async () => {
+    const shared = { name: "shared", path: "/skills/shared/SKILL.md", enabled: true }
+    const local = { name: "local", path: "/work/.agents/skills/local/SKILL.md", enabled: false }
+    responders["skills/list"] = () => ({
+      data: [
+        { cwd: "/work", skills: [shared, local], errors: [] },
+        {
+          cwd: "/other",
+          skills: [shared],
+          errors: [{ path: "/broken", message: "Invalid skill" }],
+        },
+      ],
+    })
+    const adapter = await connectedAdapter()
+    try {
+      expect(await adapter.refreshSkills(["/work", "/other"])).toEqual([shared, local])
+      expect(adapter.getStatus().skills).toEqual([shared, local])
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("bypasses the skills cache on an explicit refresh", async () => {
+    responders["skills/list"] = () => ({ data: [] })
+    const adapter = await connectedAdapter()
+    try {
+      await adapter.refreshSkills(["/work"])
+      expect(lastWritten((m) => m.method === "skills/list")?.params).toEqual({
+        cwds: ["/work"],
+        forceReload: true,
+      })
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("sends the required OAuth server name and reads authorizationUrl", async () => {
+    responders["mcpServer/oauth/login"] = ({ params }) => {
+      if ((params as { name?: string }).name !== "github") {
+        return { __error: { code: -32600, message: "Invalid request: missing field name" } }
+      }
+      return { authorizationUrl: "https://auth.example/authorize" }
+    }
+    const adapter = await connectedAdapter()
+    try {
+      await expect(adapter.startMcpOAuthLogin("github")).resolves.toEqual({
+        authUrl: "https://auth.example/authorize",
+      })
+      expect(lastWritten((m) => m.method === "mcpServer/oauth/login")?.params).toEqual({
+        name: "github",
+      })
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("loads every thread-list page with the same ordering", async () => {
+    responders["thread/list"] = ({ params }) => {
+      const cursor = (params as { cursor?: string }).cursor
+      return cursor
+        ? { data: [{ id: "older", name: "Older" }], nextCursor: null }
+        : { data: [{ id: "recent", name: "Recent" }], nextCursor: "next-page" }
+    }
+    const adapter = await connectedAdapter()
+    try {
+      expect(await adapter.listSessions()).toEqual([
+        expect.objectContaining({ sessionId: "recent", title: "Recent" }),
+        expect.objectContaining({ sessionId: "older", title: "Older" }),
+      ])
+      expect(lastWritten((m) => m.method === "thread/list")?.params).toEqual({
+        limit: 50,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        cursor: "next-page",
+      })
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("rejects repeated thread-list cursors instead of looping or returning partial history", async () => {
+    responders["thread/list"] = () => ({ data: [{ id: "same" }], nextCursor: "repeated" })
+    const adapter = await connectedAdapter()
+    try {
+      await expect(adapter.listSessions()).rejects.toThrow(/cursor/i)
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+
+  it("retains the current multi-bucket account usage response", async () => {
+    const codex = {
+      limitId: "codex",
+      limitName: "Codex",
+      planType: "pro",
+      primary: { usedPercent: 23, windowDurationMins: 300 },
+    }
+    const spark = {
+      limitId: "codex_bengalfox",
+      limitName: "Spark",
+      planType: "pro",
+      primary: { usedPercent: 67, windowDurationMins: 300 },
+    }
+    responders["account/rateLimits/read"] = () => ({
+      ordinaryUsageAllowed: false,
+      rateLimits: codex,
+      rateLimitsByLimitId: { codex, codex_bengalfox: spark },
+    })
+    const adapter = await connectedAdapter()
+    try {
+      await adapter.refreshAccount()
+      expect(adapter.getStatus()).toEqual(
+        expect.objectContaining({
+          ordinaryUsageAllowed: false,
+          rateLimits: expect.objectContaining(codex),
+          rateLimitsByLimitId: {
+            codex: expect.objectContaining(codex),
+            codex_bengalfox: expect.objectContaining(spark),
+          },
+        })
+      )
+      feed("account/rateLimits/updated", {
+        rateLimits: { limitId: null, primary: { usedPercent: 24, windowDurationMins: 300 } },
+      })
+      expect(adapter.getStatus().rateLimits?.primary?.usedPercent).toBe(24)
+      expect(adapter.getStatus().rateLimitsByLimitId?.codex.primary?.usedPercent).toBe(24)
+    } finally {
+      await adapter.disconnect()
+    }
+  })
+})
+
+// Opt in with COGNIA_CODEX_LIVE=1. This uses a real local Codex binary with an
+// isolated home and one fixture MCP server; it makes no model inference calls.
+;(process.env.COGNIA_CODEX_LIVE === "1" ? it : it.skip)(
+  "does not amplify real MCP startup and coalesces explicit discovery reads",
+  async () => {
+    const fs = await import("node:fs")
+    const os = await import("node:os")
+    const path = await import("node:path")
+    const { spawn } = await import("node:child_process")
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-native-mcp-audit-"))
+    const marker = path.join(dir, "starts")
+    const fixture = path.join(dir, "fixture.cjs")
+    fs.writeFileSync(
+      fixture,
+      `
+      const fs = require('node:fs');
+      fs.appendFileSync(${JSON.stringify(marker)}, 'start\\n');
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const message = JSON.parse(line);
+        if (message.id === undefined) return;
+        const result = message.method === 'initialize'
+          ? { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+          : message.method === 'tools/list' ? { tools: [] } : { resources: [], resourceTemplates: [] };
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }) + '\\n');
+      });
+    `
+    )
+    fs.writeFileSync(
+      path.join(dir, "config.toml"),
+      `[mcp_servers.audit_fixture]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(fixture)}]\n`
+    )
+    const skillDir = path.join(dir, ".agents/skills/audit")
+    fs.mkdirSync(skillDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: audit\ndescription: local fixture\n---\nAudit only.\n"
+    )
+    const native = jest.requireMock("@/lib/native/external-agent")
+    const envBuilder = jest.requireMock("./env-builder")
+    let child: ReturnType<typeof spawn> | undefined
+    let exited: Promise<void> | undefined
+    native.spawnExternalAgent.mockImplementation(async () => {
+      child = spawn("codex", ["app-server"], {
+        cwd: dir,
+        env: { ...process.env, CODEX_HOME: dir },
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+      exited = new Promise<void>((resolve) => child!.once("exit", () => resolve()))
+      let buffer = ""
+      child.stdout!.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString()
+        let newline: number
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const data = buffer.slice(0, newline)
+          buffer = buffer.slice(newline + 1)
+          stdoutCb?.({ agentId: "proc-1", data })
+        }
+      })
+      child.stderr!.resume()
+      return "proc-1"
+    })
+    native.sendToExternalAgent.mockImplementation(async (_id: string, message: string) => {
+      writes.push(message)
+      child!.stdin!.write(message.endsWith("\n") ? message : `${message}\n`)
+    })
+    native.killExternalAgent.mockImplementation(async () => {
+      child?.kill()
+      await exited
+    })
+    envBuilder.buildAgentEnv.mockResolvedValueOnce({ CODEX_HOME: dir })
+    const adapter = new CodexAppServerAdapter()
+    try {
+      await adapter.connect({
+        ...config,
+        process: { command: "codex", args: ["app-server"], cwd: dir },
+      })
+      expect(await adapter.refreshSkills([dir])).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "audit" })])
+      )
+      const session = await adapter.createSession({ cwd: dir })
+      await new Promise<void>((resolve, reject) => {
+        const ready = () =>
+          adapter
+            .getStatus()
+            .mcpServers.some(
+              (server) => server.name === "audit_fixture" && server.runtimeStatus === "connected"
+            )
+        if (ready()) {
+          resolve()
+          return
+        }
+        const timer = setTimeout(() => {
+          off()
+          reject(new Error("fixture MCP startup did not complete"))
+        }, 5000)
+        const off = adapter.onStatusUpdate(() => {
+          if (ready()) {
+            clearTimeout(timer)
+            off()
+            resolve()
+          }
+        })
+      })
+      expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toHaveLength(1)
+      expect(
+        writes.map((line) => JSON.parse(line)).filter((m) => m.method === "mcpServerStatus/list")
+      ).toHaveLength(0)
+      const results = await Promise.all([
+        adapter.refreshMcpServers(true),
+        adapter.refreshMcpServers(true),
+        adapter.refreshMcpServers(true),
+      ])
+      expect(results[0]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "audit_fixture" })])
+      )
+      const calls = writes
+        .map((line) => JSON.parse(line))
+        .filter((m) => m.method === "mcpServerStatus/list")
+      expect(calls).toHaveLength(1)
+      expect(calls[0].params).toEqual({ threadId: session.id })
+      const startedAfterInitialRead = fs.readFileSync(marker, "utf8").trim().split("\n").length
+      await adapter.refreshMcpServers(true)
+      expect({
+        startedAfterInitialRead,
+        afterRepeatedRead: fs.readFileSync(marker, "utf8").trim().split("\n").length,
+      }).toEqual({ startedAfterInitialRead: 2, afterRepeatedRead: 3 })
+    } finally {
+      await adapter.disconnect()
+      child?.kill()
+      await exited
+      native.sendToExternalAgent.mockImplementation(async (agentId: string, message: string) => {
+        writes.push(message)
+        autoRespond(agentId, message)
+      })
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  },
+  30000
+)

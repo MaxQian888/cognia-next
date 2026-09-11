@@ -71,6 +71,32 @@ describe("provider http helper", () => {
     )
   })
 
+  it.each(["https://gateway.example/coding/", "https://gateway.example/coding/v1/"])(
+    "uses a single version segment for gateway models and messages at %s",
+    async (baseURL) => {
+      const fetchImpl = jest.fn(
+        async (_url: RequestInfo | URL, _init?: RequestInit) =>
+          new Response('{"data":[]}', { status: 200 })
+      )
+      for (const path of ["models", "messages"]) {
+        await providerRequest(
+          { protocol: "anthropic", baseURL, apiKey: "test-key" },
+          { path, fetchImpl }
+        )
+      }
+      expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+        "https://gateway.example/coding/v1/models",
+        "https://gateway.example/coding/v1/messages",
+      ])
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: { "x-api-key": "test-key", "anthropic-version": "2023-06-01" },
+        })
+      )
+    }
+  )
+
   it("uploads multipart without forcing a content type and downloads raw bytes", async () => {
     const provider = {
       protocol: "openai" as const,

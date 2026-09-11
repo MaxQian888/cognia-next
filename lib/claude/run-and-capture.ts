@@ -50,6 +50,8 @@ import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
 import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
+import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { dispatchPreToolUse, dispatchPostToolUse } from "@/lib/claude/adapter-hooks"
 
 /**
  * Envelope-backed capture subscription (ADR-0090 Phase 3, flag-gated).
@@ -691,6 +693,12 @@ async function captureAssistantReplyCore(
     let interruptDrainHandle: ReturnType<typeof setTimeout> | null = null
     let settled = false
     let promptSent = false
+    const releaseResponder = registerCaptureResponder(
+      sessionId,
+      turnId,
+      Boolean(cap?.onPermissionRequest)
+    )
+    const answeredPermissions = new Set<string>()
     let abortRequested = false
 
     // Accumulated state — the latest assistant message wins. Most turns
@@ -765,11 +773,27 @@ async function captureAssistantReplyCore(
     //     via `approveTool`, forwarding a rewritten `updatedInput`. Denies on
     //     responder error so a faulty gate can never hang the turn. ──
     const handlePermissionRequest = (req: PermissionRequestEvent) => {
-      if (!cap?.onPermissionRequest) return
+      if (!cap?.onPermissionRequest || answeredPermissions.has(req.requestId)) return
+      answeredPermissions.add(req.requestId)
       void (async () => {
         let outcome: CapturePermissionDecision
         try {
-          outcome = await cap.onPermissionRequest!(req)
+          // The capture is the sole command responder, including the global
+          // plugin firewall previously run by the competing UI subscriber.
+          const pre = await dispatchPreToolUse(req.toolName, req.input, sessionId)
+          if (settled || abortRequested || signal?.aborted) return
+          if (pre.action === "deny") {
+            outcome = { decision: "deny", message: pre.reason ?? "denied by plugin onPreToolUse" }
+          } else {
+            const rewritten = pre.action === "modify" ? pre.modifiedArgs : undefined
+            outcome = await cap.onPermissionRequest!({
+              ...req,
+              ...(rewritten ? { input: rewritten } : {}),
+            })
+            if (outcome.decision !== "deny" && rewritten && outcome.updatedInput === undefined) {
+              outcome = { ...outcome, updatedInput: rewritten }
+            }
+          }
         } catch {
           outcome = { decision: "deny", message: "permission responder failed" }
         }
@@ -802,19 +826,30 @@ async function captureAssistantReplyCore(
     const handleToolResultReview = (req: ToolResultReviewEvent) => {
       if (req.toolUseId) reviewedToolUseIds.add(req.toolUseId)
       void (async () => {
+        const call = req.toolUseId ? toolCallsById.get(req.toolUseId) : undefined
         let updatedToolOutput: unknown
+        try {
+          const post = await dispatchPostToolUse(
+            req.toolName || call?.name || "",
+            call?.input ?? {},
+            req.result,
+            sessionId
+          )
+          updatedToolOutput = post.modifiedResult
+        } catch {
+          /* Global post-tool observers fail open, matching the interactive path. */
+        }
         if (cap?.onToolResultReview) {
-          const call = req.toolUseId ? toolCallsById.get(req.toolUseId) : undefined
           try {
             const decision = await cap.onToolResultReview({
               toolName: req.toolName || call?.name || "",
               input: call?.input ?? {},
-              result: req.result,
+              result: updatedToolOutput ?? req.result,
               isError: req.isError,
             })
-            updatedToolOutput = decision ? decision.updatedToolOutput : undefined
+            updatedToolOutput = decision?.updatedToolOutput ?? updatedToolOutput
           } catch {
-            updatedToolOutput = undefined
+            /* Keep the global rewrite if the capture-specific observer fails. */
           }
         }
         if (settled || abortRequested || signal?.aborted) return
@@ -837,6 +872,7 @@ async function captureAssistantReplyCore(
     const cleanup = () => {
       if (settled) return
       settled = true
+      releaseResponder()
       try {
         unlisten?.()
       } catch {

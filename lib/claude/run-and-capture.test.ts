@@ -13,6 +13,7 @@ import {
   retryFromInner,
   type CaptureStreamEvent,
 } from "./run-and-capture"
+import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
 import {
   registerChatMiddleware,
@@ -43,6 +44,13 @@ const onClaudeMessageMock = jest.fn(async (handler: (evt: ClaudeEvent) => void) 
   return unlistenMock
 })
 
+const preToolUseMock = jest.fn(async () => ({ action: "allow" }))
+const postToolUseMock = jest.fn(async () => ({}))
+jest.mock("@/lib/claude/adapter-hooks", () => ({
+  dispatchPreToolUse: (...args: unknown[]) => (preToolUseMock as jest.Mock)(...args),
+  dispatchPostToolUse: (...args: unknown[]) => (postToolUseMock as jest.Mock)(...args),
+}))
+
 const subscribeAgentEventsMock = jest.fn()
 jest.mock("./ipc", () => ({
   sendPrompt: (sessionId: string, prompt: unknown, options?: unknown) =>
@@ -57,6 +65,8 @@ jest.mock("./ipc", () => ({
 
 beforeEach(() => {
   captured = null
+  preToolUseMock.mockReset().mockResolvedValue({ action: "allow" })
+  postToolUseMock.mockReset().mockResolvedValue({})
   sendPromptMock.mockClear()
   interruptSessionMock.mockClear()
   approveToolMock.mockClear()
@@ -1677,6 +1687,88 @@ describe("runAndCaptureAssistantReply", () => {
     expect(result.text).toBe("Hello")
   })
 
+  it("applies the global plugin firewall before asking the capture owner", async () => {
+    preToolUseMock.mockResolvedValueOnce({ action: "deny", reason: "blocked" } as never)
+    const responder = jest.fn(() => ({ decision: "allow" as const }))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+    })
+    await flushUntilSubscribed()
+    fire(permissionRequest("blocked", "Bash", {}))
+    await flushMicrotasks()
+    expect(responder).not.toHaveBeenCalled()
+    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "blocked", "deny", "blocked", undefined)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
+  it("shows rewritten input to the owner and dispatches that exact approved input", async () => {
+    preToolUseMock.mockResolvedValueOnce({
+      action: "modify",
+      modifiedArgs: { path: "safe" },
+    } as never)
+    const responder = jest.fn(() => ({ decision: "allow" as const }))
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
+      onPermissionRequest: responder,
+    })
+    await flushUntilSubscribed()
+    fire(permissionRequest("rewritten", "Read", { path: "original" }))
+    await flushMicrotasks()
+    expect(responder).toHaveBeenCalledWith(expect.objectContaining({ input: { path: "safe" } }))
+    expect(approveToolMock).toHaveBeenCalledWith(SESSION, "rewritten", "allow", undefined, {
+      path: "safe",
+    })
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+  })
+
+  it("owns response events until settlement and answers repeated asks only once", async () => {
+    const responder = jest.fn(() => ({ decision: "allow" as const }))
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "owned-turn" },
+      {
+        timeoutMs: 1_000,
+        onPermissionRequest: responder,
+      }
+    )
+    await flushUntilSubscribed()
+    const request = { ...permissionRequest("req-once", "Read", {}), turnId: "owned-turn" }
+    expect(hasCaptureResponder(request)).toBe(true)
+    fire(request)
+    fire(request)
+    await flushMicrotasks()
+    expect(responder).toHaveBeenCalledTimes(1)
+    expect(approveToolMock).toHaveBeenCalledTimes(1)
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(hasCaptureResponder(request)).toBe(false)
+  })
+
+  it("releases response ownership after a failed send", async () => {
+    sendPromptMock.mockRejectedValueOnce(new Error("offline"))
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "owned-turn" },
+      {
+        onPermissionRequest: () => ({ decision: "deny" }),
+      }
+    )
+    await expect(promise).rejects.toMatchObject({ code: "send_failed" })
+    expect(
+      hasCaptureResponder({
+        type: "permission_request",
+        sessionId: SESSION,
+        turnId: "owned-turn",
+      })
+    ).toBe(false)
+  })
+
   it("answers a permission_request via approveTool with a rewritten input", async () => {
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
       timeoutMs: 1_000,
@@ -1710,6 +1802,7 @@ describe("runAndCaptureAssistantReply", () => {
     })
     await Promise.resolve()
     fire(permissionRequest("stale-request", "bash", { command: "build" }))
+    await flushMicrotasks()
     controller.abort()
     const rejected = expect(promise).rejects.toMatchObject({ code: "aborted" })
     approve({ decision: "allow" })

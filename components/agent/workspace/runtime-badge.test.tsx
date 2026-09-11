@@ -10,6 +10,7 @@ const messages = {
       runtime: {
         claude: "Claude",
         codex: "Codex",
+        devin: "Devin CLI",
         claudeCode: "Claude Code",
         geminiCli: "Gemini",
         cursorCli: "Cursor",
@@ -62,6 +63,15 @@ describe("RuntimeBadge", () => {
   it("renders the Cursor label", () => {
     renderBadge("cursor-cli")
     expect(screen.getByText("Cursor")).toBeInTheDocument()
+  })
+
+  it("renders the Devin label and brand icon", () => {
+    renderBadge("devin")
+    expect(screen.getByText("Devin CLI")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-badge-devin").querySelector("img")).toHaveAttribute(
+      "src",
+      "/icons/lobe/devin-color.svg"
+    )
   })
 
   it("renders the OpenCode ACP label", () => {

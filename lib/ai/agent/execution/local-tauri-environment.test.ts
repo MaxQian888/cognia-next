@@ -40,7 +40,31 @@ describe("local Tauri AgentTeam execution environment", () => {
 
   it("prepares an immutable environment version and exposes takeover surfaces", async () => {
     const executeSetup = jest.fn(async () => ({ success: true, bypassed: false }))
-    const settle = jest.fn(async () => [{ path: "src/index.ts", kind: "modified" }])
+    const resources: import("@/lib/task-workspace/types").ResourceChange[] = [
+      {
+        runId: "workspace-run-1",
+        path: "src/index.ts",
+        kind: "modified",
+        oldPath: null,
+        origin: "agent",
+        agentId: "mate-1",
+        mediaType: "text/typescript",
+        size: 1,
+        hash: null,
+        beforeHash: null,
+        insertions: 1,
+        deletions: 0,
+        binary: false,
+        resourceKind: "file",
+        beforeMode: null,
+        afterMode: null,
+        sensitive: false,
+        revision: 1,
+        captureClass: "source",
+        contentCaptured: true,
+      },
+    ]
+    const settle = jest.fn(async () => resources)
     const acquireWorkspaceBundle = jest.fn(async () => ({
       bundleId: "bundle-1",
       environmentKind: "managed" as const,
@@ -66,6 +90,24 @@ describe("local Tauri AgentTeam execution environment", () => {
           bundleTurnId: "bundle-turn-1",
           bundleId: "bundle-1",
           run: {
+            taskId: "task-1",
+            parentRunId: null,
+            agentId: "mate-1",
+            agentKind: "agent-team",
+            workspaceId: "workspace-1",
+            base: { kind: "remoteDefault" },
+            workspaceKey: null,
+            executionRunId: null,
+            traceId: null,
+            turnId: null,
+            attemptId: null,
+            providerAttemptId: null,
+            surface: null,
+            trackingPolicy: { generatedOutputRoots: [], autoDetect: true },
+            baselineRevision: 0,
+            state: "running",
+            createdAt: 1,
+            settledAt: null,
             runId: "workspace-run-1",
             executionRoot: "/worktrees/child-1",
             isolationKind: "gitWorktree" as const,
@@ -76,7 +118,7 @@ describe("local Tauri AgentTeam execution environment", () => {
           additionalAliases: [],
           settle,
           abort: jest.fn(),
-        }) as WorkspaceBundleTurnLease
+        }) satisfies WorkspaceBundleTurnLease
     )
     const environment = createLocalTauriExecutionEnvironment({
       isTauri: () => true,
@@ -134,9 +176,7 @@ describe("local Tauri AgentTeam execution environment", () => {
       editor: { root: "/worktrees/child-1" },
       browser: { sessionScope: "child-1" },
     })
-    await expect(child.settle("ready")).resolves.toEqual([
-      { path: "src/index.ts", kind: "modified" },
-    ])
+    await expect(child.settle("ready")).resolves.toEqual(resources)
     await environment.dispose("child-1")
     expect(settle).toHaveBeenCalledTimes(1)
   })
@@ -169,7 +209,18 @@ describe("local Tauri AgentTeam execution environment", () => {
   it("fails closed when Registry does not open a Bundle Turn", async () => {
     const environment = createLocalTauriExecutionEnvironment({
       executeSetup: async () => ({ success: true }),
-      acquireWorkspaceBundle: async () => ({ bundleId: "bundle-1", leases: [] }) as WorkspaceBundle,
+      acquireWorkspaceBundle: async () =>
+        ({
+          bundleId: "bundle-1",
+          environmentKind: "managed",
+          ownerType: "team",
+          ownerRef: "run-1",
+          state: "active",
+          leases: [],
+          lastUsedAt: 1,
+          pinned: false,
+          createdAt: 1,
+        }) satisfies WorkspaceBundle,
       openWorkspaceBundleTurnLease: async () => null,
     })
     const prepared = await environment.prepare(profile(), "/repo")

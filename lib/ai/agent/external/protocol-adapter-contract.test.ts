@@ -93,7 +93,16 @@ describe.each(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS.map((p) => [p] as const))(
       // than staying pending until the run's wall clock gives up with nothing
       // to say. Either shape is accepted, because both are reportable.
       const settled = await adapter
-        .execute("no-such-session", { prompt: "hello" }, { timeout: 1_000 })
+        .execute(
+          "no-such-session",
+          {
+            id: "message-1",
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+            timestamp: new Date(),
+          },
+          { timeout: 1_000 }
+        )
         .then(
           (result) => ({ rejected: false as const, result }),
           (error: unknown) => ({ rejected: true as const, error })

@@ -35,6 +35,7 @@ export type ExternalAgentPresetId =
   | "qwen-code"
   | "pi-rpc"
   | "droid"
+  | "devin"
   | "opencode-acp"
   | "opencode-server"
   | "opencode-remote"
@@ -293,6 +294,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   "qwen-code": buildPresetConfig("qwen-code"),
   "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
+  devin: buildPresetConfig("devin"),
   "opencode-acp": OPENCODE_ACP_PRESET,
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,

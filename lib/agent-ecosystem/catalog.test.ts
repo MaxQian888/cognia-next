@@ -11,6 +11,10 @@ import {
 } from "./catalog"
 
 describe("lookups", () => {
+  it("links the Devin runtime without claiming an unsupported history importer", () => {
+    expect(findEcosystemByRuntimeId("devin")?.id).toBe("devin")
+    expect(findEcosystemById("devin")?.sessionSourceIds).toEqual([])
+  })
   it("finds an ecosystem by its own id", () => {
     expect(findEcosystemById("codex")?.migrationVendor).toBe("codex")
   })

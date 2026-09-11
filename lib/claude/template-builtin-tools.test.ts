@@ -61,7 +61,7 @@ const teammate = {
   id: "mate-1",
   teamId: "team-1",
   name: "Alpha",
-  role: "member",
+  role: "teammate",
   status: "idle",
 } as AgentTeammate
 
@@ -70,7 +70,7 @@ const chatRow: ChatTemplateRow = {
   name: "Standup",
   description: "Daily standup prompt",
   body: "What did {{who}} do yesterday?",
-  params: [{ id: "who", label: "Who", required: true, kind: "text" }],
+  params: [{ id: "who", label: "Who", required: true, kind: "string" }],
   revision: 3,
   usageCount: 4,
   lastUsedAt: 20,

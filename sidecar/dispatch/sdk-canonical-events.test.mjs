@@ -511,6 +511,77 @@ test("a rate-limit event with no info yields nothing to log", () => {
   )
 })
 
+test("subscription quota events with missing or invalid status cannot imply recovery", () => {
+  for (const status of [undefined, null, "unknown", false, 0]) {
+    assert.deepEqual(
+      canonicalEventsFromSdkMessage(
+        { type: "rate_limit_event", rate_limit_info: { status, utilization: 0 } },
+        createSdkMappingState()
+      ),
+      []
+    )
+  }
+})
+
+test("subscription quota events preserve utilization and overage without using token costs", () => {
+  const info = {
+    status: "allowed_warning",
+    rateLimitType: "five_hour",
+    utilization: 0.91,
+    resetsAt: 1781869200,
+    overageStatus: "rejected",
+    overageResetsAt: 1781969200,
+    overageDisabledReason: "out_of_credits",
+    isUsingOverage: false,
+    overageInUse: false,
+    surpassedThreshold: 0.9,
+    errorCode: "credits_required",
+    canUserPurchaseCredits: true,
+    hasChargeableSavedPaymentMethod: false,
+  }
+  assert.deepEqual(
+    canonicalEventsFromSdkMessage(
+      { type: "rate_limit_event", rate_limit_info: info, total_cost_usd: 123 },
+      createSdkMappingState()
+    ),
+    [{ kind: "rate-limit", ...info }]
+  )
+})
+
+test("subscription quota recovery preserves zero and false and omits malformed optional fields", () => {
+  assert.deepEqual(
+    canonicalEventsFromSdkMessage(
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed",
+          utilization: 0,
+          resetsAt: Infinity,
+          overageStatus: "unknown",
+          overageResetsAt: NaN,
+          overageDisabledReason: null,
+          isUsingOverage: false,
+          overageInUse: "false",
+          surpassedThreshold: "0.9",
+          errorCode: 1,
+          canUserPurchaseCredits: false,
+          hasChargeableSavedPaymentMethod: null,
+        },
+      },
+      createSdkMappingState()
+    ),
+    [
+      {
+        kind: "rate-limit",
+        status: "allowed",
+        utilization: 0,
+        isUsingOverage: false,
+        canUserPurchaseCredits: false,
+      },
+    ]
+  )
+})
+
 test("non-objects are ignored", () => {
   assert.deepEqual(canonicalEventsFromSdkMessage(null, createSdkMappingState()), [])
   assert.deepEqual(canonicalEventsFromSdkMessage("nope", createSdkMappingState()), [])

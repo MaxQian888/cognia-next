@@ -20,6 +20,7 @@ import { normalizeExternalAgentValiditySnapshot } from "./canonical-contract"
 import { resolveExternalAgentSurfaceFromMetadata } from "./ecosystem-adapters"
 import { adaptPermissionMode } from "./permission-modes"
 import { protocolAdapterRegistry } from "./protocol-adapter"
+import { normalizeCogniaModelBinding } from "./gateway-task"
 
 // The protocols with a built-in adapter registered by
 // `ExternalAgentManager.registerDefaultAdapters()`. Keeping this in set-equality
@@ -729,6 +730,7 @@ export function normalizeExternalAgentConfigInput(
     autoApprovePatterns: input.autoApprovePatterns,
     requireApprovalFor: input.requireApprovalFor,
     codexOptions: input.codexOptions,
+    cogniaModel: normalizeCogniaModelBinding(input.cogniaModel),
     timeout: input.timeout ?? DEFAULT_TIMEOUT,
     retryConfig: {
       maxRetries: input.retryConfig?.maxRetries ?? DEFAULT_RETRY_CONFIG.maxRetries,

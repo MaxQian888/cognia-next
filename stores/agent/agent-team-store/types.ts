@@ -91,7 +91,7 @@ export interface AgentTeamState {
    * the patch are preserved.
    */
   updateTeamCapabilities: (teamId: string, bundle: TeamCapabilityBundle) => void
-  deleteTeam: (teamId: string) => void
+  deleteTeam: (teamId: string) => Promise<void>
   /** Workspace isolation cascade: drop all teams/teammates/tasks for a project (templates kept). */
   purgeProject: (projectId: string) => void
   setTeamStatus: (teamId: string, status: TeamStatus) => void

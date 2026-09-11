@@ -142,10 +142,20 @@ describe("teammate-preset-adapter", () => {
         specialization: "security",
         runtime: "codex",
         temperature: 0.4,
+        cogniaModel: {
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-a",
+        },
       })
       expect(out.specialization).toBe("security")
       expect(out.runtime).toBe("codex")
       expect(out.temperature).toBe(0.4)
+      expect(out.cogniaModel).toEqual({
+        providerId: "plugin:kimi:subscription",
+        modelId: "kimi-for-coding",
+        accountId: "account-a",
+      })
     })
 
     it("round-trips overlay → flat list → overlay against the same team default", () => {

@@ -27,6 +27,10 @@ describe("sandbox platform gate", () => {
 })
 
 describe("allowlists", () => {
+  it("admits the installed Devin ACP binary", () => {
+    expect(EXTERNAL_AGENT_BINARY_ALLOWLIST).toContain("devin")
+  })
+
   it("admits the binary the claude-code preset actually spawns", () => {
     // `ecosystem-adapters.ts` launches the bare `claude-agent-acp` binary for
     // the `claude-code` preset. Rust's allowlist only carried the npx package,
@@ -54,6 +58,15 @@ describe("allowlists", () => {
 })
 
 describe("agentStateWritableRoots", () => {
+  it("gives only the Devin binary its config, sessions, and cache roots", () => {
+    expect(agentStateWritableRoots("devin", ["acp"])).toEqual([
+      ".config/devin",
+      ".local/share/devin",
+      ".cache/devin",
+    ])
+    expect(agentStateWritableRoots("npx", ["-y", "devin-adapter"])).toEqual([".npm"])
+  })
+
   it("resolves an npx launch to the PACKAGE's state, not npx's", () => {
     const roots = agentStateWritableRoots("npx", ["-y", "@zed-industries/codex-acp"])
     expect(roots).toContain(".codex")

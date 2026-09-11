@@ -185,6 +185,32 @@ describe("createProviderSettingsSnapshot", () => {
     })
     expect(snap.customProviders[0].protocol).toBe("anthropic")
   })
+
+  it("keeps custom subscription model information in the operation snapshot", () => {
+    const model = {
+      id: "m",
+      name: "Reasoner",
+      contextLength: 8192,
+      maxOutputTokens: 2048,
+      supportsReasoning: true,
+      supportsVision: false,
+      pricing: { promptPer1M: 0, completionPer1M: 2 },
+    }
+    const snap = createProviderSettingsSnapshot({
+      defaultProvider: undefined,
+      providerSettings: undefined,
+      customProviders: [
+        {
+          id: "custom-code",
+          customModels: ["m"],
+          customModelMetadata: { m: model },
+          subscription: { modelApi: { list: false } },
+        },
+      ],
+    })
+    expect(snap.customProviders[0].models).toEqual([expect.objectContaining(model)])
+    expect(snap.customProviders[0].subscription?.modelApi).toEqual({ list: false })
+  })
 })
 
 describe("resolveFeatureProvider — explicit provider", () => {
@@ -1084,4 +1110,21 @@ describe("resolveFeatureProvider — ledger fields", () => {
     )
     expect(nothing).toMatchObject({ kind: "unresolved", code: "no_candidates" })
   })
+})
+
+it.each([
+  ["claude-sonnet-5", "anthropic"],
+  ["deepseek/deepseek-v4-flash", "openai.chat"],
+])("CommandCode feature model %s uses %s", (model, expected) => {
+  const result = createFeatureProviderModel({
+    kind: "resolved",
+    providerId: "commandcode",
+    protocol: "openai",
+    apiKey: "test",
+    baseURL: "https://api.commandcode.ai/provider/v1",
+    model,
+    isCustomProvider: false,
+    useProxy: false,
+  } as ResolvedProvider)
+  expect(result).toMatchObject({ __provider: expected, id: model })
 })

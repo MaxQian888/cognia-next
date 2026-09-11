@@ -73,6 +73,7 @@ function caller(over: Partial<ResolvedCaller> = {}): ResolvedCaller {
   return {
     parentDepth: 0,
     maxDepth: 2,
+    maxConcurrent: 0,
     parentChain: [],
     budgetRoot: "dispatch:test-session",
     ...over,

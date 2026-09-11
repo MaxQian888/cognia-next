@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import type { RuntimeTargetRecord } from "./target-registry"
 
 // The suite below always injects `dependencies`, so the DEFAULT dependency
@@ -16,6 +17,7 @@ jest.mock("./target-registry", () => {
   return {
     ...actual,
     RuntimeTargetRegistry: class {
+      upsertAndActivateCompanionTarget = forward("upsertAndActivateCompanionTarget")
       getActiveTarget = forward("getActiveTarget")
       ensureStandaloneTarget = forward("ensureStandaloneTarget")
       activateTarget = forward("activateTarget")
@@ -26,6 +28,35 @@ jest.mock("./target-registry", () => {
     },
   }
 })
+
+let mockVault: null | { accountId: string; createContentCipher: jest.Mock; loadSecret: jest.Mock } =
+  null
+const mockMigrate = jest.fn(async (_input: unknown) => ({ stage: "verified" as const, tables: [] }))
+const mockMarkCompleted = jest.fn(async () => undefined)
+const mockActivateCipher = jest.fn()
+let mockRuntimeKind = "companion"
+let mockExecutionLegs: Array<{ resource: string; state: string }> = []
+jest.mock("./browser-vault", () => ({
+  ...jest.requireActual("./browser-vault"),
+  getActiveBrowserVault: () => mockVault,
+}))
+jest.mock("@/lib/accounts/content-cipher", () => ({
+  ...jest.requireActual("@/lib/accounts/content-cipher"),
+  activateAccountContentCipher: (...args: unknown[]) => mockActivateCipher(...args),
+}))
+jest.mock("./target-database-migration", () => ({
+  ...jest.requireActual("./target-database-migration"),
+  migrateAccountDatabaseToTarget: (input: unknown) => mockMigrate(input),
+  markTargetDatabaseMigrationCompleted: () => mockMarkCompleted(),
+}))
+jest.mock("./runtime-snapshot-store", () => ({
+  ...jest.requireActual("./runtime-snapshot-store"),
+  getRuntimeSnapshot: () => ({ target: { kind: mockRuntimeKind } }),
+}))
+jest.mock("@/lib/execution/broker", () => ({
+  ...jest.requireActual("@/lib/execution/broker"),
+  getExecutionBroker: () => ({ list: () => mockExecutionLegs }),
+}))
 
 const mockReloadCompanionConfig = jest.fn(async () => undefined)
 jest.mock("@/lib/tauri/transport-companion", () => ({
@@ -541,4 +572,230 @@ it("completes a switch that relies on the default dependencies", async () => {
   expect(contexts).toEqual([
     { accountId: "acct_runtime", fromTargetId: companion.id, toTargetId: standalone.id },
   ])
+})
+
+it("does not publish hydration runtime context after registration becomes stale", async () => {
+  let current = true
+  const activateDatabase = jest.fn()
+  const setContext = jest.fn()
+  const upsertAndActivateCompanionTarget = jest.fn(async () => {
+    current = false
+    return { ...standalone, id: "companion-stale" }
+  })
+  await expect(
+    registerCompanionRuntimeTarget(
+      {
+        accountId: "acct_runtime",
+        targetId: "companion-stale",
+        baseUrl: "https://stale.example",
+        deviceId: "stale-device",
+        serverVersion: "2.0.0",
+      },
+      {
+        registry: { upsertAndActivateCompanionTarget },
+        getContext: () => null,
+        activateDatabase,
+        setContext,
+      },
+      () => current
+    )
+  ).resolves.toBeNull()
+  expect(activateDatabase).not.toHaveBeenCalled()
+  expect(setContext).not.toHaveBeenCalled()
+})
+
+describe("default runtime lifecycle boundaries", () => {
+  const companion: RuntimeTargetRecord = {
+    ...standalone,
+    id: "host-default",
+    kind: "companion",
+    hostKind: "cloud",
+    credentialRef: "vault-ref",
+  }
+  let existingDatabases: Set<string>
+  let exists: jest.SpyInstance
+  let deleteDatabase: jest.SpyInstance
+  beforeEach(() => {
+    existingDatabases = new Set()
+    exists = jest
+      .spyOn(Dexie, "exists")
+      .mockImplementation(async (name) => existingDatabases.has(name))
+    deleteDatabase = jest.spyOn(Dexie, "delete").mockImplementation(async (name) => {
+      existingDatabases.delete(name)
+    })
+    mockVault = {
+      accountId: "acct_runtime",
+      createContentCipher: jest.fn(() => ({})),
+      loadSecret: jest.fn(async () => "key"),
+    }
+    mockMigrate.mockClear()
+    mockMarkCompleted.mockClear()
+    mockActivateCipher.mockClear()
+    mockReloadCompanionConfig.mockReset().mockResolvedValue(undefined)
+    mockRuntimeKind = "companion"
+    mockExecutionLegs = []
+    mockRegistry = {
+      getActiveTarget: jest.fn(async () => null),
+      ensureStandaloneTarget: jest.fn(async () => standalone),
+      activateTarget: jest.fn(async (_accountId, id) =>
+        id === standalone.id ? standalone : companion
+      ),
+      upsertAndActivateCompanionTarget: jest.fn(async () => companion),
+      listTargets: jest.fn(async () => [standalone, companion]),
+      deleteTarget: jest.fn(async () => undefined),
+      deleteAccountTargets: jest.fn(async () => undefined),
+    }
+  })
+  afterEach(async () => {
+    exists.mockRestore()
+    deleteDatabase.mockRestore()
+    mockVault = null
+    mockRuntimeKind = "companion"
+    mockExecutionLegs = []
+    const { clearActiveRuntimeTargetContext } = await import("./runtime-target-context")
+    clearActiveRuntimeTargetContext()
+  })
+
+  it.each(["legacy-target", "account", "absent"])(
+    "migrates %s plaintext before activating the encrypted target",
+    async (source) => {
+      const legacy = "cognia-account-acct_runtime-target-web-standalone"
+      const account = "cognia-account-acct_runtime"
+      if (source !== "absent") existingDatabases.add(source === "legacy-target" ? legacy : account)
+      expect(await prepareAccountRuntimeTarget("acct_runtime")).toEqual(standalone)
+      expect(mockMigrate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceDbName: source === "legacy-target" ? legacy : account,
+          targetDbName: `${legacy}-encrypted-v1`,
+        })
+      )
+      expect(mockVault!.createContentCipher).toHaveBeenCalledWith(`${legacy}-encrypted-v1`)
+      expect(mockActivateCipher).toHaveBeenCalledTimes(1)
+      expect(mockRegistry.activateTarget).toHaveBeenCalledTimes(1)
+      expect(mockMarkCompleted).toHaveBeenCalledTimes(1)
+      expect(existingDatabases.size).toBe(0)
+    }
+  )
+
+  it.each([null, "acct_other"])(
+    "refuses migration when the unlocked Vault belongs to %s",
+    async (accountId) => {
+      mockVault = accountId ? { ...mockVault!, accountId } : null
+      await expect(prepareAccountRuntimeTarget("acct_runtime")).rejects.toThrow(
+        "Vault must be unlocked"
+      )
+      expect(mockMigrate).not.toHaveBeenCalled()
+      expect(mockRegistry.activateTarget).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not mark migration complete if plaintext deletion cannot be verified", async () => {
+    exists.mockResolvedValue(true)
+    await expect(prepareAccountRuntimeTarget("acct_runtime")).rejects.toThrow(
+      "deletion could not be verified"
+    )
+    expect(mockMarkCompleted).not.toHaveBeenCalled()
+    expect(mockRegistry.activateTarget).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])(
+    "probes an already-active target for pending plaintext: %s",
+    async (pending) => {
+      mockRegistry.getActiveTarget.mockResolvedValue(standalone)
+      if (pending) existingDatabases.add("cognia-account-acct_runtime")
+      expect(await prepareAccountRuntimeTarget("acct_runtime")).toEqual(standalone)
+      expect(mockMigrate).toHaveBeenCalledTimes(pending ? 1 : 0)
+      expect(mockRegistry.activateTarget).not.toHaveBeenCalled()
+    }
+  )
+
+  it("verifies account registry removal after default physical database deletion", async () => {
+    mockRegistry.listTargets.mockResolvedValueOnce([standalone]).mockResolvedValueOnce([])
+    expect((await removeAccountRuntimeTargets("acct_runtime")).registryRowsDeleted).toBe(1)
+    expect(deleteDatabase).toHaveBeenCalledTimes(2)
+    mockRegistry.listTargets.mockResolvedValue([standalone])
+    await expect(removeAccountRuntimeTargets("acct_runtime")).rejects.toThrow(
+      "registry deletion could not be verified"
+    )
+  })
+
+  it.each(["locked", "wrong-account", "missing-reference", "missing-secret"])(
+    "refuses a default Host switch with %s credentials",
+    async (kind) => {
+      mockRegistry.getActiveTarget.mockResolvedValue(standalone)
+      if (kind === "locked") mockVault = null
+      if (kind === "wrong-account") mockVault!.accountId = "acct_other"
+      if (kind === "missing-reference")
+        mockRegistry.listTargets.mockResolvedValue([
+          standalone,
+          { ...companion, credentialRef: undefined },
+        ])
+      if (kind === "missing-secret") mockVault!.loadSecret.mockResolvedValue(null)
+      await expect(switchAccountRuntimeTarget("acct_runtime", companion.id)).rejects.toThrow(
+        /Vault|credentials/
+      )
+      expect(mockRegistry.activateTarget).not.toHaveBeenCalled()
+    }
+  )
+
+  it("blocks only active standalone AI turns before a default Host switch", async () => {
+    mockRuntimeKind = "standalone"
+    mockExecutionLegs = [{ resource: "ai-turn", state: "running" }]
+    await expect(switchAccountRuntimeTarget("acct_runtime", companion.id)).rejects.toThrow(
+      "must stop or finish"
+    )
+    mockExecutionLegs = [
+      { resource: "terminal", state: "running" },
+      { resource: "ai-turn", state: "done" },
+    ]
+    await expect(switchAccountRuntimeTarget("acct_runtime", companion.id)).resolves.toEqual(
+      companion
+    )
+    expect(mockReloadCompanionConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a missing target and a failed first activation without inventing a rollback target", async () => {
+    await expect(switchAccountRuntimeTarget("acct_runtime", "host-missing")).rejects.toThrow(
+      "does not exist"
+    )
+    mockReloadCompanionConfig.mockRejectedValueOnce(new Error("transport refused"))
+    await expect(switchAccountRuntimeTarget("acct_runtime", companion.id)).rejects.toThrow(
+      "transport refused"
+    )
+    expect(mockRegistry.activateTarget).toHaveBeenCalledTimes(1)
+  })
+
+  it("registers default Host context only while its pairing guard remains current", async () => {
+    const { setActiveRuntimeTargetContext, getActiveRuntimeTargetContext } =
+      await import("./runtime-target-context")
+    setActiveRuntimeTargetContext("acct_runtime", standalone.id)
+    const config = { baseUrl: "https://cloud.example", deviceId: "device", serverVersion: "2.0.0" }
+    expect(await registerCompanionRuntimeTarget(config, undefined, () => false)).toBeNull()
+    expect(mockRegistry.upsertAndActivateCompanionTarget).not.toHaveBeenCalled()
+    expect(await registerCompanionRuntimeTarget(config, undefined, () => true)).toEqual(companion)
+    expect(getActiveRuntimeTargetContext()?.targetId).toBe(companion.id)
+  })
+
+  it("detaches a default Companion after releasing its runtime subscriptions", async () => {
+    const { setActiveRuntimeTargetContext, getActiveRuntimeTargetContext } =
+      await import("./runtime-target-context")
+    setActiveRuntimeTargetContext("acct_runtime", companion.id)
+    mockRegistry.getActiveTarget.mockResolvedValue(companion)
+    expect(await detachActiveCompanionRuntimeTarget()).toEqual(standalone)
+    expect(getActiveRuntimeTargetContext()?.targetId).toBe(standalone.id)
+    expect(mockRegistry.deleteTarget).toHaveBeenCalledWith("acct_runtime", companion.id)
+    expect(deleteDatabase).toHaveBeenCalledWith("cognia-account-acct_runtime-target-host-default")
+  })
+
+  it.each([null, standalone, { ...companion, id: "host-other" }])(
+    "leaves a nonmatching active target untouched during detach: %p",
+    async (active) => {
+      const { setActiveRuntimeTargetContext } = await import("./runtime-target-context")
+      setActiveRuntimeTargetContext("acct_runtime", companion.id)
+      mockRegistry.getActiveTarget.mockResolvedValue(active)
+      expect(await detachActiveCompanionRuntimeTarget()).toEqual(active)
+      expect(mockRegistry.deleteTarget).not.toHaveBeenCalled()
+      expect(deleteDatabase).not.toHaveBeenCalled()
+    }
+  )
 })

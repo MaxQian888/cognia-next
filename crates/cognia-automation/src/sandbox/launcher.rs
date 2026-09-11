@@ -33,6 +33,9 @@ pub struct LaunchScope {
     /// Extra read-only directories beyond the standard system paths
     /// (e.g. the user's home for `~/.gitconfig`, `~/.npmrc`).
     pub readable: Vec<String>,
+    /// Host-selected credential/state roots hidden from this task. Explicit
+    /// writable descendants (the task's own home) remain accessible.
+    pub denied_readable: Vec<String>,
     /// Allow network egress. Interactive dev shells usually need it
     /// (`git`, `npm`); the caller decides.
     pub network: bool,
@@ -124,6 +127,15 @@ pub fn bwrap_prefix(bwrap: &str, scope: &LaunchScope, empty_dir: &Path) -> Vec<S
     // left secrets readable and never looked at the readable roots — the bug
     // this closes). A later bwrap bind wins.
     push_protected_binds(&mut args, &writable, &scope.readable, empty_dir);
+    for denied in &scope.denied_readable {
+        if Path::new(denied).exists() {
+            let kind = if Path::new(denied).is_file() { ProtKind::File } else { ProtKind::Dir };
+            push_empty_bind(&mut args, kind, empty_dir, denied);
+            for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+                args.extend(["--bind".into(), allowed.clone(), allowed.clone()]);
+            }
+        }
+    }
 
     if !scope.cwd.is_empty() {
         args.push("--chdir".to_string());
@@ -210,6 +222,12 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     // leaving `~/.ssh` / cognia's credential store readable (the bug this
     // closes).
     push_protected_denies(&mut out, &writable);
+    for denied in &scope.denied_readable {
+        out.push_str(&format!("(deny file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(denied)));
+        for allowed in writable.iter().filter(|allowed| Path::new(allowed).starts_with(denied) && *allowed != denied) {
+            out.push_str(&format!("(allow file-read* file-write* (subpath \"{}\"))\n", escape_sbpl(allowed)));
+        }
+    }
     push_secret_read_denies(&mut out, &scope.readable);
     // Anchored at $HOME and the app data directory rather than at whatever the
     // caller declared readable. With reads open globally, a scope that does not
@@ -307,6 +325,25 @@ fn push_secret_read_denies(out: &mut String, readable: &[String]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn managed_task_hides_credentials_and_siblings_but_keeps_its_own_home() {
+        let root = tempfile::tempdir().unwrap();
+        let tasks = root.path().join("tasks");
+        let own = tasks.join("one");
+        std::fs::create_dir_all(&own).unwrap();
+        let mut managed = scope();
+        managed.writable.push(own.to_string_lossy().into_owned());
+        managed.denied_readable = vec![tasks.to_string_lossy().into_owned(), "/home/u/.codex".into()];
+        let profile = render_sbpl(&managed);
+        let deny = format!("(deny file-read* file-write* (subpath \"{}\"))", tasks.display());
+        let own_allow = format!("(allow file-read* file-write* (subpath \"{}\"))", own.display());
+        assert!(profile.contains("(deny file-read* file-write* (subpath \"/home/u/.codex\"))"));
+        assert!(profile.find(&deny).unwrap() < profile.find(&own_allow).unwrap());
+        let args = bwrap_prefix("/usr/bin/bwrap", &managed, root.path());
+        assert!(args.windows(3).any(|w| w == ["--ro-bind", root.path().to_str().unwrap(), tasks.to_str().unwrap()]));
+        assert!(args.windows(3).any(|w| w == ["--bind", own.to_str().unwrap(), own.to_str().unwrap()]));
+    }
+
     use std::path::PathBuf;
 
     use super::*;
@@ -315,6 +352,7 @@ mod tests {
         LaunchScope {
             cwd: "/work/project".to_string(),
             writable: vec!["/work/project".to_string()],
+            denied_readable: vec![],
             readable: vec!["/home/u".to_string()],
             network: true,
         }
@@ -390,6 +428,44 @@ mod tests {
     }
 
     #[test]
+    fn interactive_profile_allows_only_the_null_sink_device_write() {
+        let profile = render_sbpl(&scope());
+        assert!(profile.contains("(allow file-write-data (literal \"/dev/null\"))"));
+        assert!(!profile.contains("(allow file-write-data (subpath \"/dev\"))"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn interactive_profile_runs_git_with_closed_stdin_and_keeps_writes_scoped() {
+        let profile = render_sbpl(&scope());
+        let output = std::process::Command::new("/usr/bin/sandbox-exec")
+            .args([
+                "-p",
+                &profile,
+                "/bin/sh",
+                "-c",
+                "printf ok >/dev/null; exec 0<&-; exec /usr/bin/git --version",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("git version"));
+        let outside = tempfile::tempdir().unwrap();
+        let denied = outside.path().join("must-not-exist");
+        let output = std::process::Command::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile, "/usr/bin/touch"])
+            .arg(&denied)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(!denied.exists());
+    }
+
+    #[test]
     fn network_only_proxy_profile_does_not_change_filesystem_access() {
         let p = sandbox_exec_network_proxy_prefix(7890);
         assert!(p[2].contains("(allow default)"));
@@ -417,6 +493,7 @@ mod tests {
         let s = LaunchScope {
             cwd: "/a".to_string(),
             writable: vec!["/a".to_string(), "/b".to_string(), "/b".to_string()],
+            denied_readable: vec![],
             readable: vec![],
             network: false,
         };

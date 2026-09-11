@@ -20,7 +20,15 @@ function hostRecord(overrides: Partial<ExternalAgentConfigRecord> = {}): Externa
     revision: "rev_1",
     lifecycleGeneration: 2,
     seq: 1,
-    config: { name: "Pi on the box", protocol: "pi-rpc" },
+    config: {
+      id: "host_pi",
+      enabled: true,
+      transport: "stdio",
+      createdAt: "2026-09-10T00:00:00.000Z",
+      updatedAt: "2026-09-10T00:00:00.000Z",
+      name: "Pi on the box",
+      protocol: "pi-rpc",
+    },
     enabled: true,
     lifecycleStatus: "ready",
     createdAt: 0,
@@ -149,7 +157,19 @@ describe("listAgentRuntimes", () => {
       ...base,
       externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
-      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      hostConfigs: [
+        hostRecord({
+          config: {
+            id: "host_pi",
+            enabled: true,
+            transport: "stdio",
+            createdAt: "2026-09-10T00:00:00.000Z",
+            updatedAt: "2026-09-10T00:00:00.000Z",
+            name: "Pi (native RPC)",
+            protocol: "pi-rpc",
+          },
+        }),
+      ],
       runtimeSupportsExternalAgents: { ok: true, via: "remote" },
     })
     expect(rows.map((row) => row.key)).toEqual(["builtin", "host:eac_1"])
@@ -167,7 +187,19 @@ describe("listAgentRuntimes", () => {
       ...base,
       externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
-      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      hostConfigs: [
+        hostRecord({
+          config: {
+            id: "host_pi",
+            enabled: true,
+            transport: "stdio",
+            createdAt: "2026-09-10T00:00:00.000Z",
+            updatedAt: "2026-09-10T00:00:00.000Z",
+            name: "Pi (native RPC)",
+            protocol: "pi-rpc",
+          },
+        }),
+      ],
       runtimeSupportsExternalAgents: { ok: true, via: "local" },
     })
     expect(rows.map((row) => row.key)).toEqual(["builtin", "external:local_pi"])
@@ -186,7 +218,19 @@ describe("listAgentRuntimes", () => {
       ...base,
       externalEnabled: true,
       externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
-      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      hostConfigs: [
+        hostRecord({
+          config: {
+            id: "host_pi",
+            enabled: true,
+            transport: "stdio",
+            createdAt: "2026-09-10T00:00:00.000Z",
+            updatedAt: "2026-09-10T00:00:00.000Z",
+            name: "Pi (native RPC)",
+            protocol: "pi-rpc",
+          },
+        }),
+      ],
       runtimeSupportsExternalAgents: { ok: false, reason: "not-granted" },
     })
     expect(rows[1]).toMatchObject({ placement: "both", group: "host" })
@@ -198,7 +242,19 @@ describe("listAgentRuntimes", () => {
       ...base,
       externalEnabled: true,
       externalAgents: [agent({ id: "local_codex", name: "Codex" })],
-      hostConfigs: [hostRecord({ config: { name: "Pi on the box", protocol: "pi-rpc" } })],
+      hostConfigs: [
+        hostRecord({
+          config: {
+            id: "host_pi",
+            enabled: true,
+            transport: "stdio",
+            createdAt: "2026-09-10T00:00:00.000Z",
+            updatedAt: "2026-09-10T00:00:00.000Z",
+            name: "Pi on the box",
+            protocol: "pi-rpc",
+          },
+        }),
+      ],
       runtimeSupportsExternalAgents: { ok: true, via: "remote" },
     })
     expect(rows.map((row) => row.key)).toEqual(["builtin", "external:local_codex", "host:eac_1"])

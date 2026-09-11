@@ -1,7 +1,11 @@
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: () => ({ settings: { customProviders: [] } }) },
+}))
 // ADR-0028 — env-resolver unit tests. The transport layer is mocked so the
 // tests run without a real Tauri host.
 
 import {
+  subscriptionAccountProviderFor,
   resolveAccountEnv,
   resolveAccountEnvForExternalRuntime,
   resolveAccountId,
@@ -285,4 +289,27 @@ describe("resolveProxyEnv", () => {
     await expect(resolveProxyEnv(undefined)).resolves.toEqual({})
     expect(mockCall).not.toHaveBeenCalled()
   })
+})
+
+it("maps configured custom and plugin providers to distinct account families", () => {
+  const customProviders = [
+    {
+      id: "custom-demo",
+      customName: "Demo",
+      baseURL: "https://example.com/v1",
+      apiProtocol: "openai",
+      customModels: ["model"],
+      subscription: {},
+    },
+  ] as AppSettings["customProviders"]
+  expect(subscriptionAccountProviderFor("custom-demo", customProviders)).toBe("custom-demo")
+  expect(subscriptionAccountProviderFor("other-demo", customProviders)).toBeNull()
+  expect(
+    resolveAccountId(
+      "custom-demo",
+      null,
+      null,
+      settings({ customProviders, defaultAccountIds: { "custom-demo": "custom-account" } })
+    )
+  ).toBe("custom-account")
 })

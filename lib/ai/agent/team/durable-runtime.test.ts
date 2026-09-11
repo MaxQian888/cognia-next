@@ -14,7 +14,6 @@ const config = (overrides: Partial<AgentTeamConfig> = {}): AgentTeamConfig => ({
   maxConcurrentTeammates: 2,
   executionMode: "coordinated",
   displayMode: "expanded",
-  runtimeVersion: "durable-v2",
   writeMode: "single-writer",
   repositories: [
     { id: "primary", role: "primary", path: "/repo", writable: true },

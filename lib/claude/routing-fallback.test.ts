@@ -21,6 +21,27 @@ jest.mock("@/lib/diagnostics/bus", () => ({
   dispatchDiagnostic: (...args: unknown[]) => dispatchDiagnosticMock(...args),
 }))
 
+const getSessionMock = jest.fn()
+const getCharacterMock = jest.fn()
+const codexCredentialMock = jest.fn()
+const opencodeCredentialMock = jest.fn()
+const managedCredentialMock = jest.fn()
+jest.mock("@/lib/subscription/core/managed-key-credential", () => ({
+  resolveManagedSubscriptionCredential: (...args: unknown[]) => managedCredentialMock(...args),
+}))
+jest.mock("@/lib/db/sessions", () => ({
+  getSession: (...args: unknown[]) => getSessionMock(...args),
+}))
+jest.mock("@/lib/db/characters", () => ({
+  getCharacter: (...args: unknown[]) => getCharacterMock(...args),
+}))
+jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
+  resolveCodexVaultCredential: (...args: unknown[]) => codexCredentialMock(...args),
+}))
+jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
+  resolveOpencodeVaultCredential: (...args: unknown[]) => opencodeCredentialMock(...args),
+}))
+
 const baseOptions = (
   fallbackEntries: Array<{ providerId: string; modelId: string }>
 ): SendOptions =>
@@ -109,6 +130,42 @@ describe("attemptRoutingFallback", () => {
       severity: "info",
       meta: { sessionId: "s1", providerId: "anthropic", modelId: "claude-haiku-4-5" },
     })
+  })
+
+  it("uses the fallback model's discovered limits and preserves a smaller turn output cap", async () => {
+    useSettingsStore.setState({
+      settings: {
+        routingFallbackEnabled: true,
+        providerSettings: {
+          openai: {
+            enabled: true,
+            apiKey: "test",
+            defaultModel: "provider-default",
+            inferenceDefaults: { maxTokens: 10000 },
+            discoveredModels: [
+              { id: "fallback-model", contextLength: 64000, maxOutputTokens: 4096 },
+            ],
+          },
+        },
+      } as never,
+    })
+    const entries = [
+      { providerId: "anthropic", modelId: "initial-model" },
+      { providerId: "openai", modelId: "fallback-model" },
+    ]
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      attemptIndex: 0,
+      options: {
+        ...baseOptions(entries),
+        compaction: { enabled: true, contextWindow: 200000 } as SendOptions["compaction"],
+        modelParams: { maxOutputTokens: 1024 },
+      },
+    })
+    await expect(attemptRoutingFallback("s1", "rate limit exceeded")).resolves.toBe(true)
+    const cached = useChatStore.getState().lastSendBySession.s1
+    expect(cached?.options.compaction?.contextWindow).toBe(64000 - 1024)
+    expect(cached?.options.modelParams?.maxOutputTokens).toBe(1024)
   })
 
   it("stays silent when the retry itself could not be issued", async () => {
@@ -401,4 +458,186 @@ describe("attemptRoutingFallback — error-class routing (P3.3)", () => {
     const timedOut = await attemptRoutingFallback("s1", "Request timed out")
     expect(timedOut).toBe(true)
   })
+})
+
+describe("subscription account identity on routing retry", () => {
+  beforeEach(() => {
+    getSessionMock.mockReset()
+    getCharacterMock.mockReset()
+    codexCredentialMock.mockReset()
+    opencodeCredentialMock.mockReset()
+    sendPromptMock.mockClear().mockResolvedValue(undefined)
+    useChatStore.getState().clear()
+    useSettingsStore.setState({
+      settings: {
+        routingFallbackEnabled: true,
+        defaultProvider: "codex",
+        providerSettings: {
+          codex: { providerId: "codex", enabled: true, apiKey: "manual-key" },
+          opencode: { providerId: "opencode", enabled: true, apiKey: "other-provider-manual" },
+        },
+      } as never,
+    })
+  })
+
+  it.each(["session", "character"])(
+    "retains an explicit %s account when retrying another model on the same provider",
+    async (source) => {
+      getSessionMock.mockResolvedValue(
+        source === "session" ? { id: "s1", accountId: "pinned" } : { id: "s1", characterId: "c1" }
+      )
+      getCharacterMock.mockResolvedValue({ accountIdOverride: "pinned" })
+      codexCredentialMock.mockResolvedValue({
+        apiKey: "pinned-key",
+        baseURL: "https://selected.test",
+      })
+      seedCache("s1", [
+        { providerId: "codex", modelId: "model-a" },
+        { providerId: "codex", modelId: "model-b" },
+      ])
+      expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+      expect(codexCredentialMock).toHaveBeenCalledWith("codex", "pinned")
+      expect(sendPromptMock).toHaveBeenCalledWith(
+        "s1",
+        "hello",
+        expect.objectContaining({
+          providerCredentials: expect.objectContaining({ apiKey: "pinned-key" }),
+        })
+      )
+    }
+  )
+
+  it("uses the new provider's manual/default credentials for a cross-provider retry", async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", accountId: "codex-pinned" })
+    seedCache("s1", [
+      { providerId: "codex", modelId: "model-a" },
+      { providerId: "opencode", modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(getSessionMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "s1",
+      "hello",
+      expect.objectContaining({
+        providerCredentials: expect.objectContaining({ apiKey: "other-provider-manual" }),
+      })
+    )
+  })
+
+  it("does not carry the original provider pin into a second retry within another provider family", async () => {
+    getSessionMock.mockResolvedValue({
+      id: "s1",
+      providerOverride: "codex",
+      accountId: "codex-pinned",
+    })
+    seedCache("s1", [
+      { providerId: "opencode", modelId: "model-a" },
+      { providerId: "opencode", modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(opencodeCredentialMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "s1",
+      "hello",
+      expect.objectContaining({
+        providerCredentials: expect.objectContaining({ apiKey: "other-provider-manual" }),
+      })
+    )
+  })
+
+  it("keeps the selected account on routing-plan retries as well as legacy alias retries", async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", accountId: "pinned" })
+    codexCredentialMock.mockResolvedValue({
+      apiKey: "pinned-key",
+      baseURL: "https://selected.test",
+    })
+    const entries = [
+      { providerId: "codex", modelId: "model-a" },
+      { providerId: "codex", modelId: "model-b" },
+    ]
+    useChatStore.getState().setLastSend("s1", {
+      content: "hello",
+      attemptIndex: 0,
+      options: {
+        ...baseOptions(entries),
+        routingPlan: { decisionId: "decision", orderedCandidates: entries } as never,
+      },
+    })
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "s1",
+      "hello",
+      expect.objectContaining({
+        model: "model-b",
+        providerCredentials: expect.objectContaining({ apiKey: "pinned-key" }),
+      })
+    )
+  })
+
+  it("does not retry when account ownership cannot be reloaded", async () => {
+    getSessionMock.mockRejectedValue(new Error("account database locked"))
+    seedCache("s1", [
+      { providerId: "codex", modelId: "model-a" },
+      { providerId: "codex", modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("does not retry with a manual key when the pinned account disappeared", async () => {
+    getSessionMock.mockResolvedValue({ id: "s1", accountId: "removed" })
+    codexCredentialMock.mockResolvedValue(null)
+    seedCache("s1", [
+      { providerId: "codex", modelId: "model-a" },
+      { providerId: "codex", modelId: "model-b" },
+    ])
+    expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(false)
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+})
+
+it("retains a custom subscription pin only within the same registered provider", async () => {
+  useChatStore.getState().clear()
+  const customProviders = ["custom-one", "custom-two"].map((id) => ({
+    id,
+    customName: id,
+    baseURL: "https://example.com/v1",
+    apiProtocol: "openai",
+    customModels: ["model"],
+    subscription: {},
+  }))
+  useSettingsStore.setState({
+    settings: {
+      routingFallbackEnabled: true,
+      defaultProvider: "custom-one",
+      customProviders,
+    } as never,
+  })
+  getSessionMock.mockResolvedValue({
+    id: "s1",
+    providerOverride: "custom-one",
+    accountId: "custom-pin",
+  })
+  managedCredentialMock
+    .mockReset()
+    .mockResolvedValue({ apiKey: "test", baseURL: "https://example.com/v1" })
+  sendPromptMock.mockResolvedValue(undefined)
+  seedCache("s1", [
+    { providerId: "custom-one", modelId: "one" },
+    { providerId: "custom-one", modelId: "two" },
+  ])
+  expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+  expect(managedCredentialMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "custom-one" }),
+    "custom-pin"
+  )
+  seedCache("s1", [
+    { providerId: "custom-one", modelId: "one" },
+    { providerId: "custom-two", modelId: "two" },
+  ])
+  expect(await attemptRoutingFallback("s1", "rate limit exceeded")).toBe(true)
+  expect(managedCredentialMock).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "custom-two" }),
+    null
+  )
 })

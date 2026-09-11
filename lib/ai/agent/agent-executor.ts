@@ -30,7 +30,7 @@ import {
   type ProviderSettingsEntry,
   type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
-import type { Character } from "@cognia/agent-config-types"
+import type { AppSettings, Character } from "@cognia/agent-config-types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { DispatchContext } from "@/lib/claude/agents/dispatch-context-registry"
 import type { ExternalSessionPermissionSpec } from "@/lib/ai/agent/external/permission-cascade"
@@ -579,9 +579,15 @@ async function runToolEnabledStandalone(
         const next = controller?.failAndAdvance() ?? null
         if (!next || !appSettings) throw error
         candidate = next
-        const { resolveProviderAttemptOptions } =
+        const { resolveProviderAttemptOptions, applyProviderAttemptLimits } =
           await import("@/lib/claude/provider-attempt-options")
-        const resolvedAttempt = await resolveProviderAttemptOptions(next.providerId, appSettings)
+        const resolvedAttempt = await resolveProviderAttemptOptions(
+          next.providerId,
+          appSettings,
+          undefined,
+          false,
+          next.modelId
+        )
         attemptOptions = {
           ...sendOptions,
           provider: next.providerId,
@@ -598,6 +604,14 @@ async function runToolEnabledStandalone(
               }
             : undefined,
         }
+        Object.assign(
+          attemptOptions,
+          applyProviderAttemptLimits(
+            attemptOptions,
+            appSettings,
+            sendOptions.modelParams?.maxOutputTokens
+          )
+        )
         if (plan && sendOptions.spanId && traceEmitter) {
           traceEmitter.recordEvent(sendOptions.spanId, {
             name: "routing.fallback",
@@ -866,7 +880,14 @@ export async function runCompletionRail(
         ...resolution,
         model: candidate.modelId,
       })
-      const options: Record<string, unknown> = { model, ...providerVisiblePayload }
+      const { buildProviderAttemptModelParams } =
+        await import("@/lib/claude/provider-attempt-options")
+      const modelParams = buildProviderAttemptModelParams(candidate.providerId, candidate.modelId, {
+        ...liveSettings,
+        providerSettings,
+        customProviders,
+      } as AppSettings)
+      const options: Record<string, unknown> = { model, ...modelParams, ...providerVisiblePayload }
       if (config.temperature !== undefined) options.temperature = config.temperature
       if (config.abortSignal) options.abortSignal = config.abortSignal
 

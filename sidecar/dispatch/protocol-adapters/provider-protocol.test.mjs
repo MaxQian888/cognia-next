@@ -165,3 +165,15 @@ test("decideOpenAiEndpointFlavor: auto/undefined falls back to the host+id heuri
   assert.equal(decideOpenAiEndpointFlavor({ baseURL: "https://api.deepseek.com/v1" }), "chat")
   assert.equal(decideOpenAiEndpointFlavor({ baseURL: "https://x.openai.azure.com" }), "chat")
 })
+
+test("CommandCode routes Claude to Messages and other models to Chat Completions", () => {
+  assert.equal(resolveProviderProtocol("commandcode", "claude-sonnet-5"), "anthropic")
+  assert.equal(resolveProviderProtocol("commandcode", "anthropic/claude-opus-5"), "anthropic")
+  assert.equal(resolveProviderProtocol("commandcode", "deepseek/deepseek-v4-flash"), "openai")
+  assert.equal(resolveProviderProtocol("commandcode", "gpt-5.5"), "openai")
+  assert.equal(resolveProviderProtocol("commandcode"), "openai")
+  assert.equal(
+    decideOpenAiEndpointFlavor({ providerId: "commandcode", apiFlavor: "responses" }),
+    "chat"
+  )
+})

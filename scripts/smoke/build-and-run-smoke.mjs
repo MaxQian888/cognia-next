@@ -11,8 +11,17 @@ import { fileURLToPath } from "node:url"
 import { createCliExternalAgentAliasPlugin } from "../build/cli-external-agent-aliases.mjs"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
-const entry = path.join(root, "scripts/smoke/external-cognia-parity-smoke.ts")
-const outfile = path.join(root, "cli/dist/smoke/external-cognia-parity-smoke.mjs")
+const devinAcp = process.argv.includes("--devin-acp")
+const entry = path.join(
+  root,
+  devinAcp ? "scripts/smoke/devin-acp-smoke.ts" : "scripts/smoke/external-cognia-parity-smoke.ts"
+)
+const outfile = path.join(
+  root,
+  devinAcp
+    ? "cli/dist/smoke/devin-acp-smoke.mjs"
+    : "cli/dist/smoke/external-cognia-parity-smoke.mjs"
+)
 
 const esbuild = await import("esbuild")
 
@@ -49,6 +58,7 @@ await esbuild.build({
   entryPoints: [entry],
   outfile,
   bundle: true,
+  banner: { js: "globalThis.__COGNIA_CLI__ = true;" },
   platform: "node",
   format: "esm",
   target: "node26",

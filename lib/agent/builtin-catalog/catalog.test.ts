@@ -10,7 +10,7 @@ import {
   GENERAL_PURPOSE_AGENT_ID,
   PLAN_AGENT_ID,
 } from "./catalog"
-import { isNamedAgentColor } from "@/lib/claude/agents/agent-color"
+import { isNamedAgentColor, normalizeAgentColor } from "@/lib/claude/agents/agent-color"
 import { SUBAGENT_CONTRACT_TAG } from "@/lib/claude/agents/subagent-prompt-frame"
 
 describe("the built-in catalog", () => {
@@ -142,7 +142,10 @@ describe("prompt hygiene", () => {
       CODE_REVIEWER_AGENT_ID,
     ]) {
       const entry = builtinAgentById(id)!
-      expect(isNamedAgentColor(entry.color ?? "")).toBe(true)
+      const color = normalizeAgentColor(entry.color)
+      if (!color) throw new Error("Expected builtin agent color")
+      expect(color).toBe(entry.color)
+      expect(isNamedAgentColor(color)).toBe(true)
       expect(builtinAgentDefinition(entry).color).toBe(entry.color)
     }
     const colours = [

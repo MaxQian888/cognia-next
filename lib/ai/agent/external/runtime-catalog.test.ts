@@ -62,6 +62,25 @@ function entry(
 }
 
 describe("catalog shape", () => {
+  it("discovers Devin as a user-owned ACP runtime without installing or deleting it", () => {
+    const devin = findRuntimeById("devin")!
+    expect(devin).toMatchObject({
+      presetIds: ["devin"],
+      ownership: "system",
+      protocol: "acp",
+      transport: "stdio",
+      systemCommand: "devin",
+      launchArgs: ["acp"],
+      versionProbe: { args: ["--version"], parser: "semver-anywhere" },
+      distributions: [],
+      sandbox: { required: true, windowsExceptionEligible: false },
+    })
+    expect(runtimeSupportsPlatform(devin, "darwin")).toBe(true)
+    expect(runtimeSupportsPlatform(devin, "linux")).toBe(true)
+    expect(runtimeSupportsPlatform(devin, "win32")).toBe(false)
+    expect(devin.certifiedVersions).toBeUndefined()
+  })
+
   it("is versioned and non-empty", () => {
     expect(EXTERNAL_AGENT_RUNTIME_CATALOG_VERSION).toBeGreaterThanOrEqual(1)
     expect(EXTERNAL_AGENT_RUNTIMES.length).toBeGreaterThan(0)
@@ -388,7 +407,7 @@ describe("binding a saved configuration to a runtime", () => {
 
   it("disambiguates the npx runtimes by the package they run", () => {
     const cases: [string, string][] = [
-      ["@zed-industries/codex-acp", "codex-acp"],
+      ["@agentclientprotocol/codex-acp", "codex-acp"],
       ["@google/gemini-cli", "gemini-cli"],
       ["@qwen-code/qwen-code", "qwen-code"],
     ]

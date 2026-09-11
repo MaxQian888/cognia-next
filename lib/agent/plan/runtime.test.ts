@@ -3,7 +3,12 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listPlanEvents } from "@/lib/db/plans"
 import type { CreatePlanInput } from "@/types/agent/plan"
 import * as detect from "@/lib/platform/detect"
-import { __resetPlanRuntimeForTesting, getPlanRuntime, resolvePlanConfig } from "./runtime"
+import {
+  __resetPlanRuntimeForTesting,
+  getPlanRuntime,
+  resolvePlanConfig,
+  readPlanChatResumeFailure,
+} from "./runtime"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 
 // Partial mock of the platform leaf so `isTauri` is controllable while every
@@ -34,14 +39,15 @@ jest.mock("@tauri-apps/api/event", () => ({ emit: jest.fn().mockResolvedValue(un
 // `./notify`'s contract (covered in `notify.test.ts`), not the runtime's.
 const emitSchedulerEventMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/scheduler/event-integration", () => ({
-  emitSchedulerEvent: (...a: unknown[]) => emitSchedulerEventMock(...a),
+  emitSchedulerEvent: (...a: Parameters<typeof emitSchedulerEventMock>) =>
+    emitSchedulerEventMock(...a),
 }))
 
 // Mock the workflow orchestrator so `runPlan` exercises its own
 // transition/synthesis/context logic without actually executing step nodes.
 const runWorkflowMock = jest.fn()
 jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
-  runWorkflow: (...a: unknown[]) => runWorkflowMock(...a),
+  runWorkflow: (...a: Parameters<typeof runWorkflowMock>) => runWorkflowMock(...a),
 }))
 
 const isTauriMock = detect.isTauri as jest.Mock
@@ -247,7 +253,7 @@ describe("setStepStatus", () => {
     )
     expect(plan.steps[0].issueId).toBe("iss_1")
     mockRecordWorkSettled.mockClear()
-    await rt.setStepStatus(plan.id, plan.steps[0].id, "running")
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "in_progress")
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockRecordWorkSettled).not.toHaveBeenCalled()
     await rt.setStepStatus(plan.id, plan.steps[0].id, "failed", { error: "boom" })
@@ -673,5 +679,47 @@ describe("pass-through readers", () => {
     expect((await rt.getExecutingPlanForSession("ses_a"))?.id).toBe(plan.id)
     expect((await rt.getOpenPlanForSession("ses_a"))?.id).toBe(plan.id)
     expect((await rt.listPlansBySession("ses_a")).map((p) => p.id)).toContain(plan.id)
+  })
+})
+
+describe("chat resume failure recovery", () => {
+  it("retains the exact continuation without repeating approval or step transitions", async () => {
+    const runtime = getPlanRuntime()
+    const plan = await runtime.createPlan(createInput({ metadata: { preserved: true } }))
+    await runtime.approvePlan(plan.id)
+    await runtime.startPlan(plan.id)
+    const before = await getDb().agentPlans.get(plan.id)
+    const events = await listPlanEvents(plan.id)
+    const failure = { prompt: "retry the prepared first step", mode: "default" as const }
+    await runtime.setChatResumeFailure(plan.id, failure)
+    const failed = await getDb().agentPlans.get(plan.id)
+    expect(readPlanChatResumeFailure(failed!)).toEqual(failure)
+    expect(failed?.generationId).toBe(before?.generationId)
+    expect(failed?.steps).toEqual(before?.steps)
+    expect(failed?.metadata?.preserved).toBe(true)
+    expect(await listPlanEvents(plan.id)).toEqual(events)
+    await runtime.setChatResumeFailure(plan.id, null)
+    expect(readPlanChatResumeFailure((await getDb().agentPlans.get(plan.id))!)).toBeNull()
+  })
+
+  it("does not revive a cancelled plan or accept malformed persisted continuation data", async () => {
+    const runtime = getPlanRuntime()
+    const plan = await runtime.createPlan(createInput())
+    await runtime.cancelPlan(plan.id)
+    await runtime.setChatResumeFailure(plan.id, { prompt: "retry", mode: "auto" })
+    expect(readPlanChatResumeFailure((await getDb().agentPlans.get(plan.id))!)).toBeNull()
+    expect(
+      readPlanChatResumeFailure({
+        ...plan,
+        metadata: { chatResumeFailure: { prompt: "", mode: "auto" } },
+      })
+    ).toBeNull()
+    expect(
+      readPlanChatResumeFailure({
+        ...plan,
+        metadata: { chatResumeFailure: { prompt: "retry", mode: "bypassPermissions" } },
+      })
+    ).toBeNull()
+    await expect(runtime.setChatResumeFailure("missing", null)).resolves.toBeUndefined()
   })
 })

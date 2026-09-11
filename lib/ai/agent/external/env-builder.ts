@@ -54,6 +54,9 @@ export async function buildAgentEnv(
   config: ExternalAgentConfig,
   baseEnv: Record<string, string> = {}
 ): Promise<Record<string, string>> {
+  // A managed task carries only its gateway lease. Never inject an adopted
+  // upstream account into the isolated child, even for a Codex preset.
+  if (config.metadata?.cogniaGatewayTask) return { ...baseEnv }
   const overlay = await codexEnvOverlay(config)
   if (!overlay) return { ...baseEnv }
   // Caller-supplied env wins. The overlay supplies fields the caller didn't

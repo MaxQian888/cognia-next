@@ -12,7 +12,14 @@ const ENVELOPE_AAD = new TextEncoder().encode("cognia-eval-artifact/v1")
 const WEB_DATA_KEY_SECRET = "evaluation-artifact-data-key"
 
 export type AccountArtifactDomain =
-  "evaluation" | "performance" | "work-submission" | "human-input" | "workflow-blob"
+  | "evaluation"
+  | "performance"
+  | "work-submission"
+  | "human-input"
+  | "workflow-blob"
+  | "workflow-knowledge"
+  | "workflow-feedback"
+  | "workflow-annotation"
 
 /**
  * Per-domain key locations. Kept as literals rather than derived from the
@@ -24,6 +31,21 @@ const ARTIFACT_KEY_LOCATIONS: Record<
   Exclude<AccountArtifactDomain, "evaluation">,
   { keyringNamespace: string; keyIdSuffix: string; vaultSecretName: string }
 > = {
+  "workflow-knowledge": {
+    keyringNamespace: "workflow-knowledge-artifacts",
+    keyIdSuffix: "workflow-knowledge-data-key",
+    vaultSecretName: "workflow-knowledge-artifact-data-key",
+  },
+  "workflow-feedback": {
+    keyringNamespace: "workflow-feedback-artifacts",
+    keyIdSuffix: "workflow-feedback-data-key",
+    vaultSecretName: "workflow-feedback-artifact-data-key",
+  },
+  "workflow-annotation": {
+    keyringNamespace: "workflow-annotation-artifacts",
+    keyIdSuffix: "workflow-annotation-data-key",
+    vaultSecretName: "workflow-annotation-artifact-data-key",
+  },
   performance: {
     keyringNamespace: "performance-artifacts",
     keyIdSuffix: "performance-data-key",

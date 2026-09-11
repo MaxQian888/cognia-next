@@ -28,6 +28,7 @@ import type {
   AcpConfigOption,
   AcpConfigOptionValue,
   AcpSessionModelState,
+  ExternalAgentCogniaModelBinding,
 } from "@/types/agent/external-agent"
 
 /**
@@ -107,6 +108,20 @@ export function resolveExternalAgentModelAxis(
     owns(input.sessionModel, input.sessionProviderOverride) ??
     owns(input.defaultModel, input.defaultProvider)
   )
+}
+
+/** Only an explicit conversation choice opts an external task into Cognia routing. */
+export function resolveExternalAgentCogniaModelAxis(
+  input: ExternalAgentModelAxisInput & { accountId?: string | null }
+): ExternalAgentCogniaModelBinding | null | undefined {
+  if (isExternalAgentProviderId(input.sessionProviderOverride)) return null
+  if (!input.sessionProviderOverride || !input.sessionModel || input.sessionModel === "auto")
+    return undefined
+  return {
+    providerId: input.sessionProviderOverride,
+    modelId: input.sessionModel,
+    ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
+  }
 }
 
 /**

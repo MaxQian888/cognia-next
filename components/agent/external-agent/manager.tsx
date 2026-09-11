@@ -119,6 +119,8 @@ import { RuntimeDetectionBadge } from "./runtime-detection-badge"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
+import { CogniaModelPicker } from "./cognia-model-picker"
+import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
 
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"
@@ -430,6 +432,7 @@ interface AddAgentDialogProps {
 }
 
 function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
+  const tGateway = useTranslations("externalAgent.cogniaModel")
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
@@ -515,10 +518,35 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
       return
     }
 
+    if (
+      formData.cogniaModel &&
+      (!formData.cogniaModel.providerId ||
+        !formData.cogniaModel.modelId ||
+        !canUseCogniaModels({
+          protocol: formData.protocol,
+          transport: formData.transport,
+          process: {
+            command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
+            args: formData.args.split(" ").filter(Boolean),
+          },
+          network:
+            formData.transport !== "stdio" && !formData.autoSpawnServer
+              ? { endpoint: formData.endpoint }
+              : undefined,
+          metadata: {
+            ...getPresetConfig(selectedPreset)?.metadata,
+            autoSpawnServer: formData.autoSpawnServer,
+          },
+        }))
+    ) {
+      toast.error(tGateway("invalid"))
+      return
+    }
     setIsSubmitting(true)
     try {
       await onAdd({
         ...formData,
+        preset: selectedPreset || undefined,
         name: formData.name.trim(),
         command: formData.command.trim(),
         endpoint: formData.endpoint.trim(),
@@ -630,7 +658,13 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     </a>
                   )}
                 </div>
-                {currentPreset.setupHint && <p>{currentPreset.setupHint}</p>}
+                {currentPreset.setupHint && (
+                  <p>
+                    {selectedPreset === "devin"
+                      ? tManager("devinSetupHint")
+                      : currentPreset.setupHint}
+                  </p>
+                )}
                 {relatedOfficialSurfaces.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-medium">{tManager("otherOfficialSurfaces")}</p>
@@ -1014,6 +1048,23 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 </div>
               </CollapsibleContent>
             </Collapsible>
+            <CogniaModelPicker
+              config={{
+                protocol: formData.protocol,
+                transport: formData.transport,
+                process: {
+                  command: formData.command || (formData.autoSpawnServer ? "opencode" : ""),
+                  args: formData.args.split(" ").filter(Boolean),
+                },
+                network:
+                  formData.transport !== "stdio" && !formData.autoSpawnServer
+                    ? { endpoint: formData.endpoint }
+                    : undefined,
+                metadata: { ...currentPreset?.metadata, autoSpawnServer: formData.autoSpawnServer },
+              }}
+              value={formData.cogniaModel}
+              onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+            />
           </div>
           <DialogFooter>
             <Button
@@ -1141,7 +1192,11 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         .filter(Boolean)
 
       const config: CreateExternalAgentInput = {
+        ...(data.preset
+          ? { metadata: { ...getPresetConfig(data.preset)?.metadata, preset: data.preset } }
+          : {}),
         name: data.name,
+        cogniaModel: data.cogniaModel ?? null,
         protocol: data.protocol,
         transport: data.transport,
         timeout: toNonNegativeInteger(data.timeoutMs, Number.parseInt(DEFAULT_TIMEOUT_MS, 10)),
@@ -1164,7 +1219,7 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
       }
 
       if (data.protocol === "opencode") {
-        const metadata: Record<string, unknown> = {}
+        const metadata: Record<string, unknown> = { ...config.metadata }
         if (data.autoSpawnServer) {
           metadata.autoSpawnServer = true
           config.process = {

@@ -24,6 +24,8 @@ import {
   type ProviderSettingsEntry,
   type RichCustomProviderEntry,
 } from "@/lib/ai/provider-consumption"
+import { resolveAppDefaultModel } from "./app-default-model"
+import { isExternalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 export interface BuildRendererLlmClientArgs {
   session: ChatSession | null | undefined
@@ -59,11 +61,23 @@ export function buildRendererLlmClient({
 }: BuildRendererLlmClientArgs): LlmClient | null {
   if (!appSettings) return null
 
-  const providerId =
-    providerOverride ?? session?.providerOverride ?? appSettings.defaultProvider ?? "anthropic"
+  // Both the session override and the app-wide default can carry the reserved
+  // external-agent marker, which names no provider. Left in, `providerId`
+  // became `cognia:external-agent:<id>`, `resolveFeatureProvider` resolved
+  // nothing, and this factory returned `null` for EVERY renderer-side feature
+  // (conversation titles, timeline labels, the /goal judge) as long as the app
+  // default pointed at an agent. These are provider calls, so they read the
+  // pair on the provider lane and fall through to anthropic like any other
+  // unset default. See `lib/ai/app-default-model.ts`.
+  const appDefault = resolveAppDefaultModel(appSettings)
+  const sessionProvider = isExternalAgentProviderId(session?.providerOverride)
+    ? undefined
+    : session?.providerOverride
+
+  const providerId = providerOverride ?? sessionProvider ?? appDefault.provider ?? "anthropic"
 
   const snapshot = createProviderSettingsSnapshot({
-    defaultProvider: appSettings.defaultProvider,
+    defaultProvider: appDefault.provider,
     providerSettings: appSettings.providerSettings as
       Record<string, ProviderSettingsEntry> | undefined,
     customProviders: appSettings.customProviders as RichCustomProviderEntry[] | undefined,
@@ -88,9 +102,11 @@ export function buildRendererLlmClient({
   const model =
     modelOverride ??
     modelPreference ??
-    session?.model ??
+    // Same reason as the provider above: a row stamped with the marker holds
+    // the agent's own model id, and no provider offers it.
+    (isExternalAgentProviderId(session?.providerOverride) ? undefined : session?.model) ??
     resolution.model ??
-    appSettings.defaultModel
+    appDefault.model
   if (!model) return null
 
   // Plugin-contributed protocol ids (`${pluginId}:${id}`) execute only in the

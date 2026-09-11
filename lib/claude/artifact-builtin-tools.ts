@@ -35,6 +35,7 @@ import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { revealCanvasDocument } from "@/lib/artifacts/reveal"
 import { buildArtifactSourceMetadata } from "@/lib/artifacts/source-metadata"
+import { CHART_TYPES } from "@/lib/artifacts/chart-contract"
 import { ARTIFACT_TYPES } from "@/lib/artifacts/constants"
 import type { Artifact, ArtifactLanguage, ArtifactType, CanvasDocument } from "@/types"
 
@@ -335,7 +336,11 @@ export async function runArtifactBuiltinTool(
           return invalidArguments(`type must be one of ${ARTIFACT_TYPES.join(", ")}`)
         }
         const language = str(args, "language") as ArtifactLanguage | undefined
-        const chartType = str(args, "chartType")
+        const requestedChartType = str(args, "chartType")
+        const chartType = CHART_TYPES.find((candidate) => candidate === requestedChartType)
+        if (requestedChartType && !chartType) {
+          return invalidArguments(`chartType must be one of ${CHART_TYPES.join(", ")}`)
+        }
         const messageId = context.messageId ?? `tool:${name}`
         const artifact = store.createArtifact({
           sessionId,

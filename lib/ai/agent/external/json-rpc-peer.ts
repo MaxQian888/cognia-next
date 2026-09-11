@@ -117,20 +117,29 @@ export class JsonRpcPeer {
         timeout: timeoutId,
       })
 
-      Promise.resolve(this.opts.writeRaw(message)).catch((error) => {
+      const onWriteFailure = (error: unknown) => {
         clearTimeout(timeoutId)
         this.pending.delete(id)
         reject(error instanceof Error ? error : new Error(String(error)))
-      })
+      }
+      try {
+        Promise.resolve(this.opts.writeRaw(message)).catch(onWriteFailure)
+      } catch (error) {
+        onWriteFailure(error)
+      }
     })
   }
 
   /** Send a JSON-RPC notification (no id, no response expected). */
   sendNotification(method: string, params?: Record<string, unknown>): void {
     const message = this.envelope({ method, params })
-    Promise.resolve(this.opts.writeRaw(message)).catch(() => {
+    try {
+      Promise.resolve(this.opts.writeRaw(message)).catch(() => {
+        // Notifications are best-effort; a failed write is non-fatal.
+      })
+    } catch {
       // Notifications are best-effort; a failed write is non-fatal.
-    })
+    }
   }
 
   /** Cancel an outbound request, or an active nested request received from the peer. */

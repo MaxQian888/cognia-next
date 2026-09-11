@@ -33,6 +33,7 @@ import {
 import { remoteDecisionId } from "./remote-run-service"
 
 export interface RemoteExecuteOptions {
+  cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
   /** Which host configuration, at which revision and readiness generation. */
   stamp: ExternalAgentConfigStamp
   /** The chat session the frames are addressed to. */
@@ -88,6 +89,11 @@ export async function executeOnRemoteHostAgent(
   prompt: string,
   options: RemoteExecuteOptions
 ): Promise<(ExternalAgentResult & { runId: string }) | null> {
+  if (options.cogniaModel || options.externalSessionId?.startsWith("cognia-gateway:")) {
+    throw new Error(
+      "Cognia gateway tasks require a local agent; remote gateway transport is not configured"
+    )
+  }
   const runId = options.newRunId?.() ?? `rer_${crypto.randomUUID()}`
   let text = ""
   let externalSessionId = options.externalSessionId ?? ""

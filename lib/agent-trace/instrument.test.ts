@@ -1,4 +1,4 @@
-import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import type { AgentTraceSpan } from "@cognia/agent-trace"
 import {
   __getActiveSpanForTesting,
   __resetAgentTraceEmitterForTesting,

@@ -25,7 +25,12 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { PlanApprovalCard, type PlanEditPatch, type PlanResumeMode } from "./plan-approval-card"
 import { useSessionPlan } from "@/hooks/agent/use-session-plan"
-import { getPlanRuntime } from "@/lib/agent/plan/runtime"
+import {
+  getPlanRuntime,
+  readPlanChatResumeFailure,
+  type PlanChatResumeFailure,
+} from "@/lib/agent/plan/runtime"
+import { Button } from "@/components/ui/button"
 import { parsePlanText } from "@/lib/agent/plan/exit-plan-capture"
 import { resolvePlanHtmlStyle } from "@/lib/agent/plan/plan-html"
 import { resolvePlanStrategy } from "@/lib/agent/plan/strategy"
@@ -100,10 +105,26 @@ export function PlanApprovalDock({
   const t = useTranslations("plan")
   const plan = useSessionPlan(sessionId)
   const appSettings = useSettingsStore((s) => s.settings)
-  const [busy, setBusy] = useState(false)
+  const [busyPlanId, setBusyPlanId] = useState<string | null>(null)
+  const busy = !!plan && busyPlanId === plan.id
+  const [localFailure, setLocalFailure] = useState<
+    (PlanChatResumeFailure & { planId: string }) | null
+  >(null)
+  const resumeFailure = plan
+    ? localFailure?.planId === plan.id
+      ? localFailure
+      : readPlanChatResumeFailure(plan)
+    : null
+
+  const rememberResumeFailure = async (planId: string, failure: PlanChatResumeFailure) => {
+    setLocalFailure({ ...failure, planId })
+    await getPlanRuntime()
+      .setChatResumeFailure(planId, failure)
+      .catch(() => undefined)
+  }
   // One auto-resume attempt per mounted dock (belt-and-braces on top of the
   // metadata stamp, which is the cross-remount guard).
-  const autoResumedRef = useRef(false)
+  const autoResumedRef = useRef<string | null>(null)
 
   // requireApproval=false: an exit-plan capture lands `approved` (never
   // `awaiting_approval`), so no card renders — auto-resume the implementing
@@ -111,19 +132,30 @@ export function PlanApprovalDock({
   // across remounts. Registered BEFORE the early-return gate (hook order);
   // all gating (incl. the ref read) happens inside the effect.
   useEffect(() => {
-    if (autoResumedRef.current) return
     if (!plan || plan.status !== "approved" || plan.source !== "exit_plan_mode") return
-    if (plan.config.requireApproval !== false || plan.metadata?.autoResumedAt) return
-    autoResumedRef.current = true
+    if (autoResumedRef.current === plan.id) return
+    if (
+      plan.config.requireApproval !== false ||
+      plan.metadata?.autoResumedAt ||
+      readPlanChatResumeFailure(plan)
+    )
+      return
+    autoResumedRef.current = plan.id
     const planId = plan.id
     void (async () => {
       try {
         await getPlanRuntime().updatePlanDraft(planId, {
-          metadata: { autoResumedAt: Date.now() },
+          metadata: { ...plan.metadata, autoResumedAt: Date.now() },
         })
         await onResume(PLAN_APPROVED_PROMPT, "acceptEdits")
       } catch {
-        // Best-effort: the user can still drive the plan manually.
+        setLocalFailure({ planId, prompt: PLAN_APPROVED_PROMPT, mode: "acceptEdits" })
+        await getPlanRuntime()
+          .setChatResumeFailure(planId, {
+            prompt: PLAN_APPROVED_PROMPT,
+            mode: "acceptEdits",
+          })
+          .catch(() => undefined)
       }
     })()
   }, [plan, onResume])
@@ -132,11 +164,27 @@ export function PlanApprovalDock({
   // row becomes `approved` (still "open"), so gating here also prevents the dock
   // from lingering or firing a second resume turn. Keep-planning flips the row
   // back to `draft`, which this gate also hides.
-  if (!plan || plan.status !== "awaiting_approval") return null
+  if (!plan || (plan.status !== "awaiting_approval" && !resumeFailure)) return null
+
+  const handleRetryResume = async () => {
+    if (busy || !resumeFailure) return
+    setBusyPlanId(plan.id)
+    try {
+      // Clear before sending; a failed metadata write cannot leave a stale
+      // retry record behind after the model already accepted the continuation.
+      await getPlanRuntime().setChatResumeFailure(plan.id, null)
+      await onResume(resumeFailure.prompt, resumeFailure.mode)
+      setLocalFailure(null)
+    } catch {
+      await rememberResumeFailure(plan.id, resumeFailure)
+      setBusyPlanId(null)
+    }
+  }
 
   const handleApprove = async (mode: PlanResumeMode) => {
     if (busy) return
-    setBusy(true)
+    setBusyPlanId(plan.id)
+    let continuation: PlanChatResumeFailure | null = null
     try {
       // Which executor owns this plan is decided BEFORE approving, from the
       // pure resolver — calling `startPlan` blind would hand an `orchestrated`
@@ -151,38 +199,41 @@ export function PlanApprovalDock({
         // there, one visible turn per step.
         const started = await getPlanRuntime().startPlan(plan.id)
         if (started?.strategy === "in_session" && started.userMessage) {
-          await onResume(started.userMessage, mode)
+          continuation = { prompt: started.userMessage, mode }
+          await onResume(continuation.prompt, mode)
           return
         }
       }
       // Orchestrated / exit-plan-mode parity: one implementing turn that asks
       // the model to work the approved plan through itself.
-      await onResume(buildPlanApprovedPrompt(plan), mode)
+      continuation = { prompt: buildPlanApprovedPrompt(plan), mode }
+      await onResume(continuation.prompt, mode)
       // Leave `busy` true — approvePlan flips the status so this dock unmounts.
     } catch {
-      setBusy(false)
+      if (continuation) await rememberResumeFailure(plan.id, continuation)
+      setBusyPlanId(null)
     }
   }
 
   const handleKeepPlanning = async (feedback?: string) => {
     if (busy) return
-    setBusy(true)
+    setBusyPlanId(plan.id)
     try {
       await getPlanRuntime().keepPlanning(plan.id, feedback)
       if (feedback && onSendPlanFeedback) await onSendPlanFeedback(feedback)
       // keepPlanning flips the row to `draft`, unmounting the dock.
     } catch {
-      setBusy(false)
+      setBusyPlanId(null)
     }
   }
 
   const handleDiscard = async (feedback?: string) => {
     if (busy) return
-    setBusy(true)
+    setBusyPlanId(plan.id)
     try {
       await getPlanRuntime().rejectPlan(plan.id, feedback)
     } finally {
-      setBusy(false)
+      setBusyPlanId(null)
     }
   }
 
@@ -194,7 +245,7 @@ export function PlanApprovalDock({
     // execution stays in sync with what the user sees.
     const titles = "planText" in patch ? parsePlanText(patch.planText) : patch.stepTitles
     if (titles.length === 0) return
-    setBusy(true)
+    setBusyPlanId(plan.id)
     try {
       await getPlanRuntime().updatePlanDraft(plan.id, {
         title,
@@ -209,7 +260,7 @@ export function PlanApprovalDock({
         },
       })
     } finally {
-      setBusy(false)
+      setBusyPlanId(null)
     }
   }
 
@@ -224,15 +275,26 @@ export function PlanApprovalDock({
       toast.error(t("approval.refineUnavailable"))
       return
     }
-    setBusy(true)
+    setBusyPlanId(plan.id)
     try {
       await getPlanRuntime().refinePlan(
         { planId: plan.id, refinementType: type, trigger: "manual", customInstructions: feedback },
         client
       )
     } finally {
-      setBusy(false)
+      setBusyPlanId(null)
     }
+  }
+
+  if (resumeFailure) {
+    return (
+      <div role="alert" className="flex items-center justify-between gap-3 pb-2">
+        <p className="text-sm text-muted-foreground">{t("approval.resumeFailed")}</p>
+        <Button size="sm" disabled={busy} onClick={() => void handleRetryResume()}>
+          {t("tracker.resume")}
+        </Button>
+      </div>
+    )
   }
 
   return (

@@ -34,7 +34,7 @@ import { useAskUserStore } from "@/stores/agent/ask-user-store"
 import type { TranscriptFs } from "@/cli/src/agent/transcript"
 
 /** Backends this smoke knows how to drive, in the order it tries them. */
-const BACKENDS = ["codex-app-server", "codex", "claude-code"] as const
+const BACKENDS = ["codex-app-server", "codex", "claude-code", "devin"] as const
 type Backend = (typeof BACKENDS)[number]
 
 /**
@@ -99,11 +99,12 @@ function config(backend: Backend, cwd: string): ResolvedConfig {
     ...DEFAULT_RESOLVED_CONFIG,
     cwd,
     agentBackend: backend,
+    ...(backend === "devin" ? { agentBackends: { devin: { model: "swe-2-medium" } } } : {}),
     // Both planes on: the read tool is in `git`, the write tool in `coreFiles`.
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS, git: true, coreFiles: true },
-    // Keep the real approval policy active: the read and host tools should
-    // auto-run, while the one mutating write must cross exactly one gate.
-    permissionMode: "default",
+    // Devin exposes Code as acceptEdits; Ask excludes file changes. Other
+    // backends use default, where the write must cross the approval gate.
+    permissionMode: backend === "devin" ? "acceptEdits" : "default",
     streamIdleTimeoutMs: 180_000,
   }
 }
@@ -120,6 +121,7 @@ async function runBackend(
   const cwd = makeWorkspace(root)
   const observed: Observed = { calls: [], results: [] }
   let approvalPrompts = 0
+  const expectedApprovals = backend === "devin" ? 0 : 1
   const unsubscribeAskUser = useAskUserStore.subscribe((state) => {
     if (!state.active) return
     state.resolveActive({ selected: ["yes"], text: "", cancelled: false })
@@ -163,7 +165,7 @@ async function runBackend(
       `  read-only    ${sawRead ? "OK" : "MISSING"} (${READ_TOOL})`,
       `  mutating     ${sawWrite ? "OK" : "MISSING"} (${WRITE_TOOL})`,
       `  host tool    ${sawHostTool ? "OK" : "MISSING"} (${HOST_TOOL})`,
-      `  approvals    ${approvalPrompts} (expected exactly 1)`,
+      `  approvals    ${approvalPrompts} (expected exactly ${expectedApprovals})`,
       `  git probe    ${
         observed.results.some((r) => r.name === PROBE_TOOL && r.ok)
           ? "OK"
@@ -175,7 +177,8 @@ async function runBackend(
     // The mutating half is only proven by the file actually appearing: a tool
     // result Cognia recorded but that changed nothing would be the same silent
     // lie this work exists to remove.
-    const ok = sawRead && sawWrite && sawHostTool && wroteFile && approvalPrompts === 1
+    const ok =
+      sawRead && sawWrite && sawHostTool && wroteFile && approvalPrompts === expectedApprovals
     return { ok, detail: lines.join("\n") }
   } finally {
     unsubscribeAskUser()

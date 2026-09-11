@@ -13,6 +13,7 @@ jest.mock("@/lib/ai/generation/utility-client", () => ({
 }))
 
 import { buildAgentRoleLlmClient } from "./agent-role-client"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 beforeEach(() => jest.clearAllMocks())
 
@@ -114,4 +115,24 @@ it("retains the existing cheap utility fallback when the Agent has no utility ta
   expect(buildUtilityLlmClient).toHaveBeenCalledWith(
     expect.objectContaining({ override: { providerOverride: "openai", model: undefined } })
   )
+})
+
+it("does not fall back to an app default owned by an external agent", async () => {
+  // The app-wide pair doubles as the external lane's default. This client is a
+  // BYOK provider path, so an agent's own model id is not a fallback it can use.
+  await buildAgentRoleLlmClient({
+    role: "plan",
+    session: { id: "session-1" } as ChatSession,
+    appSettings: {
+      defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+    } as AppSettings,
+    featureId: "plan-decompose",
+  })
+
+  const args = buildUtilityLlmClient.mock.calls[0][0] as {
+    override: { model?: string; providerOverride?: string }
+  }
+  expect(args.override.model).toBeUndefined()
+  expect(args.override.providerOverride).toBeUndefined()
 })

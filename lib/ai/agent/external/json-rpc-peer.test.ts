@@ -29,23 +29,27 @@ describe("JsonRpcPeer", () => {
     expect(onNotification).not.toHaveBeenCalled()
   })
   describe("wire shape", () => {
-    it("includes jsonrpc:2.0 by default", () => {
+    it("includes jsonrpc:2.0 by default", async () => {
       const { peer, writes } = makePeer()
-      void peer.sendRequest("thread/start", { model: "gpt" })
+      const request = peer.sendRequest("thread/start", { model: "gpt" })
       expect(JSON.parse(writes[0])).toMatchObject({
         jsonrpc: "2.0",
         id: 1,
         method: "thread/start",
         params: { model: "gpt" },
       })
+      peer.ingest(JSON.stringify({ id: 1, result: {} }))
+      await request
     })
 
-    it("omits jsonrpc when omitJsonRpcVersion is set (Codex app-server)", () => {
+    it("omits jsonrpc when omitJsonRpcVersion is set (Codex app-server)", async () => {
       const { peer, writes } = makePeer({ omitJsonRpcVersion: true })
-      void peer.sendRequest("turn/start", { threadId: "t1" })
+      const request = peer.sendRequest("turn/start", { threadId: "t1" })
       const parsed = JSON.parse(writes[0])
       expect("jsonrpc" in parsed).toBe(false)
       expect(parsed).toMatchObject({ id: 1, method: "turn/start", params: { threadId: "t1" } })
+      peer.ingest(JSON.stringify({ id: 1, result: {} }))
+      await request
     })
 
     it("notifications carry no id", () => {
@@ -56,12 +60,15 @@ describe("JsonRpcPeer", () => {
       expect(parsed.method).toBe("initialized")
     })
 
-    it("increments request ids", () => {
+    it("increments request ids", async () => {
       const { peer, writes } = makePeer()
-      void peer.sendRequest("a")
-      void peer.sendRequest("b")
+      const first = peer.sendRequest("a")
+      const second = peer.sendRequest("b")
       expect(JSON.parse(writes[0]).id).toBe(1)
       expect(JSON.parse(writes[1]).id).toBe(2)
+      peer.ingest(JSON.stringify({ id: 1, result: {} }))
+      peer.ingest(JSON.stringify({ id: 2, result: {} }))
+      await Promise.all([first, second])
     })
   })
 
@@ -110,14 +117,60 @@ describe("JsonRpcPeer", () => {
       }
     })
 
-    it("rejects when the transport write fails", async () => {
-      const peer = new JsonRpcPeer({
-        writeRaw: () => {
-          throw new Error("pipe closed")
-        },
-      })
-      await expect(peer.sendRequest("x")).rejects.toThrow("pipe closed")
+    it.each([false, true])("cleans up failed transport writes (async=%s)", async (asyncWrite) => {
+      jest.useFakeTimers()
+      try {
+        const peer = new JsonRpcPeer({
+          writeRaw: () => {
+            if (asyncWrite) return Promise.reject(new Error("pipe closed"))
+            throw new Error("pipe closed")
+          },
+        })
+        await expect(peer.sendRequest("x")).rejects.toThrow("pipe closed")
+        expect(jest.getTimerCount()).toBe(0)
+        expect(peer.cancelRequest(1)).toBe(false)
+        expect(() => jest.runAllTimers()).not.toThrow()
+      } finally {
+        jest.useRealTimers()
+      }
     })
+
+    it("rejects a timed-out request even when cancellation cannot be written", async () => {
+      jest.useFakeTimers()
+      try {
+        const peer = new JsonRpcPeer({
+          writeRaw: jest
+            .fn()
+            .mockImplementationOnce(() => {})
+            .mockImplementation(() => {
+              throw new Error("pipe closed")
+            }),
+        })
+        const assertion = expect(peer.sendRequest("slow", undefined, 1000)).rejects.toThrow(
+          "Request timeout: slow"
+        )
+        jest.advanceTimersByTime(1000)
+        await assertion
+        expect(peer.cancelRequest(1)).toBe(false)
+        expect(jest.getTimerCount()).toBe(0)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it.each([false, true])(
+      "treats notification failures as best effort (async=%s)",
+      async (asyncWrite) => {
+        const peer = new JsonRpcPeer({
+          writeRaw: () => {
+            if (asyncWrite) return Promise.reject(new Error("pipe closed"))
+            throw new Error("pipe closed")
+          },
+        })
+        expect(() => peer.sendNotification("initialized")).not.toThrow()
+        await Promise.resolve()
+      }
+    )
 
     it("ignores a response for an unknown id", () => {
       const { peer } = makePeer()

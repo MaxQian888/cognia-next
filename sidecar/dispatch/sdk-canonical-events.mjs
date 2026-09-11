@@ -659,12 +659,32 @@ export function canonicalEventsFromSdkMessage(evt, state = createSdkMappingState
     case "rate_limit_event": {
       const info = evt.rate_limit_info
       if (!info || typeof info !== "object") return []
+      if (!["allowed", "allowed_warning", "rejected"].includes(info.status)) return []
       return [
         compact({
           kind: "rate-limit",
-          status: info.status ?? "allowed",
+          status: info.status,
           rateLimitType: asString(info.rateLimitType),
           resetsAt: asNumber(info.resetsAt),
+          utilization: asNumber(info.utilization),
+          overageStatus: ["allowed", "allowed_warning", "rejected"].includes(info.overageStatus)
+            ? info.overageStatus
+            : undefined,
+          overageResetsAt: asNumber(info.overageResetsAt),
+          overageDisabledReason: asString(info.overageDisabledReason),
+          isUsingOverage:
+            typeof info.isUsingOverage === "boolean" ? info.isUsingOverage : undefined,
+          overageInUse: typeof info.overageInUse === "boolean" ? info.overageInUse : undefined,
+          surpassedThreshold: asNumber(info.surpassedThreshold),
+          errorCode: asString(info.errorCode),
+          canUserPurchaseCredits:
+            typeof info.canUserPurchaseCredits === "boolean"
+              ? info.canUserPurchaseCredits
+              : undefined,
+          hasChargeableSavedPaymentMethod:
+            typeof info.hasChargeableSavedPaymentMethod === "boolean"
+              ? info.hasChargeableSavedPaymentMethod
+              : undefined,
         }),
       ]
     }

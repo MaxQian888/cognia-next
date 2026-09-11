@@ -6,6 +6,7 @@ jest.mock("@/lib/twin/distill/llm", () => ({
 
 import { buildRendererLlmClient } from "./renderer-llm-client"
 import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 /**
  * Exercises the real provider-resolution chain
@@ -38,6 +39,53 @@ describe("buildRendererLlmClient", () => {
     expect(
       buildRendererLlmClient({ session: makeSession(), appSettings: undefined, featureId: "f" })
     ).toBeNull()
+  })
+
+  it("still builds a client when the app default belongs to an external agent", () => {
+    // The marker names no provider, so `providerId` used to resolve to nothing
+    // and this factory returned null for every renderer-side feature
+    // (conversation titles, timeline labels, the /goal judge) as long as the
+    // app default pointed at an agent. And `commandcode/...` is that agent's
+    // vocabulary: sending it to a provider base URL is a guaranteed 4xx.
+    const client = buildRendererLlmClient({
+      session: makeSession(),
+      appSettings: makeSettings({
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: externalAgentProviderId("pi-rpc"),
+        providerSettings: {
+          anthropic: { apiKey: "sk-test", enabled: true, defaultModel: "claude-sonnet-4-6" },
+        },
+      }),
+      featureId: "conversation-title",
+    })
+
+    expect(client).not.toBeNull()
+    // Asserted on a real call, not vacuously over an empty list.
+    expect(mockCreateLlmClient).toHaveBeenCalledTimes(1)
+    const arg = mockCreateLlmClient.mock.calls[0][0] as unknown as {
+      model?: string
+      provider?: string
+    }
+    expect(arg.model).toBe("claude-sonnet-4-6")
+    expect(arg.provider).not.toContain("cognia:external-agent")
+  })
+
+  it("ignores an external-agent session override rather than resolving nothing", () => {
+    // An external-agent conversation still wants a title. The row's marker is a
+    // lane stamp, so a renderer-side utility call falls through to the app
+    // default (here anthropic) instead of failing to resolve a provider.
+    const client = buildRendererLlmClient({
+      session: makeSession({
+        providerOverride: externalAgentProviderId("pi-rpc"),
+        model: "commandcode/meta/muse-spark-1.3-contributor",
+      }),
+      appSettings: makeSettings(),
+      featureId: "conversation-title",
+    })
+
+    expect(client).not.toBeNull()
+    const arg = mockCreateLlmClient.mock.calls[0][0] as unknown as { model?: string }
+    expect(arg.model).not.toBe("commandcode/meta/muse-spark-1.3-contributor")
   })
 
   it("builds a client when the default provider resolves with a key", () => {

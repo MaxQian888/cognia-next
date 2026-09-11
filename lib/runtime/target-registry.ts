@@ -144,7 +144,8 @@ export class RuntimeTargetRegistry {
 
   /** Atomically write and activate a Companion target for a completed pair. */
   async upsertAndActivateCompanionTarget(
-    input: UpsertCompanionTargetInput
+    input: UpsertCompanionTargetInput,
+    isCurrent?: () => boolean
   ): Promise<RuntimeTargetRecord> {
     const accountId = assertAccountId(input.accountId)
     const id = assertTargetId(input.id)
@@ -152,9 +153,12 @@ export class RuntimeTargetRegistry {
     let activated: RuntimeTargetRecord | undefined
     await this.db.transaction("rw", this.db.targets, this.db.activeTargets, async () => {
       const existing = await this.db.targets.get([accountId, id])
+      if (isCurrent && !isCurrent()) throw new Error("Runtime target activation cancelled")
       activated = companionTargetRow(input, accountId, id, now, existing)
       await this.db.targets.put(activated)
       await this.db.activeTargets.put({ accountId, targetId: id, updatedAt: now })
+      // Throwing within the transaction rolls both writes back together.
+      if (isCurrent && !isCurrent()) throw new Error("Runtime target activation cancelled")
     })
     return activated as RuntimeTargetRecord
   }

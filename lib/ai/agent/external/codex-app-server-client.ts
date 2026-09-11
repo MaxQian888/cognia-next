@@ -82,7 +82,7 @@ const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 // ============================================================================
 
 // Wire-format ground truth: verified against `codex app-server generate-json-schema
-// --out <dir>` AND `--experimental --out <dir>` (codex-cli **0.150.1**). Both
+// --out <dir>` AND `--experimental --out <dir>` (codex-cli **0.154.0**). Both
 // bundles matter: the adapter negotiates `experimentalApi: true`, so a field
 // present only in the experimental dump is one we may use even though the
 // default dump says it does not exist. Key invariants encoded below:
@@ -218,10 +218,21 @@ export interface CodexRateLimitWindow {
 
 /** Flattened `account/rateLimits/read` snapshot for the status card. */
 export interface CodexRateLimitsInfo {
+  limitId?: string
+  limitName?: string
+  normalModelSlug?: string
   planType?: string
   primary?: CodexRateLimitWindow
   secondary?: CodexRateLimitWindow
   rateLimitReachedType?: string
+  credits?: { hasCredits: boolean; unlimited: boolean; balance: string | null } | null
+  individualLimit?: {
+    limit: string
+    used: string
+    remainingPercent: number
+    resetsAt: number
+  } | null
+  spendControlReached?: boolean | null
 }
 
 /** A `thread/list` entry (v2 `Thread`, subset the session UI needs). */
@@ -277,6 +288,9 @@ interface CodexThreadItem {
   readOnlyHint?: boolean | null
   result?: unknown
   error?: unknown
+  contentItems?: unknown[]
+  success?: boolean | null
+  agentsStates?: Record<string, { status?: string; message?: string | null }>
   // webSearch
   query?: string
   // imageView
@@ -317,7 +331,9 @@ interface CodexMcpServerStatus {
   name?: string
   status?: string
   authStatus?: string
-  tools?: Array<{ name?: string }>
+  runtimeStatus?: string | null
+  toolsError?: string | null
+  tools?: Array<{ name?: string }> | Record<string, unknown>
   [key: string]: unknown
 }
 
@@ -338,6 +354,12 @@ export interface CodexAppServerStatus {
   requiresOpenaiAuth?: boolean
   /** `account/rateLimits/read` / `account/rateLimits/updated` snapshot. */
   rateLimits?: CodexRateLimitsInfo | null
+  rateLimitsByLimitId?: Record<string, CodexRateLimitsInfo>
+  ordinaryUsageAllowed?: boolean
+  accountError?: string
+  rateLimitsError?: string
+  /** Milliseconds since epoch; absent when no successful account read exists. */
+  accountFetchedAt?: number
   /**
    * `true` when the connected Codex CLI lacks the `skills/extraRoots/set`
    * method, so configured extra skill folders cannot be registered. Left
@@ -442,6 +464,13 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private itemPhases = new Map<string, string>()
   // Full model catalog cached from `model/list` (drives effort options).
   private modelCache: CodexModelInfo[] = []
+  private mcpRefreshes = new Map<string, Promise<CodexMcpServerStatus[]>>()
+  private accountRefresh?: Promise<void>
+  private accountRefreshAfter = 0
+  private accountRefreshTimer?: ReturnType<typeof setTimeout>
+  private accountRevision = 0
+  private rateLimitsRevision = 0
+  private pendingRateLimitsUpdates?: Map<string, CodexRateLimitsInfo>
   // Per-method support cache for graceful degradation on older codex CLIs.
   private unsupportedMethods = new Set<string>()
   // `thread/compact/start` only acknowledges admission. Completion is reported
@@ -727,7 +756,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           sessionId,
           timestamp: new Date(),
           error: reason,
-          recoverable: true,
+          recoverable: false,
         })
       }
     }
@@ -746,6 +775,15 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this.sentSystemPrompt.clear()
     this.itemPhases.clear()
     this.modelCache = []
+    this.mcpRefreshes.clear()
+    this.accountRevision += 1
+    this.accountRefresh = undefined
+    this.accountRefreshAfter = 0
+    clearTimeout(this.accountRefreshTimer)
+    this.accountRefreshTimer = undefined
+    this.pendingRateLimitsUpdates = undefined
+    this.status = { mcpServers: [], skills: [] }
+    this.notifyStatus()
     this.clearSessionExtensionSupportCache()
   }
 
@@ -833,9 +871,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       this.status.configRequirements
     )
 
-    const result = await this.peer.sendRequest<{ thread?: { id?: string } }>("thread/start", params)
+    const result = await this.peer.sendRequest<{
+      thread?: { id?: string }
+      model?: string
+      reasoningEffort?: string
+      cwd?: string
+    }>("thread/start", params)
     const threadId = result?.thread?.id
     if (!threadId) throw new Error("Codex app-server did not return a thread id")
+    if (result.model) metadata.selectedModel = result.model
+    if (result.reasoningEffort && metadata.reasoningEffort === undefined)
+      metadata.reasoningEffort = result.reasoningEffort
+    if (result.cwd) metadata.cwd = result.cwd
 
     const session: ExternalAgentSession = {
       id: threadId,
@@ -1044,12 +1091,27 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async listSessions(): Promise<
     Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
   > {
-    const result = await this.callSessionExtension<{ data?: CodexThreadSummary[] }>(
-      "session/list",
-      "thread/list",
-      { limit: 50, sortKey: "updated_at", sortDirection: "desc" }
-    )
-    return (result?.data ?? [])
+    const threads: CodexThreadSummary[] = []
+    const cursors = new Set<string>()
+    let cursor: string | undefined
+    do {
+      const result = await this.callSessionExtension<{
+        data?: CodexThreadSummary[]
+        nextCursor?: string | null
+      }>("session/list", "thread/list", {
+        limit: 50,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+        ...(cursor ? { cursor } : {}),
+      })
+      threads.push(...(result?.data ?? []))
+      cursor = readString(result?.nextCursor)
+      if (cursor) {
+        if (cursors.has(cursor)) throw new Error("thread/list repeated a pagination cursor")
+        cursors.add(cursor)
+      }
+    } while (cursor)
+    return threads
       .filter((thread): thread is CodexThreadSummary & { id: string } => !!readString(thread.id))
       .map((thread) => ({
         sessionId: thread.id,
@@ -1130,11 +1192,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   async forkSession(sessionId: string): Promise<ExternalAgentSession> {
     const source = this._sessions.get(sessionId)
-    const result = await this.callSessionExtension<{ thread?: { id?: string } }>(
-      "session/fork",
-      "thread/fork",
-      { threadId: sessionId }
-    )
+    const result = await this.callSessionExtension<{
+      thread?: { id?: string; turns?: Array<{ items?: CodexThreadItem[] }> }
+      model?: string
+      reasoningEffort?: string
+      cwd?: string
+    }>("session/fork", "thread/fork", { threadId: sessionId })
     const threadId = readString(result?.thread?.id)
     if (!threadId) throw new Error("Codex app-server did not return a forked thread id")
     const session: ExternalAgentSession = {
@@ -1144,10 +1207,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       permissionMode: source?.permissionMode ?? "default",
       capabilities: this._capabilities,
       tools: this._tools ?? [],
-      messages: [...(source?.messages ?? [])],
+      messages: result.thread?.turns
+        ? hydrateMessagesFromTurns(result.thread.turns)
+        : [...(source?.messages ?? [])],
       createdAt: new Date(),
       lastActivityAt: new Date(),
-      metadata: { ...(source?.metadata ?? {}), forkedFrom: sessionId },
+      metadata: {
+        ...(source?.metadata ?? {}),
+        forkedFrom: sessionId,
+        ...(result.model ? { selectedModel: result.model } : {}),
+        ...(result.reasoningEffort ? { reasoningEffort: result.reasoningEffort } : {}),
+        ...(result.cwd ? { cwd: result.cwd } : {}),
+      },
     }
     this._sessions.set(session.id, session)
     this.sentSystemPrompt.add(session.id)
@@ -1239,7 +1310,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   /** Remove the last `numTurns` turns from the thread's context. */
   async rollbackSession(sessionId: string, numTurns: number): Promise<void> {
     if (!this.peer) throw new Error("Not connected to Codex app-server")
-    await this.peer.sendRequest("thread/rollback", { threadId: sessionId, numTurns })
+    const result = await this.peer.sendRequest<{
+      thread?: { turns?: Array<{ items?: CodexThreadItem[] }> }
+    }>("thread/rollback", { threadId: sessionId, numTurns })
+    if (result.thread?.turns && this._sessions.has(sessionId)) {
+      this.updateSession(sessionId, { messages: hydrateMessagesFromTurns(result.thread.turns) })
+    }
   }
 
   /** Set the user-facing thread name (mirrored back via thread/name/updated). */
@@ -1292,7 +1368,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       if (event.type === "done") {
         isDone = true
         sawDone = true
-      } else if (event.type === "error") {
+      } else if (event.type === "error" && !event.recoverable) {
         isDone = true
         error = new Error(event.error)
       }
@@ -1611,13 +1687,66 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       return
     }
     if (method === "account/updated" || method === "account/login/completed") {
-      void this.refreshAccount()
+      // Invalidate the previous identity immediately. A login event is not a
+      // reason to bypass the quota-read cooldown or keep another account's data.
+      this.accountRevision += 1
+      this.status = {
+        ...this.status,
+        account: undefined,
+        requiresOpenaiAuth: undefined,
+        accountError: undefined,
+        accountFetchedAt: undefined,
+        rateLimits: undefined,
+        rateLimitsByLimitId: undefined,
+        ordinaryUsageAllowed: undefined,
+        rateLimitsError: undefined,
+      }
+      this.notifyStatus()
+      if (!this.accountRefreshTimer) {
+        this.accountRefreshTimer = setTimeout(
+          () => {
+            const peer = this.peer
+            void (async () => {
+              // Wait for the old identity's read, then fetch the latest once.
+              await this.accountRefresh
+              if (this.peer !== peer) return
+              this.accountRefreshTimer = undefined
+              await this.refreshAccount()
+            })()
+          },
+          Math.max(0, this.accountRefreshAfter - Date.now())
+        )
+      }
       return
     }
     if (method === "account/rateLimits/updated") {
-      const rateLimits = mapRateLimits(readObject(p.rateLimits))
+      const raw = readObject(p.rateLimits)
+      const limitId = readString(raw?.limitId)
+      const previous = limitId
+        ? (this.status.rateLimitsByLimitId?.[limitId] ??
+          (this.status.rateLimits?.limitId === limitId ? this.status.rateLimits : undefined))
+        : this.status.rateLimits
+      const rateLimits = mapRateLimits(raw, previous)
       if (rateLimits) {
-        this.status = { ...this.status, rateLimits }
+        const key = limitId ?? ""
+        const pendingUpdate = mapRateLimits(raw, this.pendingRateLimitsUpdates?.get(key))
+        if (pendingUpdate) this.pendingRateLimitsUpdates?.set(key, pendingUpdate)
+        this.rateLimitsRevision += 1
+        this.status = {
+          ...this.status,
+          rateLimitsError: undefined,
+          ...(!limitId || !this.status.rateLimits || this.status.rateLimits.limitId === limitId
+            ? { rateLimits }
+            : {}),
+          ...(rateLimits.limitId
+            ? {
+                rateLimitsByLimitId: {
+                  ...this.status.rateLimitsByLimitId,
+                  [rateLimits.limitId]: rateLimits,
+                },
+              }
+            : {}),
+        }
         this.notifyStatus()
       }
       return
@@ -2152,12 +2281,15 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           timestamp: new Date(),
           toolUseId: id,
           result: item.aggregatedOutput ?? "",
-          isError: typeof item.exitCode === "number" && item.exitCode !== 0,
+          isError:
+            item.status === "failed" ||
+            item.status === "declined" ||
+            (typeof item.exitCode === "number" && item.exitCode !== 0),
         })
         return
       }
       case "fileChange": {
-        if (item.status !== "failed") {
+        if (item.status === "completed") {
           void import("@/lib/task-workspace/tool-evidence")
             .then(({ recordToolFileChanges }) => recordToolFileChanges(sessionId, id, item.changes))
             .catch(() => undefined)
@@ -2175,7 +2307,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           timestamp: new Date(),
           toolUseId: id,
           result: asRecord(item.changes) ?? {},
-          isError: item.status === "failed",
+          isError: item.status === "failed" || item.status === "declined",
         })
         return
       }
@@ -2205,8 +2337,20 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           sessionId,
           timestamp: new Date(),
           toolUseId: id,
-          result: (item.result as string | Record<string, unknown>) ?? "",
-          isError: item.error != null,
+          result:
+            (item.result as string | Record<string, unknown>) ??
+            (item.type === "dynamicToolCall"
+              ? { contentItems: item.contentItems ?? [] }
+              : item.type === "collabAgentToolCall"
+                ? { agentsStates: item.agentsStates ?? {} }
+                : ""),
+          isError:
+            item.error != null ||
+            item.success === false ||
+            item.status === "failed" ||
+            item.status === "declined" ||
+            item.status === "interrupted" ||
+            Object.values(item.agentsStates ?? {}).some((state) => state.status === "errored"),
           ...presentation,
         })
         return
@@ -2584,7 +2728,11 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const sessionId = this.resolveSessionId(params)
     const mode = readString(params.mode)
     const parsed = parseMcpElicitationSchema(params.requestedSchema)
-    if (!sessionId || (mode !== "form" && mode !== "openai/form") || !parsed) {
+    if (
+      !sessionId ||
+      (mode !== "form" && mode !== "openai/form" && mode !== "openaiForm") ||
+      !parsed
+    ) {
       return Promise.resolve({ action: "decline", content: null, _meta: null })
     }
 
@@ -3069,41 +3217,104 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   async refreshAccount(): Promise<void> {
+    if (!this.peer) return
+    if (this.accountRefresh) return this.accountRefresh
+    if (Date.now() < this.accountRefreshAfter) return
+    // One read pair per 30 seconds, including failures. No automatic retry:
+    // callers and notifications share the same budget.
+    this.accountRefreshAfter = Date.now() + 30_000
+    const refresh = this.readAccount()
+    this.accountRefresh = refresh
+    try {
+      await refresh
+    } finally {
+      if (this.accountRefresh === refresh) this.accountRefresh = undefined
+    }
+  }
+
+  private async readAccount(): Promise<void> {
+    const peer = this.peer
+    const revision = this.accountRevision
+    const current = () => this.peer === peer && this.accountRevision === revision
     try {
       const account = await this.callOptional<{
         account?: Record<string, unknown> | null
         requiresOpenaiAuth?: boolean
       }>("account/read", { refreshToken: false })
+      if (!current()) return
       if (account !== undefined) {
         this.status = {
           ...this.status,
           account: account.account ? mapAccountInfo(account.account) : null,
           requiresOpenaiAuth: account.requiresOpenaiAuth === true,
+          accountError: undefined,
+          accountFetchedAt: Date.now(),
         }
       }
     } catch (error) {
+      if (!current()) return
+      this.status = {
+        ...this.status,
+        accountError: error instanceof Error ? error.message : String(error),
+      }
       log.warn("Codex account read failed", { error })
     }
 
+    const limitsRevision = this.rateLimitsRevision
+    const updates = new Map<string, CodexRateLimitsInfo>()
+    this.pendingRateLimitsUpdates = updates
     try {
       // `account/rateLimits/read` takes no params (serde unit) — omit them.
-      const limits = await this.callOptional<{ rateLimits?: Record<string, unknown> }>(
-        "account/rateLimits/read"
-      )
+      const limits = await this.callOptional<{
+        rateLimits?: Record<string, unknown>
+        rateLimitsByLimitId?: Record<string, Record<string, unknown>> | null
+        ordinaryUsageAllowed?: boolean
+      }>("account/rateLimits/read")
+      if (!current()) return
       if (limits !== undefined) {
-        this.status = { ...this.status, rateLimits: mapRateLimits(readObject(limits.rateLimits)) }
+        const buckets: Record<string, CodexRateLimitsInfo> = {}
+        for (const [id, raw] of Object.entries(limits.rateLimitsByLimitId ?? {})) {
+          const mapped = mapRateLimits(readObject(raw))
+          if (mapped) buckets[id] = mapped
+        }
+        this.status = {
+          ...this.status,
+          rateLimits: mapRateLimits(readObject(limits.rateLimits)),
+          rateLimitsByLimitId: limits.rateLimitsByLimitId ? buckets : undefined,
+          ordinaryUsageAllowed: limits.ordinaryUsageAllowed,
+          rateLimitsError: undefined,
+        }
+        // Keep fields and buckets absent from sparse pushes, then overlay the
+        // fields pushed since this read began.
+        this.pendingRateLimitsUpdates = undefined
+        for (const update of updates.values()) {
+          this.handleNotification("account/rateLimits/updated", { rateLimits: update })
+        }
       }
     } catch (error) {
+      if (!current() || limitsRevision !== this.rateLimitsRevision) return
       if (isCodexChatgptAuthRequiredError(error)) {
         // Expected for this auth mode, not a failure: record "no rate limits"
         // (null) rather than "unknown" (undefined) so the UI can stop asking.
-        this.status = { ...this.status, rateLimits: null }
+        this.status = {
+          ...this.status,
+          rateLimits: null,
+          rateLimitsByLimitId: undefined,
+          ordinaryUsageAllowed: undefined,
+          rateLimitsError: undefined,
+        }
         log.debug("Codex rate limits unavailable without ChatGPT auth", {
           accountType: this.status.account?.type,
         })
       } else {
+        this.status = {
+          ...this.status,
+          rateLimitsError: error instanceof Error ? error.message : String(error),
+        }
         log.warn("Codex rate-limit read failed", { error })
       }
+    } finally {
+      if (this.pendingRateLimitsUpdates === updates) this.pendingRateLimitsUpdates = undefined
     }
 
     this.notifyStatus()
@@ -3113,20 +3324,61 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   // Native MCP + skills (WS3)
   // --------------------------------------------------------------------------
 
-  async refreshMcpServers(): Promise<CodexMcpServerStatus[]> {
-    if (!this.peer) return []
+  async refreshMcpServers(strict = false, threadId?: string): Promise<CodexMcpServerStatus[]> {
+    if (!this.peer) {
+      if (strict) throw new Error("Codex app server is disconnected")
+      return []
+    }
+    // Scope runtime status to a loaded thread when possible. Codex can still
+    // create temporary discovery processes, so concurrent readers share a call.
+    const scope = threadId ?? this._sessions.keys().next().value
+    const key = scope ?? ""
+    let refresh = this.mcpRefreshes.get(key)
+    if (!refresh) {
+      refresh = this.readMcpServers(scope)
+      this.mcpRefreshes.set(key, refresh)
+    }
     try {
-      const result = await this.peer.sendRequest<{ servers?: CodexMcpServerStatus[] }>(
-        "mcpServerStatus/list",
-        {}
-      )
-      this.status = { ...this.status, mcpServers: result?.servers ?? [] }
-      this.notifyStatus()
-      return this.status.mcpServers
+      return await refresh
     } catch (error) {
       log.warn("mcpServerStatus/list failed", { error })
+      if (strict) throw error
       return this.status.mcpServers
+    } finally {
+      if (this.mcpRefreshes.get(key) === refresh) this.mcpRefreshes.delete(key)
     }
+  }
+
+  private async readMcpServers(threadId?: string): Promise<CodexMcpServerStatus[]> {
+    const peer = this.peer
+    if (!peer) throw new Error("Codex app server is disconnected")
+    const servers: CodexMcpServerStatus[] = []
+    let cursor: string | undefined
+    const seen = new Set<string>()
+    do {
+      const result = await peer.sendRequest<{
+        data?: CodexMcpServerStatus[]
+        servers?: CodexMcpServerStatus[]
+        nextCursor?: string | null
+      }>("mcpServerStatus/list", {
+        ...(cursor ? { cursor } : {}),
+        ...(threadId ? { threadId } : {}),
+      })
+      const page = result.data ?? result.servers
+      if (!Array.isArray(page)) throw new Error("Invalid MCP inventory response")
+      servers.push(
+        ...page.map((server) =>
+          server.runtimeStatus ? { ...server, status: server.runtimeStatus } : server
+        )
+      )
+      cursor = result.nextCursor ?? undefined
+      if (cursor && seen.has(cursor)) throw new Error("Repeated MCP inventory cursor")
+      if (cursor) seen.add(cursor)
+    } while (cursor)
+    if (this.peer !== peer) throw new Error("Codex app server is disconnected")
+    this.status = { ...this.status, mcpServers: servers }
+    this.notifyStatus()
+    return this.status.mcpServers
   }
 
   async reloadMcpConfig(): Promise<void> {
@@ -3136,21 +3388,30 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
   async startMcpOAuthLogin(server: string): Promise<{ authUrl?: string }> {
     if (!this.peer) return {}
-    const result = await this.peer.sendRequest<{ authUrl?: string; url?: string }>(
-      "mcpServer/oauth/login",
-      { server }
-    )
-    return { authUrl: result?.authUrl ?? result?.url }
+    const result = await this.peer.sendRequest<{
+      authorizationUrl?: string
+      authUrl?: string
+      url?: string
+    }>("mcpServer/oauth/login", { name: server })
+    return { authUrl: result?.authorizationUrl ?? result?.authUrl ?? result?.url }
   }
 
   async refreshSkills(cwds?: string[]): Promise<CodexSkill[]> {
     if (!this.peer) return []
     try {
       const roots = cwds ?? (this._config?.process?.cwd ? [this._config.process.cwd] : [])
-      const result = await this.peer.sendRequest<{ skills?: CodexSkill[] }>("skills/list", {
+      const result = await this.peer.sendRequest<{
+        data?: Array<{ skills: CodexSkill[] }>
+        skills?: CodexSkill[]
+      }>("skills/list", {
         cwds: roots,
+        forceReload: true,
       })
-      this.status = { ...this.status, skills: result?.skills ?? [] }
+      const skills = result?.data?.flatMap((entry) => entry.skills) ?? result?.skills ?? []
+      this.status = {
+        ...this.status,
+        skills: [...new Map(skills.map((skill) => [skill.path, skill])).values()],
+      }
       this.notifyStatus()
       return this.status.skills
     } catch (error) {
@@ -3222,7 +3483,33 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       this.status = { ...this.status, mcpServers: servers }
       this.notifyStatus()
     } else {
-      void this.refreshMcpServers()
+      // Native startup notifications describe ONE server. A global inventory
+      // request starts fresh MCP discovery processes; doing that for every
+      // startup event multiplies the number of processes by the server count.
+      const name = readString(params.name)
+      const status = readString(params.status)
+      if (!name || !status) return
+      const runtimeStatus =
+        status === "ready"
+          ? "connected"
+          : params.failureReason === "reauthenticationRequired"
+            ? "authenticationRequired"
+            : status
+      const previous = this.status.mcpServers.find((server) => server.name === name)
+      const updated = {
+        ...previous,
+        name,
+        runtimeStatus,
+        status: runtimeStatus,
+        error: readString(params.error) ?? null,
+      }
+      this.status = {
+        ...this.status,
+        mcpServers: previous
+          ? this.status.mcpServers.map((server) => (server.name === name ? updated : server))
+          : [...this.status.mcpServers, updated],
+      }
+      this.notifyStatus()
     }
   }
 
@@ -3808,24 +4095,68 @@ function mapAccountInfo(raw: Record<string, unknown>): CodexAccountInfo {
 }
 
 function mapRateLimitWindow(
-  raw: Record<string, unknown> | undefined
+  raw: Record<string, unknown> | undefined,
+  previous?: CodexRateLimitWindow
 ): CodexRateLimitWindow | undefined {
-  const usedPercent = readNumber(raw?.usedPercent)
+  const usedPercent = readNumber(raw?.usedPercent) ?? previous?.usedPercent
   if (raw === undefined || usedPercent === undefined) return undefined
   return {
     usedPercent,
-    windowDurationMins: readNumber(raw.windowDurationMins),
-    resetsAt: readNumber(raw.resetsAt),
+    windowDurationMins: readNumber(raw.windowDurationMins) ?? previous?.windowDurationMins,
+    resetsAt: readNumber(raw.resetsAt) ?? previous?.resetsAt,
   }
 }
 
-function mapRateLimits(raw: Record<string, unknown> | undefined): CodexRateLimitsInfo | null {
+function mapRateLimits(
+  raw: Record<string, unknown> | undefined,
+  previous?: CodexRateLimitsInfo | null
+): CodexRateLimitsInfo | null {
   if (!raw) return null
+  const credits = readObject(raw.credits)
+  const individualLimit = readObject(raw.individualLimit)
   return {
-    planType: readString(raw.planType),
-    primary: mapRateLimitWindow(readObject(raw.primary)),
-    secondary: mapRateLimitWindow(readObject(raw.secondary)),
-    rateLimitReachedType: readString(raw.rateLimitReachedType),
+    limitId: readString(raw.limitId) ?? previous?.limitId,
+    limitName: readString(raw.limitName) ?? previous?.limitName,
+    normalModelSlug: readString(raw.normalModelSlug) ?? previous?.normalModelSlug,
+    planType: readString(raw.planType) ?? previous?.planType,
+    primary: mapRateLimitWindow(readObject(raw.primary), previous?.primary) ?? previous?.primary,
+    secondary:
+      mapRateLimitWindow(readObject(raw.secondary), previous?.secondary) ?? previous?.secondary,
+    rateLimitReachedType: readString(raw.rateLimitReachedType) ?? previous?.rateLimitReachedType,
+    credits:
+      raw.credits === undefined
+        ? previous?.credits
+        : credits &&
+            typeof credits.hasCredits === "boolean" &&
+            typeof credits.unlimited === "boolean"
+          ? {
+              hasCredits: credits.hasCredits,
+              unlimited: credits.unlimited,
+              balance: readString(credits.balance) ?? null,
+            }
+          : null,
+    individualLimit:
+      raw.individualLimit === undefined
+        ? previous?.individualLimit
+        : individualLimit &&
+            typeof individualLimit.limit === "string" &&
+            typeof individualLimit.used === "string" &&
+            readNumber(individualLimit.remainingPercent) !== undefined &&
+            readNumber(individualLimit.resetsAt) !== undefined
+          ? {
+              limit: individualLimit.limit,
+              used: individualLimit.used,
+              remainingPercent: individualLimit.remainingPercent as number,
+              resetsAt: individualLimit.resetsAt as number,
+            }
+          : null,
+    // Unlike sparse window fields, explicit null means unavailable in v2.
+    spendControlReached:
+      raw.spendControlReached === undefined
+        ? previous?.spendControlReached
+        : typeof raw.spendControlReached === "boolean"
+          ? raw.spendControlReached
+          : null,
   }
 }
 

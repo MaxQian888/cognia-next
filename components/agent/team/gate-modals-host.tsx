@@ -4,9 +4,8 @@
  * GateModalsHost — the consumer for HITL approval gates (ADR-0022 §HITL gates).
  *
  * Subscribes to `usePendingGatesStore` and renders one <ApprovalGateDialog>
- * per open gate. Without this host the budget / deadlock / teammate-fix gates
- * have a producer (`TeamNotifier.openGate`) but no UI, so a paused team run
- * (`concurrency.reduceTo(0)`) hangs forever with no release valve.
+ * per open cost-budget or AgentPlan step gate. Squad gates moved to durable
+ * ExecutionRunInterrupt records in ADR-0169 and do not use this store.
  *
  * Mounted EXACTLY ONCE, at the app root (`app/layout.tsx`), for every shell —
  * desktop and mobile alike. A gate can open while the user is on any surface,
@@ -21,10 +20,8 @@
  * unblocks rather than stranding the waiter.
  */
 
-import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { usePendingGatesStore, type PendingGate } from "@/stores/agent/pending-gates-store"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { ApprovalGateDialog } from "./approval-gate-dialog"
 import { useApprovalGate } from "./use-approval-gate"
 import { Button } from "@/components/ui/button"
@@ -58,22 +55,6 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
   const { approve, reject } = useApprovalGate(gate.key.scope, gate.key.id)
   const close = usePendingGatesStore((s) => s.close)
   const t = useTranslations("agentTeam.approvalGate")
-
-  // The deadlock gate fires when ALL teammates are unavailable, so every
-  // teammate on the team is a valid reset candidate. Other gate types don't
-  // use the list. Select the stable `teammates` record and derive the list in
-  // a memo — mapping inside the selector would return fresh objects each render
-  // and loop forever.
-  const teammatesRecord = useAgentTeamStore((s) => s.teammates)
-  const quarantinedTeammates = useMemo(
-    () =>
-      gate.gateType === "deadlock"
-        ? Object.values(teammatesRecord)
-            .filter((m) => m.teamId === gate.teamId)
-            .map((m) => ({ id: m.id, name: m.name }))
-        : undefined,
-    [teammatesRecord, gate.gateType, gate.teamId]
-  )
 
   // This dialog is mounted at the app root so a gate is answerable from
   // whatever surface the user is on (ADR-0045). The cost is that answering it
@@ -149,7 +130,6 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
       body={gate.body}
       onApprove={approveAndClose}
       onReject={rejectAndClose}
-      quarantinedTeammates={quarantinedTeammates}
     />
   )
 }

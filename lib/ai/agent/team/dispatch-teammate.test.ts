@@ -9,9 +9,27 @@ import type { RemoteWorkerRunInput } from "./remote-worker-runtime"
 
 const mockedBusEmit = emitSystemBusEvent as jest.Mock
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
+const recordTeamUsageMock = jest.fn<Promise<null>, unknown[]>(async () => null)
+const priceTokensMock = jest.fn()
+jest.mock("@/lib/db/session-usage", () => ({
+  recordTeamUsage: (...args: unknown[]) => recordTeamUsageMock(...args),
+  swallowUsageWrite: (write: Promise<unknown>) => {
+    void write.catch(() => undefined)
+  },
+}))
+jest.mock("@/lib/usage/pricing", () => {
+  const actual = jest.requireActual("@/lib/usage/pricing")
+  return {
+    ...actual,
+    priceTokensForModel: (...args: unknown[]) => {
+      priceTokensMock(...args)
+      return actual.priceTokensForModel(...args)
+    },
+  }
+})
 
 jest.mock("@/lib/telemetry/events/track-event", () => ({
-  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+  trackEvent: (...args: Parameters<typeof mockTrackEvent>) => mockTrackEvent(...args),
 }))
 
 // ── Module mocks ────────────────────────────────────────────────────────────
@@ -54,38 +72,52 @@ jest.mock("@/lib/task-workspace/run-lease", () => ({
 
 const resolveAcpMcpMock = jest.fn<Promise<unknown[]>, unknown[]>(async () => [])
 jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
-  resolveAcpMcpServers: (...a: unknown[]) => resolveAcpMcpMock(...a),
+  resolveAcpMcpServers: (...a: Parameters<typeof resolveAcpMcpMock>) => resolveAcpMcpMock(...a),
 }))
 
 const executeAgentMock = jest.fn()
 jest.mock("../agent-executor", () => ({
-  executeAgent: (...a: unknown[]) => executeAgentMock(...a),
+  executeAgent: (...a: Parameters<typeof executeAgentMock>) => executeAgentMock(...a),
 }))
 
 const createSessionMock = jest.fn((..._a: unknown[]) => Promise.resolve({ id: "sess" }))
 const getSessionMock = jest.fn((..._a: unknown[]) => Promise.resolve(undefined as unknown))
 const deleteSessionMock = jest.fn((..._a: unknown[]) => Promise.resolve())
 jest.mock("@/lib/db/sessions", () => ({
-  createSession: (...a: unknown[]) => createSessionMock(...a),
-  getSession: (...a: unknown[]) => getSessionMock(...a),
-  deleteSession: (...a: unknown[]) => deleteSessionMock(...a),
+  createSession: (...a: Parameters<typeof createSessionMock>) => createSessionMock(...a),
+  getSession: (...a: Parameters<typeof getSessionMock>) => getSessionMock(...a),
+  deleteSession: (...a: Parameters<typeof deleteSessionMock>) => deleteSessionMock(...a),
 }))
 
-jest.mock("@/lib/db/settings", () => ({ getSettings: () => Promise.resolve({}) }))
+const getSettingsMock = jest.fn().mockResolvedValue({})
+jest.mock("@/lib/db/settings", () => ({ getSettings: () => getSettingsMock() }))
 
 const resolveSendOptionsMock = jest.fn((..._a: unknown[]) => Promise.resolve({}))
 jest.mock("@/lib/claude/build-options", () => ({
-  resolveSendOptions: (...a: unknown[]) => resolveSendOptionsMock(...a),
+  resolveSendOptions: (...a: Parameters<typeof resolveSendOptionsMock>) =>
+    resolveSendOptionsMock(...a),
 }))
 
 const runAndCaptureMock = jest.fn()
 jest.mock("@/lib/claude/run-and-capture", () => ({
-  runAndCaptureAssistantReply: (...a: unknown[]) => runAndCaptureMock(...a),
+  runAndCaptureAssistantReply: (...a: Parameters<typeof runAndCaptureMock>) =>
+    runAndCaptureMock(...a),
 }))
 
 const resolveProviderAttemptOptionsMock = jest.fn()
+const applyProviderAttemptLimitsMock = jest.fn(
+  (
+    ...args: Parameters<
+      (typeof import("@/lib/claude/provider-attempt-options"))["applyProviderAttemptLimits"]
+    >
+  ) =>
+    jest.requireActual("@/lib/claude/provider-attempt-options").applyProviderAttemptLimits(...args)
+)
 jest.mock("@/lib/claude/provider-attempt-options", () => ({
-  resolveProviderAttemptOptions: (...a: unknown[]) => resolveProviderAttemptOptionsMock(...a),
+  resolveProviderAttemptOptions: (...a: Parameters<typeof resolveProviderAttemptOptionsMock>) =>
+    resolveProviderAttemptOptionsMock(...a),
+  applyProviderAttemptLimits: (...a: Parameters<typeof applyProviderAttemptLimitsMock>) =>
+    applyProviderAttemptLimitsMock(...a),
 }))
 
 const hookFns = {
@@ -106,7 +138,8 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => {
 
 const resolveExternalMock = jest.fn<Promise<string | null>, unknown[]>(async () => null)
 jest.mock("./resolve-external-backing", () => ({
-  resolveTeammateExternalAgent: (...a: unknown[]) => resolveExternalMock(...a),
+  resolveTeammateExternalAgent: (...a: Parameters<typeof resolveExternalMock>) =>
+    resolveExternalMock(...a),
 }))
 
 // Passthrough spy on the ONE resolver, so a test can assert what was handed to
@@ -125,6 +158,8 @@ jest.mock("@/lib/ai/agent/execution/resolve-agent-execution-spec", () => {
 })
 
 const externalExecuteMock = jest.fn()
+const externalSteerMock = jest.fn<Promise<void>, unknown[]>(async () => undefined)
+const externalCancelMock = jest.fn<Promise<void>, unknown[]>(async () => undefined)
 // The capability profile the manager reports for the resolved external agent.
 // `undefined` by default so the existing suites exercise the "no negotiated
 // profile" path; individual tests set it to assert the projection reaches the
@@ -132,19 +167,23 @@ const externalExecuteMock = jest.fn()
 let externalCapabilityProfileMock: unknown
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => ({
-    execute: (...a: unknown[]) => externalExecuteMock(...a),
+    execute: (...a: Parameters<typeof externalExecuteMock>) => externalExecuteMock(...a),
+    steerSession: (...args: unknown[]) => externalSteerMock(...args),
+    cancel: (...args: unknown[]) => externalCancelMock(...args),
     getAgentCapabilityProfile: () => externalCapabilityProfileMock,
   }),
 }))
 
 const applyTeammateTwinContextMock = jest.fn()
 jest.mock("./twin-context", () => ({
-  applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
+  applyTeammateTwinContext: (...a: Parameters<typeof applyTeammateTwinContextMock>) =>
+    applyTeammateTwinContextMock(...a),
 }))
 
 const beginDurableDispatchMock = jest.fn()
 jest.mock("./durable-dispatch", () => ({
-  beginDurableDispatch: (...args: unknown[]) => beginDurableDispatchMock(...args),
+  beginDurableDispatch: (...args: Parameters<typeof beginDurableDispatchMock>) =>
+    beginDurableDispatchMock(...args),
 }))
 
 jest.mock("./durable-runtime", () => ({
@@ -159,7 +198,7 @@ jest.mock("./remote-worker-runtime", () => {
     ...actual,
     getRemoteWorkerRuntime: () => ({
       listWorkers: () => remoteWorkersMock(),
-      run: (...args: unknown[]) => remoteRunMock(...args),
+      run: (...args: Parameters<typeof remoteRunMock>) => remoteRunMock(...args),
     }),
   }
 })
@@ -170,8 +209,10 @@ const updateChildRunMock = jest.fn(async (..._args: unknown[]) => true)
 const settleDispatchLeaseMock = jest.fn(async (..._args: unknown[]) => true)
 const advanceRemoteEventMock = jest.fn(async (..._args: unknown[]) => true)
 jest.mock("@/lib/db/agent-team-runtime", () => ({
-  claimAgentTeamDispatchLease: (...args: unknown[]) => claimDispatchLeaseMock(...args),
-  getAgentTeamChildRun: (...args: unknown[]) => getAgentTeamChildRunMock(...args),
+  claimAgentTeamDispatchLease: (...args: Parameters<typeof claimDispatchLeaseMock>) =>
+    claimDispatchLeaseMock(...args),
+  getAgentTeamChildRun: (...args: Parameters<typeof getAgentTeamChildRunMock>) =>
+    getAgentTeamChildRunMock(...args),
   getAgentTeamRun: async () => ({
     id: "run1",
     teamId: "team1",
@@ -184,9 +225,12 @@ jest.mock("@/lib/db/agent-team-runtime", () => ({
     updatedAt: 1,
   }),
   renewAgentTeamDispatchLease: async () => true,
-  settleAgentTeamDispatchLease: (...args: unknown[]) => settleDispatchLeaseMock(...args),
-  updateAgentTeamChildRun: (...args: unknown[]) => updateChildRunMock(...args),
-  advanceAgentTeamRemoteEvent: (...args: unknown[]) => advanceRemoteEventMock(...args),
+  settleAgentTeamDispatchLease: (...args: Parameters<typeof settleDispatchLeaseMock>) =>
+    settleDispatchLeaseMock(...args),
+  updateAgentTeamChildRun: (...args: Parameters<typeof updateChildRunMock>) =>
+    updateChildRunMock(...args),
+  advanceAgentTeamRemoteEvent: (...args: Parameters<typeof advanceRemoteEventMock>) =>
+    advanceRemoteEventMock(...args),
 }))
 
 const projectRemoteEventMock = jest.fn(async (..._args: unknown[]) => undefined)
@@ -194,11 +238,14 @@ const projectChildLifecycleMock = jest.fn(async (..._args: unknown[]) => undefin
 const projectFleetMock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/execution/agent-team-bridge", () => ({
   agentTeamExecutionRunId: (runId: string) => `execution:team:${runId}`,
-  projectRemoteAgentTeamEvent: (...args: unknown[]) => projectRemoteEventMock(...args),
-  projectAgentTeamChildLifecycle: (...args: unknown[]) => projectChildLifecycleMock(...args),
+  projectRemoteAgentTeamEvent: (...args: Parameters<typeof projectRemoteEventMock>) =>
+    projectRemoteEventMock(...args),
+  projectAgentTeamChildLifecycle: (...args: Parameters<typeof projectChildLifecycleMock>) =>
+    projectChildLifecycleMock(...args),
 }))
 jest.mock("@/lib/fleet/managed-session-projection", () => ({
-  projectManagedFleetSession: (...args: unknown[]) => projectFleetMock(...args),
+  projectManagedFleetSession: (...args: Parameters<typeof projectFleetMock>) =>
+    projectFleetMock(...args),
 }))
 
 const decisionContextMock = jest.fn(async () => "")
@@ -349,6 +396,7 @@ beforeEach(() => {
   resolveProviderAttemptOptionsMock.mockResolvedValue({
     providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
   })
+  getSettingsMock.mockResolvedValue({})
 })
 
 describe("dispatchTeammate — text-only fallback", () => {
@@ -567,7 +615,6 @@ describe("dispatchTeammate — durable execution environment", () => {
     ])
     const dispose = jest.fn(async () => undefined)
     const { ctx } = makeCtx(makeTeammate(), {
-      runtimeVersion: "durable-v2",
       repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
     })
     Object.assign(ctx, {
@@ -693,7 +740,6 @@ describe("dispatchTeammate — remote durable worker", () => {
         },
       }),
       {
-        runtimeVersion: "durable-v2",
         repositories: [{ id: "primary", role: "primary", path: "/repo", writable: true }],
       }
     )
@@ -874,7 +920,13 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
         routingContextHint: { promptText: "edit code" },
       })
     )
-    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith("openai", {})
+    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith(
+      "openai",
+      {},
+      undefined,
+      false,
+      "gpt-5.6"
+    )
     expect(runAndCaptureMock).toHaveBeenCalledTimes(2)
     expect(runAndCaptureMock.mock.calls[1]?.[2]).toEqual(
       expect.objectContaining({
@@ -913,6 +965,68 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     )
     expect(runAndCaptureMock).toHaveBeenCalledTimes(1)
     expect(resolveProviderAttemptOptionsMock).not.toHaveBeenCalled()
+  })
+
+  it("recomputes teammate fallback budgets for the actual model and preserves a smaller output request", async () => {
+    isTauriMock.mockReturnValue(true)
+    createSessionMock.mockResolvedValue({ id: "sess1" })
+    getSessionMock.mockResolvedValue({ id: "sess1", kind: "team" })
+    const plan = routingPlan()
+    const fallback = {
+      ...plan.orderedCandidates[1],
+      providerId: "custom-team-sub",
+      modelId: "account-model",
+      deploymentId: "custom-team-sub::account-model",
+    }
+    const settings = {
+      customProviders: [
+        {
+          id: fallback.providerId,
+          customName: "Team subscription",
+          enabled: true,
+          subscription: {},
+          customModels: [fallback.modelId],
+          customModelMetadata: {
+            [fallback.modelId]: {
+              id: fallback.modelId,
+              contextLength: 8000,
+              maxInputTokens: 5000,
+              maxOutputTokens: 1000,
+            },
+          },
+        },
+      ],
+    }
+    getSettingsMock.mockResolvedValue(settings)
+    resolveSendOptionsMock.mockResolvedValue({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      routingPlan: { ...plan, orderedCandidates: [plan.orderedCandidates[0], fallback] },
+      modelParams: { maxOutputTokens: 600 },
+      compaction: { enabled: true, contextWindow: 900000, maxSummaryTokens: 2000 },
+    })
+    resolveProviderAttemptOptionsMock.mockResolvedValue({
+      providerCredentials: { apiKey: "fallback-key", protocol: "openai" },
+      modelParams: { maxOutputTokens: 3000, temperature: 0.2 },
+    })
+    runAndCaptureMock
+      .mockRejectedValueOnce(new Error("primary unavailable"))
+      .mockResolvedValueOnce({ text: "bounded fallback" })
+    const { ctx } = makeCtx(makeTeammate())
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+    expect(resolveProviderAttemptOptionsMock).toHaveBeenCalledWith(
+      fallback.providerId,
+      settings,
+      undefined,
+      false,
+      fallback.modelId
+    )
+    expect(runAndCaptureMock.mock.calls[1]?.[2]).toMatchObject({
+      provider: fallback.providerId,
+      model: fallback.modelId,
+      modelParams: { maxOutputTokens: 600, temperature: 0.2 },
+      compaction: { contextWindow: 5000, maxSummaryTokens: 1000 },
+    })
   })
 
   it("fails rather than running a codex teammate on the built-in engine", async () => {
@@ -1008,6 +1122,111 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
       "edit code",
       expect.objectContaining({ model: "gpt-5.6-sol" })
     )
+  })
+
+  it("forwards an explicit provider/model/account binding independently of the native model hint", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({
+      success: true,
+      finalResponse: "ok",
+      tokenUsage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+    })
+    const cogniaModel = {
+      providerId: "plugin:kimi:subscription",
+      modelId: "kimi-for-coding",
+      accountId: "team-account",
+    }
+    const { ctx } = makeCtx(
+      makeTeammate({ config: { runtime: "codex-app-server", model: "native-model", cogniaModel } })
+    )
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code" })
+    expect(externalExecuteMock.mock.calls[0][2]).toMatchObject({
+      cogniaModel,
+      model: "native-model",
+    })
+    expect(resolveSpecMock.mock.calls[0][0].legacy.modelId).toBe("kimi-for-coding")
+    expect(priceTokensMock).toHaveBeenCalledWith(cogniaModel.providerId, cogniaModel.modelId, {
+      inputTokens: 10,
+      outputTokens: 2,
+    })
+    expect(recordTeamUsageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          providerId: cogniaModel.providerId,
+          model: cogniaModel.modelId,
+        }),
+      })
+    )
+  })
+
+  it("rejects a gateway binding on a builtin teammate without dispatching another model", async () => {
+    const cogniaModel = { providerId: "kimi", modelId: "kimi-for-coding" }
+    const { ctx, pool, storeWriter } = makeCtx(
+      makeTeammate({ config: { runtime: "claude", cogniaModel } })
+    )
+    await expect(
+      dispatchTeammate(ctx, { taskId: "t1", prompt: "edit code", recordToStore: true })
+    ).rejects.toThrow("requires an external teammate runtime")
+    expect(pool.recordFailure).toHaveBeenCalled()
+    expect(storeWriter.setTaskStatus).toHaveBeenCalledWith(
+      "t1",
+      "failed",
+      undefined,
+      expect.any(String)
+    )
+    expect(externalExecuteMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("persists the mapped gateway session and targets its live control and resume exactly", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    const publicSession = "cognia-gateway:task-a:native-a"
+    const release = jest.fn()
+    let controlAttached!: () => void
+    const attached = new Promise<void>((resolve) => {
+      controlAttached = resolve
+    })
+    const attachControl = jest.fn(async (..._args: unknown[]) => {
+      controlAttached()
+      return release
+    })
+    beginDurableDispatchMock.mockResolvedValue({
+      childRunId: "child-gateway",
+      capture: jest.fn(),
+      attachControl,
+      prepareTurnContext: jest.fn(async () => ""),
+      run: (operation: () => Promise<unknown>) => operation(),
+      complete: jest.fn(async () => undefined),
+      fail: jest.fn(async () => undefined),
+    })
+    getAgentTeamChildRunMock.mockResolvedValue({ sessionId: publicSession })
+    externalExecuteMock.mockImplementation(async (_agent, _prompt, options) => {
+      expect(options.sessionId).toBe(publicSession)
+      expect(options).not.toHaveProperty("cogniaModel")
+      options.onEvent({ type: "text_delta", sessionId: publicSession, text: "partial" })
+      await attached
+      const [control, sessionId] = attachControl.mock.calls[0] as unknown as [
+        {
+          steer: (message: string) => Promise<void>
+          pause: () => Promise<void>
+          terminate: () => Promise<void>
+        },
+        string,
+      ]
+      expect(sessionId).toBe(publicSession)
+      await control.steer("continue carefully")
+      await control.pause()
+      await control.terminate()
+      return { success: true, finalResponse: "ok", sessionId: publicSession }
+    })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex-app-server" } }))
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "continue" })
+    expect(attachControl).toHaveBeenCalledTimes(1)
+    expect(externalSteerMock).toHaveBeenCalledWith("agent-1", publicSession, "continue carefully")
+    expect(externalCancelMock).toHaveBeenCalledWith("agent-1", publicSession)
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   it("falls back to the run's model hint when the teammate pins no model", async () => {

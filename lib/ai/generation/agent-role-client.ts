@@ -9,6 +9,7 @@ import type { LlmClient } from "@/lib/twin/distill/llm"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { resolveAgentModel } from "@/lib/agent/agent-profile-policy"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 export interface BuildAgentRoleClientArgs {
   role: AgentModelRole
@@ -33,7 +34,9 @@ export async function buildAgentRoleLlmClient({
     (session?.characterId
       ? await resolveCharacterById(session.characterId).catch(() => undefined)
       : undefined)
-  const appFallback = role === "utility" ? undefined : appSettings?.defaultModel
+  // Provider lane: an app default that belongs to an external agent names a
+  // model no configured provider offers (`lib/ai/app-default-model.ts`).
+  const appFallback = role === "utility" ? undefined : resolveAppDefaultModel(appSettings).model
   const roleModel = resolveAgentModel(role, agent, appFallback)
   const roleOverride: UtilityModelConfig = {
     ...override,

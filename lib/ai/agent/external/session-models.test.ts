@@ -6,6 +6,7 @@ import {
   findModelConfigOption,
   isExternalAgentProviderId,
   resolveExternalAgentModelAxis,
+  resolveExternalAgentCogniaModelAxis,
   resolveExternalAgentModels,
   EMPTY_THINKING_SURFACE,
   findThinkingConfigOption,
@@ -286,5 +287,41 @@ describe("resolveExternalAgentModelAxis", () => {
         defaultProvider: externalAgentProviderId("codex-local"),
       })
     ).toBeUndefined()
+  })
+})
+
+describe("resolveExternalAgentCogniaModelAxis", () => {
+  it("binds only an explicit internal conversation selection", () => {
+    expect(
+      resolveExternalAgentCogniaModelAxis({
+        agentId: "pi",
+        sessionProviderOverride: "kimi",
+        sessionModel: "kimi-k2",
+        accountId: "account",
+      })
+    ).toEqual({ providerId: "kimi", modelId: "kimi-k2", accountId: "account" })
+    expect(
+      resolveExternalAgentCogniaModelAxis({
+        agentId: "pi",
+        defaultProvider: "kimi",
+        defaultModel: "kimi-k2",
+      })
+    ).toBeUndefined()
+    expect(
+      resolveExternalAgentCogniaModelAxis({
+        agentId: "pi",
+        sessionProviderOverride: "kimi",
+        sessionModel: "auto",
+      })
+    ).toBeUndefined()
+  })
+  it("explicitly opts out when the conversation selects an external model", () => {
+    expect(
+      resolveExternalAgentCogniaModelAxis({
+        agentId: "pi",
+        sessionProviderOverride: externalAgentProviderId("pi"),
+        sessionModel: "native-model",
+      })
+    ).toBeNull()
   })
 })

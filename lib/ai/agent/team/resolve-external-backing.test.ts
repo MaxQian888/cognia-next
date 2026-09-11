@@ -117,6 +117,26 @@ describe("resolveTeammateExternalAgent", () => {
     expect(createAgentFromPreset).not.toHaveBeenCalled()
   })
 
+  it("does not reuse a saved agent's unrelated gateway account and defers native login for bound tasks", async () => {
+    const cogniaModel = {
+      providerId: "plugin:kimi:subscription",
+      modelId: "kimi-for-coding",
+      accountId: "team-account",
+    }
+    getAllAgents.mockReturnValue([
+      { config: { id: "saved", cogniaModel: { ...cogniaModel, accountId: "private-account" } } },
+    ])
+    isFromPreset.mockReturnValue("codex")
+    createAgentFromPreset.mockReturnValue({ id: "team-agent" })
+    const id = await resolveTeammateExternalAgent(
+      teammate({ config: { runtime: "codex", cogniaModel } }),
+      EMPTY_CAPS,
+      ctx()
+    )
+    expect(id).toBe("team-agent")
+    expect(addAgent).toHaveBeenCalledWith({ id: "team-agent" }, { connect: false })
+  })
+
   it("upgrades runtime 'codex' to the native app-server when the codex CLI is present", async () => {
     resolvePreferredCodex.mockResolvedValue("codex-app-server")
     createAgentFromPreset.mockReturnValue({

@@ -4,6 +4,7 @@ import {
   resolveModelDisplayName,
   resolveModelContextLength,
   resolveModelMeta,
+  resolveModelMaxOutputTokens,
   resolveDefaultModelForProvider,
 } from "./model-options"
 import { PROVIDERS } from "@cognia/provider-types/provider"
@@ -261,6 +262,59 @@ describe("resolveModelContextLength", () => {
 })
 
 describe("resolveModelMeta", () => {
+  it("carries all known execution limits and capabilities without inventing unknown values", () => {
+    const settings = {
+      "plugin:code": {
+        providerId: "plugin:code",
+        discoveredModels: [
+          {
+            id: "model",
+            contextLength: 262144,
+            maxInputTokens: 200000,
+            maxOutputTokens: 32000,
+            supportsReasoning: true,
+            supportsTools: false,
+            supportsVision: false,
+            knownFields: [
+              "id",
+              "contextLength",
+              "maxInputTokens",
+              "maxOutputTokens",
+              "supportsReasoning",
+              "supportsTools",
+            ],
+          },
+        ],
+      },
+    } as Record<string, UserProviderSettings>
+    const meta = resolveModelMeta("plugin:code", "model", settings)
+    expect(meta).toMatchObject({
+      contextLength: 262144,
+      maxInputTokens: 200000,
+      maxOutputTokens: 32000,
+      supportsReasoning: true,
+      supportsTools: false,
+    })
+    expect(meta.supportsVision).toBeUndefined()
+    expect(resolveModelMaxOutputTokens("model", "plugin:code", settings)).toBe(32000)
+    expect(resolveModelMaxOutputTokens("unknown", "plugin:code", settings)).toBeUndefined()
+  })
+
+  it("uses account limits over custom subscription fallback but preserves ordinary custom overrides", () => {
+    const custom = {
+      id: "custom",
+      customModels: ["model"],
+      customModelMetadata: {
+        model: { id: "model", maxOutputTokens: 64000, supportsReasoning: true },
+      },
+      discoveredModels: [{ id: "model", maxOutputTokens: 8000, supportsReasoning: false }],
+    } as CustomProviderSettings
+    expect(resolveModelMaxOutputTokens("model", "custom", {}, [custom])).toBe(64000)
+    custom.subscription = {}
+    expect(resolveModelMaxOutputTokens("model", "custom", {}, [custom])).toBe(8000)
+    expect(resolveModelMeta("custom", "model", {}, [custom]).supportsReasoning).toBe(false)
+  })
+
   it("reads context window + capability flags from the built-in catalog", () => {
     const meta = resolveModelMeta("anthropic", PROVIDERS.anthropic.defaultModel)
     expect(meta.contextLength).toBeGreaterThan(0)
@@ -303,4 +357,38 @@ describe("resolveModelMeta", () => {
       supportsReasoning: undefined,
     })
   })
+})
+
+it("includes registered plugin models and removes stale configured models on unload", async () => {
+  const { registerProviderDefinition, unregisterProvider } =
+    await import("@cognia/provider-core/providers/provider-loader")
+  const id = "models:api"
+  registerProviderDefinition(
+    {
+      id,
+      name: "Example",
+      type: "cloud",
+      protocol: "openai",
+      apiKeyRequired: true,
+      baseURLRequired: false,
+      defaultModel: "plugin-model",
+      defaultEnabled: false,
+      category: "specialized",
+      models: [],
+    },
+    "plugin"
+  )
+  const settings = {
+    [id]: { providerId: id, enabled: true, defaultModel: "plugin-model" },
+  } as never
+  try {
+    expect(
+      collectModelOptions(settings, []).some(
+        (option) => option.providerId === id && option.modelId === "plugin-model"
+      )
+    ).toBe(true)
+  } finally {
+    unregisterProvider(id)
+  }
+  expect(collectModelOptions(settings, []).some((option) => option.providerId === id)).toBe(false)
 })

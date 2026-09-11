@@ -91,6 +91,8 @@ import type {
   ExternalAgentContent,
   ExternalAgentMessage,
   AcpPermissionResponse,
+  AcpPermissionMode,
+  AcpConfigOption,
   ExternalAgentEvent,
 } from "@/types/agent/external-agent"
 import { loggers } from "@cognia/logging"
@@ -109,6 +111,386 @@ const mockListen = listen as jest.Mock
 const mockInvoke = invoke as jest.Mock
 const mockAgentReadTextFile = agentReadTextFile as jest.Mock
 const mockAgentWriteTextFile = agentWriteTextFile as jest.Mock
+
+describe("AcpClientAdapter — prompt deadlines and host response envelopes", () => {
+  async function connectedAdapter(timeout?: number) {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { initialize: () => Promise<unknown> }).initialize = jest.fn(
+      async () => ({ protocolVersion: 1, agentCapabilities: {} })
+    )
+    await adapter.connect({ ...stdioConfig(), timeout })
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { cwd: "/work" }
+    const peer = (adapter as unknown as { peer: JsonRpcPeer }).peer
+    const frames = () =>
+      mockInvoke.mock.calls
+        .filter(([command]) => command === "send_to_external_agent")
+        .map(([, args]) => JSON.parse(args.message))
+    return { adapter, peer, frames }
+  }
+
+  it("retains baseline stdio MCP support without optional HTTP or SSE capabilities", async () => {
+    const { adapter } = await connectedAdapter()
+    expect(adapter.capabilities?.mcpTools).toBe(true)
+    await adapter.disconnect()
+  })
+
+  it("rejects unsupported prompt content without changing history, status, or listeners", async () => {
+    const { adapter, frames } = await connectedAdapter()
+    const session = adapter.getSession("s")!
+    session.status = "active"
+    session.messages = []
+    const register = jest.spyOn(
+      adapter as unknown as {
+        addEventListener: (sessionId: string, listener: (event: ExternalAgentEvent) => void) => void
+      },
+      "addEventListener"
+    )
+    await expect(
+      adapter
+        .prompt("s", {
+          id: "m",
+          role: "user",
+          timestamp: new Date(),
+          content: [
+            { type: "image", source: { type: "base64", data: "AA==", mediaType: "image/png" } },
+          ],
+        })
+        [Symbol.asyncIterator]()
+        .next()
+    ).rejects.toThrow(/prompt capability.*image/i)
+    expect(adapter.getSession("s")?.status).toBe("active")
+    expect(session.messages).toEqual([])
+    expect(register).not.toHaveBeenCalled()
+    expect(frames()).toEqual([])
+    await adapter.disconnect()
+  })
+
+  it("propagates HTTP rejection immediately instead of waiting for a request timeout", async () => {
+    const { adapter, peer } = await connectedAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      transport: "http",
+      network: { endpoint: "https://agent.test" },
+    }
+    ;(proxyFetch as jest.Mock).mockResolvedValueOnce(
+      new Response("denied", { status: 401, statusText: "Unauthorized" })
+    )
+    await expect(peer.sendRequest("session/new", { cwd: "/work", mcpServers: [] })).rejects.toThrow(
+      "HTTP error: 401 Unauthorized"
+    )
+    await adapter.disconnect()
+  })
+
+  it.each(["fs/write_text_file", "terminal/kill", "terminal/release", "terminal/write"])(
+    "acknowledges %s with an empty ACP result on the real wire path",
+    async (method) => {
+      const { adapter, peer, frames } = await connectedAdapter()
+      seedTerminal(adapter, "s", "terminal-1")
+      peer.ingest(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "host-request",
+          method,
+          params: {
+            sessionId: "s",
+            path: "/work/out.md",
+            content: "done",
+            terminalId: "terminal-1",
+            data: "input",
+          },
+        })
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(frames()).toContainEqual({ jsonrpc: "2.0", id: "host-request", result: {} })
+      await adapter.disconnect()
+    }
+  )
+
+  it.each([
+    { configTimeout: undefined, executionTimeout: undefined },
+    { configTimeout: 120_000, executionTimeout: undefined },
+    { configTimeout: 1_000, executionTimeout: 120_000 },
+  ])("allows a turn past the control RPC deadline with %j", async (settings) => {
+    jest.useFakeTimers()
+    const { adapter, peer, frames } = await connectedAdapter(settings.configTimeout)
+    try {
+      const events: ExternalAgentEvent[] = []
+      const consume = (async () => {
+        for await (const event of adapter.prompt(
+          "s",
+          {
+            id: "m",
+            role: "user",
+            content: [{ type: "text", text: "hello" }],
+            timestamp: new Date(),
+          },
+          { timeout: settings.executionTimeout }
+        )) {
+          events.push(event)
+        }
+      })()
+      const observed = consume.catch(() => undefined)
+      await jest.advanceTimersByTimeAsync(31_000)
+      expect(events.filter((event) => event.type === "error")).toEqual([])
+      expect(frames().filter((frame) => frame.method?.includes("cancel"))).toEqual([])
+      const prompt = frames().find((frame) => frame.method === "session/prompt")
+      peer.ingest(
+        JSON.stringify({ jsonrpc: "2.0", id: prompt.id, result: { stopReason: "end_turn" } })
+      )
+      await observed
+      expect(events).toEqual([expect.objectContaining({ type: "done", success: true })])
+    } finally {
+      await adapter.disconnect()
+      jest.useRealTimers()
+    }
+  })
+
+  it("cancels the session and pending approval at the configured execution deadline", async () => {
+    jest.useFakeTimers()
+    const { adapter, frames } = await connectedAdapter(1_000)
+    try {
+      const consume = (async () => {
+        for await (const event of adapter.prompt("s", {
+          id: "m",
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+          timestamp: new Date(),
+        })) {
+          void event
+        }
+      })()
+      const rejection = expect(consume).rejects.toThrow("Request timeout: session/prompt")
+      const permission = callPermission(
+        adapter,
+        { sessionId: "s", options: [ALLOW] },
+        undefined,
+        900
+      )
+      await jest.advanceTimersByTimeAsync(1_001)
+      expect(frames()).toContainEqual({
+        jsonrpc: "2.0",
+        method: "session/cancel",
+        params: { sessionId: "s" },
+      })
+      await expect(permission).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+      await rejection
+      expect(adapter.getSession("s")?.status).toBe("idle")
+    } finally {
+      await adapter.disconnect()
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("AcpClientAdapter — timeout cancellation failure", () => {
+  it("reports the original deadline even when cancelling agent work rejects", async () => {
+    jest.useFakeTimers()
+    const adapter = new AcpClientAdapter()
+    seedSession(adapter, "s", "default")
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    const peer = new JsonRpcPeer({ writeRaw: async () => {} })
+    ;(adapter as unknown as { peer: JsonRpcPeer }).peer = peer
+    const cancel = jest
+      .spyOn(adapter, "cancel")
+      .mockRejectedValue(new Error("terminal cleanup failed"))
+    try {
+      const consume = (async () => {
+        for await (const event of adapter.prompt("s", {
+          id: "m",
+          role: "user",
+          content: [{ type: "text", text: "hello" }],
+          timestamp: new Date(),
+        })) {
+          void event
+        }
+      })()
+      const rejection = expect(consume).rejects.toThrow("Request timeout: session/prompt")
+      await jest.advanceTimersByTimeAsync(1_001)
+      await rejection
+      expect(cancel).toHaveBeenCalledWith("s")
+      expect(adapter.getSession("s")?.status).toBe("idle")
+    } finally {
+      cancel.mockRestore()
+      await adapter.disconnect()
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("AcpClientAdapter — Devin permission modes", () => {
+  const modeOptions = (currentValue: string): AcpConfigOption[] => [
+    {
+      id: "mode",
+      name: "Mode",
+      type: "select",
+      category: "mode",
+      currentValue,
+      options: ["accept-edits", "smart", "ask", "plan", "bypass"].map((value) => ({
+        value,
+        name: value,
+      })),
+    },
+  ]
+
+  function devinAdapter() {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { _config: ExternalAgentConfig })._config = {
+      ...stdioConfig(),
+      metadata: { preset: "devin" },
+      process: { command: "/opt/bin/devin", cwd: "/work" },
+    }
+    setStatus(adapter, "connected")
+    return adapter
+  }
+
+  it("keeps the native initial mode in metadata and canonicalizes local authority", async () => {
+    const adapter = devinAdapter()
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest.fn().mockResolvedValue({
+      sessionId: "s",
+      configOptions: modeOptions("accept-edits"),
+    })
+    const session = await adapter.createSession({ cwd: "/work" })
+    expect(session.permissionMode).toBe("acceptEdits")
+    expect(adapter.getConfigOptions("s")?.[0].currentValue).toBe("accept-edits")
+  })
+
+  it.each<[AcpPermissionMode, string]>([
+    ["default", "ask"],
+    ["acceptEdits", "accept-edits"],
+    ["bypassPermissions", "bypass"],
+    ["plan", "plan"],
+    ["dontAsk", "ask"],
+  ])(
+    "maps %s to native %s while preserving canonical permission handling",
+    async (mode, nativeMode) => {
+      const adapter = devinAdapter()
+      seedSession(adapter, "s", "default")
+      adapter.getSession("s")!.metadata = { configOptions: modeOptions("accept-edits") }
+      const sendRequest = jest.fn().mockResolvedValue({ configOptions: modeOptions(nativeMode) })
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = sendRequest
+      await adapter.setSessionMode("s", mode)
+      expect(sendRequest).toHaveBeenCalledWith("session/set_config_option", {
+        sessionId: "s",
+        configId: "mode",
+        value: nativeMode,
+      })
+      expect(adapter.getSession("s")?.permissionMode).toBe(mode)
+      expect(adapter.getConfigOptions("s")?.[0].currentValue).toBe(nativeMode)
+      if (mode === "dontAsk") {
+        const notify = (
+          adapter as unknown as { handleNotification: (notification: unknown) => void }
+        ).handleNotification.bind(adapter)
+        notify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "s",
+            update: { sessionUpdate: "current_mode_update", currentModeId: "ask" },
+          },
+        })
+        notify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "s",
+            update: { sessionUpdate: "config_option_update", configOptions: modeOptions("ask") },
+          },
+        })
+        expect(adapter.getSession("s")?.permissionMode).toBe("dontAsk")
+        await expect(
+          callPermission(adapter, { sessionId: "s", kind: "execute", options: [ALLOW, REJECT] })
+        ).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject" } })
+      }
+    }
+  )
+
+  it("canonicalizes mode selection through the native config control", async () => {
+    const adapter = devinAdapter()
+    seedSession(adapter, "s", "default")
+    adapter.getSession("s")!.metadata = { configOptions: modeOptions("ask") }
+    ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest.fn().mockResolvedValue({
+      configOptions: modeOptions("bypass"),
+    })
+    await adapter.setConfigOption("s", "mode", "bypass")
+    expect(adapter.getSession("s")?.permissionMode).toBe("bypassPermissions")
+  })
+
+  it.each([false, true])(
+    "restores load metadata and receives replay before the response (response config: %s)",
+    async (includeResponseConfig) => {
+      const adapter = devinAdapter()
+      ;(adapter as unknown as { _agentCapabilities: unknown })._agentCapabilities = {
+        loadSession: true,
+      }
+      const replayEvents: ExternalAgentEvent[] = []
+      ;(
+        adapter as unknown as {
+          addEventListener: (
+            sessionId: string,
+            listener: (event: ExternalAgentEvent) => void
+          ) => void
+        }
+      ).addEventListener("s", (event) => replayEvents.push(event))
+      const models = {
+        currentModelId: "swe-2-medium",
+        availableModels: [{ modelId: "swe-2-medium", name: "SWE 2" }],
+      }
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest.fn(async () => {
+        expect(adapter.getSession("s")?.metadata?.cwd).toBe("/work")
+        mockAgentReadTextFile.mockResolvedValue("replayed context")
+        await dispatchAgentRequest(adapter, "fs/read_text_file", {
+          sessionId: "s",
+          path: "/work/file.md",
+        })
+        const notify = (
+          adapter as unknown as { handleNotification: (notification: unknown) => void }
+        ).handleNotification.bind(adapter)
+        for (const update of [
+          { sessionUpdate: "config_option_update", configOptions: modeOptions("accept-edits") },
+          { sessionUpdate: "session_info_update", title: "Restored title" },
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Prior reply" } },
+        ]) {
+          notify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s", update } })
+        }
+        return { models, ...(includeResponseConfig ? { configOptions: modeOptions("ask") } : {}) }
+      })
+      const session = await adapter.loadSession("s", { cwd: "/work", allowedTools: ["Read"] })
+      expect(session.metadata?.title).toBe("Restored title")
+      expect(session.metadata?.models).toEqual(models)
+      expect(session.permissionMode).toBe(includeResponseConfig ? "default" : "acceptEdits")
+      expect(session.allowedTools).toEqual(["Read"])
+      expect(adapter.getConfigOptions("s")?.[0].currentValue).toBe(
+        includeResponseConfig ? "ask" : "accept-edits"
+      )
+      expect(replayEvents).toContainEqual(
+        expect.objectContaining({
+          type: "message_delta",
+          delta: { type: "text", text: "Prior reply" },
+        })
+      )
+      expect(mockAgentReadTextFile).toHaveBeenCalledWith("/work/file.md", ["/work"])
+    }
+  )
+
+  it.each([false, true])(
+    "rolls back provisional session when loading fails (existing session: %s)",
+    async (existing) => {
+      const adapter = devinAdapter()
+      ;(adapter as unknown as { _agentCapabilities: unknown })._agentCapabilities = {
+        loadSession: true,
+      }
+      if (existing) seedSession(adapter, "s", "plan")
+      const previous = adapter.getSession("s")
+      ;(adapter as unknown as { sendRequest: jest.Mock }).sendRequest = jest
+        .fn()
+        .mockRejectedValue(new Error("load failed"))
+      await expect(adapter.loadSession("s", { cwd: "/work" })).rejects.toThrow("load failed")
+      expect(adapter.getSession("s")).toBe(previous)
+    }
+  )
+})
 
 describe("buildAcpPromptBlocks", () => {
   const message = (content: ExternalAgentMessage["content"]): ExternalAgentMessage => ({
@@ -612,7 +994,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
     expect(res.outcome.outcome).toBe("cancelled")
   })
 
-  it.each(["read", "file_read", "write", "file_write"])(
+  it.each(["read", "file_read", "write", "file_write", "edit"])(
     "acceptEdits auto-approves the non-destructive kind %s",
     async (kind) => {
       const a = new AcpClientAdapter()

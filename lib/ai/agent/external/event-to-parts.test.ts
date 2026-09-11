@@ -268,7 +268,7 @@ describe("applyExternalAgentEventToParts — tool calls", () => {
 
 describe("applyExternalAgentEventToParts — artifacts", () => {
   /** Start a call, then land its result — the only order that can produce a card. */
-  function runArtifactTool(toolName: string, result: unknown) {
+  function runArtifactTool(toolName: string, result: string | Record<string, unknown>) {
     const started = applyExternalAgentEventToParts(
       [],
       ev({ type: "tool_use_start", toolUseId: "t1", toolName, rawInput: { title: "demo" } })

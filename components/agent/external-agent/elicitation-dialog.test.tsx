@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import en from "@/i18n/messages/en.json"
@@ -236,4 +236,58 @@ describe("ExternalAgentElicitationDialog", () => {
     expect(screen.getByText(en.externalAgent.elicitation.punycodeWarning)).toBeInTheDocument()
     expect(screen.getByRole("link")).toHaveAttribute("href", "https://xn--80ak6aa92e.com/auth")
   })
+})
+
+it("keeps the answer and permits retry when delivery fails", async () => {
+  const onRespond = jest
+    .fn()
+    .mockRejectedValueOnce(new Error("disconnected"))
+    .mockResolvedValueOnce(undefined)
+  render(
+    wrap(
+      <ExternalAgentElicitationDialog
+        request={piRequest("input", { type: "string", title: "Name" })}
+        onRespond={onRespond}
+      />
+    )
+  )
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "feature-x" } })
+  fireEvent.click(screen.getByRole("button", { name: en.externalAgent.elicitation.submit }))
+  await screen.findByRole("alert")
+  expect(screen.getByLabelText("Name")).toHaveValue("feature-x")
+  fireEvent.click(screen.getByRole("button", { name: en.externalAgent.elicitation.submit }))
+  await waitFor(() => expect(onRespond).toHaveBeenCalledTimes(2))
+  expect(onRespond).toHaveBeenLastCalledWith({
+    requestId: "dlg-1",
+    action: "accept",
+    content: { input: "feature-x" },
+  })
+})
+
+it("blocks duplicate submissions and dismissal while an answer is in flight", async () => {
+  let finish!: () => void
+  const onRespond = jest.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+  )
+  render(
+    wrap(
+      <ExternalAgentElicitationDialog
+        request={piRequest("confirm", { type: "boolean", title: "Proceed?" })}
+        onRespond={onRespond}
+      />
+    )
+  )
+  const submit = screen.getByRole("button", { name: en.externalAgent.elicitation.submit })
+  fireEvent.click(submit)
+  fireEvent.click(submit)
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+  expect(onRespond).toHaveBeenCalledTimes(1)
+  expect(submit).toBeDisabled()
+  expect(screen.getByRole("button", { name: en.externalAgent.elicitation.decline })).toBeDisabled()
+  await act(async () => finish())
+  fireEvent.click(submit)
+  expect(onRespond).toHaveBeenCalledTimes(1)
 })

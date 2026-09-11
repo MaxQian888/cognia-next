@@ -46,6 +46,9 @@ pub(crate) fn push_loadability_base(out: &mut String) {
     out.push_str("(allow mach-lookup)\n");
     out.push_str("(allow sysctl-read)\n");
     out.push_str("(allow file-read*)\n");
+    // Git repairs closed standard descriptors by opening this sink O_RDWR.
+    // Both interactive launchers and one-shot commands need the same allowance.
+    out.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
 }
 
 /// Write-deny every protected path under each writable root, and read-deny the
@@ -148,6 +151,10 @@ mod tests {
         push_loadability_base(&mut out);
         assert!(out.contains("(allow file-read*)\n"), "{out}");
         assert!(out.contains("(allow process*)\n"), "{out}");
+        assert!(
+            out.contains("(allow file-write-data (literal \"/dev/null\"))\n"),
+            "{out}"
+        );
     }
 
     #[test]

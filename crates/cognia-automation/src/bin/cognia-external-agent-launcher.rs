@@ -25,6 +25,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut cwd = None;
     let mut writable = Vec::new();
     let mut readable = Vec::new();
+    let mut denied_readable = Vec::new();
     let mut network = false;
 
     while let Some(arg) = iter.next() {
@@ -39,6 +40,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
                     cwd,
                     writable,
                     readable,
+                    denied_readable,
                     network,
                 },
                 target,
@@ -48,6 +50,7 @@ fn parse_args(raw: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--cwd" => cwd = Some(next_value(&mut iter, "--cwd")?),
             "--writable" => writable.push(next_value(&mut iter, "--writable")?),
             "--readable" => readable.push(next_value(&mut iter, "--readable")?),
+            "--deny-readable" => denied_readable.push(next_value(&mut iter, "--deny-readable")?),
             "--network" => network = true,
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -171,6 +174,8 @@ mod tests {
                 "/work",
                 "--readable",
                 "/home/u",
+                "--deny-readable",
+                "/home/u/.codex",
                 "--network",
                 "--",
                 "codex",
@@ -183,6 +188,7 @@ mod tests {
         assert_eq!(args.scope.cwd, "/work");
         assert_eq!(args.scope.writable, ["/work"]);
         assert_eq!(args.scope.readable, ["/home/u"]);
+        assert_eq!(args.scope.denied_readable, ["/home/u/.codex"]);
         assert!(args.scope.network);
         assert_eq!(args.target, ["codex", "app-server"]);
     }

@@ -32,6 +32,12 @@ describe("validateAgentRunResult", () => {
     expect(isAgentRunResult(result())).toBe(true)
   })
 
+  it("preserves a schema-validated structured output alongside the text", () => {
+    const completed = result({ structuredOutput: { summary: "shipped" } })
+    expect(validateAgentRunResult(completed)).toEqual([])
+    expect(completed.structuredOutput).toEqual({ summary: "shipped" })
+  })
+
   it("rejects a non-object and a wrong schema version", () => {
     expect(validateAgentRunResult(null)).toEqual(["run result must be an object"])
     expect(validateAgentRunResult(result({ schemaVersion: 2 as 1 }))).toContain(

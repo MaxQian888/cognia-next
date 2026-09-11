@@ -16,6 +16,7 @@
       "codex-acp",
       "copilot",
       "cursor-agent",
+      "devin",
       "droid",
       "gemini",
       "kiro-cli",
@@ -25,7 +26,7 @@
     "manualOnly": {
       "claude": "The Claude Code CLI itself. No preset spawns it (the `claude-code` preset uses the ACP adapter binary), but hand-configured agents and the container/kube backends do.",
       "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`.",
-      "codex-acp": "The Zed Codex ACP shim as a GLOBAL install; the shipped preset uses the `npx @zed-industries/codex-acp` form. `workspace_runtime_backend.rs` spawns the bare name.",
+      "codex-acp": "The Codex ACP adapter as a GLOBAL install; the shipped preset uses the maintained `npx @agentclientprotocol/codex-acp` form. `workspace_runtime_backend.rs` spawns the bare name.",
       "gemini": "The Gemini CLI as a global install; the shipped preset uses the `npx @google/gemini-cli` form."
     }
   },
@@ -33,6 +34,7 @@
     "note": "Packages `npx [-y|--yes] <package>` may execute.",
     "packages": [
       "@agentclientprotocol/claude-agent-acp",
+      "@agentclientprotocol/codex-acp",
       "@anthropic-ai/claude-code",
       "@google/gemini-cli",
       "@qwen-code/qwen-code",
@@ -68,6 +70,11 @@
         "match": "base",
         "values": ["pi"],
         "roots": [".pi"]
+      },
+      {
+        "match": "base",
+        "values": ["devin"],
+        "roots": [".config/devin", ".local/share/devin", ".cache/devin"]
       },
       {
         "match": "contains",

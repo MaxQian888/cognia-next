@@ -13,6 +13,18 @@ import type { AgentEcosystemEntry } from "./types"
 
 export const AGENT_ECOSYSTEMS: readonly AgentEcosystemEntry[] = [
   {
+    id: "devin",
+    runtimeIds: ["devin"],
+    sessionSourceIds: [],
+    migrationVendor: null,
+    vendorRootKeys: [],
+    configRootKey: null,
+    probeRootKeys: [],
+    pluginEcosystem: null,
+    subagentSourceId: null,
+    memoryAgentId: null,
+  },
+  {
     id: "claude-code",
     runtimeIds: ["claude-agent-acp"],
     sessionSourceIds: ["claude-code"],

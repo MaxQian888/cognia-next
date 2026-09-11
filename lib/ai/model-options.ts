@@ -4,7 +4,7 @@
  * `components/chat/composer/model-picker.tsx` unchanged.
  */
 
-import { PROVIDERS } from "@cognia/provider-types/provider"
+import { getAllProviders } from "@cognia/provider-types/provider"
 import type {
   UserProviderSettings,
   CustomProviderSettings,
@@ -13,6 +13,7 @@ import type {
 import { getModelDisplayName } from "@/lib/ai/icons"
 import { getCachedOpenRouterCatalogModels } from "@cognia/provider-core/providers/openrouter-catalog-sync"
 import { customProviderModelIds } from "@cognia/provider-routing/model-option-source"
+import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 
 /**
  * The synced OpenRouter live-models catalog (Dexie v93), as the synchronous
@@ -31,7 +32,9 @@ function openRouterCatalogEntry(modelId: string): ProviderModelDiscoveryEntry | 
   return openRouterCatalogModels().find((m) => m.id === modelId)
 }
 
-export interface ModelOption {
+type ModelMetadata = Omit<ProviderModelDiscoveryEntry, "id" | "name" | "provider" | "knownFields">
+
+export interface ModelOption extends ModelMetadata {
   providerId: string
   /** Human-readable provider name (e.g. "Anthropic"), not the raw id. */
   providerName: string
@@ -61,37 +64,65 @@ export function resolveModelMeta(
   providerId: string | undefined,
   modelId: string,
   providerSettings?: Record<string, UserProviderSettings>,
-  customProviders?: CustomProviderSettings[]
-): Pick<ModelOption, "contextLength" | "supportsTools" | "supportsVision" | "supportsReasoning"> {
+  customProviders?: CustomProviderSettings[],
+  catalog = getAllProviders()
+): ModelMetadata {
   if (!providerId) return {}
-  const cpm = customProviders?.find((c) => c.id === providerId)?.customModelMetadata?.[modelId]
+  const custom = customProviders?.find((c) => c.id === providerId)
+  const cpm = custom?.customModelMetadata?.[modelId]
   // OpenRouter's per-account list is the synced catalog; everyone else uses the
   // settings-store `discoveredModels`.
   const discovered =
     providerId === "openrouter"
       ? openRouterCatalogEntry(modelId)
-      : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
-  const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
-  const firstDefined = <T>(...vals: (T | undefined)[]): T | undefined =>
-    vals.find((v) => v !== undefined)
-  return {
-    contextLength: firstDefined(
-      cpm?.contextLength,
-      discovered?.contextLength,
-      builtin?.contextLength
-    ),
-    supportsTools: firstDefined(
-      cpm?.capabilities?.functionCalling,
-      discovered?.supportsTools,
-      builtin?.supportsTools
-    ),
-    supportsVision: firstDefined(
-      cpm?.capabilities?.vision,
-      discovered?.supportsVision,
-      builtin?.supportsVision
-    ),
-    supportsReasoning: firstDefined(discovered?.supportsReasoning, builtin?.supportsReasoning),
+      : (custom?.discoveredModels ?? providerSettings?.[providerId]?.discoveredModels)?.find(
+          (m) => m.id === modelId
+        )
+  const builtin = catalog[providerId]?.models?.find((m) => m.id === modelId)
+  const curated = cpm
+    ? {
+        ...cpm,
+        supportsTools: cpm.supportsTools ?? cpm.capabilities?.functionCalling,
+        supportsVision: cpm.supportsVision ?? cpm.capabilities?.vision,
+        supportsStreaming: cpm.supportsStreaming ?? cpm.capabilities?.streaming,
+      }
+    : undefined
+  // User overrides win for ordinary custom providers; subscription declarations
+  // are fallback metadata, so account-specific discovery takes precedence.
+  const sources = custom?.subscription
+    ? [builtin, curated, discovered]
+    : [builtin, discovered, curated]
+  const fields = [
+    "contextLength",
+    "maxInputTokens",
+    "maxOutputTokens",
+    "supportsTools",
+    "supportsVision",
+    "supportsAudio",
+    "supportsVideo",
+    "supportsStreaming",
+    "supportsReasoning",
+    "supportsImageGeneration",
+    "supportsEmbedding",
+    "supportsStructuredOutput",
+    "pricing",
+  ] as const
+  const result: ModelMetadata = {}
+  for (const source of sources) {
+    if (!source) continue
+    for (const field of fields) {
+      const value = source[field]
+      if (value === undefined || (source.knownFields && !source.knownFields.includes(field)))
+        continue
+      if (
+        (field === "contextLength" || field === "maxInputTokens" || field === "maxOutputTokens") &&
+        (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)
+      )
+        continue
+      Object.assign(result, { [field]: value })
+    }
   }
+  return result
 }
 
 /**
@@ -106,13 +137,18 @@ export function resolveModelDisplayName(
   providerId: string | undefined,
   modelId: string,
   providerSettings?: Record<string, UserProviderSettings>,
-  customProviders?: CustomProviderSettings[]
+  customProviders?: CustomProviderSettings[],
+  catalog = getAllProviders()
 ): string {
   if (providerId) {
     const cp = customProviders?.find((c) => c.id === providerId)
+    const live = (cp?.discoveredModels ?? providerSettings?.[providerId]?.discoveredModels)?.find(
+      (m) => m.id === modelId
+    )
+    if (!isBuiltInProviderId(providerId) && (!cp || cp.subscription) && live?.name) return live.name
     const cpName = cp?.customModelMetadata?.[modelId]?.name
     if (cpName) return cpName
-    const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)?.name
+    const builtin = catalog[providerId]?.models?.find((m) => m.id === modelId)?.name
     if (builtin) return builtin
     const discovered =
       providerId === "openrouter"
@@ -144,19 +180,18 @@ export function resolveModelContextLength(
   customProviders?: CustomProviderSettings[]
 ): number | undefined {
   if (!modelId || !providerId) return undefined
-  const positive = (n: number | undefined): number | undefined =>
-    typeof n === "number" && n > 0 ? n : undefined
-  const cp = customProviders?.find((c) => c.id === providerId)
-  const cpLen = positive(cp?.customModelMetadata?.[modelId]?.contextLength)
-  if (cpLen) return cpLen
-  const discovered =
-    providerId === "openrouter"
-      ? openRouterCatalogEntry(modelId)
-      : providerSettings?.[providerId]?.discoveredModels?.find((m) => m.id === modelId)
-  const discoveredLen = positive(discovered?.contextLength)
-  if (discoveredLen) return discoveredLen
-  const builtin = PROVIDERS[providerId]?.models?.find((m) => m.id === modelId)
-  return positive(builtin?.contextLength)
+  return resolveModelMeta(providerId, modelId, providerSettings, customProviders).contextLength
+}
+
+/** Known output cap for the actual selected model, including account-specific discovery. */
+export function resolveModelMaxOutputTokens(
+  modelId: string | undefined,
+  providerId: string | undefined,
+  providerSettings?: Record<string, UserProviderSettings>,
+  customProviders?: CustomProviderSettings[]
+): number | undefined {
+  if (!modelId || !providerId) return undefined
+  return resolveModelMeta(providerId, modelId, providerSettings, customProviders).maxOutputTokens
 }
 
 /**
@@ -165,8 +200,8 @@ export function resolveModelContextLength(
  * hand-picked list per provider), NOT the models.dev catalog — see the
  * comment inside {@link collectModelOptions} for why the latter is unsuitable.
  */
-export function catalogModelIds(providerId: string): string[] {
-  const cfg = PROVIDERS[providerId]
+export function catalogModelIds(providerId: string, catalog = getAllProviders()): string[] {
+  const cfg = catalog[providerId]
   if (!cfg) return []
   const ids = new Set<string>()
   if (cfg.defaultModel) ids.add(cfg.defaultModel)
@@ -238,7 +273,7 @@ export function resolveDefaultModelForProvider(
   }
   const configured = providerSettings?.[providerId]?.defaultModel
   if (configured) return configured
-  const catalogDefault = PROVIDERS[providerId]?.defaultModel
+  const catalogDefault = getAllProviders()[providerId]?.defaultModel
   if (catalogDefault) return catalogDefault
   const first = servable.values().next()
   return first.done ? undefined : first.value
@@ -258,6 +293,7 @@ export function collectModelOptions(
   providerSettings: Record<string, UserProviderSettings> | undefined,
   customProviders: CustomProviderSettings[] | undefined
 ): ModelOption[] {
+  const catalog = getAllProviders()
   const out: ModelOption[] = []
   const entries = Object.entries(providerSettings ?? {})
   if (!entries.some(([id]) => id === "anthropic")) {
@@ -265,6 +301,7 @@ export function collectModelOptions(
   }
   for (const [providerId, settings] of entries) {
     if (settings.enabled === false) continue
+    if (providerId.includes(":") && !catalog[providerId]) continue
     // Selectable models = what the user has configured (enabledModels whitelist
     // + defaultModel) plus what live /v1/models discovery confirmed for *their*
     // account (discoveredModels). The models.dev catalog is a global metadata
@@ -286,15 +323,21 @@ export function collectModelOptions(
     }
     // Nothing configured at all → fall back to the curated built-in catalog
     // so an enabled provider never renders as an empty group.
-    const providerName = PROVIDERS[providerId]?.name ?? providerId
-    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId)
+    const providerName = catalog[providerId]?.name ?? providerId
+    const modelIds = allowed.size > 0 ? [...allowed] : catalogModelIds(providerId, catalog)
     for (const modelId of modelIds) {
       out.push({
         providerId,
         providerName,
         modelId,
-        modelName: resolveModelDisplayName(providerId, modelId, providerSettings, customProviders),
-        ...resolveModelMeta(providerId, modelId, providerSettings, customProviders),
+        modelName: resolveModelDisplayName(
+          providerId,
+          modelId,
+          providerSettings,
+          customProviders,
+          catalog
+        ),
+        ...resolveModelMeta(providerId, modelId, providerSettings, customProviders, catalog),
       })
     }
   }
@@ -308,8 +351,14 @@ export function collectModelOptions(
         providerId: cp.id,
         providerName: cp.name ?? cp.id,
         modelId,
-        modelName: resolveModelDisplayName(cp.id, modelId, providerSettings, customProviders),
-        ...resolveModelMeta(cp.id, modelId, providerSettings, customProviders),
+        modelName: resolveModelDisplayName(
+          cp.id,
+          modelId,
+          providerSettings,
+          customProviders,
+          catalog
+        ),
+        ...resolveModelMeta(cp.id, modelId, providerSettings, customProviders, catalog),
       })
     }
   }
