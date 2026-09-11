@@ -1,6 +1,6 @@
 ---
 title: 统一订阅
-description: 横跨 Anthropic、Codex 与 OpenCode 的同一套账号模型 —— keyring 支撑的 provider vault、宁取真实用量窗口也不取额度计的有序 limits 源注册表、九个余额适配器，以及加密导出信封。
+description: 横跨 Anthropic、Codex、OpenCode 与 CommandCode 的同一套账号模型 —— keyring 支撑的 provider vault、宁取真实用量窗口也不取额度计的有序 limits 源注册表、九个余额适配器，以及加密导出信封。
 ---
 
 # 统一订阅
@@ -8,7 +8,7 @@ description: 横跨 Anthropic、Codex 与 OpenCode 的同一套账号模型 —�
 <Status variant="stable">Stable · ADR-0025 · vault schema v4</Status>
 
 <TLDR>
-  三个订阅提供方 —— Anthropic、Codex、OpenCode —— 共用同一套账号模型、同一种 vault 格式、同一个额度接口面。
+  内置及动态注册的订阅提供方（包括 Anthropic、Codex、OpenCode、CommandCode）共用同一套账号模型、同一种 vault 格式、同一个额度接口面。
   真正有意思的是 **limits 源注册表**（`lib/subscription/limits/registry.ts`）：
   这是一个扁平的**有序**列表，带窗口的源排在通用余额源**之前**，
   因此 runner 会优先采用真实的用量窗口，只有在没有窗口适用时才回退到额度计。
@@ -20,7 +20,7 @@ description: 横跨 Anthropic、Codex 与 OpenCode 的同一套账号模型 —�
 
 <StatGrid>
   <Stat label="源文件" value="129" hint="lib/subscription —— 含测试" />
-  <Stat label="提供方" value="3" hint="anthropic · codex · opencode" />
+  <Stat label="提供方" value="4" hint="anthropic · codex · opencode · commandcode" />
   <Stat label="余额适配器" value="9" hint="deepinfra · deepseek · moonshot · novita · openrouter · ppio · siliconflow · 302 · _shared" />
   <Stat label="内置 limits 源" value="4" hint="anthropic · codex · volcengine · balance" />
   <Stat label="Tauri 命令" value="17" hint="src-tauri/src/subscription/commands.rs" />
@@ -42,6 +42,40 @@ runner 遍历返回的候选列表，在第一个能产出快照的源处停止�
 注册表本身是纯的：一个列表加一个解析器，返回**所有**匹配的源而不是挑一个 ——
 这样回退决策就留在 runner 里，可被测试。
 
+## 通过面板或插件添加服务
+
+所有添加入口共用 `core/provider-registry.ts` 和同一个账号表单。对于兼容 OpenAI Chat
+Completions 或 Anthropic Messages 的服务，在账号中心选择添加自定义服务，填写名称、API
+端点、协议、模型 ID 和 API Key 即可。名称、端点和模型保存在现有自定义提供商配置中，密钥
+仅进入当前本地账号的加密订阅 vault。
+
+插件可声明 `subscription-provider` capability 和 `subscriptionProviders[]`，TypeScript SDK
+提供 `defineSubscriptionProvider`。宿主自动生成 `pluginId:providerId` 标识，注册模型目录，
+并复用添加账号、端点预设、默认账号、凭据解析和加密备份流程。停用插件会移除其配置入口和
+模型注册，已保存账号仍可查看和删除。加密备份同时保存面板创建的服务定义，不会自动启用插件。
+
+声明式接入支持 API Key 以及上述两种标准协议。OAuth、自动刷新、CLI 凭据发现、厂商特殊协议
+和实时额度查询仍需专门的宿主适配器或独立额度扩展，不会根据服务名称猜测认证流程或额度 API。
+
+## CommandCode API 订阅
+
+CommandCode 的 GOAT、Pro、Max、Team 和 Provider 套餐使用
+[Settings → API Keys](https://commandcode.ai/settings/keys) 中的 API Key 接入。
+Go 套餐仅支持 CLI，无法使用此集成。账户中心、订阅设置、首次引导和聊天/角色账户选择器
+共用添加密钥对话框及端点预设绑定。密钥保存在加密订阅 vault 中；选择、编辑、激活、删除、
+加密导入导出及同步沿用统一账户生命周期。
+
+官方端点为 `https://api.commandcode.ai/provider/v1`。Claude 模型调用 Anthropic Messages
+（`/messages`），其他模型调用 OpenAI Chat Completions（`/chat/completions`）；
+聊天、上下文压缩、功能模型调用和本地 Gateway 均按模型选择协议。
+绑定预设优先于账户端点，可传递 `x-cmd-zdr: 1` 等自定义请求头，内部 `x-cognia-*` 请求头会被排除。
+
+模型发现使用公开的 `/models` 接口。连接测试会发起一次最小的认证生成请求，可能消耗少量套餐额度；
+仅获取公开模型列表无法验证密钥有效性。官方未公开额度查询 API，界面引导用户前往
+CommandCode Studio 查看用量，不显示虚构余额。目前不提供 OAuth 或 CLI 凭据发现。
+
+以上行为于 2026-09-11 对照[官方 Provider API 文档](https://commandcode.ai/docs/provider)核验。
+
 ## 代码位置
 
 ```
@@ -56,6 +90,7 @@ lib/subscription/
                usage-analytics · overview-windows · sidecar-sync
   codex/       oauth · discovery · refresh · scheduler · usage-probe · chat-bridge
   opencode/    discovery · chat-bridge
+  commandcode/ chat-bridge
   limits/
     registry.ts  runner.ts  aggregate.ts     # 解析 → 运行 → 聚合
     coalesce.ts  coalesce-record.ts  meters.ts  policy.ts
@@ -79,6 +114,30 @@ vault、provider 与发现逻辑位于 `cognia-subscription` crate；`mod.rs` �
 而命令面留在 app 侧，因为它拥有 sidecar 重启接缝与 `ApiKeyState`。
 
 ## 账号中心与凭据边界
+
+### 订阅与中转行为（2026-09-11）
+
+账号中心、首次引导、快速登录和 Anthropic 提供方复用入口使用同一组账号弹窗。Cognia 管理的
+Anthropic、Codex、OpenCode 账号可以在添加时选择已有端点预设，也可以之后修改绑定；外部
+OpenCode 发现记录仍然只读。Anthropic 订阅和 Console 登录使用 OAuth；第三方 API 和 Coding
+Plan 密钥应在已有的提供方配置中添加，不能伪装成 OAuth 凭据。
+
+账号绑定的预设优先，否则额度查询读取 vault 真正的默认预设，不能任取预设库的第一项。
+额度快照使用 vault 的 `provider` 和 `accountId` 作为存储标识，通过 `sourceId` 保留真实额度或
+余额适配器来源。单个账号失败不会丢弃其他账号的结果，也不会阻止独立自定义来源的查询。
+自定义来源使用跨页面挂载唯一的 ID，编辑时保留所有额度窗口和请求头。
+
+Codex 和 OpenCode 聊天桥接会传递预设请求头，并排除内部 `x-cognia-*` 配置。Codex 始终以所选
+ChatGPT 凭据的身份为准。OpenCode 聊天和压缩摘要请求标明 Cognia 客户端，并通过
+`x-opencode-session` 传递相同的会话 ID，遵循
+[OpenCode Go 客户端要求](https://opencode.ai/docs/go/#where-can-i-use-it)。Go 面向编程代理流量；
+此集成不表示无限制通用 API 使用或已获得提供方认证。端点与请求头配置依据
+[Codex 配置参考](https://developers.openai.com/codex/config-reference/)和
+[OpenCode 提供方文档](https://opencode.ai/docs/providers/)。
+
+当前 Companion 命令清单将订阅 vault 命令定义为 `client.local` / `internal`。Web 和移动端显示
+桌面管理说明，不通过通用 RPC 获取 vault 密钥。远程脱敏提供方诊断属于 ADR-0104 的独立能力。
+提供方文档核对日期为 2026-09-11；离线测试不代表真实额度接口已验证可用。
 
 设置 → 订阅 → 账号是唯一的账号 CRUD 界面。Claude、Codex、OpenCode 的 provider 页面只保留
 各自的用量、探测和路由设置，不再重复账号修改控件。「当前激活」表示把一个凭据投影到当前
@@ -109,7 +168,7 @@ v3 → v4 是纯 payload 迁移：只会从传入 vault payload 中已经存在�
 
 `core/encrypted-package.ts` 复用了 `lib/data/` 中全库 Dexie 备份的同一套加密 ——
 PBKDF2-SHA256 迭代 600,000 次加 AES-GCM-256 ——
-但采用了一个更简单、只装三个 provider vault 的信封
+但采用了一个更简单、保存动态 provider vault 的信封
 （`SUBSCRIPTION_PACKAGE_VERSION = "subscription-v1"`）。
 更小的载荷让备份文件在工具中保持可读，也让「里面装了哪些 vault」一目了然。
 

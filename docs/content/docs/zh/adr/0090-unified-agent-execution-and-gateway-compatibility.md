@@ -584,3 +584,154 @@ spec 仍然是「这一回合怎么执行」的权威。二者只通过
 `session/resume: supported`，并且记录的工作目录仍存在。随后 Cognia 执行恢复握手；只有成功才把所有权从
 `source-mirror` 改为 `native-bound`。失败会保留只读镜像并给出具体诊断。验证过的 native session id
 会保存为 session composition 的 runtime binding，并由后续 `ExternalAgentManager.execute` 复用。
+
+
+## 2026-09-11 修订 — 外部任务使用 Cognia 模型
+
+两个 Agent 编辑入口共用 Cognia 模型选择面板，外部 Agent 可以从中选择内部
+provider/model。对话明确选择的 Cognia 模型优先于 Agent 默认值。绑定保存
+`providerId`、`modelId` 和可选的订阅 `accountId`，不会把上游密钥复制到外部
+Agent 配置中。
+
+托管路径支持本地 Codex app-server/ACP、OpenCode server/ACP、Pi RPC、Claude
+Agent ACP 和 Qwen Code ACP。Codex 使用网关的 Responses 入口，OpenCode、Pi 和 Qwen 使用 Chat
+Completions，Claude 使用 Anthropic Messages。没有受支持的隔离启动协议的
+运行时、已连接的远程服务器及非本地进程后端会被拒绝。支持 ACP 本身不代表支持
+此模式。这些任务当前使用 OpenAI 或 Anthropic 上游，具体组合受网关协议兼容性
+检查约束。
+
+进程启动前，`prepareExternalAgentGatewayRoute` 重新构建并发布补全后的
+provider 快照，且要求宿主确认接收。快照包含 `apiFlavor` 和模型信息：总上下文、
+最大输入、最大输出、工具调用、推理、视觉、音频、视频、流式及结构化输出。
+缺失的信息保持未知。明确选择订阅账号时，模型信息通过该账号临时解析，避免
+静默使用另一个账号缓存的限制。模型明确不支持工具或流式时，启动适配器会拒绝
+任务。
+
+每个任务的网关 ticket lease 独立保存 provider 覆盖配置。并行任务可以选择不同
+账号，而不改写共享 provider 快照或 Cognia 的当前订阅账号。恢复任务时使用保留
+的实际账号绑定：省略账号表示启动时解析，冻结后的 `null` 表示使用配置中的手动
+API 凭据。ticket 只开放需要的推理操作，以及模型发现和 token 计数。准备或网关
+路由失败时不会退回直连上游。本地账号代次变化和已注册订阅的 vault 变更会使相关
+网关授权失效。
+
+管理器创建任务专属的子 Agent 进程，在宿主管理的任务状态目录中生成运行时配置。
+原生和 Node 启动器从运行时必需的环境变量开始，再加入隔离配置目录和网关凭据，
+不继承原有 provider/auth 变量。上游密钥保留在 Cognia；生成的 provider 文件引用
+环境变量，不包含网关密钥。原生子进程继承父任务的路由，不会独立获得切换其他
+provider 或账号的权限。
+
+任务完成、取消或失败时会撤销 lease 并停止任务进程。生成的 provider 文件会被
+移除，原生对话历史和不含密钥的绑定保留用于恢复。保留的绑定同时记录所属
+Cognia 本地账号，即使手动 provider/model 选择相同，其他本地账号也不能恢复
+同一任务。恢复沿用任务标识和绑定，同时申请新的 lease；变更 provider、模型或账号需要新建任务。删除外部会话会调用
+`external_agent_delete_gateway_task`，该命令拒绝仍有活动进程的任务，并删除
+保留的任务状态。原生和 companion 接口共用后端实现与 Agent Control 能力授权。
+
+配置和凭据隔离与文件、网络沙箱是不同的边界。此模式不会自动创建 worktree 或
+容器，不会禁止所有外网访问，也不能阻止具有完整权限的二进制读取任意宿主文件。
+这些保证由已有工作区及所选沙箱策略提供。不能根据 loopback URL 推断远程网关
+已经连通。
+
+实现入口：`lib/gateway/mint-session-ticket.ts`、
+`lib/gateway/snapshot-publisher.ts`、`lib/ai/agent/external/gateway-task.ts`、
+`lib/ai/agent/external/manager.ts`、
+`crates/cognia-external-agent/src/gateway_task.rs` 和
+`cli/src/runtime/external/gateway-task.ts`。
+
+### 网关协议字段与兼容边界
+
+推理入口包括 `POST /v1/chat/completions`、`POST /v1/responses` 和
+`POST /v1/messages`。OpenAI provider 快照使用 `apiFlavor: "chat"` 或
+`apiFlavor: "responses"`，Anthropic provider 使用 Messages 协议。同协议请求
+在经过网关安全检查、模型选择、配置字段剥离和模型限制后保留原生 wire 结构。
+原生 Responses 明确传入的 `store: false` 会保留。跨协议请求直接经过 `ChatIR`，
+Responses 请求也不再以 Chat Completions 请求作为中间表示。
+
+| 能力 | Chat Completions | Responses | Anthropic Messages |
+| --- | --- | --- | --- |
+| JSON Schema 输出 | `response_format.json_schema` | `text.format`，`type: "json_schema"` | `output_config.format`，`type: "json_schema"` |
+| 严格函数工具 | `tools[].function.strict` | `tools[].strict` | `tools[].strict` |
+| 工具选择 | `auto`、`required`、`none` 或指定函数 | `auto`、`required`、`none` 或指定函数/custom 工具 | `auto`、`any`、`none` 或指定工具 |
+| 并行工具偏好 | `parallel_tool_calls` | `parallel_tool_calls` | 取反映射到 `tool_choice.disable_parallel_tool_use` |
+| 相对推理强度 | `reasoning_effort` | `reasoning.effort` | `output_config.effort` |
+| 输出 token 请求 | `max_completion_tokens` 或 `max_tokens` | `max_output_tokens` | `max_tokens` |
+| 用户图片 | 文本/图片数组，支持 data URL | `input_text`/`input_image` 数组 | 文本/图片块，URL 或 base64 source |
+| 工具结果中的图片 | 没有等价表示，拒绝 | `function_call_output.output` 文本/图片数组 | `tool_result.content` 文本/图片数组 |
+
+JSON schema 和明确的 strict 标志会保留，不会放宽 schema。Anthropic 结构化输出
+没有与 OpenAI 包装层对应的 schema 名称、描述和非严格模式：只向
+`output_config.format` 发送 schema；Anthropic schema 转为 OpenAI 请求时会补充
+生成的名称和 `strict: true`。OpenAI `json_object` 在 Anthropic 上没有等价能力，
+因此拒绝转换。非法工具选择类型、未声明的指定工具、重复工具名称及格式错误的
+strict/parallel 标志都会在转换前拒绝。支持的转换保留文本/图片顺序和图片数据；
+assistant 图片内容及带 provider file ID 的工具结果尚无跨协议表示，会明确拒绝，
+不会压成纯文本。
+
+Effort 映射保留相对意图，不表示精确的推理 token 预算。跨协议 Anthropic effort
+会记录为近似，因为它也影响非 thinking 输出。两类协议共同接受的转换值为
+`low`、`medium`、`high` 和 `xhigh`；`none`/`minimal` 仅适用于 OpenAI，`max`
+仅适用于 Anthropic。目标协议不接受的值，以及向 OpenAI 转换时明确指定的
+Anthropic `thinking` 模式/token 预算，都会被拒绝。Responses 的 summary 详细
+程度没有跨协议等价控制；网关记录近似，并转发上游实际产生的推理文本。
+
+Responses 的非流式和流式轮次支持函数调用/结果、带 namespace 的函数工具和文本
+custom 工具。转换路径把 custom 工具表示为接收字符串 `input` 的函数。custom
+语法会作为描述约束发送，并记录为近似；转换路径**不会**强制执行原生语法。
+Hosted tools 和加密推理状态需要原来的原生 Responses 上游。原生透传不代表已经
+认证所有 provider 专有功能或模型。
+
+转换后的 Responses 流包含增量文本、推理摘要和工具参数事件；上游流被截断时
+报告失败，不会伪造成功的空响应。`previous_response_id` 按网关账号代次、ticket/key
+和模型隔离。内存续接缓存最多 32 条、每条 2 MiB，保留一小时。未知、过期或不属于
+当前作用域的 ID 会被拒绝，并要求重发完整输入。原生 Responses ID 仍依赖上游
+状态；`store: false` 不保证原生续接成功。
+
+`GET /v1/models` 与 `GET /v1/models/{model}` 仅公开 ticket 可见的模型。已发布的
+`maxInputTokens`、`maxOutputTokens` 和 `contextLength` 约束请求；输入量使用
+已有网关估算器，不声称与 provider tokenizer 完全一致。明确为 false 的
+`supportsTools`、`supportsStreaming`、`supportsStructuredOutput`、
+`supportsReasoning`、`supportsVision`、`supportsAudio` 和 `supportsVideo`
+会拒绝冲突请求。未知事实保持未知；能力元数据不会凭空提供尚不支持的协议转换。
+Ticket 输出预留量同时受任务剩余预算限制。
+
+任务 ticket 的推理和 Anthropic token 计数转发在上游发送前共用
+`cognia_net::outbound_pii::has_no_leaking_pii`。检查覆盖提示、历史、工具输入/
+结果/定义和结构化输出 schema，排除传输凭据和无关请求 metadata。原生 Responses
+透传也经过同一检查。Ticket 撤销、过期、账号变化及下游取消仍会终止请求或流。
+已有普通网关 key 策略保持不变。
+
+实现入口：`crates/cognia-gateway/src/translate/`、
+`crates/cognia-gateway/src/server.rs`、`crates/cognia-gateway/src/snapshot.rs` 和
+`crates/cognia-gateway/src/route_ticket.rs`。验证证据包括定向 Rust 单元/loopback
+集成检查，以及已安装 Codex CLI 对 loopback fixture 的工具往返。这些证据不代表
+已验证真实 Kimi、CommandCode 或其他订阅 provider 的网络兼容性。
+
+2026-09-11 核对来源：
+[Anthropic 结构化输出](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)、
+[Anthropic effort](https://platform.claude.com/docs/en/build-with-claude/effort)、
+[Anthropic 工具结果](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)、
+[OpenAI 函数调用](https://developers.openai.com/api/docs/guides/function-calling) 和
+[OpenAI Responses 流式事件](https://developers.openai.com/api/docs/guides/streaming-responses)。
+
+### Team 与插件子代理调度
+
+外部队友可通过共用模型面板设置 `TeammateConfig.cogniaModel`。插件作者可在
+`PluginSubagentDef` 中声明相同绑定，也可在单次 `ctx.agent.dispatchSubagent`
+调用中覆盖。调用参数明确传入 `null` 表示使用原生模型配置；省略参数则使用
+子代理定义。选择可执行程序预设不会继承另一个同预设 Agent 保存的模型或账号。
+绑定 Cognia 模型的调度会等待任务网关配置准备完毕，再启动原生进程。
+
+任务启动、SDK 声明、清单验证、动态子代理注册和调用共用同一个绑定校验器，
+仅接受 provider、model 和可选账号引用，拒绝非法值及密钥字段。原生模型名称
+仍是独立选项；网关绑定在任务准备阶段确定实际模型。
+
+Team 调度将映射后的公开外部会话 ID 保存到已有的 durable child 记录。
+引导、暂停和终止都定位到这个明确会话，不会在共享预设中任选一个活动会话。
+恢复 durable child 时，把保留的网关会话传回管理器，由管理器检查原账号、模型
+及所属 Cognia 账号，并申请新的 lease。调度结束后移除实时控制注册，保留已有
+的中止信号和 PII 防护链路。
+
+实现入口：`lib/ai/agent/team/resolve-external-backing.ts`、
+`lib/ai/agent/team/dispatch-teammate.ts`、`lib/plugin/agent-sdk/dispatch.ts` 和
+`types/agent/external-agent.ts`。CLI/TUI 的 backend 选择尚未开放此项明确的
+Cognia 模型绑定，其原生模型选择仍是独立功能。

@@ -1,6 +1,6 @@
 ---
 title: Unified Subscription
-description: One account model across Anthropic, Codex and OpenCode — keyring-backed provider vaults, an ordered limits-source registry that prefers a real utilization window over a credit meter, nine balance adapters, and an encrypted export envelope.
+description: One account model across Anthropic, Codex, OpenCode and CommandCode — keyring-backed provider vaults, an ordered limits-source registry that prefers a real utilization window over a credit meter, nine balance adapters, and an encrypted export envelope.
 ---
 
 # Unified Subscription
@@ -8,7 +8,7 @@ description: One account model across Anthropic, Codex and OpenCode — keyring-
 <Status variant="stable">Stable · ADR-0025 · vault schema v4</Status>
 
 <TLDR>
-  Three subscription providers — Anthropic, Codex, OpenCode — share one account model, one vault format
+  Built-in and registered subscription providers — including Anthropic, Codex, OpenCode, and CommandCode — share one account model, one vault format
   and one limits surface. The interesting piece is the **limits-source registry**
   (`lib/subscription/limits/registry.ts`): a flat ordered list where windowed sources come *before* the
   generic balance source, so the runner prefers a real utilization window and only falls through to a
@@ -20,7 +20,7 @@ description: One account model across Anthropic, Codex and OpenCode — keyring-
 
 <StatGrid>
   <Stat label="Source files" value="129" hint="lib/subscription — incl. tests" />
-  <Stat label="Providers" value="3" hint="anthropic · codex · opencode" />
+  <Stat label="Built-in providers" value="4" hint="plus custom and plugin registrations" />
   <Stat label="Balance adapters" value="9" hint="deepinfra · deepseek · moonshot · novita · openrouter · ppio · siliconflow · 302 · _shared" />
   <Stat label="Built-in limits sources" value="4" hint="anthropic · codex · volcengine · balance" />
   <Stat label="Tauri commands" value="17" hint="src-tauri/src/subscription/commands.rs" />
@@ -48,6 +48,8 @@ runner where it can be tested.
 ```
 lib/subscription/
   core/
+    provider-registry.ts   # built-in, custom, and plugin setup definitions
+    managed-key-credential.ts # generic API-key account transport
     transport.ts           # authedGet + account access — the injected seam
     encrypted-package.ts   # encrypted export / import envelope
     vault-snapshot.ts  migration.ts  account-expiry.ts
@@ -57,6 +59,7 @@ lib/subscription/
                usage-analytics · overview-windows · sidecar-sync
   codex/       oauth · discovery · refresh · scheduler · usage-probe · chat-bridge
   opencode/    discovery · chat-bridge
+  commandcode/ chat-bridge
   limits/
     registry.ts  runner.ts  aggregate.ts     # resolve → run → aggregate
     coalesce.ts  coalesce-record.ts  meters.ts  policy.ts
@@ -79,7 +82,78 @@ The vault, provider and discovery logic lives in the `cognia-subscription` crate
 so existing `crate::subscription::…` call sites stay unchanged, while the command surface stays app-side
 because it owns the sidecar-restart seam and `ApiKeyState`.
 
+## Adding a provider without adding a new integration
+
+The account panels consume one registry (`core/provider-registry.ts`). Account Center, onboarding,
+chat and character account selectors reuse the same dispatcher and managed-key form. For a standard
+OpenAI Chat Completions or Anthropic Messages service, choose **Add custom service** and enter its
+name, API base URL, protocol, model IDs, and API key. Endpoint/model metadata uses the existing custom
+provider settings; the key goes only into the local account's encrypted subscription vault.
+
+A plugin can contribute the same metadata through `subscriptionProviders[]` with the
+`subscription-provider` capability; the TypeScript SDK provides `defineSubscriptionProvider`.
+The host namespaces its ID as `pluginId:providerId`, registers its model catalog, and supplies the
+account form, presets, default-account selection, credential resolution, and encrypted backup.
+Disabling the plugin removes its setup and model registration while keeping stored accounts available
+for inspection/removal. Encrypted backups include custom service definitions, but do not reactivate plugins.
+See the [manifest reference](../../plugin-dev/manifest) for a declaration example.
+
+The declaration supports API-key authentication with the two standard protocols. OAuth, token refresh,
+CLI discovery, a vendor-specific wire protocol, and live quota queries still require their existing
+host adapters or separate quota extensions. No login flow or quota endpoint is inferred from a name.
+
+## CommandCode API subscriptions
+
+CommandCode GOAT, Pro, Max, Team, and Provider plans connect with the API key from
+[Settings → API Keys](https://commandcode.ai/settings/keys). The Go plan is CLI-only and cannot use
+this integration. Add an account from Account Center, the subscription settings, onboarding, or the
+chat/character account picker. These entry points share the same key dialog and endpoint-preset binding.
+Keys stay in the encrypted subscription vault; account selection, editing, activation, removal,
+encrypted export/import, and synchronization use the existing account lifecycle.
+
+The official base URL is `https://api.commandcode.ai/provider/v1`. Claude models use Anthropic Messages
+(`/messages`); other models use OpenAI Chat Completions (`/chat/completions`). This selection applies to
+chat, compaction, feature model calls, and the local Gateway. A bound preset takes precedence over the
+account URL and may supply custom headers such as `x-cmd-zdr: 1`; internal `x-cognia-*` headers are excluded.
+
+Model discovery uses the public `/models` endpoint. Connection testing makes a minimal authenticated
+generation request and may consume a small amount of plan credits; fetching the public model list alone
+cannot validate a key. No public quota API is documented, so the UI directs users to CommandCode Studio
+for usage instead of displaying an invented balance. OAuth and CLI credential discovery are not exposed.
+
+Verified against the [official Provider API documentation](https://commandcode.ai/docs/provider)
+on 2026-09-11.
+
 ## Account Center and credential boundaries
+
+### Subscription and relay behavior (2026-09-11)
+
+Account Center, onboarding, express sign-in, and the Anthropic provider reuse entry share the same
+provider account dialogs. Managed Anthropic, Codex, and OpenCode accounts can choose an existing
+endpoint preset while being added and change that binding later. External OpenCode discovery pointers
+remain read-only. Anthropic subscription/Console sign-in is OAuth; vendor API and Coding Plan keys
+belong in the existing Providers configuration, not in an invented OAuth credential.
+
+An account's bound preset wins; otherwise queries use the vault's actual default preset. Merely having
+another preset in the library never selects it. Limits snapshots retain the vault `provider` and
+`accountId` as their storage identity and carry `sourceId` for the actual quota or balance adapter.
+One failing account cannot discard the other accounts or prevent independent custom sources from
+being queried. Custom sources use unique IDs across editor mounts and preserve every quota window
+and request header when edited.
+
+Codex and OpenCode chat bridges forward preset request headers, excluding internal `x-cognia-*`
+configuration. Codex's selected ChatGPT identity remains authoritative. OpenCode chat and compaction
+requests identify Cognia and carry the same conversation ID in `x-opencode-session`, following the
+[OpenCode Go client contract](https://opencode.ai/docs/go/#where-can-i-use-it). Go is intended for coding
+agent traffic; this integration does not imply unrestricted general API use or vendor certification.
+Endpoint/header configuration is documented in the
+[Codex configuration reference](https://developers.openai.com/codex/config-reference/) and
+[OpenCode provider documentation](https://opencode.ai/docs/providers/).
+
+Subscription vault commands are `client.local` / `internal` in the current Companion command manifest.
+Web and mobile clients therefore show desktop-management guidance rather than receiving vault secrets
+through generic RPC. Sanitized remote provider diagnostics are a separate capability under ADR-0104.
+Provider documentation was checked on 2026-09-11; offline tests do not certify live quota endpoints.
 
 Settings → Subscription → Accounts is the only account CRUD surface. Claude, Codex, and OpenCode
 provider pages keep provider-specific usage, probe, and routing controls; they do not duplicate account
@@ -114,7 +188,7 @@ configuration-file read, or network request.
 
 `core/encrypted-package.ts` reuses the same crypto as the Dexie-wide backup in `lib/data/` —
 PBKDF2-SHA256 at 600,000 iterations plus AES-GCM-256 — but ships a simpler envelope sized for just the
-three provider vaults (`SUBSCRIPTION_PACKAGE_VERSION = "subscription-v1"`). The smaller payload keeps
+registered provider vaults (`SUBSCRIPTION_PACKAGE_VERSION = "subscription-v1"`). The smaller payload keeps
 backup files readable in tooling and makes it obvious which vaults are inside.
 
 <Callout type="warn">

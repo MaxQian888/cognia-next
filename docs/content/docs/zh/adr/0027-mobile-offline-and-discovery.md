@@ -89,3 +89,25 @@ Capacitor 7 移动端外壳已发布 JWT 配对、WebRTC 通道、写入离线�
 ## 当前状态修订（2026-08-13）
 
 PNG manifest、mobile Inbox、backup/import/reminder、Twin long-press/redaction/camera 流程，以及 workflow delete/pause RPC mirrors 均已存在。剩余开放项是真实 Tauri service worker 在 macOS、Windows、Linux 上的 smoke 证据；历史功能清单不应再被当作当前缺口。
+
+## 同步正确性与有界查询修订（2026-09-11）
+
+消息创建时间不能代表消息变更：流式持久化和编辑会修改已有消息，而不改变
+`createdAt`。Dexie v226 新增本地 `messageSyncClock` 和消息索引
+`[syncRevision+id]`。写入中间件在消息事务内分配单调递增的 revision，覆盖并发
+写入、导入和流式更新。删除最新消息不会重置时钟；事务回滚也会回滚时钟。
+迁移直接向原始记录添加元数据，不解密或重写已有加密正文。
+
+messages 的不透明游标升级为 version 2。收到 version-1 游标时，按 revision
+索引分批补齐，不能把创建时间误作 revision。全新客户端仍获取最近 500 条消息，
+并在同一读事务中记录时钟检查点；之后对更早消息的修改会进入后续增量。更早历史
+继续通过专用 transcript 分页读取。行游标与删除游标保持独立。
+
+同一 schema 版本为 workflow runs 新增 `[syncActivityAt+id]` 索引，其元数据为
+`max(startedAt, completedAt)`，由写入中间件维护。Host 在数据库查询阶段限制
+每页大小，不再每页读取并排序所有剩余运行记录。
+
+同步在请求发起时捕获 Host 配置代次和数据库，在每批写入前验证，包括异步解密或
+准备工作完成之后。迟到结果不能写入新选中 Host 的数据库。启动流程清理时取消
+其同步任务。定向失效通知和分阶段拉取共用每个 Host 的并发预算，新增定向任务
+不会额外获得一套独立并发额度。

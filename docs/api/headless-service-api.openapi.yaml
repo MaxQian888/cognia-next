@@ -28545,6 +28545,51 @@ paths:
                   type: string
                   description: Client-minted id for the local `messages` row; the host reuses it so the optimistic mirror and the
                     authoritative row converge.
+                messageMetadata:
+                  type: object
+                  description: Internal reply and template provenance for the mirrored user message; not part of the platform request.
+                  properties:
+                    replyTo:
+                      type: object
+                      description: "The message this turn answers (ADR-0177 batch 2): the stored id of the target and a one-line preview,
+                        stamped on the user row by the host."
+                      required:
+                        - messageId
+                        - preview
+                      properties:
+                        messageId:
+                          type: string
+                        preview:
+                          type: string
+                        platformMessageId:
+                          type: string
+                          description: The platform's id for the target when the reference came over an IM connector.
+                      additionalProperties: false
+                    templateRun:
+                      type: object
+                      description: Template provenance for the persisted user turn; never an authority or sender identity.
+                      required:
+                        - templateId
+                        - version
+                        - text
+                        - params
+                      properties:
+                        templateId:
+                          type: string
+                        version:
+                          type: string
+                        text:
+                          type: string
+                          minLength: 1
+                        params:
+                          type: object
+                          additionalProperties:
+                            type: object
+                            additionalProperties: {}
+                            example: {}
+                          example: {}
+                      additionalProperties: false
+                  additionalProperties: false
                 request:
                   type: object
                   required:
@@ -39690,6 +39735,182 @@ paths:
                     additionalProperties: false
                 additionalProperties: false
                 x-cognia-schema-owner: external-agents
+        "202":
+          description: Command is still running under the durable operation ledger. The body is the Operation document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "400":
+          description: The request or command arguments are invalid.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: Authentication failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: The command is not registered.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "410":
+          description: The command was renamed. details.replacement names the command to call instead.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "415":
+          description: The request body is not JSON.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: A valid signed policy is required.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: The principal exceeded its command rate limit.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: The canonical dispatch failed.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The durable security store is unavailable.
+          headers:
+            x-request-id:
+              description: Mirrors requestId in the problem document.
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/external_agent_delete_gateway_task:
+    post:
+      operationId: internalRpcExternalAgentDeleteGatewayTask
+      tags:
+        - headless-rpc
+      summary: external_agent_delete_gateway_task (process.spawn)
+      description: "Loopback service-token command. Target: execution; risk: critical."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                  pattern: ^[a-zA-Z0-9_-]{1,128}$
+                taskId:
+                  type: string
+                  pattern: ^[a-zA-Z0-9_-]{1,128}$
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - task_id
+                    - required:
+                        - taskId
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
         "202":
           description: Command is still running under the durable operation ledger. The body is the Operation document.
           content:
@@ -95988,6 +96209,30 @@ paths:
                   items:
                     type: string
                     minLength: 1
+                templateRun:
+                  type: object
+                  description: Template provenance for the persisted user turn; never an authority or sender identity.
+                  required:
+                    - templateId
+                    - version
+                    - text
+                    - params
+                  properties:
+                    templateId:
+                      type: string
+                    version:
+                      type: string
+                    text:
+                      type: string
+                      minLength: 1
+                    params:
+                      type: object
+                      additionalProperties:
+                        type: object
+                        additionalProperties: {}
+                        example: {}
+                      example: {}
+                  additionalProperties: false
               additionalProperties: false
       responses:
         "200":
@@ -144364,6 +144609,7 @@ components:
           - external_agent_config_list
           - external_agent_config_reconcile
           - external_agent_config_update
+          - external_agent_delete_gateway_task
           - external_agent_detect_runtimes
           - external_agent_list
           - external_agent_release_run
@@ -145121,10 +145367,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - protocol/companion-command-renames.json
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 692
-  generatedRequestSchemaCount: 692
+  internalCommandCount: 693
+  generatedRequestSchemaCount: 693
   runtimeInferredRequestSchemaCount: 0
-  contractRequestSchemaCount: 692
+  contractRequestSchemaCount: 693
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 692
+  generatedResponseSchemaCount: 693
   loopbackOnly: true

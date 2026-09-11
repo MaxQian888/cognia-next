@@ -206,3 +206,33 @@ desktop server was unreachable, for three reasons:
 ## Current-state amendment (2026-08-13)
 
 PNG manifest assets, mobile Inbox, backup/import/reminders, Twin long-press/redaction/camera flows, and workflow delete/pause RPC mirrors are now present. The remaining open item is real Tauri service-worker smoke coverage across macOS, Windows, and Linux; the historical feature checklist must not be treated as current missing functionality.
+
+## Sync correctness and bounded work amendment (2026-09-11)
+
+Message creation time is not a change cursor: streaming persistence and edits
+update an existing message without changing `createdAt`. Dexie v226 adds a
+local `messageSyncClock` and `[syncRevision+id]` message index. The write
+middleware allocates monotonically increasing revisions in the message
+transaction, including concurrent writes, imports, and streaming updates.
+The clock survives deletion of the newest message. Rollbacks also roll back
+the clock. Migration adds metadata to raw records without decrypting or
+rewriting their encrypted content.
+
+The opaque messages cursor is now version 2. A version-1 cursor triggers a
+bounded catch-up through the revision index, rather than treating a creation
+timestamp as a revision. A fresh client still receives the newest 500
+messages and an atomic clock checkpoint; later edits to older messages are
+included in subsequent deltas. Dedicated transcript pagination remains the
+path for older history. Row and deletion checkpoints remain independent.
+
+The same schema version adds `[syncActivityAt+id]` to workflow runs. The
+metadata equals `max(startedAt, completedAt)` and is stamped at the write
+boundary. The Host can therefore limit each query before materialization,
+instead of loading and sorting all remaining runs on every page.
+
+Synchronization captures the Host configuration generation and database at
+request start. It checks them before applying each slice, including after
+asynchronous decryption or preparation. A stale result cannot write into a
+newly selected Host's database. Boot teardown cancels its sync work. Targeted
+invalidations and staged pulls share a per-Host concurrency budget; creating
+another targeted run does not create another independent allowance.

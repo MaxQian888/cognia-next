@@ -144,6 +144,107 @@ Every Cognia plugin ships with a `cognia-plugin.json` manifest. It is the single
   }}
 />
 
+## Subscription providers
+
+For an API-key service compatible with OpenAI Chat Completions or Anthropic Messages, add the
+`subscription-provider` capability and a declarative provider entry:
+
+```json
+{
+  "capabilities": ["subscription-provider"],
+  "subscriptionProviders": [
+    {
+      "id": "api",
+      "name": "Example API",
+      "baseUrl": "https://api.example.com/v1",
+      "protocol": "openai",
+      "models": ["example-model"],
+      "apiKeyUrl": "https://example.com/settings/keys",
+      "usageUrl": "https://example.com/usage",
+      "docsUrl": "https://example.com/docs"
+    }
+  ]
+}
+```
+
+This is a manifest fragment; retain your plugin's normal identity, version, and entry fields.
+The SDK `defineSubscriptionProvider` helper accepts the same fields. The host prefixes the local ID
+with the plugin ID and renders a shared account form in every subscription entry point. Users enter
+keys into the host form; declarations must not contain credentials, custom headers, or executable
+callbacks. No secret-read permission is required. Endpoint presets remain host-managed.
+
+`protocol` accepts `openai` or `anthropic`; `models` must contain at least one model ID. API endpoints
+must use HTTP(S), contain no embedded credentials, query, or fragment. A subscription ID cannot also
+name an `aiProviders` contribution. Disabling the plugin unregisters the service and model definition
+without deleting its saved accounts. OAuth, provider-specific refresh, and quota adapters are separate
+extensions and are not implied by this capability.
+
+Model entries may be plain IDs (backward compatible) or objects using the shared model metadata:
+
+```json
+{
+  "id": "coding",
+  "name": "Coding service",
+  "protocol": "anthropic",
+  "baseUrl": "https://api.example.com/coding/",
+  "modelApi": { "list": true, "retrieve": true },
+  "models": [
+    {
+      "id": "coding-model",
+      "name": "Coding Model",
+      "contextLength": 262144,
+      "maxInputTokens": 250000,
+      "maxOutputTokens": 8192,
+      "supportsTools": true,
+      "supportsVision": true,
+      "supportsReasoning": true,
+      "supportsStreaming": true
+    }
+  ]
+}
+```
+
+Optional metadata also includes audio/video, structured output, embedding and image-generation
+flags, and `pricing` using the shared per-million-token pricing fields. Omit unknown limits,
+capabilities and prices; a subscription is not automatically zero-cost. IDs must be unique and
+token limits must be positive integers. Total context, maximum input and maximum output are distinct
+fields. The first model remains the default. Routing and agent compaction consume the resolved
+limits; a known output cap bounds a larger user-requested output limit without increasing a smaller one.
+Unknown capabilities do not disable agent parameters, while an explicit `false` remains authoritative.
+These limits apply to requests dispatched by Cognia, including its subagents and team fallbacks.
+SDK-native Task subagents and external agents control their own requests; this metadata does not
+override limits that their SDK or protocol does not expose.
+
+`modelApi` declares independent support for standard model-list and model-detail endpoints.
+If omitted, plugin model discovery uses the declaration without guessing a remote API exists.
+`list: true` enables authenticated `GET models`; `retrieve: true` enables `GET models/{id}`.
+Without retrieval support, model details are derived from the listing. The host handles Anthropic
+pagination, credential- and endpoint-scoped caching, cancellation, response normalization, and
+merging account-specific remote metadata over declared fallback fields. Successful discovery does
+not prove inference access to every listed model. The shared account panel and provider settings
+refresh action use the same model operations.
+
+| Wire protocol | Declaration | Authentication and URL behavior |
+| --- | --- | --- |
+| OpenAI Chat Completions | `protocol: "openai", apiFlavor: "chat"` | Bearer key; versioned base URL, then `/chat/completions`. |
+| OpenAI Responses | `protocol: "openai", apiFlavor: "responses"` | Bearer key; versioned base URL, then `/responses`. |
+| Anthropic Messages | `protocol: "anthropic"` | `x-api-key` and `anthropic-version`; a root base gains `/v1` once, then `/messages`. |
+
+OpenAI subscriptions default to `apiFlavor: "chat"`. `apiFlavor` is invalid on Anthropic entries.
+For a service supporting multiple wires, declare distinct entries with stable IDs and the correct
+endpoint per protocol. Users select the entry when adding the account; each has its own account
+namespace. Other protocols, OAuth and vendor-specific signatures are not implied by compatibility
+with one of these protocols.
+
+A complete Kimi Code example lives in `plugins/kimi-subscription`. Its `plugin.json` declares the
+OpenAI and Anthropic membership endpoints, rich fallback models and live listing support; its entry
+module uses that same JSON without registration code. It derives model details from the list because
+Kimi has not documented a separate model retrieval endpoint for this integration.
+From the repository root, run `pnpm exec node plugins/kimi-subscription/build.mjs` to produce an
+installable ZIP in `plugins/kimi-subscription/dist/`. The included English and Chinese READMEs cover
+desktop installation, account setup, membership requirements, lifecycle behavior, and adapting the
+example to another provider. This example is installed explicitly rather than bundled by default.
+
 ## Validation
 
 `lib/plugin/core/validation.ts:validatePluginManifest` runs a Zod schema. Any missing required field or type mismatch causes immediate install failure with a descriptive error.

@@ -695,3 +695,189 @@ preset is already configured, its runtime is connected/executable, its negotiate
 resume handshake. Only success changes ownership from `source-mirror` to `native-bound`; failure leaves
 the mirror read-only with a specific diagnostic. The verified native session id is persisted as the
 session composition's runtime binding and reused by `ExternalAgentManager.execute` on later turns.
+
+
+## 2026-09-11 amendment — external tasks using Cognia models
+
+External agents can select an internal Cognia provider/model through the shared
+Cognia model picker in both agent editors. A conversation's explicit Cognia
+model selection takes precedence over the agent default. The binding records
+`providerId`, `modelId`, and an optional subscription `accountId`; it does not
+copy an upstream key into the external-agent configuration.
+
+The managed path supports local Codex app-server/ACP, OpenCode server/ACP, Pi RPC,
+Claude Agent ACP, and Qwen Code ACP runtimes. Codex uses the gateway Responses ingress;
+OpenCode, Pi, and Qwen use Chat Completions; Claude uses Anthropic Messages. A runtime
+without a supported isolated launch contract, an attached remote server, or a
+non-local process backend is refused. ACP support by itself does not imply
+support for this mode. The gateway currently accepts OpenAI and Anthropic
+upstreams for these tasks, subject to its protocol compatibility checks.
+
+Before a process starts, `prepareExternalAgentGatewayRoute` rebuilds and publishes
+an enriched provider snapshot and requires the host to accept it. Provider rows
+carry `apiFlavor` and model metadata: context length, maximum input and output,
+tool calling, reasoning, vision, audio, video, streaming, and structured output.
+Absent facts remain unknown. An explicit subscription account resolves its model
+information transiently, so metadata cached for another account cannot silently
+supply that task's limits. A model explicitly lacking tools or streaming is
+rejected by the launch adapter.
+
+Each task receives a private provider override inside its gateway ticket lease.
+Concurrent tasks can select different accounts without rewriting the shared
+provider snapshot or changing Cognia's active subscription account. The resolved
+account binding is retained for resume: an omitted account is resolved at task
+start, while a frozen `null` account means the configured manual API credential.
+The ticket exposes only the required inference operation plus model discovery
+and token counting. It cannot fall back to a direct upstream connection when
+preparation or gateway routing fails. Local account-generation changes and
+registered subscription-vault mutations invalidate affected gateway authority.
+
+The manager creates a task-owned child agent process and generates runtime
+configuration beneath the host-owned task state directory. Native and Node
+launchers start from runtime essentials rather than inherited provider/auth
+variables, then apply the isolated config home and gateway credential. Upstream
+keys stay in Cognia; generated provider files reference environment variables
+instead of containing the gateway secret. Native subprocesses inherit their
+parent task route. They do not receive permission to choose another provider or
+account independently.
+
+Completion, cancellation, and failures revoke the lease and stop the task
+process. Generated provider files are removed while native conversation history
+and the nonsecret binding are retained for resume. The retained binding also
+records the owning Cognia local account, so another local account cannot resume
+the same task even when its manual provider/model selection matches. Resume
+uses the same task identity and binding with a fresh lease; changing provider/model/account requires
+a new task. Deleting the external session calls
+`external_agent_delete_gateway_task`, which rejects active processes and removes
+the retained task state. Its native and companion interfaces share the same
+backend implementation and Agent Control capability.
+
+Configuration and credential isolation are separate from filesystem/network
+sandboxing. This mode does not create a worktree or container, deny all external
+network access, or stop a fully privileged binary from reading arbitrary host
+files. Those guarantees depend on the selected existing workspace and sandbox
+policy. Remote gateway transport is not inferred from a loopback URL.
+
+Implementation: `lib/gateway/mint-session-ticket.ts`,
+`lib/gateway/snapshot-publisher.ts`, `lib/ai/agent/external/gateway-task.ts`,
+`lib/ai/agent/external/manager.ts`,
+`crates/cognia-external-agent/src/gateway_task.rs`, and
+`cli/src/runtime/external/gateway-task.ts`.
+
+### Gateway protocol fields and compatibility boundaries
+
+The inference ingress is `POST /v1/chat/completions`, `POST /v1/responses`, or
+`POST /v1/messages`. OpenAI provider snapshots use `apiFlavor: "chat"` or
+`apiFlavor: "responses"`; Anthropic providers use the Messages protocol.
+Same-protocol requests retain their native wire shape after gateway security,
+model selection, configured field stripping, and model-limit enforcement.
+An explicit native Responses `store: false` is preserved. Cross-protocol
+requests use `ChatIR` directly, including Responses requests; they no longer
+pass through a Chat Completions request as an intermediate representation.
+
+| Capability | Chat Completions | Responses | Anthropic Messages |
+| --- | --- | --- | --- |
+| JSON Schema output | `response_format.json_schema` | `text.format` with `type: "json_schema"` | `output_config.format` with `type: "json_schema"` |
+| Strict function tools | `tools[].function.strict` | `tools[].strict` | `tools[].strict` |
+| Tool selection | `auto`, `required`, `none`, or named function | `auto`, `required`, `none`, or named function/custom tool | `auto`, `any`, `none`, or named tool |
+| Parallel tool preference | `parallel_tool_calls` | `parallel_tool_calls` | Inverse `tool_choice.disable_parallel_tool_use` |
+| Relative reasoning effort | `reasoning_effort` | `reasoning.effort` | `output_config.effort` |
+| Output-token request | `max_completion_tokens` or `max_tokens` | `max_output_tokens` | `max_tokens` |
+| User images | Text/image arrays, including data URLs | `input_text`/`input_image` arrays | Text/image blocks with URL or base64 source |
+| Images inside tool results | No equivalent; rejected | `function_call_output.output` text/image arrays | `tool_result.content` text/image arrays |
+
+JSON schemas and explicit strict flags are preserved rather than relaxed.
+Anthropic structured output has no schema-name/description or non-strict mode
+matching the OpenAI wrapper: only the schema is sent in `output_config.format`,
+and an Anthropic schema rendered toward OpenAI receives a generated name and
+`strict: true`. OpenAI `json_object` has no equivalent on Anthropic and is
+rejected. Invalid tool-choice kinds, undeclared forced tool names, duplicate
+tool names, and malformed strict/parallel flags are rejected before translation.
+Text/image order and image bytes survive supported conversions; assistant-image
+content and provider file-ID tool results have no implemented cross-protocol
+representation and are rejected instead of flattened to text.
+
+Effort mappings preserve relative intent, not an exact reasoning-token budget.
+Cross-protocol Anthropic effort is recorded as an approximation because it also
+applies to non-thinking output. The accepted translated values are
+`low`, `medium`, `high`, and `xhigh` on both families; `none`/`minimal` are
+OpenAI-only, and `max` is Anthropic-only. An incompatible value or an explicit
+Anthropic `thinking` mode/token budget is rejected when targeting OpenAI.
+Responses summary verbosity has no matching cross-protocol control; the gateway
+records an approximation and streams whatever reasoning text the upstream emits.
+
+Function calls/results, namespaced function tools, and text custom tools are
+supported in buffered and streaming Responses turns. Custom tools on a translated
+route are represented by a function accepting a string `input`. A custom grammar
+is included as a descriptive constraint and recorded as an approximation; the
+translated route does **not** enforce native grammar. Hosted tools and encrypted
+reasoning state require their original native Responses upstream. Native
+passthrough is not certification of every provider-specific feature or model.
+
+Translated Responses streaming emits incremental text, reasoning-summary, and
+tool-argument events; truncated upstream streams end as failures rather than
+successful empty responses. `previous_response_id` is scoped to the gateway
+account generation, ticket/key, and model. The in-memory continuation cache is
+bounded to 32 entries, 2 MiB per entry, and one hour. Unknown, expired, or foreign
+IDs are rejected with a request to resend full input. Native Responses IDs still
+depend on upstream state; `store: false` does not promise native continuation.
+
+`GET /v1/models` and `GET /v1/models/{model}` expose only ticket-visible models.
+Published `maxInputTokens`, `maxOutputTokens`, and `contextLength` constrain
+requests; input uses the existing gateway estimator, not a claim of exact
+provider tokenization. Explicitly false `supportsTools`, `supportsStreaming`,
+`supportsStructuredOutput`, `supportsReasoning`, `supportsVision`, `supportsAudio`,
+and `supportsVideo` reject conflicting requests. Unknown facts remain unknown;
+capability metadata does not create a protocol conversion that is otherwise
+unsupported. Ticket output reservations are clamped to the remaining task budget.
+
+Task-ticket inference and Anthropic token-count forwarding reuse
+`cognia_net::outbound_pii::has_no_leaking_pii` before sending data upstream. The
+check includes prompts, history, tool inputs/results/definitions, and structured
+output schemas, while excluding transport credentials and unrelated request
+metadata. Native Responses passthrough uses the same check. Ticket revocation,
+expiry, account changes, and downstream cancellation still terminate the request
+or stream. Existing ordinary gateway-key policy is unchanged.
+
+Implementation: `crates/cognia-gateway/src/translate/`,
+`crates/cognia-gateway/src/server.rs`, `crates/cognia-gateway/src/snapshot.rs`, and
+`crates/cognia-gateway/src/route_ticket.rs`. Evidence consists of focused Rust
+unit/loopback integration checks and an installed Codex CLI tool roundtrip
+against a loopback fixture. This does not establish live Kimi/CommandCode or
+other subscription-provider compatibility.
+
+Sources checked on 2026-09-11:
+[Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+[Anthropic effort](https://platform.claude.com/docs/en/build-with-claude/effort),
+[Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls),
+[OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
+and [OpenAI Responses streaming](https://developers.openai.com/api/docs/guides/streaming-responses).
+
+### Team and plugin subagent dispatch
+
+An external teammate can declare `TeammateConfig.cogniaModel` through its shared
+model picker. Plugin authors can declare the same binding on `PluginSubagentDef`
+or override it for one `ctx.agent.dispatchSubagent` call. A per-call `null`
+explicitly selects native model configuration; `undefined` uses the subagent
+definition. Selecting an executable preset does not inherit the model or account
+of an unrelated saved agent with that preset. Bound dispatches defer native login
+until the task's gateway configuration is ready.
+
+The binding validator is shared by task launch, SDK authoring, manifest
+validation, dynamic subagent registration, and dispatch. It accepts only provider,
+model and optional account references, rejecting malformed values and secret
+fields. Native model names remain a separate option; a gateway binding resolves
+the actual model at task preparation.
+
+Team dispatch records the mapped public external session ID on its existing
+durable child row. Steering, pause, and terminate target that exact session;
+they do not select an arbitrary active session on the shared preset. A resumed
+durable child passes its retained gateway session back to the manager, which
+enforces the original account/model/owner binding and mints a fresh lease.
+Control registration is released after the dispatch, while the existing abort
+signal and PII gates remain in force.
+
+Implementation: `lib/ai/agent/team/resolve-external-backing.ts`,
+`lib/ai/agent/team/dispatch-teammate.ts`, `lib/plugin/agent-sdk/dispatch.ts`, and
+`types/agent/external-agent.ts`. CLI/TUI backend selection does not yet expose
+this explicit Cognia model binding; its native model selection remains separate.
