@@ -72,10 +72,29 @@ export function createProductionRoomDeps(opts: ProductionRoomDepsOptions = {}): 
       runTurnMemory: (sessionId, input) => runTurnMemory(sessionId, input as never),
       buildUtilityLlmClient: (args) => buildUtilityLlmClient(args as never),
       runTitleTask: (args) => runTitleTask(args as never),
-      resolveProviderAttemptOptions: async (providerId, settings) => {
-        const { resolveProviderAttemptOptions } =
+      resolveProviderAttemptOptions: async (providerId, settings, modelId, previousOptions) => {
+        const { resolveProviderAttemptOptions, applyProviderAttemptLimits } =
           await import("@/lib/claude/provider-attempt-options")
-        return resolveProviderAttemptOptions(providerId, settings)
+        const attempt = await resolveProviderAttemptOptions(
+          providerId,
+          settings,
+          undefined,
+          false,
+          modelId
+        )
+        return {
+          ...attempt,
+          ...applyProviderAttemptLimits(
+            {
+              ...previousOptions,
+              provider: providerId,
+              model: modelId ?? attempt.defaultModel,
+              modelParams: attempt.modelParams,
+            },
+            settings,
+            previousOptions?.modelParams?.maxOutputTokens
+          ),
+        }
       },
       pendingRecoveryPhase: (messages) => pendingRecoveryPhase(messages as never),
       applySdkSubagentBridge: (event, teamSessionId) => {

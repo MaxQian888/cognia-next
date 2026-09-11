@@ -38,6 +38,7 @@ function makeAdapter(over: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow
 }
 
 const RESOLVED: ResolvedBinding = {
+  modeSource: "adapter-default",
   mode: "auto",
   characterId: undefined,
   trigger: {} as ResolvedBinding["trigger"],

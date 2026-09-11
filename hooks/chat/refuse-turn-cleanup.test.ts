@@ -126,18 +126,41 @@ describe("a refusal that never owned a working copy", () => {
     expect(SOURCE.match(/typeof endingRunId === "number"/g)).toHaveLength(2)
   })
 
-  /**
-   * The busy refusal is an English sentence naming an internal workspace key,
-   * so it is translated. Every OTHER failure keeps the host's own words,
-   * because `detail` has no renderer today and a generic sentence would leave
-   * the reader with no account of the cause at all.
-   */
-  it("translates the refusal it can name and keeps the host's words for the rest", () => {
+  function leaseFailureBody(): string {
     const start = SOURCE.indexOf('console.error("workspace turn lease failed"')
     expect(start).toBeGreaterThan(-1)
-    const body = SOURCE.slice(start, SOURCE.indexOf("const taskLease = bundleTurnLease", start))
-    expect(body).toContain("message: isWorkspaceBusyRefusal(error)")
-    expect(body).toContain('tInlineErr("workspaceBusy")')
-    expect(body).toContain("detail: error instanceof Error ? error.message : String(error)")
+    return SOURCE.slice(start, SOURCE.indexOf("const taskLease = bundleTurnLease", start))
+  }
+
+  /**
+   * "Busy" and "unresolvable" are different codes, because the card renders the
+   * code's own hint above the message and `workspaceUnavailable`'s tells the
+   * reader to bind the workspace to a folder — the one move that cannot help a
+   * binding that is already correct and merely held by a running turn.
+   */
+  it("distinguishes a busy working copy from one it cannot resolve", () => {
+    const body = leaseFailureBody()
+    // Whitespace-tolerant: the branch must pick the busy code, not merely
+    // mention it somewhere in the same refusal.
+    expect(body).toMatch(/isWorkspaceBusyRefusal\(error\)\s*\?\s*createDiagnostic\("workspaceBusy"/)
+    expect(body).toMatch(/:\s*createDiagnostic\("workspaceUnavailable"/)
+  })
+
+  /**
+   * The busy refusal is an English sentence naming an internal workspace key,
+   * so the translated sentence is what `message` carries — it is mirrored onto
+   * the legacy `errorMessage` that the mobile toast and the OS session
+   * notification still render as prose. The host's own words survive in
+   * `detail`, which the card now discloses. Every OTHER failure keeps the
+   * host's words as its message: there they are the only account of the cause.
+   */
+  it("translates the refusal it can name and keeps the host's words for the rest", () => {
+    const body = leaseFailureBody()
+    expect(body).toContain('message: tInlineErr("workspaceBusy")')
+    expect(body).toContain("detail: leaseFailure")
+    expect(body).toContain("message: leaseFailure")
+    expect(body).toContain(
+      "const leaseFailure = error instanceof Error ? error.message : String(error)"
+    )
   })
 })

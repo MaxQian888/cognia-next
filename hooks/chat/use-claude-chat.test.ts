@@ -5,12 +5,24 @@
  * The hook also wires a long-lived sidecar event handler through `onClaudeMessage`
  * — that handler is exercised indirectly via `send` / `respondToApproval`.
  */
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { act, renderHook } from "@testing-library/react"
 import type { SendOptions } from "@cognia/agent-config-types"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import type { StartSquadRunInput, StartSquadRunResult } from "@/lib/ai/agent/team/start-squad-run"
 import type { WatchSquadRunInput } from "@/lib/ai/agent/team/watch-squad-run"
+
+const backgroundDrainMock = jest.fn()
+const peerDrainMock = jest.fn(async () => undefined)
+jest.mock("./background-result-runtime", () => ({
+  ...jest.requireActual("./background-result-runtime"),
+  maybeDrainBackgroundResults: (sessionId: string) => backgroundDrainMock(sessionId),
+}))
+jest.mock("@/lib/chat/session-peer-messaging", () => ({
+  ...jest.requireActual("@/lib/chat/session-peer-messaging"),
+  drainSessionPeerMessages: (sessionId: string) => (peerDrainMock as jest.Mock)(sessionId),
+}))
 
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
@@ -331,8 +343,12 @@ const setDelegationRulesMock = jest.fn()
  * with a manager, so without this every external-lane case is refused with
  * `external_agent_unavailable` before `executeOnExternalAgent` is reached.
  */
+const ensureExternalAgentReadyMock = jest.fn(async (..._args: unknown[]) => ({
+  ok: true,
+  alreadyConnected: true,
+}))
 jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
-  ensureExternalAgentReady: async () => ({ ok: true, alreadyConnected: true }),
+  ensureExternalAgentReady: (...args: unknown[]) => ensureExternalAgentReadyMock(...args),
 }))
 
 jest.mock("@/lib/ai/agent/external/manager", () => ({
@@ -409,6 +425,7 @@ const makeSlice = (): SliceLike => ({
 interface ChatStateLike {
   activeSessionId: string | null
   openSessionIds: string[]
+  paneIdsBySession: Record<string, string[]>
   splitSessionId: string | null
   /** Slices for *background* (non-focused) sessions; the active session's slice
    * is projected from the flat fields below by the `sessions` getter, so the
@@ -436,6 +453,7 @@ interface ChatStateLike {
   setStatus: jest.Mock
   setError: jest.Mock
   replaceSessionMessages: jest.Mock
+  replaceMessagesForSession: jest.Mock
   setSessionStatus: jest.Mock
   setSessionError: jest.Mock
   setSessionDiagnostic: jest.Mock
@@ -468,6 +486,7 @@ const sliceWrite = (id: string, patch: Partial<SliceLike>) => {
 const chatState: ChatStateLike = {
   activeSessionId: "sess-1",
   openSessionIds: ["sess-1"],
+  paneIdsBySession: {},
   splitSessionId: null,
   otherSlices: {},
   get sessions() {
@@ -532,6 +551,9 @@ const chatState: ChatStateLike = {
     const cur = chatState.sessions[a.sessionId]?.pendingApprovals ?? []
     sliceWrite(a.sessionId, { pendingApprovals: [...cur, a], status: "awaiting_approval" })
   }),
+  replaceMessagesForSession: jest.fn((id: string, messages: unknown[]) =>
+    sliceWrite(id, { messages })
+  ),
   clearApproval: jest.fn(),
   markApprovalInterrupted: jest.fn(),
   closeSession: jest.fn(),
@@ -668,7 +690,14 @@ jest.mock("@cognia/vector/store", () => ({
   createVectorStore: (...args: unknown[]) => mockCreateVectorStore(...args),
 }))
 
-import { useClaudeChat } from "./use-claude-chat"
+import {
+  __resetRemoteAttachForTests,
+  DEFAULT_APPROVAL_BACKSTOP_MS,
+} from "@/lib/companion/remote-attach-registry"
+import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
+import { createElement, useState, type ReactNode } from "react"
+import { useClaudeChat } from "./use-claude-chat-controller"
+import { ClaudeChatRuntimeProvider, useClaudeChat as useSharedClaudeChat } from "./use-claude-chat"
 import {
   hasSessionGrant,
   recordSessionGrant,
@@ -683,6 +712,8 @@ import {
 jest.setTimeout(30_000)
 
 beforeEach(() => {
+  chatState.paneIdsBySession = {}
+  useSubagentRuntimeStore.setState({ subAgents: {} })
   resetComputerUseSessionGrants()
   isTauriMock.mockReset().mockReturnValue(true)
   flushProjectEditorEdits.mockReset().mockResolvedValue([])
@@ -830,6 +861,7 @@ async function flush() {
 }
 
 afterEach(() => {
+  __resetRemoteAttachForTests()
   // The external-branch test flips the (real) agent-runtime store; reset it so
   // subsequent tests keep taking the default claude-sdk path.
   useAgentRuntimeStore.setState({
@@ -1499,6 +1531,127 @@ describe("useClaudeChat — actions", () => {
       "hi",
       expect.objectContaining({ agentId: "ext-1", model: "anthropic/claude-opus-4-1" })
     )
+  })
+
+  it("routes an internal model and account through the external task gateway", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Gateway task",
+      model: "kimi-for-coding",
+      providerOverride: "plugin:kimi:subscription",
+      accountId: "account-a",
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+    expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("ext-1", { deferConnect: true })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({
+        cogniaModel: {
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-a",
+        },
+        context: expect.objectContaining({
+          custom: expect.objectContaining({ chatSessionId: "sess-1" }),
+        }),
+      })
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("resumes and persists the durable gateway session link after manager recreation", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const nativeId = "cognia-gateway:task-1:native-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Resumed task",
+      model: "auto",
+      externalAgentSession: { agentId: "ext-1", sessionId: nativeId },
+    })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "ok",
+      sessionId: nativeId,
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: "sess-1" })
+    })
+    expect(ensureExternalAgentReadyMock).toHaveBeenCalledWith("ext-1", { deferConnect: true })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "continue",
+      expect.objectContaining({ sessionId: nativeId })
+    )
+  })
+
+  it("aborts the isolated external task when Stop is pressed without interrupting the built-in agent", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "Task",
+      model: "coder",
+      providerOverride: "gateway",
+    })
+    let taskSignal: AbortSignal | undefined
+    executeOnExternalAgentMock.mockImplementation(
+      (_prompt: string, options: { signal: AbortSignal }) => {
+        taskSignal = options.signal
+        return new Promise((resolve) =>
+          options.signal.addEventListener(
+            "abort",
+            () => resolve({ success: false, error: "aborted" }),
+            { once: true }
+          )
+        )
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    let sending: Promise<unknown>
+    await act(async () => {
+      sending = result.current.send("hi", undefined, { sessionId: "sess-1" })
+      await flush()
+    })
+    expect(taskSignal).toBeDefined()
+    await act(async () => {
+      await result.current.stop("sess-1")
+      await sending
+    })
+    expect(taskSignal!.aborted).toBe(true)
+    expect(interruptSessionMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("stores the first gateway session link for later app reloads", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    const nativeId = "cognia-gateway:task-2:native-2"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "New task",
+      model: "coder",
+      providerOverride: "gateway",
+    })
+    executeOnExternalAgentMock.mockResolvedValue({
+      success: true,
+      finalResponse: "ok",
+      sessionId: nativeId,
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+    expect(updateSessionMock).toHaveBeenCalledWith("sess-1", {
+      externalAgentSession: { agentId: "ext-1", sessionId: nativeId },
+    })
   })
 
   it("does not replay a model the row attributes to a different agent", async () => {
@@ -2597,6 +2750,42 @@ describe("useClaudeChat — actions", () => {
     chatState.activeSessionId = "sess-1"
   })
 
+  it("bounds a local approval even when its pane closes before the user answers", async () => {
+    renderHook(useClaudeChat)
+    await flush()
+    jest.useFakeTimers()
+    try {
+      await act(async () => {
+        _messageCallback?.({
+          type: "permission_request",
+          sessionId: "sess-1",
+          requestId: "forgotten",
+          toolName: "edit",
+          input: {},
+        })
+      })
+      expect(chatState.pushApproval).toHaveBeenCalled()
+      chatState.activeSessionId = "sess-other"
+      chatState.openSessionIds = ["sess-other"]
+      delete chatState.otherSlices["sess-1"]
+      await act(async () => jest.advanceTimersByTime(DEFAULT_APPROVAL_BACKSTOP_MS))
+      expect(approveToolMock).toHaveBeenCalledWith(
+        "sess-1",
+        "forgotten",
+        "deny",
+        "auto-denied: approval timed out"
+      )
+      expect(chatState.markApprovalInterrupted).toHaveBeenCalledWith(
+        "forgotten",
+        "sess-1",
+        "approval timed out"
+      )
+    } finally {
+      __resetRemoteAttachForTests()
+      jest.useRealTimers()
+    }
+  })
+
   it("incoming permission_request for the active session pushes an approval", async () => {
     renderHook(() => useClaudeChat())
     await flush()
@@ -3007,27 +3196,6 @@ describe("useClaudeChat — goal loop wiring (ADR-0019)", () => {
 
   // ── /loop wiring (self-paced) ──────────────────────────────────────────────
 
-  function activeLoop(over: Record<string, unknown> = {}) {
-    return {
-      id: "lp1",
-      sessionId: "sess-1",
-      mode: "self_paced",
-      status: "active",
-      generationId: "lgen1",
-      config: {
-        maxIterations: 100,
-        maxTokens: 1_000_000,
-        minDelayMs: 60_000,
-        maxDelayMs: 3_600_000,
-        maxParseFailures: 3,
-      },
-      iterations: 0,
-      tokensUsed: 0,
-      parseFailureCount: 0,
-      ...over,
-    }
-  }
-
   it("send pauses an active self-paced loop on a fresh user message", async () => {
     loopRuntimeMock.getActiveLoopForSession.mockResolvedValue(activeLoop())
     const { result } = renderHook(() => useClaudeChat())
@@ -3282,6 +3450,38 @@ describe("useClaudeChat — concurrent sessions", () => {
     // Its slice sealed to idle without disturbing the focused session.
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
   })
+
+  it.each(["result", "session_ended"])(
+    "settles a hidden retained session on %s without switching focus",
+    async (terminal) => {
+      chatState.activeSessionId = "sess-other"
+      chatState.openSessionIds = ["sess-other"]
+      chatState.otherSlices["sess-1"] = { ...makeSlice(), status: "streaming" }
+      renderHook(useClaudeChat)
+      await flush()
+      const finalMessages = [
+        { id: "a1", role: "assistant", parts: [{ type: "text", text: "done" }] },
+      ]
+      if (terminal === "result")
+        adapterMock.applySdkEvent.mockReturnValueOnce({
+          messages: finalMessages,
+          turnComplete: true,
+        })
+      else chatState.otherSlices["sess-1"].messages = finalMessages
+      await act(async () =>
+        _messageCallback?.(
+          terminal === "result"
+            ? { type: "event", sessionId: "sess-1", event: { type: "result" } }
+            : { type: "session_ended", sessionId: "sess-1" }
+        )
+      )
+      await flush()
+      expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+      expect(chatState.activeSessionId).toBe("sess-other")
+      expect(chatState.openSessionIds).toEqual(["sess-other"])
+      expect(sendPromptMock).not.toHaveBeenCalled()
+    }
+  )
 
   it("does NOT touch the store for a closed (no-pane) session — only Dexie", async () => {
     chatState.activeSessionId = "sess-other"
@@ -3682,5 +3882,217 @@ describe("useClaudeChat — Squad dispatch", () => {
     expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
       expect.objectContaining({ squadId: "squad-2" })
     )
+  })
+})
+
+describe("strict chat continuation dispatch", () => {
+  it("rejects a failed sidecar dispatch after preserving the diagnostic", async () => {
+    sendPromptMock.mockRejectedValueOnce(new Error("host offline"))
+    const { result } = renderHook(useClaudeChat)
+    await flush()
+    await act(async () => {
+      await expect(
+        result.current.send("approved plan", undefined, {
+          sessionId: "sess-1",
+          skipUserAppend: true,
+          throwOnError: true,
+        })
+      ).rejects.toThrow("host offline")
+    })
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalled()
+  })
+
+  it.each(["", []])("rejects empty continuation content %j", async (content) => {
+    const { result } = renderHook(useClaudeChat)
+    await expect(result.current.send(content, undefined, { throwOnError: true })).rejects.toThrow(
+      "empty_chat_turn"
+    )
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("propagates the plugin refusal without dispatching", async () => {
+    dispatchUserPromptSubmitMock.mockResolvedValueOnce({
+      action: "block",
+      reason: "blocked",
+    } as never)
+    const { result } = renderHook(useClaudeChat)
+    await flush()
+    await act(async () => {
+      await expect(result.current.send("plan", undefined, { throwOnError: true })).rejects.toThrow(
+        "blocked"
+      )
+    })
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+})
+
+function activeLoop(over: Record<string, unknown> = {}) {
+  return {
+    id: "lp1",
+    sessionId: "sess-1",
+    mode: "self_paced",
+    status: "active",
+    generationId: "lgen1",
+    config: {
+      maxIterations: 100,
+      maxTokens: 1_000_000,
+      minDelayMs: 60_000,
+      maxDelayMs: 3_600_000,
+      maxParseFailures: 3,
+    },
+    iterations: 0,
+    tokensUsed: 0,
+    parseFailureCount: 0,
+    ...over,
+  }
+}
+
+describe("embedded runtime reachability", () => {
+  it("projects existing subagents when a pane appears without a new runtime event", async () => {
+    useSubagentRuntimeStore.setState({
+      subAgents: {
+        child: {
+          id: "child",
+          name: "Worker",
+          parentAgentId: "aside",
+          status: "completed",
+          context: { sessionId: "aside" },
+          result: { finalResponse: "done" },
+          createdAt: new Date(),
+        },
+      },
+    } as never)
+    chatState.otherSlices.aside = {
+      ...makeSlice(),
+      messages: [{ id: "a", role: "assistant", parts: [] }],
+    }
+    renderHook(useClaudeChat)
+    await flush()
+    expect(chatState.replaceMessagesForSession).not.toHaveBeenCalledWith("aside", expect.anything())
+    const previous = { ...chatState }
+    chatState.paneIdsBySession = { aside: ["pane"] }
+    act(() =>
+      subscribers.forEach((subscriber) =>
+        (subscriber as (state: ChatStateLike, previous: ChatStateLike) => void)(chatState, previous)
+      )
+    )
+    expect(chatState.replaceMessagesForSession).toHaveBeenCalledWith(
+      "aside",
+      expect.arrayContaining([
+        expect.objectContaining({
+          parts: expect.arrayContaining([
+            expect.objectContaining({ type: "subagent", subagentId: "child" }),
+          ]),
+        }),
+      ])
+    )
+  })
+
+  it("drains queued deliveries when an embedded pane becomes reachable", async () => {
+    const { rerender } = renderHook(useClaudeChat)
+    await flush()
+    backgroundDrainMock.mockClear()
+    peerDrainMock.mockClear()
+    chatState.paneIdsBySession = { aside: ["pane"] }
+    rerender()
+    expect(backgroundDrainMock).toHaveBeenCalledWith("aside")
+    expect(peerDrainMock).toHaveBeenCalledWith("aside")
+  })
+
+  it("starts an embedded loop on its bound session rather than the focused session", async () => {
+    let kickoff: ((loop: unknown) => void) | null = null
+    loopRuntimeMock.onKickoff.mockImplementationOnce((callback: (loop: unknown) => void) => {
+      kickoff = callback
+      return () => {}
+    })
+    chatState.paneIdsBySession = { aside: ["pane"] }
+    chatState.otherSlices.aside = makeSlice()
+    renderHook(useClaudeChat)
+    await flush()
+    await act(async () =>
+      kickoff?.(activeLoop({ sessionId: "aside", safePrompt: "continue aside" }))
+    )
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "aside",
+      expect.stringContaining("continue aside"),
+      expect.any(Object)
+    )
+    expect(chatState.activeSessionId).toBe("sess-1")
+  })
+})
+
+describe("shared chat runtime", () => {
+  it("does not race an IM responder even when capture releases before the event queue drains", async () => {
+    renderHook(useSharedClaudeChat, { wrapper: ClaudeChatRuntimeProvider })
+    await flush()
+    const release = registerCaptureResponder("sess-1", "im-turn", true)
+    act(() => {
+      _messageCallback?.({
+        type: "permission_request",
+        sessionId: "sess-1",
+        turnId: "im-turn",
+        requestId: "im-ask",
+        toolName: "Bash",
+        input: { command: "pwd" },
+      })
+      release()
+    })
+    await flush()
+    expect(approveToolMock).not.toHaveBeenCalled()
+    expect(chatState.pushApproval).not.toHaveBeenCalled()
+  })
+
+  it("keeps the controller alive when a consumer unmounts", async () => {
+    let hide: () => void = () => {}
+    function Consumer() {
+      useSharedClaudeChat()
+      return null
+    }
+    function Wrapper({ children }: { children: ReactNode }) {
+      const [visible, setVisible] = useState(true)
+      hide = () => setVisible(false)
+      return createElement(
+        ClaudeChatRuntimeProvider,
+        null,
+        children,
+        visible ? createElement(Consumer) : null
+      )
+    }
+    const { unmount, result } = renderHook(useSharedClaudeChat, { wrapper: Wrapper })
+    await flush()
+    act(hide)
+    expect(typeof result.current.send).toBe("function")
+    expect(onClaudeMessageMock).toHaveBeenCalledTimes(1)
+    expect(onClaudeUnsub).not.toHaveBeenCalled()
+    unmount()
+    expect(onClaudeUnsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects missing or nested runtime owners", () => {
+    const error = jest.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      expect(() => renderHook(useSharedClaudeChat)).toThrow("requires ClaudeChatRuntimeProvider")
+      expect(() =>
+        renderHook(useSharedClaudeChat, {
+          wrapper: ({ children }: { children: ReactNode }) =>
+            createElement(
+              ClaudeChatRuntimeProvider,
+              null,
+              createElement(ClaudeChatRuntimeProvider, null, children)
+            ),
+        })
+      ).toThrow("must be mounted once")
+    } finally {
+      error.mockRestore()
+    }
+  })
+
+  it("shares commands and one sidecar subscription across simultaneous surfaces", async () => {
+    const { result } = renderHook(() => [useSharedClaudeChat(), useSharedClaudeChat()], {
+      wrapper: ClaudeChatRuntimeProvider,
+    })
+    await flush()
+    expect(onClaudeMessageMock).toHaveBeenCalledTimes(1)
+    expect(result.current[0]).toBe(result.current[1])
   })
 })

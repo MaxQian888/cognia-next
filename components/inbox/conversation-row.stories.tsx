@@ -40,7 +40,7 @@ export const Active: Story = { args: { isActive: true } }
 export const Unread: Story = { args: { item: makeItem({ unreadCount: 3 }) } }
 
 export const Pinned: Story = {
-  args: { item: makeItem({ override: override({ pinned: true }) }) },
+  args: { item: makeItem({ session: { ...makeItem().session, pinned: true } }) },
 }
 
 export const PendingStatus: Story = {

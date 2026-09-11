@@ -10,15 +10,15 @@ const mockWsOpen = jest.fn()
 const mockWsSend = jest.fn()
 const mockWsClose = jest.fn()
 jest.mock("@/lib/connectors/tauri/commands", () => ({
-  connectorsWsOpen: (...a: unknown[]) => mockWsOpen(...a),
-  connectorsWsSend: (...a: unknown[]) => mockWsSend(...a),
-  connectorsWsClose: (...a: unknown[]) => mockWsClose(...a),
+  connectorsWsOpen: (...a: Parameters<typeof mockWsOpen>) => mockWsOpen(...a),
+  connectorsWsSend: (...a: Parameters<typeof mockWsSend>) => mockWsSend(...a),
+  connectorsWsClose: (...a: Parameters<typeof mockWsClose>) => mockWsClose(...a),
 }))
 
 // ── mock the at-gate + bus so no Dexie / real bus is touched ───────────────
 const mockGate = jest.fn(async (..._a: unknown[]) => true)
 jest.mock("@/lib/connectors/at-gate", () => ({
-  gateInboundEvent: (...a: unknown[]) => mockGate(...a),
+  gateInboundEvent: (...a: Parameters<typeof mockGate>) => mockGate(...a),
 }))
 const mockDispatch = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/connectors/bus", () => ({
@@ -51,7 +51,7 @@ const mockBuildCard = buildWeComTemplateCard as jest.Mock
 const mockDecryptMedia = jest.fn()
 jest.mock("./media", () => ({
   ...jest.requireActual("./media"),
-  fetchAndDecryptMedia: (...args: unknown[]) => mockDecryptMedia(...args),
+  fetchAndDecryptMedia: (...args: Parameters<typeof mockDecryptMedia>) => mockDecryptMedia(...args),
 }))
 
 const mockListen = listen as jest.Mock
@@ -747,6 +747,32 @@ describe("createWeComAdapter — proactive push", () => {
     await adapter.stop()
   })
 
+  it("uploads inline bytes directly without routing a data URL through the native proxy", async () => {
+    const { adapter, bus } = await startSubscribed(makeEmit())
+    const res = await settleWithAcks(
+      bus,
+      adapter.send({
+        conversationRef: {
+          platform: "wecom",
+          adapterId: "wc1",
+          chatId: "u_alice",
+          chatType: "single",
+        },
+        segments: [{ type: "image", url: "data:image/png;base64,AQID" }],
+        metadata: { idempotencyKey: "inline" },
+      }),
+      (f) => {
+        if (f.cmd === "aibot_upload_media_init") return { body: { upload_id: "inline-up" } }
+        if (f.cmd === "aibot_upload_media_finish") return { body: { media_id: "inline-media" } }
+        return {}
+      }
+    )
+    expect(res.ok).toBe(true)
+    const chunk = sentFrames().find((f) => f.cmd === "aibot_upload_media_chunk")
+    expect(chunk?.body).toMatchObject({ base64_data: "AQID" })
+    await adapter.stop()
+  })
+
   it("keys proactive media frames by msgtype (not a generic `media` object)", async () => {
     const emit = makeEmit()
     const { adapter, bus } = await startSubscribed(emit)
@@ -1033,7 +1059,7 @@ describe("lossless WeCom text chunks", () => {
     )
     expect(result.ok).toBe(true)
     const frames = sentFrames().filter((frame) =>
-      ["aibot_respond_msg", "aibot_send_msg"].includes(frame.cmd)
+      ["aibot_respond_msg", "aibot_send_msg"].includes(frame.cmd ?? "")
     )
     const chunks = frames.map(
       (frame) =>

@@ -58,6 +58,23 @@ export function platformAddressOf(message: {
   return { adapterId, platformMessageId: messageId }
 }
 
+/**
+ * Whether the reaction affordance applies to this row at all.
+ *
+ * A reaction is a signal to other people. In a solo chat with the assistant
+ * there is nobody to receive it: the emoji would land in local metadata that
+ * no one else can ever read, and the mirror would be skipped for want of a
+ * platform address. So the picker is offered only where the row is genuinely
+ * multi-party — it came over an IM connector (`metadata.platformMessage`), or
+ * it already carries reactions somebody put there. That is "the feature does
+ * not exist here", which is a different answer from "it exists and this shell
+ * may not write it" (see `reactionAbilityFor`), and the two must not collapse
+ * into one blank space: the second still renders, disabled, with its reason.
+ */
+export function messageAllowsReactions(message: { metadata?: unknown }): boolean {
+  return platformAddressOf(message) !== null || readReactions(message).length > 0
+}
+
 /** What a shell may do with reactions, from the same route the Inbox writes use. */
 export type ReactionAbility = "write-and-mirror" | "write-only" | "host-only"
 

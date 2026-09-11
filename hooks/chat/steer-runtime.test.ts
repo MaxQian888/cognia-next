@@ -24,6 +24,7 @@ const state = {
   status: "idle",
   sessions: {} as Record<string, SliceLike>,
   openSessionIds: [] as string[],
+  paneIdsBySession: {} as Record<string, string[]>,
   lastSendBySession: {} as Record<
     string,
     { content: string; options: SendOptions; attemptIndex: number }
@@ -103,6 +104,7 @@ beforeEach(() => {
   state.status = "idle"
   state.sessions = {}
   state.openSessionIds = []
+  state.paneIdsBySession = {}
   state.lastSendBySession = {}
   state.setLastSend.mockClear()
   state.clearSteerQueue.mockClear()
@@ -234,6 +236,13 @@ describe("sessionStatusOf", () => {
 })
 
 describe("isSessionOpen", () => {
+  it("keeps an embedded pane reachable without adding a navigation tab", () => {
+    state.paneIdsBySession.embedded = ["pane"]
+    expect(isSessionOpen("embedded")).toBe(true)
+    expect(state.openSessionIds).toEqual([])
+    delete state.paneIdsBySession.embedded
+    expect(isSessionOpen("embedded")).toBe(false)
+  })
   it("is true only for sessions with a visible pane", () => {
     state.openSessionIds = ["s1"]
     expect(isSessionOpen("s1")).toBe(true)

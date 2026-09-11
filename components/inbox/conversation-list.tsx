@@ -4,18 +4,19 @@
  * Conversation list for the Inbox middle pane.
  *
  * Sort order:
- *  1. Pinned (conversationOverrides.pinned === true) — sorted by updatedAt desc.
+ *  1. Pinned (session.pinned === true) — sorted by updatedAt desc.
  *  2. Unread (unreadCount > 0) — sorted by updatedAt desc.
  *  3. Read — sorted by updatedAt desc.
  *  4. Archived — hidden by default; toggle at bottom to show.
  *
  * Each session is enriched (via the `[sessionId+createdAt]` index) with the
- * latest-message preview + timestamp and a real unread count (messages newer
- * than the last-read pointer). Pending-draft counts come from the shared
+ * latest-message preview + timestamp and the shared session unread count. Pending-draft counts come from the shared
  * `usePendingDraftCounts` subscriber so rows can badge without each opening
  * their own query. Rows render with a reduced-motion-aware stagger.
  */
 
+import { toast } from "sonner"
+import { useSessions } from "@/hooks/chat/use-sessions"
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
@@ -46,6 +47,7 @@ interface ConversationListProps {
   adapterId?: string
   platformKind?: string
   activeConversationKey?: string
+  activeSessionId?: string
 }
 
 /**
@@ -65,7 +67,7 @@ function buildFilterPredicate(
   const wantSnoozed = chips.has("snoozed")
   return (item) => {
     if (wantUnread && item.unreadCount <= 0) return false
-    if (wantPinned && !item.override?.pinned) return false
+    if (wantPinned && !item.session.pinned) return false
     if (wantPending && item.override?.status !== "pending") return false
     if (wantSnoozed && item.override?.status !== "snoozed") return false
     if (!needle) return true
@@ -82,8 +84,10 @@ export function ConversationList({
   adapterId,
   platformKind,
   activeConversationKey,
+  activeSessionId,
 }: ConversationListProps) {
   const router = useRouter()
+  const { bulkSetPinned, archive, unarchive } = useSessions({ enabled: false })
   const t = useTranslations("inbox.conversationList")
   const reduce = useReducedMotion()
   // Workspace isolation (Dexie v86): only show conversations whose session
@@ -118,22 +122,19 @@ export function ConversationList({
     const overrides = await db.conversationOverrides.toArray()
     const overrideMap = new Map(overrides.map((o) => [o.conversationKey, o]))
 
+    const sessionStates = await db.sessionState.toArray()
+    const unreadById = new Map(sessionStates.map((state) => [state.sessionId, state.unreadCount]))
     const items: ConversationRowItem[] = []
     for (const session of sessions) {
       const ck = session.platformBinding!.conversationKey
       const override = overrideMap.get(ck)
-      const lastReadAt = override?.lastReadAt ?? 0
 
       const latest = await db.messages
         .where("[sessionId+createdAt]")
         .between([session.id, Dexie.minKey], [session.id, Dexie.maxKey])
         .last()
 
-      // Messages strictly newer than the last-read pointer (lowerOpen=true).
-      const unreadCount = await db.messages
-        .where("[sessionId+createdAt]")
-        .between([session.id, lastReadAt], [session.id, Dexie.maxKey], false, true)
-        .count()
+      const unreadCount = unreadById.get(session.id) ?? 0
 
       items.push({
         session,
@@ -159,9 +160,9 @@ export function ConversationList({
     for (const item of filtered) {
       // Hidden buckets first: archived, then resolved (a resolved conversation
       // drops out of the active list like an archived one until revealed).
-      if (item.override?.archived) archived.push(item)
+      if (item.session.archivedAt != null) archived.push(item)
       else if (item.override?.status === "resolved") resolved.push(item)
-      else if (item.override?.pinned) pinned.push(item)
+      else if (item.session.pinned) pinned.push(item)
       else if (item.unreadCount > 0) unread.push(item)
       else read.push(item)
     }
@@ -272,8 +273,8 @@ export function ConversationList({
         : { primary: t("empty"), secondary: null, reset: null }
       : null
 
-  const handleSelect = (ck: string) => {
-    router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)
+  const handleSelect = (ck: string, sessionId: string) => {
+    router.push(`/inbox/c?key=${encodeURIComponent(ck)}&sessionId=${encodeURIComponent(sessionId)}`)
   }
 
   return (
@@ -312,8 +313,22 @@ export function ConversationList({
                   <ConversationRow
                     item={item}
                     draftCount={draftCounts.get(ck) ?? 0}
-                    isActive={ck === activeConversationKey}
+                    isActive={
+                      activeSessionId
+                        ? item.session.id === activeSessionId
+                        : ck === activeConversationKey
+                    }
                     onSelect={handleSelect}
+                    onTogglePinned={(session) => {
+                      void bulkSetPinned([session.id], !session.pinned).catch(() =>
+                        toast.error(t("operationFailed"))
+                      )
+                    }}
+                    onToggleArchived={(session) => {
+                      void (
+                        session.archivedAt != null ? unarchive(session.id) : archive(session.id)
+                      ).catch(() => toast.error(t("operationFailed")))
+                    }}
                   />
                 </motion.li>
               )

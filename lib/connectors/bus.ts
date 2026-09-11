@@ -2673,7 +2673,7 @@ export class ConnectorBus {
         const { handleNotificationActionCallback } =
           await import("@/lib/notifications/im-callback-handler")
         await handleNotificationActionCallback({
-          binding: resolvedBinding,
+          binding: { bindingPayload: resolvedBinding.payload },
           adapterId: event.adapterId,
           conversationKey: resolvedConversationKey ?? undefined,
         })

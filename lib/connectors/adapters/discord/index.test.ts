@@ -21,7 +21,8 @@ jest.mock("@/lib/connectors/bus", () => {
 const mockResolveCallbackBinding = jest.fn()
 jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
   ...jest.requireActual("@/lib/connectors/adapters/_shared/a2ui-mapper"),
-  resolveCallbackBinding: (...args: unknown[]) => mockResolveCallbackBinding(...args),
+  resolveCallbackBinding: (...args: Parameters<typeof mockResolveCallbackBinding>) =>
+    mockResolveCallbackBinding(...args),
   recordCallbackBinding: jest.fn().mockResolvedValue(undefined),
 }))
 
@@ -398,6 +399,7 @@ describe("createDiscordAdapter", () => {
       })
     ).toMatchObject({ ok: true })
     const reaction = await adapter.addReaction!(id, "👍")
+    if (!reaction?.reactionId) throw new Error("Expected reaction receipt")
     await adapter.removeReaction!(id, reaction.reactionId)
     await adapter.pinMessage!("discord:dc-1:wrong-channel", id)
     await adapter.unpinMessage!(id)

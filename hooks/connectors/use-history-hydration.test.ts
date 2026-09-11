@@ -19,10 +19,12 @@ jest.mock("@/lib/connectors/runtime", () => ({
   insertInboundMessage: (...args: unknown[]) => mockInsert(...args),
 }))
 
+const mockGetSession = jest.fn()
 const mockToArray = jest.fn()
 const mockGetConversationState = jest.fn()
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
+    sessions: { get: (...args: unknown[]) => mockGetSession(...args) },
     messages: { where: () => ({ equals: () => ({ toArray: () => mockToArray() }) }) },
     connectorConversationStates: { get: (...args: unknown[]) => mockGetConversationState(...args) },
   }),
@@ -49,7 +51,10 @@ function makeEvent(messageId: string, timestamp: number) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockIsTauri.mockReturnValue(true)
-  mockFindSession.mockResolvedValue({ id: "sess-1" })
+  mockFindSession.mockResolvedValue({
+    id: "sess-1",
+    platformBinding: { conversationKey: "k", adapterId: "adp" },
+  })
   mockToArray.mockResolvedValue([])
   mockGetConversationState.mockResolvedValue(undefined)
   mockInsert.mockResolvedValue(undefined)
@@ -249,4 +254,36 @@ describe("useHistoryHydration", () => {
     })
     expect(result.current.error).toBe("failed")
   })
+})
+
+it("hydrates the explicitly opened older session instead of the latest binding", async () => {
+  mockGetSession.mockResolvedValue({
+    id: "old",
+    platformBinding: { conversationKey: "k", adapterId: "adp" },
+  })
+  mockListAdapters.mockReturnValue([{ id: "adp", fetchHistory: () => gen([makeEvent("m", 1)]) }])
+  const { result } = renderHook(() => useHistoryHydration("k", "adp", "old"))
+  await act(async () => {
+    await result.current.hydrate()
+  })
+  expect(mockGetSession).toHaveBeenCalledWith("old")
+  expect(mockFindSession).not.toHaveBeenCalled()
+  expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({ messageId: "m" }), "old", 1)
+})
+
+it.each([
+  undefined,
+  { id: "old", platformBinding: { conversationKey: "other", adapterId: "adp" } },
+  { id: "old", platformBinding: { conversationKey: "k", adapterId: "other" } },
+])("rejects missing or foreign exact session targets without falling back", async (session) => {
+  mockGetSession.mockResolvedValue(session)
+  const fetchHistory = jest.fn(() => gen([makeEvent("m", 1)]))
+  mockListAdapters.mockReturnValue([{ id: "adp", fetchHistory }])
+  const { result } = renderHook(() => useHistoryHydration("k", "adp", "old"))
+  await act(async () => {
+    await result.current.hydrate()
+  })
+  expect(mockFindSession).not.toHaveBeenCalled()
+  expect(fetchHistory).not.toHaveBeenCalled()
+  expect(mockInsert).not.toHaveBeenCalled()
 })

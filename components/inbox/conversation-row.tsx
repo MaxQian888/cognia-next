@@ -19,7 +19,19 @@
  */
 
 import { useFormatter, useNow, useTranslations } from "next-intl"
-import { PinIcon } from "lucide-react"
+import {
+  PinIcon,
+  PinOffIcon,
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  MoreHorizontalIcon,
+} from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu"
 import type { ConversationStatus } from "@/lib/db/conversation-overrides"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -49,7 +61,9 @@ export interface ConversationRowProps {
   /** Pending-draft count for this conversation (badge); 0 hides it. */
   draftCount?: number
   isActive: boolean
-  onSelect: (conversationKey: string) => void
+  onSelect: (conversationKey: string, sessionId: string) => void
+  onTogglePinned?: (session: ChatSession) => void
+  onToggleArchived?: (session: ChatSession) => void
 }
 
 /** Dot color for the non-"open" lifecycle statuses surfaced in the row. */
@@ -64,8 +78,11 @@ export function ConversationRow({
   draftCount = 0,
   isActive,
   onSelect,
+  onTogglePinned,
+  onToggleArchived,
 }: ConversationRowProps) {
   const t = useTranslations("inbox.conversationRow")
+  const tSession = useTranslations("desktop.sessionRow")
   const tStatus = useTranslations("inbox.lifecycle.status")
   const format = useFormatter()
   // Anchor relativeTime to a stable render-time "now" so next-intl doesn't fall
@@ -101,7 +118,7 @@ export function ConversationRow({
         type="button"
         variant="ghost"
         className="h-auto min-w-0 flex-1 justify-start gap-2.5 rounded-none p-0 text-left hover:bg-transparent"
-        onClick={() => onSelect(ck)}
+        onClick={() => onSelect(ck, session.id)}
         aria-current={isActive ? "true" : undefined}
         aria-label={t("openConversation", { name })}
         data-testid={`conversation-row-button-${ck}`}
@@ -127,7 +144,7 @@ export function ConversationRow({
          * title to nothing. */}
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center gap-1.5">
-            {override?.pinned && <PinIcon className="size-3 shrink-0 text-muted-foreground" />}
+            {session.pinned && <PinIcon className="size-3 shrink-0 text-muted-foreground" />}
             {override?.status && override.status !== "open" && (
               <span
                 className={cn("size-2 shrink-0 rounded-full", ROW_STATUS_DOT[override.status])}
@@ -185,6 +202,43 @@ export function ConversationRow({
         </div>
       </Button>
 
+      {(onTogglePinned || onToggleArchived) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 shrink-0"
+              aria-label={tSession("actionsMenu")}
+            >
+              <MoreHorizontalIcon className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {onTogglePinned && (
+              <DropdownMenuItem onSelect={() => onTogglePinned(session)}>
+                {session.pinned ? (
+                  <PinOffIcon className="size-4" />
+                ) : (
+                  <PinIcon className="size-4" />
+                )}
+                {tSession(session.pinned ? "unpin" : "pin")}
+              </DropdownMenuItem>
+            )}
+            {onToggleArchived && (
+              <DropdownMenuItem onSelect={() => onToggleArchived(session)}>
+                {session.archivedAt != null ? (
+                  <ArchiveRestoreIcon className="size-4" />
+                ) : (
+                  <ArchiveIcon className="size-4" />
+                )}
+                {tSession(session.archivedAt != null ? "unarchive" : "archive")}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
       {/* Plugin contributions: per-row actions (archive, mute, transfer to
        * workflow, …). Hidden when no plugin contributes.
        *
@@ -200,8 +254,8 @@ export function ConversationRow({
           adapterId,
           platform,
           sessionId: session.id,
-          pinned: !!override?.pinned,
-          archived: !!override?.archived,
+          pinned: !!session.pinned,
+          archived: session.archivedAt != null,
         }}
       />
     </div>

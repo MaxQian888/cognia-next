@@ -79,10 +79,13 @@ export function sessionStatusOf(sessionId: string): ChatStatus {
   return s.sessions[sessionId]?.status ?? (sessionId === s.activeSessionId ? s.status : "idle")
 }
 
-/** A session is "open" when it has a visible pane (tab / split). Its events
- * stream into the store slice; closed (background) sessions only touch Dexie. */
+/** Navigation tabs and embedded panes both receive live state. Pane lifetimes
+ * do not change the navigation tab strip or the focused session. */
 export function isSessionOpen(sessionId: string): boolean {
-  return useChatStore.getState().openSessionIds.includes(sessionId)
+  const state = useChatStore.getState()
+  return (
+    state.openSessionIds.includes(sessionId) || Boolean(state.paneIdsBySession?.[sessionId]?.length)
+  )
 }
 
 /**

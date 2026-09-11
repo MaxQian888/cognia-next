@@ -15,6 +15,7 @@ jest.mock("@/lib/claude/adapter", () => {
   }
 })
 
+import { registerCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { handleEvent, isArtifactAutoCreateEnabled, isTeamSubSession } from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
@@ -26,6 +27,26 @@ import {
 } from "@/lib/claude/project-history-evidence-registry"
 
 describe("Claude chat event seam", () => {
+  it("leaves capture-owned response events to their registered responder", async () => {
+    const release = registerCaptureResponder("captured", "turn", true)
+    try {
+      // No coalescer is needed: the response must be left to its owner before
+      // any transcript or approval side effect starts.
+      await expect(
+        handleEvent(
+          { type: "permission_request", sessionId: "captured", turnId: "turn" } as never,
+          { current: null },
+          { current: [] },
+          { current: new Map() },
+          { current: null },
+          undefined as never
+        )
+      ).resolves.toBeUndefined()
+    } finally {
+      release()
+    }
+  })
+
   it("exports event routing and filters team sub-sessions", () => {
     expect(typeof handleEvent).toBe("function")
     expect(isTeamSubSession("team::char::member")).toBe(true)

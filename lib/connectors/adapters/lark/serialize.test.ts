@@ -46,7 +46,9 @@ describe("serializeSend", () => {
       const first = serializeSend(req).payload.uuid as string
       expect(first.length).toBeLessThanOrEqual(50)
       expect(serializeSend(req).payload.uuid).toBe(first)
-      expect((await serializeOutboundAsync(req, {})).payload.uuid).toBe(first)
+      expect((await serializeOutboundAsync(req, req.conversationRef.adapterId)).payload.uuid).toBe(
+        first
+      )
       const changed = { ...req, metadata: { idempotencyKey: req.metadata.idempotencyKey + "b" } }
       expect(serializeSend(changed).payload.uuid).not.toBe(first)
     }

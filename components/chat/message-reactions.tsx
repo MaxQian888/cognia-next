@@ -14,6 +14,11 @@
  * undone by the next sync, so the controls render disabled with the reason,
  * rather than vanishing. Hiding a control collapses three different answers
  * into one blank space.
+ *
+ * The one case that does vanish is the one where the feature never applied:
+ * a solo chat with the assistant has nobody to receive a reaction, so the add
+ * button is absent rather than dead (`messageAllowsReactions`). Pills follow
+ * the row itself — where reactions exist, they are shown.
  */
 
 import { useCallback, useState } from "react"
@@ -28,6 +33,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   MESSAGE_REACTION_EMOJIS,
+  messageAllowsReactions,
   reactionAbilityFor,
   readReactions,
   toggleMessageReaction,
@@ -118,7 +124,7 @@ export function MessageReactionAdd({ message, sessionId, className }: MessageRea
   )
   const [open, setOpen] = useState(false)
   const reactions = readReactions(message)
-  if (!sessionId) return null
+  if (!sessionId || !messageAllowsReactions(message)) return null
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>

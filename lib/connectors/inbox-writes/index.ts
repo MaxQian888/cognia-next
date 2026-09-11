@@ -31,6 +31,7 @@ import {
   sendManualReplyLocally,
   type ApproveDraftLocallyOptions,
   type ManualReplyResult,
+  type ManualReplyMessageMetadata,
 } from "./local"
 import {
   approveDraftRemotely,
@@ -85,6 +86,7 @@ export interface SendManualReplyInput {
   segments?: MessageSegment[]
   replyTo?: OutboundRequest["replyTo"]
   threadId?: string
+  messageMetadata?: ManualReplyMessageMetadata
   /** Override the client-minted idempotency key (tests / callers with their own key). */
   idempotencyKey?: string
   /** Override the client-minted local message id. */
@@ -125,6 +127,7 @@ export async function sendManualReply(
     clientMessageId,
     replyTo: input.replyTo,
     threadId: input.threadId,
+    messageMetadata: input.messageMetadata,
   }
   if (route === "local") {
     const result = await sendManualReplyLocally(shared)
@@ -244,5 +247,6 @@ export {
   draftApprovalIdempotencyKey,
   type ManualReplyInput,
   type ManualReplyResult,
+  type ManualReplyMessageMetadata,
   type ApproveDraftResult,
 } from "./local"

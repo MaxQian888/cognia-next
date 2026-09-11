@@ -26,6 +26,7 @@ import type { CapabilityUnavailable } from "@/lib/connectors/capability-availabi
 export interface HistoryLoadEarlierProps {
   conversationKey: string
   adapterId: string
+  sessionId?: string
   /** Why this bot cannot fetch history, when it cannot. */
   unavailable?: CapabilityUnavailable
 }
@@ -33,12 +34,14 @@ export interface HistoryLoadEarlierProps {
 export function HistoryLoadEarlier({
   conversationKey,
   adapterId,
+  sessionId,
   unavailable,
 }: HistoryLoadEarlierProps) {
   const t = useTranslations("inbox.loadEarlier")
   const { hydrate, hydrating, canHydrate, lastCount, error } = useHistoryHydration(
     conversationKey,
-    adapterId
+    adapterId,
+    sessionId
   )
 
   const handleClick = async () => {

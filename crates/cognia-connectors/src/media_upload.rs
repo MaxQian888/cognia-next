@@ -17,7 +17,7 @@ use cognia_net::proxy_config;
 /// source (remote URL or local file) is streamed/checked against this so a
 /// multi-GB asset can't OOM the process on a memory-constrained device. 100 MiB
 /// comfortably covers images / short clips while staying bounded.
-const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
+pub(crate) const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_FORM_FIELDS_BYTES: usize = 64 * 1024;
 
@@ -30,12 +30,49 @@ fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
         .map_err(|e| format!("reqwest build failed: {e}"))
 }
 
+/// Decode inline composer attachments without handing a data URL to HTTP or
+/// filesystem APIs. Bound the encoded payload before allocating decoded bytes.
+pub(crate) fn inline_source_bytes(
+    source: &str,
+    max_bytes: usize,
+) -> Option<Result<bytes::Bytes, String>> {
+    if !source.starts_with("data:") {
+        return None;
+    }
+    Some((|| {
+        use base64::Engine as _;
+        let (header, encoded) = source
+            .split_once(',')
+            .ok_or_else(|| "invalid inline media data URL".to_string())?;
+        if !header.ends_with(";base64") {
+            return Err("inline media must be base64 encoded".into());
+        }
+        if encoded.len() > max_bytes.div_ceil(3) * 4 {
+            return Err(format!(
+                "inline media exceeds the {max_bytes}-byte upload cap"
+            ));
+        }
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|_| "invalid inline media base64".to_string())?;
+        if decoded.len() > max_bytes {
+            return Err(format!(
+                "inline media exceeds the {max_bytes}-byte upload cap"
+            ));
+        }
+        Ok(bytes::Bytes::from(decoded))
+    })())
+}
+
 async fn read_source_bytes(
     req: &ConnectorMediaUploadRequest,
     max_bytes: usize,
 ) -> Result<bytes::Bytes, String> {
     match (&req.source_url, &req.local_path) {
         (Some(source_url), None) => {
+            if let Some(bytes) = inline_source_bytes(source_url, max_bytes) {
+                return bytes;
+            }
             let client = build_client(source_url)?;
             let mut resp = client
                 .get(source_url)
@@ -449,6 +486,63 @@ mod tests {
 
         assert_eq!(content_uri, "mxc://matrix.org/up");
         mock_server.verify().await;
+    }
+
+    #[test]
+    fn inline_media_decoding_is_bounded_and_rejects_invalid_data() {
+        assert!(inline_source_bytes("https://example.com/image", 3).is_none());
+        assert_eq!(
+            inline_source_bytes("data:application/octet-stream;base64,AQID", 3)
+                .unwrap()
+                .unwrap()
+                .as_ref(),
+            &[1, 2, 3]
+        );
+        for source in [
+            "data:broken",
+            "data:text/plain,hi",
+            "data:text/plain;base64,!",
+            "data:text/plain;base64,A",
+        ] {
+            assert!(inline_source_bytes(source, 3).unwrap().is_err(), "{source}");
+        }
+        assert!(inline_source_bytes("data:text/plain;base64,AQID", 2)
+            .unwrap()
+            .unwrap_err()
+            .contains("upload cap"));
+        assert!(inline_source_bytes("data:text/plain;base64,AQIDBA==", 2)
+            .unwrap()
+            .unwrap_err()
+            .contains("upload cap"));
+    }
+
+    #[tokio::test]
+    async fn upload_media_posts_inline_original_bytes() {
+        proxy_config::apply_current(proxy_config::ProxyConfig::default()).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .and(body_bytes(vec![1u8, 2, 3]))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"content_uri": "mxc://matrix.org/inline"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let result = upload_media(ConnectorMediaUploadRequest {
+            upload_url: format!("{}/upload", server.uri()),
+            headers: None,
+            source_url: Some("data:image/png;base64,AQID".into()),
+            local_path: None,
+            content_type: Some("image/png".into()),
+            multipart: None,
+            response_mode: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(result, "mxc://matrix.org/inline");
+        server.verify().await;
     }
 
     #[tokio::test]

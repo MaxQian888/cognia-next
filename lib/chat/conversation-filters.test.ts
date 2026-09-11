@@ -62,6 +62,21 @@ describe("resolveConversationSortBy", () => {
 })
 
 describe("resolveConversationFilters", () => {
+  it("filters IM origin independently of team membership and retains it in saved filters", () => {
+    const filters = resolveConversationFilters({ im: true, kind: "team" })
+    const bound = session({
+      kind: "team",
+      platformBinding: { platform: "slack" } as ChatSession["platformBinding"],
+    })
+    expect(matchesConversationFilters(bound, filters, undefined)).toBe(true)
+    expect(matchesConversationFilters(session({ kind: "team" }), filters, undefined)).toBe(false)
+    expect(
+      matchesConversationFilters(session({ ...bound, kind: "direct" }), filters, undefined)
+    ).toBe(false)
+    expect(countActiveConversationFilters(filters)).toBe(2)
+    expect(conversationFiltersEqual(filters, { im: true, kind: "team" })).toBe(true)
+    expect(conversationFiltersEqual(filters, { kind: "team" })).toBe(false)
+  })
   it("treats an absent blob as unfiltered, reusing one identity", () => {
     expect(resolveConversationFilters(undefined)).toBe(EMPTY_CONVERSATION_FILTERS)
     expect(resolveConversationFilters(null)).toBe(EMPTY_CONVERSATION_FILTERS)

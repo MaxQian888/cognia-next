@@ -52,7 +52,7 @@ jest.mock("@/lib/db/chat-drafts", () => ({
   setDraftDebounced: jest.fn(),
 }))
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
@@ -63,6 +63,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { buildSendContent } from "@/lib/chat/attachments/dispatch"
 import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
 import { buildLinkContextBlocks } from "@/lib/chat/link-context"
+import { clearDraft } from "@/lib/db/chat-drafts"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 const buildSendContentMock = buildSendContent as jest.Mock
@@ -159,6 +160,36 @@ beforeEach(() => {
 })
 
 describe("Composer — attachment send contract", () => {
+  it("keeps the next draft and its attachments when an earlier send completes", async () => {
+    buildSendContentMock.mockResolvedValue({ content: "hi", rejected: [], tokens: 0, manifest: [] })
+    let complete!: () => void
+    const onSend = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve
+        })
+    )
+    const ta = renderComposer(onSend)
+    await stageImage("submitted.png")
+    await typeAndEnter(ta, "hi")
+    await waitFor(() => expect(onSend).toHaveBeenCalled())
+    fireEvent.change(ta, { target: { value: "Next draft" } })
+    await stageImage("next.png")
+    jest.mocked(clearDraft).mockClear()
+
+    await act(async () => complete())
+
+    expect(ta.value).toBe("Next draft")
+    expect(screen.getByAltText("next.png")).toBeInTheDocument()
+    expect(clearDraft).not.toHaveBeenCalled()
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(buildSendContentMock).toHaveBeenCalledTimes(2))
+    expect(buildSendContentMock.mock.calls[1][1]).toEqual([
+      expect.objectContaining({ filename: "next.png" }),
+    ])
+    await act(async () => complete())
+  })
+
   it("appends readable context for recognized links while keeping the URL in the prompt", async () => {
     buildSendContentMock.mockResolvedValue({
       content: "Read https://example.com/docs",

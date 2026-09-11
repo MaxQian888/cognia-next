@@ -32,6 +32,47 @@ interface PendingEntry extends PendingApproval {
   sessionId: string
 }
 
+/** Captures own response commands; transcript observers remain independent. */
+interface CaptureResponder {
+  turnId: string
+  permissionRequests: boolean
+}
+const captureResponders = new Map<string, Set<CaptureResponder>>()
+
+/** Register before subscribing/sending so the UI cannot answer a capture-owned ask. */
+export function registerCaptureResponder(
+  sessionId: string,
+  turnId: string,
+  permissionRequests: boolean
+): () => void {
+  const owner = { turnId, permissionRequests }
+  const owners = captureResponders.get(sessionId) ?? new Set<CaptureResponder>()
+  owners.add(owner)
+  captureResponders.set(sessionId, owners)
+  return () => {
+    owners.delete(owner)
+    if (owners.size === 0 && captureResponders.get(sessionId) === owners) {
+      captureResponders.delete(sessionId)
+    }
+  }
+}
+
+export function hasCaptureResponder(event: {
+  type: string
+  sessionId?: string
+  turnId?: string
+}): boolean {
+  if (event.type !== "permission_request" && event.type !== "tool_result_review") return false
+  if (!event.sessionId) return false
+  const owners = captureResponders.get(event.sessionId)
+  if (!owners) return false
+  for (const owner of owners) {
+    if (event.turnId !== undefined && owner.turnId !== event.turnId) continue
+    if (event.type === "tool_result_review" || owner.permissionRequests) return true
+  }
+  return false
+}
+
 const pending = new Map<string, PendingEntry>()
 // sessionId → set of toolNames the user chose to "allow for this session".
 const sessionBypass = new Map<string, Set<string>>()
@@ -199,6 +240,7 @@ export function __resetApprovalRegistryForTesting(): void {
     if (entry.timer) clearTimeout(entry.timer)
   }
   pending.clear()
+  captureResponders.clear()
   sessionBypass.clear()
   listeners.clear()
 }

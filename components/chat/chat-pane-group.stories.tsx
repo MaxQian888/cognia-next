@@ -64,7 +64,6 @@ const meta = {
     steerFlush: fn(),
     regenerate: fn(),
     editResend: fn(),
-    respondToApproval: fn(),
     onCreate: fn(),
     onUseSample: fn(),
     onOpenSettings: fn(),

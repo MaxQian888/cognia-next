@@ -27,6 +27,15 @@ describe("resolveMessageDisplayOptions", () => {
     ).toBe(resolveMessageDisplayOptions({ preset: "focused" }).agentFlowMode)
   })
 
+  it("hides the row action bar until hover in both reading presets", () => {
+    // The bar is chrome, not content: always-on it puts a permanent strip of
+    // icon buttons under every message. `inspector` is the deliberate opt-out —
+    // that preset's whole point is showing everything at once.
+    expect(resolveMessageDisplayOptions({ preset: "focused" }).actions).toBe("hover")
+    expect(resolveMessageDisplayOptions({ preset: "balanced" }).actions).toBe("hover")
+    expect(resolveMessageDisplayOptions({ preset: "inspector" }).actions).toBe("all")
+  })
+
   it("applies preset defaults before global and session overrides", () => {
     expect(
       resolveMessageDisplayOptions(

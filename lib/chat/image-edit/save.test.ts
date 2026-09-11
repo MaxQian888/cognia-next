@@ -9,12 +9,17 @@ const ingested = {
   byteSize: 64,
 }
 
-function deps(overrides: Record<string, unknown> = {}) {
+type MockDeps = jest.Mocked<Required<import("./save").SaveImageEditDeps>>
+
+function deps(overrides: Partial<MockDeps> = {}): MockDeps {
   return {
-    ingest: jest.fn(async () => ingested),
-    append: jest.fn(async () => ({ appended: true, parts: [] })),
+    ingest: jest.fn(async (..._args: Parameters<MockDeps["ingest"]>) => ingested),
+    append: jest.fn(async (..._args: Parameters<MockDeps["append"]>) => ({
+      appended: true,
+      parts: [],
+    })),
     ...overrides,
-  } as never
+  }
 }
 
 const base = {
@@ -88,7 +93,12 @@ describe("saveImageEditVersion", () => {
   })
 
   it("reuses the caller's version id, which is how a retry stays one version", async () => {
-    const d = deps({ append: jest.fn(async () => ({ appended: false, parts: [] })) })
+    const d = deps({
+      append: jest.fn(async (..._args: Parameters<MockDeps["append"]>) => ({
+        appended: false,
+        parts: [],
+      })),
+    })
     const result = await saveImageEditVersion({ ...base, versionId: "iev_same" }, d)
     expect(result.version.versionId).toBe("iev_same")
     expect(result.appended).toBe(false)
@@ -112,7 +122,7 @@ describe("saveImageEditVersion", () => {
 
   it("propagates an append failure instead of reporting a save", async () => {
     const d = deps({
-      append: jest.fn(async () => {
+      append: jest.fn(async (..._args: Parameters<MockDeps["append"]>) => {
         throw new Error("lineage-missing")
       }),
     })
@@ -121,7 +131,7 @@ describe("saveImageEditVersion", () => {
 
   it("never appends when ingestion fails", async () => {
     const d = deps({
-      ingest: jest.fn(async () => {
+      ingest: jest.fn(async (..._args: Parameters<MockDeps["ingest"]>) => {
         throw new Error("too large")
       }),
     })

@@ -467,7 +467,21 @@ it("recovers a topic only for the exact persisted run-card receipt", async () =>
   ).toBeUndefined()
 })
 it("anchors a topic denial to the originating message", async () => {
-  const enqueue = jest.fn(async () => undefined)
+  const enqueue = jest.fn<
+    ReturnType<typeof import("@/lib/connectors/delivery-gateway").enqueueGoverned>,
+    Parameters<typeof import("@/lib/connectors/delivery-gateway").enqueueGoverned>
+  >(async (input) => ({
+    id: "job-1",
+    adapterId: input.adapterId,
+    conversationKey: input.conversationKey,
+    request: input.request,
+    status: "pending",
+    attempts: 0,
+    createdAt: 0,
+    nextAttemptAt: 0,
+    idempotencyKey: "denial-1",
+    source: input.source ?? "ai-run",
+  }))
   await notifyCallbackDenied(
     callbackEvent({ originatingMessageId: "om-card" }),
     "lark:lk-1:oc-chat:om-root",

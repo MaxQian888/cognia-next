@@ -53,36 +53,41 @@ export async function sendManualReplyRemotely(
   input: ManualReplyInput & { clientMessageId: string },
   options: RemoteWriteOptions = {}
 ): Promise<RemoteManualReplyResult> {
-  const queueRow = await enqueue({
-    command: INBOX_WRITE_COMMANDS.send,
-    idempotencyKey: input.idempotencyKey,
-    label: options.label,
-    payload: {
-      adapterId: input.adapterId,
-      conversationKey: input.conversationKey,
-      sessionId: input.sessionId,
-      clientMessageId: input.clientMessageId,
-      request: {
-        conversationRef: input.conversationRef,
-        segments: input.segments,
-        metadata: { idempotencyKey: input.idempotencyKey },
-        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-        ...(input.threadId ? { threadId: input.threadId } : {}),
+  const db = getDb()
+  const queueRow = await db.transaction("rw", db.mobileOutboundQueue, db.messages, async () => {
+    const queued = await enqueue({
+      command: INBOX_WRITE_COMMANDS.send,
+      idempotencyKey: input.idempotencyKey,
+      label: options.label,
+      payload: {
+        adapterId: input.adapterId,
+        conversationKey: input.conversationKey,
+        sessionId: input.sessionId,
+        clientMessageId: input.clientMessageId,
+        ...(input.messageMetadata ? { messageMetadata: input.messageMetadata } : {}),
+        request: {
+          conversationRef: input.conversationRef,
+          segments: input.segments,
+          metadata: { idempotencyKey: input.idempotencyKey },
+          ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+        },
       },
-    },
+    })
+    const parts = segmentsToMessageParts(input.segments)
+    const row: StoredMessage = {
+      id: input.clientMessageId,
+      sessionId: input.sessionId,
+      role: "user",
+      parts: parts.length > 0 ? parts : [{ type: "text", text: "" }],
+      // The host stamps `outboundJobId` on its authoritative copy; until that
+      // syncs down the mirror only carries the relay key so the pill can wait.
+      metadata: { ...input.messageMetadata, relayIdempotencyKey: input.idempotencyKey },
+      createdAt: Date.now(),
+    }
+    await db.messages.put(row)
+    return queued
   })
-  const parts = segmentsToMessageParts(input.segments)
-  const row: StoredMessage = {
-    id: input.clientMessageId,
-    sessionId: input.sessionId,
-    role: "user",
-    parts: parts.length > 0 ? parts : [{ type: "text", text: "" }],
-    // The host stamps `outboundJobId` on its authoritative copy; until that
-    // syncs down the mirror only carries the relay key so the pill can wait.
-    metadata: { relayIdempotencyKey: input.idempotencyKey },
-    createdAt: Date.now(),
-  }
-  await getDb().messages.put(row)
   markSessionDirty(input.sessionId)
   invalidatePersistSnapshot(input.sessionId)
   return { queueRow, messageId: input.clientMessageId }

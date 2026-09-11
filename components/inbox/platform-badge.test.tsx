@@ -38,7 +38,7 @@ describe("PlatformBadge", () => {
 
   it("renders title attribute matching the platform kind", () => {
     render(<PlatformBadge platform="lark" />)
-    expect(screen.getByTitle("lark")).toBeInTheDocument()
+    expect(screen.getByTitle("Lark")).toBeInTheDocument()
   })
 
   it("uses the shadcn Badge primitive (ghost variant)", () => {
@@ -73,7 +73,7 @@ describe("PlatformBadge", () => {
       const { unmount } = render(<PlatformBadge platform={kind} />)
       const badge = screen.getByTestId(`platform-badge-${kind}`)
       expect(badge).toHaveTextContent(ABBR[kind]!)
-      expect(badge).toHaveAttribute("title", kind)
+      expect(badge).toHaveAttribute("aria-label", expect.any(String))
       expect(badge).not.toHaveAttribute("data-planned")
       unmount()
     }
@@ -125,4 +125,12 @@ describe("PlatformBadge", () => {
       unmount()
     })
   })
+})
+
+it("gives icon-only badges a platform name and renders full names on request", () => {
+  const { rerender } = render(<PlatformBadge platform="slack" iconOnly />)
+  expect(screen.getByRole("img", { name: "Slack" })).toBeInTheDocument()
+  expect(screen.getByTestId("platform-badge-slack")).not.toHaveTextContent("SL")
+  rerender(<PlatformBadge platform="slack" fullName />)
+  expect(screen.getByText("Slack")).toBeInTheDocument()
 })

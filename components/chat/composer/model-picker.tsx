@@ -208,6 +208,9 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       model: modelId,
       providerOverride: providerId,
     })
+    // Internal model choices on an external lane are bound through the task
+    // gateway on the next send, not sent to the built-in SDK's live session.
+    if (agentModels.agentId) return
     // Host truth, not webview kind: a paired phone or browser reaches the
     // host's sidecar over the companion transport (`claude_session_control` is
     // an `execution`-target command), and the headless brain owns one outright.

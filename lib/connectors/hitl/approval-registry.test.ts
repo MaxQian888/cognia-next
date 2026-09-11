@@ -4,6 +4,8 @@
 
 import {
   awaitApproval,
+  registerCaptureResponder,
+  hasCaptureResponder,
   resolveApproval,
   hasSessionBypass,
   grantSessionBypass,
@@ -197,5 +199,41 @@ describe("approval ownership", () => {
     owner.abort()
     await expect(result).resolves.toEqual({ decision: "allow" })
     expect(expired).not.toHaveBeenCalled()
+  })
+})
+
+describe("capture response ownership", () => {
+  const request = { type: "permission_request", sessionId: "s", turnId: "turn" }
+
+  it("claims only response events belonging to its session and turn", () => {
+    const release = registerCaptureResponder("s", "turn", true)
+    expect(hasCaptureResponder(request)).toBe(true)
+    expect(hasCaptureResponder({ ...request, turnId: undefined })).toBe(true)
+    expect(hasCaptureResponder({ ...request, type: "tool_result_review" })).toBe(true)
+    expect(hasCaptureResponder({ ...request, type: "event" })).toBe(false)
+    expect(hasCaptureResponder({ ...request, turnId: "previous" })).toBe(false)
+    expect(hasCaptureResponder({ ...request, sessionId: "another" })).toBe(false)
+    expect(hasCaptureResponder({ type: "permission_request" })).toBe(false)
+    release()
+    expect(hasCaptureResponder(request)).toBe(false)
+  })
+
+  it("leaves manual permissions with the UI when capture has no permission responder", () => {
+    const release = registerCaptureResponder("s", "turn", false)
+    expect(hasCaptureResponder(request)).toBe(false)
+    expect(hasCaptureResponder({ ...request, type: "tool_result_review" })).toBe(true)
+    release()
+  })
+
+  it("releasing an old owner cannot remove a newer turn's ownership", () => {
+    const releaseOld = registerCaptureResponder("s", "old", true)
+    const releaseCurrent = registerCaptureResponder("s", "turn", true)
+    releaseOld()
+    expect(hasCaptureResponder(request)).toBe(true)
+    releaseCurrent()
+    const releaseNext = registerCaptureResponder("s", "turn", true)
+    releaseCurrent()
+    expect(hasCaptureResponder(request)).toBe(true)
+    releaseNext()
   })
 })

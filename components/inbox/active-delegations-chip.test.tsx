@@ -18,7 +18,7 @@ jest.mock("next/link", () => ({
 }))
 jest.mock("@/components/ui/tooltip")
 
-const rows = jest.fn(async (): Promise<Array<{ status: string }>> => [])
+const rows = jest.fn(async (): Promise<Array<{ status: string; runId?: string }>> => [])
 jest.mock("@/lib/db/schema", () => ({
   getDb: () => ({
     executionRunBindings: {

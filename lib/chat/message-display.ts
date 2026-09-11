@@ -63,7 +63,11 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
       cost: "hidden",
       finishState: "details",
     },
-    actions: "core",
+    // Hover-revealed, not always-on: the row's own chrome is not content, and a
+    // permanent strip of icon buttons under every message is what the reading
+    // area reads as noise. `HOVER_REVEAL_CLASS` keeps it reachable by focus and
+    // on touch, so hiding it costs no reach.
+    actions: "hover",
     agentFlowMode: "simplified",
     reasoning: "collapsed",
     tools: "auto",
@@ -86,7 +90,8 @@ const PRESETS: Record<MessageDisplayPreset, ResolvedMessageDisplayOptions> = {
       cost: "details",
       finishState: "details",
     },
-    actions: "core",
+    // Hover-revealed for the same reason `focused` is.
+    actions: "hover",
     agentFlowMode: "standard",
     reasoning: "auto",
     tools: "auto",

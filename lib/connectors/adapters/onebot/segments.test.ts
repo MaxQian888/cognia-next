@@ -534,3 +534,24 @@ describe("fromOneBotSegments — NapCat rich segments", () => {
     ])
   })
 })
+
+it("projects inline media bytes to OneBot 11 base64 sources", () => {
+  expect(
+    toOneBotSegments(
+      [
+        { type: "image", url: "data:image/png;base64,AQID" },
+        {
+          type: "file",
+          url: "data:text/plain;base64,aGk=",
+          name: "note.txt",
+          mimeType: "text/plain",
+          sizeBytes: 2,
+        },
+      ],
+      "v11"
+    )
+  ).toEqual([
+    { type: "image", data: { file: "base64://AQID" } },
+    { type: "file", data: { file: "base64://aGk=", name: "note.txt" } },
+  ])
+})

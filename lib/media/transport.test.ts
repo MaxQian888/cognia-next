@@ -203,3 +203,28 @@ it.each([null, {}, { transferId: "" }])(
     )
   }
 )
+
+it("refills media capacity while an earlier range is still pending", async () => {
+  let releaseFirst!: () => void
+  const first = new Promise<void>((resolve) => {
+    releaseFirst = resolve
+  })
+  const offsets: number[] = []
+  call.mockImplementation(async (command, args) => {
+    if (command === "plugin_media_export_video")
+      return { transferId: "t1", byteLength: 6 * 65_536, chunkEncoding: "base64" }
+    if (command === "plugin_media_read_chunk") {
+      const { offset, length } = args as { offset: number; length: number }
+      offsets.push(offset)
+      if (offset === 0) await first
+      return Buffer.alloc(length, 7).toString("base64")
+    }
+    return null
+  })
+  const result = callMediaBinary("plugin_media_export_video", {})
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const startedBeforeFirst = offsets.length
+  releaseFirst()
+  expect(await result).toEqual(new Uint8Array(6 * 65_536).fill(7))
+  expect(startedBeforeFirst).toBe(6)
+})

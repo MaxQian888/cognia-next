@@ -139,8 +139,6 @@ describe("ConnectorBus — routing from the composition axes", () => {
     // is read: the work belongs to a person, the mirror still says `auto`.
     await upsertByConversationKey({
       conversationKey: `telegram:${adapterId}:chatA`,
-      adapterId,
-      platform: "telegram",
       sessionId: "s1",
       mode: "auto",
       autonomy: "observe",
@@ -153,8 +151,6 @@ describe("ConnectorBus — routing from the composition axes", () => {
     const adapterId = await seedAdapter()
     await upsertByConversationKey({
       conversationKey: `telegram:${adapterId}:chatA`,
-      adapterId,
-      platform: "telegram",
       sessionId: "s1",
       mode: "auto",
       autonomy: "act",
@@ -170,8 +166,6 @@ describe("ConnectorBus — routing from the composition axes", () => {
       const adapterId = await seedAdapter()
       await upsertByConversationKey({
         conversationKey: `telegram:${adapterId}:chatA`,
-        adapterId,
-        platform: "telegram",
         sessionId: "s1",
         // `confirm` and `autopilot` have no legacy spelling, so an older client
         // writing the mirror can only ever say `draft` or `auto` for them.
@@ -190,8 +184,6 @@ describe("ConnectorBus — routing from the composition axes", () => {
     const adapterId = await seedAdapter()
     await upsertByConversationKey({
       conversationKey: `telegram:${adapterId}:chatA`,
-      adapterId,
-      platform: "telegram",
       sessionId: "s1",
       mode: "manual",
       autonomy: "confirm",
@@ -204,8 +196,6 @@ describe("ConnectorBus — routing from the composition axes", () => {
     const adapterId = await seedAdapter()
     await upsertByConversationKey({
       conversationKey: `telegram:${adapterId}:chatA`,
-      adapterId,
-      platform: "telegram",
       sessionId: "s1",
       autonomy: "suggest",
     })

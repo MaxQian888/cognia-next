@@ -1,242 +1,367 @@
 /**
  * @jest-environment jsdom
  *
- * Task 40 — Composer respects auto / manual / draft for platform sessions.
- *
- * Strategy: test the exported helper functions and hook rather than
- * full render (the composer has many nested providers / i18n deps).
- * The key logic is in:
- *   - useResolvedConnectorMode (tested in its own file)
- *   - handlePlatformSubmit (the submit shim added to the Composer)
- *
- * We exercise the three branches via unit-level mocks of the Dexie functions
- * and verify the correct side-effects.
+ * Real Composer regression coverage for the unified platform send contract.
  */
 
 import "fake-indexeddb/auto"
-import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import type { ChatSession } from "@cognia/agent-config-types"
-import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-// ── mock tauri (not available in jsdom) ──────────────────────────────────────
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
-jest.mock("@/lib/connectors/tauri/commands", () => ({
-  connectorsKeyringGet: jest.fn().mockResolvedValue(null),
-  connectorsHttpRequest: jest.fn().mockResolvedValue({ status: 200, body: "{}", headers: {} }),
+jest.mock("@/lib/db/connector-drafts", () => ({
+  listPendingForConversation: jest.fn(async () => []),
+}))
+jest.mock("@/components/inbox/canned-response-picker", () => ({ CannedResponsePicker: () => null }))
+jest.mock("@/components/inbox/inbox-composer-actions-host", () => ({
+  InboxComposerActionsHost: () => null,
 }))
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function makeAdapter(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
+jest.mock("@/lib/slash-commands/custom", () => ({
+  loadCustomSlashCommands: jest.fn(async () => []),
+}))
+jest.mock("@/lib/search/search-service", () => ({
+  search: jest.fn(),
+  formatSearchResultsForLLM: jest.fn(() => "Search result body"),
+}))
+jest.mock("@/lib/search/configured-search", () => ({
+  searchWithAppSettings: jest.fn(),
+}))
+jest.mock("@/lib/shell/exec", () => ({
+  executeShell: jest.fn(),
+  formatShellResult: jest.fn(),
+}))
+jest.mock("@/lib/files/memory", () => ({
+  appendMemory: jest.fn(),
+}))
+jest.mock("./composer/voice-controls", () => ({
+  VoiceControls: () => null,
+}))
+const mockWaitForStagedAttachments = jest.fn(async (): Promise<void> => undefined)
+jest.mock("./composer/staged-attachment-store", () => {
+  const actual = jest.requireActual("./composer/staged-attachment-store")
+  const { useMemo } = jest.requireActual("react")
   return {
-    id: "cai_test_1",
-    type: "telegram",
-    displayName: "Test Bot",
-    enabled: true,
-    transportMode: "longpoll",
-    settings: {},
-    credentialsRef: { keyringService: "cognia", accounts: [] },
-    trigger: {
-      rules: [{ kind: "private-default" }],
-      blockers: [],
-      storeUnmatchedInDraftMode: false,
+    ...actual,
+    useStagedAttachments() {
+      const staged = actual.useStagedAttachments()
+      return useMemo(() => ({ ...staged, whenSettled: mockWaitForStagedAttachments }), [staged])
     },
-    defaultMode: "auto",
-    mediaModelPolicy: "local_extract_only",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+  }
+})
+// Make the send pipeline deterministic: plain text in → that text as content.
+jest.mock("@/lib/chat/attachments/dispatch", () => ({
+  ...jest.requireActual("@/lib/chat/attachments/dispatch"),
+  buildSendContent: jest.fn(async (text: string) => ({
+    content: text,
+    rejected: [],
+    tokens: 1,
+    manifest: [],
+  })),
+}))
+
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import type { ReactNode } from "react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { Composer } from "./composer"
+import { DataAdapterProvider } from "@/lib/data-hooks/context"
+import type { DataAdapter } from "@/lib/data-hooks/types"
+import { selectComposerReplyTo, useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { listInputHistory } from "@/lib/db/chat-input-history"
+import type { ChatSession } from "@cognia/agent-config-types"
+
+function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
+  return {
+    useCharacters: () => undefined,
+    useCharacter: () => undefined,
+    useSkillsByIds: () => undefined,
+    usePresets: () => undefined,
+    clearMessages: jest.fn(async () => undefined),
+    updateSession: jest.fn(async () => undefined),
+    recordPresetUsage: jest.fn(async () => undefined),
+    trustWorkspace: jest.fn(async () => undefined),
     ...overrides,
   }
 }
 
-function makePlatformSession(modeOverride?: "auto" | "manual" | "draft"): ChatSession {
-  const now = Date.now()
-  return {
-    id: "sess_platform_1",
-    title: "Platform chat",
-    kind: "direct",
-    platformBinding: {
-      platform: "telegram",
-      adapterId: "cai_test_1",
-      conversationKey: "telegram:cai_test_1:chat_99",
-      conversationRef: { platform: "telegram", adapterId: "cai_test_1" },
-    },
-    createdAt: now,
-    updatedAt: now,
-    ...(modeOverride ? { _testModeOverride: modeOverride } : {}),
-  } as ChatSession
+function withAdapter(adapter: DataAdapter) {
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <DataAdapterProvider adapter={adapter}>
+      <TooltipProvider>{children}</TooltipProvider>
+    </DataAdapterProvider>
+  )
+  Wrapper.displayName = "ComposerBehaviorWrapper"
+  return Wrapper
 }
 
+const mkSession = (overrides: Partial<ChatSession> = {}): ChatSession => ({
+  id: "ses_behavior",
+  title: "Behavior",
+  kind: "direct",
+  permissionMode: undefined,
+  createdAt: 0,
+  updatedAt: 0,
+  ...overrides,
+})
+
+function renderComposer(session: ChatSession, onSend = jest.fn(async () => undefined)) {
+  const Wrapper = withAdapter(makeAdapter())
+  const composer = (currentSession: ChatSession) => (
+    <Wrapper>
+      <Composer
+        session={currentSession}
+        onStartNewSession={async () => undefined}
+        onOpenSettings={() => undefined}
+        onSend={onSend}
+        onStop={async () => undefined}
+      />
+    </Wrapper>
+  )
+  const view = render(composer(session))
+  const ta = document.querySelector("textarea") as HTMLTextAreaElement
+  return { ta, onSend, switchSession: (next: ChatSession) => view.rerender(composer(next)) }
+}
+
+// The first full Composer mount in the test body costs as much as the cold-open
+// hook below and overruns the 5s default the same way under parallel workers,
+// so the file gets the same 30s budget.
+jest.setTimeout(30_000)
+
+// Cold-open Dexie (delete + reopen + migrate the full schema) can exceed the
+// default 5s hook budget on the first test of the file — repo convention is a
+// 30s hook timeout for suites that reset the DB per test.
 beforeEach(async () => {
+  jest.clearAllMocks()
+  mockWaitForStagedAttachments.mockResolvedValue(undefined)
+  useSettingsStore.setState({ settings: { composerBehavior: { persistDrafts: false } } as never })
+  useChatStore.getState().clear()
+  await getDb().delete()
   __resetDbForTesting()
-  await getDb().adapterInstances.clear()
-  await getDb().conversationOverrides.clear()
-  await getDb().outboundQueue.clear()
-  await getDb().messages.clear()
-  await getDb().connectorDrafts.clear()
+  getDb()
+  await whenSeeded()
+}, 30_000)
+
+afterEach(() => {
+  useSettingsStore.setState({ settings: undefined as never })
 })
 
-// ── import the functions under test AFTER mock setup ─────────────────────────
-
-// We import the specific logic pieces rather than the full React component
-import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+jest.mock("@/lib/inbox/manual-send", () => ({
+  ...jest.requireActual("@/lib/inbox/manual-send"),
+  sendManualMessageToConversation: jest.fn(),
+}))
+jest.mock("@/lib/connectors/inbox-writes", () => ({
+  ...jest.requireActual("@/lib/connectors/inbox-writes"),
+  useInboxWriteReadiness: () => ({
+    route: "remote",
+    hostSupported: true,
+    availability: { state: "available" },
+  }),
+}))
 import {
-  listPendingForConversation as listPendingDrafts,
-  createDraft,
-  approveDraft,
-  rejectDraft,
-} from "@/lib/db/connector-drafts"
-import { isTauri } from "@/lib/tauri"
+  sendManualMessageToConversation,
+  UnsupportedPlatformAttachmentsError,
+} from "@/lib/inbox/manual-send"
+import { toast } from "sonner"
 
-describe("Composer platform binding — manual mode", () => {
-  it("enqueueOutbound is called with text segment on manual submit", async () => {
-    await getDb().adapterInstances.add(makeAdapter({ defaultMode: "manual" }))
-
-    const session = makePlatformSession("manual")
-    const { conversationKey, conversationRef, adapterId } = session.platformBinding!
-
-    // Simulate what the manual-mode branch does
-    const job = await enqueueOutbound({
-      adapterId,
-      conversationKey,
-      request: {
-        conversationRef,
-        segments: [{ type: "text", text: "hello manual" }],
-        metadata: { idempotencyKey: crypto.randomUUID() },
-      },
-      source: "manual",
-    })
-
-    expect(job.adapterId).toBe("cai_test_1")
-    expect(job.conversationKey).toBe("telegram:cai_test_1:chat_99")
-    expect(job.status).toBe("pending")
-    expect(job.request.segments[0]).toMatchObject({ type: "text", text: "hello manual" })
-
-    // And a user message is stored with outboundJobId
-    const now = Date.now()
-    await getDb().messages.add({
-      id: "msg_1",
-      sessionId: session.id,
-      role: "user",
-      parts: [{ type: "text", text: "hello manual" }],
-      metadata: { outboundJobId: job.id },
-      createdAt: now,
-    })
-
-    const msgs = await getDb().messages.toArray()
-    expect(msgs).toHaveLength(1)
-    expect(msgs[0].metadata?.outboundJobId).toBe(job.id)
+const boundSession = () =>
+  mkSession({
+    platformBinding: {
+      platform: "telegram",
+      adapterId: "bot",
+      conversationKey: "telegram:bot:chat",
+      conversationRef: { platform: "telegram", adapterId: "bot", chatId: "chat" },
+    },
   })
+
+it.each([false, true])(
+  "snapshots the reply before preparation (initial reply: %s)",
+  async (hasReply) => {
+    let finishPreparation!: () => void
+    mockWaitForStagedAttachments.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishPreparation = resolve
+      })
+    )
+    ;(sendManualMessageToConversation as jest.Mock).mockResolvedValueOnce({ route: "remote" })
+    const session = boundSession()
+    const originalReply = hasReply ? { messageId: "original", preview: "Original" } : null
+    const nextReply = { messageId: "next", preview: "Next" }
+    useChatStore.getState().setReplyTo(originalReply, session.id)
+    const { ta } = renderComposer(session)
+    fireEvent.change(ta, { target: { value: "Submitted reply" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(mockWaitForStagedAttachments).toHaveBeenCalled())
+    expect(sendManualMessageToConversation).not.toHaveBeenCalled()
+    act(() => useChatStore.getState().setReplyTo(nextReply, session.id))
+    await act(async () => finishPreparation())
+    await waitFor(() =>
+      expect(sendManualMessageToConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ replyTo: originalReply })
+      )
+    )
+    expect(selectComposerReplyTo(useChatStore.getState(), session.id)).toEqual(nextReply)
+  }
+)
+
+it("recalls the full folded paste after a failed platform send", async () => {
+  let fail!: (error: Error) => void
+  ;(sendManualMessageToConversation as jest.Mock).mockReturnValueOnce(
+    new Promise<void>((_resolve, reject) => {
+      fail = reject
+    })
+  )
+  const { ta } = renderComposer(boundSession())
+  const pastedText = "L1\nL2\nL3\nL4\nL5\nL6"
+  fireEvent.paste(ta, { clipboardData: { items: [], getData: () => pastedText } })
+  expect(ta.value).toContain("[Pasted")
+  fireEvent.keyDown(ta, { key: "Enter" })
+  await waitFor(() => expect(sendManualMessageToConversation).toHaveBeenCalled())
+  fireEvent.change(ta, { target: { value: "New draft" } })
+  await act(async () => fail(new Error("offline")))
+  expect(ta.value).toBe("New draft")
+  ta.setSelectionRange(0, 0)
+  fireEvent.keyDown(ta, { key: "ArrowUp" })
+  expect(ta.value).toBe(pastedText)
+  await waitFor(async () => expect(await listInputHistory("ses_behavior")).toContain(pastedText))
 })
 
-describe("Composer platform binding — draft mode", () => {
-  it("shows 'Edit draft' button label when drafts are pending", async () => {
-    await getDb().adapterInstances.add(makeAdapter({ defaultMode: "draft" }))
-    const session = makePlatformSession("draft")
-    const { conversationKey } = session.platformBinding!
+it.each([false, true])(
+  "consumes only the submitted reply target (changed: %s)",
+  async (changed) => {
+    let complete!: () => void
+    ;(sendManualMessageToConversation as jest.Mock).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        complete = resolve
+      })
+    )
+    const session = boundSession()
+    const submittedReply = { messageId: "original", preview: "Original" }
+    const nextReply = { messageId: "next", preview: "Next" }
+    useChatStore.getState().setReplyTo(submittedReply, session.id)
+    const { ta } = renderComposer(session)
+    fireEvent.change(ta, { target: { value: "Reply" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(sendManualMessageToConversation).toHaveBeenCalled())
+    expect(sendManualMessageToConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ replyTo: submittedReply })
+    )
+    if (changed) act(() => useChatStore.getState().setReplyTo(nextReply, session.id))
+    await act(async () => complete())
+    expect(selectComposerReplyTo(useChatStore.getState(), session.id)).toEqual(
+      changed ? nextReply : null
+    )
+  }
+)
 
-    // No drafts initially
-    const before = await listPendingDrafts(conversationKey)
-    expect(before).toHaveLength(0)
+it.each([
+  [false, "New draft"],
+  [true, "New draft"],
+  [true, ""],
+])(
+  "keeps the current draft after a failed send (session changed: %s, text: %s)",
+  async (changed, nextText) => {
+    let fail!: (error: Error) => void
+    ;(sendManualMessageToConversation as jest.Mock).mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        fail = reject
+      })
+    )
+    const { ta, onSend, switchSession } = renderComposer(boundSession())
+    const submittedText = "/clear\nSubmitted reply"
+    fireEvent.change(ta, { target: { value: submittedText } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() => expect(sendManualMessageToConversation).toHaveBeenCalled())
+    if (changed) switchSession({ ...boundSession(), id: "another-session" })
+    fireEvent.change(ta, { target: { value: nextText } })
 
-    // Create a pending draft
-    await createDraft({
-      conversationKey,
-      sessionId: session.id,
-      segments: [{ type: "text", text: "AI draft reply" }],
+    await act(async () => fail(new Error("offline")))
+
+    expect(ta.value).toBe(nextText)
+    expect(onSend).not.toHaveBeenCalled()
+    expect(sendManualMessageToConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ text: submittedText })
+    )
+    await waitFor(async () => {
+      expect(await listInputHistory("ses_behavior")).toContain(submittedText)
     })
+    if (!changed) {
+      ta.setSelectionRange(0, 0)
+      fireEvent.keyDown(ta, { key: "ArrowUp" })
+      expect(ta.value).toBe(submittedText)
+      fireEvent.keyDown(ta, { key: "ArrowDown" })
+      expect(ta.value).toBe(nextText)
+    }
+  }
+)
 
-    const after = await listPendingDrafts(conversationKey)
-    expect(after).toHaveLength(1)
-    expect(after[0].status).toBe("pending")
-  })
+it.each(["auto", "draft", "manual"])(
+  "primary send always sends to the platform in %s mode",
+  async (mode) => {
+    await getDb().conversationOverrides.put({
+      id: "override",
+      conversationKey: "telegram:bot:chat",
+      modeOverride: mode,
+      updatedAt: Date.now(),
+    } as never)
+    ;(sendManualMessageToConversation as jest.Mock).mockResolvedValue({ route: "remote" })
+    const { ta, onSend } = renderComposer(boundSession())
+    fireEvent.change(ta, { target: { value: "Human reply" } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() =>
+      expect(sendManualMessageToConversation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "Human reply",
+          session: expect.objectContaining({ id: "ses_behavior" }),
+        })
+      )
+    )
+    expect(onSend).not.toHaveBeenCalled()
+    await waitFor(() => expect(ta.value).toBe(""))
+  }
+)
 
-  it("approve draft enqueues outbound and marks draft approved", async () => {
-    await getDb().adapterInstances.add(makeAdapter({ defaultMode: "draft" }))
-    const session = makePlatformSession("draft")
-    const { conversationKey, conversationRef, adapterId } = session.platformBinding!
-
-    const draft = await createDraft({
-      conversationKey,
-      sessionId: session.id,
-      segments: [{ type: "text", text: "AI draft" }],
-    })
-
-    // Simulate approve: enqueue + mark approved
-    await enqueueOutbound({
-      adapterId,
-      conversationKey,
-      request: {
-        conversationRef,
-        segments: draft.segments,
-        metadata: { idempotencyKey: crypto.randomUUID() },
-      },
-      source: "draft-approved",
-    })
-
-    await approveDraft(draft.id)
-
-    const updated = await getDb().connectorDrafts.get(draft.id)
-    expect(updated?.status).toBe("approved")
-
-    const jobs = await getDb().outboundQueue.toArray()
-    expect(jobs).toHaveLength(1)
-    expect(jobs[0].adapterId).toBe(adapterId)
-  })
-
-  it("reject draft marks draft rejected", async () => {
-    await getDb().adapterInstances.add(makeAdapter({ defaultMode: "draft" }))
-    const session = makePlatformSession("draft")
-    const { conversationKey } = session.platformBinding!
-
-    const draft = await createDraft({
-      conversationKey,
-      sessionId: session.id,
-      segments: [{ type: "text", text: "AI draft" }],
-    })
-
-    await rejectDraft(draft.id)
-
-    const updated = await getDb().connectorDrafts.get(draft.id)
-    expect(updated?.status).toBe("rejected")
-  })
+it("keeps input when platform sending fails", async () => {
+  ;(sendManualMessageToConversation as jest.Mock).mockRejectedValueOnce(new Error("offline"))
+  const { ta, onSend } = renderComposer(boundSession())
+  fireEvent.change(ta, { target: { value: "Keep this reply" } })
+  fireEvent.keyDown(ta, { key: "Enter" })
+  await waitFor(() => expect(sendManualMessageToConversation).toHaveBeenCalled())
+  await waitFor(() => expect(ta.value).toBe("Keep this reply"))
+  expect(onSend).not.toHaveBeenCalled()
 })
 
-describe("Composer platform binding — auto mode", () => {
-  it("auto mode: no outbound job created, falls through to standard sendPrompt path", async () => {
-    await getDb().adapterInstances.add(makeAdapter({ defaultMode: "auto" }))
-    // In auto mode the composer calls the regular onSend (no enqueueOutbound side effect)
-    const jobs = await getDb().outboundQueue.toArray()
-    expect(jobs).toHaveLength(0) // No jobs — auto just calls onSend directly
-  })
+it("explains unsupported platform attachments and preserves the input", async () => {
+  ;(sendManualMessageToConversation as jest.Mock).mockRejectedValueOnce(
+    new UnsupportedPlatformAttachmentsError("telegram")
+  )
+  const { ta } = renderComposer(boundSession())
+  fireEvent.change(ta, { target: { value: "Keep this reply" } })
+  fireEvent.keyDown(ta, { key: "Enter" })
+  await waitFor(() => expect(ta.value).toBe("Keep this reply"))
+  expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Telegram"))
+  expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/attachment/i))
 })
 
-describe("Composer web-mode guard — Task 111", () => {
-  it("platform-bound session does not create outbound job in web mode (isTauri=false)", async () => {
-    // isTauri is already mocked as false at the top of this file.
-    // Verify the guard: in web mode, the user cannot call enqueueOutbound
-    // via the Composer because the Send button is disabled. This is a
-    // unit-level assertion on the expected behavior: the queue stays empty
-    // even if handleSubmit logic is manually invoked.
-    const session = makePlatformSession("manual")
-    const { conversationKey, conversationRef, adapterId } = session.platformBinding!
-
-    // Simulate what the web-mode guard prevents: enqueueOutbound is NOT called
-    // when isTauri()=false and the session is platform-bound.
-    // We verify by checking no jobs were added by this test.
-    const before = await getDb().outboundQueue.count()
-    expect(before).toBe(0)
-
-    // The disabled state is: (!isTauri() && !!session?.platformBinding)
-    // Verify this evaluates to true
-    expect(isTauri()).toBe(false)
-    expect(session.platformBinding).toBeTruthy()
-    const sendButtonShouldBeDisabled = !isTauri() && !!session.platformBinding
-    expect(sendButtonShouldBeDisabled).toBe(true)
-
-    // Ensure the adapterId/conversationKey vars are used (suppress lint)
-    void adapterId
-    void conversationKey
-    void conversationRef
-  })
+it("offers a send button on a remote route and a separate draft-review action", async () => {
+  const { ta } = renderComposer(boundSession())
+  fireEvent.change(ta, { target: { value: "hello" } })
+  expect(screen.getByRole("button", { name: "Send" })).toBeEnabled()
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /Review drafts|reviewDrafts/ })).toBeInTheDocument()
+  )
 })
+
+it.each(["/clear", "!echo hello", "#remember this", "/local explain this"])(
+  "sends %s literally instead of invoking local commands",
+  async (text) => {
+    ;(sendManualMessageToConversation as jest.Mock).mockResolvedValueOnce({ route: "remote" })
+    const { ta, onSend } = renderComposer(boundSession())
+    fireEvent.change(ta, { target: { value: text, selectionStart: text.length } })
+    fireEvent.keyDown(ta, { key: "Enter" })
+    await waitFor(() =>
+      expect(sendManualMessageToConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ text })
+      )
+    )
+    expect(onSend).not.toHaveBeenCalled()
+  }
+)

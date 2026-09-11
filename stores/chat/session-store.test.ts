@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
 
-const updateSessionMock = jest.fn(async () => undefined)
+const updateSessionMock = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/db/sessions").updateSession>) => undefined
+)
 /**
  * Present by default. `updateSession` reads the row back before it writes,
  * because Dexie resolves an update against a missing key instead of refusing
@@ -16,7 +18,8 @@ jest.mock("@/lib/db/sessions", () => ({
   deleteSession: jest.fn(async () => undefined),
   getSession: (...args: unknown[]) => getSessionMock(...(args as [string])),
   listSessions: jest.fn(async () => []),
-  updateSession: (...args: unknown[]) => updateSessionMock(...args),
+  updateSession: (...args: Parameters<typeof import("@/lib/db/sessions").updateSession>) =>
+    updateSessionMock(...args),
 }))
 
 /**

@@ -1,5 +1,6 @@
 "use client"
 
+import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { startTransition } from "react"
 import {
   applySdkEvent,
@@ -249,6 +250,35 @@ export async function tryAutoModeDecision(evt: {
   return false
 }
 
+/** An awaiting tool remains bounded even if its only pane is later hidden/closed. */
+function pushInteractiveApproval(approval: PendingApproval, ownerSessionId = approval.sessionId) {
+  useChatStore.getState().pushApproval(approval)
+  armApprovalBackstop(approval.sessionId, approval.requestId, () => {
+    const owner = useChatStore.getState().sessions[ownerSessionId]
+    // A decision already removed the request. A missing slice, however, means
+    // the pane closed; the sidecar still needs its timeout denial.
+    if (
+      owner &&
+      !owner.pendingApprovals.some(
+        (pending) => pending.requestId === approval.requestId && pending.status !== "interrupted"
+      )
+    )
+      return
+    void approveTool(
+      approval.sessionId,
+      approval.requestId,
+      "deny",
+      "auto-denied: approval timed out"
+    )
+      .then(() => {
+        useChatStore
+          .getState()
+          .markApprovalInterrupted(approval.requestId, approval.sessionId, "approval timed out")
+      })
+      .catch((error) => console.error("approval backstop deny failed", error))
+  })
+}
+
 export async function handleEvent(
   evt: ClaudeEvent,
   activeRef: React.MutableRefObject<string | null>,
@@ -257,6 +287,9 @@ export async function handleEvent(
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
+  // A headless capture owns these response commands for its turn, even when
+  // a local pane is open. Other event observers and transcript ingestion stay live.
+  if (hasCaptureResponder(evt)) return
   const { messagesMirrorRef, registry, getExecutionHandle } = coalescing
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
@@ -321,7 +354,7 @@ export async function handleEvent(
         // Open panes flush their coalesced React commit; closed panes have no
         // commit pending but (ADR-0127) may hold a debounced Dexie write and an
         // in-flight mirror — flush + drop those for every streaming session.
-        if (isSessionOpen(sid)) registry.get(sid).commit.flush()
+        registry.get(sid).commit.flush()
         registry.get(sid).persist.cancel()
         registry.release(sid)
         messagesMirrorRef.current.delete(sid)
@@ -386,10 +419,11 @@ export async function handleEvent(
       const terminalMessages =
         messagesMirrorRef.current.get(evt.sessionId) ??
         useChatStore.getState().sessions[evt.sessionId]?.messages
-      // Per-session sealing: any *open* session (focused or a background pane)
-      // settles its own slice. Closed sessions only settled the in-flight
-      // counter above.
-      const sealOpen = isSessionOpen(evt.sessionId)
+      // A hidden retained pane has no decision owner but still has a live
+      // slice. Settle it as well, so revealing it cannot revive stale streaming
+      // state or strand an already-queued user turn.
+      const sealOpen =
+        isSessionOpen(evt.sessionId) || Boolean(useChatStore.getState().sessions[evt.sessionId])
       const sealSession = (sid: string) => {
         registry.get(sid).commit.flush()
         registry.get(sid).persist.cancel()
@@ -651,21 +685,24 @@ export async function handleEvent(
         }
         const decided = await tryAutoModeDecision(evt)
         if (decided) return
-        useChatStore.getState().pushApproval({
-          sessionId: evt.sessionId,
-          requestId: evt.requestId,
-          toolUseID: evt.toolUseID,
-          toolName: evt.toolName,
-          input: evt.input,
-          title: evt.title,
-          displayName: evt.displayName,
-          description: evt.description,
-          blockedPath: evt.blockedPath,
-          decisionReason: evt.decisionReason,
-          origin: "subagent",
-          subagentId: subagentRoute.subagentId,
-          subagentRunId: subagentRoute.runId,
-        })
+        pushInteractiveApproval(
+          {
+            sessionId: evt.sessionId,
+            requestId: evt.requestId,
+            toolUseID: evt.toolUseID,
+            toolName: evt.toolName,
+            input: evt.input,
+            title: evt.title,
+            displayName: evt.displayName,
+            description: evt.description,
+            blockedPath: evt.blockedPath,
+            decisionReason: evt.decisionReason,
+            origin: "subagent",
+            subagentId: subagentRoute.subagentId,
+            subagentRunId: subagentRoute.runId,
+          },
+          subagentRoute.parentSessionId
+        )
         return
       }
       // An open pane (focused OR background tab/split) surfaces the approval
@@ -725,7 +762,7 @@ export async function handleEvent(
         blockedPath: evt.blockedPath,
         decisionReason: evt.decisionReason,
       }
-      useChatStore.getState().pushApproval(approval)
+      pushInteractiveApproval(approval)
       return
     }
     case "tool_result_review": {
@@ -768,10 +805,11 @@ export async function handleEvent(
       // it) — cancel its backstop deny (Remote Session Control).
       clearApprovalBackstops(sessionId)
       const isActive = sessionId === activeRef.current
-      // Any open pane streams live into its slice; a closed (no-pane) session
-      // only touches Dexie. `isOpen ⊇ isActive` — the active session is always
-      // open.
-      const isOpen = isSessionOpen(sessionId)
+      // Retained hidden panes keep their runtime slice current too. Visibility
+      // controls approval ownership, not the lifetime of an accepted turn.
+      // Sessions never opened in this renderer still use the Dexie-only path.
+      const isOpen =
+        isSessionOpen(sessionId) || Boolean(useChatStore.getState().sessions[sessionId])
 
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.
       // Mirror-first for an open session: the store commit may be a frame

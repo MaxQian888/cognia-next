@@ -61,7 +61,7 @@ import {
 import { parseWeComMessage, type WeComConversationRef } from "./parse"
 import { serializeSegments, clampUtf8, type WeComMediaSegment } from "./serialize"
 import { buildWeComTemplateCard, parseTemplateCardEvent, buildAckUpdateCard } from "./a2ui-mapper"
-import { uploadWeComMedia, fetchAndDecryptMedia, bytesToBase64 } from "./media"
+import { uploadWeComMedia, fetchAndDecryptMedia, bytesToBase64, base64ToBytes } from "./media"
 import { sniffImageMediaType } from "../_shared/inbound-media"
 import { resolveWelcomeMessage, type WeComAdapterSettings } from "./welcome"
 import { buildMenuClickInboundEvent, buildWeComMenuCard, parseMenuButtonClick } from "./menu-card"
@@ -579,13 +579,26 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
   // ── outbound: media upload ────────────────────────────────────────────────
   async function uploadMedia(seg: WeComMediaSegment): Promise<string> {
-    const resp = await proxyFetch(seg.url)
-    if (!resp.ok)
-      throw new WeComAckError(
-        `Media download HTTP ${resp.status}`,
-        resp.status === 429 || resp.status >= 500
-      )
-    const bytes = new Uint8Array(await resp.arrayBuffer())
+    let bytes: Uint8Array
+    if (seg.url.startsWith("data:")) {
+      const encoded = /^data:[^,]*;base64,([A-Za-z0-9+/]*={0,2})$/.exec(seg.url)?.[1]
+      if (encoded === undefined) throw new WeComAckError("Invalid inline media", false)
+      if (encoded.length > Math.ceil((20 * 1024 * 1024) / 3) * 4)
+        throw new WeComAckError("wecom media exceeds 20MB cap", false)
+      try {
+        bytes = base64ToBytes(encoded)
+      } catch {
+        throw new WeComAckError("Invalid inline media base64", false)
+      }
+    } else {
+      const resp = await proxyFetch(seg.url)
+      if (!resp.ok)
+        throw new WeComAckError(
+          `Media download HTTP ${resp.status}`,
+          resp.status === 429 || resp.status >= 500
+        )
+      bytes = new Uint8Array(await resp.arrayBuffer())
+    }
     const name = seg.name ?? `media.${seg.type === "image" ? "png" : "bin"}`
     return uploadWeComMedia(requestOk, opts.id, bytes, name, seg.type)
   }

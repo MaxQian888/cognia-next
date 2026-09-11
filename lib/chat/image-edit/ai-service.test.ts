@@ -10,14 +10,18 @@ const mockGetState = jest.fn(() => ({
 const mockExecute = jest.fn()
 
 jest.mock("@/lib/ai/provider-consumption", () => ({
-  resolveFeatureProvider: (...args: unknown[]) => mockResolveFeatureProvider(...args),
-  createProviderSettingsSnapshot: (...args: unknown[]) => mockCreateSnapshot(...args),
+  resolveFeatureProvider: (...args: Parameters<typeof mockResolveFeatureProvider>) =>
+    mockResolveFeatureProvider(...args),
+  createProviderSettingsSnapshot: (...args: Parameters<typeof mockCreateSnapshot>) =>
+    mockCreateSnapshot(...args),
 }))
 jest.mock("@/stores", () => ({
   useSettingsStore: { getState: () => mockGetState() },
 }))
 jest.mock("@/lib/ai/operations", () => ({
-  getProviderOperationExecutor: () => ({ execute: (...a: unknown[]) => mockExecute(...a) }),
+  getProviderOperationExecutor: () => ({
+    execute: (...a: Parameters<typeof mockExecute>) => mockExecute(...a),
+  }),
 }))
 jest.mock("@/lib/ai/operations/host-surfaces", () => ({
   detectHostSurfaces: () => ["renderer"],
@@ -46,7 +50,8 @@ beforeEach(() => {
 describe("resolveImageEditCapabilities", () => {
   const deps = {
     getSnapshot: () => ({}) as never,
-    resolveProvider: (...args: unknown[]) => mockResolveFeatureProvider(...args) as never,
+    resolveProvider: (...args: Parameters<typeof mockResolveFeatureProvider>) =>
+      mockResolveFeatureProvider(...args) as never,
     defaultProviderId: () => "openai",
   }
 
@@ -363,8 +368,8 @@ describe("runImageEdit", () => {
             ok: false,
             operationId: "images.edit",
             providerId: "openai",
-            availability: "available",
-            failure: { code: "network", message: "502" },
+            availability: "ready",
+            failure: { code: "network", message: "502", retryable: true },
           }) as ProviderOperationResult<unknown>,
       }
     )

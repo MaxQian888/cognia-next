@@ -1,212 +1,49 @@
 "use client"
 
-/**
- * /inbox/c?key=…[&messageId=…] — single conversation view.
- *
- * Static route reading the conversation key from the query string (replaces the
- * old `/inbox/c/[conversationKey]` dynamic route, unservable for runtime keys
- * under `output: "export"`). `URLSearchParams.get` returns the already-decoded
- * value, so no manual decodeURIComponent here. An optional `messageId` lands
- * the pane on one message once the session's history hydrates — the ⌘K message
- * hits and cross-links point here for IM conversations.
- */
-
+/** Compatibility entry point. Every IM session opens in the shared chat workspace. */
 import { Suspense, useEffect } from "react"
-import { notFound, useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { toast } from "sonner"
-import { getDb } from "@/lib/db/schema"
-import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
-import type { ChatSession } from "@cognia/agent-config-types"
-import { InboxShell } from "@/components/inbox/inbox-shell"
-import { ConversationHeader } from "@/components/inbox/conversation-header"
-import { useResolvedBinding } from "@/hooks/connectors/use-resolved-binding"
-import { HistoryLoadEarlier } from "@/components/inbox/history-load-earlier"
+import { Button } from "@/components/ui/button"
+import { StateCard } from "@/components/inbox/state/state-card"
 import { PageLoading } from "@/components/ui/loading-states"
-import { ChatPane } from "@/components/chat/chat-view"
-import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
-import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
-import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
-import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
-import type { PlatformKind } from "@/types/connectors/platform-kind"
-import {
-  effectiveCapabilities,
-  effectiveCapabilitiesForRow,
-} from "@/lib/connectors/effective-capabilities"
-import { capabilityAvailability } from "@/lib/connectors/capability-availability"
-import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import type { ComposerTurnMetadata } from "@/components/chat/composer"
-import { turnMetadataSendOptions } from "@/lib/chat/turn-metadata"
+import { useSessions } from "@/hooks/chat/use-sessions"
+import { focusSession } from "@/hooks/global-search/use-global-search-actions"
+import { resolveConversationLinkSession } from "@/lib/connectors/session-bindings"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 
 function ConversationInner() {
   const params = useSearchParams()
   const conversationKey = params.get("key") ?? ""
+  const sessionId = params.get("sessionId") ?? undefined
   const messageId = params.get("messageId") ?? undefined
-  if (!conversationKey) {
-    notFound()
-  }
-  return <ConversationDetail conversationKey={conversationKey} messageId={messageId} />
-}
-
-function ConversationDetail({
-  conversationKey,
-  messageId,
-}: {
-  conversationKey: string
-  /** Land on this message after the session hydrates (`&messageId=`). */
-  messageId?: string
-}) {
   const t = useTranslations("inbox.conversation")
   const router = useRouter()
-  const session = useLiveQuery<ChatSession | undefined>(
-    () =>
-      typeof window === "undefined"
-        ? Promise.resolve(undefined)
-        : getDb()
-            .sessions.filter((s) => s.platformBinding?.conversationKey === conversationKey)
-            .first(),
-    [conversationKey]
-  )
-
-  // The header's policy read-out used to be handed `defaultPrivateChatPolicy()`
-  // — a literal, not this bot's policy — so it described a bot nobody had
-  // configured. Resolved live through the same three layers the bus uses;
-  // `undefined` until the adapter row loads, which the read-out says out loud
-  // rather than papering over with a default.
-  const resolvedBinding = useResolvedBinding(
-    session?.platformBinding
-      ? { adapterId: session.platformBinding.adapterId, conversationKey }
-      : null
-  )
-
-  // Mount the chat IPC + team-chat once per route. Both subscribers are
-  // mirrored here for parity with `DesktopChatWorkspace`; only the one
-  // matching the session kind is wired into the ChatPane below.
-  const directChat = useClaudeChat()
-  const teamChat = useTeamChat()
   const { select } = useSessions()
+  const session = useLiveQuery(
+    async () =>
+      (await resolveConversationLinkSession(conversationKey, { sessionId, messageId })) ?? null,
+    [conversationKey, sessionId, messageId]
+  )
 
-  // When the session resolves, make it the globally-active session so
-  // useClaudeChat/useTeamChat dispatch into the right Zustand slice.
   useEffect(() => {
-    if (session?.id) {
-      select(session.id)
-    }
-  }, [session?.id, select])
+    if (!conversationKey || !session) return
+    focusSession(session, session.id, select)
+    router.replace(`/${buildSessionHref(session.id, messageId)}`)
+  }, [conversationKey, session, messageId, router, select])
 
-  // Deep link to one message: wait for the (now active) session's history via
-  // the cross-session primitive, then jump. Fires once per (session, message).
-  useEffect(() => {
-    if (!session?.id || !messageId) return
-    let cancelled = false
-    void jumpToSessionMessage(session.id, messageId, { align: "center" }).then((landed) => {
-      if (!landed && !cancelled) toast.error(t("jumpFailed"))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [session?.id, messageId, t])
-
-  // The bot row behind this conversation. "Load earlier" is gated on what THIS
-  // instance can do, not on what the platform's adapter implements — a Slack
-  // grant without a `*:history` scope has no history to fetch and the button
-  // would only produce a `missing_scope` toast. The bar is still MOUNTED when
-  // it cannot: an absent bar reads the same as an empty backlog.
-  const adapterRow = useAdapterInstance(session?.platformBinding?.adapterId)
-
-  // Expose the viewed conversation so the connector inbound bridge can suppress
-  // an OS notification for the conversation already on screen (focus-aware).
-  useEffect(() => {
-    const store = useActiveConversationStore.getState()
-    store.setActiveConversation(conversationKey)
-    return () => store.clearIf(conversationKey)
-  }, [conversationKey])
-
-  // session === undefined means the query is still loading.
-  if (session === undefined) {
+  if (!conversationKey || session === null) {
     return (
-      <InboxShell view="conversation" conversationKey={conversationKey}>
-        <PageLoading title={t("loading")} />
-      </InboxShell>
+      <div className="flex flex-1 flex-col items-center justify-center p-4">
+        <StateCard.Empty title={t("unavailableTitle")} description={t("unavailableDescription")} />
+        <Button variant="outline" onClick={() => router.replace("/")}>
+          {t("openConversations")}
+        </Button>
+      </div>
     )
   }
-
-  // session === null means no matching session was found.
-  if (session === null) {
-    notFound()
-  }
-
-  const platform = session.platformBinding!.platform as PlatformKind
-  const adapterId = session.platformBinding!.adapterId
-  // Until the row resolves, answer from the platform table — the same fallback
-  // the model's tool manifest uses, so the button never contradicts the tools.
-  const historyAccess = capabilityAvailability(
-    adapterRow ? effectiveCapabilitiesForRow(adapterRow) : effectiveCapabilities({ platform }),
-    "history.fetch"
-  )
-  const isTeamSession = session.kind === "team" && Boolean(session.teamId)
-
-  const send = isTeamSession ? teamChat.send : directChat.send
-  const handleSend = (
-    content: Parameters<typeof send>[0],
-    manifest?: readonly AttachmentManifestEntry[],
-    _templateRun?: unknown,
-    turnMetadata?: ComposerTurnMetadata
-  ) =>
-    isTeamSession
-      ? teamChat.send(content, {
-          attachmentManifest: manifest,
-          ...turnMetadataSendOptions(turnMetadata),
-        })
-      : directChat.send(content, undefined, {
-          attachmentManifest: manifest,
-          ...turnMetadataSendOptions(turnMetadata),
-        })
-  const stop = isTeamSession ? teamChat.stop : directChat.stop
-  const regenerate = isTeamSession ? teamChat.regenerate : directChat.regenerate
-  const editAndResend = isTeamSession ? teamChat.editAndResend : directChat.editAndResend
-
-  const openSettings = (tab?: string) => {
-    router.push(tab ? `/settings?section=${tab}` : "/settings")
-  }
-
-  return (
-    <InboxShell view="conversation" adapterId={adapterId} conversationKey={conversationKey}>
-      {/* `min-h-0` lets the dock below shrink instead of overflowing the pane;
-          `min-w-0` keeps a wide message from widening the whole column.
-          Notices are no longer mounted here — `InboxShell` owns the single
-          `InboxNoticeArea` for every Inbox route. */}
-      <div className="flex h-full min-h-0 min-w-0 flex-col" data-testid="conversation-detail">
-        <ConversationHeader
-          conversationKey={conversationKey}
-          sessionId={session.id}
-          title={session.title}
-          platform={platform}
-          policy={resolvedBinding?.trigger}
-          characterId={session.characterId}
-        />
-        <HistoryLoadEarlier
-          conversationKey={conversationKey}
-          adapterId={adapterId}
-          unavailable={historyAccess.available ? undefined : historyAccess}
-        />
-        <ArtifactWorkspaceDock>
-          <ChatPane
-            showHeader={false}
-            activeSession={session}
-            onSend={handleSend}
-            onStop={stop}
-            onRegenerate={regenerate}
-            onEditResend={editAndResend}
-            onCreate={() => {}}
-            onUseSample={(text) => void send(text)}
-            onOpenSettings={openSettings}
-          />
-        </ArtifactWorkspaceDock>
-      </div>
-    </InboxShell>
-  )
+  return <PageLoading title={t("loading")} />
 }
 
 export default function ConversationPage() {

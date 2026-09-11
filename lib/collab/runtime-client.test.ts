@@ -2,12 +2,13 @@ const mockConnections = jest.fn()
 
 jest.mock("@/lib/accounts/active-account-id", () => ({ getActiveAccountId: () => "account_1" }))
 jest.mock("./connection", () => ({
-  loadCollabConnection: (...args: unknown[]) => mockConnections(...args),
+  loadCollabConnection: (...args: Parameters<typeof mockConnections>) => mockConnections(...args),
 }))
 jest.mock("@/lib/network/platform-fetch", () => ({ createPlatformFetch: () => jest.fn() }))
 const mockReadActiveAccessToken = jest.fn()
 jest.mock("@/lib/logto/app-session", () => ({
-  readActiveAccessToken: (...args: unknown[]) => mockReadActiveAccessToken(...args),
+  readActiveAccessToken: (...args: Parameters<typeof mockReadActiveAccessToken>) =>
+    mockReadActiveAccessToken(...args),
 }))
 
 import { resolveCurrentCollabContext } from "./runtime-client"
@@ -41,7 +42,7 @@ describe("resolveCurrentCollabContext", () => {
     mockConnections.mockReturnValue({ baseUrl: "https://collab.test" })
     mockReadActiveAccessToken.mockResolvedValue("fresh-token")
     const fetchImpl = jest.fn(
-      async () =>
+      async (..._args: Parameters<typeof fetch>) =>
         new Response(
           JSON.stringify({
             grant: "g",

@@ -6,8 +6,6 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import {
   CollabClient,
-  type AppendCollabIssueEventInput,
-  type CreateCollabIssueInput,
   type CreateCollabPlanInput,
   type CreateCollabRunInput,
   type PatchCollabIssueInput,
@@ -67,7 +65,13 @@ export async function dispatchCollabOutbound(
   let result: unknown
   switch (command) {
     case "collab_issue_create":
-      result = await client.createIssue(orgId, body as CreateCollabIssueInput)
+      result = await client.createIssue(orgId, {
+        ...body,
+        operationId: requiredString(body, "operationId"),
+        workspaceId: requiredString(body, "workspaceId"),
+        issueProjectId: requiredString(body, "issueProjectId"),
+        title: requiredString(body, "title"),
+      })
       break
     case "collab_issue_patch":
       result = await client.patchIssue(
@@ -77,11 +81,11 @@ export async function dispatchCollabOutbound(
       )
       break
     case "collab_issue_append_event":
-      result = await client.appendIssueEvent(
-        orgId,
-        requiredString(payload, "issueId"),
-        body as AppendCollabIssueEventInput
-      )
+      result = await client.appendIssueEvent(orgId, requiredString(payload, "issueId"), {
+        ...body,
+        operationId: requiredString(body, "operationId"),
+        kind: requiredString(body, "kind"),
+      })
       break
     case "collab_plan_create":
       result = await client.createPlan(orgId, body as CreateCollabPlanInput)

@@ -140,6 +140,36 @@ export async function findActiveSessionForConversation(
   return bound[0]
 }
 
+/** Resolve an old Inbox link without changing the remote conversation's active session. */
+export async function resolveConversationLinkSession(
+  conversationKey: string,
+  target: { sessionId?: string; messageId?: string } = {}
+): Promise<ChatSession | undefined> {
+  const db = getDb()
+  // Explicit targets must belong to this conversation; never silently send the
+  // user to another session when a copied link is stale or inconsistent.
+  if (target.sessionId) {
+    const session = await db.sessions.get(target.sessionId)
+    if (session?.platformBinding?.conversationKey !== conversationKey) return undefined
+    if (target.messageId) {
+      const message = await db.messages.get(target.messageId)
+      if (message?.sessionId !== session.id) return undefined
+    }
+    return session
+  }
+  if (target.messageId) {
+    const message = await db.messages.get(target.messageId)
+    if (!message) return undefined
+    const session = await db.sessions.get(message.sessionId)
+    return session?.platformBinding?.conversationKey === conversationKey ? session : undefined
+  }
+  const override = await db.conversationOverrides
+    .where("conversationKey")
+    .equals(conversationKey)
+    .first()
+  return findActiveSessionForConversation(conversationKey, override)
+}
+
 /**
  * Create a ChatSession bound to the given platform conversation. Sets both
  * `platformBinding` and the denormalized `platformConversationKey` index
@@ -189,4 +219,111 @@ export async function refreshPlatformSessionBinding(
   }
   await getDb().sessions.put(updated)
   return updated
+}
+
+/**
+ * Consume legacy Inbox list preferences into the shared session model.
+ * Removing consumed fields makes subsequent unpin/unarchive operations stable.
+ * The conversation-level read watermark is retained for older consumers.
+ */
+export async function migrateLegacyConversationListState(scope?: {
+  conversationKey: string
+  sessionId?: string
+  overwrite?: boolean
+}): Promise<void> {
+  const db = getDb()
+  await db.transaction(
+    "rw",
+    db.sessions,
+    db.conversationOverrides,
+    db.sessionState,
+    db.messages,
+    async () => {
+      const overrides = scope
+        ? await db.conversationOverrides
+            .where("conversationKey")
+            .equals(scope.conversationKey)
+            .toArray()
+        : await db.conversationOverrides.toArray()
+      for (const override of overrides) {
+        const sessions = await db.sessions
+          .filter(
+            (session) =>
+              session.platformBinding?.conversationKey === override.conversationKey &&
+              (!scope?.sessionId || session.id === scope.sessionId)
+          )
+          .toArray()
+        if (!sessions.length) continue
+        const hasPinned = Object.prototype.hasOwnProperty.call(override, "pinned")
+        const hasArchived = Object.prototype.hasOwnProperty.call(override, "archived")
+        for (const session of sessions) {
+          if (hasPinned || hasArchived) {
+            await db.sessions
+              .where("id")
+              .equals(session.id)
+              .modify((row) => {
+                const changesPinned = hasPinned && (scope?.overwrite || row.pinned === undefined)
+                const changesArchived =
+                  hasArchived && (scope?.overwrite || row.archivedAt === undefined)
+                if (changesPinned || changesArchived) {
+                  // Match bulkSetSessionsPinned: sync advances, display recency stays.
+                  row.lastMessageAt ??= row.updatedAt
+                  row.updatedAt = Date.now()
+                }
+                if (changesPinned) row.pinned = override.pinned === true
+                if (changesArchived) {
+                  if (override.archived) row.archivedAt = override.updatedAt
+                  else delete row.archivedAt
+                }
+              })
+          }
+          if (override.lastReadAt !== undefined && !(await db.sessionState.get(session.id))) {
+            const messages = await db.messages.where("sessionId").equals(session.id).toArray()
+            await db.sessionState.put({
+              sessionId: session.id,
+              lastReadAt: override.lastReadAt,
+              unreadCount: messages.filter(
+                (message) =>
+                  message.createdAt > override.lastReadAt! &&
+                  message.role === "user" &&
+                  message.metadata?.platformMessage != null
+              ).length,
+              updatedAt: Date.now(),
+            })
+          }
+        }
+        if (hasPinned || hasArchived) {
+          await db.conversationOverrides
+            .where("id")
+            .equals(override.id)
+            .modify((row) => {
+              delete row.pinned
+              delete row.archived
+              row.updatedAt = Date.now()
+            })
+        }
+      }
+      // Legacy sessions without an override had no read watermark either.
+      const bound = await db.sessions
+        .filter(
+          (session) =>
+            !!session.platformBinding &&
+            (!scope || session.platformBinding.conversationKey === scope.conversationKey) &&
+            (!scope?.sessionId || session.id === scope.sessionId)
+        )
+        .toArray()
+      for (const session of bound) {
+        if (await db.sessionState.get(session.id)) continue
+        const messages = await db.messages.where("sessionId").equals(session.id).toArray()
+        await db.sessionState.put({
+          sessionId: session.id,
+          lastReadAt: 0,
+          unreadCount: messages.filter(
+            (message) => message.role === "user" && message.metadata?.platformMessage != null
+          ).length,
+          updatedAt: Date.now(),
+        })
+      }
+    }
+  )
 }

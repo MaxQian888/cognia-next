@@ -65,9 +65,11 @@ jest.mock("@/lib/policy/action-review/chat-tool-channel", () => ({
 }))
 jest.mock("@/lib/usage/compaction-metrics", () => ({ pendingRecoveryPhase: jest.fn(() => 2) }))
 const resolveProviderAttemptOptions = jest.fn(async () => ({ concurrentLimit: 3 }))
+const applyProviderAttemptLimits = jest.fn(() => ({}))
 jest.mock("@/lib/claude/provider-attempt-options", () => ({
   resolveProviderAttemptOptions: (...args: unknown[]) =>
     resolveProviderAttemptOptions(...(args as [])),
+  applyProviderAttemptLimits: (...args: unknown[]) => applyProviderAttemptLimits(...(args as [])),
 }))
 const applySdkSubagentBridge = jest.fn()
 jest.mock("@/lib/claude/sdk-subagent-bridge", () => ({
@@ -143,6 +145,32 @@ it("loads the provider attempt options and the subagent bridge lazily", async ()
   deps.ai.applySdkSubagentBridge({ type: "assistant" } as never, "room-1")
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(applySdkSubagentBridge).toHaveBeenCalledWith({ type: "assistant" }, "room-1")
+})
+
+it("passes the Room fallback model and previous output cap to runtime limit resolution", async () => {
+  const deps = createProductionRoomDeps()
+  const settings = {} as never
+  const previous = {
+    modelParams: { maxOutputTokens: 256 },
+    compaction: { enabled: true, contextWindow: 200000 },
+  } as never
+  await deps.ai.resolveProviderAttemptOptions("example:api", settings, "selected-model", previous)
+  expect(resolveProviderAttemptOptions).toHaveBeenCalledWith(
+    "example:api",
+    settings,
+    undefined,
+    false,
+    "selected-model"
+  )
+  expect(applyProviderAttemptLimits).toHaveBeenCalledWith(
+    expect.objectContaining({
+      provider: "example:api",
+      model: "selected-model",
+      compaction: { enabled: true, contextWindow: 200000 },
+    }),
+    settings,
+    256
+  )
 })
 
 it("never lets a bridge failure escape the room loop", async () => {

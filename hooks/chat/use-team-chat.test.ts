@@ -165,7 +165,8 @@ const runWithExecutionLeaseMock = jest.fn(
     run({ signal: new AbortController().signal })
 )
 jest.mock("@/lib/execution/admit", () => ({
-  runWithExecutionLease: (...args: unknown[]) => runWithExecutionLeaseMock(...args),
+  runWithExecutionLease: (...args: Parameters<typeof runWithExecutionLeaseMock>) =>
+    runWithExecutionLeaseMock(...args),
 }))
 
 const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
@@ -1145,6 +1146,29 @@ describe("useTeamChat — send coverage", () => {
 
     expect(sendPromptMock).toHaveBeenCalledTimes(1)
     expect(resolveProviderAttemptOptionsMock).not.toHaveBeenCalled()
+  })
+
+  it("preserves template provenance through the team send hook", async () => {
+    makeAutoResolveSetup()
+    makeLinearTeam([])
+    const templateRun = {
+      templateId: "review",
+      version: "1",
+      text: "Review {{target}}",
+      params: { target: { kind: "text" as const, value: "workflow" } },
+    }
+    const { result } = renderHook(useTeamChat)
+    await flush()
+    await act(async () => result.current.send("Review workflow", { templateRun }))
+    expect(persistMessagesMock).toHaveBeenCalledWith(
+      "team-1",
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          metadata: expect.objectContaining({ templateRun }),
+        }),
+      ])
+    )
   })
 
   it("preserves attachment provenance on the optimistic team user message", async () => {

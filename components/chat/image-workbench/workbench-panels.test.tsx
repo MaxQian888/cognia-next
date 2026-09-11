@@ -27,7 +27,7 @@ function transformProps(overrides: Record<string, unknown> = {}) {
     lockAspect: true,
     onLockAspectChange: jest.fn(),
     ...overrides,
-  } as never
+  }
 }
 
 describe("TransformPanel", () => {
@@ -190,7 +190,7 @@ function aiProps(overrides: Record<string, unknown> = {}) {
     onClearSelection: jest.fn(),
     onRun: jest.fn(),
     ...overrides,
-  } as never
+  }
 }
 
 describe("AiPanel", () => {

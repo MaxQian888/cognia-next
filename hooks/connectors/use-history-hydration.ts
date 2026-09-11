@@ -43,7 +43,8 @@ export interface HistoryHydrationResult {
 
 export function useHistoryHydration(
   conversationKey: string,
-  adapterId: string
+  adapterId: string,
+  sessionId?: string
 ): HistoryHydrationResult {
   const [hydrating, setHydrating] = useState(false)
   const [lastCount, setLastCount] = useState<number | null>(null)
@@ -72,13 +73,19 @@ export function useHistoryHydration(
         return 0
       }
 
-      const session = await findSessionByConversationKey(conversationKey)
-      if (!session) {
+      const db = getDb()
+      const session = sessionId
+        ? await db.sessions.get(sessionId)
+        : await findSessionByConversationKey(conversationKey)
+      if (
+        !session ||
+        session.platformBinding?.conversationKey !== conversationKey ||
+        session.platformBinding.adapterId !== adapterId
+      ) {
         setLastCount(0)
         return 0
       }
 
-      const db = getDb()
       const conversationState = await db.connectorConversationStates.get(conversationKey)
       const existing = await db.messages.where("sessionId").equals(session.id).toArray()
       const seen = new Set<string>()
@@ -141,7 +148,7 @@ export function useHistoryHydration(
     } finally {
       setHydrating(false)
     }
-  }, [conversationKey, adapterId])
+  }, [conversationKey, adapterId, sessionId])
 
   return { hydrating, lastCount, error, canHydrate, hydrate }
 }

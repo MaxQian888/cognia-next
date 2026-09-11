@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { hasCaptureResponder } from "@/lib/connectors/hitl/approval-registry"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import { makeUserMessage } from "@/lib/claude/adapter"
@@ -11,7 +12,10 @@ import { prefixReplyContext } from "@/lib/chat/reply-to"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
-import { resolveExternalAgentModelAxis } from "@/lib/ai/agent/external/session-models"
+import {
+  resolveExternalAgentModelAxis,
+  resolveExternalAgentCogniaModelAxis,
+} from "@/lib/ai/agent/external/session-models"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
@@ -227,8 +231,8 @@ export function resolveChatTurnAttemptIdentity(input: {
 }
 
 /**
- * Wires the Claude sidecar IPC into the React store. Mount this hook once at
- * the top of the chat page; do not invoke it per-message.
+ * Owns the direct-chat runtime. Only ClaudeChatRuntimeProvider mounts this
+ * controller; surfaces consume the shared public useClaudeChat hook.
  */
 export function useClaudeChat() {
   const store = useChatStore
@@ -275,7 +279,7 @@ export function useClaudeChat() {
     const apply = () => {
       const runtime = useSubagentRuntimeStore.getState().subAgents
       const chat = useChatStore.getState()
-      const ids = new Set(chat.openSessionIds)
+      const ids = new Set([...chat.openSessionIds, ...Object.keys(chat.paneIdsBySession ?? {})])
       if (chat.activeSessionId) ids.add(chat.activeSessionId)
       for (const sid of ids) {
         const subs = selectSessionSubagents(runtime, sid)
@@ -292,7 +296,24 @@ export function useClaudeChat() {
       }
     }
     apply()
-    return useSubagentRuntimeStore.subscribe(apply)
+    const unsubscribeRuntime = useSubagentRuntimeStore.subscribe(apply)
+    const unsubscribePanes = useChatStore.subscribe((state, previous?: typeof state) => {
+      if (
+        previous &&
+        state.paneIdsBySession === previous.paneIdsBySession &&
+        state.openSessionIds === previous.openSessionIds &&
+        state.activeSessionId === previous.activeSessionId
+      )
+        return
+      // A newly revealed pane may have hydrated its messages after the last
+      // subagent update. Re-project even when the runtime signature is unchanged.
+      subagentSigRef.current.clear()
+      apply()
+    })
+    return () => {
+      unsubscribeRuntime()
+      unsubscribePanes()
+    }
   }, [])
 
   // Always-allow tool list — also kept fresh via ref.
@@ -360,6 +381,7 @@ export function useClaudeChat() {
   // can cancel the renderer streamText loop (the sidecar path uses
   // `interruptSession` instead).
   const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
+  const externalGatewayAbortRef = useRef<Map<string, AbortController>>(new Map())
   // Session-owned handles live beside the existing coalescing resources. The
   // resolver callback supplies the exact spec used for the outgoing send, so
   // this hook never resolves execution a second time.
@@ -405,7 +427,10 @@ export function useClaudeChat() {
   useEffect(() => {
     const executionHandles = executionHandlesRef.current
     const squadWatchers = squadWatchersRef.current
+    const gatewayControllers = externalGatewayAbortRef.current
     return () => {
+      for (const controller of gatewayControllers.values()) controller.abort()
+      gatewayControllers.clear()
       registry.flushAllPersist()
       registry.clear()
       executionHandles.clear()
@@ -516,6 +541,9 @@ export function useClaudeChat() {
   // identical store/coalescing/persistence path.
   const enqueueClaudeEvent = useCallback(
     (evt: ClaudeEvent) => {
+      // Snapshot ownership before queuing: the capture may settle and release
+      // its turn before this session's queued transcript work drains.
+      if (hasCaptureResponder(evt)) return Promise.resolve()
       const key =
         typeof (evt as { sessionId?: unknown }).sessionId === "string"
           ? (evt as { sessionId: string }).sessionId
@@ -598,6 +626,8 @@ export function useClaudeChat() {
          *  don't duplicate the user turn when re-issuing the SDK request. */
         sharedRequest?: { messageId: string; queueItemId: string; takeover?: boolean }
         skipUserAppend?: boolean
+        /** Let approval continuations retain a retry action when dispatch is refused. */
+        throwOnError?: boolean
         /** Skip Thread-B delegation routing. Set on the built-in fallback
          *  re-entry so a failed external delegation runs the SDK path without
          *  re-evaluating (and re-matching) the delegation rules. */
@@ -657,12 +687,31 @@ export function useClaudeChat() {
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
+      const rejectSend = (error?: unknown): void => {
+        if (!callOptions?.throwOnError) return
+        const diagnostic = sessionId
+          ? useChatStore.getState().sessions[sessionId]?.errorDiagnostic
+          : null
+        throw error instanceof Error
+          ? error
+          : new Error(
+              typeof error === "string"
+                ? error
+                : diagnostic?.message || diagnostic?.code || "chat_turn_not_accepted"
+            )
+      }
       if (!sessionId) {
         useChatStore.getState().setError(tInlineErr("noSession"))
+        rejectSend(tInlineErr("noSession"))
         return
       }
-      if (typeof content === "string" && !content.trim()) return
-      if (Array.isArray(content) && content.length === 0) return
+      if (
+        (typeof content === "string" && !content.trim()) ||
+        (Array.isArray(content) && content.length === 0)
+      ) {
+        rejectSend("empty_chat_turn")
+        return
+      }
 
       const sharedTarget = await getSession(sessionId)
       // Only a NEW user turn is published to the shared transcript. The
@@ -713,6 +762,7 @@ export function useClaudeChat() {
       // renderer's streaming panels.
       if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
         console.warn("send blocked: concurrent stream cap reached", { sessionId })
+        rejectSend("concurrent_stream_cap_reached")
         return
       }
 
@@ -963,6 +1013,7 @@ export function useClaudeChat() {
         useChatStore
           .getState()
           .setSessionError(sessionId, tInlineErr("providerConcurrencyCapReached"))
+        rejectSend(tInlineErr("providerConcurrencyCapReached"))
         return
       }
 
@@ -1047,6 +1098,7 @@ export function useClaudeChat() {
             meta: { sessionId },
           })
         )
+        rejectSend(promptDecision.reason || "prompt_blocked_by_plugin")
         return
       }
       if (promptDecision.action === "modify") {
@@ -1261,6 +1313,7 @@ export function useClaudeChat() {
               sessionId,
               toDiagnostic(error, { source: "chat", meta: { sessionId } })
             )
+          rejectSend(error)
           return
         }
       }
@@ -1396,6 +1449,7 @@ export function useClaudeChat() {
               )
             )
             chatTurnPerformance.finish(sessionId, "failed")
+            rejectSend(result.reason || "squad_dispatch_failed")
             return
           }
           // Leave the conversation's own record of the handoff, now rather
@@ -1450,6 +1504,7 @@ export function useClaudeChat() {
             })
           )
           chatTurnPerformance.finish(sessionId, "failed")
+          rejectSend(error)
         }
         return
       }
@@ -1596,6 +1651,7 @@ export function useClaudeChat() {
           outcome: "failed",
           errorCode: "cost_budget_exceeded",
         })
+        rejectSend("cost_budget_exceeded")
         return
       }
       // Durable acceptance (ADR-0123), phase A. `effectiveContent` has been
@@ -1687,6 +1743,7 @@ export function useClaudeChat() {
             ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
           })
         }
+        rejectSend(input.diagnostic.message || input.errorCode)
       }
       let abortStaleLocalRuntime = () => {}
       if (durableReceipt) {
@@ -1899,24 +1956,35 @@ export function useClaudeChat() {
           // the one the session already holds — which, when the refusal is
           // `isWorkspaceBusyRefusal`, is precisely the live turn that caused it.
           markTurnUnowned()
+          const leaseFailure = error instanceof Error ? error.message : String(error)
           await refuseTurn({
             errorCode: "task_workspace_unavailable",
             finishRun: true,
-            diagnostic: createDiagnostic("workspaceUnavailable", {
-              source: "chat",
-              // Only the refusal we can name is translated. For that one the
-              // host's sentence is an English internal key with nothing in it
-              // for the reader; for every other failure it is the ONLY account
-              // of what went wrong, and `detail` has no renderer yet, so
-              // replacing it with a generic sentence would lose the cause.
-              message: isWorkspaceBusyRefusal(error)
-                ? tInlineErr("workspaceBusy")
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
-              detail: error instanceof Error ? error.message : String(error),
-              meta: { sessionId },
-            }),
+            // Two codes, because the two refusals want opposite advice:
+            // `workspaceUnavailable` tells the reader to bind a folder, which
+            // is exactly wrong for a binding that is already correct and merely
+            // held by a turn that has not finished.
+            diagnostic: isWorkspaceBusyRefusal(error)
+              ? createDiagnostic("workspaceBusy", {
+                  source: "chat",
+                  // The host's own sentence names an internal workspace key and
+                  // says nothing to a reader, so the translated one is what
+                  // `message` carries — it is mirrored onto the legacy
+                  // `errorMessage` that the mobile toast and the OS session
+                  // notification still render as prose. The host's words go to
+                  // `detail`, under the card's raw disclosure.
+                  message: tInlineErr("workspaceBusy"),
+                  detail: leaseFailure,
+                  meta: { sessionId },
+                })
+              : createDiagnostic("workspaceUnavailable", {
+                  source: "chat",
+                  // For every other failure the host's sentence is the ONLY
+                  // account of what went wrong, so it stays the message rather
+                  // than being demoted into a disclosure.
+                  message: leaseFailure,
+                  meta: { sessionId },
+                }),
           })
           return
         }
@@ -2092,10 +2160,24 @@ export function useClaudeChat() {
         // Local lanes only. A host lane names a configuration the Host owns and
         // runs; there is no local adapter to register, and asking the local
         // store for it would answer `unknown-agent` for a perfectly good agent.
+        const cogniaModel = resolveExternalAgentCogniaModelAxis({
+          agentId: extAgentId,
+          sessionModel: session?.model,
+          sessionProviderOverride: session?.providerOverride,
+          accountId: session?.accountId ?? undefined,
+        })
+        const managedGatewayTask =
+          !!(cogniaModel === undefined
+            ? useExternalAgentStore.getState().agents[extAgentId]?.cogniaModel
+            : cogniaModel) ||
+          (session?.externalAgentSession?.agentId === extAgentId &&
+            session.externalAgentSession.sessionId.startsWith("cognia-gateway:"))
         if (turnRuntimeRef?.kind === "external") {
           const { ensureExternalAgentReady } =
             await import("@/lib/agent/ensure-external-agent-ready")
-          const readiness = await ensureExternalAgentReady(extAgentId)
+          const readiness = await ensureExternalAgentReady(extAgentId, {
+            deferConnect: managedGatewayTask,
+          })
           if (!readiness.ok) {
             store.getState().replaceSessionMessages(sessionId, previousMessages)
             await refuseTurn({
@@ -2179,7 +2261,7 @@ export function useClaudeChat() {
           pending.persist.cancel()
           registry.release(sessionId)
           await persistMessages(sessionId, next).catch(() => undefined)
-          if (delegation && chatFailurePolicy === "fallback") {
+          if (delegation && chatFailurePolicy === "fallback" && !managedGatewayTask) {
             await finishDirectChatExecutionRun(
               sessionId,
               "failed",
@@ -2234,6 +2316,9 @@ export function useClaudeChat() {
           if (error) dispatchPluginChatError(sessionId, error)
         }
 
+        const gatewayController =
+          managedGatewayTask && !hostSelection ? new AbortController() : undefined
+        if (gatewayController) externalGatewayAbortRef.current.set(sessionId, gatewayController)
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
@@ -2326,9 +2411,28 @@ export function useClaudeChat() {
            * thing that differs: the card, the store and the dialog are the same
            * ones the local lane uses.
            */
+          let persistedExternalSessionId = session?.externalAgentSession?.sessionId
+          let externalSessionWrite = Promise.resolve()
+          let externalSessionWriteError: unknown
+          const persistExternalSession = (nativeId?: string) => {
+            if (!nativeId?.startsWith("cognia-gateway:") || nativeId === persistedExternalSessionId)
+              return
+            persistedExternalSessionId = nativeId
+            externalSessionWrite = externalSessionWrite
+              .then(async () => {
+                await updateSession(sessionId, {
+                  externalAgentSession: { agentId: extAgentId, sessionId: nativeId },
+                })
+              })
+              .catch((error: unknown) => {
+                externalSessionWriteError = error
+              })
+          }
           const handleExternalEvent = (
             event: import("@/types/agent/external-agent").ExternalAgentEvent
           ) => {
+            if (event.type === "session_start") persistExternalSession(event.sessionId)
+            if (gatewayController?.signal.aborted) return
             // First, before anything else in this handler can throw or return:
             // an agent that refused the turn has exactly one useful thing to
             // say, and remembering it must not depend on the projection or the
@@ -2431,6 +2535,7 @@ export function useClaudeChat() {
             defaultProvider: appSettings?.defaultProvider,
           })
           const externalModelAxes = {
+            ...(cogniaModel !== undefined ? { cogniaModel } : {}),
             ...(externalModel ? { model: externalModel } : {}),
             ...(sendOptions.requestedEffort || sendOptions.effort
               ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
@@ -2457,6 +2562,10 @@ export function useClaudeChat() {
                 })
               : await executeOnExternalAgent(externalSendText, {
                   agentId: extAgentId,
+                  ...(gatewayController ? { signal: gatewayController.signal } : {}),
+                  ...(session?.externalAgentSession?.agentId === extAgentId
+                    ? { sessionId: session.externalAgentSession.sessionId }
+                    : {}),
                   // Resume the agent's own native session, but only for an
                   // import whose binding has been verified. The id comes from
                   // the session row, which is where it has always lived. The
@@ -2478,6 +2587,10 @@ export function useClaudeChat() {
                 })
 
           sealCoalescer()
+          persistExternalSession(result?.sessionId)
+          await externalSessionWrite
+          if (externalSessionWriteError) throw externalSessionWriteError
+          if (gatewayController?.signal.aborted) return
 
           if (!result) {
             await handleExternalFailure("No external agent available for this request")
@@ -2584,9 +2697,13 @@ export function useClaudeChat() {
           emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
           emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
         } catch (err) {
+          if (gatewayController?.signal.aborted) return
           const error = err instanceof Error ? err : new Error(String(err))
           await handleExternalFailure(error.message, error)
         } finally {
+          if (externalGatewayAbortRef.current.get(sessionId) === gatewayController) {
+            externalGatewayAbortRef.current.delete(sessionId)
+          }
           // However this turn ended, the adapter's waiters are gone. An entry
           // left behind would be an unanswerable dialog pinned over the pane —
           // the approval dialog has no close button, because on the SDK path
@@ -2594,6 +2711,7 @@ export function useClaudeChat() {
           // on each exit path so a throw between them cannot skip it.
           await releaseExternalDecisionSurfaces()
         }
+        if (store.getState().sessions[sessionId]?.errorDiagnostic) rejectSend()
         return
       }
       // ── End external agent branch ──────────────────────────────────────
@@ -2834,6 +2952,7 @@ export function useClaudeChat() {
             ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
           })
         }
+        rejectSend(error)
       }
     },
     [
@@ -2924,7 +3043,7 @@ export function useClaudeChat() {
               context,
               target.collaboration.sessionId,
               Math.max(
-                synced?.cursor ?? target.collaboration.lastSequence,
+                synced?.cursor ?? target.collaboration.syncCursor,
                 Number(next.payload.contextSequence)
               ),
               await getDeviceId()
@@ -3036,22 +3155,25 @@ export function useClaudeChat() {
     []
   )
   const openSessionIdsForDrain = useChatStore((s) => s.openSessionIds)
+  const paneIdsForDrain = useChatStore((s) => s.paneIdsBySession)
   useEffect(() => {
     void expireSessionPeerMessages().catch(() => undefined)
-    for (const sessionId of openSessionIdsForDrain) {
+    const reachable = new Set([...openSessionIdsForDrain, ...Object.keys(paneIdsForDrain ?? {})])
+    for (const sessionId of reachable) {
       maybeDrainBackgroundResults(sessionId)
       void drainSessionPeerMessages(sessionId).catch(() => undefined)
     }
-  }, [openSessionIdsForDrain])
+  }, [openSessionIdsForDrain, paneIdsForDrain])
 
   // Self-paced /loop kick-off: when the runtime creates or resumes a loop
-  // for the ACTIVE session, dispatch its next iteration silently — the same
+  // for a reachable session, dispatch its next iteration silently — the same
   // skipUserAppend path as every later continuation, so the send never trips
   // the fresh-user-message preempt above.
   useEffect(() => {
     const unsub = getLoopRuntime().onKickoff((loop) => {
-      if (loop.sessionId !== activeRef.current) return
+      if (!isSessionOpen(loop.sessionId)) return
       void sendRef.current?.(renderLoopIterationMessage(loop), undefined, {
+        sessionId: loop.sessionId,
         skipUserAppend: true,
       })
     })
@@ -3117,9 +3239,12 @@ export function useClaudeChat() {
         // sidecar path interrupts the host instead. The follow-up
         // `session_ended` remains idempotent with the optimistic local seal.
         const standaloneController = standaloneAbortRef.current.get(sessionId)
+        const gatewayController = externalGatewayAbortRef.current.get(sessionId)
         if (hostStateAbortQueued) {
           // Durable HostState action owns the interrupt; the runner retries it
           // with the same action id after reconnect.
+        } else if (gatewayController) {
+          gatewayController.abort()
         } else if (standaloneController) {
           standaloneController.abort()
           standaloneAbortRef.current.delete(sessionId)
@@ -3148,6 +3273,11 @@ export function useClaudeChat() {
       if (queued.length === 0) return
       steerArmed.add(sessionId)
       try {
+        const gatewayController = externalGatewayAbortRef.current.get(sessionId)
+        if (gatewayController) {
+          gatewayController.abort()
+          return
+        }
         const handle = getExecutionHandle(sessionId)
         if (handle) await handle.interrupt()
         else await interruptSession(sessionId)
@@ -3401,7 +3531,9 @@ export function useClaudeChat() {
     async (sessionId: string) => {
       const handle = getExecutionHandle(sessionId)
       try {
-        if (handle) await handle.cancel()
+        const gatewayController = externalGatewayAbortRef.current.get(sessionId)
+        if (gatewayController) gatewayController.abort()
+        else if (handle) await handle.cancel()
         else await closeSession(sessionId)
       } catch (err) {
         console.error("close session failed", err)

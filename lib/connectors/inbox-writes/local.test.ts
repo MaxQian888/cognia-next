@@ -26,6 +26,7 @@ import type { ConversationReference } from "@/types/connectors/event"
 
 import {
   DraftNotFoundError,
+  parseManualReplyMessageMetadata,
   adapterIdOfConversationKey,
   approveDraftLocally,
   draftApprovalIdempotencyKey,
@@ -52,6 +53,7 @@ function fakeGateway(): void {
       conversationKey: string
       request: OutboundJobRow["request"]
       source: OutboundJobRow["source"]
+      localMessage?: import("@cognia/agent-config-types").StoredMessage
     }) => {
       const now = Date.now()
       const row: OutboundJobRow = {
@@ -68,6 +70,11 @@ function fakeGateway(): void {
         source: input.source,
       }
       await getDb().outboundQueue.add(row)
+      if (input.localMessage)
+        await getDb().messages.put({
+          ...input.localMessage,
+          metadata: { ...input.localMessage.metadata, outboundJobId: row.id },
+        })
       return row
     }
   )
@@ -99,8 +106,8 @@ describe("segmentsToMessageParts", () => {
     ).toEqual([
       { type: "text", text: "hello" },
       { type: "text", text: "**bold**" },
-      { type: "text", text: "[image: https://x/i.png]" },
-      { type: "text", text: "[file: report.pdf]" },
+      { type: "file", url: "https://x/i.png", mediaType: "image/png" },
+      { type: "file", url: "https://x/f", mediaType: "application/pdf", filename: "report.pdf" },
     ])
   })
 
@@ -126,6 +133,27 @@ describe("sendManualReplyLocally", () => {
     idempotencyKey: "idem-1",
   }
 
+  it("preserves internal reply and template metadata without including it in the platform request", async () => {
+    const messageMetadata = {
+      replyTo: {
+        messageId: "local-parent",
+        platformMessageId: "remote-parent",
+        preview: "earlier",
+      },
+      templateRun: {
+        templateId: "t",
+        version: "1",
+        text: "hello",
+        params: { who: { kind: "text" as const, value: "name" } },
+      },
+    }
+    const result = await sendManualReplyLocally({ ...input, messageMetadata })
+    expect((await getDb().messages.get(result.messageId))?.metadata).toMatchObject(messageMetadata)
+    expect(enqueueMock.mock.calls[0][0].request.metadata).toEqual({
+      idempotencyKey: input.idempotencyKey,
+    })
+  })
+
   it("enqueues a governed manual job and appends the local user message", async () => {
     const result = await sendManualReplyLocally(input)
 
@@ -143,6 +171,15 @@ describe("sendManualReplyLocally", () => {
     expect(message?.parts).toEqual([{ type: "text", text: "on it" }])
     expect(message?.metadata?.outboundJobId).toBe(result.jobId)
     expect(invalidateMock).toHaveBeenCalledWith("messages", KEY)
+  })
+
+  it("keeps committed acceptance when the sync notification throws", async () => {
+    invalidateMock.mockImplementationOnce(() => {
+      throw new Error("notification unavailable")
+    })
+    const sent = await sendManualReplyLocally(input)
+    expect((await getDb().messages.get(sent.messageId))?.metadata?.outboundJobId).toBe(sent.jobId)
+    expect(await getDb().outboundQueue.count()).toBe(1)
   })
 
   it("replays idempotently — a retried RPC never sends twice", async () => {
@@ -327,4 +364,26 @@ describe("draftApprovalIdempotencyKey", () => {
   it("derives a stable key from the draft id", () => {
     expect(draftApprovalIdempotencyKey({ id: "d-1" })).toBe("cdr-approve:d-1")
   })
+})
+
+describe("parseManualReplyMessageMetadata", () => {
+  it("accepts absent and valid internal metadata", () => {
+    expect(parseManualReplyMessageMetadata(undefined)).toBeUndefined()
+    const metadata = {
+      replyTo: { messageId: "m", preview: "quote" },
+      templateRun: {
+        templateId: "t",
+        version: "1",
+        text: "hello",
+        params: { who: { kind: "text" as const, value: "name" } },
+      },
+    }
+    expect(parseManualReplyMessageMetadata(metadata)).toEqual(metadata)
+  })
+  it.each([null, [], "x", { other: "unexpected" }, { replyTo: "bad" }, { templateRun: {} }])(
+    "rejects malformed metadata: %j",
+    (value) => {
+      expect(() => parseManualReplyMessageMetadata(value)).toThrow("invalid messageMetadata")
+    }
+  )
 })

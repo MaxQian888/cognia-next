@@ -553,6 +553,10 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       typeof file.sizeBytes === "number" && Number.isFinite(file.sizeBytes) && file.sizeBytes > 0
         ? Math.floor(file.sizeBytes)
         : undefined
+    if (length === undefined && file.url.startsWith("data:")) {
+      const encoded = /^data:[^,]*;base64,([A-Za-z0-9+/]*={0,2})$/.exec(file.url)?.[1]
+      if (encoded !== undefined) length = atob(encoded).length
+    }
     if (length === undefined && !isRemoteHttpSource(file.url)) {
       try {
         const stat = await statFile(localPathFromSource(file.url))
@@ -589,7 +593,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       await connectorsMediaUpload({
         uploadUrl: opened.upload_url,
         contentType: file.mimeType || "application/octet-stream",
-        ...(isRemoteHttpSource(file.url)
+        ...(isRemoteHttpSource(file.url) || file.url.startsWith("data:")
           ? { sourceUrl: file.url }
           : { localPath: localPathFromSource(file.url) }),
       })
@@ -728,7 +732,7 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
               seg.type === "file"
                 ? seg.name || fileNameFromSource(seg.url, "file")
                 : seg.alt || fileNameFromSource(seg.url, "image"),
-            mimeType: seg.type === "file" ? seg.mimeType : undefined,
+            mimeType: seg.mimeType,
             sizeBytes: seg.type === "file" ? seg.sizeBytes : undefined,
           },
           { channelId: refChannel || undefined, threadTs: refThreadTs }

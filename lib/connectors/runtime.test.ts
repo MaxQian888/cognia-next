@@ -73,7 +73,8 @@ jest.mock("@/lib/twin/runtime/build-deps", () => ({
 let tryBuildMemoryDepsImpl: jest.Mock = jest.fn(async () => undefined)
 jest.mock("@/lib/memory/runtime/build-deps", () => ({
   __esModule: true,
-  tryBuildMemoryDeps: (...a: unknown[]) => tryBuildMemoryDepsImpl(...a),
+  tryBuildMemoryDeps: (...a: Parameters<typeof tryBuildMemoryDepsImpl>) =>
+    tryBuildMemoryDepsImpl(...a),
 }))
 
 // The embedding provider is mocked so the PII-embed-gate tests can assert
@@ -178,6 +179,7 @@ function makeEvent(
 }
 
 const RESOLVED: ResolvedBinding = {
+  modeSource: "adapter-default",
   mode: "auto",
   characterId: "char_abc",
   trigger: {
@@ -2639,7 +2641,7 @@ describe("installRuntime — ai-run reply quoting (ADR-0009 §3A.3)", () => {
     await callHandler(groupEvent({ canReplyToMessage: false }), "ai-run")
     const [job] = await getDb().outboundQueue.toArray()
     expect(job.request.replyTo).toBeUndefined()
-    expect(job.request.deliveryTarget.sourceMessageId).toBeUndefined()
+    expect(job.request.deliveryTarget?.sourceMessageId).toBeUndefined()
     const [binding] = await getDb().executionRunBindings.toArray()
     expect(binding).toBeDefined()
     expect(binding.sourceMessageId).toBeUndefined()
@@ -3120,5 +3122,24 @@ describe("insertInboundMessage — session recency bump", () => {
     )
     const bumped = await getDb().sessions.get(session.id)
     expect(bumped!.updatedAt).toBe(9_999_999_999_999)
+  })
+})
+
+describe("inbound shared unread state", () => {
+  it("increments the canonical session unread counter once across concurrent redelivery", async () => {
+    const event = makeEvent({
+      conversationKey: "telegram:adapter_1:unread-unified",
+      messageId: "first",
+    })
+    await callHandler(event, "manual-store")
+    const session = (await getDb().sessions.toArray())[0]!
+    const previous = (await getDb().sessionState.get(session.id))?.unreadCount ?? 0
+    const next = makeEvent({ conversationKey: event.conversationKey, messageId: "second" })
+    const [a, b] = await Promise.all([
+      insertInboundMessage(next, session.id),
+      insertInboundMessage(next, session.id),
+    ])
+    expect(a.id).toBe(b.id)
+    expect((await getDb().sessionState.get(session.id))?.unreadCount).toBe(previous + 1)
   })
 })

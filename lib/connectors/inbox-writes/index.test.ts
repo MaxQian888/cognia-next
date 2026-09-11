@@ -97,6 +97,14 @@ beforeEach(async () => {
       idempotencyKey: (input as unknown as OutboundJobRow).request.metadata.idempotencyKey,
     } as OutboundJobRow
     await getDb().outboundQueue.add(row)
+    const message = (
+      input as unknown as { localMessage?: import("@cognia/agent-config-types").StoredMessage }
+    ).localMessage
+    if (message)
+      await getDb().messages.put({
+        ...message,
+        metadata: { ...message.metadata, outboundJobId: row.id },
+      })
     return row
   })
 })
@@ -115,6 +123,33 @@ const sendInput = {
 }
 
 describe("sendManualReply", () => {
+  it.each(["local", "remote"] as const)(
+    "preserves reply/template provenance through the %s facade",
+    async (route) => {
+      if (route === "local") asLocalHost()
+      else asThinClient()
+      const messageMetadata = {
+        replyTo: { messageId: "parent", platformMessageId: "remote-parent", preview: "quoted" },
+        templateRun: { templateId: "template", version: "1", text: "on it", params: {} },
+      }
+      const outcome = await sendManualReply({ ...sendInput, messageMetadata })
+      expect((await getDb().messages.get(outcome.messageId))?.metadata).toMatchObject(
+        messageMetadata
+      )
+      if (route === "remote") {
+        const [queued] = await getDb().mobileOutboundQueue.toArray()
+        expect(queued.payload.messageMetadata).toEqual(messageMetadata)
+        expect((queued.payload.request as { metadata: unknown }).metadata).toEqual({
+          idempotencyKey: outcome.idempotencyKey,
+        })
+      } else {
+        expect(enqueueMock.mock.calls[0][0].request.metadata).toEqual({
+          idempotencyKey: outcome.idempotencyKey,
+        })
+      }
+    }
+  )
+
   it("executes locally on a connector host and reports the route", async () => {
     asLocalHost()
     const outcome = await sendManualReply(sendInput)
@@ -283,5 +318,80 @@ describe("InboxWriteUnavailableError", () => {
     expect(error.name).toBe("InboxWriteUnavailableError")
     expect(error.message).toContain("connector_enqueue_outbound")
     expect(error.message).toContain("requires-companion")
+  })
+})
+
+describe("manual send atomic acceptance", () => {
+  const request = {
+    adapterId: ADAPTER,
+    conversationKey: KEY,
+    sessionId: SESSION,
+    conversationRef: REF,
+    text: "keep my reply",
+    messageMetadata: {
+      replyTo: { messageId: "parent", preview: "quoted" },
+    },
+  }
+  it.each(["local", "remote"])(
+    "rolls back %s queue acceptance when transcript persistence fails",
+    async (route) => {
+      if (route === "local") {
+        asLocalHost()
+        enqueueMock.mockImplementation(
+          jest.requireActual("@/lib/connectors/delivery-gateway").enqueueGoverned
+        )
+      } else asThinClient()
+      const db = getDb()
+      const failMirror = jest
+        .spyOn(db.messages, route === "local" ? "bulkPut" : "put")
+        .mockRejectedValueOnce(new Error("transcript storage failed"))
+      await expect(sendManualReply(request)).rejects.toThrow("transcript storage failed")
+      failMirror.mockRestore()
+      expect(await db.outboundQueue.count()).toBe(0)
+      expect(await db.mobileOutboundQueue.count()).toBe(0)
+      expect(await db.messages.count()).toBe(0)
+      const sent = await sendManualReply(request)
+      expect(await db.messages.count()).toBe(1)
+      expect((await db.messages.get(sent.messageId))?.metadata?.replyTo).toEqual(
+        request.messageMetadata.replyTo
+      )
+      expect(await (route === "local" ? db.outboundQueue : db.mobileOutboundQueue).count()).toBe(1)
+    }
+  )
+
+  it("reports a committed send as accepted when post-commit housekeeping fails", async () => {
+    asLocalHost()
+    const gateway = jest.requireActual("@/lib/connectors/delivery-gateway").enqueueGoverned
+    enqueueMock.mockImplementation(async (input: unknown) => {
+      await gateway(input)
+      throw new Error("post-commit housekeeping failed")
+    })
+    const sent = await sendManualReply(request)
+    expect(sent.messageId).toBeTruthy()
+    expect(await getDb().outboundQueue.count()).toBe(1)
+    expect((await getDb().messages.get(sent.messageId))?.metadata?.outboundJobId).toBe(sent.jobId)
+  })
+
+  it("serializes overlapping host replays without replacing original metadata", async () => {
+    asLocalHost()
+    enqueueMock.mockImplementation(
+      jest.requireActual("@/lib/connectors/delivery-gateway").enqueueGoverned
+    )
+    const firstInput = {
+      ...request,
+      idempotencyKey: "concurrent-manual",
+      clientMessageId: "first-message",
+    }
+    const [first, replay] = await Promise.all([
+      sendManualReply(firstInput),
+      sendManualReply({ ...firstInput, clientMessageId: "replay-message", text: "changed replay" }),
+    ])
+    expect(first.messageId).toBe("first-message")
+    expect(replay).toMatchObject({ messageId: first.messageId, jobId: first.jobId, reused: true })
+    expect(await getDb().outboundQueue.count()).toBe(1)
+    expect(await getDb().messages.count()).toBe(1)
+    expect((await getDb().messages.get(first.messageId))?.parts).toEqual([
+      { type: "text", text: request.text },
+    ])
   })
 })

@@ -49,6 +49,18 @@ beforeEach(async () => {
 afterEach(() => clearActiveRuntimeTargetContext())
 
 describe("sendManualReplyRemotely", () => {
+  it("relays reply provenance as internal metadata and keeps it in the optimistic mirror", async () => {
+    const messageMetadata = { replyTo: { messageId: "parent", preview: "quoted" } }
+    const { queueRow, messageId } = await sendManualReplyRemotely({
+      ...manualInput,
+      messageMetadata,
+    })
+    expect(queueRow.payload.messageMetadata).toEqual(messageMetadata)
+    expect((queueRow.payload.request as { metadata: unknown }).metadata).toEqual({
+      idempotencyKey: "idem-1",
+    })
+    expect((await getDb().messages.get(messageId))?.metadata).toMatchObject(messageMetadata)
+  })
   it("enqueues the relay RPC and mirrors the message optimistically", async () => {
     const { queueRow, messageId } = await sendManualReplyRemotely(manualInput)
 
@@ -175,4 +187,23 @@ describe("mutateOverrideRemotely", () => {
     // A leaked marker would permanently freeze this conversation's sync.
     expect(hasPendingOverrideMutation(KEY)).toBe(false)
   })
+})
+
+it("rolls back the durable relay when its optimistic message cannot be stored", async () => {
+  const fail = jest.spyOn(getDb().messages, "put").mockRejectedValueOnce(new Error("mirror failed"))
+  try {
+    await expect(sendManualReplyRemotely(manualInput)).rejects.toThrow("mirror failed")
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+  } finally {
+    fail.mockRestore()
+  }
+})
+
+it("preserves the enqueue error when a malformed target has no pending marker to release", async () => {
+  clearActiveRuntimeTargetContext()
+  await expect(mutateOverrideRemotely({ kind: "delete", conversationKey: "" })).rejects.toThrow(
+    "Outbound queue requires an active account and runtime target"
+  )
+  expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+  expect(hasPendingOverrideMutation("")).toBe(false)
 })

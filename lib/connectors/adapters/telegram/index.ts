@@ -227,8 +227,10 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       } as Record<string, string>
     )[method]
     const source = field ? payload[field] : undefined
+    const inlineSource =
+      typeof source === "string" && source.startsWith("data:") ? source : undefined
     let localPath: string | undefined
-    if (typeof source === "string") {
+    if (typeof source === "string" && !inlineSource) {
       const asset = source.match(/^(?:asset:\/\/localhost|https?:\/\/asset\.localhost)\/(.+)$/i)
       if (asset) {
         const decoded = decodeURIComponent(asset[1])
@@ -240,16 +242,16 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
       }
     }
     const resp =
-      localPath && field
+      (localPath || inlineSource) && field
         ? (JSON.parse(
             await connectorsMediaUpload({
               uploadUrl: url,
-              localPath,
+              ...(inlineSource ? { sourceUrl: inlineSource } : { localPath }),
               responseMode: "http",
               contentType: upload?.contentType,
               multipart: {
                 fieldName: field,
-                filename: upload?.filename || localPath.split(/[\\/]/).pop() || field,
+                filename: upload?.filename || localPath?.split(/[\\/]/).pop() || field,
                 fields: Object.fromEntries(
                   Object.entries(payload)
                     .filter(([key, value]) => key !== field && value !== undefined)

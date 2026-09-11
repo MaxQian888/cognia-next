@@ -26,7 +26,7 @@ import {
 
 /** True when the segment carries a remote URL that still needs uploading. */
 function needsUpload(url: string): boolean {
-  return url.includes("://")
+  return url.startsWith("data:") || url.includes("://")
 }
 
 /** Lowercased extension of a URL's path (query/hash stripped), or "". */

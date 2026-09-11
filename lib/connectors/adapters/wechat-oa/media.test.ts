@@ -126,7 +126,11 @@ it("rejects empty messages and missing recipient", async () => {
     "empty"
   )
   await expect(
-    prepareWechatMessages({ ...req([]), conversationRef: {} }, token, "https://api.weixin.qq.com")
+    prepareWechatMessages(
+      { ...req([]), conversationRef: { platform: "wechat-oa", adapterId: "oa-1" } },
+      token,
+      "https://api.weixin.qq.com"
+    )
   ).rejects.toThrow("openId")
 })
 

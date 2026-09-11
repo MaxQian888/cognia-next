@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { UserIcon } from "lucide-react"
 
+import { getActiveCredential } from "@cognia/provider-core/providers/completeness"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -19,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { updateSession } from "@/lib/db/sessions"
 import { subscriptionAccountProviderFor } from "@/lib/claude/env-resolver"
-import { useAccounts } from "@/lib/subscription/core/hooks"
+import { useAccounts, useSubscriptionProviders } from "@/lib/subscription/core/hooks"
 import { useSettingsStore } from "@/stores/settings"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -49,16 +50,37 @@ export function HeaderAccountSwitcher({
   const settings = useSettingsStore((state) => state.settings)
   const rawProviderId =
     session?.providerOverride ?? characterProviderId ?? settings?.defaultProvider ?? "anthropic"
-  const subscriptionProvider = subscriptionAccountProviderFor(rawProviderId)
+  const providers = useSubscriptionProviders()
+  const definition = providers.find(
+    (entry) =>
+      entry.id === rawProviderId ||
+      entry.plans?.some((plan) => plan.chatProviderId === rawProviderId)
+  )
+  const subscriptionProvider = definition?.id ?? subscriptionAccountProviderFor(rawProviderId)
   const providerId: ProviderId = subscriptionProvider ?? "anthropic"
   const live = useAccounts(providerId)
   const accounts = testAccounts ?? live.accounts
   const [sessionSelection, setSessionSelection] = useState({
     sessionId: session?.id,
     accountId: session?.accountId,
+    authoritativeAccountId: session?.accountId,
   })
+  const [savingSessionId, setSavingSessionId] = useState<string | null>(null)
+  if (
+    sessionSelection.sessionId !== session?.id ||
+    sessionSelection.authoritativeAccountId !== session?.accountId
+  ) {
+    setSessionSelection({
+      sessionId: session?.id,
+      accountId: session?.accountId,
+      authoritativeAccountId: session?.accountId,
+    })
+  }
   const sessionAccountId =
-    sessionSelection.sessionId === session?.id ? sessionSelection.accountId : session?.accountId
+    sessionSelection.sessionId === session?.id &&
+    sessionSelection.authoritativeAccountId === session?.accountId
+      ? sessionSelection.accountId
+      : session?.accountId
 
   const inheritedAccountId = useMemo(
     () =>
@@ -79,26 +101,44 @@ export function HeaderAccountSwitcher({
       settings?.defaultProvider,
     ]
   )
+  const inheritsManualKey =
+    definition?.authMode !== "anthropic-oauth" &&
+    !characterAccountIdOverride &&
+    Boolean(getActiveCredential(settings?.providerSettings?.[rawProviderId]))
+  const usesManualKey = !sessionAccountId && inheritsManualKey
+  const inheritedLabel =
+    accountLabel(accounts.find((account) => account.id === inheritedAccountId)) ?? t("noOverride")
   const effectiveAccountId = sessionAccountId ?? inheritedAccountId
   const effectiveAccount = accounts.find((account) => account.id === effectiveAccountId)
   const effectiveLabel =
-    accountLabel(effectiveAccount) ??
+    (usesManualKey ? t("manualApiKey") : accountLabel(effectiveAccount)) ??
     (effectiveAccountId
       ? t("unavailableWithId", { id: effectiveAccountId.slice(0, 8) })
       : t("noOverride"))
 
-  if (!subscriptionProvider || (accounts.length <= 1 && !sessionAccountId)) return null
+  if (
+    !subscriptionProvider ||
+    (!sessionAccountId && (accounts.length === 0 || (accounts.length === 1 && !inheritsManualKey)))
+  )
+    return null
 
   const saveSessionAccount = async (accountId: string | undefined, label: string) => {
-    if (!session || sessionAccountId === accountId) return
+    if (!session || sessionAccountId === accountId || savingSessionId === session.id) return
+    setSavingSessionId(session.id)
     try {
       await updateSession(session.id, { accountId })
-      setSessionSelection({ sessionId: session.id, accountId })
+      setSessionSelection({
+        sessionId: session.id,
+        accountId,
+        authoritativeAccountId: session.accountId,
+      })
       toast.success(accountId ? t("toast", { label }) : t("inheritedToast", { label }))
     } catch (cause) {
       toast.error(
         t("switchFailed", { error: cause instanceof Error ? cause.message : String(cause) })
       )
+    } finally {
+      setSavingSessionId((current) => (current === session.id ? null : current))
     }
   }
 
@@ -111,6 +151,7 @@ export function HeaderAccountSwitcher({
           className="h-7 gap-1 px-2 text-xs"
           data-testid="header-account-switcher"
           aria-label={t("aria")}
+          disabled={savingSessionId === session?.id}
         >
           <UserIcon className="size-3" aria-hidden="true" />
           <span>{effectiveLabel}</span>
@@ -118,10 +159,15 @@ export function HeaderAccountSwitcher({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem
-          onSelect={() => void saveSessionAccount(undefined, effectiveLabel)}
+          onSelect={() =>
+            void saveSessionAccount(
+              undefined,
+              inheritsManualKey ? t("manualApiKey") : inheritedLabel
+            )
+          }
           data-testid="account-option-inherited"
         >
-          {t("useInherited")}
+          {t(inheritsManualKey ? "manualApiKey" : "useInherited")}
           {!sessionAccountId && (
             <span className="ml-auto text-[10px] text-muted-foreground">{t("effective")}</span>
           )}
@@ -136,7 +182,7 @@ export function HeaderAccountSwitcher({
               data-testid={`account-option-${account.id}`}
             >
               {label}
-              {effectiveAccountId === account.id && (
+              {!usesManualKey && effectiveAccountId === account.id && (
                 <span className="ml-auto text-[10px] text-muted-foreground">{t("effective")}</span>
               )}
             </DropdownMenuItem>

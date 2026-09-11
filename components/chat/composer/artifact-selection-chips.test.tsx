@@ -284,7 +284,7 @@ describe("entity chips", () => {
   it("labels the chip with the localized kind noun and the record's own title", () => {
     act(() => useChatStore.getState().addContextSelection(entity()))
     render(
-      <ComposerSessionProvider sessionId={null}>
+      <ComposerSessionProvider value={null}>
         <ArtifactSelectionChips />
       </ComposerSessionProvider>
     )
@@ -303,7 +303,7 @@ describe("entity chips", () => {
         )
     })
     render(
-      <ComposerSessionProvider sessionId={null}>
+      <ComposerSessionProvider value={null}>
         <ArtifactSelectionChips />
       </ComposerSessionProvider>
     )
@@ -317,7 +317,7 @@ describe("entity chips", () => {
       useChatStore.getState().addContextSelection(entity({ entityKind: "plan", entityId: "x" }))
     })
     render(
-      <ComposerSessionProvider sessionId={null}>
+      <ComposerSessionProvider value={null}>
         <ArtifactSelectionChips />
       </ComposerSessionProvider>
     )
@@ -333,7 +333,7 @@ describe("entity chips", () => {
       useChatStore.getState().addContextSelection(sel({ artifactId: "a2" }))
     })
     render(
-      <ComposerSessionProvider sessionId={null}>
+      <ComposerSessionProvider value={null}>
         <ArtifactSelectionChips />
       </ComposerSessionProvider>
     )

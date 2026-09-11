@@ -489,8 +489,8 @@ describe("retrieval feedback on a recalled memory", () => {
 
   it("labels every button in both locales", () => {
     for (const messages of [en, zhCN]) {
-      const labels = messages.chat.sourcesPart as Record<string, string>
-      for (const key of ["feedbackHelpful", "feedbackWrong", "feedbackOutdated"]) {
+      const labels = messages.chat.sourcesPart
+      for (const key of ["feedbackHelpful", "feedbackWrong", "feedbackOutdated"] as const) {
         expect(typeof labels[key]).toBe("string")
         expect(labels[key].length).toBeGreaterThan(0)
       }

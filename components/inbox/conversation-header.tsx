@@ -62,6 +62,8 @@ interface ConversationHeaderProps {
   modelOverride?: string
   /** Fires after a successful behaviour write, with the preset that landed. */
   onModeChange?: (preset: ImModePresetId) => void
+  /** Reuse platform controls inside the common chat header. */
+  controlsOnly?: boolean
 }
 
 export function ConversationHeader({
@@ -74,6 +76,7 @@ export function ConversationHeader({
   providerOverride,
   modelOverride,
   onModeChange,
+  controlsOnly = false,
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
   const tPresets = useTranslations("inbox.modeSwitcher.presets")
@@ -126,56 +129,65 @@ export function ConversationHeader({
     }
   }
 
+  const Container = controlsOnly ? "div" : "header"
   return (
-    <header
-      className="flex h-9 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur md:px-3"
+    <Container
+      className={
+        controlsOnly
+          ? "flex shrink-0 items-center gap-1"
+          : "flex h-9 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur md:px-3"
+      }
       data-testid="conversation-header"
     >
-      {/* Mobile-only nav cluster: back to the conversation list + open the
-       * adapters Sheet. Hidden on md+ where the three-pane shell exposes
-       * both surfaces directly. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-7 md:hidden"
-        onClick={handleBack}
-        aria-label={t("backToList")}
-        data-testid="conversation-header-back"
-      >
-        <ChevronLeftIcon className="size-4" />
-      </Button>
-      <SidebarTrigger
-        className="md:hidden"
-        aria-label={t("openSidebar")}
-        data-testid="conversation-header-open-sidebar"
-      />
-
-      {/* Left: platform + character chip + title */}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <PlatformBadge platform={platform} iconOnly />
-        <ThreadMembershipChip conversationKey={conversationKey} className="shrink-0" />
-        {character && (
-          <span
-            className="flex min-w-0 items-center gap-1.5"
-            data-testid="conversation-character-chip"
+      {!controlsOnly && (
+        <>
+          {/* Mobile-only nav cluster: back to the conversation list + open the
+           * adapters Sheet. Hidden on md+ where the three-pane shell exposes
+           * both surfaces directly. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 md:hidden"
+            onClick={handleBack}
+            aria-label={t("backToList")}
+            data-testid="conversation-header-back"
           >
-            <span
-              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
-              style={{ backgroundColor: avatarColor(character), color: "white" }}
-              aria-hidden
-              title={character.name}
-            >
-              {avatarGlyph(character)}
-            </span>
-            <span className="truncate text-xs text-muted-foreground" title={character.name}>
-              {character.name}
-            </span>
-          </span>
-        )}
-        {/* `font-medium`, matching `chat-header.tsx` — same seam, same weight. */}
-        <h2 className="truncate text-sm font-medium">{title}</h2>
-      </div>
+            <ChevronLeftIcon className="size-4" />
+          </Button>
+          <SidebarTrigger
+            className="md:hidden"
+            aria-label={t("openSidebar")}
+            data-testid="conversation-header-open-sidebar"
+          />
+
+          {/* Left: platform + character chip + title */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <PlatformBadge platform={platform} iconOnly />
+            <ThreadMembershipChip conversationKey={conversationKey} className="shrink-0" />
+            {character && (
+              <span
+                className="flex min-w-0 items-center gap-1.5"
+                data-testid="conversation-character-chip"
+              >
+                <span
+                  className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
+                  style={{ backgroundColor: avatarColor(character), color: "white" }}
+                  aria-hidden
+                  title={character.name}
+                >
+                  {avatarGlyph(character)}
+                </span>
+                <span className="truncate text-xs text-muted-foreground" title={character.name}>
+                  {character.name}
+                </span>
+              </span>
+            )}
+            {/* `font-medium`, matching `chat-header.tsx` — same seam, same weight. */}
+            <h2 className="truncate text-sm font-medium">{title}</h2>
+          </div>
+        </>
+      )}
 
       {/* The one control that answers "what will the next turn run as" earns
           its place in the strip; every other setting lives behind `⋯`.
@@ -216,6 +228,7 @@ export function ConversationHeader({
         providerOverride={providerOverride}
         modelOverride={modelOverride}
         desktop={desktop}
+        hideOpenInChat={controlsOnly}
         onOpenContact={() => setContactOpen(true)}
         onOpenBindings={() => setBindingsOpen(true)}
       />
@@ -226,7 +239,7 @@ export function ConversationHeader({
        * all. That applies doubly on a phone, where the `AppShellMobile` top bar
        * (the other standing opener) isn't mounted either, so the toggle must
        * NOT be breakpoint-gated. */}
-      <ArtifactDockToggle className="size-7" />
+      {!controlsOnly && <ArtifactDockToggle className="size-7" />}
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -270,6 +283,6 @@ export function ConversationHeader({
           adapterId={parsedAdapterId}
         />
       )}
-    </header>
+    </Container>
   )
 }

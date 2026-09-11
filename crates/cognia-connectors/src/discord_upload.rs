@@ -70,6 +70,11 @@ fn build_client(target_url: &str) -> Result<reqwest::Client, String> {
 /// Fetch the source URL into memory (shared proxy / TLS config). Times out after
 /// 60 s — enough for typical image / short-video / voice payloads.
 async fn fetch_bytes(source_url: &str) -> Result<bytes::Bytes, String> {
+    if let Some(bytes) =
+        super::media_upload::inline_source_bytes(source_url, super::media_upload::MAX_UPLOAD_BYTES)
+    {
+        return bytes;
+    }
     let client = build_client(source_url)?;
     let resp = client
         .get(source_url)
@@ -180,6 +185,22 @@ pub async fn upload(req: ConnectorDiscordUploadRequest) -> Result<String, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn fetch_bytes_decodes_inline_attachment_without_http() {
+        assert_eq!(
+            fetch_bytes("data:image/png;base64,AQID")
+                .await
+                .unwrap()
+                .as_ref(),
+            &[1, 2, 3]
+        );
+        assert!(fetch_bytes("data:image/png;base64,!")
+            .await
+            .unwrap_err()
+            .contains("base64"));
+    }
+
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

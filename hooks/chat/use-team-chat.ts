@@ -25,6 +25,7 @@
  * react to the same event.
  */
 
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
@@ -58,6 +59,8 @@ import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
  * to the active session). See `RoomSendOptions` for the rest. */
 export interface TeamSendOptions {
   attachmentManifest?: readonly AttachmentManifestEntry[]
+  /** Template provenance retained only on the user transcript row. */
+  templateRun?: ChatTemplateRun
   sessionId?: string
   skipPersistUserTurn?: boolean
   steerDrain?: boolean
@@ -120,7 +123,11 @@ export function useTeamChat() {
       if (!opts?.skipPersistUserTurn && !opts?.steerDrain) {
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts?.attachmentManifest),
-          { senderKind: "user", ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}) }
+          {
+            senderKind: "user",
+            ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}),
+            ...(opts?.templateRun ? { templateRun: opts.templateRun } : {}),
+          }
         )
         const before = useChatStore.getState().sessions[sessionId]?.messages ?? []
         useChatStore.getState().replaceSessionMessages(sessionId, [...before, optimistic])
@@ -132,6 +139,7 @@ export function useTeamChat() {
           content,
           webSearchContext: opts?.webSearchContext,
           attachmentManifest: opts?.attachmentManifest,
+          ...(opts?.templateRun ? { templateRun: opts.templateRun } : {}),
           ...(opts?.replyTo ? { replyTo: opts.replyTo } : {}),
           ...(opts?.targetMemberIds && opts.targetMemberIds.length > 0
             ? { targetMemberIds: [...opts.targetMemberIds] }

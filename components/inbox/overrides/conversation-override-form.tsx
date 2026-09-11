@@ -245,8 +245,6 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [engagement, setEngagement] = useState(initialRow?.engagement)
   const [authority, setAuthority] = useState(initialRow?.authority)
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
-  const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
-  const [archived, setArchived] = useState(initialRow?.archived ?? false)
   // Per-conversation outbound mute (fine-grained control) — consulted by the
   // outbound runner with the same defer semantics as the adapter-level mute.
   const [muted, setMuted] = useState(initialRow?.muted ?? false)
@@ -430,8 +428,6 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         input: {
           conversationKey,
           sessionId,
-          pinned: pinned ? true : undefined,
-          archived: archived ? true : undefined,
           slaResponseMinutes: parseSlaMinutes(slaMinutes),
           // undefined = inherit the adapter default (`defaultEscalation`).
           escalation,
@@ -908,31 +904,6 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
                       />
                     </div>
                     <p className="text-xs text-muted-foreground">{t("fields.replyQuotingHint")}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="conv-override-pinned" className="cursor-pointer">
-                      {t("fields.pinned")}
-                    </Label>
-                    <Switch
-                      id="conv-override-pinned"
-                      checked={pinned}
-                      onCheckedChange={setPinned}
-                      data-testid="conv-override-pinned"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="conv-override-archived" className="cursor-pointer">
-                      {t("fields.archived")}
-                    </Label>
-                    <Switch
-                      id="conv-override-archived"
-                      checked={archived}
-                      onCheckedChange={setArchived}
-                      data-testid="conv-override-archived"
-                    />
                   </div>
                 </div>
 

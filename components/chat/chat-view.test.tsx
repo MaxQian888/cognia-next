@@ -4,6 +4,38 @@
 
 import * as ReactForMocks from "react"
 
+const mockPaneRuntime = {
+  ownsDecisions: true,
+  resumePlan: jest.fn(async () => undefined),
+  runtime: {
+    respondToApproval: jest.fn(async () => undefined),
+    interruptAndSteer: jest.fn(),
+    flushSteer: jest.fn(),
+    compact: jest.fn(),
+    setModel: jest.fn(),
+    resetRuntime: jest.fn(),
+    rewindFiles: jest.fn(),
+  },
+}
+jest.mock("@/hooks/chat/use-chat-pane-runtime", () => ({
+  useChatPaneRuntime: () => mockPaneRuntime,
+}))
+jest.mock("./chat-session-gates", () => ({
+  ChatSessionGates: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="session-decisions" data-session={sessionId} />
+  ),
+}))
+jest.mock("@/components/inbox/platform-conversation-context", () => ({
+  PlatformConversationContext: () => null,
+}))
+const mockPlanDockProps: Array<Record<string, unknown>> = []
+jest.mock("@/components/agent/plan/plan-approval-dock", () => ({
+  PlanApprovalDock: (props: Record<string, unknown>) => {
+    mockPlanDockProps.push(props)
+    return <div data-testid="plan-decision" />
+  },
+}))
+
 const mockComposerProps: Array<Record<string, unknown>> = []
 jest.mock("./composer", () => {
   const react = jest.requireActual<typeof import("react")>("react")
@@ -239,8 +271,55 @@ function makeProps() {
   }
 }
 
+describe("ChatPane shared blocking capabilities", () => {
+  it("does not expose local AI rewrite actions on platform transcripts", () => {
+    const MockList = MessageList as jest.Mock
+    MockList.mockClear()
+    render(
+      <ChatPane
+        {...makeProps()}
+        activeSession={{
+          ...mockSession,
+          platformBinding: {
+            platform: "lark",
+            adapterId: "adapter",
+            conversationRef: { platform: "lark", adapterId: "adapter" },
+            conversationKey: "lark:adapter:chat",
+          },
+        }}
+      />
+    )
+    expect(MockList.mock.calls.at(-1)?.[0]?.onRegenerate).toBeUndefined()
+    expect(MockList.mock.calls.at(-1)?.[0]?.onEditResend).toBeUndefined()
+  })
+  it("exposes approval and plan continuation without any host gate callbacks", () => {
+    mockPaneRuntime.ownsDecisions = true
+    mockPlanDockProps.length = 0
+    render(<ChatPane {...makeProps()} sessionId="embedded" showHeader={false} />)
+    expect(screen.getByTestId("session-decisions")).toHaveAttribute("data-session", "embedded")
+    expect(screen.getByTestId("plan-decision")).toBeInTheDocument()
+    expect(mockPlanDockProps.at(-1)?.onResume).toBe(mockPaneRuntime.resumePlan)
+  })
+  it("does not offer direct plan continuation for a team", () => {
+    render(
+      <ChatPane {...makeProps()} activeSession={{ ...mockSession, kind: "team", teamId: "team" }} />
+    )
+    expect(screen.queryByTestId("plan-decision")).toBeNull()
+    expect(screen.getByTestId("session-decisions")).toBeInTheDocument()
+  })
+  it("renders decisions in only one surface for the same conversation", () => {
+    mockPaneRuntime.ownsDecisions = false
+    render(<ChatPane {...makeProps()} />)
+    expect(screen.queryByTestId("session-decisions")).toBeNull()
+    expect(screen.queryByTestId("plan-decision")).toBeNull()
+    mockPaneRuntime.ownsDecisions = true
+  })
+})
+
 describe("ChatPane", () => {
   beforeEach(() => {
+    mockPaneRuntime.ownsDecisions = true
+    mockPlanDockProps.length = 0
     peekPendingChatPromptMock.mockReset().mockReturnValue(null)
     acknowledgePendingChatPromptMock.mockReset().mockReturnValue(true)
     readOnboardingRequestMock.mockReset().mockReturnValue(null)
@@ -375,7 +454,7 @@ describe("ChatPane", () => {
     // the durable write and the acknowledgement must not dispatch it twice.
     // A legacy handoff has no onboarding record, which is exactly why the
     // transcript, not the record, has to be what proves it already went out.
-    readOnboardingRequestMock.mockReturnValue(undefined)
+    readOnboardingRequestMock.mockReturnValue(null)
     hasPersistedPromptMessageMock.mockReturnValue(true)
     peekPendingChatPromptMock.mockReturnValue({
       id: "dispatch-replay",
@@ -707,6 +786,31 @@ describe("ChatPane", () => {
     }
   })
 
+  /**
+   * `workspaceBusy` is the one workspace code whose registry spec offers a
+   * single action, so an unserved `retry` leaves the card with no footer and no
+   * affordance at all — the failure mode the short-handler-map comment in
+   * `chat-view.tsx` warns about, with nothing left to fall back on.
+   */
+  it("serves the busy workspace code's only action", () => {
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
+    MockDiagnosticCard.mockClear()
+    const diagnostic = createDiagnostic("workspaceBusy", {
+      source: "chat",
+      now: () => 0,
+      id: "busy",
+    })
+    expect(diagnostic.actions).toEqual([{ kind: "retry" }])
+    storeState.errorDiagnostic = diagnostic
+    try {
+      render(<ChatPane {...makeProps()} />)
+      const handlers = MockDiagnosticCard.mock.calls[0]?.[0]?.handlers ?? {}
+      expect(Object.keys(handlers)).toContain("retry")
+    } finally {
+      storeState.errorDiagnostic = null
+    }
+  })
+
   it("passes any other error message through unchanged", () => {
     const MockInlineError = InlineError as jest.Mock
     MockInlineError.mockClear()
@@ -852,6 +956,29 @@ describe("ChatPane", () => {
   })
 
   describe("concurrency cap", () => {
+    it("keeps IM platform sending enabled when AI streams are at capacity", () => {
+      storeState.atCapacity = true
+      render(
+        <ChatPane
+          {...makeProps()}
+          activeSession={
+            {
+              ...mockSession,
+              platformBinding: {
+                platform: "lark",
+                adapterId: "adapter",
+                conversationRef: { platform: "lark", adapterId: "adapter" },
+                conversationKey: "lark:adapter:chat",
+              },
+            } as ChatSession
+          }
+        />
+      )
+      expect(mockComposerProps.at(-1)?.disabled).toBeFalsy()
+      expect(screen.queryByRole("status")).toBeNull()
+      storeState.atCapacity = false
+    })
+
     it("renders the over-capacity notice when the bound session is at the stream cap", () => {
       storeState.atCapacity = true
       const { getByRole } = render(<ChatPane {...makeProps()} />)

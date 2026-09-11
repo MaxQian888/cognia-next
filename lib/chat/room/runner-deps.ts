@@ -129,12 +129,15 @@ export interface RoomRunnerAi {
   runTitleTask: (args: Record<string, unknown>) => Promise<unknown>
   resolveProviderAttemptOptions: (
     providerId: string,
-    settings: AppSettings
+    settings: AppSettings,
+    modelId?: string,
+    previousOptions?: SendOptions
   ) => Promise<{
     providerCredentials?: SendOptions["providerCredentials"]
     protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
     modelParams?: SendOptions["modelParams"]
     concurrentLimit?: number
+    compaction?: SendOptions["compaction"]
   }>
   /**
    * The compaction phase whose recovery preamble is still owed, or `null`.

@@ -23,6 +23,7 @@
  * a thin client only knows the key, and the key is the unique index.
  */
 
+import { migrateLegacyConversationListState } from "@/lib/connectors/session-bindings"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 import {
   addLabel,
@@ -136,6 +137,13 @@ function patchRecordOf(
 export function encodeOverrideMutationClears(
   mutation: ConversationOverrideMutation
 ): ConversationOverrideMutation {
+  if (
+    mutation.kind !== "upsert" &&
+    mutation.kind !== "patch" &&
+    mutation.kind !== "configSection"
+  ) {
+    return mutation
+  }
   const record = patchRecordOf(mutation)
   if (!record) return mutation
   const encoded: Record<string, unknown> = {}
@@ -158,6 +166,13 @@ export function encodeOverrideMutationClears(
 export function decodeOverrideMutationClears(
   mutation: ConversationOverrideMutation
 ): ConversationOverrideMutation {
+  if (
+    mutation.kind !== "upsert" &&
+    mutation.kind !== "patch" &&
+    mutation.kind !== "configSection"
+  ) {
+    return mutation
+  }
   const record = patchRecordOf(mutation)
   if (!record) return mutation
   const decoded: Record<string, unknown> = {}
@@ -252,7 +267,7 @@ export interface ApplyOverrideMutationOptions {
  * host that owns the `conversationOverrides` table. Returns the resulting
  * row when the primitive yields one, `undefined` for trail-only / delete.
  */
-export async function applyConversationOverrideMutation(
+async function applyOverrideMutation(
   relayed: ConversationOverrideMutation,
   options: ApplyOverrideMutationOptions = {}
 ): Promise<ConversationOverrideRow | undefined> {
@@ -339,9 +354,7 @@ export async function applyConversationOverrideMutation(
  * locally yet are created when the mutation carries a `sessionId`; otherwise
  * the optimistic step is skipped (the sync will materialise the row).
  */
-export async function applyOptimisticOverrideMutation(
-  relayed: ConversationOverrideMutation
-): Promise<void> {
+async function applyOptimisticMutation(relayed: ConversationOverrideMutation): Promise<void> {
   // Same decode as the authoritative path, so the local mirror and the host
   // agree about which fields the operator cleared.
   const mutation = decodeOverrideMutationClears(relayed)
@@ -420,4 +433,66 @@ export async function applyOptimisticOverrideMutation(
       await deleteByConversationKey(mutation.conversationKey)
       return
   }
+}
+
+async function reconcileListMutation(mutation: ConversationOverrideMutation): Promise<void> {
+  if (mutation.kind !== "setPinned" && mutation.kind !== "setArchived") {
+    const patch =
+      mutation.kind === "upsert"
+        ? mutation.input
+        : mutation.kind === "patch" || mutation.kind === "configSection"
+          ? mutation.patch
+          : undefined
+    if (
+      !patch ||
+      !(
+        Object.prototype.hasOwnProperty.call(patch, "pinned") ||
+        Object.prototype.hasOwnProperty.call(patch, "archived")
+      )
+    )
+      return
+  }
+  const conversationKey = conversationKeyOfMutation(mutation)
+  if (!conversationKey) return
+  const sessionId =
+    mutation.kind === "upsert"
+      ? mutation.input.sessionId
+      : "sessionId" in mutation
+        ? mutation.sessionId
+        : undefined
+  await migrateLegacyConversationListState({ conversationKey, sessionId, overwrite: true })
+}
+
+export async function applyConversationOverrideMutation(
+  mutation: ConversationOverrideMutation,
+  options: ApplyOverrideMutationOptions = {}
+): Promise<ConversationOverrideRow | undefined> {
+  mutation = normalizeListClears(mutation)
+  const result = await applyOverrideMutation(mutation, options)
+  await reconcileListMutation(mutation)
+  return result
+}
+
+export async function applyOptimisticOverrideMutation(
+  mutation: ConversationOverrideMutation
+): Promise<void> {
+  mutation = normalizeListClears(mutation)
+  await applyOptimisticMutation(mutation)
+  await reconcileListMutation(mutation)
+}
+
+function normalizeListClears(mutation: ConversationOverrideMutation): ConversationOverrideMutation {
+  const decoded = decodeOverrideMutationClears(mutation)
+  const normalize = <T extends object>(patch: T): T => {
+    const result = { ...patch } as T & { pinned?: boolean; archived?: boolean }
+    for (const field of ["pinned", "archived"] as const) {
+      if (Object.prototype.hasOwnProperty.call(result, field))
+        result[field] = result[field] === true
+    }
+    return result
+  }
+  if (decoded.kind === "upsert") return { ...decoded, input: normalize(decoded.input) }
+  if (decoded.kind === "patch" || decoded.kind === "configSection")
+    return { ...decoded, patch: normalize(decoded.patch) }
+  return decoded
 }

@@ -377,6 +377,8 @@ function createWorld(init: { session?: Partial<ChatSession>; team?: Partial<Team
 
   return {
     runner,
+    deps,
+    sinks,
     emit,
     calls,
     db,
@@ -422,6 +424,54 @@ const textOf = (m: Msg) =>
     .join("")
 
 describe("a linear turn", () => {
+  it("retries a member with the selected fallback model and recomputed execution limits", async () => {
+    const w = createWorld({ team: { members: [{ characterId: "a" }] } })
+    w.deps.ai.resolveSendOptions = async () =>
+      ({
+        provider: "initial",
+        model: "initial-model",
+        modelParams: { maxOutputTokens: 256 },
+        compaction: { enabled: true, contextWindow: 200000 },
+        routingPlan: {
+          decisionId: "retry",
+          orderedCandidates: [
+            { providerId: "initial", modelId: "initial-model" },
+            { providerId: "next", modelId: "fallback-model" },
+          ],
+        },
+      }) as never
+    const resolveAttempt = jest.fn(async () => ({
+      modelParams: { maxOutputTokens: 256 },
+      compaction: { enabled: true, contextWindow: 32000 } as SendOptions["compaction"],
+    }))
+    w.deps.ai.resolveProviderAttemptOptions = resolveAttempt
+    let attempts = 0
+    w.scripts.set("a", (sub, emit) => {
+      if (attempts++ === 0) emit(endedFrame(sub, "rate limit exceeded"))
+      else {
+        emit(assistantFrame(sub, "retried", "success"))
+        emit(resultFrame(sub))
+        emit(endedFrame(sub))
+      }
+    })
+    await w.runner.send("hello", { sessionId: ROOM })
+    expect(resolveAttempt).toHaveBeenCalledWith(
+      "next",
+      expect.anything(),
+      "fallback-model",
+      expect.objectContaining({
+        modelParams: { maxOutputTokens: 256 },
+        compaction: { enabled: true, contextWindow: 200000 },
+      })
+    )
+    expect(w.calls.sendPrompt[1].options).toMatchObject({
+      provider: "next",
+      model: "fallback-model",
+      modelParams: { maxOutputTokens: 256 },
+      compaction: { enabled: true, contextWindow: 32000 },
+    })
+  })
+
   it("runs every target one after another and persists the room transcript", async () => {
     const w = createWorld()
     await w.runner.send("hello team", { sessionId: ROOM })
@@ -459,6 +509,21 @@ describe("a linear turn", () => {
       expect(call.options.systemPrompt).toContain("sys")
       expect(call.options.systemPrompt).toContain("## Room instructions\n\nAnswer in one line.")
     }
+  })
+
+  it("preserves template provenance on persisted and queued user turns", async () => {
+    const w = createWorld()
+    const templateRun = {
+      templateId: "review",
+      version: "1",
+      text: "Review {{target}}",
+      params: { target: { kind: "text" as const, value: "workflow" } },
+    }
+    await w.runner.send("Review workflow", { sessionId: ROOM, templateRun })
+    expect(w.db.get(ROOM)?.[0].metadata).toMatchObject({ templateRun })
+    w.status.set(ROOM, "streaming")
+    await w.runner.send("Review workflow", { sessionId: ROOM, templateRun })
+    expect(w.steerAppended.at(-1)?.metadata).toMatchObject({ templateRun })
   })
 
   it("stamps the reply reference on the user turn and on a queued steer", async () => {

@@ -34,6 +34,7 @@
  * waits while the human is typing and stands down once they send.
  */
 
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import type { UIMessage } from "ai"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic } from "@cognia/diagnostics"
@@ -132,6 +133,8 @@ export interface RoomSendOptions {
   sessionId: string
   /** Attachment provenance for the optimistic user message. */
   attachmentManifest?: readonly AttachmentManifestEntry[]
+  /** Template provenance retained only on the user transcript row. */
+  templateRun?: ChatTemplateRun
   skipPersistUserTurn?: boolean
   /**
    * This turn is the steer queue replaying itself. Like `skipPersistUserTurn`
@@ -333,7 +336,13 @@ export class RoomRunner {
         const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
         const optimistic = withMetadata(
           makeUserMessage(content, undefined, opts.attachmentManifest),
-          { senderKind: "user", steer: steerMeta, ...replyMetadata(opts), ...authorMetadata(opts) }
+          {
+            senderKind: "user",
+            steer: steerMeta,
+            ...replyMetadata(opts),
+            ...authorMetadata(opts),
+            ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
+          }
         )
         sinks.steer.appendMessage(sessionId, optimistic)
         sinks.steer.enqueue(sessionId, {
@@ -414,6 +423,7 @@ export class RoomRunner {
     if (!skipsUserTurn(opts)) {
       const userMsg = withMetadata(makeUserMessage(content, undefined, opts.attachmentManifest), {
         senderKind: "user",
+        ...(opts.templateRun ? { templateRun: opts.templateRun } : {}),
         ...replyMetadata(opts),
         ...authorMetadata(opts),
       })
@@ -1228,7 +1238,12 @@ export class RoomRunner {
           const next = controller?.failAndAdvance() ?? null
           if (!next || !settings) throw error
           candidate = next
-          const attempt = await deps.ai.resolveProviderAttemptOptions(next.providerId, settings)
+          const attempt = await deps.ai.resolveProviderAttemptOptions(
+            next.providerId,
+            settings,
+            next.modelId,
+            opts
+          )
           opts = {
             ...opts,
             provider: next.providerId,
@@ -1237,6 +1252,7 @@ export class RoomRunner {
             protocolAdapterSpec: attempt.protocolAdapterSpec,
             modelParams: attempt.modelParams,
             providerConcurrencyLimit: attempt.concurrentLimit,
+            ...(attempt.compaction ? { compaction: attempt.compaction } : {}),
             fallbackModel: undefined,
             aliasResolution: opts.aliasResolution
               ? {

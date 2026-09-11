@@ -138,6 +138,20 @@ beforeEach(async () => {
 afterAll(dbFixture.dispose)
 
 describe("Composer — {{parameter}} chips", () => {
+  it("can send after filling a parameter that blocked the previous attempt", async () => {
+    const sent: unknown[] = []
+    const { ta } = await mount((content) => sent.push(content))
+    fireEvent.change(ta, { target: { value: "review {{module}}" } })
+
+    await submit(ta)
+    expect(sent).toHaveLength(0)
+    fireEvent.change(paramInput(), { target: { value: "login" } })
+    await submit(ta)
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(textOf(sent[0])).toContain("review login")
+  })
+
   it("paints a typed parameter as an empty chip", async () => {
     const { ta } = await mount()
 

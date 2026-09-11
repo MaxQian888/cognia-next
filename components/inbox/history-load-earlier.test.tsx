@@ -12,6 +12,7 @@ jest.mock("next-intl", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), info: jest.fn() } }))
 
 const mockHydrate = jest.fn()
+const mockHook = jest.fn()
 let hookReturn: {
   hydrate: jest.Mock
   hydrating: boolean
@@ -20,7 +21,10 @@ let hookReturn: {
   error: "unsupported" | "failed" | null
 }
 jest.mock("@/hooks/connectors/use-history-hydration", () => ({
-  useHistoryHydration: () => hookReturn,
+  useHistoryHydration: (...args: unknown[]) => {
+    mockHook(...args)
+    return hookReturn
+  },
 }))
 
 import { HistoryLoadEarlier } from "./history-load-earlier"
@@ -130,4 +134,21 @@ describe("HistoryLoadEarlier", () => {
     expect(screen.getByRole("button", { name: "aria" })).not.toHaveAttribute("title")
     expect(screen.getByTestId("capability-notice")).toHaveAttribute("data-cause", "not_declared")
   })
+})
+
+it("forwards an exact session target to history hydration", () => {
+  render(<HistoryLoadEarlier conversationKey="k" adapterId="adp" sessionId="old" />)
+  expect(mockHook).toHaveBeenCalledWith("k", "adp", "old")
+})
+
+it("shows an empty-history result only after a successful completed load", () => {
+  hookReturn = { ...hookReturn, lastCount: 0 }
+  const view = render(<HistoryLoadEarlier conversationKey="k" adapterId="adp" />)
+  expect(screen.getByText("none")).toBeInTheDocument()
+  hookReturn = { ...hookReturn, hydrating: true }
+  view.rerender(<HistoryLoadEarlier conversationKey="k" adapterId="adp" />)
+  expect(screen.queryByText("none")).not.toBeInTheDocument()
+  hookReturn = { ...hookReturn, hydrating: false, error: "failed" }
+  view.rerender(<HistoryLoadEarlier conversationKey="k" adapterId="adp" />)
+  expect(screen.queryByText("none")).not.toBeInTheDocument()
 })

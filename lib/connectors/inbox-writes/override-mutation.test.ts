@@ -311,8 +311,8 @@ describe("applyOptimisticOverrideMutation — thin-client mirror", () => {
 // ---------------------------------------------------------------------------
 
 /** What the companion transport does to a payload: `JSON.stringify(args)`. */
-function overTheWire(mutation: ConversationOverrideMutation): ConversationOverrideMutation {
-  return JSON.parse(JSON.stringify(mutation)) as ConversationOverrideMutation
+function overTheWire<T extends ConversationOverrideMutation>(mutation: T): T {
+  return JSON.parse(JSON.stringify(mutation)) as T
 }
 
 describe("override mutation clears survive the relay", () => {
@@ -405,4 +405,53 @@ describe("override mutation clears survive the relay", () => {
     expect(row?.mode).toBe("manual")
     expect(row?.autonomy).toBeUndefined()
   })
+})
+
+describe("shared session list preference writes", () => {
+  it.each([applyConversationOverrideMutation, applyOptimisticOverrideMutation])(
+    "writes and clears canonical metadata for the exact IM session",
+    async (apply) => {
+      const db = getDb()
+      const binding = {
+        platform: "telegram",
+        adapterId: "tg-1",
+        conversationKey: KEY,
+        conversationRef: { platform: "telegram", adapterId: "tg-1" },
+      }
+      await db.sessions.bulkAdd([
+        {
+          id: SESSION,
+          title: "Target",
+          kind: "direct",
+          platformBinding: binding,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "other",
+          title: "Sibling",
+          kind: "direct",
+          platformBinding: binding,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      await apply({
+        kind: "upsert",
+        input: { conversationKey: KEY, sessionId: SESSION, pinned: true, archived: true },
+      })
+      expect(await db.sessions.get(SESSION)).toMatchObject({
+        pinned: true,
+        archivedAt: expect.any(Number),
+      })
+      expect(await db.sessions.get("other")).not.toHaveProperty("archivedAt")
+      expect(await readForResolution(KEY)).not.toHaveProperty("pinned")
+      await apply({
+        kind: "upsert",
+        input: { conversationKey: KEY, sessionId: SESSION, pinned: undefined, archived: undefined },
+      })
+      expect((await db.sessions.get(SESSION))?.pinned).toBe(false)
+      expect(await db.sessions.get(SESSION)).not.toHaveProperty("archivedAt")
+    }
+  )
 })

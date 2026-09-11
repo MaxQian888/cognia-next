@@ -9,6 +9,20 @@ describe("resolveLarkMediaKeys", () => {
     mockInvoke.mockReset()
   })
 
+  it("uploads inline image bytes instead of treating their data URL as a platform key", async () => {
+    mockInvoke.mockResolvedValueOnce("img_uploaded")
+    const url = "data:image/png;base64,AQID"
+    const out = await resolveLarkMediaKeys([{ type: "image", url }], {
+      getAccessToken: async () => "token",
+    })
+    expect(out).toEqual([{ type: "image", url: "img_uploaded" }])
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_upload_image", {
+      accessToken: "token",
+      sourceUrl: url,
+      imageType: undefined,
+    })
+  })
+
   it("passes through non-media segments unchanged", async () => {
     const segments: MessageSegment[] = [
       { type: "text", text: "hi" },

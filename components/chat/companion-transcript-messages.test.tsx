@@ -69,6 +69,22 @@ describe("selectActiveTurnMessages", () => {
 describe("<CompanionTranscriptMessages />", () => {
   beforeEach(() => surfaceProps.splice(0))
 
+  it("leaves AI rewrite actions absent when the conversation does not support them", () => {
+    render(
+      <CompanionTranscriptMessages
+        sessionId="platform-session"
+        messages={messages}
+        status="idle"
+        onCopy={jest.fn()}
+      />
+    )
+
+    expect(surfaceProps[0]?.renderAdapters).toMatchObject({
+      onRegenerate: undefined,
+      onEditResend: undefined,
+    })
+  })
+
   it("wires the bounded transcript surface with active-turn messages and local actions", () => {
     const onCopy = jest.fn()
     const onRegenerate = jest.fn()

@@ -283,6 +283,12 @@ export function fromOneBotSegments(
 // toOneBotSegments — internal → platform
 // ---------------------------------------------------------------------------
 
+/** OneBot 11 uses base64:// rather than browser data URLs for inline media. */
+function v11MediaSource(url: string): string {
+  const encoded = /^data:[^,]*;base64,([A-Za-z0-9+/]*={0,2})$/.exec(url)?.[1]
+  return encoded === undefined ? url : `base64://${encoded}`
+}
+
 function toV11Segment(seg: MessageSegment): OneBotSegment | null {
   switch (seg.type) {
     case "text":
@@ -292,7 +298,7 @@ function toV11Segment(seg: MessageSegment): OneBotSegment | null {
       return { type: "text", data: { text: seg.md } }
 
     case "image":
-      return { type: "image", data: { file: seg.url } }
+      return { type: "image", data: { file: v11MediaSource(seg.url) } }
 
     case "mention":
       return { type: "at", data: { qq: seg.userId } }
@@ -304,13 +310,13 @@ function toV11Segment(seg: MessageSegment): OneBotSegment | null {
       return { type: "face", data: { id: seg.code } }
 
     case "voice":
-      return { type: "record", data: { file: seg.url } }
+      return { type: "record", data: { file: v11MediaSource(seg.url) } }
 
     case "video":
-      return { type: "video", data: { file: seg.url } }
+      return { type: "video", data: { file: v11MediaSource(seg.url) } }
 
     case "file":
-      return { type: "file", data: { file: seg.url, name: seg.name } }
+      return { type: "file", data: { file: v11MediaSource(seg.url), name: seg.name } }
 
     default:
       return null

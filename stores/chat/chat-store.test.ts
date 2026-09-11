@@ -76,6 +76,34 @@ describe("useChatStore", () => {
     useChatStore.getState().clear()
   })
 
+  it("retains embedded panes without selecting or adding navigation tabs", () => {
+    const store = useChatStore.getState()
+    store.setActiveSession("main")
+    store.retainPane("embedded", "pane-a")
+    store.retainPane("embedded", "pane-a")
+    store.retainPane("embedded", "pane-b")
+    store.replaceSessionMessages("embedded", [msg("draft")])
+    expect(useChatStore.getState().activeSessionId).toBe("main")
+    expect(useChatStore.getState().openSessionIds).toEqual(["main"])
+    expect(useChatStore.getState().paneIdsBySession.embedded).toEqual(["pane-a", "pane-b"])
+    store.releasePane("embedded", "pane-a")
+    expect(useChatStore.getState().paneIdsBySession.embedded).toEqual(["pane-b"])
+    store.releasePane("embedded", "pane-b")
+    store.releasePane("embedded", "pane-b")
+    expect(useChatStore.getState().paneIdsBySession.embedded).toBeUndefined()
+    expect(useChatStore.getState().sessions.embedded.messages).toEqual([msg("draft")])
+    expect(useChatStore.getState().activeSessionId).toBe("main")
+  })
+
+  it("keeps one pending approval when the same request is delivered twice", () => {
+    const store = useChatStore.getState()
+    const ask = approval("same-request")
+    store.pushApproval(ask)
+    const first = useChatStore.getState().sessions.s1.pendingApprovals[0]
+    store.pushApproval(ask)
+    expect(useChatStore.getState().sessions.s1.pendingApprovals).toEqual([first])
+  })
+
   describe("initial state", () => {
     it("starts with documented defaults", () => {
       const { result } = renderHook(() => useChatStore())
@@ -1091,6 +1119,21 @@ describe("useChatStore", () => {
       act(() => result.current.openSession("B"))
       act(() => result.current.openSession("B"))
       expect(result.current.openSessionIds).toEqual(["A", "B"])
+    })
+
+    it("closing a navigation tab preserves retry state for a mounted embedded pane", () => {
+      const store = useChatStore.getState()
+      store.openSession("embedded")
+      store.retainPane("embedded", "workbench")
+      store.setLastSend("embedded", {
+        content: "retry me",
+        options: {} as SendOptions,
+        attemptIndex: 0,
+      })
+      store.closeSession("embedded")
+      expect(useChatStore.getState().openSessionIds).not.toContain("embedded")
+      expect(useChatStore.getState().sessions.embedded).toBeDefined()
+      expect(useChatStore.getState().lastSendBySession.embedded?.content).toBe("retry me")
     })
 
     it("closeSession drops the slice, tab, lastSend, and split reference", () => {

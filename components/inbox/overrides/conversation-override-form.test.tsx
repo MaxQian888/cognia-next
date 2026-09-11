@@ -302,7 +302,8 @@ describe("ConversationOverrideForm", () => {
       "data-state",
       "checked"
     )
-    expect(screen.getByTestId("conv-override-pinned")).toHaveAttribute("data-state", "checked")
+    expect(screen.queryByTestId("conv-override-pinned")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("conv-override-archived")).not.toBeInTheDocument()
   })
 
   it("upserts a new row when Save is clicked", async () => {

@@ -313,3 +313,9 @@ describe("ConversationHeaderOverflow", () => {
     expect(screen.queryByTestId("conversation-header-more-dot")).not.toBeInTheDocument()
   })
 })
+
+it("omits the redundant open-in-chat action in the shared chat header", () => {
+  renderOverflow({ hideOpenInChat: true })
+  expect(screen.queryByTestId("conversation-header-open-in-chat")).not.toBeInTheDocument()
+  expect(screen.getByTestId("conversation-header-contact")).toBeInTheDocument()
+})

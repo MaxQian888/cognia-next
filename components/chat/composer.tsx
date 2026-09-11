@@ -35,6 +35,7 @@ import {
   useState,
 } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import {
   selectComposerContextSelections,
   selectComposerPermissionMode,
@@ -54,7 +55,13 @@ import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-
 import { refreshSelectionFreshness } from "@/lib/chat/mentions/selection-freshness"
 import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import type { SendContent, SendOptions, ChatSession, Character } from "@cognia/agent-config-types"
+import type {
+  SendContent,
+  SendOptions,
+  ChatSession,
+  Character,
+  MessageReplyTo,
+} from "@cognia/agent-config-types"
 import {
   buildSendContent,
   INLINE_TOKEN_CEILING,
@@ -122,23 +129,16 @@ import { ScheduleSuggestion } from "./composer/schedule-suggestion"
 import { resolveSendButton } from "./composer/send-button-mode"
 import { ComposerCheatsheet } from "./composer/composer-cheatsheet"
 import { nextPermissionMode } from "./permission-mode-indicator"
-import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
+import { canEnqueueInboxWrite, useInboxWriteReadiness } from "@/lib/connectors/inbox-writes"
 import {
-  InboxWriteUnavailableError,
-  approveInboxDraft,
-  rejectInboxDraft,
-  sendManualReply,
-} from "@/lib/connectors/inbox-writes"
+  sendManualMessageToConversation,
+  UnsupportedPlatformAttachmentsError,
+} from "@/lib/inbox/manual-send"
 import { listPendingForConversation as listPendingDrafts } from "@/lib/db/connector-drafts"
-import type { MessageSegment } from "@/types/connectors/segment"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import type { ConnectorDraftRow } from "@/lib/db/connector-types"
+import { DraftEditor } from "@/components/inbox/draft-editor"
+import { PlatformReplyAssistance } from "./composer/platform-reply-assistance"
+import { PlatformBadge } from "@/components/inbox/platform-badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   BUILTIN_SLASH_COMMANDS,
   applyTemplate,
@@ -413,7 +413,8 @@ interface InnerProps {
     text: string,
     files: SubmittedFile[],
     precomputed?: ReadonlyMap<string, ExtractedAttachment>,
-    templateRun?: ChatTemplateRun | null
+    templateRun?: ChatTemplateRun | null,
+    submission?: { replyTo: MessageReplyTo | null }
   ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
@@ -430,8 +431,6 @@ interface InnerProps {
   /** Open a settings tab — the enhance wand's "no model" toast uses it. */
   onOpenSettings: (tab: SettingsTab) => void
   handleRef?: Ref<ComposerHandle>
-  /** Non-zero when the session has pending connector drafts to review. */
-  pendingDraftCount?: number
   mentionMode?: MentionMode
   mentionables?: readonly MentionTarget[]
   placeholder?: string
@@ -457,7 +456,10 @@ function ComposerInner(props: InnerProps) {
   // (textarea on top, a single bottom action row) regardless of container
   // width; web/desktop keep the container-query responsive layout below.
   const isMobile = platform === "mobile"
-  const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
+  const inboxReadiness = useInboxWriteReadiness()
+  const outboundBlocked =
+    !!props.session?.platformBinding &&
+    (inboxReadiness.route === "unavailable" || !canEnqueueInboxWrite(inboxReadiness.availability))
   // Non-LLM composer behavior toggles (AppSettings.composerBehavior). Each
   // defaults ON via `!== false` so an absent block preserves prior behavior.
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
@@ -623,6 +625,20 @@ function ComposerInner(props: InnerProps) {
   // and the footer chip agree with what a send actually runs in.
   const cwd = useEffectiveCwd(props.session)
   const sessionId = props.session?.id ?? null
+  // Pending sends must settle against the draft that is currently mounted,
+  // rather than the input/attachments captured before their first await.
+  const currentDraftRef = useRef({
+    sessionId,
+    text: controller.textInput.value,
+    files: attachments.files,
+  })
+  useEffect(() => {
+    currentDraftRef.current = {
+      sessionId,
+      text: controller.textInput.value,
+      files: attachments.files,
+    }
+  }, [sessionId, controller.textInput.value, attachments.files])
 
   // `@` mode resolution. Callers may set `mentionMode` explicitly. Otherwise a
   // direct chat AND a team room default to the combined panel, so every
@@ -1151,6 +1167,7 @@ function ComposerInner(props: InnerProps) {
   )
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
+    if (props.session?.platformBinding) return null
     const tg = detectTrigger(controller.textInput.value, caret, {
       mentionMode: resolvedMentionMode,
       hasCommandPrefix,
@@ -1169,6 +1186,7 @@ function ComposerInner(props: InnerProps) {
     controller.textInput.value,
     caret,
     popoverDismissed,
+    props.session?.platformBinding,
     resolvedMentionMode,
     hasCommandPrefix,
     isLinkToken,
@@ -1263,6 +1281,7 @@ function ComposerInner(props: InnerProps) {
     controller.textInput.value,
     caret,
     popoverDismissed,
+    props.session?.platformBinding,
     resolvedMentionMode,
     hasCommandPrefix,
     isLinkToken,
@@ -1598,7 +1617,7 @@ function ComposerInner(props: InnerProps) {
   // --- Submit handler ----------------------------------------------------
   const submit = useCallback(async () => {
     const text = controller.textInput.value
-    if (props.disabled) return
+    if (props.disabled || outboundBlocked) return
     if (attachmentPrepareCountRef.current > 0) return
     // Re-entrancy guard (send protection): reject a second dispatch while one is
     // already in flight — covers the window between the click and the store
@@ -1610,6 +1629,22 @@ function ComposerInner(props: InnerProps) {
     // first await, leaving no race for a concurrent submit to slip through.
     const empty = text.trim().length === 0 && attachments.files.length === 0
     if (empty) return
+
+    // Validate before arming send protection: this return never enters the
+    // dispatch's try/finally, and the user must be able to fill a chip and retry.
+    const missingParams = unfilledRequiredParams(paramIds, effectiveBinding, paramDeclarations)
+    if (missingParams.length > 0) {
+      toast.error(tTemplateParams("unfilled", { count: missingParams.length }))
+      const first = paramTokens.find((seg) => seg.paramId === missingParams[0])
+      const ta = textareaRef.current
+      if (first && ta) {
+        ta.focus()
+        ta.setSelectionRange(first.start, first.start)
+        setCaret(first.start)
+        setActiveParamId(first.paramId)
+      }
+      return
+    }
 
     isSendingRef.current = true
     setIsSending(true)
@@ -1635,6 +1670,9 @@ function ComposerInner(props: InnerProps) {
     // order is the user's (drag-reordered) order, and the model must receive
     // them in exactly that order — see `buildAttachmentBlocks`.
     const snapshotFiles = applyOrder([...attachments.files], staged.order)
+    const platformSubmission = props.session?.platformBinding
+      ? { replyTo: selectComposerReplyTo(useChatStore.getState(), sessionId) }
+      : undefined
     // `id` is RETAINED here (unlike before): it is the key `buildSendContent`
     // uses to look each file up in the staging-time extraction cache.
     const snapshotAttachmentInputs = snapshotFiles.map((item) => ({ ...item }))
@@ -1680,15 +1718,26 @@ function ComposerInner(props: InnerProps) {
       if (usedTemplateId && !usedTemplateId.startsWith(REPO_TEMPLATE_ID_PREFIX)) {
         void recordChatTemplateUse(usedTemplateId, effectiveBinding.params).catch(() => undefined)
       }
+      const currentDraft = currentDraftRef.current
+      if (currentDraft.sessionId !== sessionId) return
       if (clearAfterSendEnabled) {
-        attachments.clear()
+        for (const file of snapshotFiles) attachments.remove(file.id)
         setRestoredAttachments([])
-        if (sessionId) void clearChatDraft(sessionId, { hostAlreadyCleared: true })
+        const hasNewFiles = currentDraft.files.some(
+          (file) => !snapshotFiles.some((submitted) => submitted.id === file.id)
+        )
+        if (sessionId && !currentDraft.text && !hasNewFiles) {
+          void clearChatDraft(sessionId, { hostAlreadyCleared: true })
+        }
       }
       settleFocusAfterSend()
     }
     const restoreInputAfterFailure = () => {
       if (!cleared) return
+      const currentDraft = currentDraftRef.current
+      // A failed request cannot replace follow-up typing or another session's
+      // draft. Restore only while its optimistic empty input is still current.
+      if (currentDraft.sessionId !== sessionId || currentDraft.text) return
       controller.textInput.setInput(text)
       setPastedBlocks(pasteMap)
       // The text comes back holding SHORT labels, so the label→URL map has to
@@ -1698,25 +1747,6 @@ function ComposerInner(props: InnerProps) {
       cleared = false
       // Attachments were never cleared, so there is nothing to restore — the
       // staged files are still live in the controller.
-    }
-    // ── Unfilled `{{parameters}}` ─────────────────────────────────────────
-    // A literal `{{module}}` reaching the model is never what anyone meant, and
-    // the model will cheerfully act as though it understood. Refuse the send,
-    // say how many are missing, and put the caret on the first one so the fix
-    // is one keystroke away. Checked BEFORE the optimistic clear so nothing has
-    // to be restored.
-    const missingParams = unfilledRequiredParams(paramIds, effectiveBinding, paramDeclarations)
-    if (missingParams.length > 0) {
-      toast.error(tTemplateParams("unfilled", { count: missingParams.length }))
-      const first = paramTokens.find((seg) => seg.paramId === missingParams[0])
-      const ta = textareaRef.current
-      if (first && ta) {
-        ta.focus()
-        ta.setSelectionRange(first.start, first.start)
-        setCaret(first.start)
-        setActiveParamId(first.paramId)
-      }
-      return
     }
     // Substitute on the CHIP RANGES, before the command pipeline: code stays
     // code because the chip pass already excluded it, and a `/command`'s
@@ -1740,7 +1770,7 @@ function ComposerInner(props: InnerProps) {
         snapshotAttachmentInputs.map(async (item) => {
           // A file whose extraction is cached never needs its bytes again —
           // skip the blob→data-URL round trip entirely.
-          if (precomputed.has(item.id)) return item
+          if (!props.session?.platformBinding && precomputed.has(item.id)) return item
           if (item.url?.startsWith("blob:")) {
             const dataUrl = await blobUrlToDataUrl(item.url)
             return { ...item, url: dataUrl ?? item.url }
@@ -1749,8 +1779,22 @@ function ComposerInner(props: InnerProps) {
         })
       )
 
-      // Record the exact typed text for ↑/↓ recall (before any command stripping).
-      history.record(text)
+      // Platform recall cannot depend on folded maps cleared during submission.
+      // Keep template tokens editable while retaining full paste/link bodies.
+      history.record(props.session?.platformBinding ? restoreText(text) : text)
+
+      if (props.session?.platformBinding) {
+        const ok = await props.onSubmit(
+          restoreText(paramRendered.text),
+          filesToSend,
+          precomputed,
+          templateRun,
+          platformSubmission
+        )
+        if (ok === false) restoreInputAfterFailure()
+        else finalizeSend()
+        return
+      }
 
       // ── `!shell` / `#memory` first-line modes ────────────────────────────
       // Decided from the ORIGINAL input, never from the post-command outgoing
@@ -1914,6 +1958,7 @@ function ComposerInner(props: InnerProps) {
     attachments,
     staged,
     props,
+    outboundBlocked,
     sessionId,
     commandMap,
     segments,
@@ -2583,14 +2628,13 @@ function ComposerInner(props: InnerProps) {
   // case the inline ternaries used to miss: a turn streaming with text already
   // typed is a *send* (it joins the running turn as a follow-up), not a stop.
   const sendButton = resolveSendButton({
-    status: props.status,
+    status: props.session?.platformBinding ? "ready" : props.status,
     isSending,
     isPreparingAttachments,
     hasContent: controller.textInput.value.trim().length > 0 || attachments.files.length > 0,
-    hasPendingDrafts,
+    hasPendingDrafts: false,
     composerDisabled: !!props.disabled,
-    // Web shell + a platform-bound session cannot write outbound at all.
-    outboundBlocked: !isDesktop && !!props.session?.platformBinding,
+    outboundBlocked,
   })
   // Cross-fade transition for the send/stop button icon swap (reduced-motion aware).
   const sendIconTransition = useReducedMotionTransition(mobileTransition("fast"))
@@ -3070,7 +3114,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tAttach = useTranslations("chat.composer.attachments")
   // ADR-0131 relay failures (no paired host / host predates the relay) are
   // reported here rather than thrown at the user as a stack trace.
-  const tInbox = useTranslations("inbox")
+  const tPlatform = useTranslations("chatPlatformComposer")
+  const tPlatformName = useTranslations("inbox.platformBadge.names")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
@@ -3107,8 +3152,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const cwd = useEffectiveCwd(session)
 
   // ── Platform connector mode ─────────────────────────────────────────────
-  const resolvedMode = useResolvedConnectorMode(session)
-  const [pendingDrafts, setPendingDrafts] = useState<ConnectorDraftRow[]>([])
+  const conversationKey = session?.platformBinding?.conversationKey
+  const pendingDrafts = useLiveQuery(
+    () => (conversationKey ? listPendingDrafts(conversationKey) : Promise.resolve([])),
+    [conversationKey],
+    []
+  )
   const [draftDialogOpen, setDraftDialogOpen] = useState(false)
   // Oversize attachment confirmation: handleSubmit parks a resolver here while
   // the dialog below collects the user's choice (send anyway / cancel).
@@ -3120,23 +3169,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // onboarding chip row that links to it lives at this level, while the `?`
   // shortcut that opens it lives in the inner key handler.
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
-
-  // Poll pending drafts when in draft mode
-  useEffect(() => {
-    const conversationKey = session?.platformBinding?.conversationKey
-    if (!conversationKey || resolvedMode !== "draft") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPendingDrafts([])
-      return
-    }
-    let cancelled = false
-    void listPendingDrafts(conversationKey).then((drafts) => {
-      if (!cancelled) setPendingDrafts(drafts)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [session?.platformBinding?.conversationKey, resolvedMode])
 
   const pushSystemMessage = useCallback(
     (payload: string | SystemMessageBlock | SlashCommandResultBlock) => {
@@ -3352,7 +3384,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       text: string,
       files: SubmittedFile[],
       precomputed?: ReadonlyMap<string, ExtractedAttachment>,
-      templateRun?: ChatTemplateRun | null
+      templateRun?: ChatTemplateRun | null,
+      submission?: { replyTo: MessageReplyTo | null }
     ) => {
       const trimmed = text.trim()
       // NOTE: `!shell` / `#memory` are NOT detected here any more. They are
@@ -3360,45 +3393,35 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // (see `onSubmitShell` / `onSubmitMemory`); sniffing the prefix off this
       // post-command text meant `/clear\n!ls` executed a shell command.
 
-      // ── Platform connector short-circuit ─────────────────────────────────
-      // When a session is platform-bound, branch on the resolved mode before
-      // the standard sendPrompt path.
-      if (session?.platformBinding && resolvedMode && resolvedMode !== "auto") {
-        const { adapterId, conversationKey, conversationRef } = session.platformBinding
-        if (resolvedMode === "manual") {
-          if (!trimmed && files.length === 0) return true
-          // ADR-0131: one shell-agnostic call. On a connector host this is
-          // the same `enqueueGoverned(source: "manual")` + `messages` write it
-          // always was; on a phone / web companion / desktop driving a remote
-          // host it relays through the durable queue instead. The composer no
-          // longer knows (or needs to know) which.
-          try {
-            await sendManualReply({
-              adapterId,
-              conversationKey,
-              sessionId: session.id,
-              conversationRef,
-              text: trimmed,
-              label: session.title ?? conversationKey,
-            })
-          } catch (error) {
-            if (error instanceof InboxWriteUnavailableError) {
-              toast.error(tInbox("relay.sendFailed"))
-              return true
-            }
-            throw error
+      if (session?.platformBinding) {
+        if (!trimmed && files.length === 0) return false
+        const replyTo = submission?.replyTo ?? null
+        try {
+          await sendManualMessageToConversation({
+            session,
+            text: trimmed,
+            files,
+            replyTo,
+            templateRun,
+          })
+          const chatState = useChatStore.getState()
+          if (replyTo && selectComposerReplyTo(chatState, session.id) === replyTo) {
+            chatState.setReplyTo(null, session.id)
           }
-          return true // skip standard sendPrompt — caller's input cleared by ComposerInner
-        }
-        if (resolvedMode === "draft") {
-          // In draft mode, the submit button opens the draft reviewer dialog
-          const drafts = await listPendingDrafts(conversationKey)
-          setPendingDrafts(drafts)
-          setDraftDialogOpen(true)
           return true
+        } catch (error) {
+          toast.error(
+            error instanceof UnsupportedPlatformAttachmentsError
+              ? tPlatform("attachmentsUnsupported", {
+                  platform: tPlatformName.has(error.platform)
+                    ? tPlatformName(error.platform)
+                    : error.platform,
+                })
+              : tPlatform("sendFailed")
+          )
+          return false
         }
       }
-      // ── END platform connector short-circuit ──────────────────────────────
 
       // ── Web search prefetch ─────────────────────────────────────────
       // If the user toggled web search for this turn, run the query through
@@ -3581,12 +3604,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       clearContextSelections,
       pushSystemMessage,
       tAttach,
-      tInbox,
+      tPlatform,
+      tPlatformName,
       tWebSearch,
       session,
-      resolvedMode,
-      setPendingDrafts,
-      setDraftDialogOpen,
     ]
   )
 
@@ -3596,49 +3617,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       : status === "error"
         ? "error"
         : "ready"
-
-  // ── Draft review dialog helpers ─────────────────────────────────────────
-  // Both draft actions route through the ADR-0131 facade so the phone's
-  // reviewer and this dialog share one code path (and one idempotency key
-  // derived from the draft id — a retried approval can never send twice).
-  const handleApproveDraft = useCallback(
-    async (draft: ConnectorDraftRow, segments?: MessageSegment[]) => {
-      const binding = session?.platformBinding
-      try {
-        await approveInboxDraft(draft, {
-          segments,
-          ...(binding ? { binding } : {}),
-          label: session?.title ?? draft.conversationKey,
-        })
-      } catch (error) {
-        if (error instanceof InboxWriteUnavailableError) {
-          toast.error(tInbox("relay.sendFailed"))
-          return
-        }
-        throw error
-      }
-      setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
-    },
-    // `session` whole, not its two fields: the React Compiler infers the
-    // object here and refuses to preserve a narrower manual dep list.
-    [session, tInbox]
-  )
-
-  const handleRejectDraft = useCallback(
-    async (draft: ConnectorDraftRow) => {
-      try {
-        await rejectInboxDraft(draft)
-      } catch (error) {
-        if (error instanceof InboxWriteUnavailableError) {
-          toast.error(tInbox("relay.sendFailed"))
-          return
-        }
-        throw error
-      }
-      setPendingDrafts((prev) => prev.filter((d) => d.id !== draft.id))
-    },
-    [tInbox]
-  )
 
   return (
     <div
@@ -3671,6 +3649,45 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               the prompt-input provider: it derives everything from that
               provider's file list. */}
           <StagedAttachmentsProvider>
+            {session?.platformBinding && (
+              <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                <PlatformBadge platform={session.platformBinding.platform} />
+                <span className="min-w-0 flex-1 truncate">
+                  {tPlatform("destination", {
+                    platform: tPlatformName.has(session.platformBinding.platform)
+                      ? tPlatformName(session.platformBinding.platform)
+                      : session.platformBinding.platform,
+                    destination: session.title ?? session.platformBinding.conversationKey,
+                  })}
+                </span>
+                <PlatformReplyAssistance key={session.id} session={session} disabled={disabled} />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDraftDialogOpen(true)}
+                >
+                  {tPlatform("reviewDrafts", { count: pendingDrafts.length })}
+                </Button>
+                <CannedResponsePicker
+                  conversationKey={session.platformBinding.conversationKey}
+                  context={{
+                    conversation: {
+                      title: session.title,
+                      platform: session.platformBinding.platform,
+                    },
+                    contact: { platform: session.platformBinding.platform },
+                  }}
+                />
+                <InboxComposerActionsHost
+                  conversationKey={session.platformBinding.conversationKey}
+                  adapterId={session.platformBinding.adapterId}
+                  platform={session.platformBinding.platform}
+                  sessionId={session.id}
+                  className="flex shrink-0 items-center gap-1 empty:hidden"
+                />
+              </div>
+            )}
             <ComposerInner
               session={session}
               status={promptStatus}
@@ -3683,10 +3700,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onOpenCheatsheet={() => setCheatsheetOpen(true)}
               onOpenSettings={onOpenSettings}
               handleRef={ref}
-              pendingDraftCount={pendingDrafts.length}
               mentionMode={mentionMode}
               mentionables={mentionables}
-              placeholder={placeholder}
+              placeholder={
+                session?.platformBinding
+                  ? tPlatform("destination", {
+                      platform: tPlatformName.has(session.platformBinding.platform)
+                        ? tPlatformName(session.platformBinding.platform)
+                        : session.platformBinding.platform,
+                      destination: session.title ?? session.platformBinding.conversationKey,
+                    })
+                  : placeholder
+              }
               mobileMentionMembers={mobileMentionMembers}
               workflowMention={workflowMention}
               compactLayout={compactLayout}
@@ -3711,29 +3736,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 session={session ?? null}
                 status={status}
                 onOpenProviderSettings={() => onOpenSettings("api-key")}
-                leading={
-                  session?.platformBinding ? (
-                    <>
-                      <CannedResponsePicker
-                        conversationKey={session.platformBinding.conversationKey}
-                        context={{
-                          conversation: {
-                            title: session.title,
-                            platform: session.platformBinding.platform,
-                          },
-                          contact: { platform: session.platformBinding.platform },
-                        }}
-                      />
-                      <InboxComposerActionsHost
-                        conversationKey={session.platformBinding.conversationKey}
-                        adapterId={session.platformBinding.adapterId}
-                        platform={session.platformBinding.platform}
-                        sessionId={session.id}
-                        className="flex shrink-0 items-center gap-1 empty:hidden"
-                      />
-                    </>
-                  ) : null
-                }
               />
             )}
             <HelperHints onOpenCheatsheet={() => setCheatsheetOpen(true)} />
@@ -3754,25 +3756,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               <p className="text-sm text-muted-foreground">{tDraftReview("noPendingDrafts")}</p>
             ) : (
               pendingDrafts.map((draft) => (
-                <div key={draft.id} className="rounded-md border p-3 text-sm">
-                  <p className="mb-2 whitespace-pre-wrap">
-                    {draft.segments
-                      .map((s) => (s.type === "text" ? s.text : s.type === "markdown" ? s.md : ""))
-                      .join(" ")}
-                  </p>
-                  <DialogFooter className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void handleRejectDraft(draft)}
-                    >
-                      {tDraftReview("reject")}
-                    </Button>
-                    <Button size="sm" onClick={() => void handleApproveDraft(draft)}>
-                      {tDraftReview("approve")}
-                    </Button>
-                  </DialogFooter>
-                </div>
+                <DraftEditor
+                  key={draft.id}
+                  draft={draft}
+                  onClose={() => setDraftDialogOpen(false)}
+                />
               ))
             )}
           </div>

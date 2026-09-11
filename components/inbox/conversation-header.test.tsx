@@ -573,3 +573,22 @@ describe("ConversationHeader — callback-bindings inspector (B3)", () => {
     expect(screen.queryByTestId("conversation-header-bindings")).not.toBeInTheDocument()
   })
 })
+
+it("reuses platform controls without a second title, navigation, or artifact toggle", () => {
+  render(
+    <ConversationHeader
+      controlsOnly
+      conversationKey="telegram:a1:42"
+      sessionId="s1"
+      title="Repeated title"
+      platform="telegram"
+      policy={EMPTY_POLICY}
+    />
+  )
+  expect(screen.queryByText("Repeated title")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("conversation-header-back")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("conversation-header-open-sidebar")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("conversation-header-open-in-chat")).not.toBeInTheDocument()
+  expect(screen.getByTestId("conversation-header-overrides")).toBeInTheDocument()
+  expect(screen.getByTestId("conversation-header-contact")).toBeInTheDocument()
+})

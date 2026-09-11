@@ -15,16 +15,22 @@ import { __resetPruneCounterForTesting } from "./dedup"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { TriggerPolicy } from "@/types/connectors/policy"
 
-const dispatchConnectorInboundToBots = jest.fn(async () => ({
-  enqueued: [],
-  rejected: [],
-  unresolved: [],
-}))
+const dispatchConnectorInboundToBots = jest.fn(
+  async (
+    ..._args: Parameters<
+      typeof import("@/lib/bot/sources/connector-inbound").dispatchConnectorInboundToBots
+    >
+  ) => ({
+    enqueued: [],
+    rejected: [],
+    unresolved: [],
+  })
+)
 
 jest.mock("@/lib/bot/sources/connector-inbound", () => ({
   __esModule: true,
-  dispatchConnectorInboundToBots: (...args: unknown[]) =>
-    dispatchConnectorInboundToBots(...(args as [])),
+  dispatchConnectorInboundToBots: (...args: Parameters<typeof dispatchConnectorInboundToBots>) =>
+    dispatchConnectorInboundToBots(...args),
 }))
 
 jest.mock("@/lib/workflow/runtime/trigger-subscriptions", () => ({

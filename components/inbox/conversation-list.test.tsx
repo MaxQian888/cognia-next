@@ -29,6 +29,12 @@ beforeAll(() => {
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockPin = jest.fn().mockResolvedValue(undefined)
+const mockArchive = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/hooks/chat/use-sessions", () => ({
+  useSessions: () => ({ bulkSetPinned: mockPin, archive: mockArchive, unarchive: mockArchive }),
+}))
+
 const mockPush = jest.fn()
 
 // Draft counts come from a separate live subscriber; isolate the list by
@@ -183,7 +189,7 @@ describe("ConversationList", () => {
       { session: makeSession("s3", "ck-unread", 3000), override: undefined, unreadCount: 1 },
       // Pinned second in array (but should render first)
       {
-        session: makeSession("s4", "ck-pinned", 2000),
+        session: { ...makeSession("s4", "ck-pinned", 2000), pinned: true },
         override: makeOverride("ck-pinned", { pinned: true }),
         unreadCount: 0,
       },
@@ -211,13 +217,15 @@ describe("ConversationList", () => {
     ]
     render(<ConversationList />)
     fireEvent.click(screen.getByTestId("conversation-row-button-ck-nav"))
-    expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("ck-nav")}`)
+    expect(mockPush).toHaveBeenCalledWith(
+      `/inbox/c?key=${encodeURIComponent("ck-nav")}&sessionId=s5`
+    )
   })
 
   it("archived conversations are hidden by default but shown after toggle", () => {
     mockEnriched = [
       {
-        session: makeSession("s6", "ck-archived", 1000),
+        session: { ...makeSession("s6", "ck-archived", 1000), archivedAt: 2 },
         override: makeOverride("ck-archived", { archived: true }),
         unreadCount: 0,
       },
@@ -313,7 +321,7 @@ describe("ConversationList", () => {
     mockEnriched = [
       { session: makeSession("s1", "ck-plain", 1000), override: undefined, unreadCount: 0 },
       {
-        session: makeSession("s2", "ck-pin", 2000),
+        session: { ...makeSession("s2", "ck-pin", 2000), pinned: true },
         override: makeOverride("ck-pin", { pinned: true }),
         unreadCount: 0,
       },
@@ -364,4 +372,30 @@ describe("ConversationList", () => {
     expect(screen.queryByTestId("conversation-row-ck-plain")).not.toBeInTheDocument()
     expect(screen.getByTestId("conversation-row-ck-pending")).toBeInTheDocument()
   })
+})
+
+it("distinguishes two sessions bound to the same IM conversation", () => {
+  mockEnriched = [
+    { session: makeSession("old", "same", 1), override: undefined, unreadCount: 0 },
+    { session: makeSession("new", "same", 2), override: undefined, unreadCount: 0 },
+  ]
+  render(<ConversationList activeConversationKey="same" activeSessionId="old" />)
+  const old = screen.getByRole("button", { name: "Open conversation: Chat old" })
+  fireEvent.click(old)
+  expect(mockPush).toHaveBeenCalledWith("/inbox/c?key=same&sessionId=old")
+  expect(old).toHaveAttribute("aria-current", "true")
+  expect(screen.getByRole("button", { name: "Open conversation: Chat new" })).not.toHaveAttribute(
+    "aria-current"
+  )
+})
+
+it("pins and archives the exact session using common session actions", () => {
+  mockEnriched = [
+    { session: makeSession("shared", "same", 1), override: undefined, unreadCount: 0 },
+  ]
+  render(<ConversationList />)
+  fireEvent.click(screen.getByText("Pin"))
+  expect(mockPin).toHaveBeenCalledWith(["shared"], true)
+  fireEvent.click(screen.getByText("Archive"))
+  expect(mockArchive).toHaveBeenCalledWith("shared")
 })

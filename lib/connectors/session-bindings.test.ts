@@ -4,6 +4,8 @@
  */
 
 import {
+  migrateLegacyConversationListState,
+  resolveConversationLinkSession,
   findSessionByConversationKey,
   listSessionsByConversationKey,
   findActiveSessionForConversation,
@@ -207,4 +209,138 @@ describe("listSiblingConversations", () => {
     expect(await listSiblingConversations(KEY)).toEqual([])
     expect(await listSiblingConversations("not-a-key")).toEqual([])
   })
+})
+
+describe("resolveConversationLinkSession", () => {
+  it("honors the remote active session instead of choosing the newest", async () => {
+    const db = getDb()
+    await db.sessions.bulkAdd([imSession("old", 1), imSession("new", 2)])
+    await db.conversationOverrides.add({
+      id: "o",
+      conversationKey: KEY,
+      sessionId: "old",
+      activeSessionId: "old",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect((await resolveConversationLinkSession(KEY))?.id).toBe("old")
+  })
+  it("opens an explicit historical session and rejects another conversation", async () => {
+    await getDb().sessions.bulkAdd([
+      imSession("old", 1),
+      imSession("new", 2),
+      imSession("other", 3, "telegram:tg-1:99"),
+    ])
+    expect((await resolveConversationLinkSession(KEY, { sessionId: "old" }))?.id).toBe("old")
+    expect(await resolveConversationLinkSession(KEY, { sessionId: "other" })).toBeUndefined()
+    expect(await resolveConversationLinkSession(KEY, { sessionId: "deleted" })).toBeUndefined()
+  })
+  it("resolves a message to its owner and rejects contradictory explicit targets", async () => {
+    await getDb().sessions.bulkAdd([imSession("old", 1), imSession("new", 2)])
+    await getDb().messages.add({ id: "m", sessionId: "old", role: "user", parts: [], createdAt: 1 })
+    expect((await resolveConversationLinkSession(KEY, { messageId: "m" }))?.id).toBe("old")
+    expect(
+      (await resolveConversationLinkSession(KEY, { sessionId: "old", messageId: "m" }))?.id
+    ).toBe("old")
+    expect(
+      await resolveConversationLinkSession(KEY, { sessionId: "new", messageId: "m" })
+    ).toBeUndefined()
+    expect(
+      await resolveConversationLinkSession("telegram:tg-1:99", { messageId: "m" })
+    ).toBeUndefined()
+    expect(await resolveConversationLinkSession(KEY, { messageId: "deleted" })).toBeUndefined()
+  })
+})
+
+describe("legacy conversation list state", () => {
+  it("preserves old Inbox preferences once and never resurrects a canonical clear", async () => {
+    const db = getDb()
+    await db.sessions.add(imSession("s", 2))
+    await db.conversationOverrides.add({
+      id: "o",
+      conversationKey: KEY,
+      sessionId: "s",
+      createdAt: 1,
+      updatedAt: 3,
+      pinned: true,
+      archived: true,
+      lastReadAt: 1,
+    })
+    await db.messages.add({
+      id: "legacy-in",
+      sessionId: "s",
+      role: "user",
+      parts: [],
+      createdAt: 2,
+      metadata: {
+        platformMessage: {
+          platform: "telegram",
+          adapterId: "tg-1",
+          conversationKey: KEY,
+          messageId: "remote",
+          sender: { remoteUserId: "human" },
+        },
+      },
+    } as never)
+    await migrateLegacyConversationListState()
+    expect(await db.sessions.get("s")).toMatchObject({ pinned: true, archivedAt: 3 })
+    expect(await db.sessionState.get("s")).toMatchObject({ lastReadAt: 1, unreadCount: 1 })
+    expect(await db.conversationOverrides.get("o")).not.toHaveProperty("pinned")
+    await db.sessions
+      .where("id")
+      .equals("s")
+      .modify((session) => {
+        session.pinned = false
+        delete session.archivedAt
+      })
+    await db.sessionState.update("s", { unreadCount: 0, lastReadAt: 4 })
+    await migrateLegacyConversationListState()
+    expect(await db.sessions.get("s")).toMatchObject({ pinned: false })
+    expect(await db.sessions.get("s")).not.toHaveProperty("archivedAt")
+    expect(await db.sessionState.get("s")).toMatchObject({ unreadCount: 0, lastReadAt: 4 })
+  })
+  it("preserves existing canonical false and explicit mutation scopes", async () => {
+    const db = getDb()
+    await db.sessions.bulkAdd([{ ...imSession("s", 2), pinned: false }, imSession("other", 1)])
+    await db.conversationOverrides.add({
+      id: "o",
+      conversationKey: KEY,
+      sessionId: "s",
+      createdAt: 1,
+      updatedAt: 3,
+      pinned: true,
+    })
+    await migrateLegacyConversationListState()
+    expect((await db.sessions.get("s"))?.pinned).toBe(false)
+    await db.conversationOverrides.update("o", { pinned: false, archived: true })
+    await migrateLegacyConversationListState({
+      conversationKey: KEY,
+      sessionId: "s",
+      overwrite: true,
+    })
+    expect(await db.sessions.get("s")).toMatchObject({
+      pinned: false,
+      archivedAt: expect.any(Number),
+    })
+    expect(await db.sessions.get("other")).not.toHaveProperty("archivedAt")
+  })
+})
+
+it("initializes real inbound unread for a legacy IM session without any override", async () => {
+  const db = getDb()
+  await db.sessions.add(imSession("no-override", 1))
+  await db.messages.bulkAdd([
+    {
+      id: "remote",
+      sessionId: "no-override",
+      role: "user",
+      createdAt: 2,
+      parts: [],
+      metadata: { platformMessage: { messageId: "remote" } },
+    },
+    { id: "local", sessionId: "no-override", role: "user", createdAt: 2, parts: [] },
+    { id: "assistant", sessionId: "no-override", role: "assistant", createdAt: 2, parts: [] },
+  ] as never[])
+  await migrateLegacyConversationListState()
+  expect(await db.sessionState.get("no-override")).toMatchObject({ unreadCount: 1 })
 })

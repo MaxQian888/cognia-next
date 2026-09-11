@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix connector retention sweeps being silently dropped by the host execution cap. Housekeeping fans out one clock plus five sweeps, which is six starts against a default `maxConcurrentExecutions` of 5, and the start that lost the race was discarded rather than delayed: `concurrency-blocked` and `overlap-skipped` are terminal, so the sweep simply never ran and the next chance was 24 hours later, where the same task lost again. Outbound, inbound, audit, heartbeat, execution-run and callback-binding retention could therefore stop running entirely, and the attachment cache stopped being swept, while the log filled with `host concurrency cap (5) reached`. All six housekeeping tasks now buffer a blocked start instead of dropping it, existing installs are reconciled to that policy rather than keeping the old one forever, and the boot sweep and the clock's startup catch-up are collapsed into a single sweep instead of firing two bursts of five starts inside one startup window.

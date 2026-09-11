@@ -86,7 +86,7 @@ describe("ImportedOriginChip", () => {
           importLifecycle: { status: "running", background: true },
           importLossReport: {
             fidelity: "structured",
-            losses: [{ path: "events.unknown", kind: "omitted", detail: "redacted" }],
+            losses: [{ path: "events.unknown", kind: "dropped", detail: "redacted" }],
           },
           importCanonicalState: {
             tasks: [{ taskId: "task-1", status: "running" }],

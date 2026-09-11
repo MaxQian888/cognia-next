@@ -84,7 +84,7 @@ export const CONVERSATION_ACTIVITY_FILTER_OPTIONS: readonly ConversationActivity
 ] as const
 
 /** The boolean quick filters, in the order the toolbar renders them. */
-export const CONVERSATION_FILTER_TOGGLES = ["unread", "pinned", "branched"] as const
+export const CONVERSATION_FILTER_TOGGLES = ["unread", "pinned", "branched", "im"] as const
 
 export type ConversationFilterToggle = (typeof CONVERSATION_FILTER_TOGGLES)[number]
 
@@ -118,6 +118,7 @@ export const EMPTY_CONVERSATION_FILTERS: Readonly<Required<ConversationFilters>>
   unread: false,
   pinned: false,
   branched: false,
+  im: false,
   kind: "all" as ConversationKindFilter,
   workspaceIds: EMPTY_LIST as string[],
   folderIds: EMPTY_LIST as string[],
@@ -175,6 +176,7 @@ export function resolveConversationFilters(
     unread: filters.unread === true,
     pinned: filters.pinned === true,
     branched: filters.branched === true,
+    im: filters.im === true,
     kind: isKindFilter(filters.kind) ? filters.kind : "all",
     workspaceIds: normalizeList(filters.workspaceIds),
     folderIds: normalizeList(filters.folderIds),
@@ -357,6 +359,7 @@ export function matchesConversationFilters(
   if (filters.unread && !(unreadIds?.has(session.id) ?? false)) return false
   if (filters.pinned && !session.pinned) return false
   if (filters.branched && !session.parentSessionId) return false
+  if (filters.im && !session.platformBinding) return false
   if (filters.kind === "team" && session.kind !== "team") return false
   if (filters.kind === "dm" && session.kind === "team") return false
   if (!listAdmits(filters.workspaceIds, session.projectId)) return false

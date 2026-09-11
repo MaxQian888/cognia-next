@@ -12,6 +12,7 @@ jest.mock("./reactions-store", () => ({
 
 import {
   MESSAGE_REACTION_EMOJIS,
+  messageAllowsReactions,
   platformAddressOf,
   reactionAbilityFor,
   ReactionNeedsHostError,
@@ -49,6 +50,21 @@ function mirror(overrides: Partial<ReactionMirror> = {}): ReactionMirror & {
     ...overrides,
   }
 }
+
+describe("messageAllowsReactions", () => {
+  it("applies to an IM row and to a row that already carries reactions", () => {
+    expect(messageAllowsReactions(imMessage)).toBe(true)
+    expect(
+      messageAllowsReactions({ metadata: { reactions: [{ emoji: "👍", actorIds: ["x"] }] } })
+    ).toBe(true)
+  })
+
+  it("does not apply to a solo assistant row, where a reaction reaches nobody", () => {
+    expect(messageAllowsReactions({ metadata: {} })).toBe(false)
+    expect(messageAllowsReactions({})).toBe(false)
+    expect(messageAllowsReactions({ metadata: { reactions: [] } })).toBe(false)
+  })
+})
 
 describe("readers", () => {
   it("reads reactions and the IM address defensively", () => {

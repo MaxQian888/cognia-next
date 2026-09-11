@@ -4,30 +4,18 @@
  * Concurrent-chat pane layout. Renders one or two live `ChatPane`s (split
  * view), each bound to its own session slice so
  * sessions stream simultaneously and a focus switch never pauses a background
- * stream. Every pane wires its own send / stop / regenerate / edit + an inline
- * tool-approval gate scoped to that session — a gate in pane B can never block
- * or be confused with pane A's.
+ * stream. Every pane wires its own send / stop / regenerate / edit; ChatPane
+ * owns its session-scoped blocking decisions.
  */
 
 import { useCallback, type ReactNode, type Ref } from "react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { ChatPane } from "./chat-view"
-import { ToolApprovalDialog } from "./tool-approval-dialog"
-import { ExternalAgentElicitationDialog } from "@/components/agent/external-agent/elicitation-dialog"
 import type { ComposerHandle, ComposerTurnMetadata } from "./composer"
 import type { RecentSessionEntry } from "./empty-state"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
-import { useChatStore, useSessionPendingApprovals } from "@/stores/chat"
-import {
-  useExternalElicitationStore,
-  useSessionPendingElicitation,
-} from "@/stores/agent/external-elicitation-store"
-import type {
-  ApprovalDecision,
-  Character,
-  ChatSession,
-  SendContent,
-} from "@cognia/agent-config-types"
+import { useChatStore } from "@/stores/chat"
+import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 
@@ -57,10 +45,6 @@ export interface ChatPaneGroupProps {
   compact?: (sessionId: string) => Promise<void>
   setModel?: (sessionId: string, model: string) => Promise<void>
   resetRuntime?: (sessionId: string) => Promise<void>
-  respondToApproval: (
-    approval: import("@cognia/agent-config-types").PendingApproval,
-    decision: ApprovalDecision
-  ) => Promise<void> | void
   onCreate: () => void
   onUseSample: (text: string) => void
   /** First turn from the welcome hero composer — creates the session, then sends. */
@@ -88,72 +72,6 @@ export interface ChatPaneGroupProps {
   ) => Promise<void> | void
 }
 
-/** Inline, session-scoped approval gate for one pane. */
-function PaneApprovalGate({
-  sessionId,
-  onRespond,
-}: {
-  sessionId: string
-  onRespond: (
-    approval: import("@cognia/agent-config-types").PendingApproval,
-    decision: ApprovalDecision
-  ) => Promise<void> | void
-}) {
-  const approvals = useSessionPendingApprovals(sessionId)
-  // Prefer the first LIVE approval — a fresh answerable request must never be
-  // hidden behind a stale interrupted notice. Interrupted entries surface only
-  // when nothing is answerable (Dismiss-only card in the dialog).
-  const approval = approvals.find((a) => a.status !== "interrupted") ?? approvals[0] ?? null
-  return (
-    <ToolApprovalDialog
-      approval={approval}
-      onRespond={(decision) => onRespond(approval!, decision)}
-      onDismiss={() =>
-        approval && useChatStore.getState().clearApproval(approval.requestId, sessionId)
-      }
-      onCancelRun={(runId) => {
-        // Abort the whole dispatched subagent run (distinct from deny-one).
-        void import("@/lib/claude/agents/cancel-subagent").then(({ cancelSubagentRun }) =>
-          cancelSubagentRun(runId)
-        )
-      }}
-    />
-  )
-}
-
-/**
- * Inline, session-scoped question gate for one pane.
- *
- * The sibling of `PaneApprovalGate`, and a separate dialog for the same reason
- * the settings page keeps them apart: an approval grants a capability and
- * answers allow / deny / always, while an elicitation collects a VALUE and has
- * no "always" to offer.
- *
- * The response goes straight to the manager rather than up through a prop:
- * unlike an approval it has no settings, ruleset or receipt side effects to
- * coordinate, so threading it through every shell that renders this group
- * would buy nothing.
- */
-function PaneElicitationGate({ sessionId }: { sessionId: string }) {
-  const pending = useSessionPendingElicitation(sessionId)
-  const respond = useCallback(
-    (response: import("@/types/agent/external-agent").AcpElicitationResponse) => {
-      if (!pending) return
-      // Cleared first: the dialog calls back exactly once per request, and
-      // leaving it mounted while the answer is in flight would let a second
-      // click answer the same question twice.
-      useExternalElicitationStore.getState().remove(sessionId, pending.request.id)
-      // Where the agent is decides how the answer travels; the dialog does not
-      // need to know, so the branch lives in the bridge.
-      void import("@/lib/ai/agent/external/chat-decision-bridge").then(
-        ({ deliverExternalElicitation }) => deliverExternalElicitation(pending, response)
-      )
-    },
-    [pending, sessionId]
-  )
-  return <ExternalAgentElicitationDialog request={pending?.request ?? null} onRespond={respond} />
-}
-
 export function ChatPaneGroup({
   sessions,
   send,
@@ -166,7 +84,6 @@ export function ChatPaneGroup({
   compact,
   setModel,
   resetRuntime,
-  respondToApproval,
   onCreate,
   onUseSample,
   onHeroSend,
@@ -275,18 +192,10 @@ export function ChatPaneGroup({
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
             {renderPane(activeSessionId, true)}
-            {activeSessionId && (
-              <>
-                <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
-                <PaneElicitationGate sessionId={activeSessionId} />
-              </>
-            )}
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize="50%" minSize="25%" className="flex min-h-0 flex-col">
             {renderPane(effectiveSplitId, false, undefined, () => setSplitSessionId(null))}
-            <PaneApprovalGate sessionId={effectiveSplitId} onRespond={respondToApproval} />
-            <PaneElicitationGate sessionId={effectiveSplitId} />
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
@@ -295,12 +204,6 @@ export function ChatPaneGroup({
             activeSessionId,
             true,
             splitTargetId ? () => setSplitSessionId(splitTargetId) : undefined
-          )}
-          {activeSessionId && (
-            <>
-              <PaneApprovalGate sessionId={activeSessionId} onRespond={respondToApproval} />
-              <PaneElicitationGate sessionId={activeSessionId} />
-            </>
           )}
         </div>
       )}

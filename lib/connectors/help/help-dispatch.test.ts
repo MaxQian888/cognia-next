@@ -47,7 +47,7 @@ function deps(override: Record<string, unknown> | undefined = undefined) {
   // production `readForResolution` reaches for Dexie, which the node project
   // has no database for, and the read is swallowed by its own catch.
   const readOverride = jest.fn().mockResolvedValue(override)
-  return { enqueue, audit, now: () => 5000, readOverride } as never
+  return { enqueue, audit, now: () => 5000, readOverride }
 }
 
 /** The plain-text mirror of the single card the dispatcher enqueued. */

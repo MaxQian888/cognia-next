@@ -22,6 +22,9 @@ import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { dropUnreadMarker } from "@/lib/chat/unread-marker"
 import { ChatHeader } from "./chat-header"
+import { ChatSessionGates } from "./chat-session-gates"
+import { useChatPaneRuntime } from "@/hooks/chat/use-chat-pane-runtime"
+import { PlatformConversationContext } from "@/components/inbox/platform-conversation-context"
 import { ChatColumn } from "./chat-column"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
@@ -274,9 +277,8 @@ interface ChatPaneProps {
   workflowMention?: ComposerWorkflowMention
   /**
    * Resume the chat turn after the user approves a plan in the plan-approval
-   * dock. The host switches the session permission mode to `mode`
-   * (acceptEdits / default / auto) and sends the resume prompt. When omitted
-   * the dock is not rendered (e.g. surfaces without a send pipeline).
+   * dock. Overrides the shared session-bound continuation when the host needs
+   * additional context. Omitting this callback never removes the approval UI.
    */
   onResumeAfterPlanApproval?: (
     prompt: string,
@@ -322,10 +324,8 @@ interface ChatPaneProps {
 /**
  * The "main pane" content of the desktop shell — header, message list,
  * composer, error/empty states. Owned by `<DesktopChatWorkspace>`, which
- * provides the cross-cutting hooks and dialogs.
- *
- * Kept lean on purpose: every cross-cutting concern (settings, approvals,
- * command palette, title bar) belongs in the shell.
+ * provides its layout. Blocking decisions and session-bound runtime actions
+ * belong here so an embedded host cannot accidentally omit them.
  */
 export function ChatPane({
   activeSession,
@@ -368,6 +368,13 @@ export function ChatPane({
   // The pane is bound to its own session slice (defaulting to the focused
   // session) so a background pane reads + streams its own state independently.
   const boundId = sessionId ?? activeSession?.id ?? null
+  const { runtime, ownsDecisions, resumePlan } = useChatPaneRuntime(boundId)
+  const directSession = activeSession?.kind !== "team"
+  const resumeAfterPlanApproval = onResumeAfterPlanApproval ?? resumePlan
+  const steerNow =
+    onSteerNow ?? (directSession && boundId ? () => runtime.interruptAndSteer(boundId) : undefined)
+  const steerFlush =
+    onSteerFlush ?? (directSession && boundId ? () => runtime.flushSteer(boundId) : undefined)
   // Subscribe to a boolean, not the whole `messages` array: the empty/chat
   // layout swap and the focus/retry gates only care whether any message
   // exists. Streaming tokens mutate `messages` but not this boolean, so the
@@ -680,12 +687,13 @@ export function ChatPane({
         onSend={handleSend}
         onStop={() => void onStop()}
         status={status}
-        // Only the concurrent-stream cap blocks the composer (this pane isn't
+        // Platform delivery does not consume an AI stream slot. For local chat,
+        // the concurrent-stream cap blocks the composer (this pane isn't
         // one of the streamers, so there is nothing to steer). Awaiting approval
         // stays writable on purpose: that is exactly when the user wants to say
         // "don't use that tool, do it another way", and `send` already routes a
         // message in that state into the steer queue rather than a new turn.
-        disabled={atCapacity || composerDisabled}
+        disabled={(atCapacity && !activeSession.platformBinding) || composerDisabled}
         mobileMentionMembers={mobileMentionMembers}
         workflowMention={workflowMention}
       />
@@ -698,8 +706,8 @@ export function ChatPane({
       <RunStatusBar
         sessionId={boundId}
         onStop={() => void onStop()}
-        onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
-        onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
+        onSteerNow={steerNow ? () => void steerNow() : undefined}
+        onSteerFlush={steerFlush ? () => void steerFlush() : undefined}
       />
     </ChatColumn>
   )
@@ -713,7 +721,7 @@ export function ChatPane({
   // just above the composer. Only one layout branch mounts at a time.
   const errorAndFooter = (
     <>
-      {atCapacity && (
+      {atCapacity && !activeSession.platformBinding && (
         <ChatColumn className="mb-1">
           <div
             role="status"
@@ -783,6 +791,22 @@ export function ChatPane({
     <>
       {showHeader && (
         <ChatHeader session={activeSession} onSplitView={onSplitView} onExitSplit={onExitSplit} />
+      )}
+      {boundId && ownsDecisions && (
+        <ChatSessionGates sessionId={boundId} respondToApproval={runtime.respondToApproval} />
+      )}
+      {activeSession?.platformBinding && (
+        <PlatformConversationContext session={activeSession} showHeader={!showHeader} />
+      )}
+      {boundId && ownsDecisions && directSession && (
+        <ChatColumn>
+          <PlanApprovalDock
+            sessionId={boundId}
+            session={activeSession}
+            onResume={resumeAfterPlanApproval}
+            onSendPlanFeedback={onSendPlanFeedback ?? onSend}
+          />
+        </ChatColumn>
       )}
       {runtimeNotice && <ChatColumn className="mt-3">{runtimeNotice}</ChatColumn>}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
@@ -892,9 +916,9 @@ export function ChatPane({
                   directCharacter={activeCharacter ?? null}
                   projectRoot={projectRoot}
                   onCopy={handleCopySuccess}
-                  onRegenerate={handleRegenerate}
-                  onEditResend={handleEditResend}
-                  onRewindFiles={onRewindFiles}
+                  onRegenerate={activeSession.platformBinding ? undefined : handleRegenerate}
+                  onEditResend={activeSession.platformBinding ? undefined : handleEditResend}
+                  onRewindFiles={onRewindFiles ?? (directSession ? runtime.rewindFiles : undefined)}
                   useCompanionTranscript={usesCompanionTranscript}
                 />
                 {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
@@ -903,16 +927,6 @@ export function ChatPane({
                 <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
               </ChatColumn>
               {errorAndFooter}
-              {boundId && onResumeAfterPlanApproval && (
-                <ChatColumn>
-                  <PlanApprovalDock
-                    sessionId={boundId}
-                    session={activeSession}
-                    onResume={onResumeAfterPlanApproval}
-                    onSendPlanFeedback={onSendPlanFeedback}
-                  />
-                </ChatColumn>
-              )}
               {/* Executing/paused plans surface the live tracker in the same slot
                 (statuses are mutually exclusive with awaiting_approval). */}
               {boundId && (
@@ -935,9 +949,9 @@ export function ChatPane({
               {boundId ? (
                 <ChatScopeProvider
                   sessionId={boundId}
-                  compact={onCompact}
-                  setModel={onSetModel}
-                  resetRuntime={onResetRuntime}
+                  compact={onCompact ?? (() => runtime.compact(boundId))}
+                  setModel={onSetModel ?? ((model) => runtime.setModel(boundId, model))}
+                  resetRuntime={onResetRuntime ?? (() => runtime.resetRuntime(boundId))}
                 >
                   {composerEl}
                 </ChatScopeProvider>
@@ -974,8 +988,8 @@ function ChatMessages({
   directCharacter?: Character | null
   projectRoot?: string | null
   onCopy: () => void
-  onRegenerate: () => void
-  onEditResend: (messageId: string, newText: string) => void
+  onRegenerate?: () => void
+  onEditResend?: (messageId: string, newText: string) => void
   onRewindFiles?: (
     sessionId: string,
     checkpointId: string,

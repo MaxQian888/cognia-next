@@ -22,6 +22,8 @@
  * deferred suppression).
  */
 
+import { isViewingConversation } from "@/stores/inbox/active-conversation-store"
+import { isNotifiableInboundEvent } from "@/lib/connectors/inbound-notifiability"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
@@ -714,7 +716,36 @@ export async function insertInboundMessage(
     },
     createdAt: now,
   }
-  await getDb().messages.add(row)
+  const db = getDb()
+  const persisted = await db.transaction("rw", db.messages, db.sessionState, async () => {
+    // Concurrent redeliveries must neither insert nor increment unread twice.
+    const duplicate = await db.messages
+      .where("platformMessageId")
+      .equals(event.messageId)
+      .filter(
+        (message) =>
+          message.sessionId === sessionId &&
+          message.metadata?.platformMessage?.adapterId === event.adapterId &&
+          message.metadata?.platformMessage?.conversationKey === event.conversationKey
+      )
+      .first()
+    if (duplicate) return duplicate
+    await db.messages.add(row)
+    if (
+      isNotifiableInboundEvent(event) &&
+      !isViewingConversation(event.conversationKey, sessionId)
+    ) {
+      const previous = await db.sessionState.get(sessionId)
+      await db.sessionState.put({
+        sessionId,
+        lastReadAt: previous?.lastReadAt ?? 0,
+        unreadCount: (previous?.unreadCount ?? 0) + 1,
+        updatedAt: Date.now(),
+      })
+    }
+    return row
+  })
+  if (persisted.id !== row.id) return persisted
   // The persist snapshot in `lib/db/messages.ts` assumes it is the only
   // writer for a session; an inbound platform message arriving mid-stream
   // would otherwise leave it claiming rows are unchanged.

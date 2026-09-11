@@ -544,6 +544,8 @@ interface ChatState {
   /** Ordered list of open sessions (the tab strip). The active session is
    * always present. */
   openSessionIds: string[]
+  /** Mounted chat surfaces, separate from navigation tabs. First pane owns dialogs. */
+  paneIdsBySession: Record<string, string[]>
   /** Session shown in the secondary split pane, or `null` when not split. */
   splitSessionId: string | null
   messages: UIMessage[]
@@ -653,6 +655,8 @@ interface ChatState {
   setActiveSession: (id: string | null) => void
   /** Add a session to the open-tab strip (no focus change). Idempotent. */
   openSession: (id: string) => void
+  retainPane: (sessionId: string, paneId: string) => void
+  releasePane: (sessionId: string, paneId: string) => void
   /** Close a session pane: drop its slice + tab, clear split if it held it,
    * and re-focus the next open session when the active one was closed. */
   closeSession: (id: string) => void
@@ -817,6 +821,7 @@ export const useChatStore = create<ChatState>((set) => ({
   activeSessionEpoch: 0,
   sessions: {},
   openSessionIds: [],
+  paneIdsBySession: {},
   splitSessionId: null,
   messages: [],
   status: "idle",
@@ -879,13 +884,35 @@ export const useChatStore = create<ChatState>((set) => ({
       const sessions = s.sessions[id] ? s.sessions : { ...s.sessions, [id]: makeSessionSlice() }
       return { openSessionIds: [...s.openSessionIds, id], sessions }
     }),
+  retainPane: (sessionId, paneId) =>
+    set((s) => {
+      const panes = s.paneIdsBySession[sessionId] ?? []
+      if (panes.includes(paneId)) return s
+      return {
+        paneIdsBySession: { ...s.paneIdsBySession, [sessionId]: [...panes, paneId] },
+        sessions: s.sessions[sessionId]
+          ? s.sessions
+          : { ...s.sessions, [sessionId]: makeSessionSlice() },
+      }
+    }),
+  releasePane: (sessionId, paneId) =>
+    set((s) => {
+      const panes = s.paneIdsBySession[sessionId]
+      if (!panes?.includes(paneId)) return s
+      const paneIdsBySession = { ...s.paneIdsBySession }
+      const remaining = panes.filter((id) => id !== paneId)
+      if (remaining.length) paneIdsBySession[sessionId] = remaining
+      else delete paneIdsBySession[sessionId]
+      // Closing a surface does not close its tab or discard a live turn/draft.
+      return { paneIdsBySession }
+    }),
   closeSession: (id) =>
     set((s) => {
       const openSessionIds = s.openSessionIds.filter((x) => x !== id)
       const sessions = { ...s.sessions }
-      delete sessions[id]
+      if (!s.paneIdsBySession[id]?.length) delete sessions[id]
       const lastSendBySession = { ...s.lastSendBySession }
-      delete lastSendBySession[id]
+      if (!s.paneIdsBySession[id]?.length) delete lastSendBySession[id]
       const splitSessionId = s.splitSessionId === id ? null : s.splitSessionId
       const base = { openSessionIds, sessions, lastSendBySession, splitSessionId }
       if (s.activeSessionId !== id) return base
@@ -1059,6 +1086,13 @@ export const useChatStore = create<ChatState>((set) => ({
       // sub-session/ephemeral id for approveTool routing.
       const bucketId = resolveApprovalBucket(approval.sessionId)
       const slice = sliceForId(s, bucketId)
+      if (
+        slice.pendingApprovals.some(
+          (pending) =>
+            pending.requestId === approval.requestId && pending.sessionId === approval.sessionId
+        )
+      )
+        return s
       const stamped: PendingApproval = { requestedAt: Date.now(), ...approval }
       // Durable mirror: persist the ask so a crash/restart surfaces it as
       // interrupted instead of dropping it silently.
@@ -1372,6 +1406,7 @@ export const useChatStore = create<ChatState>((set) => ({
       activeSessionId: null,
       sessions: {},
       openSessionIds: [],
+      paneIdsBySession: {},
       splitSessionId: null,
       messages: [],
       status: "idle",

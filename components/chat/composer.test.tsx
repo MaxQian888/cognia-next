@@ -348,7 +348,7 @@ describe("Composer — data-hooks integration", () => {
     expect(updateSession).not.toHaveBeenCalled()
   })
 
-  it("keeps IM actions and status controls in one footer row", () => {
+  it("keeps IM actions accessible separately from the model status row", () => {
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -371,7 +371,9 @@ describe("Composer — data-hooks integration", () => {
 
     const footer = screen.getByTestId("composer-footer")
     expect(footer.className).toContain("flex-nowrap")
-    expect(footer).toContainElement(screen.getByTestId("canned-response-trigger"))
+    expect(screen.getByTestId("canned-response-trigger")).toBeInTheDocument()
+    expect(footer).not.toContainElement(screen.getByTestId("canned-response-trigger"))
+    expect(screen.getByRole("button", { name: "AI draft reply" })).toBeInTheDocument()
     // The wide footer holds the execution controls inline — there is no "⋯" to
     // fold them into at this width.
     expect(footer).toContainElement(screen.getByTestId("composer-execution-controls"))

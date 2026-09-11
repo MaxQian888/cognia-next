@@ -158,7 +158,12 @@ describe("SessionEnvironmentChip", () => {
   it("is a real button, so it is reachable by keyboard on either device", () => {
     render(
       <SessionEnvironmentChip
-        executionContext={{ location: "local", projectId: "p", projectRoot: "/repo" }}
+        executionContext={{
+          location: "local",
+          projectId: "p",
+          projectRoot: "/repo",
+          taskWorkspace: { taskId: "task-1", workspaceKey: "workspace-1" },
+        }}
         onManage={jest.fn()}
       />
     )

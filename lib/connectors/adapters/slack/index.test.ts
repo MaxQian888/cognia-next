@@ -822,6 +822,22 @@ describe("createSlackAdapter", () => {
       expect(JSON.parse(complete.req.body as string).thread_ts).toBe("1600000000.000888")
     })
 
+    it("uploads inline image bytes with their decoded byte length", async () => {
+      mockUploadApis()
+      const url = "data:image/png;base64,AQID"
+      const result = await makeAdapter().send({
+        conversationRef,
+        segments: [{ type: "image", url, alt: "original.png", mimeType: "image/png" }],
+        metadata: { idempotencyKey: "inline" },
+      })
+      expect(result.ok).toBe(true)
+      const calls = uploadCalls()
+      const open = new URL(calls[0].req.url as string)
+      expect(open.searchParams.get("length")).toBe("3")
+      expect(calls[1].req).toMatchObject({ sourceUrl: url, contentType: "image/png" })
+      expect(calls[1].req.localPath).toBeUndefined()
+    })
+
     it("happy path: 3 calls in order with the documented params, no chat.postMessage", async () => {
       mockUploadApis()
       const result = await makeAdapter().send({

@@ -35,6 +35,12 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("@/components/inbox/platform-conversation-context", () => ({
+  PlatformConversationHeader: ({ session }: { session: { id: string } }) => (
+    <div data-testid="platform-controls" data-session={session.id} />
+  ),
+}))
+
 const mockRouterPush = jest.fn()
 jest.mock("next/navigation", () => ({
   ...jest.requireActual("next/navigation"),
@@ -281,7 +287,7 @@ describe("ChatHeader", () => {
     expect(button).not.toBeDisabled()
   })
 
-  it("offers 'open in Inbox' only for a platform-bound conversation, routing to /inbox/c", () => {
+  it("renders platform identity and controls in the common chat header", () => {
     const Wrapper = withAdapter(makeAdapter())
     const { rerender } = render(
       <Wrapper>
@@ -303,9 +309,9 @@ describe("ChatHeader", () => {
         />
       </Wrapper>
     )
-    const button = screen.getByRole("button", { name: /open in inbox/i })
-    fireEvent.click(button)
-    expect(mockRouterPush).toHaveBeenCalledWith("/inbox/c?key=telegram%3Aa1%3A1001")
+    expect(screen.getByTestId("platform-controls")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "Telegram" })).toBeInTheDocument()
+    expect(screen.queryByTestId("chat-header-open-in-inbox")).not.toBeInTheDocument()
   })
 
   it("hides the Codex App dispatch action outside Tauri", () => {

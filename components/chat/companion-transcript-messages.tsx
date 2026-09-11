@@ -38,8 +38,8 @@ export interface CompanionTranscriptMessagesProps {
   directCharacter?: Character | null
   projectRoot?: string | null
   onCopy: () => void
-  onRegenerate: () => void | Promise<void>
-  onEditResend: (messageId: string, newText: string) => void | Promise<void>
+  onRegenerate?: () => void | Promise<void>
+  onEditResend?: (messageId: string, newText: string) => void | Promise<void>
   onRewindFiles?: (
     sessionId: string,
     checkpointId: string,

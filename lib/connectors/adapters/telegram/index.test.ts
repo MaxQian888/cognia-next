@@ -1095,6 +1095,26 @@ describe("Telegram local multipart uploads", () => {
     })
     expect(mockInvoke.mock.calls.some(([cmd]) => cmd === "connectors_http_request")).toBe(false)
   })
+  it("uploads inline bytes through sourceUrl and retains reply/thread routing", async () => {
+    mockInvoke.mockResolvedValue(JSON.stringify(makeSendOkResp(71)))
+    const url = "data:image/png;base64,AQID"
+    const result = await makeAdapter().send({
+      conversationRef: { platform: "telegram", adapterId: "tg-upload", chatId: "-100" },
+      threadId: "77",
+      replyTo: { messageId: "-100:70" },
+      segments: [{ type: "image", url, mimeType: "image/png" }],
+      metadata: { idempotencyKey: "inline" },
+    })
+    expect(result.ok).toBe(true)
+    const req = mockInvoke.mock.calls.find(([cmd]) => cmd === "connectors_media_upload")![1].req
+    expect(req.sourceUrl).toBe(url)
+    expect(req.localPath).toBeUndefined()
+    expect(req.multipart.fields).toMatchObject({
+      message_thread_id: "77",
+      reply_parameters: JSON.stringify({ message_id: 70 }),
+    })
+  })
+
   it("preserves Telegram's multipart rate-limit response", async () => {
     mockInvoke.mockResolvedValue(
       JSON.stringify({

@@ -239,6 +239,15 @@ describe("ConversationFilterMenu (desktop)", () => {
     expect(actions.setKind).toHaveBeenCalledWith("team")
   })
 
+  it("offers IM origin even when the sidebar already scopes team membership", async () => {
+    const user = userEvent.setup()
+    const { actions } = menu({ scopeOwnsKind: true })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await openSection(user, "status")
+    pick(await screen.findByRole("menuitemcheckbox", { name: "filters.options.im" }))
+    expect(actions.toggle).toHaveBeenCalledWith("im", true)
+  })
+
   it("drops the kind group on a surface whose own scope already decides it", async () => {
     // The desktop rail's guild rows scope the list to Chats or to one team, and
     // the controller stops applying `kind` there — so offering it would put a

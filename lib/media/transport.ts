@@ -34,51 +34,54 @@ export async function callMediaBinary(
       throw new Error("Media host returned an invalid transfer size")
     }
     const result = new Uint8Array(byteLength)
-    for (let start = 0; start < byteLength; start += CHUNK_BYTES * DOWNLOAD_WINDOW) {
-      signal?.throwIfAborted()
-      const reads: Promise<void>[] = []
-      for (let index = 0; index < DOWNLOAD_WINDOW; index++) {
-        const offset = start + index * CHUNK_BYTES
-        if (offset >= byteLength) break
-        const length = Math.min(CHUNK_BYTES, byteLength - offset)
-        reads.push(
-          (async () => {
-            const chunk = await transport.call<number[] | string>("plugin_media_read_chunk", {
-              transferId,
-              offset,
-              length,
-              ...(response.chunkEncoding === "base64" ? { encoding: "base64" } : {}),
-            })
-            signal?.throwIfAborted()
-            let bytes: Uint8Array | number[]
-            if (typeof chunk === "string") {
-              if (
-                chunk.length !== Math.ceil(length / 3) * 4 ||
-                !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk)
-              ) {
-                throw new Error("Media host returned an invalid binary chunk")
-              }
-              bytes = Uint8Array.from(atob(chunk), (character) => character.charCodeAt(0))
-            } else if (
-              Array.isArray(chunk) &&
-              !chunk.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
+    let nextOffset = 0
+    let stopped = false
+    const readNext = async () => {
+      try {
+        while (!stopped && nextOffset < byteLength) {
+          signal?.throwIfAborted()
+          const offset = nextOffset
+          const length = Math.min(CHUNK_BYTES, byteLength - offset)
+          nextOffset += length
+          const chunk = await transport.call<number[] | string>("plugin_media_read_chunk", {
+            transferId,
+            offset,
+            length,
+            ...(response.chunkEncoding === "base64" ? { encoding: "base64" } : {}),
+          })
+          signal?.throwIfAborted()
+          let bytes: Uint8Array | number[]
+          if (typeof chunk === "string") {
+            if (
+              chunk.length !== Math.ceil(length / 3) * 4 ||
+              !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(chunk)
             ) {
-              bytes = chunk
-            } else {
               throw new Error("Media host returned an invalid binary chunk")
             }
-            if (bytes.length !== length)
-              throw new Error("Media host returned an invalid binary chunk")
-            result.set(bytes, offset)
-          })()
-        )
+            bytes = Uint8Array.from(atob(chunk), (character) => character.charCodeAt(0))
+          } else if (
+            Array.isArray(chunk) &&
+            !chunk.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
+          ) {
+            bytes = chunk
+          } else {
+            throw new Error("Media host returned an invalid binary chunk")
+          }
+          if (bytes.length !== length)
+            throw new Error("Media host returned an invalid binary chunk")
+          result.set(bytes, offset)
+        }
+      } catch (error) {
+        stopped = true
+        throw error
       }
-      // Closing a transfer must not race an outstanding read, including
-      // when cancellation or one failed chunk stops the whole window.
-      const results = await Promise.allSettled(reads)
-      const failure = results.find((result) => result.status === "rejected")
-      if (failure?.status === "rejected") throw failure.reason
     }
+    // A slow range must not idle the other slots. Cleanup still waits for
+    // every in-flight worker after cancellation or a failed range.
+    const results = await Promise.allSettled(Array.from({ length: DOWNLOAD_WINDOW }, readNext))
+    const failure = results.find((result) => result.status === "rejected")
+    if (failure?.status === "rejected") throw failure.reason
+    signal?.throwIfAborted()
     return result
   } catch (error) {
     failed = true

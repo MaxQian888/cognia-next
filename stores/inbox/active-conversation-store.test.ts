@@ -3,7 +3,11 @@
 import { useActiveConversationStore, isViewingConversation } from "./active-conversation-store"
 
 beforeEach(() => {
-  useActiveConversationStore.setState({ activeConversationKey: null })
+  useActiveConversationStore.setState({
+    activeConversationKey: null,
+    activeSessionId: null,
+    visiblePanes: {},
+  })
 })
 
 describe("active-conversation-store", () => {
@@ -49,3 +53,53 @@ describe("isViewingConversation", () => {
   })
 })
 /** @jest-environment jsdom */
+
+it("distinguishes an older session from the active runtime session in one remote conversation", () => {
+  useActiveConversationStore.getState().setActiveConversation("same", "old")
+  const focus = jest.spyOn(document, "hasFocus").mockReturnValue(true)
+  expect(isViewingConversation("same", "old")).toBe(true)
+  expect(isViewingConversation("same", "new")).toBe(false)
+  useActiveConversationStore.getState().clearIf("same", "new")
+  expect(isViewingConversation("same", "old")).toBe(true)
+  useActiveConversationStore.getState().clearIf("same")
+  expect(useActiveConversationStore.getState().activeSessionId).toBeNull()
+  focus.mockRestore()
+})
+
+it("tracks multiple visible exact sessions independently of active focus", () => {
+  jest.spyOn(document, "hasFocus").mockReturnValue(true)
+  const store = useActiveConversationStore.getState()
+  store.retainVisiblePane("pane-a", "same", "old")
+  store.retainVisiblePane("pane-b", "same", "new")
+  store.retainVisiblePane("duplicate", "same", "old")
+  expect(isViewingConversation("same", "old")).toBe(true)
+  expect(isViewingConversation("same", "new")).toBe(true)
+  expect(isViewingConversation("same", "absent")).toBe(false)
+  store.releaseVisiblePane("pane-a")
+  expect(isViewingConversation("same", "old")).toBe(true)
+  store.releaseVisiblePane("duplicate")
+  expect(isViewingConversation("same", "old")).toBe(false)
+  expect(isViewingConversation("same", "new")).toBe(true)
+  jest.restoreAllMocks()
+})
+
+it("does not count a hidden browser document as viewed", () => {
+  jest.spyOn(document, "hasFocus").mockReturnValue(true)
+  jest.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  useActiveConversationStore.getState().retainVisiblePane("pane", "same", "s")
+  expect(isViewingConversation("same", "s")).toBe(false)
+  jest.restoreAllMocks()
+})
+
+it("shares read capture across duplicate owners until the entire visit closes", () => {
+  const store = useActiveConversationStore.getState()
+  const firstVisit = store.retainVisiblePane("first", "same", "s")
+  firstVisit.markerCaptured = true
+  expect(store.retainVisiblePane("second", "same", "s")).toBe(firstVisit)
+  store.releaseVisiblePane("first")
+  expect(store.retainVisiblePane("third", "same", "s").markerCaptured).toBe(true)
+  expect(store.retainVisiblePane("other", "same", "different").markerCaptured).toBe(false)
+  store.releaseVisiblePane("second")
+  store.releaseVisiblePane("third")
+  expect(store.retainVisiblePane("new-visit", "same", "s").markerCaptured).toBe(false)
+})

@@ -110,6 +110,7 @@ export interface ConversationHeaderOverflowProps {
   modelOverride?: string
   /** Desktop-only surfaces are gated on this (Tauri shell). */
   desktop: boolean
+  hideOpenInChat?: boolean
   onOpenContact: () => void
   onOpenBindings: () => void
 }
@@ -124,6 +125,7 @@ export function ConversationHeaderOverflow({
   modelOverride,
   desktop,
   onOpenContact,
+  hideOpenInChat = false,
   onOpenBindings,
 }: ConversationHeaderOverflowProps) {
   const t = useTranslations("inbox.conversationHeader")
@@ -258,17 +260,19 @@ export function ConversationHeaderOverflow({
               operator still sees the elevated-permission state even when the
               biometric toggle isn't available (web build / mobile shell). */}
           {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs"
-            onClick={() => void openInChat()}
-            data-testid="conversation-header-open-in-chat"
-          >
-            <MessageSquareIcon className="size-3.5" aria-hidden />
-            {t("openInChat")}
-          </Button>
+          {!hideOpenInChat && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={() => void openInChat()}
+              data-testid="conversation-header-open-in-chat"
+            >
+              <MessageSquareIcon className="size-3.5" aria-hidden />
+              {t("openInChat")}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"

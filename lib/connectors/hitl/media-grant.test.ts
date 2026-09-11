@@ -118,7 +118,13 @@ describe("requestMediaGrant", () => {
   }
 
   it("records one binding per button, each with its own decision", async () => {
-    const recordBinding = jest.fn(async () => undefined)
+    const recordBinding = jest.fn(
+      async (
+        ..._args: Parameters<
+          typeof import("@/lib/connectors/adapters/_shared/a2ui-mapper").recordCallbackBinding
+        >
+      ) => undefined
+    )
     await requestMediaGrant({
       ...base,
       recordBinding: recordBinding as never,
@@ -126,16 +132,20 @@ describe("requestMediaGrant", () => {
       audit: (async () => undefined) as never,
     })
     expect(recordBinding).toHaveBeenCalledTimes(3)
-    const decisions = recordBinding.mock.calls.map(
-      (call) => (call[0] as { payload: { decision: string } }).payload.decision
-    )
+    const decisions = recordBinding.mock.calls.map((call) => call[0].payload?.decision)
     expect(decisions).toEqual(["allow_24h", "allow_always", "deny"])
   })
 
   // Consent belongs to the person who sent the attachment, not to whoever is
   // watching the channel.
   it("scopes the buttons to the sender when one is known", async () => {
-    const recordBinding = jest.fn(async () => undefined)
+    const recordBinding = jest.fn(
+      async (
+        ..._args: Parameters<
+          typeof import("@/lib/connectors/adapters/_shared/a2ui-mapper").recordCallbackBinding
+        >
+      ) => undefined
+    )
     await requestMediaGrant({
       ...base,
       initiatorUserId: "u42",
@@ -150,7 +160,13 @@ describe("requestMediaGrant", () => {
   })
 
   it("falls back to operators-only with no known sender", async () => {
-    const recordBinding = jest.fn(async () => undefined)
+    const recordBinding = jest.fn(
+      async (
+        ..._args: Parameters<
+          typeof import("@/lib/connectors/adapters/_shared/a2ui-mapper").recordCallbackBinding
+        >
+      ) => undefined
+    )
     await requestMediaGrant({
       ...base,
       recordBinding: recordBinding as never,

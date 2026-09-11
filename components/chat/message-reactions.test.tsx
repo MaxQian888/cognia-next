@@ -37,6 +37,19 @@ function message(reactions?: unknown): UIMessage {
   } as unknown as UIMessage
 }
 
+/** A row that arrived over an IM connector — the multi-party case. */
+function imMessage(reactions?: unknown): UIMessage {
+  return {
+    id: "m2",
+    role: "user",
+    parts: [{ type: "text", text: "hi" }],
+    metadata: {
+      platformMessage: { messageId: "p1", adapterId: "telegram", platform: "telegram" },
+      ...(reactions ? { reactions } : {}),
+    },
+  } as unknown as UIMessage
+}
+
 beforeEach(() => {
   route = "local"
   toggleMessageReaction.mockClear()
@@ -69,7 +82,7 @@ it("toggles through a pill and through the picker", async () => {
   render(
     <>
       <MessageReactionPills message={message([{ emoji: "👍", actorIds: ["x"] }])} sessionId="s1" />
-      <MessageReactionAdd message={message([{ emoji: "👍", actorIds: ["x"] }])} sessionId="s1" />
+      <MessageReactionAdd message={imMessage([{ emoji: "👍", actorIds: ["x"] }])} sessionId="s1" />
     </>
   )
   fireEvent.click(screen.getByTestId("message-reaction-👍"))
@@ -106,7 +119,7 @@ it("shows the pills read-only with the reason on a companion shell", () => {
   render(
     <>
       <MessageReactionPills message={message([{ emoji: "👍", actorIds: ["x"] }])} sessionId="s1" />
-      <MessageReactionAdd message={message()} sessionId="s1" />
+      <MessageReactionAdd message={imMessage()} sessionId="s1" />
     </>
   )
   expect(screen.getByTestId("message-reactions")).toHaveAttribute("data-ability", "host-only")
@@ -117,6 +130,18 @@ it("shows the pills read-only with the reason on a companion shell", () => {
 })
 
 it("offers no add button without a conversation to write into", () => {
-  const { container } = render(<MessageReactionAdd message={message()} />)
+  const { container } = render(<MessageReactionAdd message={imMessage()} />)
   expect(container).toBeEmptyDOMElement()
+})
+
+it("offers no add button on a solo assistant row, where a reaction reaches nobody", () => {
+  const { container } = render(<MessageReactionAdd message={message()} sessionId="s1" />)
+  expect(container).toBeEmptyDOMElement()
+})
+
+it("offers the add button once the row already carries a reaction somebody left", () => {
+  render(
+    <MessageReactionAdd message={message([{ emoji: "👍", actorIds: ["x"] }])} sessionId="s1" />
+  )
+  expect(screen.getByTestId("message-reaction-add")).toBeInTheDocument()
 })

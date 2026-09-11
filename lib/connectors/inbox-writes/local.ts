@@ -18,7 +18,7 @@
  * existing `outboundQueue` row and returns it instead of sending twice.
  */
 
-import type { StoredMessage } from "@cognia/agent-config-types"
+import type { StoredMessage, MessageReplyTo } from "@cognia/agent-config-types"
 import { enqueueGoverned } from "@/lib/connectors/delivery-gateway"
 import { approveDraft, getDraft, rejectDraft } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow, OutboundJobRow } from "@/lib/db/connector-types"
@@ -30,7 +30,30 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { readChatTemplateRun, type ChatTemplateRun } from "@/lib/chat/template/run"
+import { parseReplyToPayload } from "@/lib/chat/reply-to"
 import { enforceTwinDisclosureFromProvenance } from "@/lib/twin/outbound-disclosure"
+
+/** Internal transcript provenance; never forwarded to platform adapters. */
+export interface ManualReplyMessageMetadata {
+  replyTo?: MessageReplyTo
+  templateRun?: ChatTemplateRun
+}
+
+export function parseManualReplyMessageMetadata(
+  value: unknown
+): ManualReplyMessageMetadata | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("invalid messageMetadata")
+  const raw = value as Record<string, unknown>
+  if (Object.keys(raw).some((key) => key !== "replyTo" && key !== "templateRun"))
+    throw new Error("invalid messageMetadata field")
+  const replyTo = raw.replyTo === undefined ? undefined : parseReplyToPayload(raw.replyTo)
+  const templateRun = raw.templateRun === undefined ? undefined : readChatTemplateRun(raw)
+  if (replyTo === null || templateRun === null) throw new Error("invalid messageMetadata value")
+  return { ...(replyTo ? { replyTo } : {}), ...(templateRun ? { templateRun } : {}) }
+}
 
 export interface ManualReplyInput {
   adapterId: string
@@ -54,6 +77,7 @@ export interface ManualReplyInput {
   clientMessageId?: string
   replyTo?: OutboundRequest["replyTo"]
   threadId?: string
+  messageMetadata?: ManualReplyMessageMetadata
 }
 
 export interface ManualReplyResult {
@@ -77,10 +101,20 @@ export function segmentsToMessageParts(
         if (segment.md) parts.push({ type: "text", text: segment.md })
         break
       case "image":
-        parts.push({ type: "text", text: `[image: ${segment.url}]` })
+        parts.push({
+          type: "file",
+          url: segment.url,
+          mediaType: segment.mimeType ?? "image/png",
+          filename: segment.alt,
+        })
         break
       case "file":
-        parts.push({ type: "text", text: `[file: ${segment.name}]` })
+        parts.push({
+          type: "file",
+          url: segment.url,
+          mediaType: segment.mimeType,
+          filename: segment.name,
+        })
         break
       default:
         break
@@ -108,7 +142,24 @@ async function findMessageForJob(
  * local `user` message carrying `metadata.outboundJobId`. Idempotent on
  * `idempotencyKey`.
  */
+// Host RPC replays may overlap before the first durable write completes.
+const manualReplyWrites = new Map<string, Promise<ManualReplyResult>>()
+
 export async function sendManualReplyLocally(input: ManualReplyInput): Promise<ManualReplyResult> {
+  const previous = manualReplyWrites.get(input.idempotencyKey)
+  const write = (previous ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => persistManualReplyLocally(input))
+  manualReplyWrites.set(input.idempotencyKey, write)
+  try {
+    return await write
+  } finally {
+    if (manualReplyWrites.get(input.idempotencyKey) === write)
+      manualReplyWrites.delete(input.idempotencyKey)
+  }
+}
+
+async function persistManualReplyLocally(input: ManualReplyInput): Promise<ManualReplyResult> {
   const existingJob = await findJobByIdempotencyKey(input.idempotencyKey)
   if (existingJob) {
     const existingMessage = await findMessageForJob(input.sessionId, existingJob.id)
@@ -120,23 +171,36 @@ export async function sendManualReplyLocally(input: ManualReplyInput): Promise<M
     return { jobId: existingJob.id, messageId, reused: true }
   }
 
-  const job = await enqueueGoverned({
-    adapterId: input.adapterId,
-    conversationKey: input.conversationKey,
-    request: {
-      conversationRef: input.conversationRef,
-      segments: input.segments,
-      metadata: { idempotencyKey: input.idempotencyKey },
-      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-    },
-    source: "manual",
-  })
-  const messageId = await appendReplyMessage(input, job.id)
-  return { jobId: job.id, messageId, reused: false }
+  const message = buildReplyMessage(input)
+  try {
+    const job = await enqueueGoverned({
+      localMessage: message,
+      adapterId: input.adapterId,
+      conversationKey: input.conversationKey,
+      request: {
+        conversationRef: input.conversationRef,
+        segments: input.segments,
+        metadata: { idempotencyKey: input.idempotencyKey },
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      },
+      source: "manual",
+    })
+    notifyReplyMessage(input)
+    return { jobId: job.id, messageId: message.id, reused: false }
+  } catch (error) {
+    // Housekeeping can fail after the atomic commit. Report acceptance only
+    // when BOTH durable rows exist; a failed transcript write rolls back the job.
+    const acceptedJob = await findJobByIdempotencyKey(input.idempotencyKey)
+    const acceptedMessage =
+      acceptedJob && (await findMessageForJob(input.sessionId, acceptedJob.id))
+    if (!acceptedJob || !acceptedMessage) throw error
+    notifyReplyMessage(input)
+    return { jobId: acceptedJob.id, messageId: acceptedMessage.id, reused: true }
+  }
 }
 
-async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promise<string> {
+function buildReplyMessage(input: ManualReplyInput, jobId?: string): StoredMessage {
   const now = Date.now()
   const id = input.clientMessageId ?? crypto.randomUUID()
   const parts = segmentsToMessageParts(input.segments)
@@ -145,16 +209,30 @@ async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promi
     sessionId: input.sessionId,
     role: "user",
     parts: parts.length > 0 ? parts : [{ type: "text", text: "" }],
-    metadata: { outboundJobId: jobId },
+    metadata: { ...input.messageMetadata, ...(jobId ? { outboundJobId: jobId } : {}) },
     createdAt: now,
   }
+  return row
+}
+
+async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promise<string> {
+  const row = buildReplyMessage(input, jobId)
   // `put`, not `add`: a thin client may already hold the optimistic row under
   // the same client-minted id (host and client converge on one row).
   await getDb().messages.put(row)
+  notifyReplyMessage(input)
+  return row.id
+}
+
+function notifyReplyMessage(input: ManualReplyInput): void {
   markSessionDirty(input.sessionId)
   invalidatePersistSnapshot(input.sessionId)
-  publishSyncInvalidate("messages", input.conversationKey)
-  return id
+  try {
+    publishSyncInvalidate("messages", input.conversationKey)
+  } catch {
+    // The transcript and job already committed. Periodic companion sync can
+    // recover a missed wake; a notification failure must not invite a resend.
+  }
 }
 
 export interface ApproveDraftLocallyOptions {

@@ -63,7 +63,7 @@ describe("ConversationRow — interaction (story-fixture reuse)", () => {
     await user.click(screen.getByRole("button", ROW))
 
     expect(onSelect).toHaveBeenCalledTimes(1)
-    expect(onSelect).toHaveBeenCalledWith(CK)
+    expect(onSelect).toHaveBeenCalledWith(CK, argsOf(stories.Default).item.session.id)
   })
 
   it("does not fire onSelect until the row is actually clicked", () => {
@@ -100,6 +100,6 @@ describe("ConversationRow — interaction (story-fixture reuse)", () => {
 
     // Clicking the last row still routes the conversationKey through onSelect.
     await user.click(rows[3]!)
-    expect(onSelect).toHaveBeenCalledWith(CK)
+    expect(onSelect).toHaveBeenCalledWith(CK, argsOf(stories.Default).item.session.id)
   })
 })

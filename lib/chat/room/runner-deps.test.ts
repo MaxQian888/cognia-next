@@ -133,3 +133,12 @@ it("lets a companion projection replace only the durable writes", async () => {
   await expect(projected.db.persistMessages("room", [])).resolves.toBeUndefined()
   expect(projected.ipc).toBe(deps.ipc)
 })
+
+it("accepts model-specific retry context without requiring it from older callers", async () => {
+  const deps = makeFakeDeps()
+  await expect(
+    deps.ai.resolveProviderAttemptOptions("provider", {} as never, "model", {
+      modelParams: { maxOutputTokens: 128 },
+    })
+  ).resolves.toEqual({})
+})

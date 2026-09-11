@@ -31,7 +31,13 @@ function event(overrides: Partial<NormalizedInboundEvent> = {}): NormalizedInbou
     messageId: "m1",
     conversationRef: { platform: "telegram", adapterId: "cai_1", chatId: "c1", messageId: "m1" },
     conversationKey: "telegram:cai_1:c1",
-    sender: { id: "u1", displayName: "U" },
+    sender: {
+      id: "u1",
+      displayName: "U",
+      platform: "telegram",
+      adapterId: "cai_1",
+      remoteUserId: "u1",
+    },
     channel: { id: "telegram:cai_1:c1", kind: "private", platformChannelId: "c1" },
     segments: [],
     plainText: "hello",
@@ -119,7 +125,18 @@ describe("duplicate merging", () => {
     ],
     ["slash", event({ plainText: "/ops status" })],
     ["keyword hit", event({ plainText: "please DEPLOY now" })],
-    ["listed sender", event({ sender: { id: "vip", displayName: "V" } })],
+    [
+      "listed sender",
+      event({
+        sender: {
+          id: "vip",
+          displayName: "V",
+          platform: "telegram",
+          adapterId: "cai_1",
+          remoteUserId: "vip",
+        },
+      }),
+    ],
   ]
 
   function expectSameVerdicts(original: TriggerPolicy, merged: TriggerPolicy): void {

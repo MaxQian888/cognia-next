@@ -59,14 +59,21 @@ interface PlatformBadgeProps {
   className?: string
   /** When true, render only the icon without the label abbreviation. */
   iconOnly?: boolean
+  fullName?: boolean
 }
 
-export function PlatformBadge({ platform, className, iconOnly = false }: PlatformBadgeProps) {
+export function PlatformBadge({
+  platform,
+  className,
+  iconOnly = false,
+  fullName = false,
+}: PlatformBadgeProps) {
   const t = useTranslations("inbox.platformBadge")
   const buildable = isAbbrKind(platform)
   const planned = getConnectorMeta(platform)?.status === "planned"
 
-  const label = buildable ? t(`abbr.${platform}`) : fallbackPlatformAbbr(platform)
+  const name = buildable ? t(`names.${platform}`) : platform
+  const label = fullName ? name : buildable ? t(`abbr.${platform}`) : fallbackPlatformAbbr(platform)
   const colorClass = buildable ? PLATFORM_COLOR[platform] : "text-muted-foreground"
 
   return (
@@ -76,15 +83,19 @@ export function PlatformBadge({ platform, className, iconOnly = false }: Platfor
         // Restore the visible icon size from the original implementation — the
         // Badge default (`[&>svg]:size-3` = 12 px) is too small for a platform
         // glyph in a list row.
-        "px-0 py-0 font-medium [&>svg]:size-3.5",
+        "px-0 py-0 font-medium [&_svg]:size-3.5",
         colorClass,
         className
       )}
-      title={planned ? t("planned") : platform}
+      title={planned ? t("planned") : name}
+      aria-label={planned ? `${name} · ${t("planned")}` : name}
+      role="img"
       data-testid={`platform-badge-${platform}`}
       data-planned={planned ? "true" : undefined}
     >
-      <PlatformIcon kind={platform} />
+      <span aria-hidden="true" className="contents">
+        <PlatformIcon kind={platform} />
+      </span>
       {!iconOnly && <span className="text-xs leading-none">{label}</span>}
     </Badge>
   )

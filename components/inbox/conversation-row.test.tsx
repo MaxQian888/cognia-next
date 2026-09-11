@@ -82,9 +82,10 @@ describe("ConversationRow", () => {
   })
 
   it("shows a pin icon when the conversation is pinned", () => {
-    const override = { conversationKey: "slack:a1:C1", pinned: true } as ConversationOverrideRow
+    const item = makeItem()
+    item.session.pinned = true
     const { container } = render(
-      <ConversationRow item={makeItem({ override })} isActive={false} onSelect={() => {}} />
+      <ConversationRow item={item} isActive={false} onSelect={() => {}} />
     )
     expect(container.querySelector("svg.lucide-pin")).toBeInTheDocument()
   })
@@ -121,7 +122,7 @@ describe("ConversationRow", () => {
     const onSelect = jest.fn()
     render(<ConversationRow item={makeItem()} isActive={false} onSelect={onSelect} />)
     fireEvent.click(screen.getByTestId("conversation-row-button-slack:a1:C1"))
-    expect(onSelect).toHaveBeenCalledWith("slack:a1:C1")
+    expect(onSelect).toHaveBeenCalledWith("slack:a1:C1", "s1")
   })
 
   it("applies the active background when isActive", () => {

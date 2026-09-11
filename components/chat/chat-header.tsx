@@ -2,14 +2,12 @@
 
 import { useState } from "react"
 import { createPortal } from "react-dom"
-import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useTranslations } from "next-intl"
 import {
   Columns2Icon,
   ExternalLinkIcon,
-  InboxIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   Settings2Icon,
@@ -33,7 +31,8 @@ import { MentionBacklinksChip } from "@/components/chat/mention-backlinks-chip"
 import { RoomParticipantsChip } from "@/components/chat/room-participants-chip"
 import { sessionBacklinkTarget } from "@/lib/chat/mentions/backlinks"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
-import { inboxConversationHref } from "@/lib/inbox/conversation-href"
+import { PlatformConversationHeader } from "@/components/inbox/platform-conversation-context"
+import { PlatformBadge } from "@/components/inbox/platform-badge"
 import { isTauri } from "@/lib/tauri"
 import { useUIStore } from "@/stores/ui"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -76,7 +75,6 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
   const character = useCharacter(session.characterId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [codexDispatching, setCodexDispatching] = useState(false)
-  const router = useRouter()
 
   const handleOpenInCodexApp = async () => {
     setCodexDispatching(true)
@@ -131,6 +129,9 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         >
           {session.title || t("untitledSession")}
         </span>
+        {session.platformBinding && (
+          <PlatformBadge platform={session.platformBinding.platform} fullName />
+        )}
         {/* Self-hides unless this session was branched from another one. */}
         <BranchLineageChip session={session} />
         {/* The reverse direction: self-hides unless this session HAS branches.
@@ -167,24 +168,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
 
       <PluginExtensionSlot point="chat.header" className="flex items-center gap-1 empty:hidden" />
 
-      {/* A platform-bound (IM) conversation has a second home: the Inbox route,
-          where the connector chrome (mode, assignee, delivery state) lives.
-          The reverse link sits in the Inbox header's overflow. */}
-      {session.platformBinding ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className={HEADER_ICON_BUTTON}
-          aria-label={t("openInInbox")}
-          title={t("openInInbox")}
-          data-testid="chat-header-open-in-inbox"
-          onClick={() =>
-            router.push(inboxConversationHref(session.platformBinding!.conversationKey))
-          }
-        >
-          <InboxIcon className="size-4" />
-        </Button>
-      ) : null}
+      {session.platformBinding && <PlatformConversationHeader session={session} />}
 
       {isTauri() ? (
         <Button
