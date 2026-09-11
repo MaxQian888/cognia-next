@@ -194,6 +194,29 @@ it("hands off a managed Bundle atomically and scopes legacy patch selections to 
   )
 })
 
+it("rejects selected Bundle patches without a primary workspace id before changing state", async () => {
+  getSessionMock.mockResolvedValueOnce({
+    ...managedBundle,
+    executionContext: {
+      ...managedBundle.executionContext,
+      execution: {
+        ...managedBundle.executionContext.execution,
+        roots: managedBundle.executionContext.execution.roots.map((root) =>
+          root.role === "primary" ? { ...root, workspaceId: undefined } : root
+        ),
+      },
+    },
+  })
+
+  await expect(
+    handoffSessionToLocal("session-1", [{ path: "src/a.ts", hunkIds: ["h1"] }])
+  ).rejects.toThrow("Managed workspace Bundle has no primary root")
+
+  expect(updateSessionMock).not.toHaveBeenCalled()
+  expect(applyBundleMock).not.toHaveBeenCalled()
+  expect(applyMock).not.toHaveBeenCalled()
+})
+
 it("keeps a Bundle managed after a fully compensated handoff failure", async () => {
   getSessionMock.mockResolvedValueOnce(managedBundle)
   applyBundleMock.mockResolvedValueOnce({

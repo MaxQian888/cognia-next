@@ -81,10 +81,25 @@ export function TaskResourcesPanel({
   const [sensitiveAuthorized, setSensitiveAuthorized] = useState(false)
   const [runPreview, setRunPreview] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [conflicted, setConflicted] = useState(false)
   const [pinned, setPinned] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previewController = useRef<AbortController | null>(null)
+  const downloadController = useRef<AbortController | null>(null)
+  const uploadController = useRef<AbortController | null>(null)
+  const contentMode = tab === "diff" ? "diff" : "body"
+
+  useEffect(() => {
+    setDownloading(false)
+    setLoading(false)
+    return () => {
+      downloadController.current?.abort()
+      uploadController.current?.abort()
+    }
+  }, [sessionId, selectedRunId])
 
   useEffect(() => {
     let disposed = false
@@ -101,30 +116,26 @@ export function TaskResourcesPanel({
 
   useEffect(() => {
     if (!active) return
+    let cancelled = false
     setSelectedRunId(active.runId)
     void Promise.all([listTaskRuns(active.taskId), listTaskResources(active.taskId)])
       .then(([nextRuns, nextResources]) => {
+        if (cancelled) return
         setRuns(nextRuns)
         setResources(nextResources)
         reconcile(sessionId, nextResources)
       })
-      .catch((reason: unknown) => setError(String(reason)))
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(String(reason))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [active?.taskId, active?.runId, reconcile, sessionId, provisional?.revision])
 
   useEffect(() => {
     setResources(cachedResources ?? [])
   }, [cachedResources])
-
-  useEffect(() => {
-    setContent(null)
-    setDiff(null)
-    setError(null)
-    setSensitiveAuthorized(false)
-    setSelectedHunks([])
-    setRunPreview(false)
-    if (blobUrl) URL.revokeObjectURL(blobUrl)
-    setBlobUrl(null)
-  }, [selectedPath, selectedRunId, tab])
 
   useEffect(() => {
     let cancelled = false
@@ -215,37 +226,79 @@ export function TaskResourcesPanel({
   }, [captureClass, events, origin, status, timeFilterNow, timeRange])
   const selected = visibleResources.find((resource) => resource.path === selectedPath) ?? null
 
+  useEffect(() => {
+    setContent(null)
+    setDiff(null)
+    setError(null)
+    setSensitiveAuthorized(false)
+    setSelectedHunks([])
+    setRunPreview(false)
+    setBlobUrl(null)
+  }, [
+    sessionId,
+    selected?.path,
+    selected?.hash,
+    selected?.sensitive,
+    selected?.contentCaptured,
+    selected?.captureClass,
+    selectedRunId,
+    contentMode,
+  ])
+
   async function loadSelected(allowSensitive = false) {
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
+    setPreviewLoading(false)
     if (!selected || !selectedRunId) return
     if (selected.captureClass === "generated" || selected.contentCaptured === false) return
     if (selected.sensitive && !allowSensitive) return
-    setLoading(true)
+    setPreviewLoading(true)
     setError(null)
     try {
-      if (tab === "diff") {
-        setDiff(await readTaskResourceDiff(selectedRunId, selected.path, allowSensitive))
+      if (contentMode === "diff") {
+        const nextDiff = await readTaskResourceDiff(selectedRunId, selected.path, allowSensitive)
+        if (!controller.signal.aborted) setDiff(nextDiff)
       } else if (selected.binary) {
-        const blob = await downloadTaskResource(selectedRunId, selected.path, allowSensitive)
-        setBlobUrl(URL.createObjectURL(blob))
+        const blob = await downloadTaskResource(
+          selectedRunId,
+          selected.path,
+          allowSensitive,
+          controller.signal
+        )
+        if (!controller.signal.aborted) setBlobUrl(URL.createObjectURL(blob))
       } else if (selected.kind !== "deleted") {
         const read = await readTaskResource(selectedRunId, selected.path, {
           maxBytes: 1024 * 1024,
           allowSensitive,
         })
-        setContent(read.content)
+        if (!controller.signal.aborted) setContent(read.content)
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      if (!controller.signal.aborted)
+        setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setPreviewLoading(false)
     }
   }
 
   useEffect(() => {
     void loadSelected(false)
-  }, [selected?.path, selected?.hash, selectedRunId, tab])
+    return () => {
+      previewController.current?.abort()
+    }
+  }, [
+    sessionId,
+    selected?.path,
+    selected?.hash,
+    selected?.sensitive,
+    selected?.contentCaptured,
+    selected?.captureClass,
+    selectedRunId,
+    contentMode,
+  ])
 
-  async function refresh() {
+  async function refresh(signal?: AbortSignal) {
     if (!active) return
     const [next, nextPatchSet, nextAdoption] = await Promise.all([
       listTaskResources(active.taskId),
@@ -254,6 +307,7 @@ export function TaskResourcesPanel({
         ? getCodeAdoptionTurnByTaskWorkspaceRun(selectedRunId)
         : Promise.resolve(undefined),
     ])
+    if (signal?.aborted) return
     setResources(next)
     setPatchSet(nextPatchSet)
     setAdoption(nextAdoption ?? null)
@@ -325,14 +379,52 @@ export function TaskResourcesPanel({
 
   async function upload(file: File) {
     if (!selectedRunId) return
+    uploadController.current?.abort()
+    const controller = new AbortController()
+    uploadController.current = controller
     setLoading(true)
+    setError(null)
     try {
-      await uploadTaskResource(selectedRunId, file.name, file)
-      await refresh()
+      await uploadTaskResource(selectedRunId, file.name, file, false, controller.signal)
+      if (controller.signal.aborted) return
+      await refresh(controller.signal)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      if (!controller.signal.aborted)
+        setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
+    }
+  }
+
+  async function downloadSelected() {
+    if (!selected || !selectedRunId) return
+    downloadController.current?.abort()
+    const controller = new AbortController()
+    downloadController.current = controller
+    setDownloading(true)
+    setError(null)
+    try {
+      const blob = await downloadTaskResource(
+        selectedRunId,
+        selected.path,
+        sensitiveAuthorized,
+        controller.signal
+      )
+      if (controller.signal.aborted) return
+      const url = URL.createObjectURL(blob)
+      try {
+        const anchor = document.createElement("a")
+        anchor.href = url
+        anchor.download = selected.path.split("/").pop() ?? "resource"
+        anchor.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    } catch (reason) {
+      if (!controller.signal.aborted)
+        setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (!controller.signal.aborted) setDownloading(false)
     }
   }
 
@@ -629,7 +721,7 @@ export function TaskResourcesPanel({
                     <div className="flex h-full items-center justify-center text-center text-sm text-muted-foreground">
                       {t("generatedMetadataOnly")}
                     </div>
-                  ) : loading ? (
+                  ) : loading || previewLoading ? (
                     <Loader2Icon
                       className="mx-auto mt-8 size-5 animate-spin"
                       aria-label={t("loading")}
@@ -734,22 +826,11 @@ export function TaskResourcesPanel({
                     size="sm"
                     variant="ghost"
                     disabled={
-                      selected.captureClass === "generated" || selected.contentCaptured === false
+                      downloading ||
+                      selected.captureClass === "generated" ||
+                      selected.contentCaptured === false
                     }
-                    onClick={() =>
-                      void downloadTaskResource(
-                        selectedRunId,
-                        selected.path,
-                        sensitiveAuthorized
-                      ).then((blob) => {
-                        const url = URL.createObjectURL(blob)
-                        const anchor = document.createElement("a")
-                        anchor.href = url
-                        anchor.download = selected.path.split("/").pop() ?? "resource"
-                        anchor.click()
-                        URL.revokeObjectURL(url)
-                      })
-                    }
+                    onClick={() => void downloadSelected()}
                   >
                     <DownloadIcon className="size-3.5" />
                     {t("download")}

@@ -24,10 +24,13 @@ jest.mock("./serial/serial-connection", () => {
   const actual = jest.requireActual("./serial/serial-connection")
   return {
     ...actual,
-    openSerialPort: (...args: unknown[]) => openSerialPortMock(...args),
-    attachSerialPort: (...args: unknown[]) => attachSerialPortMock(...args),
-    writeSerialPort: (...args: unknown[]) => writeSerialPortMock(...args),
-    closeSerialPort: (...args: unknown[]) => closeSerialPortMock(...args),
+    openSerialPort: (...args: Parameters<typeof openSerialPortMock>) => openSerialPortMock(...args),
+    attachSerialPort: (...args: Parameters<typeof attachSerialPortMock>) =>
+      attachSerialPortMock(...args),
+    writeSerialPort: (...args: Parameters<typeof writeSerialPortMock>) =>
+      writeSerialPortMock(...args),
+    closeSerialPort: (...args: Parameters<typeof closeSerialPortMock>) =>
+      closeSerialPortMock(...args),
   }
 })
 
@@ -41,7 +44,7 @@ import {
 
 const config = { ...DEFAULT_SERIAL_CONFIG, port: "/dev/cu.usbserial-1420" }
 /** topic → the handler the session registered for it. */
-const handlers = new Map<string, (payload: never) => void>()
+const handlers = new Map<string, (payload: unknown) => void>()
 
 beforeEach(() => {
   handlers.clear()
@@ -164,4 +167,23 @@ it("surfaces an open failure as a throw rather than a half-built session", async
 
 it("decodes base64 to bytes, including high bytes a text decoder would mangle", () => {
   expect(Array.from(decodeBase64(btoa("\x00\xff\x7f")))).toEqual([0, 255, 127])
+})
+
+it("detaches its subscriptions without closing the serial port", async () => {
+  const session = await SerialTerminalSession.open(config)
+  await session.detach()
+  expect(handlers.size).toBe(0)
+  expect(closeSerialPortMock).not.toHaveBeenCalled()
+  expect(session.info.alive).toBe(true)
+})
+
+it("rejects PTY controller leases for a serial port", async () => {
+  const session = await SerialTerminalSession.open(config)
+  await expect(session.takeControl()).rejects.toThrow(
+    "Serial sessions do not support controller leases"
+  )
+  await expect(session.releaseControl()).rejects.toThrow(
+    "Serial sessions do not support controller leases"
+  )
+  expect(writeSerialPortMock).not.toHaveBeenCalled()
 })

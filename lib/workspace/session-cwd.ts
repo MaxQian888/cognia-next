@@ -16,7 +16,8 @@
  * on-screen one (see `resolveSessionExecutionRoot`), which keeps the child on
  * the parent's directory instead of whatever the user is looking at.
  */
-import type { AppSettings, ChatSession, Project } from "@/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
 import { resolveCharacterById } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
 import { getSession } from "@/lib/db/sessions"

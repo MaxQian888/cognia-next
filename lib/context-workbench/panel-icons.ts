@@ -1,6 +1,5 @@
 import type { ComponentType } from "react"
 import { resolveLucideIcon } from "@/lib/icons/lucide-catalog"
-import type { PluginContextPanelIcon } from "@/types/plugin/plugin-context-panel"
 
 /**
  * Resolve a declared icon name, or `undefined` for panels that omit one.
@@ -10,7 +9,7 @@ import type { PluginContextPanelIcon } from "@/types/plugin/plugin-context-panel
  * instead of coming back empty.
  */
 export function resolveContextPanelIcon(
-  icon: PluginContextPanelIcon | undefined
+  icon: string | undefined
 ): ComponentType<{ className?: string }> | undefined {
   return resolveLucideIcon(icon) ?? undefined
 }

@@ -10,6 +10,13 @@ const stop = jest.fn()
 const regenerate = jest.fn()
 const editAndResend = jest.fn()
 const exportRun = jest.fn()
+const templateRun = {
+  templateId: "review",
+  version: "1",
+  text: "Review {{target}}",
+  params: { target: { kind: "text" as const, value: "workflow" } },
+}
+
 const attachmentManifest: readonly AttachmentManifestEntry[] = [
   { filename: "report.txt", mediaType: "text/plain", kind: "document" },
 ]
@@ -100,6 +107,9 @@ jest.mock("@/components/chat/chat-view", () => ({
     onOpenSettings: () => void
   }) => (
     <div data-testid="chat-pane">
+      <button type="button" onClick={() => void onSend("Review workflow", undefined, templateRun)}>
+        send template
+      </button>
       <button
         type="button"
         onClick={() => void onSend("hello", attachmentManifest).catch(() => undefined)}
@@ -161,6 +171,19 @@ describe("ResourceWorkbenchChatPanel", () => {
       "flex-1",
       "flex-col",
       "overflow-hidden"
+    )
+  })
+
+  it("preserves template provenance on the scoped user turn", async () => {
+    render(<ResourceWorkbenchChatPanel />)
+    await userEvent.click(await screen.findByRole("button", { name: "send template" }))
+    expect(send).toHaveBeenCalledWith(
+      "Review workflow",
+      undefined,
+      expect.objectContaining({
+        sessionId: "resource-session",
+        templateRun,
+      })
     )
   })
 

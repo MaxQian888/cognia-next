@@ -794,14 +794,12 @@ export async function resolveTaskWorkspaceConflict(
   return outcome
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digestInput = new Uint8Array(bytes.byteLength)
-  digestInput.set(bytes)
-  const digest = await crypto.subtle.digest("SHA-256", digestInput.buffer)
+async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
-function decodeBase64(value: string): Uint8Array {
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value)
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
@@ -838,44 +836,47 @@ export async function downloadTaskResource(
       throw new Error("task resource download chunk size is invalid")
     }
     const body = new Uint8Array(handle.size)
-    for (let start = 0; start < handle.size; start += chunkBytes * DOWNLOAD_WINDOW) {
-      signal?.throwIfAborted()
-      const reads: Promise<void>[] = []
-      for (let index = 0; index < DOWNLOAD_WINDOW; index++) {
-        const offset = start + index * chunkBytes
-        if (offset >= handle.size) break
-        const length = Math.min(chunkBytes, handle.size - offset)
-        reads.push(
-          (async () => {
-            const chunk = await transport.call<TransferChunk>("task_resource_download_read_chunk", {
-              handleId: handle.handleId,
-              offset,
-              length,
-            })
-            signal?.throwIfAborted()
-            const bytes = decodeBase64(chunk.dataBase64)
-            if (
-              chunk.offset !== offset ||
-              chunk.nextOffset !== offset + length ||
-              bytes.byteLength !== length ||
-              (chunk.length !== undefined && chunk.length !== length) ||
-              (await sha256Hex(bytes)) !== chunk.chunkHash
-            ) {
-              throw new Error("task resource chunk integrity check failed")
-            }
-            body.set(bytes, offset)
-          })()
-        )
+    let nextOffset = 0
+    let stopped = false
+    const readNext = async () => {
+      try {
+        while (!stopped && nextOffset < handle.size) {
+          signal?.throwIfAborted()
+          const offset = nextOffset
+          const length = Math.min(chunkBytes, handle.size - offset)
+          nextOffset += length
+          const chunk = await transport.call<TransferChunk>("task_resource_download_read_chunk", {
+            handleId: handle.handleId,
+            offset,
+            length,
+          })
+          signal?.throwIfAborted()
+          const bytes = decodeBase64(chunk.dataBase64)
+          if (
+            chunk.offset !== offset ||
+            chunk.nextOffset !== offset + length ||
+            bytes.byteLength !== length ||
+            (chunk.length !== undefined && chunk.length !== length) ||
+            (await sha256Hex(bytes)) !== chunk.chunkHash
+          ) {
+            throw new Error("task resource chunk integrity check failed")
+          }
+          body.set(bytes, offset)
+        }
+      } catch (error) {
+        stopped = true
+        throw error
       }
-      // Drain every in-flight read before closing a failed/cancelled handle.
-      const results = await Promise.allSettled(reads)
-      const failure = results.find((result) => result.status === "rejected")
-      if (failure?.status === "rejected") throw failure.reason
     }
+    // Refill each free slot immediately, but drain all workers before cleanup.
+    const results = await Promise.allSettled(Array.from({ length: DOWNLOAD_WINDOW }, readNext))
+    const failure = results.find((result) => result.status === "rejected")
+    if (failure?.status === "rejected") throw failure.reason
     signal?.throwIfAborted()
     if ((await sha256Hex(body)) !== handle.hash) {
       throw new Error("task resource integrity check failed")
     }
+    signal?.throwIfAborted()
     return new Blob([body], { type: handle.mediaType })
   } finally {
     await transport
@@ -911,7 +912,7 @@ export async function uploadTaskResource(
   try {
     signal?.throwIfAborted()
     let offset = handle.nextOffset ?? 0
-    const chunkBytes = handle.chunkBytes ?? TRANSFER_CHUNK_BYTES
+    let chunkBytes = handle.chunkBytes ?? TRANSFER_CHUNK_BYTES
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
@@ -928,12 +929,25 @@ export async function uploadTaskResource(
     while (offset < bytes.byteLength) {
       signal?.throwIfAborted()
       const chunk = bytes.subarray(offset, offset + chunkBytes)
-      const nextOffset = await transport.call<number>("task_resource_upload_write_chunk", {
-        handleId: handle.handleId,
-        offset,
-        dataBase64: encodeBase64(chunk),
-        chunkHash: await sha256Hex(chunk),
-      })
+      let nextOffset: number
+      try {
+        nextOffset = await transport.call<number>("task_resource_upload_write_chunk", {
+          handleId: handle.handleId,
+          offset,
+          dataBase64: encodeBase64(chunk),
+          chunkHash: await sha256Hex(chunk),
+        })
+      } catch (error) {
+        // Older hosts advertise 64 KiB raw chunks but cap HTTP JSON bodies at
+        // 64 KiB. A 413 rejects before writing, so only that explicit refusal
+        // permits retrying the same offset with a smaller, carrier-safe body.
+        const code = error && typeof error === "object" && "code" in error ? error.code : null
+        if (chunkBytes > 32 * 1024 && (code === "http_413" || code === "payload_too_large")) {
+          chunkBytes = 32 * 1024
+          continue
+        }
+        throw error
+      }
       if (nextOffset !== offset + chunk.byteLength) {
         throw new Error("task resource upload offset is invalid")
       }

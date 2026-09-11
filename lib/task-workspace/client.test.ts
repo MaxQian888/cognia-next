@@ -253,6 +253,51 @@ describe("task resource transfer wire contracts", () => {
     expect(call).toHaveBeenLastCalledWith("task_resource_download_close", { handleId: "download" })
   })
 
+  it("rejects cancellation during the final whole-file integrity digest", async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const digest = await hash(bytes)
+    const controller = new AbortController()
+    let finish!: () => void
+    let notify!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      notify = resolve
+    })
+    const original = crypto.subtle.digest.bind(crypto.subtle)
+    let digests = 0
+    const spy = jest.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, input) => {
+      const result = await original(algorithm, input)
+      if (++digests === 2) {
+        notify()
+        await pending
+      }
+      return result
+    })
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: 3, hash: digest }
+      if (command === "task_resource_download_read_chunk")
+        return { offset: 0, nextOffset: 3, dataBase64: "AQID", chunkHash: digest }
+      return null
+    })
+    try {
+      const result = downloadTaskResource("run", "file", false, controller.signal)
+      const rejected = expect(result).rejects.toThrow("cancelled while hashing")
+      await started
+      controller.abort(new Error("cancelled while hashing"))
+      finish()
+      await rejected
+      expect(call).toHaveBeenLastCalledWith("task_resource_download_close", {
+        handleId: "download",
+      })
+    } finally {
+      finish()
+      spy.mockRestore()
+    }
+  })
+
   it("keeps upload writes ordered across the host's chunk limit", async () => {
     const bytes = new Uint8Array(24 * 1024 + 1).fill(7)
     const digest = await hash(bytes)
@@ -334,6 +379,94 @@ describe("task resource transfer wire contracts", () => {
     )
     await uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
     expect(lengths).toEqual([65_536, 1])
+  })
+
+  it.each(["http_413", "payload_too_large"])(
+    "retries an old HTTP host's %s with smaller ordered chunks",
+    async (code) => {
+      const bytes = new Uint8Array(65_537).fill(7)
+      const lengths: number[] = []
+      const accepted: number[] = []
+      call.mockImplementation(
+        async (command: string, args: { offset: number; dataBase64: string }) => {
+          if (command === "task_resource_upload_open")
+            return {
+              handleId: "019a1234-1234-7123-8123-0123456789ab",
+              expectedSize: bytes.length,
+              chunkBytes: 65_536,
+            }
+          if (command === "task_resource_upload_write_chunk") {
+            const length = atob(args.dataBase64).length
+            lengths.push(length)
+            if (Buffer.byteLength(JSON.stringify(args)) > 65_536)
+              throw Object.assign(new Error("HTTP 413"), { code })
+            expect(args.offset).toBe(accepted.reduce((sum, size) => sum + size, 0))
+            accepted.push(length)
+            return args.offset + length
+          }
+          return "hash"
+        }
+      )
+      await expect(
+        uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+      ).resolves.toBe("hash")
+      expect(lengths).toEqual([65_536, 32_768, 32_768, 1])
+    }
+  )
+
+  it.each([
+    ["http_413", 65_536, 2],
+    ["network", 65_536, 1],
+    ["http_413", 24_576, 1],
+  ])("bounds retries for %s with negotiated chunk %s", async (code, chunkBytes, attempts) => {
+    const bytes = new Uint8Array(65_537).fill(7)
+    call.mockImplementation(async (command: string) => {
+      if (command === "task_resource_upload_open")
+        return { handleId: "upload", expectedSize: bytes.length, chunkBytes }
+      if (command === "task_resource_upload_write_chunk")
+        throw Object.assign(new Error("refused"), { code })
+      return null
+    })
+    await expect(
+      uploadTaskResource("run", "file", { arrayBuffer: async () => bytes.buffer } as Blob)
+    ).rejects.toThrow("refused")
+    expect(
+      call.mock.calls.filter(([command]) => command === "task_resource_upload_write_chunk")
+    ).toHaveLength(attempts)
+    expect(call).toHaveBeenLastCalledWith("task_resource_upload_abort", { handleId: "upload" })
+    expect(call).not.toHaveBeenCalledWith("task_resource_upload_commit", expect.anything())
+  })
+
+  it("refills download capacity while an earlier byte range is still pending", async () => {
+    const bytes = new Uint8Array(6 * 65_536).fill(7)
+    const digest = await hash(bytes)
+    let releaseFirst!: () => void
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const offsets: number[] = []
+    call.mockImplementation(async (command: string, args: { offset: number; length: number }) => {
+      if (command === "task_resource_download_open")
+        return { handleId: "download", size: bytes.length, hash: digest, chunkBytes: 65_536 }
+      if (command === "task_resource_download_read_chunk") {
+        offsets.push(args.offset)
+        if (args.offset === 0) await first
+        const part = bytes.slice(args.offset, args.offset + args.length)
+        return {
+          offset: args.offset,
+          nextOffset: args.offset + part.length,
+          dataBase64: Buffer.from(part).toString("base64"),
+          chunkHash: await hash(part),
+        }
+      }
+      return null
+    })
+    const result = downloadTaskResource("run", "file")
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const startedBeforeFirst = offsets.length
+    releaseFirst()
+    expect(new Uint8Array(await (await result).arrayBuffer())).toEqual(bytes)
+    expect(startedBeforeFirst).toBe(6)
   })
 
   it("uses negotiated download blocks and validates the declared maximum", async () => {

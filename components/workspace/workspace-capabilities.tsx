@@ -110,7 +110,7 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
   const templateRows = useMemo<CapabilityRow[]>(
     () =>
       templateDefinitions
-        .filter((definition) => templateOwners[definition.id] === undefined)
+        .filter((definition) => templateOwners?.[definition.id] === undefined)
         .map((definition) => ({
           id: definition.id,
           name: definition.metadata.name,

@@ -11,23 +11,67 @@ jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => [] }))
 
 import { ThreadHandoffInboundPrompt } from "./thread-handoff-inbound-prompt"
 
-const prepared = {
-  ticket: {
-    source: { title: "Planning" },
-    continuation: { fidelity: "native-exact" },
+const ticket: import("@cognia/agent-config-types/thread-handoff").ThreadHandoffTicket = {
+  ticketVersion: 1,
+  ticketId: "ticket-1",
+  state: "frozen",
+  role: "target",
+  source: {
+    hostRef: "desktop-1",
+    kind: "desktop",
+    sessionId: "session-1",
+    title: "Planning",
+    messageCount: 0,
+  },
+  target: { hostRef: "phone-1", kind: "mobile" },
+  transport: "companion",
+  project: {},
+  requirements: {
+    capabilities: [],
+    hostOperations: [],
+    providerRefs: [],
+    models: [],
+    credentialProfileRefs: [],
+  },
+  continuation: {
+    sourceRuntime: "claude-code",
+    fidelity: "native-exact",
+    sequenceDigest: "digest",
+  },
+  attachments: [],
+  pendingApprovals: [],
+  history: [],
+  createdAt: 1,
+  updatedAt: 1,
+  expiresAt: 2,
+}
+const prepared: import("@/lib/thread-handoff/standalone-receiver").PreparedInboundThreadHandoff = {
+  ticket,
+  frame: {
+    ticket,
+    envelope: {
+      header: {
+        canonicalVersion: 1,
+        canonicalSessionId: "session-1",
+        sourceRuntime: "claude-code",
+        createdAt: "2026-09-10T00:00:00Z",
+        updatedAt: "2026-09-10T00:00:00Z",
+        turnCount: 0,
+        importFidelity: "native-exact",
+        sequenceDigest: "digest",
+      },
+      turns: [],
+    },
   },
   preflight: {
     ok: true,
+    checkedAt: 1,
     achievableFidelity: "contextual",
     blockers: [
-      {
-        kind: "host-operation-missing",
-        ref: "runtime:claude-code",
-        severity: "degraded",
-      },
+      { kind: "host-operation-missing", ref: "runtime:claude-code", severity: "degraded" },
     ],
   },
-} as never
+}
 
 test("shows the inbound loss and permission-reset disclosure", () => {
   render(

@@ -154,15 +154,15 @@ describe("updateProject dispatch", () => {
 })
 
 describe("deleteProject dispatch", () => {
-  it("fires dispatchProjectDelete with the deleted project id", () => {
+  it("fires dispatchProjectDelete with the deleted project id", async () => {
     const project = useProjectStore.getState().createProject({ name: "Alpha" })
     dispatchProjectDelete.mockClear()
-    useProjectStore.getState().deleteProject(project.id)
+    await useProjectStore.getState().deleteProject(project.id)
     expect(dispatchProjectDelete).toHaveBeenCalledWith(project.id)
   })
 
-  it("does not fire dispatchProjectDelete when the id does not exist", () => {
-    useProjectStore.getState().deleteProject("missing")
+  it("does not fire dispatchProjectDelete when the id does not exist", async () => {
+    await useProjectStore.getState().deleteProject("missing")
     expect(dispatchProjectDelete).not.toHaveBeenCalled()
   })
 })
@@ -443,18 +443,47 @@ describe("project-store roots", () => {
       const project = projectFixture({ id: "p_gone" })
       useProjectStore.setState({ projects: [project], loaded: true })
 
-      useProjectStore.getState().deleteProject("p_gone")
+      await useProjectStore.getState().deleteProject("p_gone")
       await Promise.resolve()
 
       expect(detachProjectContents).toHaveBeenCalledWith("p_gone")
       expect(deleteProjectCascade).not.toHaveBeenCalled()
     })
 
+    it("retains the project, active pointer and deletion event on native cleanup failure", async () => {
+      const project = projectFixture({ id: "p_retry" })
+      useProjectStore.setState({ projects: [project], activeProjectId: project.id, loaded: true })
+      deleteProjectCascade.mockRejectedValueOnce(new Error("gateway task is active"))
+      await expect(
+        useProjectStore.getState().deleteProject(project.id, "delete-data")
+      ).rejects.toThrow("gateway task is active")
+      expect(useProjectStore.getState().projects).toEqual([project])
+      expect(useProjectStore.getState().activeProjectId).toBe(project.id)
+      expect(deleteProjectRow).not.toHaveBeenCalled()
+      expect(dispatchProjectDelete).not.toHaveBeenCalled()
+      await useProjectStore.getState().deleteProject(project.id, "delete-data")
+      expect(useProjectStore.getState().projects).toEqual([])
+      expect(deleteProjectRow).toHaveBeenCalledWith(project.id)
+    })
+
+    it("does not remove a replacement workspace loaded during native cleanup", async () => {
+      const project = projectFixture({ id: "p_scope" })
+      useProjectStore.setState({ projects: [project], loaded: true })
+      deleteProjectCascade.mockImplementationOnce(async () => {
+        useProjectStore.setState({ projects: [{ ...project, name: "Another account" }] })
+      })
+      await expect(
+        useProjectStore.getState().deleteProject(project.id, "delete-data")
+      ).rejects.toThrow("Workspace changed")
+      expect(useProjectStore.getState().projects[0].name).toBe("Another account")
+      expect(deleteProjectRow).not.toHaveBeenCalled()
+    })
+
     it("destroys the contents only when asked to", async () => {
       const project = projectFixture({ id: "p_gone" })
       useProjectStore.setState({ projects: [project], loaded: true })
 
-      useProjectStore.getState().deleteProject("p_gone", "delete-data")
+      await useProjectStore.getState().deleteProject("p_gone", "delete-data")
       await Promise.resolve()
 
       expect(deleteProjectCascade).toHaveBeenCalledWith("p_gone")

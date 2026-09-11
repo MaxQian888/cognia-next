@@ -66,7 +66,7 @@ describe("installHostDispatchRuntime", () => {
   it("wakes at the next retry time without unrelated database activity", async () => {
     let now = 1_700_000_000_000
     let wake: (() => void) | undefined
-    const scheduleWake = jest.fn((callback: () => void) => {
+    const scheduleWake = jest.fn((callback: () => void, _delay: number) => {
       wake = callback
       return 1 as unknown as ReturnType<typeof setTimeout>
     })
@@ -128,7 +128,7 @@ describe("installHostDispatchRuntime", () => {
   it("wakes when an in-flight lease expires so a crashed claim is recovered", async () => {
     let now = 1_700_000_000_000
     let wake: (() => void) | undefined
-    const scheduleWake = jest.fn((callback: () => void) => {
+    const scheduleWake = jest.fn((callback: () => void, _delay: number) => {
       wake = callback
       return 9 as unknown as ReturnType<typeof setTimeout>
     })
@@ -176,7 +176,7 @@ describe("installHostDispatchRuntime", () => {
   it("cancels an armed wake on idempotent shutdown and ignores its stale callback", async () => {
     const now = 1_700_000_000_000
     let wake: (() => void) | undefined
-    const scheduleWake = jest.fn((callback: () => void) => {
+    const scheduleWake = jest.fn((callback: () => void, _delay: number) => {
       wake = callback
       return 7 as unknown as ReturnType<typeof setTimeout>
     })
@@ -243,7 +243,7 @@ describe("installHostDispatchRuntime", () => {
   it("contains drain failures and schedules a bounded retry", async () => {
     const now = 1_700_000_000_000
     let wake: (() => void) | undefined
-    const scheduleWake = jest.fn((callback: () => void) => {
+    const scheduleWake = jest.fn((callback: () => void, _delay: number) => {
       wake = callback
       return 11 as unknown as ReturnType<typeof setTimeout>
     })

@@ -85,7 +85,7 @@ export class SerialTerminalSession extends BaseTerminalSession {
       id: sessionId,
       projectId,
       extensionId: null,
-      origin: "user",
+      origin: "local",
       // The tab label and every "where am I" readout come from `shell`. A port
       // path plus its line settings is the honest answer to that question for
       // a serial session, and it is the same string the picker showed.
@@ -173,9 +173,21 @@ export class SerialTerminalSession extends BaseTerminalSession {
     if (!ok) throw new Error("the serial port did not accept the write")
   }
 
-  async resize(): Promise<void> {
+  async resize(_rows?: number, _cols?: number): Promise<void> {
     // A serial line has no window size. xterm reflows on its own, and there is
     // nothing to tell the device.
+  }
+
+  async detach(): Promise<void> {
+    this.teardown()
+  }
+
+  async takeControl(): Promise<void> {
+    throw new Error("Serial sessions do not support controller leases")
+  }
+
+  async releaseControl(): Promise<void> {
+    throw new Error("Serial sessions do not support controller leases")
   }
 
   async kill(): Promise<void> {

@@ -443,6 +443,7 @@ fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String
         cwd: cwd.clone(),
         writable: vec![cwd],
         readable: sandbox_home_readable(),
+        denied_readable: Vec::new(),
         network: req.sandbox_network.unwrap_or(true),
     };
     #[cfg(target_os = "linux")]

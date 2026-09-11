@@ -68,7 +68,7 @@ export async function handoffSessionToLocal(
       scopedSelections = []
     } else {
       const primaryRoot = context.execution?.roots.find((root) => root.role === "primary")
-      if (!primaryRoot) {
+      if (!primaryRoot?.workspaceId) {
         throw new Error("Managed workspace Bundle has no primary root")
       }
       scopedSelections = [

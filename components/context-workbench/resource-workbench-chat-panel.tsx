@@ -1,5 +1,6 @@
 "use client"
 
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { lazy, Suspense, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -140,7 +141,7 @@ export function ResourceWorkbenchChatPanel({
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      _templateRun?: unknown,
+      templateRun?: ChatTemplateRun | null,
       turnMetadata?: ComposerTurnMetadata
     ) =>
       withArtifactTarget(async () => {
@@ -149,6 +150,7 @@ export function ResourceWorkbenchChatPanel({
           sessionId,
           resourceContext,
           attachmentManifest: manifest,
+          ...(templateRun ? { templateRun } : {}),
           ...turnMetadataSendOptions(turnMetadata),
         })
       }),

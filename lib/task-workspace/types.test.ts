@@ -1,10 +1,30 @@
 import type {
+  BundleHandoffUndoOutcome,
   ResourceChange,
   ResourceEvent,
   ResourceTrackingPolicy,
   TaskResourceManifest,
   WorkspaceEnvironmentSummary,
 } from "./types"
+
+describe("bundle handoff undo conflict contract", () => {
+  it("requires a path and reason for each host-reported conflict", () => {
+    const conflicts: BundleHandoffUndoOutcome["conflicts"] = [
+      { path: "src/app.ts", reason: "source changed after handoff" },
+    ]
+    // @ts-expect-error Host conflicts always include the affected path.
+    const missingPath: BundleHandoffUndoOutcome["conflicts"][number] = { reason: "stale" }
+    // @ts-expect-error Host conflicts always include a reason.
+    const missingReason: BundleHandoffUndoOutcome["conflicts"][number] = { path: "src/app.ts" }
+
+    expect(conflicts[0]).toEqual({
+      path: "src/app.ts",
+      reason: "source changed after handoff",
+    })
+    expect(missingPath).not.toHaveProperty("path")
+    expect(missingReason).not.toHaveProperty("reason")
+  })
+})
 
 describe("task workspace resource tracking contract", () => {
   it("represents source and generated records without generated content capture", () => {

@@ -87,7 +87,7 @@ export function TransferQueuePanel({ profileId, className }: TransferQueuePanelP
     // `Uint8Array` on the way out of Dexie, a `Blob` on the way into the
     // browser's save. The row holds bytes because that is what survives a
     // structured clone.
-    downloadBlob(new Blob([row.received]), row.fileName)
+    downloadBlob(new Blob([new Uint8Array(row.received)]), row.fileName)
   }, [])
 
   const needsApproval = rows.some((row) => row.errorCode === SFTP_APPROVAL_REQUIRED)
@@ -105,7 +105,7 @@ export function TransferQueuePanel({ profileId, className }: TransferQueuePanelP
     <div className={cn("space-y-3", className)} data-testid="sftp-queue">
       {needsApproval ? (
         <Surface
-          layer="sunken"
+          layer="base"
           radius="control"
           className="flex flex-wrap items-center gap-2 border p-2.5"
         >

@@ -78,7 +78,7 @@ export interface TerminalSessionRow {
    * read `"local"` there. Optional: rows persisted before this field existed
    * simply lack it and are treated as `"localPty"`.
    */
-  kind?: "localPty" | "ssh"
+  kind?: SessionInfo["kind"]
   /**
    * The saved profile this session was launched from — a `TerminalProfile` id
    * for a local shell, an `SshHostProfile` id for SSH. Reattaching after a

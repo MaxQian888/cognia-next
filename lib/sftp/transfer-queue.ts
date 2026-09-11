@@ -292,11 +292,16 @@ async function runOne(row: SftpTransferRow): Promise<void> {
       })
       return
     }
-    const result = await uploadSftpFile(row.profileId, row.remotePath, new Blob([row.payload]), {
-      adminLease: currentSftpTransferApproval(),
-      signal: controller.signal,
-      onProgress,
-    })
+    const result = await uploadSftpFile(
+      row.profileId,
+      row.remotePath,
+      new Blob([new Uint8Array(row.payload)]),
+      {
+        adminLease: currentSftpTransferApproval(),
+        signal: controller.signal,
+        onProgress,
+      }
+    )
     await patch(row.id, {
       status: result.complete ? "done" : "failed",
       transferred: result.size,

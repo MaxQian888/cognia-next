@@ -1,4 +1,4 @@
-import type { ChatSession } from "@/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { resolveSessionCwd, type SessionCwdDeps } from "./session-cwd"
 
 function deps(overrides: Partial<SessionCwdDeps> = {}): SessionCwdDeps {

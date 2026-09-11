@@ -30,7 +30,8 @@ export function installHostDispatchRuntime(
 ): InstalledHostDispatchRuntime {
   const unregisterMobile = registerMobileStepHostDelivery({ emit: options.emit })
   const now = options.now ?? Date.now
-  const scheduleWake = options.scheduleWake ?? setTimeout
+  const scheduleWake: NonNullable<InstallHostDispatchRuntimeOptions["scheduleWake"]> =
+    options.scheduleWake ?? ((callback, delay) => setTimeout(callback, delay))
   const cancelWake = options.cancelWake ?? clearTimeout
   const runner = options.runner ?? createHostDispatchRunner({ accountId: options.accountId, now })
   let stopped = false

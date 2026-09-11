@@ -47,6 +47,7 @@ function sourceLabel(origin: SourcesPartItem["origin"]): SessionSourceLabel {
   // The workspace-knowledge origin had no label at all, so the panel asked for
   // `labels.project-knowledge` and rendered the raw key.
   if (origin === "project-knowledge") return "projectKnowledge"
+  if (origin === "project-claim" || origin === "project-history") return "memory"
   return origin
 }
 

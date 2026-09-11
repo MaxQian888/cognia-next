@@ -82,6 +82,7 @@ struct RegistryState {
 pub struct TransferRegistry {
     ttl: Duration,
     state: Mutex<RegistryState>,
+    publication: Mutex<()>,
 }
 
 impl TransferRegistry {
@@ -89,6 +90,7 @@ impl TransferRegistry {
         Self {
             ttl: ttl.max(Duration::from_secs(1)),
             state: Mutex::new(RegistryState::default()),
+            publication: Mutex::new(()),
         }
     }
 
@@ -282,17 +284,17 @@ impl TransferRegistry {
     }
 
     pub fn commit_upload(&self, handle_id: &str) -> Result<String, String> {
-        let mut state = self.state.lock();
-        sweep(&mut state);
-        let upload = state
-            .uploads
-            .remove(handle_id)
-            .ok_or_else(|| format!("unknown or expired upload handle: {handle_id}"))?;
-        let result = commit_upload(upload);
-        if result.is_err() {
-            // `commit_upload` owns the state and cleans its temp file on every failure.
-        }
-        result
+        let upload = {
+            let mut state = self.state.lock();
+            sweep(&mut state);
+            state
+                .uploads
+                .remove(handle_id)
+                .ok_or_else(|| format!("unknown or expired upload handle: {handle_id}"))?
+        };
+        // Taking ownership closes this handle to further writes/aborts. Hashing
+        // and publishing must not block unrelated transfers on the registry.
+        commit_upload(upload, &self.publication)
     }
 
     pub fn abort_upload(&self, handle_id: &str) -> Result<(), String> {
@@ -306,7 +308,7 @@ impl TransferRegistry {
     }
 }
 
-fn commit_upload(upload: UploadState) -> Result<String, String> {
+fn commit_upload(upload: UploadState, publication: &Mutex<()>) -> Result<String, String> {
     let fail = |message: String| {
         let _ = fs::remove_file(&upload.temp_path);
         Err(message)
@@ -350,6 +352,13 @@ fn commit_upload(upload: UploadState) -> Result<String, String> {
     }
     if let Err(error) = File::open(&upload.temp_path).and_then(|file| file.sync_all()) {
         return fail(format!("sync upload temp: {error}"));
+    }
+    // Only serialize the final existence check and rename. Competing uploads
+    // may hash/sync concurrently, but exactly one may publish a given path.
+    // The handle registry remains available throughout this short section.
+    let _publication = publication.lock();
+    if target.exists() {
+        return fail(format!("upload target already exists: {}", upload.rel_path));
     }
     if let Err(error) = fs::rename(&upload.temp_path, &target) {
         return fail(format!("publish upload {}: {error}", target.display()));
@@ -585,6 +594,113 @@ mod tests {
         assert_eq!(
             fs::read(root.path().join("nested/result.txt")).unwrap(),
             bytes
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn committing_a_file_does_not_hold_the_registry_lock() {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::sync::Arc;
+        let root = TempDir::new().unwrap();
+        let registry = Arc::new(TransferRegistry::new(Duration::from_secs(60)));
+        let bytes = b"committing";
+        let handle = registry
+            .open_upload(
+                root.path(),
+                "result.txt",
+                bytes.len() as u64,
+                &"0".repeat(64),
+                false,
+            )
+            .unwrap();
+        let temp_path = {
+            let mut state = registry.state.lock();
+            let upload = state.uploads.get_mut(&handle.handle_id).unwrap();
+            upload.written = bytes.len() as u64;
+            upload.temp_path.clone()
+        };
+        fs::remove_file(&temp_path).unwrap();
+        let fifo = std::ffi::CString::new(temp_path.as_os_str().as_encoded_bytes()).unwrap();
+        // A FIFO pauses the real hashing path until the writer supplies bytes.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let worker_registry = registry.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _ = done_tx.send(worker_registry.commit_upload(&handle.handle_id));
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut writer = loop {
+            match OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&temp_path)
+            {
+                Ok(writer) => break writer,
+                Err(error) if error.raw_os_error() == Some(libc::ENXIO) => {
+                    assert!(Instant::now() < deadline, "commit never opened the FIFO");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("open test FIFO: {error}"),
+            }
+        };
+        let available = registry.state.try_lock().is_some();
+        writer.write_all(bytes).unwrap();
+        drop(writer);
+        // The deliberately wrong final hash stops before sync/publication.
+        // The guard is registry access while the real hash read is blocked.
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .is_err());
+        worker.join().unwrap();
+        assert!(
+            available,
+            "commit held the global registry mutex during file I/O"
+        );
+    }
+
+    #[test]
+    fn concurrent_commits_to_one_path_publish_exactly_one_payload() {
+        use std::sync::{Arc, Barrier};
+        let root = TempDir::new().unwrap();
+        let registry = Arc::new(TransferRegistry::new(Duration::from_secs(60)));
+        let barrier = Arc::new(Barrier::new(16));
+        let workers = (0..16_u8)
+            .map(|value| {
+                let bytes = vec![value; 4096];
+                let handle = registry
+                    .open_upload(
+                        root.path(),
+                        "shared.bin",
+                        bytes.len() as u64,
+                        &sha(&bytes),
+                        false,
+                    )
+                    .unwrap();
+                registry
+                    .write_chunk(&handle.handle_id, 0, &STANDARD.encode(&bytes), &sha(&bytes))
+                    .unwrap();
+                let registry = registry.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    registry.commit_upload(&handle.handle_id).map(|_| bytes)
+                })
+            })
+            .collect::<Vec<_>>();
+        let winners = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().unwrap().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            winners.len(),
+            1,
+            "more than one upload published the same path"
+        );
+        assert_eq!(
+            fs::read(root.path().join("shared.bin")).unwrap(),
+            winners[0]
         );
     }
 
