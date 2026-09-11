@@ -206,8 +206,7 @@ describe("failures", () => {
     const failures = collectSiteFailures(
       [version({ id: "v1", status: "failed", failureMessage: "build broke", createdAt: 5 })],
       [deployment({ id: "d1", status: "failed", failureMessage: "deploy broke", updatedAt: 30 })],
-      [operation({ id: "op1", status: "failed", errorMessage: "upload broke", updatedAt: 20 })],
-      []
+      [operation({ id: "op1", status: "failed", errorMessage: "upload broke", updatedAt: 20 })]
     )
     expect(failures.map((row) => row.scope)).toEqual(["deployment", "operation", "version"])
     expect(failures.map((row) => row.message)).toEqual([
@@ -218,7 +217,7 @@ describe("failures", () => {
   })
 
   it("ignores failed rows that carry no message", () => {
-    expect(collectSiteFailures([version({ id: "v1", status: "failed" })], [], [], [])).toEqual([])
+    expect(collectSiteFailures([version({ id: "v1", status: "failed" })], [], [])).toEqual([])
   })
 })
 

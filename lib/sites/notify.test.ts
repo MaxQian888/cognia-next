@@ -130,7 +130,13 @@ describe("installSiteNotifications", () => {
   })
 
   it("notifies for an operation that lands after boot, once", async () => {
-    const notify = jest.fn(async () => "n1")
+    const notify = jest.fn(
+      async (
+        ..._args: Parameters<
+          NonNullable<NonNullable<Parameters<typeof installSiteNotifications>[0]>["notify"]>
+        >
+      ) => "n1"
+    )
     const dispose = installSiteNotifications({ since: 0, notify: notify as never })
     try {
       const db = getDb()

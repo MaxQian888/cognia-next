@@ -6,7 +6,15 @@ const mockCreate = jest.fn(async (req: unknown) => ({
   ...(req as object),
 }))
 const mockQuery = jest.fn(async (_q: unknown): Promise<unknown[]> => [])
-const mockApply = jest.fn(async (..._a: unknown[]) => ({ applied: 1, skipped: 0, failed: 0 }))
+const mockApply = jest.fn(
+  async (
+    ..._a: Parameters<typeof import("@/lib/issues/service").applyIssueAction>
+  ): ReturnType<typeof import("@/lib/issues/service").applyIssueAction> => ({
+    applied: 1,
+    skipped: 0,
+    failed: 0,
+  })
+)
 jest.mock("@/lib/issues/service", () => {
   const actual = jest.requireActual("@/lib/issues/service")
   return {
@@ -14,7 +22,7 @@ jest.mock("@/lib/issues/service", () => {
     resolveIssue: (ref: string) => mockResolve(ref),
     createIssueRecord: (req: unknown) => mockCreate(req),
     queryIssues: (q: unknown) => mockQuery(q),
-    applyIssueAction: (...a: unknown[]) => mockApply(...a),
+    applyIssueAction: (...a: Parameters<typeof mockApply>) => mockApply(...a),
   }
 })
 
@@ -45,7 +53,7 @@ function ctx(args: string): SlashContext {
   return {
     args,
     activeSessionId: "ses_a",
-    chatStatus: "ready",
+    chatStatus: "idle",
     currentPermissionMode: null,
     startNewSession: () => {},
     openSettings: () => {},
@@ -137,9 +145,9 @@ describe("/issue show / status / priority / assign / comment", () => {
       "✅ MERC-1: moved to done."
     )
     expect(mockApply).toHaveBeenCalledWith(issue, { kind: "status", to: "done" }, { kind: "human" })
-    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0, reason: "running" })
+    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0, reason: "runtime-owned" })
     expect((await dispatchIssueSubcommand(ctx("status MERC-1 done"))).system).toContain(
-      "refused (running)"
+      "refused (runtime-owned)"
     )
     expect((await dispatchIssueSubcommand(ctx("status MERC-1 closed"))).system).toContain(
       "Unknown status"

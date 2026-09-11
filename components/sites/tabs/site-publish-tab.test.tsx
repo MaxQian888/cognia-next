@@ -17,7 +17,9 @@ jest.mock("../site-manifest-editor", () => ({
 }))
 // The sub-status now reads a live query scoped to the one running operation,
 // instead of filtering a flat array of every operation's events.
-const operationEvents = jest.fn(() => [] as Array<Record<string, unknown>>)
+const operationEvents = jest.fn(
+  (_operationId: string | null) => [] as Array<Record<string, unknown>>
+)
 jest.mock("@/hooks/sites/use-site-operation-events", () => ({
   useSiteOperationEvents: (operationId: string | null) => operationEvents(operationId),
 }))

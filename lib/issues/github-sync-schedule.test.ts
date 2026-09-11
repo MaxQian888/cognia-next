@@ -5,20 +5,22 @@ const mockUpdateTask = jest.fn()
 
 jest.mock("@/lib/scheduler/scheduler-db", () => ({
   schedulerDb: {
-    getTask: (...args: unknown[]) => mockGetTask(...args),
-    createTask: (...args: unknown[]) => mockCreateTask(...args),
-    deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
-    updateTask: (...args: unknown[]) => mockUpdateTask(...args),
+    getTask: (...args: Parameters<typeof mockGetTask>) => mockGetTask(...args),
+    createTask: (...args: Parameters<typeof mockCreateTask>) => mockCreateTask(...args),
+    deleteTask: (...args: Parameters<typeof mockDeleteTask>) => mockDeleteTask(...args),
+    updateTask: (...args: Parameters<typeof mockUpdateTask>) => mockUpdateTask(...args),
   },
 }))
 
 const mockResolveBindings = jest.fn()
 jest.mock("./sync-runner", () => ({
-  resolveWorkspaceGithubBindings: (...args: unknown[]) => mockResolveBindings(...args),
+  resolveWorkspaceGithubBindings: (...args: Parameters<typeof mockResolveBindings>) =>
+    mockResolveBindings(...args),
 }))
 const mockResolveSyncBindings = jest.fn(async (): Promise<unknown[]> => [])
 jest.mock("./sync/runner", () => ({
-  resolveWorkspaceSyncBindings: (...args: unknown[]) => mockResolveSyncBindings(...args),
+  resolveWorkspaceSyncBindings: (...args: Parameters<typeof mockResolveSyncBindings>) =>
+    mockResolveSyncBindings(...args),
 }))
 
 import {

@@ -105,7 +105,7 @@ describe("issue.* skill family — registration smoke", () => {
     // defect is a fully-built surface nothing ever exposes, so the census is
     // taken against the manifest the assistant actually sees.
     const { buildBuiltInSkillManifest } = await import("../manifest")
-    const offered = buildBuiltInSkillManifest({ platform: undefined })
+    const offered = buildBuiltInSkillManifest({})
       .map((entry) => entry.name)
       .filter((name) => name.startsWith("issue_"))
 

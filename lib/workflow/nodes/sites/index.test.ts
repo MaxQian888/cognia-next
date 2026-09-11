@@ -8,15 +8,20 @@ jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: { getState: () => ({ unlockedAccountId }) },
 }))
 
-const buildAndSaveSiteVersion = jest.fn(async () => ({
-  id: "ver_1",
-  sequence: 3,
-  status: "ready",
-  source: { commitSha: "abc1234", dirty: false },
-  artifactDigest: "d",
-}))
+const buildAndSaveSiteVersion = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/sites/build-version").buildAndSaveSiteVersion>
+  ) => ({
+    id: "ver_1",
+    sequence: 3,
+    status: "ready",
+    source: { commitSha: "abc1234", dirty: false },
+    artifactDigest: "d",
+  })
+)
 jest.mock("@/lib/sites/build-version", () => ({
-  buildAndSaveSiteVersion: (...args: unknown[]) => buildAndSaveSiteVersion(...args),
+  buildAndSaveSiteVersion: (...args: Parameters<typeof buildAndSaveSiteVersion>) =>
+    buildAndSaveSiteVersion(...args),
 }))
 
 const publishSiteVersion = jest.fn(async () => ({
@@ -27,7 +32,8 @@ const publishSiteVersion = jest.fn(async () => ({
   updatedAt: 5,
 }))
 jest.mock("@/lib/sites/publish-version", () => ({
-  publishSiteVersion: (...args: unknown[]) => publishSiteVersion(...args),
+  publishSiteVersion: (...args: Parameters<typeof publishSiteVersion>) =>
+    publishSiteVersion(...args),
 }))
 
 const deployVersion = jest.fn(async () => ({
@@ -50,11 +56,14 @@ const db = {
   listSiteEnvironmentRevisions: jest.fn(async () => [{ id: "env_1", sequence: 1 }]),
 }
 jest.mock("@/lib/db/sites", () => ({
-  getSiteProject: (...a: unknown[]) => db.getSiteProject(...a),
-  listSiteVersions: (...a: unknown[]) => db.listSiteVersions(...a),
-  listSiteDeployments: (...a: unknown[]) => db.listSiteDeployments(...a),
-  listSiteOperations: (...a: unknown[]) => db.listSiteOperations(...a),
-  listSiteEnvironmentRevisions: (...a: unknown[]) => db.listSiteEnvironmentRevisions(...a),
+  getSiteProject: (...a: Parameters<typeof db.getSiteProject>) => db.getSiteProject(...a),
+  listSiteVersions: (...a: Parameters<typeof db.listSiteVersions>) => db.listSiteVersions(...a),
+  listSiteDeployments: (...a: Parameters<typeof db.listSiteDeployments>) =>
+    db.listSiteDeployments(...a),
+  listSiteOperations: (...a: Parameters<typeof db.listSiteOperations>) =>
+    db.listSiteOperations(...a),
+  listSiteEnvironmentRevisions: (...a: Parameters<typeof db.listSiteEnvironmentRevisions>) =>
+    db.listSiteEnvironmentRevisions(...a),
 }))
 
 import "./index"

@@ -18,7 +18,12 @@ describe("resolveTaskWorkspace", () => {
     const activeWorkspace = jest.fn(async () => "from-active")
     await expect(
       resolveTaskWorkspace(
-        { projectId: "explicit", createdBy: { kind: "agent", sessionId: "s1" } },
+        {
+          type: "chat",
+          payload: { prompt: "test" },
+          projectId: "explicit",
+          createdBy: { kind: "agent", sessionId: "s1" },
+        },
         deps({ sessionWorkspace, activeWorkspace })
       )
     ).resolves.toBe("explicit")
@@ -31,7 +36,11 @@ describe("resolveTaskWorkspace", () => {
     // repository must bind the schedule to the repository it is working in.
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "agent", sessionId: "s1" } },
+        {
+          type: "chat",
+          payload: { prompt: "test" },
+          createdBy: { kind: "agent", sessionId: "s1" },
+        },
         deps({ sessionWorkspace: async () => "owner", activeWorkspace: async () => "on-screen" })
       )
     ).resolves.toBe("owner")
@@ -72,7 +81,7 @@ describe("resolveTaskWorkspace", () => {
     const squadWorkspace = jest.fn(async () => "squad-owner")
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "user" }, type: "prompt", payload: { teamId: "sq1" } } as never,
+        { createdBy: { kind: "user" }, type: "chat", payload: { teamId: "sq1" } } as never,
         deps({ squadWorkspace, activeWorkspace: async () => "w1" })
       )
     ).resolves.toBe("w1")
@@ -82,7 +91,7 @@ describe("resolveTaskWorkspace", () => {
   it("falls back to the active workspace for a hand-made task", async () => {
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "user" } },
+        { type: "chat", payload: { prompt: "test" }, createdBy: { kind: "user" } },
         deps({ activeWorkspace: async () => "w1" })
       )
     ).resolves.toBe("w1")
@@ -91,7 +100,11 @@ describe("resolveTaskWorkspace", () => {
   it("falls back to the active workspace when the conversation has none", async () => {
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "agent", sessionId: "s1" } },
+        {
+          type: "chat",
+          payload: { prompt: "test" },
+          createdBy: { kind: "agent", sessionId: "s1" },
+        },
         deps({ sessionWorkspace: async () => null, activeWorkspace: async () => "w1" })
       )
     ).resolves.toBe("w1")
@@ -100,7 +113,11 @@ describe("resolveTaskWorkspace", () => {
   it("leaves the task unattributed rather than failing when a lookup throws", async () => {
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "agent", sessionId: "s1" } },
+        {
+          type: "chat",
+          payload: { prompt: "test" },
+          createdBy: { kind: "agent", sessionId: "s1" },
+        },
         deps({
           sessionWorkspace: async () => {
             throw new Error("db closed")
@@ -119,7 +136,11 @@ describe("resolveTaskWorkspace", () => {
     const hang = () => new Promise<string>(() => {})
     await expect(
       resolveTaskWorkspace(
-        { createdBy: { kind: "agent", sessionId: "s1" } },
+        {
+          type: "chat",
+          payload: { prompt: "test" },
+          createdBy: { kind: "agent", sessionId: "s1" },
+        },
         deps({ sessionWorkspace: hang, activeWorkspace: hang, timeoutMs: 20 })
       )
     ).resolves.toBeUndefined()

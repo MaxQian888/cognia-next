@@ -23,6 +23,7 @@
  * back through the same `claude.send` path.
  */
 
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -188,7 +189,7 @@ export function WorkflowEditorChatTab({
     async (
       content: SendContent,
       manifest?: readonly AttachmentManifestEntry[],
-      _templateRun?: unknown,
+      templateRun?: ChatTemplateRun | null,
       turnMetadata?: ComposerTurnMetadata
     ) => {
       try {
@@ -203,6 +204,7 @@ export function WorkflowEditorChatTab({
         await claude.send(expanded, undefined, {
           sessionId: effectiveSessionId ?? undefined,
           attachmentManifest: manifest,
+          ...(templateRun ? { templateRun } : {}),
           ...turnMetadataSendOptions(turnMetadata),
         })
         if (refs.length > 0) {

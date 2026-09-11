@@ -33,6 +33,7 @@ function workflow(over: Partial<VisualWorkflow> = {}): VisualWorkflow {
       {
         id: "node_a",
         type: "io.output",
+        typeVersion: 1,
         position: { x: 0, y: 0 },
         data: { label: "Output", typeVersion: 1, params: {} },
       },

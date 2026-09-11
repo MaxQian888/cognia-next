@@ -1,14 +1,31 @@
 import type { StepExecutionContext } from "@/types/workflow/visual"
 
-const gitStackParents = jest.fn(async () => [] as Array<[string, string]>)
-const gitStackSetParent = jest.fn(async () => undefined)
-const gitStackValidate = jest.fn(async () => [] as unknown[])
-const gitStackRestack = jest.fn(async () => ({
-  method: "replay",
-  updates: [{ branch: "me/ui", from: "aaa", to: "bbb" }],
-  conflict: null,
-}))
-const gitStackPush = jest.fn(async () => ({ pushed: ["me/api", "me/ui"], forceIfIncludes: true }))
+const gitStackParents = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/git/commands").gitStackParents>) =>
+    [] as Array<[string, string]>
+)
+const gitStackSetParent = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/git/commands").gitStackSetParent>) => undefined
+)
+const gitStackValidate = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/git/commands").gitStackValidate>) =>
+    [] as unknown[]
+)
+const gitStackRestack = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/git/commands").gitStackRestack>) => ({
+    method: "replay",
+    updates: [{ branch: "me/ui", from: "aaa", to: "bbb" }],
+    conflict: null as Awaited<
+      ReturnType<typeof import("@/lib/git/commands").gitStackRestack>
+    >["conflict"],
+  })
+)
+const gitStackPush = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/git/commands").gitStackPush>) => ({
+    pushed: ["me/api", "me/ui"],
+    forceIfIncludes: true,
+  })
+)
 
 jest.mock("@/lib/git/commands", () => ({
   gitStackParents: (repo: string) => gitStackParents(repo),
@@ -170,7 +187,7 @@ describe("action.stack.restack", () => {
     gitStackRestack.mockResolvedValue({
       method: "rebase",
       updates: [],
-      conflict: { branch: "me/ui", paths: ["a.ts"] },
+      conflict: { branch: "me/ui", worktree: "/repo/.worktrees/me-ui" },
     })
     const result = await run("action.stack.restack", { tipBranch: "me/docs" })
     expect(result.decision).toBe("conflict")

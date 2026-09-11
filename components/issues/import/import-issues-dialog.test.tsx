@@ -7,13 +7,17 @@ jest.mock("next-intl", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key,
 }))
 
-const mockImport = jest.fn(async (..._a: unknown[]) => ({
-  created: 2,
-  skipped: 1,
-  failed: 0,
-  createdIds: ["a", "b"],
-  errors: [],
-}))
+const mockImport = jest.fn(
+  async (
+    ..._a: unknown[]
+  ): ReturnType<typeof import("@/lib/issues/import/apply").importIssues> => ({
+    created: 2,
+    skipped: 1,
+    failed: 0,
+    createdIds: ["a", "b"],
+    errors: [],
+  })
+)
 jest.mock("@/lib/issues/import/apply", () => ({
   importIssues: (...a: unknown[]) => mockImport(...a),
 }))

@@ -9,12 +9,13 @@ const mockProposeIssueFromIm = jest.fn(
   })
 )
 jest.mock("@/lib/issues/im/propose", () => ({
-  proposeIssueFromIm: (...a: unknown[]) => mockProposeIssueFromIm(...a),
+  proposeIssueFromIm: (...a: Parameters<typeof mockProposeIssueFromIm>) =>
+    mockProposeIssueFromIm(...a),
 }))
 
 const mockPushIssueCard = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/issues/im/push", () => ({
-  pushIssueCard: (...a: unknown[]) => mockPushIssueCard(...a),
+  pushIssueCard: (...a: Parameters<typeof mockPushIssueCard>) => mockPushIssueCard(...a),
 }))
 
 const mockCreateIssue = jest.fn(async (..._a: unknown[]) => ({
@@ -22,7 +23,7 @@ const mockCreateIssue = jest.fn(async (..._a: unknown[]) => ({
   identifier: "MER-3",
 }))
 jest.mock("@/lib/db/issues", () => ({
-  createIssue: (...a: unknown[]) => mockCreateIssue(...a),
+  createIssue: (...a: Parameters<typeof mockCreateIssue>) => mockCreateIssue(...a),
 }))
 
 const mockListIssueProjects = jest.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
@@ -35,9 +36,11 @@ const mockGetIssueProject = jest.fn(async (id: unknown): Promise<unknown> => ({
 }))
 const mockGetIssueProjectByKey = jest.fn(async (..._a: unknown[]): Promise<unknown> => undefined)
 jest.mock("@/lib/db/issue-projects", () => ({
-  listIssueProjects: (...a: unknown[]) => mockListIssueProjects(...a),
-  getIssueProject: (...a: unknown[]) => mockGetIssueProject(...a),
-  getIssueProjectByKey: (...a: unknown[]) => mockGetIssueProjectByKey(...a),
+  listIssueProjects: (...a: Parameters<typeof mockListIssueProjects>) =>
+    mockListIssueProjects(...a),
+  getIssueProject: (...a: Parameters<typeof mockGetIssueProject>) => mockGetIssueProject(...a),
+  getIssueProjectByKey: (...a: Parameters<typeof mockGetIssueProjectByKey>) =>
+    mockGetIssueProjectByKey(...a),
 }))
 
 const mockEnsureDefaultProject = jest.fn(async () => ({ id: "ws_default" }))

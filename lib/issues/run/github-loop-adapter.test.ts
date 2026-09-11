@@ -431,6 +431,7 @@ describe("start — stacked mode", () => {
     const adapter = createGithubLoopRunAdapter(deps)
     await adapter.start(target(), {
       by: HUMAN,
+      origin: "interactive",
       options: { [GITHUB_LOOP_STACK_ON_OPTION]: " issue/merc-1 " },
     })
     expect((executed[0][1] as { input: { base: string } }).input.base).toBe("issue/merc-1")
@@ -444,6 +445,7 @@ describe("start — stacked mode", () => {
     const adapter = createGithubLoopRunAdapter(deps)
     await adapter.start(target(), {
       by: HUMAN,
+      origin: "interactive",
       options: {
         [GITHUB_LOOP_BASE_OPTION]: "develop",
         [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-1",
@@ -458,6 +460,7 @@ describe("start — stacked mode", () => {
     await expect(
       adapter.start(target(), {
         by: HUMAN,
+        origin: "interactive",
         options: { [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-3" },
       })
     ).rejects.toThrow(/cannot stack issue\/merc-3 on itself/)
@@ -477,7 +480,11 @@ describe("start — stacked mode", () => {
           ],
         }),
       }),
-      { by: HUMAN, options: { [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-1" } }
+      {
+        by: HUMAN,
+        origin: "interactive",
+        options: { [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-1" },
+      }
     )
     expect(parents).toEqual([["/checkout", "issue/merc-3", "issue/merc-1"]])
   })
@@ -485,7 +492,7 @@ describe("start — stacked mode", () => {
   it("does not touch a checkout for an unstacked run", async () => {
     const { deps, parents } = makeDeps()
     const adapter = createGithubLoopRunAdapter(deps)
-    await adapter.start(target(), { by: HUMAN })
+    await adapter.start(target(), { by: HUMAN, origin: "interactive" })
     expect(parents).toEqual([])
   })
 
@@ -507,7 +514,11 @@ describe("start — stacked mode", () => {
           ],
         }),
       }),
-      { by: HUMAN, options: { [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-1" } }
+      {
+        by: HUMAN,
+        origin: "interactive",
+        options: { [GITHUB_LOOP_STACK_ON_OPTION]: "issue/merc-1" },
+      }
     )
     expect(runs).toHaveLength(1)
   })

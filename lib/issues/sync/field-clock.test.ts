@@ -7,7 +7,7 @@ const HUMAN = { kind: "human" as const }
 function event(
   kind: IssueEvent["kind"],
   ts: number,
-  by = HUMAN as { kind: "human" | "agent"; id?: string }
+  by: import("@/types/issues").IssueActor = HUMAN
 ): IssueEvent {
   return {
     id: `e${ts}`,

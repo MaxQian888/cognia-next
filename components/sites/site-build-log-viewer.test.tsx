@@ -8,7 +8,10 @@ jest.mock("next-intl", () => ({
 const copy = jest.fn(async () => true)
 jest.mock("@/hooks/ui", () => ({ useCopy: () => ({ copy, copied: false, isCopying: false }) }))
 
-const buildLogs = jest.fn(() => ({ logs: [] as unknown[], loading: false }))
+const buildLogs = jest.fn((_versionId: string | null) => ({
+  logs: [] as unknown[],
+  loading: false,
+}))
 jest.mock("@/hooks/sites/use-site-build-logs", () => ({
   useSiteBuildLogs: (versionId: string | null) => buildLogs(versionId),
 }))

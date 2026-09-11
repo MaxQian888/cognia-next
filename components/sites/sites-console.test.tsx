@@ -72,7 +72,7 @@ const publishActions = {
     publish: "idle",
   },
   readyVersions: [],
-  wrangler: null,
+  wrangler: null as import("@/lib/sites/wrangler-detect").WranglerDetection | null,
   saveToken: jest.fn(),
   saveManifest: jest.fn(),
   saveEnvironment: jest.fn(),

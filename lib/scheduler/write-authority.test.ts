@@ -20,9 +20,8 @@ jest.mock("./host-support", () => ({
   describeUnsupportedTaskType: jest.fn(() => "unsupported here"),
 }))
 
-const { getTaskTypeHostSupport } = jest.requireMock<typeof import("./host-support")>(
-  "./host-support"
-) as { getTaskTypeHostSupport: jest.Mock }
+const { getTaskTypeHostSupport } =
+  jest.requireMock<jest.Mocked<typeof import("./host-support")>>("./host-support")
 
 function policy(overrides: Partial<SchedulerPermissionPolicy> = {}): SchedulerPermissionPolicy {
   return { ...DEFAULT_PERMISSION_POLICY, confirmationRequired: [], ...overrides }

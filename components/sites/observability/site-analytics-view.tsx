@@ -194,7 +194,13 @@ function TrendPanel({
       <h4 className="text-xs font-medium">{title}</h4>
       <div className="h-44">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={CHART_MARGINS}>
+          <AreaChart
+            data={data.map((point, index) => ({
+              ...point,
+              lastPointLabel: index === data.length - 1 ? format(Number(point[dataKey])) : "",
+            }))}
+            margin={CHART_MARGINS.default}
+          >
             {/* Solid hairline: dashed gridlines are noise, and read as data. */}
             <CartesianGrid stroke={gridColor} strokeOpacity={0.15} vertical={false} />
             <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -205,10 +211,7 @@ function TrendPanel({
               width={44}
               tickFormatter={(value: number) => format(value)}
             />
-            <Tooltip
-              contentStyle={TOOLTIP_STYLE}
-              formatter={(value: number) => [format(value), title]}
-            />
+            <Tooltip {...TOOLTIP_STYLE} formatter={(value) => [format(Number(value)), title]} />
             <Area
               type="monotone"
               dataKey={dataKey}
@@ -220,14 +223,7 @@ function TrendPanel({
               isAnimationActive={false}
             >
               {/* One direct label, on the last point — never a number per point. */}
-              <LabelList
-                dataKey={dataKey}
-                position="right"
-                fontSize={10}
-                formatter={(value: number, _entry: unknown, index: number) =>
-                  index === data.length - 1 ? format(value) : ""
-                }
-              />
+              <LabelList dataKey="lastPointLabel" position="right" fontSize={10} />
             </Area>
           </AreaChart>
         </ResponsiveContainer>

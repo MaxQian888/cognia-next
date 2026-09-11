@@ -137,7 +137,11 @@ export const defaultDifyImportResolver: DifyImportResolver = {
     if (
       plugin?.enabled &&
       plugin.status === "enabled" &&
-      plugin.manifest.tools?.some((tool) => tool.name === toolName)
+      Array.isArray(plugin.manifest.tools) &&
+      plugin.manifest.tools.some(
+        (tool: unknown) =>
+          typeof tool === "object" && tool !== null && "name" in tool && tool.name === toolName
+      )
     ) {
       return { kind: "plugin", pluginId: plugin.id, toolName }
     }

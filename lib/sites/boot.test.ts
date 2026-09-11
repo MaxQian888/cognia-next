@@ -8,7 +8,8 @@ jest.mock("@/lib/sites/cloudflare/service", () => ({
 jest.mock("@/lib/db/sites", () => ({ listSiteProjects: jest.fn(async () => []) }))
 const installSiteNotifications = jest.fn(() => jest.fn())
 jest.mock("@/lib/sites/notify", () => ({
-  installSiteNotifications: (...args: unknown[]) => installSiteNotifications(...args),
+  installSiteNotifications: (...args: Parameters<typeof installSiteNotifications>) =>
+    installSiteNotifications(...args),
 }))
 
 import * as db from "@/lib/db/sites"

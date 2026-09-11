@@ -50,7 +50,7 @@ function fakeAdapter(id: string, verdict: IssueRunVerdict): IssueRunAdapter {
         targetId: `t_${id}`,
         by: context.by,
       }),
-    poll: async () => ({ status: "running" }),
+    poll: async () => null,
   }
 }
 
@@ -85,7 +85,9 @@ describe("issue.run", () => {
   })
 
   it("skips an engine that refuses and takes one that accepts", async () => {
-    registerIssueRunAdapter(fakeAdapter("engine-no", { ok: false, reason: "not-supported" }))
+    registerIssueRunAdapter(
+      fakeAdapter("engine-no", { ok: false, reason: "assignee-kind-mismatch" })
+    )
     registerIssueRunAdapter(fakeAdapter("engine-yes", { ok: true }))
     await makeIssue()
 
@@ -114,24 +116,28 @@ describe("issue.run", () => {
   })
 
   it("relays a named engine's own refusal", async () => {
-    registerIssueRunAdapter(fakeAdapter("engine-a", { ok: false, reason: "not-supported" }))
+    registerIssueRunAdapter(
+      fakeAdapter("engine-a", { ok: false, reason: "assignee-kind-mismatch" })
+    )
     await makeIssue()
 
     expect(await run({ issue: "MERC-1", adapterId: "engine-a" })).toMatchObject({
       status: "refused",
-      reason: "not-supported",
+      reason: "assignee-kind-mismatch",
     })
   })
 
   it("reports every verdict when nothing will take the issue", async () => {
     // A blanket refusal reads the same as a per-engine one from the outside,
     // so the model gets the list rather than a bare no.
-    registerIssueRunAdapter(fakeAdapter("engine-a", { ok: false, reason: "not-supported" }))
+    registerIssueRunAdapter(
+      fakeAdapter("engine-a", { ok: false, reason: "assignee-kind-mismatch" })
+    )
     await makeIssue()
 
     const out = await run({ issue: "MERC-1" })
     expect(out).toMatchObject({ status: "refused", reason: "no-engine-accepts" })
-    expect(out.verdicts).toEqual([{ adapterId: "engine-a", reason: "not-supported" }])
+    expect(out.verdicts).toEqual([{ adapterId: "engine-a", reason: "assignee-kind-mismatch" }])
   })
 
   it("refuses when no engine is registered at all", async () => {

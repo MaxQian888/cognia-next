@@ -971,14 +971,18 @@ describe("TemplateService instantiation rollback", () => {
    * with no instance record pointing at them: invisible to update, detach and
    * rebind, and impossible to find again.
    */
-  async function attempt(options: { failSnapshot?: boolean; rollback?: jest.Mock }) {
+  async function attempt(options: {
+    failSnapshot?: boolean
+    rollback?: jest.Mock
+    omitRollbackToken?: boolean
+  }) {
     const repository = new InMemoryTemplateRepository()
     const rollback = options.rollback ?? jest.fn(async () => {})
     const adapter: TemplateDomainAdapter = {
       ...skillAdapter,
       instantiate: async ({ definition }) => ({
         resources: [{ domain: "skill", id: `created:${definition.id}` }],
-        rollbackToken: { skillId: "created" },
+        ...(options.omitRollbackToken ? {} : { rollbackToken: { skillId: "created" } }),
       }),
       snapshot: options.failSnapshot
         ? async () => {
@@ -1022,6 +1026,16 @@ describe("TemplateService instantiation rollback", () => {
     await expect(run()).rejects.toThrow(/snapshot unavailable/i)
     expect(rollback).toHaveBeenCalledWith({ skillId: "created" })
     // Nothing half-written left behind either.
+    expect(await repository.listInstances()).toEqual([])
+  })
+
+  it("preserves the recording error without rolling back when the adapter returned no token", async () => {
+    const { repository, rollback, run } = await attempt({
+      failSnapshot: true,
+      omitRollbackToken: true,
+    })
+    await expect(run()).rejects.toThrow(/snapshot unavailable/i)
+    expect(rollback).not.toHaveBeenCalled()
     expect(await repository.listInstances()).toEqual([])
   })
 

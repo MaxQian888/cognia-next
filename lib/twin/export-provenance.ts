@@ -5,7 +5,7 @@ import type { UIMessage } from "ai"
 
 export async function resolveSessionTwinProvenance(
   session: ChatSession,
-  messages: readonly Array<{ metadata?: unknown }> = [],
+  messages: ReadonlyArray<{ metadata?: unknown }> = [],
   getCharacter: (id: string) => Promise<{ twinId?: string } | undefined> = async (id) =>
     (await import("@/lib/db/schema")).getDb().characters.get(id)
 ): Promise<ShareProvenance[] | undefined> {

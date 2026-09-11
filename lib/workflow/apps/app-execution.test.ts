@@ -4,8 +4,11 @@ jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
 jest.mock("./quota-service", () => ({
   assertWorkflowAppAdmissionQuota: jest.fn(async () => undefined),
   WorkflowAppQuotaError: class WorkflowAppQuotaError extends Error {
-    constructor(readonly code: string) {
-      super(code)
+    constructor(
+      readonly code: string,
+      message: string
+    ) {
+      super(message)
     }
   },
 }))
@@ -68,6 +71,15 @@ const resolved = {
       quota: {},
       contentPolicy: { inputModeration: true, outputModeration: true },
       legal: { requireConsent: false },
+      reviewGate: {
+        enabled: false,
+        requiredApprovals: 1,
+        reviewerSubjectIds: [],
+        reviewerGroupIds: [],
+        requireNoBlockingComments: true,
+      },
+      qualityGate: { enabled: false, thresholds: {}, maxRunAgeMs: 1 },
+      annotationReply: { enabled: false, threshold: 0.85 },
       knowledgeBindings: {},
     },
     createdAt: 1,
@@ -202,7 +214,7 @@ describe("workflow app execution boundary", () => {
   })
 
   it("alerts after an atomic budget admission rejection and preserves the quota error", async () => {
-    const quotaError = new WorkflowAppQuotaError("token_budget_exhausted" as never)
+    const quotaError = new WorkflowAppQuotaError("token_budget_exhausted", "Token budget exhausted")
     execute.mockRejectedValueOnce(quotaError)
     emitQuotaAlert.mockResolvedValueOnce({
       emitted: true,

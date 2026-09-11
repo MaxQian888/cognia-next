@@ -84,7 +84,7 @@ describe("FieldGroup / FieldRow layout", () => {
   })
 
   it("lets callers override the gap without losing the responsive columns", () => {
-    const { container } = render(<FieldRow className="gap-2" />)
+    const { container } = render(<FieldRow className="gap-2">{null}</FieldRow>)
     const row = container.firstElementChild as HTMLElement
     // tailwind-merge keeps the caller's gap and drops the default `gap-3`.
     expect(row.className).toContain("gap-2")

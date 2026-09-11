@@ -52,7 +52,11 @@ function resource(overrides: Partial<SiteResourceRow> = {}): SiteResourceRow {
 }
 
 function deps(overrides: Partial<PublishSiteVersionDeps> = {}) {
-  const uploadVersion = jest.fn(async () => "cf-version-1")
+  const uploadVersion = jest.fn(
+    async (
+      ..._args: Parameters<ReturnType<PublishSiteVersionDeps["createService"]>["uploadVersion"]>
+    ) => "cf-version-1"
+  )
   const deployVersion = jest.fn(async () => ({ id: "d1" }))
   const base: PublishSiteVersionDeps = {
     ensureWrangler: jest.fn(async () => ({ path: "/bin/wrangler", version: "3", ready: true })),
@@ -99,7 +103,7 @@ describe("uploadSiteVersion", () => {
 
   it("refuses before hashing a binary when the version is not ready", async () => {
     const { deps: d } = deps({
-      getVersion: jest.fn(async () => ({ ...READY, status: "building" })),
+      getVersion: jest.fn(async () => ({ ...READY, status: "building" as const })),
     })
     await expect(uploadSiteVersion(INPUT, d)).rejects.toThrow(/ready Site version not found/)
     expect(d.ensureWrangler).not.toHaveBeenCalled()

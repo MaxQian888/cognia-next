@@ -17,9 +17,12 @@ jest.mock("@/lib/sites/wrangler-detect", () => ({
     ready: true,
   })),
 }))
-const uploadSiteVersion = jest.fn(async () => "cf-version-1")
+const uploadSiteVersion = jest.fn(
+  async (..._args: Parameters<typeof import("@/lib/sites/publish-version").uploadSiteVersion>) =>
+    "cf-version-1"
+)
 jest.mock("@/lib/sites/publish-version", () => ({
-  uploadSiteVersion: (...args: unknown[]) => uploadSiteVersion(...args),
+  uploadSiteVersion: (...args: Parameters<typeof uploadSiteVersion>) => uploadSiteVersion(...args),
 }))
 jest.mock("@/lib/sites/build-version", () => ({
   buildAndSaveSiteVersion: jest.fn(async () => ({})),
@@ -94,7 +97,6 @@ function liveData(overrides: Partial<SiteLiveData> = {}): SiteLiveData {
     environments: [environment],
     resources: [],
     operations: [],
-    events: [],
     loading: false,
     ...overrides,
   }
@@ -212,14 +214,14 @@ it("saves the provider token, environment, and manifest through the runner", asy
   const { result, service, manifest } = setup()
   await act(async () => {
     result.current.saveToken("cf-token")
-    result.current.saveEnvironment({ variables: { A: "1" }, secrets: {} })
+    result.current.saveEnvironment({ variables: { A: "1" }, secrets: [] })
     result.current.saveManifest("{}")
   })
   expect(service.saveProviderToken).toHaveBeenCalledWith("site_1", "cf-token")
   expect(service.saveEnvironment).toHaveBeenCalledWith({
     siteId: "site_1",
     variables: { A: "1" },
-    secrets: {},
+    secrets: [],
   })
   expect(manifest.save).toHaveBeenCalledWith("{}", undefined)
 })

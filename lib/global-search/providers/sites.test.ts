@@ -62,7 +62,7 @@ function deps(overrides: Partial<SitesProviderDeps> = {}): SitesProviderDeps {
 }
 
 async function search(query: string, d: SitesProviderDeps = deps()) {
-  return createSitesProvider(d).search(makeProviderInput(query), makeTestContext())
+  return createSitesProvider(d).search(makeProviderInput(query))
 }
 
 describe("loadSiteSearchRows", () => {

@@ -33,6 +33,7 @@ function local(over: Partial<UnifiedIssueItem> = {}): UnifiedIssueItem {
 
 function cycle(over: Partial<IssueCycle> = {}): IssueCycle {
   return {
+    externalKeys: [],
     id: "c1",
     projectId: "w1",
     kind: "cycle",

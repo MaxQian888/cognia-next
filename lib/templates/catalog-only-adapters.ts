@@ -116,14 +116,15 @@ function defaultReaders(): CatalogOnlyReaders {
         })
       ),
     subscription: async () =>
-      (["anthropic", "codex", "opencode"] as PresetTemplateProvider[]).flatMap((provider) =>
-        buildPresetTemplates(provider).map((template) =>
-          row(template as unknown as Record<string, unknown>, {
-            id: `${provider}.${template.templateId}`,
-            name: template.label,
-            trust: "built-in",
-          })
-        )
+      (["anthropic", "codex", "opencode", "commandcode"] as PresetTemplateProvider[]).flatMap(
+        (provider) =>
+          buildPresetTemplates(provider).map((template) =>
+            row(template as unknown as Record<string, unknown>, {
+              id: `${provider}.${template.templateId}`,
+              name: template.label,
+              trust: "built-in",
+            })
+          )
       ),
     /**
      * Always empty, on purpose.

@@ -47,7 +47,7 @@ function childPath(parent: string, key: string): string {
     : `${parent}/${escapeSegment(key)}`
 }
 
-function isPlainObject(value: TemplateJson): value is { [key: string]: TemplateJson } {
+function isPlainObject(value: Slot): value is { [key: string]: TemplateJson } {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 

@@ -5,7 +5,10 @@ import {
 } from "@cognia/rag"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import { redactText } from "@cognia/redact"
-import { loadOrCreateAccountArtifactKey } from "@/lib/ai/eval/artifact-crypto"
+import {
+  loadOrCreateAccountArtifactKey,
+  type AccountArtifactDomain,
+} from "@/lib/ai/eval/artifact-crypto"
 import { addCase, importedCaseId } from "@/lib/db/eval-datasets"
 import { getDb } from "@/lib/db/schema"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
@@ -55,7 +58,7 @@ function bytes(value: Uint8Array): ArrayBuffer {
 
 async function key(
   accountId: string,
-  domain: string,
+  domain: AccountArtifactDomain,
   usage: KeyUsage,
   deps: WorkflowQualityCryptoDeps
 ): Promise<CryptoKey> {
@@ -67,7 +70,7 @@ async function key(
 
 async function encryptJson(
   accountId: string,
-  domain: string,
+  domain: AccountArtifactDomain,
   aad: string,
   value: unknown,
   deps: WorkflowQualityCryptoDeps
@@ -81,7 +84,7 @@ async function encryptJson(
 
 async function decryptJson<T>(
   accountId: string,
-  domain: string,
+  domain: AccountArtifactDomain,
   aad: string,
   envelope: EncryptedContentEnvelopeV1,
   deps: WorkflowQualityCryptoDeps

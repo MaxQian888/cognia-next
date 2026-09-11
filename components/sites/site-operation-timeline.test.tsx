@@ -35,7 +35,7 @@ jest.mock("@/hooks/ui", () => ({ useCopy: () => ({ copy, copied: false, isCopyin
 
 // The journal no longer receives a flat array of every operation's events; an
 // expanded row runs its own single-operation live query.
-const operationEvents = jest.fn(() => [] as SiteOperationEventRow[])
+const operationEvents = jest.fn((_operationId: string | null) => [] as SiteOperationEventRow[])
 jest.mock("@/hooks/sites/use-site-operation-events", () => ({
   useSiteOperationEvents: (operationId: string | null) => operationEvents(operationId),
 }))
@@ -100,7 +100,7 @@ describe("SiteOperationTimeline", () => {
 
 describe("SiteOperationJournal", () => {
   it("shows the empty state when nothing has run", () => {
-    render(<SiteOperationJournal operations={[]} events={[]} />)
+    render(<SiteOperationJournal operations={[]} />)
     expect(screen.getByText("operations.empty")).toBeInTheDocument()
   })
 

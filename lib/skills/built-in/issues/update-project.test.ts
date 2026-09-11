@@ -12,6 +12,7 @@ jest.mock("@/stores/project/project-store", () => ({
 }))
 jest.mock("@/lib/db/sessions", () => ({ getSession: async () => undefined }))
 
+import { z } from "zod"
 import { getSharedBuiltInSkillRegistry } from "../registry"
 import type { BuiltInSkillContext } from "../types"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
@@ -57,6 +58,7 @@ describe("issue.update_project", () => {
   it("offers no way to change the key", async () => {
     // It is baked into every identifier the container has already minted, and
     // into whatever commits and chat messages quoted them.
+    if (!(skill.inputSchema instanceof z.ZodObject)) throw new Error("Expected object input schema")
     expect(Object.keys(skill.inputSchema.shape)).not.toContain("key")
   })
 

@@ -9,8 +9,7 @@ import { syncTwinCronToScheduler, CRON_PRESETS } from "./cron-bridge"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 
 beforeEach(async () => {
-  await schedulerDb.delete()
-  await schedulerDb.open()
+  await schedulerDb.clearAll()
 })
 
 describe("syncTwinCronToScheduler", () => {

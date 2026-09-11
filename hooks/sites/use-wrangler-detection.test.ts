@@ -1,15 +1,20 @@
 /** @jest-environment jsdom */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-const redetectWranglerBinary = jest.fn(async () => ({
-  path: "/new/wrangler",
-  version: "4",
-  ready: true,
-}))
+const redetectWranglerBinary = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/sites/wrangler-detect").redetectWranglerBinary>
+  ) => ({
+    path: "/new/wrangler",
+    version: "4",
+    ready: true,
+  })
+)
 jest.mock("@/lib/sites/wrangler-detect", () => ({
   detectWranglerBinary: jest.fn(),
   ensureWranglerApproved: jest.fn(),
-  redetectWranglerBinary: (...args: unknown[]) => redetectWranglerBinary(...args),
+  redetectWranglerBinary: (...args: Parameters<typeof redetectWranglerBinary>) =>
+    redetectWranglerBinary(...args),
 }))
 
 import { useWranglerDetection } from "./use-wrangler-detection"

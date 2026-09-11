@@ -28,6 +28,7 @@ const cycle: IssueCycle = {
   name: "v1.0",
   status: "planned",
   externalRefs: [],
+  externalKeys: [],
   createdAt: 1,
   updatedAt: 1,
 }

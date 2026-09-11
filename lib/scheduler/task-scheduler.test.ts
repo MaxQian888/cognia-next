@@ -2918,7 +2918,7 @@ describe("TaskScheduler", () => {
       })
 
       it("says not-found for an execution id that does not exist", async () => {
-        mockSchedulerDb.getExecution.mockResolvedValue(undefined)
+        mockSchedulerDb.getExecution.mockResolvedValue(null)
         await expect(scheduler.cancelExecution("nope")).resolves.toEqual({
           cancelled: false,
           reason: "not-found",
@@ -2926,7 +2926,16 @@ describe("TaskScheduler", () => {
       })
 
       it("says already-settled rather than pretending to cancel a finished run", async () => {
-        mockSchedulerDb.getExecution.mockResolvedValue({ id: "done", status: "completed" })
+        mockSchedulerDb.getExecution.mockResolvedValue({
+          id: "done",
+          status: "completed",
+          taskId: "task-1",
+          taskName: "Task",
+          taskType: "chat",
+          retryAttempt: 0,
+          startedAt: new Date(0),
+          logs: [],
+        })
         await expect(scheduler.cancelExecution("done")).resolves.toEqual({
           cancelled: false,
           reason: "already-settled",

@@ -1,3 +1,4 @@
+import type { IssueRun } from "@/types/issues"
 /**
  * @jest-environment jsdom
  */

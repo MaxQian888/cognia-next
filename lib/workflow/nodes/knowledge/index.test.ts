@@ -39,7 +39,9 @@ import {
   runKnowledgeRetrieve,
 } from "./index"
 
-function context(params: Record<string, unknown>) {
+function context(
+  params: Record<string, unknown>
+): import("@/types/workflow/visual").StepExecutionContext {
   return {
     runId: "run_a",
     workflowId: "wf_a",
@@ -50,7 +52,7 @@ function context(params: Record<string, unknown>) {
     signal: new AbortController().signal,
     log: jest.fn(),
     resolveSecret: jest.fn(),
-  } as never
+  }
 }
 
 const chunk = {

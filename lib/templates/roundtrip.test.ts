@@ -135,6 +135,7 @@ describe("full template domain round trips", () => {
       prompt: {},
       subscription: {},
       document: {},
+      chatTemplate: {},
     }
     const releases = []
     for (const adapter of sourceAdapters) {

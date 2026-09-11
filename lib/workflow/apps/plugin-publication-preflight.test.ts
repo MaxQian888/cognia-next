@@ -1,24 +1,26 @@
+import { DEFAULT_WORKFLOW_SETTINGS } from "@/types/workflow/visual"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { PluginManifest } from "@/types/plugin"
 import type { WorkflowVersion } from "@/types/workflow/deployment"
-import type { VisualWorkflowNode } from "@/types/workflow/visual"
+import type { WorkflowNode } from "@/types/workflow/visual"
 import {
   assertWorkflowPluginPublicationPreflight,
   WorkflowPluginPreflightError,
 } from "./plugin-publication-preflight"
 
-function workflowVersion(nodes: VisualWorkflowNode[]): WorkflowVersion {
+function workflowVersion(nodes: WorkflowNode[]): WorkflowVersion {
   return {
     id: "version-1",
     accountId: "account-1",
     workflowId: "workflow-1",
     sequence: 1,
     definition: {
+      schemaVersion: 2,
       id: "workflow-1",
       name: "Published workflow",
       nodes,
       edges: [],
-      settings: { concurrency: 1 },
+      settings: { ...DEFAULT_WORKFLOW_SETTINGS, concurrency: 1 },
       createdAt: 1,
       updatedAt: 1,
     },
@@ -31,18 +33,14 @@ function workflowVersion(nodes: VisualWorkflowNode[]): WorkflowVersion {
   }
 }
 
-function node(
-  type: string,
-  params: Record<string, unknown> = {},
-  typeVersion = 1
-): VisualWorkflowNode {
+function node(type: string, params: Record<string, unknown> = {}, typeVersion = 1): WorkflowNode {
   return {
     id: `node-${type}`,
     type,
     typeVersion,
     position: { x: 0, y: 0 },
     data: { label: type, params },
-  } as VisualWorkflowNode
+  } as WorkflowNode
 }
 
 function plugin(

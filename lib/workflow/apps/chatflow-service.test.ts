@@ -101,6 +101,7 @@ function release(id: string, sequence: number): WorkflowAppRelease {
         reviewerGroupIds: [],
         requireNoBlockingComments: true,
       },
+      qualityGate: { enabled: false, thresholds: {}, maxRunAgeMs: 1 },
       annotationReply: { enabled: false, threshold: 0.85 },
       knowledgeBindings: {},
     },

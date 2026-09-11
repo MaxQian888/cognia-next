@@ -51,8 +51,8 @@ describe("isTriggerEvent", () => {
 
 describe("installTriggerBridge file-watch ack", () => {
   async function driveFileWatch(dispatch: jest.Mock) {
-    let subscriber: ((raw: unknown) => Promise<void>) | undefined
-    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+    let subscriber: ((raw: unknown) => void) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => void) => {
       subscriber = handler
       return () => undefined
     })
@@ -97,8 +97,8 @@ describe("installTriggerBridge file-watch ack", () => {
   })
 
   it("does not ack for any other trigger kind", async () => {
-    let subscriber: ((raw: unknown) => Promise<void>) | undefined
-    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+    let subscriber: ((raw: unknown) => void) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => void) => {
       subscriber = handler
       return () => undefined
     })
@@ -120,9 +120,9 @@ describe("installTriggerBridge file-watch ack", () => {
 
 describe("installTriggerBridge", () => {
   it("discards malformed frames, dispatches valid frames, and disposes the listener", async () => {
-    let subscriber: ((raw: unknown) => Promise<void>) | undefined
+    let subscriber: ((raw: unknown) => void) | undefined
     const dispose = jest.fn()
-    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+    const listen = jest.fn(async (handler: (raw: unknown) => void) => {
       subscriber = handler
       return dispose
     })
@@ -147,8 +147,8 @@ describe("installTriggerBridge", () => {
   })
 
   it("contains listener dispatch failures", async () => {
-    let subscriber: ((raw: unknown) => Promise<void>) | undefined
-    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+    let subscriber: ((raw: unknown) => void) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => void) => {
       subscriber = handler
       return jest.fn()
     })

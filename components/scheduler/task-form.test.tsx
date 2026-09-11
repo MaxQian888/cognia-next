@@ -190,7 +190,9 @@ describe("TaskForm", () => {
   })
 
   it("submits overlap policy, lifecycle bounds, and jitter", async () => {
-    const onSubmit = jest.fn(async () => undefined)
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
     render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
 
     const nameInput = document.querySelector("input") as HTMLInputElement
@@ -234,7 +236,9 @@ describe("TaskForm", () => {
     })
 
     it("submits the typed conversation as the task's imTarget", async () => {
-      const onSubmit = jest.fn(async () => undefined)
+      const onSubmit = jest.fn(
+        async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+      )
       render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
 
       fireEvent.change(document.querySelector("input") as HTMLInputElement, {
@@ -311,7 +315,9 @@ describe("TaskForm", () => {
   })
 
   it("seeds the overlap policy from legacy allowConcurrent and mirrors it on submit", async () => {
-    const onSubmit = jest.fn(async () => undefined)
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
     render(
       <TaskForm
         onSubmit={onSubmit}
@@ -378,7 +384,9 @@ describe("TaskForm", () => {
   })
 
   it("rejects an end time in the past", async () => {
-    const onSubmit = jest.fn(async () => undefined)
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
     render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
 
     const nameInput = document.querySelector("input") as HTMLInputElement
@@ -447,7 +455,9 @@ describe("TaskForm — webhook notification channel", () => {
   })
 
   it("submits the typed URL on the task's notification block", async () => {
-    const onSubmit = jest.fn(async () => undefined)
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
     render(<TaskForm onSubmit={onSubmit} onCancel={jest.fn()} />)
     fireEvent.change(document.querySelector("input") as HTMLInputElement, {
       target: { value: "Digest task" },
@@ -470,7 +480,9 @@ describe("TaskForm — webhook notification channel", () => {
   })
 
   it("omits the URL when the webhook channel is not selected", async () => {
-    const onSubmit = jest.fn(async () => undefined)
+    const onSubmit = jest.fn(
+      async (_input: import("@/types/scheduler").CreateScheduledTaskInput) => undefined
+    )
     render(
       <TaskForm
         onSubmit={onSubmit}

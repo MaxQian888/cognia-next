@@ -1064,7 +1064,7 @@ export class TemplateService {
     try {
       return await this.recordInstance({ definition, plan: input.plan, idempotencyKey, result })
     } catch (error) {
-      if (adapter.rollback && result.rollbackToken !== null) {
+      if (adapter.rollback && result.rollbackToken != null) {
         // Best effort. The original failure is the one worth reporting, and a
         // rollback that also fails must not replace it with its own message.
         await adapter.rollback(result.rollbackToken).catch(() => undefined)

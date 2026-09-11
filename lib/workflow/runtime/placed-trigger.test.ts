@@ -96,7 +96,7 @@ describe("dispatchPlacedWorkflowTrigger", () => {
     await expect(
       dispatchPlacedWorkflowTrigger(
         {
-          event: { ...event, triggerId: "trigger-1", binding: { value: 1 } },
+          event: { ...event, triggerId: "trigger-1", binding: { sessionId: "session-1" } },
           idempotencyKey: "draft-key",
           triggeredBy: { source: "desktop" },
         },
@@ -107,7 +107,7 @@ describe("dispatchPlacedWorkflowTrigger", () => {
       expect.objectContaining({
         caller: "trigger.cron",
         triggerId: "trigger-1",
-        triggerBinding: { value: 1 },
+        triggerBinding: { sessionId: "session-1" },
         triggerOriginAt: 123,
         idempotencyKey: "draft-key",
         triggeredBy: { source: "desktop" },
@@ -357,7 +357,7 @@ describe("dispatchPlacedWorkflowTrigger", () => {
           credentialRef: "remote-host:cloud-row",
           addedAt: 1,
           connectionState: "ready",
-          config: { baseUrl: "https://cloud.example", deviceId: "device" },
+          config: { serverVersion: "1.0.0", baseUrl: "https://cloud.example", deviceId: "device" },
           featureManifest: {
             schemaVersion: 2,
             hostBuildId: "build",
@@ -402,7 +402,7 @@ describe("dispatchPlacedWorkflowTrigger", () => {
           credentialRef: "remote-host:legacy-row",
           addedAt: 1,
           connectionState: "ready",
-          config: { baseUrl: "https://legacy.example", deviceId: "legacy" },
+          config: { serverVersion: "1.0.0", baseUrl: "https://legacy.example", deviceId: "legacy" },
         },
       ],
     })
@@ -449,7 +449,7 @@ describe("dispatchPlacedWorkflowTrigger", () => {
           credentialRef: "remote-host:cloud-row",
           addedAt: 1,
           connectionState: "ready",
-          config: { baseUrl: "https://cloud.example", deviceId: "device" },
+          config: { serverVersion: "1.0.0", baseUrl: "https://cloud.example", deviceId: "device" },
           featureManifest: {
             schemaVersion: 2,
             hostBuildId: "build",

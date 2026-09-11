@@ -22,7 +22,7 @@ const T0 = Date.UTC(2026, 7, 20, 9, 0, 0)
 
 function envelope(over: Partial<TemplateDefinitionEnvelope>): TemplateDefinitionEnvelope {
   return {
-    apiVersion: "cognia.dev/templates/v1",
+    apiVersion: "cognia.ai/templates/v1",
     id: "user.skill.notes",
     domain: "skill",
     version: null,

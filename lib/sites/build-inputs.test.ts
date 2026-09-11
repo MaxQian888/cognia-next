@@ -73,8 +73,8 @@ it("still seeds from a failed build — its inputs are exactly what to correct",
 it("falls back to the defaults for hosts a pre-recording version does not carry", () => {
   // Claiming "no network" for an older build would be a different build.
   const legacy = version({ id: "v1" })
-  delete (legacy.build as Record<string, unknown>).installNetworkHosts
-  delete (legacy.build as Record<string, unknown>).buildNetworkHosts
+  delete legacy.build.installNetworkHosts
+  delete legacy.build.buildNetworkHosts
   const { inputs } = seedSiteBuildInputs([legacy])
   expect(inputs.installNetworkHosts).toEqual(SITE_BUILD_INPUT_DEFAULTS.installNetworkHosts)
   expect(inputs.buildNetworkHosts).toEqual([])

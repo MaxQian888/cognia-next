@@ -107,9 +107,12 @@ jest.mock("@/stores/skills", () => ({
   useSkillsStore: { getState: () => ({ openSkillInEditor }) },
 }))
 
+const appSettings: { current: Record<string, unknown> } = {
+  current: { defaultProvider: "anthropic", defaultModel: "claude" },
+}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({ settings: { defaultProvider: "anthropic", defaultModel: "claude" } }),
+    selector({ settings: appSettings.current }),
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -125,6 +128,7 @@ import { useRecorderStore } from "@/stores/skills/recorder-store"
 import type { RecordedStep } from "@/lib/skills/recording/types"
 
 import { SkillRecorderRoot } from "./recorder-root"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 const RECORDING = "0191b0e2-1c3a-7a11-9c1a-4d2f6b8c9e01"
 
@@ -483,6 +487,24 @@ describe("generation", () => {
         asCandidate: false,
       })
     )
+  })
+
+  it("does not generate at an app default that belongs to an external agent", async () => {
+    // The composer writes an agent's own model to the app-wide pair when a chat
+    // has no row yet. This generation runs on the renderer's BYOK utility
+    // client, which cannot resolve either half.
+    appSettings.current = {
+      defaultProvider: externalAgentProviderId("pi-rpc"),
+      defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+    }
+    reachGenerate()
+    render(<SkillRecorderRoot />)
+    await userEvent.click(await screen.findByRole("button", { name: /generate\.run$/ }))
+
+    expect(controller.generate).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "anthropic", model: "" })
+    )
+    appSettings.current = { defaultProvider: "anthropic", defaultModel: "claude" }
   })
 
   it("regenerates as a candidate, never as an overwrite", async () => {

@@ -74,6 +74,7 @@ import { StageRecording } from "./stage-recording"
 import { StageReview } from "./stage-review"
 import { StageSave } from "./stage-save"
 import { StageSetup } from "./stage-setup"
+import { resolveAppDefaultModel } from "@/lib/ai/app-default-model"
 
 export function SkillRecorderRoot() {
   const t = useTranslations("skills.recorder")
@@ -211,18 +212,22 @@ export function SkillRecorderRoot() {
     adoptManualDraft(draft, options.localeOverride ?? locale)
   }, [locale, options.localeOverride, steps, t, variables])
 
+  const appDefault = resolveAppDefaultModel(settings)
   const runGenerate = useCallback(
     (asCandidate: boolean) => {
       void generate({
         locale,
         client: utilityClient as never,
-        provider: settings?.defaultProvider ?? "anthropic",
-        model: settings?.defaultModel ?? "",
+        // Provider lane: the app-wide pair can hold an external agent's own
+        // model plus the reserved marker, and this generation runs on the
+        // renderer's BYOK client. See `lib/ai/app-default-model.ts`.
+        provider: appDefault.provider ?? "anthropic",
+        model: appDefault.model ?? "",
         fallbackName: t("template.defaultName"),
         asCandidate,
       })
     },
-    [locale, settings?.defaultModel, settings?.defaultProvider, t, utilityClient]
+    [appDefault.model, appDefault.provider, locale, t, utilityClient]
   )
 
   if (!available && !open) return null

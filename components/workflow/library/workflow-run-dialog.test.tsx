@@ -15,9 +15,13 @@ const runWorkflow = jest.fn((..._a: unknown[]) =>
 jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
   runWorkflow: (...a: unknown[]) => runWorkflow(...a),
 }))
-const dispatchTrigger = jest.fn(async () => undefined)
+const dispatchTrigger = jest.fn(
+  async (
+    ..._args: Parameters<typeof import("@/lib/workflow/runtime/trigger-bridge").dispatchTrigger>
+  ) => undefined
+)
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
-  dispatchTrigger: (...a: unknown[]) => dispatchTrigger(...a),
+  dispatchTrigger: (...a: Parameters<typeof dispatchTrigger>) => dispatchTrigger(...a),
 }))
 
 const toastSuccess = jest.fn()

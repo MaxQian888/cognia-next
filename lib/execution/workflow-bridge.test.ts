@@ -107,7 +107,7 @@ describe("workflow execution bridge", () => {
   })
 
   it("projects terminal workflow history in durable sequence order", async () => {
-    const row = workflowRun({ status: "completed", endedAt: 5 })
+    const row = workflowRun({ status: "succeeded", completedAt: 5 })
     const events = [
       {
         id: "a-terminal-sorts-first-by-primary-key",

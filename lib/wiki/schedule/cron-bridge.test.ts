@@ -1,5 +1,5 @@
 /**
- * @jest-environment node
+ * @jest-environment jsdom
  */
 
 import "fake-indexeddb/auto"
@@ -7,8 +7,7 @@ import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { syncWikiCronToScheduler, resolveCronExpression, WIKI_REBUILD_TASK_ID } from "./cron-bridge"
 
 beforeEach(async () => {
-  await schedulerDb.delete()
-  await schedulerDb.open()
+  await schedulerDb.clearAll()
 })
 
 describe("resolveCronExpression", () => {

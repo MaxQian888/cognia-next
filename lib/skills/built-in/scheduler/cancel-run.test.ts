@@ -151,6 +151,6 @@ describe("refusals are returned, not thrown", () => {
 })
 
 it("carries a confirm card naming the run and the task", () => {
-  const surface = skill().hitlSurface?.({ taskId: "task-1", runId: "run-9" } as never, ctx)
+  const surface = skill().hitlSurface?.({ taskId: "task-1", runId: "run-9" } as never)
   expect(JSON.stringify(surface)).toContain("run-9")
 })

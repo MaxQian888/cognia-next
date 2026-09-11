@@ -401,6 +401,7 @@ describe("editor store — external workflow transaction", () => {
         {
           id: "output",
           type: "io.output",
+          typeVersion: 1,
           position: { x: 10, y: 20 },
           data: { label: "Output", typeVersion: 1, params: {} },
         },

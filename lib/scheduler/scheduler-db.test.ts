@@ -202,11 +202,13 @@ describe("SchedulerDatabase", () => {
       // A row without a promotion deserializes to undefined; a corrupt blob is dropped.
       await schedulerDb.createTask(createMockTask({ id: "plain" }))
       expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
-      await schedulerDb.tasks.update("plain", { promotion: "{not json" })
+      await getDb().scheduledTasks.update("plain", { promotion: "{not json" })
       expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
-      await schedulerDb.tasks.update("plain", { promotion: JSON.stringify({ systemTaskId: 1 }) })
+      await getDb().scheduledTasks.update("plain", {
+        promotion: JSON.stringify({ systemTaskId: 1 }),
+      })
       expect((await schedulerDb.getTask("plain"))?.promotion).toBeUndefined()
-      await schedulerDb.tasks.update("plain", {
+      await getDb().scheduledTasks.update("plain", {
         promotion: JSON.stringify({ systemTaskId: "s", token: "t", promotedAt: "garbage" }),
       })
       expect((await schedulerDb.getTask("plain"))?.promotion?.promotedAt).toEqual(new Date(0))
@@ -246,7 +248,7 @@ describe("SchedulerDatabase", () => {
         schedulerDb.createTask(createMockTask({ id: "cron-active" })),
       ])
 
-      expect(schedulerDb.tasks.schema.idxByName["[status+eventType]"]).toBeDefined()
+      expect(getDb().scheduledTasks.schema.idxByName["[status+eventType]"]).toBeDefined()
       await expect(schedulerDb.getActiveEventTasks("alpha")).resolves.toEqual([
         expect.objectContaining({ id: "event-alpha" }),
       ])

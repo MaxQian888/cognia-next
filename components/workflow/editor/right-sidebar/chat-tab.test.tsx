@@ -6,6 +6,13 @@ import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
+const templateRun = {
+  templateId: "review",
+  version: "1",
+  text: "Review {{target}}",
+  params: { target: { kind: "text" as const, value: "workflow" } },
+}
+
 const attachmentManifest: readonly AttachmentManifestEntry[] = [
   { filename: "workflow.md", mediaType: "text/markdown", kind: "document" },
 ]
@@ -27,6 +34,12 @@ jest.mock("@/components/chat/chat-view", () => ({
     ) => void | Promise<void>
   }) => (
     <div data-testid="chatpane" data-session-id={props.activeSession?.id ?? "none"}>
+      <button
+        type="button"
+        onClick={() => void props.onSend("Review workflow", undefined, templateRun)}
+      >
+        send template
+      </button>
       <button type="button" data-testid="chatpane-create" onClick={() => props.onCreate()}>
         create
       </button>
@@ -254,6 +267,19 @@ describe("WorkflowEditorChatTab session wiring", () => {
       expect(claudeSend).toHaveBeenCalledWith("add a webhook trigger", undefined, {
         sessionId: "workflow:wf_a",
         attachmentManifest: undefined,
+      })
+    )
+  })
+
+  it("preserves template provenance on the scoped user turn", async () => {
+    harness()
+    await userEvent.click(await screen.findByRole("button", { name: "send template" }))
+    expect(claudeSend).toHaveBeenCalledWith(
+      "Review workflow",
+      undefined,
+      expect.objectContaining({
+        sessionId: "workflow:wf_a",
+        templateRun,
       })
     )
   })

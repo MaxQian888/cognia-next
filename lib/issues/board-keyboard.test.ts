@@ -80,6 +80,6 @@ describe("nextBoardColumnCoordinates", () => {
   })
 
   it("returns null when the card is over nothing", () => {
-    expect(nextBoardColumnCoordinates("right", card(300), new Map())).toBeNull()
+    expect(nextBoardColumnCoordinates("right", card(300), new Map(), ISSUE_STATUSES)).toBeNull()
   })
 })

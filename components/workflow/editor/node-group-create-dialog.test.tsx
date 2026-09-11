@@ -22,6 +22,7 @@ import { NodeGroupCreateDialog } from "./node-group-create-dialog"
 
 const store = createEditorStore({
   id: "wf_1",
+  schemaVersion: 2,
   name: "Workflow",
   nodes: [],
   edges: [],

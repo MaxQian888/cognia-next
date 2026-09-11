@@ -52,7 +52,13 @@ describe("issue sync contract", () => {
   })
 
   it("normalises a remote item to the board's own vocabulary", () => {
-    const remote: RemoteIssue = { externalId: "1", title: "t", status: "todo", coarseStatus: true }
+    const remote: RemoteIssue = {
+      externalId: "1",
+      title: "t",
+      status: "todo",
+      coarseStatus: true,
+      remoteUpdatedAt: 0,
+    }
     expect(remote.coarseStatus).toBe(true)
   })
 })

@@ -45,6 +45,7 @@ const cycle: IssueCycle = {
   name: "Sprint 1",
   status: "active",
   externalRefs: [],
+  externalKeys: [],
   createdAt: 1,
   updatedAt: 1,
 }

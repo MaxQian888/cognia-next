@@ -135,9 +135,10 @@ it("is destructive and channel-opt-in, unlike cancelling a run", () => {
 })
 
 it("warns about child processes in the confirm card for a job", () => {
-  const surface = skill().hitlSurface?.(
-    { taskId: "task-1", processId: "job-1", kind: "job" } as never,
-    ctx
-  )
+  const surface = skill().hitlSurface?.({
+    taskId: "task-1",
+    processId: "job-1",
+    kind: "job",
+  } as never)
   expect(JSON.stringify(surface)).toContain("child processes")
 })

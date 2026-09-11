@@ -76,10 +76,16 @@ describe("runWorkspaceIssueSync", () => {
     registry.register(provider("a", [good]))
     registry.register(provider("b", [bad]))
     const runMirror = jest.fn(async () => ({ repoCount: 2, results: [], failures: [] }))
-    const reconcile = jest.fn(async (b: IssueSyncBinding) => {
-      if (b.providerId === "b") throw new Error("boom")
-      return outcome(b)
-    })
+    const reconcile = jest.fn(
+      async (
+        b: IssueSyncBinding,
+        _registry: import("./registry").IssueSyncRegistry,
+        _options: { full?: boolean }
+      ) => {
+        if (b.providerId === "b") throw new Error("boom")
+        return outcome(b)
+      }
+    )
     const result = await runWorkspaceIssueSync(
       { projectId: "w1", full: true },
       {
@@ -102,7 +108,13 @@ describe("runWorkspaceIssueSync", () => {
     registry.register(provider("a", [binding("a", "p1")]))
     registry.register(provider("b", [binding("b", "p1")]))
     const runMirror = jest.fn()
-    const reconcile = jest.fn(async (b: IssueSyncBinding) => outcome(b))
+    const reconcile = jest.fn(
+      async (
+        b: IssueSyncBinding,
+        _registry: import("./registry").IssueSyncRegistry,
+        _options: { full?: boolean }
+      ) => outcome(b)
+    )
     const result = await runWorkspaceIssueSync(
       { providerId: "b", mirror: false },
       {

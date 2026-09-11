@@ -6,7 +6,15 @@ const mockCreate = jest.fn(async (req: unknown) => ({
   ...(req as object),
 }))
 const mockQuery = jest.fn(async (_q: unknown): Promise<unknown[]> => [])
-const mockApply = jest.fn(async (..._a: unknown[]) => ({ applied: 1, skipped: 0, failed: 0 }))
+const mockApply = jest.fn(
+  async (
+    ..._a: Parameters<typeof import("@/lib/issues/service").applyIssueAction>
+  ): ReturnType<typeof import("@/lib/issues/service").applyIssueAction> => ({
+    applied: 1,
+    skipped: 0,
+    failed: 0,
+  })
+)
 jest.mock("@/lib/issues/service", () => {
   const actual = jest.requireActual("@/lib/issues/service")
   return {
@@ -14,7 +22,7 @@ jest.mock("@/lib/issues/service", () => {
     resolveIssue: (ref: string) => mockResolve(ref),
     createIssueRecord: (req: unknown) => mockCreate(req),
     queryIssues: (q: unknown) => mockQuery(q),
-    applyIssueAction: (...a: unknown[]) => mockApply(...a),
+    applyIssueAction: (...a: Parameters<typeof mockApply>) => mockApply(...a),
   }
 })
 const mockEnsureLabels = jest.fn(async (names: readonly string[]) =>
@@ -168,9 +176,9 @@ describe("action.issue.update / assign / comment / label", () => {
   })
 
   it("surfaces the gate's refusal instead of hiding it", async () => {
-    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0, reason: "running" })
+    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0, reason: "runtime-owned" })
     const result = await run("action.issue.comment", { issue: "MERC-1", body: "hi" })
-    expect(result.output).toMatchObject({ applied: 0, skipped: 1, reason: "running" })
+    expect(result.output).toMatchObject({ applied: 0, skipped: 1, reason: "runtime-owned" })
   })
 
   it("assigns to a squad, unassigns with none, and rejects an agent without an id", async () => {

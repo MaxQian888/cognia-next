@@ -36,12 +36,13 @@ jest.mock("@/lib/db/workflow-human-input", () => ({
   getHumanInputRequest: jest.fn(async () => request),
   listPendingHumanInputRequests: jest.fn(async () => [request]),
   isHumanInputAssigned: jest.fn((_request, actor) => actor.isInitiator === true),
-  submitHumanInput: (...args: unknown[]) => submitHumanInput(...args),
+  submitHumanInput: (...args: Parameters<typeof submitHumanInput>) => submitHumanInput(...args),
 }))
 const promoteHumanInputFile = jest.fn(async () => ({ ref: "cognia-human-input-file:hif_1" }))
 let submissions: Array<{ responderId: string }> = []
 jest.mock("@/lib/db/workflow-human-input-files", () => ({
-  promoteHumanInputFile: (...args: unknown[]) => promoteHumanInputFile(...args),
+  promoteHumanInputFile: (...args: Parameters<typeof promoteHumanInputFile>) =>
+    promoteHumanInputFile(...args),
 }))
 
 import {
