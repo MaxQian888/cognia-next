@@ -241,7 +241,7 @@ describe("section ids match the navigation", () => {
     expect(keys.length).toBeGreaterThan(0)
     const unreachable = keys
       .map((k) => keyToSection(k))
-      .filter((id): id is string => Boolean(id) && !navIds.has(id as string))
+      .filter((id) => id !== undefined && !navIds.has(id))
     expect(unreachable).toEqual([])
   })
 

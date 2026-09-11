@@ -11,12 +11,12 @@ import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
-import { AnthropicAddAccountDialog } from "@/components/settings/subscription/add-account-dialog/anthropic"
 import { Button } from "@/components/ui/button"
-import { CodexAddAccountDialog } from "@/components/settings/subscription/add-account-dialog/codex"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { OpencodeAddAccountDialog } from "@/components/settings/subscription/add-account-dialog/opencode"
+import { SubscriptionAccountDialog } from "@/components/settings/subscription/add-account-dialog/subscription"
+import { useSubscriptionProviders } from "@/lib/subscription/core/hooks"
+import type { SubscriptionProviderDefinition } from "@/lib/subscription/core/provider-registry"
 import { ProviderPicker } from "../provider-picker"
 import { StepHeading } from "../step-shell"
 import { cn } from "@/lib/utils"
@@ -45,7 +45,7 @@ function hostOf(url: string): string {
   }
 }
 
-type ProviderChoice = "claude" | "codex" | "opencode" | "apiKey"
+type ProviderChoice = string
 
 /** What the key panel opens on. Also the app's own default provider. */
 const DEFAULT_KEY_PROVIDER = "anthropic"
@@ -126,6 +126,7 @@ interface ConnectedState {
  */
 export function ProviderStep({ onConnected, onViewChange, heading = true }: ProviderStepProps) {
   const t = useTranslations("onboarding")
+  const subscriptionProviders = useSubscriptionProviders()
   const setApiKey = useSettingsStore((s) => s.setApiKey)
   const setProviderConfig = useSettingsStore((s) => s.setProviderConfig)
   const setDefaultProvider = useSettingsStore((s) => s.setDefaultProvider)
@@ -186,7 +187,12 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
         plan: summary.plan,
       })
       setDialog(null)
-      finish({ card, email: summary.email, plan: summary.plan })
+      finish({
+        card,
+        providerName: subscriptionProviders.find((entry) => entry.id === summary.provider)?.name,
+        email: summary.email,
+        plan: summary.plan,
+      })
     } catch (err) {
       log.error("onboarding subscription activation failed", err)
       toast.error(err instanceof Error ? err.message : String(err))
@@ -225,14 +231,19 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
     }
   }
 
-  const cards: { providerKey: ProviderChoice; icon?: LucideIcon }[] = [
+  const cards: {
+    providerKey: ProviderChoice
+    icon?: LucideIcon
+    definition?: SubscriptionProviderDefinition
+  }[] = [
     ...(standalone
       ? []
-      : [
-          { providerKey: "claude" as const },
-          { providerKey: "codex" as const },
-          { providerKey: "opencode" as const },
-        ]),
+      : subscriptionProviders
+          .filter((entry) => entry.available !== false)
+          .map((definition) => ({
+            providerKey: definition.authMode === "anthropic-oauth" ? "claude" : definition.id,
+            definition,
+          }))),
     { providerKey: "apiKey", icon: KeyRoundIcon },
   ]
 
@@ -420,7 +431,7 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
           cards.length > 1 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"
         )}
       >
-        {cards.map(({ providerKey, icon: Icon }) => (
+        {cards.map(({ providerKey, icon: Icon, definition }) => (
           <button
             key={providerKey}
             type="button"
@@ -430,13 +441,22 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
           >
             <span className="flex items-center gap-2">
               {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
-              <span className="text-sm font-medium">{t(`provider.${providerKey}.title`)}</span>
+              <span className="text-sm font-medium">
+                {definition?.name ?? t(`provider.${providerKey}.title`)}
+              </span>
             </span>
             <span className="text-xs leading-relaxed text-muted-foreground">
-              {t(`provider.${providerKey}.description`)}
+              {definition &&
+              (definition.source !== "builtin" ||
+                (t.has && !t.has(`provider.${providerKey}.description`)))
+                ? (definition.description ?? definition.baseUrl)
+                : t(`provider.${providerKey}.description`)}
             </span>
             <span className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-primary">
-              {t(`provider.${providerKey}.cta`)}
+              {definition &&
+              (definition.source !== "builtin" || (t.has && !t.has(`provider.${providerKey}.cta`)))
+                ? t("provider.addSubscription")
+                : t(`provider.${providerKey}.cta`)}
               <ArrowRightIcon className="size-3 transition-transform group-hover:translate-x-0.5" />
             </span>
           </button>
@@ -445,35 +465,19 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
 
       {/* Mounted only where the vault is reachable — the dialogs talk to the
         Rust subscription commands, which a plain browser has no transport for. */}
-      {!standalone && (
-        <>
-          {/* No `initialMode`: the dialog defaults to `reuse` when it discovers
-            an existing Claude Code login, which is precisely the machine the
-            scan step just celebrated. Forcing `subscription` here sent that
-            user through a full browser PKCE round-trip instead. */}
-          <AnthropicAddAccountDialog
-            open={dialog === "claude"}
-            onOpenChange={(o) => {
-              if (!o) setDialog(null)
-            }}
-            onAdded={(account) => void handleAccountAdded("claude", account)}
-          />
-          <CodexAddAccountDialog
-            open={dialog === "codex"}
-            onOpenChange={(o) => {
-              if (!o) setDialog(null)
-            }}
-            onAdded={(account) => void handleAccountAdded("codex", account)}
-            initialMode="oauth"
-          />
-          <OpencodeAddAccountDialog
-            open={dialog === "opencode"}
-            onOpenChange={(o) => {
-              if (!o) setDialog(null)
-            }}
-            onAdded={(account) => void handleAccountAdded("opencode", account)}
-          />
-        </>
+      {!standalone && dialog && (
+        <SubscriptionAccountDialog
+          providerId={
+            subscriptionProviders.find(
+              (entry) => (entry.authMode === "anthropic-oauth" ? "claude" : entry.id) === dialog
+            )?.id
+          }
+          open
+          onOpenChange={(open) => {
+            if (!open) setDialog(null)
+          }}
+          onAdded={(account) => void handleAccountAdded(dialog, account)}
+        />
       )}
     </div>
   )

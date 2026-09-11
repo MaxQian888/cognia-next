@@ -32,6 +32,21 @@ jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => ({
 
 jest.mock("@/lib/subscription/core/transport", () => ({
   listAccounts: jest.fn(async () => []),
+  listSubscriptionProviderIds: jest.fn(async () => [
+    "anthropic",
+    "codex",
+    "opencode",
+    "commandcode",
+    "custom-service",
+  ]),
+}))
+
+let mockSubscriptionAccounts: Record<
+  string,
+  { accounts: Array<{ id: string; label?: string; email?: string }> }
+> = {}
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useSubscriptionAccounts: () => ({ byProvider: mockSubscriptionAccounts, providers: [] }),
 }))
 
 const mockSaveAgentEnvSecret = jest.fn(async (..._args: unknown[]) => undefined)
@@ -130,6 +145,7 @@ afterEach(() => {
   __resetCharacterPacksForTesting()
   __resetSkillsForTesting()
   mockSaveAgentEnvSecret.mockClear()
+  mockSubscriptionAccounts = {}
   mockKnowledgeBases = []
   mockCreateKnowledgeBase.mockClear()
   mockDeleteKnowledgeBase.mockClear()
@@ -635,4 +651,13 @@ describe("CharactersSection — list, search & bulk (C2/C3)", () => {
 
     expect(screen.queryByText("badge.missingDep")).not.toBeInTheDocument()
   })
+})
+
+it("includes registry-backed accounts in the character subscription picker", async () => {
+  mockSubscriptionAccounts = {
+    "custom-service": { accounts: [{ id: "cc-character", label: "Custom work" }] },
+  }
+  renderEditor(baseInitial())
+  fireEvent.click(screen.getByTestId("character-account-override"))
+  expect(await screen.findByRole("option", { name: "optionLabel" })).toBeInTheDocument()
 })

@@ -65,6 +65,19 @@ beforeEach(() => {
 })
 
 describe("GatewayKeysCard", () => {
+  it("explains how to replace unbound legacy keys without exposing their secrets", async () => {
+    render(<GatewayKeysCard legacyKeyCount={2} />)
+    await screen.findByText("CLI")
+    expect(screen.getByText("legacyKeysHeading")).toBeInTheDocument()
+    expect(screen.getByText("legacyKeysHelp")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "createKey" })).toBeEnabled()
+  })
+
+  it("does not show migration guidance for account-owned keys", async () => {
+    render(<GatewayKeysCard legacyKeyCount={0} />)
+    await screen.findByText("CLI")
+    expect(screen.queryByText("legacyKeysHeading")).not.toBeInTheDocument()
+  })
   it("lists existing keys with their fingerprint", async () => {
     render(<GatewayKeysCard />)
     expect(await screen.findByText("CLI")).toBeInTheDocument()

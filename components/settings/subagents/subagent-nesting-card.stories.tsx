@@ -44,6 +44,7 @@ function Controlled({ initial }: { initial: NestingPolicyValues }) {
 const ENABLED: NestingPolicyValues = {
   enabled: true,
   maxDepth: 3,
+  maxConcurrent: 3,
   tokenBudget: 200_000,
   timeoutSeconds: 120,
   dispatchMaxRetries: 2,

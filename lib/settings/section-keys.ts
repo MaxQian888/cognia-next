@@ -99,7 +99,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   // from every section — so "reset this section" skipped them and the
   // changed-settings review never listed them, even though the card writes
   // them like any other control.
-  companion: [
+  connectivity: [
     "remoteBrowserEnabled",
     "webrtcEnabled",
     "signalingUrl",
@@ -109,6 +109,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
   ],
   data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention", "sessionImportWatch"],
   appearance: [
+    "lockScreen",
     "theme",
     "colorTheme",
     "customThemes",

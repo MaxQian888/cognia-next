@@ -14,19 +14,30 @@ jest.mock("@/lib/connectivity/tunnel-resolver", () => ({
   ...jest.requireActual("@/lib/connectivity/tunnel-resolver"),
   saveNamedTunnelConfig: jest.fn(),
 }))
-const call = jest.fn(async (name: string, _args?: Record<string, unknown>) => {
-  if (name === "companion_tunnel_current") return null
-  if (name === "companion_tunnel_get_config") return { mode: "quick", hasToken: false }
-  if (name === "companion_tunnel_probe")
-    return {
-      installed: true,
-      path: "/opt/homebrew/bin/cloudflared",
-      version: "cloudflared version 2026.8.1",
-    }
-  if (name === "companion_tunnel_start")
-    return { publicUrl: "https://x.trycloudflare.com", localUrl: "https://127.0.0.1:27890" }
-  return undefined
-})
+const call = jest.fn(
+  async (
+    name: string,
+    _args?: Record<string, unknown>
+  ): Promise<
+    | import("@/lib/connectivity/tunnel-resolver").TunnelProbe
+    | import("@/lib/connectivity/tunnel-resolver").TunnelInfo
+    | import("@/lib/connectivity/tunnel-resolver").TunnelConfigSummary
+    | null
+    | undefined
+  > => {
+    if (name === "companion_tunnel_current") return null
+    if (name === "companion_tunnel_get_config") return { mode: "quick", hasToken: false }
+    if (name === "companion_tunnel_probe")
+      return {
+        installed: true,
+        path: "/opt/homebrew/bin/cloudflared",
+        version: "cloudflared version 2026.8.1",
+      }
+    if (name === "companion_tunnel_start")
+      return { publicUrl: "https://x.trycloudflare.com", localUrl: "https://127.0.0.1:27890" }
+    return undefined
+  }
+)
 jest.mock("@/lib/tauri", () => ({
   transport: { call: (...a: unknown[]) => call(...(a as [string, Record<string, unknown>?])) },
 }))

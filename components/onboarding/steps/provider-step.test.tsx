@@ -55,7 +55,21 @@ function dialogStub(name: string) {
   }
 }
 
+let mockAdditionalProviders: Array<{ id: string; name: string; authMode: string; source: string }> =
+  []
+
 const ACCOUNTS = {
+  "custom-service": {
+    id: "acc-custom",
+    createdAtMs: 1,
+    lastUsedAtMs: 1,
+    credential: {
+      provider: "api-key",
+      providerId: "custom-service",
+      accessToken: "custom-key",
+      storedAtMs: 1,
+    },
+  },
   anthropic: {
     id: "acc-a",
     createdAtMs: 1,
@@ -87,6 +101,12 @@ const ACCOUNTS = {
       storedAtMs: 1,
     },
   },
+  commandcode: {
+    id: "acc-cc",
+    createdAtMs: 1,
+    lastUsedAtMs: 1,
+    credential: { provider: "commandcode", accessToken: "cc-key", storedAtMs: 1 },
+  },
   opencode: {
     id: "acc-o",
     createdAtMs: 1,
@@ -103,6 +123,10 @@ jest.mock("@/components/settings/subscription/add-account-dialog/codex", () => (
 }))
 jest.mock("@/components/settings/subscription/add-account-dialog/opencode", () => ({
   OpencodeAddAccountDialog: dialogStub("opencode"),
+}))
+
+jest.mock("@/components/settings/subscription/add-account-dialog/commandcode", () => ({
+  CommandcodeAddAccountDialog: dialogStub("commandcode"),
 }))
 
 jest.mock("../provider-picker", () => ({
@@ -126,13 +150,14 @@ import { toast } from "sonner"
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockAdditionalProviders = []
   standalone.value = false
 })
 
 describe("ProviderStep", () => {
   it("offers all four sign-in surfaces on a shell that can use the keyring", () => {
     render(<ProviderStep />)
-    for (const k of ["claude", "codex", "opencode", "apiKey"]) {
+    for (const k of ["claude", "codex", "opencode", "commandcode", "apiKey"]) {
       expect(screen.getByTestId(`onboarding-provider-${k}`)).toBeInTheDocument()
     }
   })
@@ -369,4 +394,47 @@ describe("ProviderStep", () => {
     // Still on the key panel — the paste is not thrown away.
     expect(screen.getByLabelText("apiKeyLabel")).toBeInTheDocument()
   })
+})
+
+it("connects a CommandCode subscription through the shared dialog", async () => {
+  render(<ProviderStep />)
+  fireEvent.click(screen.getByTestId("onboarding-provider-commandcode"))
+  fireEvent.click(screen.getByTestId("dlg-commandcode-add"))
+  await waitFor(() => expect(setActiveAccount).toHaveBeenCalledWith("commandcode", "acc-cc"))
+  expect(setProviderDefaultAccount).toHaveBeenCalledWith("commandcode", "acc-cc")
+  expect(setDefaultProvider).toHaveBeenCalledWith("commandcode")
+})
+
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useSubscriptionProviders: () => [
+    ...jest.requireActual("@/lib/subscription/core/provider-registry").listSubscriptionProviders(),
+    ...mockAdditionalProviders,
+  ],
+}))
+
+jest.mock("@/components/settings/subscription/add-account-dialog/managed-key", () => ({
+  ManagedKeyAccountDialog: ({
+    definition,
+    ...props
+  }: {
+    definition?: { id: string }
+    open: boolean
+    onAdded?: (account: unknown) => void
+  }) => {
+    const Dialog = dialogStub(definition?.id ?? "custom")
+    return <Dialog {...props} />
+  },
+}))
+
+it("connects a registry-defined custom provider without provider-specific UI", async () => {
+  mockAdditionalProviders = [
+    { id: "custom-service", name: "My Custom Service", authMode: "api-key", source: "custom" },
+  ]
+  render(<ProviderStep />)
+  fireEvent.click(screen.getByTestId("onboarding-provider-custom-service"))
+  fireEvent.click(screen.getByTestId("dlg-custom-service-add"))
+  await waitFor(() => expect(setActiveAccount).toHaveBeenCalledWith("custom-service", "acc-custom"))
+  expect(setProviderDefaultAccount).toHaveBeenCalledWith("custom-service", "acc-custom")
+  expect(setDefaultProvider).toHaveBeenCalledWith("custom-service")
+  expect(screen.getByText("My Custom Service")).toBeInTheDocument()
 })

@@ -47,7 +47,12 @@ const EMPTY_RESTRICT = {
   forbiddenScreenRegions: [],
 }
 
-const hostSettings = (whitelist = { processNames: [], windowTitlePatterns: [] }) => ({
+const hostSettings = (
+  whitelist: { processNames: string[]; windowTitlePatterns: string[] } = {
+    processNames: [],
+    windowTitlePatterns: [],
+  }
+) => ({
   enabled: true,
   whitelist,
 })

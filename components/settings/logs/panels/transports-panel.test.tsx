@@ -5,9 +5,13 @@
  */
 
 const saveAppSettings = jest.fn(async () => undefined)
-const getLangfuseCredentialsStatus = jest.fn(async () => {
-  throw new Error("Host unavailable")
-})
+const getLangfuseCredentialsStatus = jest.fn(
+  async (): ReturnType<
+    typeof import("@/lib/logging/langfuse-host").getLangfuseCredentialsStatus
+  > => {
+    throw new Error("Host unavailable")
+  }
+)
 const testLangfuseConnection = jest.fn(async () => ({ connected: true, status: 200 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: { save: typeof saveAppSettings }) => unknown) =>
@@ -19,7 +23,10 @@ jest.mock("@/lib/logging/langfuse-host", () => ({
   getLangfuseCredentialsStatus: () => getLangfuseCredentialsStatus(),
   testLangfuseConnection: () => testLangfuseConnection(),
 }))
-jest.mock("@/lib/platform/detect", () => ({ isTauri: jest.fn(() => true) }))
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => true),
+}))
 
 import { useEffect } from "react"
 import { act, render, screen, waitFor, within } from "@testing-library/react"

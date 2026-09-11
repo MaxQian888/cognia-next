@@ -32,38 +32,38 @@ describe("settings-nav-config", () => {
       }
     })
 
-    it("squads sits in the AI group with Layers3 icon", () => {
+    it("squads sits in the Agents group with Layers3 icon", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "squads")
       expect(item).toBeDefined()
-      expect(item?.group).toBe("ai")
+      expect(item?.group).toBe("agents")
       expect(item?.labelKey).toBe("squads")
       expect(item?.descriptionKey).toBe("squads")
     })
 
     it("splits AI Connections and Model Catalog without reusing generic Connections", () => {
       expect(SETTINGS_NAV.find((item) => item.id === "ai-connections")).toMatchObject({
-        group: "ai",
+        group: "models",
         labelKey: "aiConnections",
       })
       expect(SETTINGS_NAV.find((item) => item.id === "model-catalog")).toMatchObject({
-        group: "ai",
+        group: "models",
         labelKey: "modelCatalog",
       })
       expect(SETTINGS_NAV.find((item) => item.id === "connections")).toBeDefined()
       expect(SETTINGS_NAV.find((item) => item.id === "providers")).toBeUndefined()
     })
 
-    it("plugins sits in the Extensions group", () => {
+    it("plugins sits in the Integrations group", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "plugins")
       expect(item).toBeDefined()
-      expect(item?.group).toBe("extensions")
+      expect(item?.group).toBe("integrations")
       expect(item?.labelKey).toBe("plugins")
     })
 
-    it("webhooks sits in the System group and requires an always-on host", () => {
+    it("webhooks sits in the Integrations group and requires an always-on host", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "webhooks")
       expect(item).toBeDefined()
-      expect(item?.group).toBe("system")
+      expect(item?.group).toBe("integrations")
       expect(item?.requires).toEqual(["always-on"])
       expect(item?.labelKey).toBe("webhooks")
     })
@@ -71,7 +71,7 @@ describe("settings-nav-config", () => {
     it("Pro IDE is a searchable interface section that requires a shell host", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "pro-ide")
       expect(item).toMatchObject({
-        group: "interface",
+        group: "workspace",
         labelKey: "proIde",
         descriptionKey: "proIde",
         requires: ["shell"],
@@ -97,7 +97,7 @@ describe("settings-nav-config", () => {
         id: "agents",
         labelKey: "agents",
         descriptionKey: "agents",
-        group: "ai",
+        group: "agents",
         icon: () => null,
         ...overrides,
       } as NavItem

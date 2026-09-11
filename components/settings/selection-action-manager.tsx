@@ -168,6 +168,7 @@ export function SelectionActionManager({ replaceAvailable = false }: SelectionAc
     void useShortcutStore.getState().bind({
       id: `selection.action:${action.id}`,
       chord,
+      scope: "app",
     })
   }
 

@@ -124,6 +124,7 @@ export function PluginConnectorConfigDialog({
           transportMode: (registration?.def.transportModes?.[0] ??
             "gateway") as AdapterInstanceRow["transportMode"],
           settings: values,
+          credentialsRef: { keyringService: "com.cognia.platforms", accounts: secretFields },
           mediaModelPolicy: "local_extract_only",
           defaultMode: "auto",
         })

@@ -95,6 +95,23 @@ const removeAgentMock = jest.fn()
 const createConfigMock = jest.fn(async (_input: CreateExternalAgentInput) => "agent-new")
 const updateConfigMock = jest.fn(async () => {})
 const removeConfigMock = jest.fn(async () => {})
+jest.mock("@/components/agent/external-agent/cognia-model-picker", () => ({
+  CogniaModelPicker: ({ onChange }: { onChange: (binding: unknown) => void }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onChange({
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-b",
+        })
+      }
+    >
+      Select Cognia fixture
+    </button>
+  ),
+}))
+
 jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
   getExternalAgentLifecycleService: async () => ({
     createConfig: createConfigMock,
@@ -312,6 +329,22 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(await screen.findByTestId("preset-picker")).toBeInTheDocument()
   })
 
+  it("opens the Devin preset with a native ACP command and localized description", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    expect(
+      screen.getByText(
+        "Run Devin through its native ACP server using your existing CLI login. Select models, including SWE-2, after connecting. Choose Accept Edits (Code) when you want Devin to modify files. Devin 3000.10.21 did not load Cognia-provided MCP servers in live tests; native tools work."
+      )
+    ).toBeInTheDocument()
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-devin"))
+    })
+    expect(screen.getByDisplayValue("Devin CLI")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("devin")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("acp")).toBeInTheDocument()
+  })
+
   it("opens a plugin-registered preset whose process config carries no args", async () => {
     // `ExternalAgentProcessConfig.args` is optional and a plugin can register a
     // preset at runtime. Reading `preset.process.args.join(" ")` threw on such
@@ -456,6 +489,23 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     // Isolation is the default, and it has to reach `metadata` — the adapter
     // reads it from there when building spawn args.
     expect(input.metadata?.piExtensionPolicy).toBe("global")
+  })
+
+  it("saves the shared Cognia model and account binding from the settings editor", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await user.click(screen.getByTestId("preset-pick-pi-rpc"))
+    await user.click(await screen.findByRole("button", { name: "Select Cognia fixture" }))
+    await user.click(screen.getByRole("button", { name: /^add$/i }))
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cogniaModel: {
+          providerId: "plugin:kimi:subscription",
+          modelId: "kimi-for-coding",
+          accountId: "account-b",
+        },
+      })
+    )
   })
 
   it("shows the exact isolation flags so the claim is inspectable", async () => {

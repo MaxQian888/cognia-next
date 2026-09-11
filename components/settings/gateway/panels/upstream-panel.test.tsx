@@ -1,7 +1,20 @@
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { toast } from "sonner"
 
 import { GatewayUpstreamPanel } from "./upstream-panel"
 import { DEFAULT_GATEWAY_CONFIG, type GatewayKeyCooldown } from "@/types/gateway"
+import { gatewayResetCooldowns } from "@/lib/tauri/gateway"
+
+jest.mock("@/lib/tauri/gateway", () => ({ gatewayResetCooldowns: jest.fn() }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), success: jest.fn() } }))
+
+const parkedKey: GatewayKeyCooldown = {
+  providerId: "openai",
+  keyHint: "…1234",
+  untilMs: 0,
+  permanent: true,
+  reason: "quota",
+}
 
 // Echo interpolation values too: a countdown test that asserts only the key
 // passes no matter which number was interpolated.
@@ -30,6 +43,61 @@ function setup(cooldowns: GatewayKeyCooldown[] = []) {
 }
 
 describe("GatewayUpstreamPanel", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    jest.mocked(gatewayResetCooldowns).mockResolvedValue(1)
+  })
+
+  it("disables recovery when no accounts are parked", () => {
+    setup()
+    expect(screen.getByRole("button", { name: "cooldownsReset" })).toBeDisabled()
+  })
+
+  it("releases all parked keys then refreshes the list without probing", async () => {
+    let complete!: (count: number) => void
+    jest.mocked(gatewayResetCooldowns).mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve
+      })
+    )
+    const { onRefreshCooldowns } = setup([parkedKey])
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsReset" }))
+    expect(screen.getByRole("button", { name: "cooldownsResetting" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "cooldownsRefresh" })).toBeDisabled()
+    expect(onRefreshCooldowns).not.toHaveBeenCalled()
+    await act(async () => complete(1))
+    expect(gatewayResetCooldowns).toHaveBeenCalledWith()
+    expect(onRefreshCooldowns).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("cooldownsResetSuccess:1")
+  })
+
+  it("reports recovery failure and allows retry without refreshing", async () => {
+    jest.mocked(gatewayResetCooldowns).mockRejectedValueOnce(new Error("transport unavailable"))
+    const { onRefreshCooldowns } = setup([parkedKey])
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsReset" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("cooldownsResetFailed"))
+    expect(onRefreshCooldowns).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsReset" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("cooldownsResetSuccess:1"))
+  })
+
+  it("reports a refresh failure separately after successfully resetting", async () => {
+    const { onRefreshCooldowns } = setup([parkedKey])
+    onRefreshCooldowns.mockRejectedValueOnce(new Error("transport unavailable"))
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsReset" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("cooldownsRefreshFailed"))
+    expect(toast.success).toHaveBeenCalledWith("cooldownsResetSuccess:1")
+  })
+
+  it("handles a failed manual refresh and permits retry", async () => {
+    const { onRefreshCooldowns } = setup()
+    onRefreshCooldowns.mockRejectedValueOnce(new Error("transport unavailable"))
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsRefresh" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("cooldownsRefreshFailed"))
+    fireEvent.click(screen.getByRole("button", { name: "cooldownsRefresh" }))
+    await waitFor(() => expect(onRefreshCooldowns).toHaveBeenCalledTimes(2))
+  })
+
   it.each([
     ["maxConcurrentPerKey", "4", { maxConcurrentPerKey: 4 }],
     ["maxConcurrentPerUpstreamKey", "6", { maxConcurrentPerUpstreamKey: 6 }],
@@ -78,12 +146,15 @@ describe("GatewayUpstreamPanel", () => {
     expect(screen.getByText("cooldownsEmpty")).toBeInTheDocument()
   })
 
-  it("refreshes the parked list on demand", () => {
+  it("refreshes the parked list on demand", async () => {
     const { onRefreshCooldowns } = setup([])
 
     fireEvent.click(screen.getByTestId("gateway-cooldowns-refresh"))
 
     expect(onRefreshCooldowns).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "cooldownsRefresh" })).toBeEnabled()
+    )
   })
 
   it("renders a permanently disabled key without a countdown", () => {

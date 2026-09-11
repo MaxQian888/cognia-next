@@ -86,8 +86,8 @@ describe("SettingsSidebar desktop-only entries", () => {
 describe("SettingsSidebar group collapse", () => {
   it("renders all groups expanded by default", async () => {
     await setup()
-    expect(screen.getByText("settings.groupAi")).toBeInTheDocument()
-    expect(screen.getByText("settings.groupData")).toBeInTheDocument()
+    expect(screen.getByText("settings.groupModels")).toBeInTheDocument()
+    expect(screen.getByText("settings.groupPrivacy")).toBeInTheDocument()
     expect(screen.getByText("settings.tabs.aiConnections")).toBeInTheDocument()
     expect(screen.getByText("settings.tabs.data")).toBeInTheDocument()
   })
@@ -95,34 +95,34 @@ describe("SettingsSidebar group collapse", () => {
   it("collapsing a group via its label persists through save()", async () => {
     const user = userEvent.setup()
     await setup()
-    await user.click(screen.getByRole("button", { name: /settings\.groupData/ }))
-    expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: ["data"] })
+    await user.click(screen.getByRole("button", { name: /settings\.groupPrivacy/ }))
+    expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: ["privacy"] })
   })
 
   it("hides the items of a group collapsed in settings", async () => {
-    await setup({ settings: { settingsSidebarCollapsedGroups: ["data"] } })
+    await setup({ settings: { settingsSidebarCollapsedGroups: ["privacy"] } })
     expect(screen.queryByText("settings.tabs.data")).not.toBeInTheDocument()
-    expect(screen.queryByText("settings.tabs.workflows")).not.toBeInTheDocument()
+    expect(screen.queryByText("settings.tabs.security")).not.toBeInTheDocument()
     // Other groups stay expanded.
     expect(screen.getByText("settings.tabs.aiConnections")).toBeInTheDocument()
   })
 
   it("expanding a collapsed group persists the removal", async () => {
     const user = userEvent.setup()
-    await setup({ settings: { settingsSidebarCollapsedGroups: ["data"] } })
-    await user.click(screen.getByRole("button", { name: /settings\.groupData/ }))
+    await setup({ settings: { settingsSidebarCollapsedGroups: ["privacy"] } })
+    await user.click(screen.getByRole("button", { name: /settings\.groupPrivacy/ }))
     expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: [] })
   })
 
   it("forces collapsed groups open while searching", async () => {
-    // "theme" matches the appearance section inside the collapsed interface group.
+    // "theme" matches the appearance section inside the collapsed appearance group.
     await setup({
-      settings: { settingsSidebarCollapsedGroups: ["interface"] },
+      settings: { settingsSidebarCollapsedGroups: ["appearance"] },
       searchQuery: "theme",
     })
     expect(screen.getByText("settings.tabs.appearance")).toBeInTheDocument()
     // The group trigger is inert during search.
-    expect(screen.getByRole("button", { name: /settings\.groupInterface/ })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /settings\.groupAppearance/ })).toBeDisabled()
     // Search never rewrites the persisted collapse state.
     expect(save).not.toHaveBeenCalled()
   })
@@ -138,9 +138,9 @@ describe("SettingsSidebar group collapse", () => {
   it("does not undo a manual collapse of the active section's group", async () => {
     const user = userEvent.setup()
     await setup({ activeSection: "general" })
-    await user.click(screen.getByRole("button", { name: /settings\.groupAi/ }))
+    await user.click(screen.getByRole("button", { name: /settings\.groupModels/ }))
     expect(save).toHaveBeenCalledTimes(1)
-    expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: ["ai"] })
+    expect(save).toHaveBeenCalledWith({ settingsSidebarCollapsedGroups: ["models"] })
   })
 })
 
@@ -191,7 +191,7 @@ describe("SettingsSidebar icon-collapsed rail", () => {
   })
 
   it("hides the search field and keeps every item reachable regardless of group collapse", async () => {
-    await setupCollapsed({ settings: { settingsSidebarCollapsedGroups: ["data"] } })
+    await setupCollapsed({ settings: { settingsSidebarCollapsedGroups: ["privacy"] } })
     expect(screen.queryByPlaceholderText("settings.searchPlaceholder")).not.toBeInTheDocument()
     expect(screen.getByText("settings.tabs.data")).toBeInTheDocument()
   })
@@ -199,7 +199,7 @@ describe("SettingsSidebar icon-collapsed rail", () => {
   it("ignores group-trigger clicks instead of persisting a collapse", async () => {
     const user = userEvent.setup()
     await setupCollapsed()
-    await user.click(screen.getByRole("button", { name: /settings\.groupData/ }))
+    await user.click(screen.getByRole("button", { name: /settings\.groupPrivacy/ }))
     expect(save).not.toHaveBeenCalled()
   })
 })

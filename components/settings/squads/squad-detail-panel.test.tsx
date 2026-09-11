@@ -1,7 +1,10 @@
 /** @jest-environment jsdom */
 
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
+
+jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 jest.mock("@/hooks/squads/use-squad-readiness", () => ({
   useSquadReadiness: () => ({ ready: true, loading: false, blockers: [], evaluatedAt: 1 }),
@@ -107,6 +110,41 @@ describe("SquadDetailPanel roster", () => {
 })
 
 describe("SquadDetailPanel advanced governance", () => {
+  beforeEach(() => {
+    store.deleteTeam.mockReset()
+    jest.mocked(toast.error).mockClear()
+  })
+
+  it("waits for external session cleanup before moving the selection", async () => {
+    let finish!: () => void
+    store.deleteTeam.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const onDeleted = jest.fn()
+    render(<SquadDetailPanel squadId="squad-1" onDeleted={onDeleted} />)
+    await userEvent.click(screen.getByRole("button", { name: "deleteAction" }))
+    await userEvent.click(screen.getByRole("button", { name: "delete", exact: true }))
+    expect(store.deleteTeam).toHaveBeenCalledWith("squad-1")
+    expect(onDeleted).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "deleteAction" })).toBeDisabled()
+    await act(async () => finish())
+    expect(onDeleted).toHaveBeenCalledWith("squad-1")
+  })
+
+  it("keeps the current selection and permits retry when cleanup fails", async () => {
+    store.deleteTeam.mockRejectedValueOnce(new Error("Native cleanup unavailable"))
+    const onDeleted = jest.fn()
+    render(<SquadDetailPanel squadId="squad-1" onDeleted={onDeleted} />)
+    await userEvent.click(screen.getByRole("button", { name: "deleteAction" }))
+    await userEvent.click(screen.getByRole("button", { name: "delete", exact: true }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("deleteFailed"))
+    expect(onDeleted).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "deleteAction" })).toBeEnabled()
+  })
+
   /**
    * Nine sections of squad configuration were editable only from a tab of
    * `/agent-teams/workspace`, which ADR-0140 retired and took out of

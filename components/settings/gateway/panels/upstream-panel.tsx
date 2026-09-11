@@ -17,7 +17,8 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { RefreshCwIcon, ShieldIcon } from "lucide-react"
+import { Loader2Icon, RefreshCwIcon, ShieldIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { MotionReveal } from "@/components/chat/motion/motion-reveal"
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
@@ -26,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import type { GatewayKeyCooldown } from "@/types/gateway"
+import { gatewayResetCooldowns } from "@/lib/tauri/gateway"
 
 import { ChipInput } from "../shared/chip-input"
 import { NumberRow } from "../../common/number-row"
@@ -45,6 +47,30 @@ export function GatewayUpstreamPanel({
 }: GatewayUpstreamPanelProps) {
   const t = useTranslations("settings.gateway")
   const { config, persist } = ctx
+  const [cooldownAction, setCooldownAction] = useState<"refresh" | "reset" | null>(null)
+
+  async function refreshCooldowns() {
+    try {
+      await onRefreshCooldowns()
+    } catch {
+      toast.error(t("cooldownsRefreshFailed"))
+    }
+  }
+
+  async function runCooldownAction(action: "refresh" | "reset") {
+    setCooldownAction(action)
+    try {
+      if (action === "reset") {
+        const count = await gatewayResetCooldowns()
+        toast.success(t("cooldownsResetSuccess", { count }))
+      }
+      await refreshCooldowns()
+    } catch {
+      toast.error(t("cooldownsResetFailed"))
+    } finally {
+      setCooldownAction(null)
+    }
+  }
 
   return (
     <GatewayPanelStack>
@@ -131,15 +157,29 @@ export function GatewayUpstreamPanel({
         title={t("cooldownsHeading")}
         description={t("cooldownsHelp")}
         action={
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void onRefreshCooldowns()}
-            data-testid="gateway-cooldowns-refresh"
-          >
-            <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
-            {t("cooldownsRefresh")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cooldownAction !== null}
+              onClick={() => void runCooldownAction("refresh")}
+              data-testid="gateway-cooldowns-refresh"
+            >
+              <RefreshCwIcon className="mr-1.5 size-3.5" aria-hidden />
+              {t("cooldownsRefresh")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cooldownAction !== null || cooldowns.length === 0}
+              onClick={() => void runCooldownAction("reset")}
+            >
+              {cooldownAction === "reset" && (
+                <Loader2Icon className="mr-1.5 size-3.5 animate-spin" aria-hidden />
+              )}
+              {t(cooldownAction === "reset" ? "cooldownsResetting" : "cooldownsReset")}
+            </Button>
+          </div>
         }
       >
         {cooldowns.length === 0 ? (

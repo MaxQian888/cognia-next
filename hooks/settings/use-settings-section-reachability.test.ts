@@ -59,7 +59,7 @@ describe("useSettingsSectionReachability", () => {
     expect(result.current.isReachable("connections")).toBe(true)
     expect(result.current.isReachable("automation")).toBe(false)
     expect(result.current.isReachable("desktop")).toBe(false)
-    expect(result.current.isReachable("companion")).toBe(false)
+    expect(result.current.isReachable("connectivity")).toBe(true)
   })
 
   it("a browser paired through Settings > Remote hosts reaches host-backed sections", () => {

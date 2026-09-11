@@ -19,7 +19,7 @@ const T0 = Date.UTC(2026, 7, 20, 9, 0, 0)
 
 function release(version: string, revision: number): TemplateDefinitionEnvelope {
   return {
-    apiVersion: "cognia.dev/templates/v1",
+    apiVersion: "cognia.ai/templates/v1",
     id: DEFINITION_ID,
     domain: "agentTeam",
     version,

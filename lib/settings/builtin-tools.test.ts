@@ -143,16 +143,46 @@ describe("builtin-tools metadata", () => {
     }
   })
 
-  it("alwaysLoad tools are never the ones that require approval", () => {
-    // alwaysLoad means the SDK keeps the schema in the prompt; that's only
-    // safe for low-risk read-only ops. If we ever set alwaysLoad on an
-    // approval-gated tool, the agent would see it in every system prompt
-    // and the user would face approval requests for things they didn't ask for.
-    for (const tool of listBuiltinTools()) {
-      if (tool.alwaysLoad) {
-        expect(tool.requiresApproval).toBe(false)
-      }
+  it("keeps the low-risk always-loaded tools available without per-call approval", () => {
+    const names = [
+      "file_hash",
+      "file_diff",
+      "file_info",
+      "file_exists",
+      "grep",
+      "glob",
+      "read",
+      "ls",
+      "TodoWrite",
+      "bash_output",
+      "TaskCreate",
+      "TaskGet",
+      "TaskList",
+      "TaskUpdate",
+      "list_shells",
+      "monitor_cancel",
+      "monitor_list",
+      "git_status",
+      "list_env",
+      "get_env",
+      "system_info",
+      "current_time",
+    ]
+    for (const name of names) {
+      expect(listBuiltinTools().find((tool) => tool.name === name)).toMatchObject({
+        alwaysLoad: true,
+        riskLevel: "low",
+        requiresApproval: false,
+      })
     }
+  })
+
+  it("keeps Monitor approval-gated even while its schema is always loaded", () => {
+    expect(listBuiltinTools().find((tool) => tool.name === "Monitor")).toMatchObject({
+      alwaysLoad: true,
+      riskLevel: "high",
+      requiresApproval: true,
+    })
   })
 
   it("getBuiltinToolCategory returns undefined for unknown ids", () => {
@@ -263,7 +293,7 @@ describe("BUILTIN_TOOL_CONFIG_KEYS", () => {
   })
 
   it("lists no modifier that is already a category", () => {
-    const categoryIds = new Set(BUILTIN_TOOL_CATEGORIES.map((c) => c.id))
+    const categoryIds = new Set<string>(BUILTIN_TOOL_CATEGORIES.map((c) => c.id))
     expect(BUILTIN_TOOL_MODIFIER_KEYS.filter((k) => categoryIds.has(k))).toEqual([])
   })
 })

@@ -138,6 +138,7 @@ import {
   type ChangeEvent,
 } from "react"
 import { toast } from "sonner"
+import { useSubscriptionAccounts } from "@/lib/subscription/core/hooks"
 import { useTranslations } from "next-intl"
 import { Checkbox } from "@/components/ui/checkbox"
 import { characterToPackDef, filterCharacters } from "@/lib/plugin/character-pack/editor-projection"
@@ -1725,33 +1726,6 @@ interface EditorProps {
   editingId?: string
 }
 
-interface AccountOption {
-  accountId: string
-  provider: string
-  label: string
-}
-
-async function loadAccountOptions(): Promise<AccountOption[]> {
-  const { listAccounts } = await import("@/lib/subscription/core/transport")
-  const providers: Array<"anthropic" | "codex" | "opencode"> = ["anthropic", "codex", "opencode"]
-  const all: AccountOption[] = []
-  for (const provider of providers) {
-    try {
-      const list = await listAccounts(provider)
-      for (const acc of list) {
-        all.push({
-          accountId: acc.id,
-          provider,
-          label: acc.label ?? acc.id.slice(0, 8),
-        })
-      }
-    } catch {
-      // Provider not configured or transport unavailable — skip.
-    }
-  }
-  return all
-}
-
 export function CharacterEditor({
   initial,
   skillsCatalog,
@@ -1777,17 +1751,19 @@ export function CharacterEditor({
   const [denyToolsText, setDenyToolsText] = useState(initial.disallowedTools.join(", "))
   const [envSecretValues, setEnvSecretValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
-  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([])
-
-  useEffect(() => {
-    let cancelled = false
-    void loadAccountOptions().then((opts) => {
-      if (!cancelled) setAccountOptions(opts)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { byProvider: subscriptionAccounts, providers: subscriptionProviders } =
+    useSubscriptionAccounts()
+  const accountOptions = useMemo(
+    () =>
+      Object.entries(subscriptionAccounts).flatMap(([provider, state]) =>
+        state.accounts.map((account) => ({
+          accountId: account.id,
+          provider: subscriptionProviders.find((entry) => entry.id === provider)?.name ?? provider,
+          label: account.label ?? account.email ?? account.id.slice(0, 8),
+        }))
+      ),
+    [subscriptionAccounts, subscriptionProviders]
+  )
 
   // Hydrate when `initial` changes (e.g. user clicks edit on a different row).
   useEffect(() => {

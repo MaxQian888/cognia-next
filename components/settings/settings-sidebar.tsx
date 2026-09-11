@@ -79,11 +79,17 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
 
   const grouped = useMemo(() => {
     const buckets: Record<SettingsGroup, NavItem[]> = {
-      ai: [],
-      extensions: [],
-      interface: [],
-      data: [],
-      observability: [],
+      account: [],
+      models: [],
+      agents: [],
+      capabilities: [],
+      authoring: [],
+      chat: [],
+      appearance: [],
+      integrations: [],
+      tasks: [],
+      workspace: [],
+      privacy: [],
       system: [],
     }
     for (const item of filtered) buckets[item.group].push(item)
@@ -91,11 +97,17 @@ export function SettingsSidebar({ activeSection, onSelect, searchQuery, onSearch
   }, [filtered])
 
   const groupLabels: Record<SettingsGroup, string> = {
-    ai: t("settings.groupAi"),
-    extensions: t("settings.groupExtensions"),
-    interface: t("settings.groupInterface"),
-    data: t("settings.groupData"),
-    observability: t("settings.groupObservability"),
+    account: t("settings.groupAccount"),
+    models: t("settings.groupModels"),
+    agents: t("settings.groupAgents"),
+    capabilities: t("settings.groupCapabilities"),
+    authoring: t("settings.groupAuthoring"),
+    chat: t("settings.groupChat"),
+    appearance: t("settings.groupAppearance"),
+    integrations: t("settings.groupIntegrations"),
+    tasks: t("settings.groupTasks"),
+    workspace: t("settings.groupWorkspace"),
+    privacy: t("settings.groupPrivacy"),
     system: t("settings.groupSystem"),
   }
 

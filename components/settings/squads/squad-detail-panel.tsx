@@ -30,6 +30,7 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ChevronRightIcon, Trash2Icon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { SquadDeriveActions } from "./squad-derive-actions"
@@ -73,6 +74,7 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const [descDraft, setDescDraft] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const members = useMemo(
     () =>
@@ -198,6 +200,7 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
               size="sm"
               className="mt-2 text-destructive hover:text-destructive"
               data-testid="squad-delete"
+              disabled={deleting}
             >
               <Trash2Icon className="mr-1.5 size-3.5" />
               {t("deleteAction")}
@@ -211,9 +214,17 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
             <AlertDialogFooter>
               <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => {
-                  deleteTeam(squadId)
-                  onDeleted?.(squadId)
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true)
+                  try {
+                    await deleteTeam(squadId)
+                    onDeleted?.(squadId)
+                  } catch {
+                    toast.error(t("deleteFailed"))
+                  } finally {
+                    setDeleting(false)
+                  }
                 }}
               >
                 {tCommon("delete")}

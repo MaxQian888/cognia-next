@@ -63,8 +63,8 @@ describe("WebhookUrlCard translation catalogue", () => {
     // A key added to one locale only resolves to the dotted path for half the
     // users, which is the failure mode the parity baseline exists to stop.
     for (const ns of MOUNTED_NAMESPACES) {
-      const enKeys = Object.keys((en as Record<string, object>)[ns]).sort()
-      const zhKeys = Object.keys((zh as Record<string, object>)[ns]).sort()
+      const enKeys = Object.keys(en[ns]).sort()
+      const zhKeys = Object.keys(zh[ns]).sort()
       expect({ ns, keys: zhKeys }).toEqual({ ns, keys: enKeys })
     }
   })

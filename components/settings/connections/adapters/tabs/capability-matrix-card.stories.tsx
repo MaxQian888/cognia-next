@@ -50,7 +50,7 @@ export const LimitedUpstream: Story = {
   args: {
     row: row({
       type: "onebot",
-      implMetadata: { appName: "Lagrange", features: ["send_msg"] },
+      implMetadata: { impl: "lagrange", version: "0.0.1", features: ["send_msg"] },
     }),
   },
 }

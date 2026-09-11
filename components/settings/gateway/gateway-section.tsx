@@ -102,13 +102,7 @@ export function GatewaySection() {
     setStatus(nextStatus)
   }, [])
 
-  const refreshCooldowns = useCallback(
-    () =>
-      gatewayListCooldowns()
-        .then(setCooldowns)
-        .catch(() => {}),
-    []
-  )
+  const refreshCooldowns = useCallback(() => gatewayListCooldowns().then(setCooldowns), [])
 
   useEffect(() => {
     if (!desktop) return
@@ -118,14 +112,14 @@ export function GatewaySection() {
       .then(setConfig)
       .catch(() => {})
     void refreshStatus()
-    void refreshCooldowns()
+    void refreshCooldowns().catch(() => {})
   }, [desktop, refreshStatus, refreshCooldowns])
 
   useEffect(() => {
     if (!desktop) return
     // Cooldowns lift on their own, so the badge would otherwise sit stale until
     // the user opened the panel and hit refresh by hand.
-    const timer = setInterval(() => void refreshCooldowns(), COOLDOWN_POLL_MS)
+    const timer = setInterval(() => void refreshCooldowns().catch(() => {}), COOLDOWN_POLL_MS)
     return () => clearInterval(timer)
   }, [desktop, refreshCooldowns])
 
@@ -378,7 +372,12 @@ function GatewayPanelBody(args: RenderArgs) {
     case "listener":
       return <GatewayListenerPanel ctx={panelContext} onRestarted={onRestarted} />
     case "keys":
-      return <GatewayKeysCard onChanged={() => void refreshStatus()} />
+      return (
+        <GatewayKeysCard
+          legacyKeyCount={panelContext.status?.legacyKeyCount}
+          onChanged={() => void refreshStatus()}
+        />
+      )
     case "reliability":
       return <GatewayReliabilityPanel ctx={panelContext} />
     case "upstream":

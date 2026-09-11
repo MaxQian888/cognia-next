@@ -193,7 +193,7 @@ describe("AccountOverviewSection", () => {
     const user = userEvent.setup()
     render(<AccountOverviewSection />)
     await user.click(screen.getByTestId("account-overview-connect"))
-    expect(pushMock).toHaveBeenCalledWith("/settings?section=subscription")
+    expect(pushMock).toHaveBeenCalledWith("/settings?section=subscription&subTab=accounts")
   })
 
   it("renders the plan, email, expiry, session actions and usage when signed in", () => {
@@ -285,7 +285,7 @@ describe("AccountOverviewSection", () => {
     const user = userEvent.setup()
     render(<AccountOverviewSection />)
     await user.click(screen.getByTestId("account-overview-manage-subscription"))
-    expect(pushMock).toHaveBeenCalledWith("/settings?section=subscription")
+    expect(pushMock).toHaveBeenCalledWith("/settings?section=subscription&subTab=accounts")
   })
 
   it("shows a pair CTA when unpaired and routes to /pair", async () => {

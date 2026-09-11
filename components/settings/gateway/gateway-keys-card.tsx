@@ -93,7 +93,13 @@ interface EditDraft {
   quota: string
 }
 
-export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
+export function GatewayKeysCard({
+  onChanged,
+  legacyKeyCount = 0,
+}: {
+  onChanged?: () => void
+  legacyKeyCount?: number
+}) {
   const t = useTranslations("settings.gateway")
   const [keys, setKeys] = useState<GatewayApiKeyRedacted[]>([])
   // Snapshot of "now" captured whenever keys (re)load — used to flag expired
@@ -236,6 +242,13 @@ export function GatewayKeysCard({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <GatewayPanelStack>
+      {legacyKeyCount > 0 && (
+        <Alert>
+          <KeyRoundIcon />
+          <AlertTitle>{t("legacyKeysHeading")}</AlertTitle>
+          <AlertDescription>{t("legacyKeysHelp", { count: legacyKeyCount })}</AlertDescription>
+        </Alert>
+      )}
       <GatewayPanelSection
         icon={<KeyRoundIcon className="size-4" />}
         title={t("keysHeading")}

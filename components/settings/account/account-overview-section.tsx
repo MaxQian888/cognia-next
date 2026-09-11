@@ -300,7 +300,7 @@ export function AccountOverviewSection() {
                   variant="link"
                   size="sm"
                   className="h-auto gap-1 p-0 text-xs"
-                  onClick={() => router.push("/settings?section=subscription")}
+                  onClick={() => router.push("/settings?section=subscription&subTab=accounts")}
                   data-testid="account-overview-connect"
                 >
                   <PlugZapIcon className="size-3" />
@@ -410,7 +410,7 @@ export function AccountOverviewSection() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => router.push("/settings?section=subscription")}
+              onClick={() => router.push("/settings?section=subscription&subTab=accounts")}
               data-testid="account-overview-manage-subscription"
             >
               {t("subscriptionManage")}

@@ -75,7 +75,7 @@ export function UsageFindingsCard() {
     [period, dayKey]
   )
 
-  const rows = useLiveQuery<SessionUsageRow[] | undefined>(
+  const rows = useLiveQuery<SessionUsageRow[], undefined>(
     async () =>
       fromMs == null ? [] : getDb().sessionUsage.where("at").aboveOrEqual(fromMs).toArray(),
     [fromMs],

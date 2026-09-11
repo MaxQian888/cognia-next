@@ -12,6 +12,7 @@ const meta = {
   title: "Settings/Agent/AgentTeamTemplatesSection",
   component: AgentTeamTemplatesSection,
   parameters: { layout: "padded" },
+  args: {},
   beforeEach: () => {
     resetStore(useAgentTeamStore)
   },
@@ -25,7 +26,7 @@ const meta = {
 } satisfies Meta<typeof AgentTeamTemplatesSection>
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<import("./agent-team-templates-section").AgentTeamTemplatesSectionProps>
 
 // The built-in templates seeded by the store's initial state.
 export const Default: Story = {}

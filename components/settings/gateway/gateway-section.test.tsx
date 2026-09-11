@@ -100,8 +100,18 @@ jest.mock("./gateway-keys-card", () => ({
 jest.mock("./panels/reliability-panel", () => ({
   GatewayReliabilityPanel: () => <div data-testid="panel-reliability" />,
 }))
+const mockRefreshCooldownError = jest.fn()
 jest.mock("./panels/upstream-panel", () => ({
-  GatewayUpstreamPanel: () => <div data-testid="panel-upstream" />,
+  GatewayUpstreamPanel: ({ onRefreshCooldowns }: { onRefreshCooldowns: () => Promise<void> }) => (
+    <div data-testid="panel-upstream">
+      <button
+        type="button"
+        onClick={() => void onRefreshCooldowns().catch(mockRefreshCooldownError)}
+      >
+        refresh parked accounts
+      </button>
+    </div>
+  ),
 }))
 jest.mock("./panels/exposure-panel", () => ({
   GatewayExposurePanel: () => <div data-testid="panel-exposure" />,
@@ -235,6 +245,16 @@ describe("GatewaySection", () => {
   it("lands on the overview panel by default", async () => {
     render(<GatewaySection />)
     expect(await screen.findByTestId("panel-overview")).toBeInTheDocument()
+  })
+
+  it("propagates manual cooldown refresh failures so the panel can report them", async () => {
+    searchString = "gatewayPanel=upstream"
+    render(<GatewaySection />)
+    await screen.findByTestId("panel-upstream")
+    const error = new Error("cooldowns unavailable")
+    mockListCooldowns.mockRejectedValueOnce(error)
+    await userEvent.click(screen.getByRole("button", { name: "refresh parked accounts" }))
+    expect(mockRefreshCooldownError).toHaveBeenCalledWith(error)
   })
 
   it.each([

@@ -108,6 +108,7 @@ it("manages visibility, pinning, direct replacement consent, and scoped shortcut
   await waitFor(() =>
     expect(bindShortcutMock).toHaveBeenCalledWith({
       id: "selection.action:plug-a:rewrite",
+      scope: "app",
       chord: "alt+shift+r",
     })
   )

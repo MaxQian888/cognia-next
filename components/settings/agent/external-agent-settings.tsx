@@ -37,6 +37,8 @@ import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecy
 import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
+import { CogniaModelPicker } from "@/components/agent/external-agent/cognia-model-picker"
+import { canUseCogniaModels } from "@/lib/ai/agent/external/gateway-task"
 import { HostExternalAgentConfigs } from "./host-external-agent-configs"
 import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
 import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
@@ -136,6 +138,7 @@ const PERMISSION_MODE_LABEL_KEY: Record<AcpPermissionMode, string> = {
 // =============================================================================
 
 interface AgentFormData {
+  cogniaModel?: CreateExternalAgentInput["cogniaModel"]
   name: string
   protocol: ExternalAgentProtocol
   transport: ExternalAgentTransport
@@ -365,6 +368,7 @@ function AgentEditorDialog({
   const t = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
+  const tGateway = useTranslations("externalAgent.cogniaModel")
   const { getAgent } = useExternalAgentStore()
 
   // Quick-start preset selector — mirrors the chat-side AddAgentDialog pattern
@@ -394,7 +398,9 @@ function AgentEditorDialog({
           description:
             initialPreset === "opencode-v2-preview"
               ? t("opencodeV2PresetDescription")
-              : preset.description,
+              : initialPreset === "devin"
+                ? t("devinPresetDescription")
+                : preset.description,
           ...opencodeFieldsFromMetadata(preset.metadata),
         }
       }
@@ -410,6 +416,7 @@ function AgentEditorDialog({
 
     return {
       name: agent.name,
+      cogniaModel: agent.cogniaModel,
       protocol: agent.protocol,
       transport: agent.transport,
       processCommand: agent.process?.command || "",
@@ -457,6 +464,7 @@ function AgentEditorDialog({
 
     const input: CreateExternalAgentInput = {
       name: formData.name.trim(),
+      cogniaModel: formData.cogniaModel ?? null,
       protocol: formData.protocol,
       transport: formData.transport,
       description: formData.description,
@@ -602,11 +610,18 @@ function AgentEditorDialog({
       }
     }
 
+    if (
+      input.cogniaModel &&
+      (!input.cogniaModel.providerId || !input.cogniaModel.modelId || !canUseCogniaModels(input))
+    ) {
+      toast.error(tGateway("invalid"))
+      return
+    }
     onSave(input)
     onOpenChange(false)
     setFormData(DEFAULT_FORM_DATA)
     setSelectedPreset("")
-  }, [formData, selectedPreset, onSave, onOpenChange, t])
+  }, [formData, selectedPreset, onSave, onOpenChange, t, tGateway])
 
   // Preset picker — keep tightly aligned with the chat-side AddAgentDialog
   // pattern. When a real preset is chosen, prefill the form fields so the user
@@ -630,7 +645,9 @@ function AgentEditorDialog({
         description:
           presetId === "opencode-v2-preview"
             ? t("opencodeV2PresetDescription")
-            : preset.description,
+            : presetId === "devin"
+              ? t("devinPresetDescription")
+              : preset.description,
         ...opencodeFieldsFromMetadata(preset.metadata),
       }))
     },
@@ -978,6 +995,32 @@ function AgentEditorDialog({
               )}
             </FormSection>
           )}
+
+          <CogniaModelPicker
+            config={{
+              protocol: formData.protocol,
+              transport: formData.transport,
+              process: {
+                command: formData.processCommand || (formData.opencodeAutoSpawn ? "opencode" : ""),
+                args: formData.processArgs.split(" ").filter(Boolean),
+              },
+              network:
+                formData.transport !== "stdio" && !formData.opencodeAutoSpawn
+                  ? { endpoint: formData.networkEndpoint }
+                  : undefined,
+              metadata: {
+                ...(selectedPreset
+                  ? getPresetConfig(selectedPreset)?.metadata
+                  : editingAgentId
+                    ? getAgent(editingAgentId)?.metadata
+                    : {}),
+                preset: selectedPreset || undefined,
+                autoSpawnServer: formData.opencodeAutoSpawn,
+              },
+            }}
+            value={formData.cogniaModel}
+            onChange={(cogniaModel) => setFormData((current) => ({ ...current, cogniaModel }))}
+          />
 
           {/* Permission Mode — narrowed to the modes the chosen backend can
               enforce, and clamped for display so switching protocol never shows
@@ -1425,7 +1468,9 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                 <p className="line-clamp-3 text-xs text-muted-foreground">
                   {id === "opencode-v2-preview"
                     ? t("opencodeV2PresetDescription")
-                    : config.description}
+                    : id === "devin"
+                      ? t("devinPresetDescription")
+                      : config.description}
                 </p>
                 {/* `tags` is optional on the preset type and a plugin can register
                     a preset at runtime, so the gallery must not assume the array

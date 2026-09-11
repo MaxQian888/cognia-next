@@ -59,7 +59,19 @@ import {
 
 import type { CapabilityId, HostProfile } from "@/lib/platform/capabilities"
 
-export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
+export type SettingsGroup =
+  | "account"
+  | "models"
+  | "agents"
+  | "capabilities"
+  | "authoring"
+  | "chat"
+  | "appearance"
+  | "integrations"
+  | "tasks"
+  | "workspace"
+  | "privacy"
+  | "system"
 
 export type SettingsSectionId =
   | "general"
@@ -218,7 +230,32 @@ export function reachableSettingsSections(
 }
 
 export const SETTINGS_NAV: NavItem[] = [
-  // === AI ===
+  // === Account & Billing ===
+  {
+    id: "account",
+    labelKey: "account",
+    descriptionKey: "account",
+    group: "account",
+    icon: CircleUserIcon,
+  },
+  {
+    id: "subscription",
+    labelKey: "subscription",
+    descriptionKey: "subscription",
+    group: "account",
+    icon: ZapIcon,
+    // The subscription vault lives on the execution host's secret store; a
+    // companion client administers the host it is paired to.
+    requires: ["keyring"],
+  },
+  {
+    id: "usage-cost",
+    labelKey: "usageCost",
+    descriptionKey: "usageCost",
+    group: "account",
+    icon: WalletIcon,
+  },
+  // === Models & Providers ===
   // NOTE: the standalone "general", "api-key", and "profile" sections were
   // merged — general → agent-runtime (defaults/behavior), api-key/providers →
   // ai-connections
@@ -231,45 +268,21 @@ export const SETTINGS_NAV: NavItem[] = [
     id: "ai-connections",
     labelKey: "aiConnections",
     descriptionKey: "aiConnections",
-    group: "ai",
+    group: "models",
     icon: ServerCogIcon,
   },
   {
     id: "model-catalog",
     labelKey: "modelCatalog",
     descriptionKey: "modelCatalog",
-    group: "ai",
+    group: "models",
     icon: DatabaseIcon,
-  },
-  {
-    id: "ocr",
-    labelKey: "ocr",
-    descriptionKey: "ocr",
-    group: "ai",
-    icon: ScrollTextIcon,
-  },
-  {
-    id: "account",
-    labelKey: "account",
-    descriptionKey: "account",
-    group: "ai",
-    icon: CircleUserIcon,
-  },
-  {
-    id: "subscription",
-    labelKey: "subscription",
-    descriptionKey: "subscription",
-    group: "ai",
-    icon: ZapIcon,
-    // The subscription vault lives on the execution host's secret store; a
-    // companion client administers the host it is paired to.
-    requires: ["keyring"],
   },
   {
     id: "ccswitch",
     labelKey: "ccswitch",
     descriptionKey: "ccswitch",
-    group: "ai",
+    group: "models",
     icon: ArrowLeftRightIcon,
     // Claude Code CLI config on the execution host. Pinned to the desktop for
     // now: `lib/ccswitch/client.ts` and `lib/claude/settings.ts` still import
@@ -278,58 +291,54 @@ export const SETTINGS_NAV: NavItem[] = [
     requires: ["shell"],
     profiles: ["desktop"],
   },
+  // === Agents ===
   {
     id: "agents",
     labelKey: "agents",
     descriptionKey: "agents",
-    group: "ai",
+    group: "agents",
     icon: PlugZapIcon,
   },
   {
     id: "agent-modes",
     labelKey: "agentModes",
     descriptionKey: "agentModes",
-    group: "ai",
+    group: "agents",
     icon: BotIcon,
   },
   {
     id: "agent-runtime",
     labelKey: "agentRuntime",
     descriptionKey: "agentRuntime",
-    group: "ai",
+    group: "agents",
     icon: WorkflowIcon,
+  },
+  {
+    id: "subagents",
+    labelKey: "subagents",
+    descriptionKey: "subagents",
+    group: "agents",
+    icon: NetworkIcon,
   },
   {
     id: "squads",
     labelKey: "squads",
     descriptionKey: "squads",
-    group: "ai",
+    group: "agents",
     icon: Layers3Icon,
   },
   {
-    id: "eval",
-    labelKey: "eval",
-    descriptionKey: "eval",
-    group: "ai",
-    icon: ClipboardCheckIcon,
-  },
-  {
-    id: "hooks",
-    labelKey: "hooks",
-    descriptionKey: "hooks",
-    group: "ai",
-    icon: WebhookIcon,
-    // Agent lifecycle hooks run in the sidecar on the execution host. Pinned
-    // to the desktop until `lib/claude/settings.ts` (raw `invoke`, host-parity
-    // Class A) moves onto the transport seam.
-    requires: ["sidecar"],
-    profiles: ["desktop"],
+    id: "teams",
+    labelKey: "teams",
+    descriptionKey: "teams",
+    group: "agents",
+    icon: Layers3Icon,
   },
   {
     id: "fleet",
     labelKey: "fleet",
     descriptionKey: "fleet",
-    group: "ai",
+    group: "agents",
     icon: RadarIcon,
     // Pinned to the desktop until `lib/tauri/fleet.ts` and
     // `lib/claude/hooks/fleet-hooks.ts` (raw `invoke`, host-parity Class A)
@@ -338,26 +347,18 @@ export const SETTINGS_NAV: NavItem[] = [
     profiles: ["desktop"],
   },
   {
-    id: "workspace-trust",
-    labelKey: "workspaceTrust",
-    descriptionKey: "workspaceTrust",
-    group: "ai",
-    icon: ShieldCheckIcon,
-    // Trust decisions about workspaces on the execution host's filesystem.
-    requires: ["shell"],
+    id: "eval",
+    labelKey: "eval",
+    descriptionKey: "eval",
+    group: "agents",
+    icon: ClipboardCheckIcon,
   },
-  {
-    id: "slash-commands",
-    labelKey: "slashCommands",
-    descriptionKey: "slashCommands",
-    group: "ai",
-    icon: TerminalSquareIcon,
-  },
+  // === Tools & Capabilities ===
   {
     id: "tools",
     labelKey: "tools",
     descriptionKey: "tools",
-    group: "ai",
+    group: "capabilities",
     icon: WrenchIcon,
     // Tool policy for the agent runtime on the execution host.
     requires: ["sidecar"],
@@ -366,101 +367,123 @@ export const SETTINGS_NAV: NavItem[] = [
     id: "search",
     labelKey: "search",
     descriptionKey: "search",
-    group: "ai",
+    group: "capabilities",
     icon: GlobeIcon,
   },
   {
-    id: "lsp",
-    labelKey: "lsp",
-    descriptionKey: "lsp",
-    group: "ai",
-    icon: BracesIcon,
-    // Language servers are spawned on the execution host.
-    requires: ["shell"],
+    id: "memory",
+    labelKey: "memory",
+    descriptionKey: "memory",
+    group: "capabilities",
+    icon: BrainIcon,
   },
   {
-    id: "sandbox",
-    labelKey: "sandbox",
-    descriptionKey: "sandbox",
-    group: "ai",
-    icon: BoxIcon,
-    // Sandbox confinement for processes the execution host spawns.
-    requires: ["shell"],
+    id: "ocr",
+    labelKey: "ocr",
+    descriptionKey: "ocr",
+    group: "capabilities",
+    icon: ScrollTextIcon,
   },
-
-  // === Extensions ===
   {
-    id: "characters",
-    labelKey: "characters",
-    descriptionKey: "characters",
-    group: "extensions",
-    icon: UsersIcon,
+    id: "speech",
+    labelKey: "speech",
+    descriptionKey: "speech",
+    group: "capabilities",
+    icon: Volume2Icon,
   },
+  {
+    id: "automation",
+    labelKey: "automation",
+    descriptionKey: "automation",
+    group: "capabilities",
+    icon: MousePointerClickIcon,
+    // Desktop UI automation is a recorded physical boundary — the capability
+    // is never server-backed, so companion profiles do not see this section.
+    requires: ["uia-automation"],
+  },
+  // === Authoring ===
   {
     id: "skills",
     labelKey: "skills",
     descriptionKey: "skills",
-    group: "extensions",
+    group: "authoring",
     icon: SparklesIcon,
   },
   {
-    id: "subagents",
-    labelKey: "subagents",
-    descriptionKey: "subagents",
-    group: "extensions",
-    icon: NetworkIcon,
+    id: "characters",
+    labelKey: "characters",
+    descriptionKey: "characters",
+    group: "authoring",
+    icon: UsersIcon,
   },
   {
-    id: "teams",
-    labelKey: "teams",
-    descriptionKey: "teams",
-    group: "extensions",
+    id: "slash-commands",
+    labelKey: "slashCommands",
+    descriptionKey: "slashCommands",
+    group: "authoring",
+    icon: TerminalSquareIcon,
+  },
+  {
+    id: "presets",
+    labelKey: "presets",
+    descriptionKey: "presets",
+    group: "authoring",
+    icon: BookmarkIcon,
+  },
+  {
+    id: "chatTemplates",
+    labelKey: "chatTemplates",
+    descriptionKey: "chatTemplates",
+    group: "authoring",
+    icon: FileCode2Icon,
+  },
+  {
+    id: "hooks",
+    labelKey: "hooks",
+    descriptionKey: "hooks",
+    group: "authoring",
+    icon: WebhookIcon,
+    // Agent lifecycle hooks run in the sidecar on the execution host. Pinned
+    // to the desktop until `lib/claude/settings.ts` (raw `invoke`, host-parity
+    // Class A) moves onto the transport seam.
+    requires: ["sidecar"],
+    profiles: ["desktop"],
+  },
+  // === Chat ===
+  {
+    id: "conversation",
+    labelKey: "conversation",
+    descriptionKey: "conversation",
+    group: "chat",
+    icon: MessagesSquareIcon,
+  },
+  {
+    id: "artifacts",
+    labelKey: "artifacts",
+    descriptionKey: "artifacts",
+    group: "chat",
     icon: Layers3Icon,
   },
   {
-    id: "mcp",
-    labelKey: "mcp",
-    descriptionKey: "mcp",
-    group: "extensions",
-    icon: PuzzleIcon,
+    id: "canvas",
+    labelKey: "canvas",
+    descriptionKey: "canvas",
+    group: "chat",
+    icon: PencilRulerIcon,
   },
   {
     id: "a2ui",
     labelKey: "a2ui",
     descriptionKey: "a2ui",
-    group: "extensions",
+    group: "chat",
     icon: BlocksIcon,
   },
-  {
-    id: "plugins",
-    labelKey: "plugins",
-    descriptionKey: "plugins",
-    group: "extensions",
-    icon: BoxesIcon,
-  },
-  {
-    id: "connections",
-    labelKey: "connections",
-    descriptionKey: "connections",
-    group: "extensions",
-    icon: LinkIcon,
-    // IM connector adapters run wherever the connector runtime does — the
-    // desktop, or the cloud brain a companion is paired to (ADR-0059 F4).
-    requires: ["connector-runtime"],
-  },
-  {
-    id: "services",
-    labelKey: "externalServices",
-    descriptionKey: "externalServices",
-    group: "extensions",
-    icon: CableIcon,
-  },
-  // === Interface ===
+  // === Appearance ===
   {
     id: "appearance",
     labelKey: "appearance",
     descriptionKey: "appearance",
-    group: "interface",
+    group: "appearance",
     icon: PaletteIcon,
   },
   {
@@ -469,77 +492,136 @@ export const SETTINGS_NAV: NavItem[] = [
     id: "sidebar",
     labelKey: "shellLayout",
     descriptionKey: "shellLayout",
-    group: "interface",
+    group: "appearance",
     icon: PanelsTopLeftIcon,
     // Customises the local desktop shell chrome (nav rail, top and bottom
     // bars) — a local-shell surface, not a capability question.
     profiles: ["desktop"],
   },
   {
+    id: "shortcuts",
+    labelKey: "shortcuts",
+    descriptionKey: "shortcuts",
+    group: "appearance",
+    icon: KeyboardIcon,
+  },
+  {
     id: "discover",
     labelKey: "discover",
     descriptionKey: "discover",
-    group: "interface",
+    group: "appearance",
     icon: CompassIcon,
     // Pure preferences for the Discover surface, which every shell renders;
     // the old desktop pin was an unmigrated UI assumption.
   },
   {
-    id: "speech",
-    labelKey: "speech",
-    descriptionKey: "speech",
-    group: "interface",
-    icon: Volume2Icon,
+    id: "pet",
+    labelKey: "pet",
+    descriptionKey: "pet",
+    group: "appearance",
+    icon: PawPrintIcon,
   },
+  {
+    id: "notifications",
+    labelKey: "notifications",
+    descriptionKey: "notifications",
+    group: "appearance",
+    icon: BellIcon,
+  },
+  // === Integrations ===
+  {
+    id: "connections",
+    labelKey: "connections",
+    descriptionKey: "connections",
+    group: "integrations",
+    icon: LinkIcon,
+    // IM connector adapters run wherever the connector runtime does — the
+    // desktop, or the cloud brain a companion is paired to (ADR-0059 F4).
+    requires: ["connector-runtime"],
+  },
+  {
+    id: "mcp",
+    labelKey: "mcp",
+    descriptionKey: "mcp",
+    group: "integrations",
+    icon: PuzzleIcon,
+  },
+  {
+    id: "plugins",
+    labelKey: "plugins",
+    descriptionKey: "plugins",
+    group: "integrations",
+    icon: BoxesIcon,
+  },
+  {
+    id: "services",
+    labelKey: "externalServices",
+    descriptionKey: "externalServices",
+    group: "integrations",
+    icon: CableIcon,
+  },
+  {
+    id: "external-bridge",
+    labelKey: "externalBridge",
+    descriptionKey: "externalBridge",
+    group: "integrations",
+    icon: WebhookIcon,
+  },
+  {
+    id: "gateway",
+    labelKey: "gateway",
+    descriptionKey: "gateway",
+    group: "integrations",
+    icon: NetworkIcon,
+    // The inbound LLM gateway is a long-lived listener on the execution host.
+    requires: ["always-on"],
+  },
+  {
+    id: "webhooks",
+    labelKey: "webhooks",
+    descriptionKey: "webhooks",
+    group: "integrations",
+    icon: WebhookIcon,
+    // Webhook delivery needs a process that outlives the page.
+    requires: ["always-on"],
+  },
+  // === Tasks & Automation ===
+  {
+    id: "workflows",
+    labelKey: "workflows",
+    descriptionKey: "workflows",
+    group: "tasks",
+    icon: WorkflowIcon,
+  },
+  {
+    id: "scheduled-tasks",
+    labelKey: "scheduledTasks",
+    descriptionKey: "scheduledTasks",
+    group: "tasks",
+    icon: ClockIcon,
+  },
+  {
+    id: "goals",
+    labelKey: "goals",
+    descriptionKey: "goals",
+    group: "tasks",
+    icon: TargetIcon,
+  },
+  // === Workspace & Code ===
   {
     id: "terminal",
     labelKey: "terminal",
     descriptionKey: "terminal",
-    group: "interface",
+    group: "workspace",
     icon: TerminalSquareIcon,
     // Terminal sessions run against the execution host's PTYs.
     requires: ["pty"],
   },
   {
-    id: "presets",
-    labelKey: "presets",
-    descriptionKey: "presets",
-    group: "interface",
-    icon: BookmarkIcon,
-  },
-  {
-    id: "chatTemplates",
-    labelKey: "chatTemplates",
-    descriptionKey: "chatTemplates",
-    group: "interface",
-    icon: FileCode2Icon,
-  },
-  {
-    id: "artifacts",
-    labelKey: "artifacts",
-    descriptionKey: "artifacts",
-    group: "interface",
-    icon: Layers3Icon,
-  },
-  {
-    id: "canvas",
-    labelKey: "canvas",
-    descriptionKey: "canvas",
-    group: "interface",
-    icon: PencilRulerIcon,
-  },
-  {
-    id: "shortcuts",
-    labelKey: "shortcuts",
-    descriptionKey: "shortcuts",
-    group: "interface",
-    icon: KeyboardIcon,
-  },
-  {
     id: "source-control",
     labelKey: "sourceControl",
     descriptionKey: "sourceControl",
-    group: "interface",
+    group: "workspace",
     icon: GitBranchIcon,
     // Git runs on the execution host (source-control.git host feature).
     requires: ["shell"],
@@ -548,7 +630,7 @@ export const SETTINGS_NAV: NavItem[] = [
     id: "pro-ide",
     labelKey: "proIde",
     descriptionKey: "proIde",
-    group: "interface",
+    group: "workspace",
     icon: SquareCodeIcon,
     // Deliberately LOOSER than the section's own gate, and that is the point.
     //
@@ -564,123 +646,50 @@ export const SETTINGS_NAV: NavItem[] = [
     requires: ["shell"],
   },
   {
-    id: "conversation",
-    labelKey: "conversation",
-    descriptionKey: "conversation",
-    group: "interface",
-    icon: MessagesSquareIcon,
+    id: "lsp",
+    labelKey: "lsp",
+    descriptionKey: "lsp",
+    group: "workspace",
+    icon: BracesIcon,
+    // Language servers are spawned on the execution host.
+    requires: ["shell"],
   },
-  {
-    id: "notifications",
-    labelKey: "notifications",
-    descriptionKey: "notifications",
-    group: "interface",
-    icon: BellIcon,
-  },
-  {
-    id: "memory",
-    labelKey: "memory",
-    descriptionKey: "memory",
-    group: "ai",
-    icon: BrainIcon,
-  },
-
-  // === Data ===
+  // === Data & Security ===
   {
     id: "data",
     labelKey: "data",
     descriptionKey: "data",
-    group: "data",
+    group: "privacy",
     icon: DatabaseIcon,
   },
   {
-    id: "workflows",
-    labelKey: "workflows",
-    descriptionKey: "workflows",
-    group: "data",
-    icon: WorkflowIcon,
+    id: "security",
+    labelKey: "security",
+    descriptionKey: "security",
+    group: "privacy",
+    icon: ShieldCheckIcon,
+    // Biometric guard policy toggles; the guard itself degrades per device,
+    // and the mobile sign-out toggle only means anything off the desktop.
   },
   {
-    id: "scheduled-tasks",
-    labelKey: "scheduledTasks",
-    descriptionKey: "scheduledTasks",
-    group: "data",
-    icon: ClockIcon,
+    id: "workspace-trust",
+    labelKey: "workspaceTrust",
+    descriptionKey: "workspaceTrust",
+    group: "privacy",
+    icon: ShieldCheckIcon,
+    // Trust decisions about workspaces on the execution host's filesystem.
+    requires: ["shell"],
   },
   {
-    id: "goals",
-    labelKey: "goals",
-    descriptionKey: "goals",
-    group: "data",
-    icon: TargetIcon,
+    id: "sandbox",
+    labelKey: "sandbox",
+    descriptionKey: "sandbox",
+    group: "privacy",
+    icon: BoxIcon,
+    // Sandbox confinement for processes the execution host spawns.
+    requires: ["shell"],
   },
-  {
-    id: "pet",
-    labelKey: "pet",
-    descriptionKey: "pet",
-    group: "data",
-    icon: PawPrintIcon,
-  },
-
-  // === Observability ===
-  {
-    id: "logs",
-    labelKey: "logs",
-    descriptionKey: "logs",
-    group: "observability",
-    icon: ScrollTextIcon,
-  },
-  {
-    id: "diagnostics",
-    labelKey: "diagnostics",
-    descriptionKey: "diagnostics",
-    group: "observability",
-    icon: BugIcon,
-  },
-  {
-    id: "usage-cost",
-    labelKey: "usageCost",
-    descriptionKey: "usageCost",
-    group: "observability",
-    icon: WalletIcon,
-  },
-
   // === System ===
-  {
-    id: "webhooks",
-    labelKey: "webhooks",
-    descriptionKey: "webhooks",
-    group: "system",
-    icon: WebhookIcon,
-    // Webhook delivery needs a process that outlives the page.
-    requires: ["always-on"],
-  },
-  {
-    id: "gateway",
-    labelKey: "gateway",
-    descriptionKey: "gateway",
-    group: "system",
-    icon: NetworkIcon,
-    // The inbound LLM gateway is a long-lived listener on the execution host.
-    requires: ["always-on"],
-  },
-  {
-    id: "external-bridge",
-    labelKey: "externalBridge",
-    descriptionKey: "externalBridge",
-    group: "system",
-    icon: WebhookIcon,
-  },
-  {
-    id: "automation",
-    labelKey: "automation",
-    descriptionKey: "automation",
-    group: "system",
-    icon: MousePointerClickIcon,
-    // Desktop UI automation is a recorded physical boundary — the capability
-    // is never server-backed, so companion profiles do not see this section.
-    requires: ["uia-automation"],
-  },
   {
     id: "connectivity",
     labelKey: "connectivity",
@@ -711,13 +720,18 @@ export const SETTINGS_NAV: NavItem[] = [
     profiles: ["desktop"],
   },
   {
-    id: "security",
-    labelKey: "security",
-    descriptionKey: "security",
+    id: "logs",
+    labelKey: "logs",
+    descriptionKey: "logs",
     group: "system",
-    icon: ShieldCheckIcon,
-    // Biometric guard policy toggles; the guard itself degrades per device,
-    // and the mobile sign-out toggle only means anything off the desktop.
+    icon: ScrollTextIcon,
+  },
+  {
+    id: "diagnostics",
+    labelKey: "diagnostics",
+    descriptionKey: "diagnostics",
+    group: "system",
+    icon: BugIcon,
   },
   {
     id: "updates",
@@ -738,11 +752,17 @@ export const SETTINGS_NAV: NavItem[] = [
 ]
 
 export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
-  "ai",
-  "extensions",
-  "interface",
-  "data",
-  "observability",
+  "account",
+  "models",
+  "agents",
+  "capabilities",
+  "authoring",
+  "chat",
+  "appearance",
+  "integrations",
+  "tasks",
+  "workspace",
+  "privacy",
   "system",
 ]
 

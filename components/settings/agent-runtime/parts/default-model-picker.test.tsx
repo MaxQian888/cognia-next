@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DefaultModelPicker, __testing__ } from "./default-model-picker"
 import { PROVIDERS } from "@cognia/provider-types/provider"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 
 const save = jest.fn()
 type AnySettings = Record<string, unknown>
@@ -30,7 +31,8 @@ const stateRef: { current: { settings: AnySettings } } = {
 }
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -205,6 +207,82 @@ describe("DefaultModelPicker", () => {
       defaultModel: undefined,
       defaultProvider: undefined,
     })
+  })
+
+  it("resolves an agent-owned app default away and says which agent holds it", () => {
+    // The composer writes an external agent's own model to the app default when
+    // a model is picked on a chat with no row yet. No provider serves that id,
+    // and `resolveSendOptions` drops it, so this page must not claim it as the
+    // sidecar's default.
+    stateRef.current = {
+      settings: {
+        ...stateRef.current.settings,
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: externalAgentProviderId("pi-rpc"),
+      },
+    }
+    render(<DefaultModelPicker />)
+    expect(
+      screen.queryByText("commandcode/meta/muse-spark-1.3-contributor")
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("modelUnset")).toBeInTheDocument()
+    expect(screen.getByTestId("default-model-agent-owned")).toHaveTextContent(
+      "modelAgentOwned:pi-rpc"
+    )
+  })
+
+  it("names no agent for the legacy unscoped marker", () => {
+    stateRef.current = {
+      settings: {
+        ...stateRef.current.settings,
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: "cognia:external-agent",
+      },
+    }
+    render(<DefaultModelPicker />)
+    expect(screen.getByTestId("default-model-agent-owned")).toHaveTextContent(
+      "modelAgentOwnedUnnamed"
+    )
+  })
+
+  it("says nothing about external agents for an ordinary provider default", () => {
+    render(<DefaultModelPicker />)
+    expect(screen.queryByTestId("default-model-agent-owned")).not.toBeInTheDocument()
+  })
+
+  it("keeps the clear row enabled so a stale agent-owned default can be dropped", async () => {
+    // `activeModel` is empty on this lane, so a `!activeModel` guard would have
+    // disabled the only control that can reach the row.
+    stateRef.current = {
+      settings: {
+        ...stateRef.current.settings,
+        defaultModel: "commandcode/meta/muse-spark-1.3-contributor",
+        defaultProvider: externalAgentProviderId("pi-rpc"),
+      },
+    }
+    const user = userEvent.setup()
+    render(<DefaultModelPicker />)
+    await user.click(screen.getByRole("button", { name: "modelLabel" }))
+    await user.click(screen.getByText("modelClearAgentOwned"))
+    expect(save).toHaveBeenCalledWith({
+      defaultModel: undefined,
+      defaultProvider: undefined,
+    })
+  })
+
+  it("disables the clear row when there is genuinely no default at all", async () => {
+    stateRef.current = {
+      settings: {
+        ...stateRef.current.settings,
+        defaultModel: undefined,
+        defaultProvider: undefined,
+      },
+    }
+    const user = userEvent.setup()
+    render(<DefaultModelPicker />)
+    await user.click(screen.getByRole("button", { name: "modelLabel" }))
+    await user.click(screen.getByText("modelClear"))
+    expect(save).not.toHaveBeenCalled()
   })
 
   it("offers the anthropic catalog when no providers are configured", async () => {
