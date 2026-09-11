@@ -12,7 +12,15 @@ const mockCreate = jest.fn(async (req: unknown) => ({
   ...(req as object),
 }))
 const mockQuery = jest.fn(async (_q: unknown): Promise<unknown[]> => [])
-const mockApply = jest.fn(async (..._a: unknown[]) => ({ applied: 1, skipped: 0, failed: 0 }))
+const mockApply = jest.fn(
+  async (
+    ..._a: Parameters<typeof import("@/lib/issues/service").applyIssueAction>
+  ): ReturnType<typeof import("@/lib/issues/service").applyIssueAction> => ({
+    applied: 1,
+    skipped: 0,
+    failed: 0,
+  })
+)
 jest.mock("@/lib/issues/service", () => {
   const actual = jest.requireActual("@/lib/issues/service")
   return {
@@ -20,7 +28,7 @@ jest.mock("@/lib/issues/service", () => {
     resolveIssue: (ref: string) => mockResolve(ref),
     createIssueRecord: (req: unknown) => mockCreate(req),
     queryIssues: (q: unknown) => mockQuery(q),
-    applyIssueAction: (...a: unknown[]) => mockApply(...a),
+    applyIssueAction: (...a: Parameters<typeof mockApply>) => mockApply(...a),
   }
 })
 const mockListEvents = jest.fn(async (_q: unknown) => [{ id: "e1" }])
@@ -80,13 +88,13 @@ describe("createIssuesAPI", () => {
   it("turns a patch into ordered board actions and sums the outcomes", async () => {
     const api = createIssuesAPI("p")
     mockApply.mockResolvedValueOnce({ applied: 1, skipped: 0, failed: 0 })
-    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0, reason: "running" })
+    mockApply.mockResolvedValueOnce({ applied: 0, skipped: 1, failed: 0 })
     const out = await api.update("MERC-1", { status: "done", cycleId: null })
     expect(mockApply.mock.calls.map((c) => (c[1] as { kind: string }).kind)).toEqual([
       "status",
       "cycle",
     ])
-    expect(out).toEqual({ applied: 1, skipped: 1, failed: 0, reason: "running" })
+    expect(out).toEqual({ applied: 1, skipped: 1, failed: 0 })
     await expect(api.update("MERC-1", {})).rejects.toThrow(/Nothing/)
     await expect(api.update("MERC-1", { status: "closed" })).rejects.toThrow(/status/)
   })

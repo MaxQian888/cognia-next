@@ -584,7 +584,7 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     },
     deleteTeam: async (teamId) => {
       if (!useAgentTeamStore.getState().teams[teamId]) return false
-      useAgentTeamStore.getState().deleteTeam(teamId)
+      await useAgentTeamStore.getState().deleteTeam(teamId)
       return true
     },
     duplicateTeam: async (teamId, input) =>

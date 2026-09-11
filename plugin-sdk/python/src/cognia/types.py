@@ -814,3 +814,27 @@ class PluginHook(Enum):
     ON_TEAM_DELEGATION_COMPLETE = "onTeamDelegationComplete"
     ON_CONNECTOR_INBOUND = "onConnectorInbound"
     ON_CONNECTOR_OUTBOUND = "onConnectorOutbound"
+
+
+class _SubscriptionProviderRequired(typing.TypedDict):
+    """Declarative manifest metadata; Cognia owns API-key entry and storage."""
+
+    id: str
+    name: str
+    baseUrl: str
+    protocol: str
+    models: List[str]
+
+
+class SubscriptionProviderDefinition(_SubscriptionProviderRequired, total=False):
+    """Optional documentation links supplement the required provider connection."""
+
+    apiKeyUrl: str
+    usageUrl: str
+    docsUrl: str
+    description: str
+
+
+def define_subscription_provider(definition: SubscriptionProviderDefinition) -> SubscriptionProviderDefinition:
+    """Return JSON metadata for manifest.subscriptionProviders; validated by host."""
+    return definition

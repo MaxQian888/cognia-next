@@ -429,6 +429,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "subscription-provider",
+      "support": "supported",
+      "manifestFields": ["subscriptionProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "balance-adapter",
       "support": "supported",
       "manifestFields": ["balanceAdapters"],
@@ -1137,6 +1144,11 @@
     {
       "field": "sharedMemoryAdapters",
       "capabilities": ["shared-memory-adapter"],
+      "execution": "host"
+    },
+    {
+      "field": "subscriptionProviders",
+      "capabilities": ["subscription-provider"],
       "execution": "host"
     },
     {

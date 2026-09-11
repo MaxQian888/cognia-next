@@ -585,3 +585,12 @@ describe("plugin point contracts", () => {
     })
   })
 })
+
+it("exposes declarative subscription providers without credential permissions", () => {
+  const contract = getRuntimePointContract("subscription.provider")
+  expect(contract.kind).toBe("runtime")
+  expect(contract.binding).toBe(
+    "lib/subscription/core/provider-registry.ts:registerPluginSubscriptionProvider"
+  )
+  expect(contract.permission).toBeUndefined()
+})

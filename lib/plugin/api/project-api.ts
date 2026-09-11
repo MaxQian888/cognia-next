@@ -47,7 +47,7 @@ export function createProjectAPI(pluginId: string): PluginProjectAPI {
 
     deleteProject: async (id: string) => {
       const store = useProjectStore.getState()
-      store.deleteProject(id)
+      await store.deleteProject(id)
       logger.info(`Deleted project: ${id}`)
     },
 

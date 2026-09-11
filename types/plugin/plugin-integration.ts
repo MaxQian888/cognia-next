@@ -378,7 +378,7 @@ export interface IntegrationActionJob {
   nextAttemptAt?: string
   output?: unknown
   error?: string
-  source: "manual" | "workflow" | "inbox"
+  source: "manual" | "workflow" | "inbox" | "chat"
   createdAt: string
   updatedAt: string
 }

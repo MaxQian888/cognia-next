@@ -35,7 +35,7 @@ import { loggers } from "@cognia/logging"
 
 import stagedCatalog from "./bundled-plugins.generated.json"
 
-const log = loggers.manager.child("bundled-plugin-seed")
+const log = loggers.plugin.child("bundled-plugin-seed")
 
 /** Where the staged plugin directories sit inside the bundle. */
 export const STAGED_PLUGIN_ROOT = "resources/plugins"

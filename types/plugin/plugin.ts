@@ -212,6 +212,7 @@ export type PluginCapability =
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
   | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
+  | "subscription-provider" // Declarative API-key subscription setup; credentials remain host-owned
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
   | "provider-operation-adapter" // Serves one provider operation (ADR-0163) for a provider, a protocol, or everyone
@@ -888,6 +889,9 @@ export interface PluginManifest {
    * `shared-memory-adapter-registry` on enable.
    */
   sharedMemoryAdapters?: import("./plugin-shared-memory-adapter").PluginSharedMemoryAdapterDef[]
+
+  /** Declarative subscription setup; the host owns credential entry and storage. */
+  subscriptionProviders?: import("@/types/subscription/provider-definition").PluginSubscriptionProviderDefinition[]
 
   /**
    * Subscription balance adapters contributed by this plugin

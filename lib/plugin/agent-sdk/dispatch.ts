@@ -17,6 +17,7 @@
 
 import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 import type {
   PluginDispatchSubagentOptions,
   PluginRunTeamOptions,
@@ -146,8 +147,17 @@ export async function dispatchSubagent(
   // preset. External agents run their own loop and do not nest back in, so the
   // depth/budget threading stops here.
   const externalPresetId = options.externalAgentId ?? def.externalPresetId
+  const cogniaModel = normalizeCogniaModelBinding(
+    options.cogniaModel === undefined ? def.cogniaModel : options.cogniaModel
+  )
+  if (cogniaModel && !externalPresetId) {
+    throw new Error("A Cognia gateway model binding requires an external subagent preset")
+  }
   if (externalPresetId) {
-    const ext = await runExternalSubagent(externalPresetId, prompt, def, options)
+    const ext = await runExternalSubagent(externalPresetId, prompt, def, {
+      ...options,
+      cogniaModel,
+    })
     return { ...ext, runId }
   }
 
@@ -368,7 +378,10 @@ async function runExternalSubagent(
   }
 
   const manager = getExternalAgentManager()
-  const existing = manager.getAllAgents().find((inst) => isFromPreset(inst.config) === presetId)
+  const cogniaModel = options.cogniaModel
+  const existing = manager
+    .getAllAgents()
+    .find((inst) => isFromPreset(inst.config) === presetId && !inst.config.cogniaModel)
   let agentId: string
   if (existing) {
     agentId = existing.config.id
@@ -379,7 +392,7 @@ async function runExternalSubagent(
         `dispatchSubagent: external preset "${presetId}" is not registered — enable the plugin that contributes it, or use a built-in preset.`
       )
     }
-    await manager.addAgent(config)
+    await manager.addAgent(config, { connect: !cogniaModel })
     agentId = config.id
   }
 
@@ -410,6 +423,8 @@ async function runExternalSubagent(
   const onEvent = options._onEvent ? pipeExternalEventsToCapture(options._onEvent) : undefined
 
   const result = await manager.execute(agentId, prompt, {
+    // A preset names an executable, not another saved agent's model/account.
+    cogniaModel: cogniaModel ?? null,
     ...(def.prompt ? { systemPrompt: def.prompt } : {}),
     // Honor the subagent's declared model on the external CLI too (the sidecar
     // path already threads `def.model`). Best-effort per the manager.

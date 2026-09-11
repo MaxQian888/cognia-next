@@ -173,6 +173,8 @@ export interface PluginDispatchSubagentOptions {
    * (Thread A2). Overrides the subagent def's own `externalPresetId` when set.
    */
   externalAgentId?: string
+  /** Override the external subagent's Cognia model/account; null explicitly selects its native model. */
+  cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
   /**
    * Detach the run: return `{ runId, backgrounded: true }` immediately and let
    * the result be collected later via the background registry. Default false

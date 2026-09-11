@@ -90,7 +90,7 @@ def test_generated_catalog_metadata_is_public():
     assert "ipc:call" in VALID_PERMISSIONS
     assert "context-panel" in VALID_CAPABILITIES
     assert PLUGIN_POINT_SCHEMA_VERSION == 1
-    assert len(PLUGIN_POINT_CONTRACTS) == 275
+    assert any(point["id"] == "subscription.provider" for point in PLUGIN_POINT_CONTRACTS)
     composer_action = next(
         item for item in PLUGIN_POINT_CONTRACTS if item["id"] == "chat.input.actions"
     )

@@ -62,6 +62,7 @@ function makeCtx(manifest: PluginManifest): ModuleBridgeContext {
     resolveAsset: (root, rel) => `${root}/${rel}`,
     moduleExports: {},
     hasPermission: () => true,
+    registerAgentTool: () => () => {},
   }
 }
 

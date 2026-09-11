@@ -13,7 +13,7 @@ import {
 } from "./seed-bundled-plugins"
 
 jest.mock("@cognia/logging", () => ({
-  loggers: { manager: { child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn() }) } },
+  loggers: { plugin: { child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn() }) } },
 }))
 
 const CATALOG = {

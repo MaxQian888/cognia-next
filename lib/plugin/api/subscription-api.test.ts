@@ -1,3 +1,7 @@
+import {
+  registerPluginSubscriptionProvider,
+  unregisterSubscriptionProvidersByPlugin,
+} from "@/lib/subscription/core/provider-registry"
 /**
  * Tests for the read-only Subscription Plugin API (`ctx.subscription`).
  *
@@ -56,6 +60,11 @@ const table = {
 }
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ subscriptionUsage: table }) }))
 
+const customProviders: unknown[] = []
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: { getState: () => ({ settings: { customProviders } }) },
+}))
+
 const PLUGIN = "sub-plugin"
 
 describe("createSubscriptionAPI", () => {
@@ -63,6 +72,7 @@ describe("createSubscriptionAPI", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    customProviders.length = 0
     creatingHooks.clear()
     resetPermissionGuard()
     guard = getPermissionGuard()
@@ -80,9 +90,38 @@ describe("createSubscriptionAPI", () => {
 
     it("lists providers and accounts", async () => {
       const api = createSubscriptionAPI(PLUGIN)
-      expect(api.providers()).toEqual(["anthropic", "codex", "opencode"])
+      expect(api.providers()).toEqual(["anthropic", "codex", "opencode", "commandcode"])
       expect(await api.listAccounts("anthropic")).toHaveLength(2)
       expect(listAccounts).toHaveBeenCalledWith("anthropic")
+    })
+
+    it("lists current custom and enabled plugin definitions without exposing credentials", () => {
+      customProviders.push({
+        id: "custom-example",
+        customName: "Custom",
+        baseURL: "https://example.com/v1",
+        apiProtocol: "openai",
+        customModels: ["model"],
+        subscription: {},
+        apiKey: "must-not-leak",
+      })
+      registerPluginSubscriptionProvider(
+        {
+          id: "example",
+          name: "Plugin",
+          baseUrl: "https://example.com/v1",
+          protocol: "openai",
+          models: ["model"],
+        },
+        "subscription-api-test"
+      )
+      const api = createSubscriptionAPI(PLUGIN)
+      expect(api.providers()).toEqual(
+        expect.arrayContaining(["custom-example", "subscription-api-test:example"])
+      )
+      expect(JSON.stringify(api.providers())).not.toContain("must-not-leak")
+      unregisterSubscriptionProvidersByPlugin("subscription-api-test")
+      expect(api.providers()).not.toContain("subscription-api-test:example")
     })
 
     it("getActiveAccountId returns only the id — never the env bearer", async () => {

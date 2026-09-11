@@ -65,6 +65,7 @@ describe("plugin-sdk root barrel", () => {
       "defineExternalAgentAdapter",
       "defineSessionImporter",
       "defineSharedMemoryAdapter",
+      "defineSubscriptionProvider",
       "defineBalanceAdapter",
       "defineLimitsSource",
       "defineImRateSource",
@@ -121,15 +122,15 @@ describe("plugin-sdk root barrel", () => {
    * narrow to the ladder a provider/model actually honours.
    */
   it("publishes the narrowing helpers alongside the tier vocabulary", () => {
-    expect(rootBarrel.availableThinkingLevels).toBeInstanceOf(Function)
-    expect(rootBarrel.clampThinkingLevel).toBeInstanceOf(Function)
-    expect(rootBarrel.visibleThinkingLevels).toBeInstanceOf(Function)
+    expect(sdk.availableThinkingLevels).toBeInstanceOf(Function)
+    expect(sdk.clampThinkingLevel).toBeInstanceOf(Function)
+    expect(sdk.visibleThinkingLevels).toBeInstanceOf(Function)
 
     // The offered ladder is depths only. `off` is not one, so a plugin that
     // wants it has to add it deliberately rather than find it here.
     expect(rootBarrel.externalAgentThinkingLevels).toBeInstanceOf(Function)
 
-    const offered = rootBarrel.availableThinkingLevels({
+    const offered = sdk.availableThinkingLevels({
       providerId: "openai",
       modelId: "gpt-5",
     })
@@ -140,8 +141,8 @@ describe("plugin-sdk root barrel", () => {
     if (offered.includes("ultracode")) expect(offered).toContain("xhigh")
 
     // A tier the surface cannot honour folds DOWN for display, never echoes back.
-    expect(rootBarrel.clampThinkingLevel("max", ["low", "medium", "high"])).toBe("high")
-    expect(rootBarrel.visibleThinkingLevels(["low", "medium", "high"], ["medium"])).toEqual([
+    expect(sdk.clampThinkingLevel("max", ["low", "medium", "high"])).toBe("high")
+    expect(sdk.visibleThinkingLevels(["low", "medium", "high"], ["medium"])).toEqual([
       "low",
       "high",
     ])
@@ -154,11 +155,11 @@ describe("plugin-sdk root barrel", () => {
    * the hidden-tier preference, none of which a session row carries.
    */
   it("publishes the composed effort surface, not just the vocabulary to rebuild it", () => {
-    expect(rootBarrel.resolveEffortSurface).toBeInstanceOf(Function)
+    expect(sdk.resolveEffortSurface).toBeInstanceOf(Function)
 
     // The pure half answers from values alone, so a plugin can reason about a
     // hypothetical surface without touching a store.
-    const external = rootBarrel.resolveEffortSurface({ runtime: "external" })
+    const external = sdk.resolveEffortSurface({ runtime: "external" })
     expect(external.external).toBe(true)
     expect(external.levels).not.toContain("ultracode")
   })

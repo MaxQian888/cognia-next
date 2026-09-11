@@ -458,6 +458,8 @@ describe("Permission API", () => {
       "ipc:expose",
       "events:publish",
       "events:subscribe",
+      "commands:read",
+      "commands:write",
     ] as const satisfies readonly PluginAPIPermission[]
 
     // Compile-time exhaustiveness: if a future PluginAPIPermission member is

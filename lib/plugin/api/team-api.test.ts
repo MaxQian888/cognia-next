@@ -36,6 +36,11 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: null, projects: [] }) },
 }))
 
+const purgeAgentTeam = jest.fn(async (_teamId: string) => {})
+jest.mock("@/lib/db/agent-team-runtime", () => ({
+  purgeAgentTeam: (id: string) => purgeAgentTeam(id),
+}))
+
 const startSquadRun = jest.fn(async () => ({ started: true, runId: "run_team_1" }))
 jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
   startSquadRun: (...args: unknown[]) => startSquadRun(...(args as [])),
@@ -85,7 +90,7 @@ const mirroredSaveDraft = jest.fn(async (input: unknown) => input)
 jest.mock("@/lib/templates/runtime", () => ({
   getTemplateRuntime: () => ({
     repository: { getDraft: (...a: unknown[]) => mirroredDraft(...(a as [])) },
-    service: { saveDraft: (...a: unknown[]) => mirroredSaveDraft(...(a as [])) },
+    service: { saveDraft: (...a: unknown[]) => mirroredSaveDraft(...(a as [unknown])) },
   }),
 }))
 
@@ -178,6 +183,15 @@ describe("createTeamAPI", () => {
       expect(await api.deleteTeam("ghost")).toBe(false)
       expect(await api.deleteTeam(team.id)).toBe(true)
       expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
+    })
+
+    it("preserves the team and reports native cleanup failure", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      purgeAgentTeam.mockRejectedValueOnce(new Error("native cleanup failed"))
+      await expect(api.deleteTeam(team.id)).rejects.toThrow("native cleanup failed")
+      expect(useAgentTeamStore.getState().teams[team.id]).toBeDefined()
     })
 
     it("duplicateTeam copies the roster and starts the copy idle", async () => {

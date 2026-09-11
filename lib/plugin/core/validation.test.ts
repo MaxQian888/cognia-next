@@ -58,6 +58,37 @@ describe("Plugin Validation", () => {
       expect(result.errors).toHaveLength(0)
     })
 
+    it("validates declarative subagent gateway bindings without accepting secret fields", () => {
+      const manifest = {
+        ...createValidManifest(),
+        capabilities: ["subagent"],
+        subagents: [
+          {
+            id: "coder",
+            name: "Coder",
+            description: "Writes code",
+            prompt: "Code",
+            externalPresetId: "codex-app-server",
+            cogniaModel: {
+              providerId: "plugin:kimi:subscription",
+              modelId: "kimi-for-coding",
+              accountId: "account-a",
+            },
+          },
+        ],
+      }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+      Object.assign(manifest.subagents[0].cogniaModel, { apiKey: "not-permitted" })
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "subagents[0].cogniaModel",
+            code: "manifest.subagent.invalid_cognia_model",
+          }),
+        ])
+      )
+    })
+
     it("accepts every value in the exported selection vocabularies", () => {
       // The guard against the drift that used to be possible: a value could be
       // added to the union and to `classifySelection`, compile everywhere, and
@@ -80,7 +111,7 @@ describe("Plugin Validation", () => {
               ]
               const result = validatePluginManifest(manifest)
               expect(
-                result.errors.filter((error) =>
+                result.diagnostics?.filter((error) =>
                   error.field?.startsWith("quickActions[0].selection")
                 )
               ).toEqual([])
@@ -133,13 +164,13 @@ describe("Plugin Validation", () => {
     })
 
     it("validates runtime compatibility profiles and availability values", () => {
-      const manifest = createValidManifest() as PluginManifest & {
-        runtimeCompatibility: Record<string, unknown>
-      }
-      manifest.runtimeCompatibility = {
-        tauri: { availability: "full" },
-        electron: { availability: "supported" },
-        mobile: { availability: "degraded", reason: 42 },
+      const manifest = {
+        ...createValidManifest(),
+        runtimeCompatibility: {
+          tauri: { availability: "full" },
+          electron: { availability: "supported" },
+          mobile: { availability: "degraded", reason: 42 },
+        },
       }
 
       const result = validatePluginManifest(manifest)
@@ -3422,5 +3453,63 @@ describe("manifest.bots validation", () => {
       validatePluginManifest(manifestWith([bot({ triggers: [{ id: "run", kind: "manual" }] })]))
         .valid
     ).toBe(true)
+  })
+})
+
+describe("declarative subscriptionProviders validation", () => {
+  const definition = {
+    id: "example",
+    name: "Example",
+    baseUrl: "https://example.com/v1",
+    protocol: "openai",
+    models: ["model"],
+  }
+  const manifest = (subscriptionProviders: unknown, capabilities = ["subscription-provider"]) => ({
+    id: "subscription-test",
+    name: "Subscription Test",
+    version: "1.0.0",
+    description: "Test",
+    type: "frontend",
+    main: "index.js",
+    capabilities,
+    subscriptionProviders,
+  })
+  it("accepts host-owned setup metadata without secret permissions", () => {
+    expect(validatePluginManifest(manifest([definition])).valid).toBe(true)
+  })
+  it.each([
+    null,
+    "bad",
+    [null],
+    [{ ...definition, baseUrl: "file:///etc/passwd" }],
+    [{ ...definition, models: [{}] }],
+    [{ ...definition, apiKey: "secret" }],
+    [{ ...definition, fetch: () => null }],
+    [definition, definition],
+  ])("rejects invalid declarations before plugin activation: %p", (value) => {
+    const result = validatePluginManifest(manifest(value))
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.subscriptionProviders.invalid" }),
+      ])
+    )
+  })
+  it("rejects ids shared with aiProviders in the same plugin", () => {
+    const result = validatePluginManifest({
+      ...manifest([definition]),
+      aiProviders: [{ id: "example" }],
+    })
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "manifest.subscriptionProviders.invalid",
+          message: expect.stringContaining("collides"),
+        }),
+      ])
+    )
+  })
+  it("requires the corresponding capability", () => {
+    expect(validatePluginManifest(manifest([definition], [])).valid).toBe(false)
   })
 })

@@ -100,6 +100,7 @@ pub fn python_host_scope(
         cwd: scratch.clone(),
         writable: vec![scratch],
         readable,
+        denied_readable: Vec::new(),
         network: true,
     }
 }

@@ -19,6 +19,7 @@
  */
 
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 import { createOverlayRegistry } from "./createOverlayRegistry"
 import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 
@@ -39,7 +40,10 @@ const registry = createOverlayRegistry<PluginSubagentDef>({
 })
 
 /** Register a plugin-contributed subagent. */
-export const registerSubagent = registry.register
+export const registerSubagent: typeof registry.register = (id, entry, options) => {
+  normalizeCogniaModelBinding(entry.cogniaModel)
+  return registry.register(id, entry, options)
+}
 /** Drop a single dynamically-registered subagent by id. */
 export const unregisterSubagentById = registry.unregisterById
 /** Drop every subagent contributed by `pluginId`. Returns the number removed. */

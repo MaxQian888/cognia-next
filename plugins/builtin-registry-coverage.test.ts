@@ -41,6 +41,8 @@ const PLUGINS_ROOT = join(__dirname)
  * reviewed decision, not an accident. Keyed by `plugin.json` id.
  */
 const INTENTIONALLY_UNBUNDLED: Readonly<Record<string, string>> = Object.freeze({
+  "cognia-kimi-subscription":
+    "Installable desktop subscription reference plugin — built as a local ZIP and enabled explicitly, not bundled by default.",
   "cognia-test-lsp-contribution":
     "Phase-B LSP fixture — exercised by its own co-located suite (which drives the bundled echo-lsp server over real stdio framing), not shipped to end users.",
   "cognia-pro-ide-fixture":

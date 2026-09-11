@@ -1,3 +1,9 @@
+import {
+  validateSubscriptionProvider,
+  isValidSubscriptionProviderId,
+} from "@/lib/subscription/core/provider-registry"
+import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
+import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 /**
  * Plugin Validation - Validates plugin manifests and configurations
  */
@@ -2374,6 +2380,66 @@ export function validatePluginManifest(
     pushWarning,
     m.type
   )
+
+  if (Array.isArray(m.subagents)) {
+    m.subagents.forEach((entry, index) => {
+      if (!entry || typeof entry !== "object") return
+      try {
+        normalizeCogniaModelBinding(entry.cogniaModel)
+      } catch (error) {
+        pushError(
+          `subagents[${index}].cogniaModel`,
+          "manifest.subagent.invalid_cognia_model",
+          error instanceof Error ? error.message : "Invalid Cognia model binding"
+        )
+      }
+    })
+  }
+
+  if (m.subscriptionProviders !== undefined) {
+    if (!Array.isArray(m.capabilities) || !m.capabilities.includes("subscription-provider")) {
+      pushError(
+        "subscriptionProviders",
+        "manifest.subscriptionProviders.capability_required",
+        "subscriptionProviders requires the subscription-provider capability"
+      )
+    }
+    if (!Array.isArray(m.subscriptionProviders)) {
+      pushError(
+        "subscriptionProviders",
+        "manifest.subscriptionProviders.invalid",
+        "subscriptionProviders must be an array"
+      )
+    } else {
+      const ids = new Set<string>()
+      for (const [index, raw] of m.subscriptionProviders.entries()) {
+        try {
+          const definition = raw as PluginSubscriptionProviderDefinition
+          validateSubscriptionProvider(definition)
+          if (!isValidSubscriptionProviderId(`${m.id}:${definition.id}`))
+            throw new Error("Invalid namespaced subscription provider id")
+          if (ids.has(definition.id)) throw new Error("Duplicate subscription provider id")
+          if (
+            Array.isArray(m.aiProviders) &&
+            m.aiProviders.some(
+              (provider) =>
+                provider &&
+                typeof provider === "object" &&
+                (provider as { id?: unknown }).id === definition.id
+            )
+          )
+            throw new Error("Subscription provider id collides with an AI provider contribution")
+          ids.add(definition.id)
+        } catch (error) {
+          pushError(
+            `subscriptionProviders[${index}]`,
+            "manifest.subscriptionProviders.invalid",
+            error instanceof Error ? error.message : "Invalid subscription provider"
+          )
+        }
+      }
+    }
+  }
 
   validateDeclarativeExtensions(m as unknown as PluginManifest, pushError)
   validateDeclarativeTrayItems(m as unknown as PluginManifest, pushError)

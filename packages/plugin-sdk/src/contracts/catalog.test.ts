@@ -1,3 +1,4 @@
+import sourcePluginPoints from "../../contract/plugin-points.json"
 import {
   AUTHOR_CAPABILITY_CONTRACTS,
   AUTHOR_PLUGIN_POINT_CONTRACTS,
@@ -93,7 +94,7 @@ describe("canonical plugin author contract", () => {
   it("exposes every plugin point through the language-neutral author contract", () => {
     expect(PLUGIN_POINT_CONTRACT_SCHEMA_VERSION).toBe(1)
     expect(CANONICAL_PLUGIN_POINT_KINDS).toEqual(["ui-slot", "hook", "activation", "runtime"])
-    expect(AUTHOR_PLUGIN_POINT_CONTRACTS).toHaveLength(275)
+    expect(AUTHOR_PLUGIN_POINT_CONTRACTS).toHaveLength(sourcePluginPoints.pluginPoints.length)
     expect(
       new Set(AUTHOR_PLUGIN_POINT_CONTRACTS.map((point) => `${point.kind}:${point.id}`)).size
     ).toBe(AUTHOR_PLUGIN_POINT_CONTRACTS.length)
@@ -110,5 +111,14 @@ describe("canonical plugin author contract", () => {
         replacementId: "onTool:*",
       })
     )
+  })
+})
+
+it("catalogs subscriptions as host-executed declarative metadata", () => {
+  expect(CANONICAL_PLUGIN_CAPABILITIES).toContain("subscription-provider")
+  expect(PLUGIN_MANIFEST_CONTRIBUTIONS).toContainEqual({
+    field: "subscriptionProviders",
+    capabilities: ["subscription-provider"],
+    execution: "host",
   })
 })

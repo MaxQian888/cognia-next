@@ -266,6 +266,12 @@ export { defineExternalAgentPreset } from "./define/define-external-agent-preset
 export { defineExternalAgentAdapter } from "./define/define-external-agent-adapter"
 export { defineSessionImporter } from "./define/define-session-importer"
 export { defineSharedMemoryAdapter } from "./define/define-shared-memory-adapter"
+export { defineSubscriptionProvider } from "./define/define-subscription-provider"
+export type {
+  PluginSubscriptionProviderDefinition,
+  SubscriptionModelDefinition,
+  SubscriptionModelApi,
+} from "@/types/subscription/provider-definition"
 export { defineBalanceAdapter } from "./define/define-balance-adapter"
 export { defineLimitsSource } from "./define/define-limits-source"
 export { defineProviderOperationAdapter } from "./define/define-provider-operation-adapter"
@@ -332,6 +338,7 @@ export {
 export type {
   AcpPermissionResponse,
   ExternalAgentConfig,
+  ExternalAgentCogniaModelBinding,
   ExternalAgentEvent,
   ExternalAgentExecutionBlockAssessment,
   ExternalAgentExecutionOptions,

@@ -192,6 +192,7 @@ VALID_CAPABILITIES = (
     "template-package",
     "agent-team-template",
     "shared-memory-adapter",
+    "subscription-provider",
     "balance-adapter",
     "limits-source",
     "provider-operation-adapter",
@@ -335,6 +336,9 @@ CAPABILITY_FIELDS = {
     "shared-memory-adapter": [
         "sharedMemoryAdapters",
     ],
+    "subscription-provider": [
+        "subscriptionProviders",
+    ],
     "balance-adapter": [
         "balanceAdapters",
     ],
@@ -456,6 +460,7 @@ CAPABILITY_SUPPORT = {
     "template-package": "supported",
     "agent-team-template": "supported",
     "shared-memory-adapter": "supported",
+    "subscription-provider": "supported",
     "balance-adapter": "supported",
     "limits-source": "supported",
     "provider-operation-adapter": "supported",
@@ -529,6 +534,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "template-package": "0.1.0",
     "agent-team-template": "0.1.0",
     "shared-memory-adapter": "0.1.0",
+    "subscription-provider": "0.1.0",
     "balance-adapter": "0.1.0",
     "limits-source": "0.1.0",
     "provider-operation-adapter": "0.1.0",
@@ -602,6 +608,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "template-package": "0.1.0",
     "agent-team-template": "0.1.0",
     "shared-memory-adapter": "0.1.0",
+    "subscription-provider": "0.1.0",
     "balance-adapter": "0.1.0",
     "limits-source": "0.1.0",
     "provider-operation-adapter": "0.1.0",
@@ -893,6 +900,13 @@ MANIFEST_CONTRIBUTIONS = [
         "field": "sharedMemoryAdapters",
         "capabilities": [
             "shared-memory-adapter",
+        ],
+        "execution": "host",
+    },
+    {
+        "field": "subscriptionProviders",
+        "capabilities": [
+            "subscription-provider",
         ],
         "execution": "host",
     },
@@ -3119,6 +3133,13 @@ PLUGIN_POINT_CONTRACTS = [
         "status": "implemented",
         "introducedIn": "0.5.0",
         "permission": "connectors:read",
+    },
+    {
+        "id": "subscription.provider",
+        "kind": "runtime",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.5.0",
     },
     {
         "id": "subscription.balance-adapter",

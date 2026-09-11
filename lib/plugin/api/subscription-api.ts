@@ -15,6 +15,8 @@
  * the Settings UI. Gated by `subscription:read`.
  */
 
+import { listSubscriptionProviders } from "@/lib/subscription/core/provider-registry"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { listAccounts, getActiveAccount } from "@/lib/subscription/core/transport"
 import { getDb } from "@/lib/db/schema"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
@@ -45,8 +47,6 @@ export interface PluginSubscriptionAPI {
   onUsageUpdate(handler: (snapshot: PluginUsageSnapshot) => void): () => void
 }
 
-const PROVIDERS: readonly ProviderId[] = ["anthropic", "codex", "opencode"] as const
-
 /** Drop the sensitive `rawHeaders` + internal `localId` from a usage row. */
 function sanitizeUsage(row: SubscriptionUsageRow | UsageSnapshot): PluginUsageSnapshot {
   const { rawHeaders: _rawHeaders, ...rest } = row as SubscriptionUsageRow
@@ -60,7 +60,10 @@ function sanitizeUsage(row: SubscriptionUsageRow | UsageSnapshot): PluginUsageSn
  */
 export function createSubscriptionAPI(pluginId: string): PluginSubscriptionAPI {
   const api: PluginSubscriptionAPI = {
-    providers: () => PROVIDERS,
+    providers: () =>
+      listSubscriptionProviders(useSettingsStore.getState().settings?.customProviders).map(
+        (provider) => provider.id
+      ),
     listAccounts: (provider) => listAccounts(provider),
     getActiveAccountId: async (provider) => {
       // Strip the snapshot's `env` (OAuth bearer) — only the id leaves.

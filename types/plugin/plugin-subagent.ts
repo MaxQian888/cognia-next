@@ -85,6 +85,8 @@ export interface PluginSubagentDef {
    * the built-in executor. `prompt` / `tools` remain advisory.
    */
   externalPresetId?: string
+  /** Task-scoped Cognia model/account for an external preset; null keeps native model selection. */
+  cogniaModel?: import("@/types/agent/external-agent").ExternalAgentCogniaModelBinding | null
   /**
    * MCP server ids/names to forward into the external agent's ACP session
    * (`session/new` `mcpServers`) when this subagent runs on an external preset.

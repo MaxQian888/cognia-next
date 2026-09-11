@@ -1,3 +1,4 @@
+import { getSubscriptionProvider } from "@/lib/subscription/core/provider-registry"
 /**
  * Drift guard for the overlay-registry capability map (PR-D).
  *
@@ -38,6 +39,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "subagent",
         "agent-team-template",
         "shared-memory-adapter",
+        "subscription-provider",
         "balance-adapter",
         "limits-source",
         "provider-operation-adapter",
@@ -55,7 +57,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(20)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(21)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {
@@ -94,7 +96,16 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
     })
 
     it("round-trips an entry through register + unregister cleanly", () => {
-      const entry = { id: `pr-d-test-${key}`, _testTag: true }
+      const entry =
+        key === "subscription-provider"
+          ? {
+              id: "example",
+              name: "Example",
+              baseUrl: "https://example.com/v1",
+              protocol: "openai",
+              models: ["model"],
+            }
+          : { id: `pr-d-test-${key}`, _testTag: true }
       const ctx = { pluginId: `pr-d-test-plugin-${key}` }
       // Should not throw — registries are idempotent under PR-D's
       // contract.
@@ -200,4 +211,25 @@ describe("converted plugin-root tokens", () => {
 
     expect(getSubagent("reviewer")?.prompt).toBe(`Read ${installRoot}/references/policy.md`)
   })
+})
+
+it("namespaces declarative subscriptions on enable and removes only that plugin on disable", () => {
+  const capability = OVERLAY_REGISTRY_CAPABILITIES["subscription-provider"]
+  const definition = {
+    id: "example",
+    name: "Example",
+    baseUrl: "https://example.com/v1",
+    protocol: "openai",
+    models: ["model"],
+  }
+  capability.registerEntry(definition, { pluginId: "subscription-plugin-a" })
+  capability.registerEntry(definition, { pluginId: "subscription-plugin-b" })
+  expect(getSubscriptionProvider("subscription-plugin-a:example")).toMatchObject({
+    source: "plugin",
+    authMode: "api-key",
+  })
+  expect(capability.unregisterAllByPlugin("subscription-plugin-a")).toBe(1)
+  expect(getSubscriptionProvider("subscription-plugin-a:example")).toBeUndefined()
+  expect(getSubscriptionProvider("subscription-plugin-b:example")).toBeDefined()
+  capability.unregisterAllByPlugin("subscription-plugin-b")
 })

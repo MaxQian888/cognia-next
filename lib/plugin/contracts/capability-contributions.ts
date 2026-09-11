@@ -23,6 +23,7 @@ export interface CapabilityContribution {
 }
 
 interface ContributionManifestShape {
+  providerOperationAdapters?: Array<{ id?: string; name?: string; operationId?: string }>
   tools?: Array<{ id?: string; name?: string }>
   nativeAnthropicTools?: Array<{ name?: string; type?: string }>
   skills?: Array<{ id?: string; name?: string }>
@@ -67,6 +68,7 @@ interface ContributionManifestShape {
   templatePackages?: Array<{ manifest?: { id?: string; name?: string } }>
   agentTeamTemplates?: Array<{ id?: string; name?: string }>
   sharedMemoryAdapters?: Array<{ id?: string; name?: string }>
+  subscriptionProviders?: Array<{ id?: string; name?: string }>
   balanceAdapters?: Array<{ id?: string; name?: string; key?: string }>
   limitsSources?: Array<{ id?: string; name?: string; key?: string }>
   compactionStrategies?: Array<{ id?: string; label?: string }>
@@ -194,6 +196,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.agentTeamTemplates).map((s) => entry(s.id, s.name)))
     case "shared-memory-adapter":
       return compact(asArray(m.sharedMemoryAdapters).map((s) => entry(s.id, s.name)))
+    case "subscription-provider":
+      return compact(asArray(m.subscriptionProviders).map((s) => entry(s.id, s.name)))
     case "balance-adapter":
       return compact(asArray(m.balanceAdapters).map((s) => entry(s.id, s.name ?? s.key)))
     case "limits-source":

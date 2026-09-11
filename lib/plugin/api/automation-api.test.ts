@@ -265,7 +265,9 @@ describe("picture-in-picture live view", () => {
   // The PiP surface had no producer on this path: its only publishers lived in
   // the OCR fallback module, so during a real computer-use turn the component
   // mounted, saw no activity, and never appeared.
-  const guardFor = (permissions: string[]) => {
+  const guardFor = (
+    permissions: Parameters<ReturnType<typeof getPermissionGuard>["registerPlugin"]>[1]
+  ) => {
     resetPermissionGuard()
     const g = getPermissionGuard({ confirmDangerousByDefault: false })
     g.registerPlugin(PLUGIN, permissions)

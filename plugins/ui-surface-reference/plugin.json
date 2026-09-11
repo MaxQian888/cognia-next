@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Reference plugin exercising every supported Cognia plugin UI surface.",
   "type": "frontend",
-  "author": "cognia-next",
+  "author": { "name": "cognia-next" },
   "license": "MIT",
   "minAppVersion": "0.1.0",
   "engines": {

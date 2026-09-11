@@ -24,6 +24,7 @@ export type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-extern
 export type {
   AcpPermissionResponse,
   ExternalAgentConfig,
+  ExternalAgentCogniaModelBinding,
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,

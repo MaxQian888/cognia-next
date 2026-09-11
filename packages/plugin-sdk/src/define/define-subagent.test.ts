@@ -29,6 +29,12 @@ describe("defineSubagent", () => {
       model: "sonnet",
       maxTurns: 8,
       effort: "high",
+      externalPresetId: "codex-app-server",
+      cogniaModel: {
+        providerId: "plugin:kimi:subscription",
+        modelId: "kimi-for-coding",
+        accountId: "coding",
+      },
     }
 
     expect(defineSubagent(def)).toMatchObject({
@@ -37,7 +43,29 @@ describe("defineSubagent", () => {
       model: "sonnet",
       maxTurns: 8,
       effort: "high",
+      cogniaModel: {
+        providerId: "plugin:kimi:subscription",
+        modelId: "kimi-for-coding",
+        accountId: "coding",
+      },
     })
+  })
+
+  it.each([
+    { providerId: "", modelId: "kimi" },
+    { providerId: "kimi", modelId: "" },
+    { providerId: "kimi", modelId: "kimi", accountId: "" },
+    { providerId: "kimi", modelId: "kimi", apiKey: "must-not-be-a-binding" },
+  ])("rejects invalid or secret-bearing Cognia bindings", (cogniaModel) => {
+    expect(() =>
+      defineSubagent({
+        id: "coder",
+        name: "Coder",
+        description: "Writes code",
+        prompt: "Code",
+        cogniaModel,
+      })
+    ).toThrow("Invalid Cognia model binding")
   })
 
   it("accepts typed tool definitions and projects them to runtime names", () => {

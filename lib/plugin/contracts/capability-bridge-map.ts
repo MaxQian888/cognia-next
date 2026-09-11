@@ -1,3 +1,8 @@
+import type { PluginSubscriptionProviderDefinition } from "@/types/subscription/provider-definition"
+import {
+  registerPluginSubscriptionProvider,
+  unregisterSubscriptionProvidersByPlugin,
+} from "@/lib/subscription/core/provider-registry"
 /**
  * Codified registry: which `PluginCapability` values feed which
  * overlay-registry register/unregister pair (the `createOverlayRegistry`
@@ -362,6 +367,13 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerSharedMemoryAdapter(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
+  }),
+  "subscription-provider": defineOverlayCapability<PluginSubscriptionProviderDefinition>({
+    manifestField: "subscriptionProviders",
+    registerEntry: (definition, context) => {
+      registerPluginSubscriptionProvider(definition, context.pluginId)
+    },
+    unregisterAllByPlugin: unregisterSubscriptionProvidersByPlugin,
   }),
   "balance-adapter": defineOverlayCapability<PluginBalanceAdapterDef>({
     // Plugin contributes a subscription balance adapter. Registered verbatim

@@ -59,8 +59,9 @@ jest.mock("@tauri-apps/api/core", () => ({
 
 jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: {
-    call: (...args: unknown[]) => mockTransportCall(...args),
-    subscribe: (...args: unknown[]) => mockTransportSubscribe(...args),
+    call: (...args: Parameters<typeof mockTransportCall>) => mockTransportCall(...args),
+    subscribe: (...args: Parameters<typeof mockTransportSubscribe>) =>
+      mockTransportSubscribe(...args),
   },
 }))
 
@@ -5957,6 +5958,7 @@ describe("PluginManager", () => {
           loader: {
             load: jest.Mock
             isLoaded: (pluginId: string) => boolean
+            getRuntimeGeneration: (pluginId: string) => string | undefined
           }
         }
       ).loader

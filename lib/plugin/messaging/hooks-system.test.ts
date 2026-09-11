@@ -1,3 +1,4 @@
+import type { PluginManifest } from "@/types/plugin"
 /**
  * Plugin Hooks System Tests
  *

@@ -47,6 +47,23 @@ describe("subagent-registry", () => {
     expect(listSubagentIds()).toEqual([])
   })
 
+  it("validates dynamically registered model/account bindings before storing them", () => {
+    const cogniaModel = {
+      providerId: "plugin:kimi:subscription",
+      modelId: "kimi-for-coding",
+      accountId: "account-a",
+    }
+    registerSubagent("coder", makeSubagent("coder", { cogniaModel }))
+    expect(getSubagent("coder")?.cogniaModel).toEqual(cogniaModel)
+    expect(() =>
+      registerSubagent(
+        "bad",
+        makeSubagent("bad", { cogniaModel: { ...cogniaModel, accountId: "" } })
+      )
+    ).toThrow("Invalid Cognia model binding")
+    expect(getSubagent("bad")).toBeUndefined()
+  })
+
   it("unregisterByPlugin leaves entries from other plugins alone", () => {
     const a = makeSubagent("a")
     const b = makeSubagent("b")

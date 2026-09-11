@@ -66,6 +66,7 @@ describe("cognia-arknights-theme", () => {
   it("ships valid generated WebP wallpapers and a vector plugin icon", () => {
     for (const wallpaper of manifest.wallpapers) {
       if (wallpaper.source.kind !== "image") continue
+      if (!wallpaper.source.relPath) throw new Error("Wallpaper is missing its bundled path")
       const bytes = readFileSync(join(publicPluginRoot, wallpaper.source.relPath))
       expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF")
       expect(bytes.subarray(8, 12).toString("ascii")).toBe("WEBP")

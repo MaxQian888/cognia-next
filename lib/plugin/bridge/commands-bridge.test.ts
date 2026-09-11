@@ -164,7 +164,12 @@ describe("dispatchPythonCommand", () => {
   it("calls the bridged hook with exactly one structured argument", async () => {
     // The manager's python hook bridge packs `args.length <= 1 ? args[0] : args`
     // as the payload, so one argument is what makes the object arrive intact.
-    const hook = jest.fn(async () => ({ handled: true, message: "hi" }))
+    const hook = jest.fn(
+      async (..._args: Parameters<Parameters<typeof dispatchPythonCommand>[1]>) => ({
+        handled: true,
+        message: "hi",
+      })
+    )
     const result = await dispatchPythonCommand("py", hook, "hello", ["a"], { sessionId: "s1" })
     expect(hook).toHaveBeenCalledTimes(1)
     expect(hook.mock.calls[0]).toHaveLength(1)

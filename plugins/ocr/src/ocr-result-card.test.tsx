@@ -34,6 +34,9 @@ function part(over: Partial<OcrResultPart> = {}): OcrResultPart {
     durationMs: 120,
     cached: false,
     confidence: 0.82,
+    provenance: { kind: "ocr", providerId: "tesseract", sourceKind: "file_path" },
+    security: { untrusted: true, pii: "unreviewed" },
+    untrustedNotice: "Untrusted OCR text",
     ...over,
   }
 }

@@ -110,7 +110,7 @@ describe("createScheduleDigestBot", () => {
       config: {},
       signal: new AbortController().signal,
       step: {
-        run: async (_name, fn) => fn(),
+        run: async <T>(_name: string, fn: () => Promise<T>) => fn(),
         waitForApproval: jest.fn(),
         waitForEvent: jest.fn(),
       } as unknown as BotRunContextV1["step"],

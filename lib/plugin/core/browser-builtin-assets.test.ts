@@ -10,7 +10,7 @@ const asset = {
   url: "/_cognia/builtin-plugins/demo/demo.cjs",
   sha256,
   sharedModules: [],
-} as const
+}
 
 function mockResponse(
   body: string,

@@ -58,7 +58,7 @@ describe("collectPluginRuntimeProfileDiagnostics", () => {
     ).toEqual([expect.objectContaining({ severity: "warning", code: "runtime.headless.degraded" })])
     expect(
       collectPluginRuntimeProfileDiagnostics(
-        manifest({ runtimeCompatibility: { headless: { availability: "unsupported" } } }),
+        manifest({ runtimeCompatibility: { headless: { availability: "blocked" } } }),
         "headless"
       )
     ).toEqual([

@@ -3,6 +3,7 @@ import { canonicalTemplateStringify, createTemplateDefinition } from "@/lib/temp
 import { sha256Hex } from "@/lib/share/hash"
 import {
   createTemplatesAPI,
+  type PluginTemplateConfirmation,
   registerLegacyPluginTemplateCompatibility,
   registerPluginTemplatePackages,
   clearTemplatesForPluginContext,
@@ -174,7 +175,7 @@ describe("PluginTemplatesAPI", () => {
       provenance: { source: "user", trust: "unsigned" },
     }))
     const saveDraft = jest.fn(async (input) => ({ ...input, revision: 2 }))
-    const confirm = jest.fn(async () => true)
+    const confirm = jest.fn(async (_request: PluginTemplateConfirmation) => true)
     const api = createTemplatesAPI("demo.plugin", {
       catalog,
       service: { createDraft, saveDraft } as never,
@@ -333,7 +334,7 @@ describe("PluginTemplatesAPI", () => {
       requiresConfirmation: true,
     }
     const instantiate = jest.fn(async () => ({ resources: [] }))
-    const confirm = jest.fn(async () => true)
+    const confirm = jest.fn(async (_request: PluginTemplateConfirmation) => true)
     const api = createTemplatesAPI("demo.plugin", {
       catalog,
       service: {
@@ -425,7 +426,7 @@ describe("PluginTemplatesAPI library writes", () => {
   }
 
   function apiWith(catalog: TemplateCatalog, service: Record<string, unknown>) {
-    const confirm = jest.fn(async () => true)
+    const confirm = jest.fn(async (_request: PluginTemplateConfirmation) => true)
     const api = createTemplatesAPI("demo.plugin", {
       catalog,
       service: service as never,
@@ -478,13 +479,26 @@ describe("PluginTemplatesAPI library writes", () => {
   })
 
   it.each([
-    ["saveDraft", async (api, draft) => api.saveDraft(draft, 3)],
+    [
+      "saveDraft",
+      async (
+        api: ReturnType<typeof createTemplatesAPI>,
+        draft: Awaited<ReturnType<typeof userDraft>>
+      ) => api.saveDraft(draft, 3),
+    ],
     [
       "publish",
-      async (api) => api.publish("skill.mine", { expectedRevision: 3, confirmedBump: "minor" }),
+      async (api: ReturnType<typeof createTemplatesAPI>) =>
+        api.publish("skill.mine", { expectedRevision: 3, confirmedBump: "minor" }),
     ],
-    ["deprecate", async (api) => api.deprecate("skill.mine", "1.0.0")],
-    ["deleteDraft", async (api) => api.deleteDraft("skill.mine")],
+    [
+      "deprecate",
+      async (api: ReturnType<typeof createTemplatesAPI>) => api.deprecate("skill.mine", "1.0.0"),
+    ],
+    [
+      "deleteDraft",
+      async (api: ReturnType<typeof createTemplatesAPI>) => api.deleteDraft("skill.mine"),
+    ],
   ])("refuses %s on a row another plugin owns", async (_name, call) => {
     const catalog = new TemplateCatalog()
     const foreign = await userDraft({
@@ -524,7 +538,7 @@ describe("PluginTemplatesAPI library writes", () => {
   it("refuses every write without templates:library:write, before prompting", async () => {
     const catalog = new TemplateCatalog()
     catalog.upsert("user", await userDraft())
-    const confirm = jest.fn(async () => true)
+    const confirm = jest.fn(async (_request: PluginTemplateConfirmation) => true)
     const service = { deleteDraft: jest.fn(), exportPackage: jest.fn(), importPackage: jest.fn() }
     const api = createTemplatesAPI("demo.plugin", {
       catalog,

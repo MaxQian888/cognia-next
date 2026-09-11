@@ -19,6 +19,7 @@
 
 import type { PluginToolDef } from "@/types/plugin/plugin"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { normalizeCogniaModelBinding } from "@/types/agent/external-agent"
 
 export type PluginSubagentToolReference = string | Pick<PluginToolDef, "name">
 
@@ -28,6 +29,7 @@ export type PluginSubagentInput = Omit<PluginSubagentDef, "tools"> & {
 }
 
 export function defineSubagent(def: PluginSubagentInput): PluginSubagentDef {
+  normalizeCogniaModelBinding(def.cogniaModel)
   if (!def.tools || def.tools.every((tool) => typeof tool === "string")) {
     return def as PluginSubagentDef
   }

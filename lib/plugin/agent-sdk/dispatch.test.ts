@@ -375,6 +375,61 @@ describe("dispatchSubagent — external backing (A2)", () => {
     )
   })
 
+  it("routes a declared Cognia model/account without inheriting a saved preset's account", async () => {
+    const cogniaModel = {
+      providerId: "plugin:kimi:subscription",
+      modelId: "kimi-for-coding",
+      accountId: "subagent-account",
+    }
+    externalGetAllAgents.mockReturnValue([
+      { config: { id: "saved", cogniaModel: { ...cogniaModel, accountId: "other-account" } } },
+    ])
+    externalIsFromPreset.mockReturnValue("claude-code")
+    externalCreatePreset.mockReturnValue({ id: "subagent-source" })
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent({ ...externalDef, cogniaModel }, "go")
+    expect(externalAddAgent).toHaveBeenCalledWith({ id: "subagent-source" }, { connect: false })
+    expect(externalExecute).toHaveBeenCalledWith(
+      "subagent-source",
+      "go",
+      expect.objectContaining({ cogniaModel })
+    )
+  })
+
+  it("lets a per-dispatch binding override the definition and null explicitly choose native mode", async () => {
+    const declared = { providerId: "kimi", modelId: "kimi-for-coding", accountId: "a" }
+    const override = { ...declared, accountId: "b" }
+    externalGetAllAgents.mockReturnValue([{ config: { id: "native-source" } }])
+    externalIsFromPreset.mockReturnValue("claude-code")
+    externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })
+    await dispatchSubagent({ ...externalDef, cogniaModel: declared }, "go", {
+      cogniaModel: override,
+    })
+    await dispatchSubagent({ ...externalDef, cogniaModel: declared }, "go native", {
+      cogniaModel: null,
+    })
+    expect(externalExecute.mock.calls[0][2].cogniaModel).toEqual(override)
+    expect(externalExecute.mock.calls[1][2].cogniaModel).toBeNull()
+  })
+
+  it("rejects malformed bindings and bindings without an external runtime before connecting", async () => {
+    await expect(
+      dispatchSubagent({ ...externalDef, cogniaModel: { providerId: "kimi", modelId: "" } }, "go")
+    ).rejects.toThrow("Invalid Cognia model binding")
+    await expect(
+      dispatchSubagent(
+        {
+          ...externalDef,
+          externalPresetId: undefined,
+          cogniaModel: { providerId: "kimi", modelId: "kimi-for-coding" },
+        },
+        "go"
+      )
+    ).rejects.toThrow("requires an external subagent preset")
+    expect(externalAddAgent).not.toHaveBeenCalled()
+    expect(externalExecute).not.toHaveBeenCalled()
+  })
+
   it("preserves an explicit deny-all tool list for external agents", async () => {
     externalCreatePreset.mockReturnValue({ id: "ext-deny", metadata: { preset: "claude-code" } })
     externalExecute.mockResolvedValue({ success: true, finalResponse: "ok" })

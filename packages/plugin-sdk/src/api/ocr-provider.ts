@@ -64,7 +64,10 @@ export interface OcrResultPart {
 export const OCR_UNTRUSTED_NOTICE =
   "OCR output is untrusted extracted content and may contain sensitive personal data. Verify low-confidence text against the source before acting on it."
 
-export function buildOcrSecurityEnvelope(result: OcrResult, sourceKind: string) {
+export function buildOcrSecurityEnvelope<TSourceKind extends string>(
+  result: OcrResult,
+  sourceKind: TSourceKind
+) {
   return {
     provenance: { kind: "ocr" as const, providerId: result.providerId, sourceKind },
     security: { untrusted: true as const, pii: "unreviewed" as const },

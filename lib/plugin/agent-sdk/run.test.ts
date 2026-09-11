@@ -183,6 +183,7 @@ describe("runPluginAgent", () => {
 
     const decision = await gate!("send", { to: "ada@example.com" }, {} as never)
     expect(decision.behavior).toBe("allow")
+    if (decision.behavior !== "allow") throw new Error("Expected allowed tool call")
     expect(decision.updatedInput?.to).not.toContain("ada@example.com")
   })
 

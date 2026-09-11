@@ -87,7 +87,11 @@ export async function ensureDispatcherConfigured(): Promise<void> {
       try {
         if (isHeadlessHost()) {
           const { useSettingsStore } = await import("@/stores/settings")
-          return useSettingsStore.getState().settings?.defaultModel
+          const { resolveAppDefaultModel } = await import("@/lib/ai/app-default-model")
+          // The extension host runs provider calls, and the app-wide pair
+          // doubles as the external agent's default: handing an extension an
+          // agent's own model id names nothing it can resolve.
+          return resolveAppDefaultModel(useSettingsStore.getState().settings).model
         }
         const settings = await invoke<{ model?: string } | null>("read_claude_user_settings")
         return settings?.model

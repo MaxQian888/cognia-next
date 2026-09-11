@@ -215,3 +215,12 @@ describe("getAllContributions", () => {
     expect(getAllContributions([], { tools: [{ id: "a" }] })).toEqual([])
   })
 })
+
+it("lists declarative subscription provider contributions", () => {
+  expect(
+    getContributionsForCapability(
+      { subscriptionProviders: [{ id: "example", name: "Example" }] },
+      "subscription-provider"
+    )
+  ).toEqual([{ id: "example", label: "Example" }])
+})

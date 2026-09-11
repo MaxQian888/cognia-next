@@ -1012,6 +1012,7 @@ export const CANONICAL_RUNTIME_POINTS = [
   "agent.tool-route",
   "agent.context-provider",
   "connectors.adapter",
+  "subscription.provider",
   "subscription.balance-adapter",
   "subscription.limits-source",
   "provider.operation-adapter",
@@ -1085,6 +1086,8 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "agent.context-provider":
     "lib/plugin/registries/context-provider-registry.ts:registerContextProvider",
   "connectors.adapter": "lib/connectors/bus.ts:registerAdapter",
+  "subscription.provider":
+    "lib/subscription/core/provider-registry.ts:registerPluginSubscriptionProvider",
   "subscription.balance-adapter":
     "lib/plugin/registries/balance-adapter-registry.ts:registerBalanceAdapter",
   "subscription.limits-source":

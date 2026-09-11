@@ -999,6 +999,25 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    id: "subscription-provider",
+    support: "supported",
+    manifestFields: ["subscriptionProviders"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['subscription-provider'] → registerPluginSubscriptionProvider → unified subscription registry and host-owned account panel",
+    hostBindings: [
+      "lib/plugin/contracts/capability-bridge-map.ts",
+      "lib/subscription/core/provider-registry.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-subscription-provider.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/subsystems/unified-subscription.mdx",
+    requiredTests: [
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+      "lib/plugin/core/validation.test.ts",
+      "packages/plugin-sdk/src/define/define-subscription-provider.test.ts",
+    ],
+  },
+  {
     // ADR-0025 follow-up. Plugins declaring this capability contribute a
     // subscription balance adapter — a pure authed-GET descriptor + parser that
     // resolves "how much credit / quota is left" for a provider account. The

@@ -17,6 +17,7 @@ function manifest(): PluginManifest {
     id: "delivery",
     name: "Delivery",
     version: "1.0.0",
+    description: "External services test plugin",
     type: "frontend",
     main: "index.ts",
     capabilities: ["integrations"],

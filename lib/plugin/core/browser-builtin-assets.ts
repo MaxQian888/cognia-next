@@ -26,7 +26,7 @@ function bytesToHex(bytes: ArrayBuffer): string {
 export async function fetchAndVerifyBrowserBuiltinAsset(
   asset: BrowserBuiltinAsset,
   fetcher: typeof fetch = fetch,
-  subtle: SubtleCrypto | undefined = globalThis.crypto?.subtle
+  subtle: Pick<SubtleCrypto, "digest"> | undefined = globalThis.crypto?.subtle
 ): Promise<string> {
   const response = await fetcher(asset.url)
   if (!response.ok) {
